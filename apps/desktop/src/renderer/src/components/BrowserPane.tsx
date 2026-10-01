@@ -1212,9 +1212,5 @@ export function BrowserPane({
       const host = presentationHosts.get(presentation.occurrence.presentationId)
       return host && renderPresentationFrame ? createPortal(renderPresentationFrame(renderPane(presentation), presentation.target), host, presentation.occurrence.presentationId) : null
     })}
-    <ServiceWindowNotice notice={media.notice ? { kind: 'indeterminate', notice: {
-      step: 'Live Browser capture is unconfirmed', mode: media.notice,
-      restore: 'Reopen this presentation to retry the live preview. The original Browser page remains available.'
-    } } : null} />
   </>
 }

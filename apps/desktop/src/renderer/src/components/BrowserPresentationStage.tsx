@@ -29,11 +29,14 @@ export function useBrowserPresentationCapture(browserId: string) {
   const [notice, setNotice] = useState<string | null>(null)
   const media = useRef<{ capture: BrowserPresentationCapture; stream: MediaStream } | null>(null)
   const pending = useRef<Promise<void> | null>(null)
+  const captureFailed = useRef(false)
   const generation = useRef(0)
   const inputChosen = useRef(false)
+  const inputSelection = useRef<Promise<void> | null>(null)
   const ensureCapture = useCallback((lease: BrowserPresentationLease): Promise<void> => {
     if (media.current) return Promise.resolve()
     if (pending.current) return pending.current
+    if (captureFailed.current) return Promise.resolve()
     const current = generation.current
     const read = async () => {
       let capture: BrowserPresentationCapture | null = null
@@ -48,25 +51,49 @@ export function useBrowserPresentationCapture(browserId: string) {
           return
         }
         await api.browser.ackPresentationCapture(capture.captureId, { outcome: 'ready', trackIds: captureTrackIds(acquired) })
+        // The owner may have unmounted while the acknowledgement was in flight.
+        if (current !== generation.current) {
+          const trackIds = captureTrackIds(acquired)
+          acquired.getTracks().forEach(track => track.stop())
+          await api.browser.ackPresentationCapture(capture.captureId, { outcome: 'stopped', trackIds })
+          return
+        }
         media.current = { capture, stream: acquired }
         setStream(acquired); setCaptureId(capture.captureId); setNotice(null)
       } catch (error) {
         acquired?.getTracks().forEach(track => track.stop())
-        if (capture) void api.browser.ackPresentationCapture(capture.captureId, { outcome: 'failed', message: error instanceof Error ? error.message : String(error) }).catch(() => {})
-        if (current === generation.current) setNotice(`Live page preview is unconfirmed. The original page is kept. ${error instanceof Error ? error.message : String(error)}`)
+        if (current === generation.current) {
+          captureFailed.current = true
+          setNotice(`Live page preview is unconfirmed. The original page is kept. ${error instanceof Error ? error.message : String(error)}`)
+        }
+        if (capture) await api.browser.ackPresentationCapture(capture.captureId, { outcome: 'failed', message: error instanceof Error ? error.message : String(error) }).catch(() => {})
       }
     }
     const operation = read().finally(() => { if (pending.current === operation) pending.current = null })
     pending.current = operation
     return operation
   }, [])
+  const retryCapture = useCallback((lease: BrowserPresentationLease) => {
+    if (pending.current || media.current) return pending.current ?? Promise.resolve()
+    captureFailed.current = false
+    return ensureCapture(lease)
+  }, [ensureCapture])
   const registered = useCallback(async (lease: BrowserPresentationLease, initialInputOwner: boolean, visible: boolean) => {
     // Only the already-selected original occurrence receives initial native input authority.
-    if (initialInputOwner && !inputChosen.current) {
-      inputChosen.current = true
-      await api.browser.activatePresentation(lease.leaseId, { kind: 'select' })
+    const current = generation.current
+    if (visible && initialInputOwner && !inputChosen.current) {
+      if (!inputSelection.current) {
+        const selection = api.browser.activatePresentation(lease.leaseId, { kind: 'select', focus: 'preserve' }).then(receipt => {
+          if (current !== generation.current) return
+          if (receipt.outcome !== 'selected') throw new Error(receipt.outcome === 'input-unconfirmed'
+            ? receipt.message : 'The Browser presentation input owner could not be confirmed')
+          inputChosen.current = true
+        }).finally(() => { if (inputSelection.current === selection) inputSelection.current = null })
+        inputSelection.current = selection
+      }
+      await inputSelection.current
     }
-    if (visible) await ensureCapture(lease)
+    if (visible && current === generation.current) await ensureCapture(lease)
   }, [ensureCapture])
   useEffect(() => {
     const stop = api.browser.onPresentationEvent(event => {
@@ -78,7 +105,7 @@ export function useBrowserPresentationCapture(browserId: string) {
       media.current = null; setStream(null); setCaptureId(null)
     })
     return () => {
-      stop(); generation.current += 1; inputChosen.current = false
+      stop(); generation.current += 1; inputChosen.current = false; inputSelection.current = null; captureFailed.current = false
       const held = media.current
       media.current = null
       if (held) {
@@ -88,7 +115,7 @@ export function useBrowserPresentationCapture(browserId: string) {
       }
     }
   }, [browserId])
-  return { stream, captureId, notice, registered, ensureCapture }
+  return { stream, captureId, notice, registered, ensureCapture, retryCapture }
 }
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
@@ -100,9 +127,10 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const element = useRef<HTMLDivElement | null>(null)
   const video = useRef<HTMLVideoElement>(null)
   const lease = useRef<BrowserPresentationLease | null>(null)
-  const [notice, setNotice] = useState<string | null>(null)
-  const latest = useRef({ presentation, blocked })
-  latest.current = { presentation, blocked }
+  const [notice, setNotice] = useState<{ source: 'registration' | 'presentation' | 'input'; message: string } | null>(null)
+  const latest = useRef({ presentation, blocked, navigationId, inputSelected })
+  latest.current = { presentation, blocked, navigationId, inputSelected }
+  const registrationRetry = useRef<((explicit?: boolean) => void) | null>(null)
   const geometry = useCallback((): BrowserPresentationGeometry => {
     const stage = element.current, facts = latest.current
     if (!stage?.isConnected || !facts.presentation.visible || facts.blocked) return { visible: false }
@@ -125,24 +153,57 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   }, [geometry])
   useLayoutEffect(() => {
     let cancelled = false
-    const failure = (error: unknown) => { if (!cancelled) setNotice(error instanceof Error ? error.message : String(error)) }
+    let registering = false, registrationFailed = false
+    let attemptedNavigationId: string | null = null
+    const failure = (error: unknown, source: 'registration' | 'presentation' = 'presentation') => {
+      if (!cancelled) setNotice({ source, message: error instanceof Error ? error.message : String(error) })
+    }
+    const retry = (explicit = false) => {
+      if (cancelled || registering || lease.current || !registrationFailed) return
+      if (!explicit && attemptedNavigationId === latest.current.navigationId) return
+      void mount().catch(failure)
+    }
     const mount = async () => {
-      const registered = await api.browser.registerPresentation({ browserId, occurrence: presentation.occurrence, geometry: geometry() })
+      registering = true
+      registrationFailed = false
+      const attemptNavigationId = latest.current.navigationId
+      attemptedNavigationId = attemptNavigationId
+      let registered: BrowserPresentationLease
+      try {
+        registered = await api.browser.registerPresentation({ browserId, occurrence: presentation.occurrence, geometry: geometry() })
+      } catch (error) {
+        registrationFailed = true
+        failure(error, 'registration')
+        return
+      } finally {
+        registering = false
+        // Creation can finish while the original failed request is still pending.
+        if (!cancelled && attemptNavigationId !== latest.current.navigationId) retry()
+      }
       if (cancelled) { await api.browser.removePresentation(registered.leaseId); return }
       lease.current = registered
+      registrationFailed = false
+      setNotice(null) // A real lease confirms this registration.
       synchronizer.current = new LatestBrowserBoundsSynchronizer(async bounds => {
         await api.browser.updatePresentation(registered.leaseId, bounds ? { visible: true, bounds } : { visible: false })
-        if (bounds && !cancelled) await media.ensureCapture(registered)
+        if (bounds && !cancelled) {
+          void media.registered(registered, latest.current.inputSelected, true).then(() => {
+            if (!cancelled) setNotice(current => current?.source === 'presentation' ? null : current)
+          }).catch(failure)
+        }
       }, failure)
-      await media.registered(registered, inputSelected, geometry().visible)
-      if (!cancelled) observe()
+      observe() // Native geometry stays current while preview capture is pending.
+      await media.registered(registered, latest.current.inputSelected, geometry().visible)
     }
+    registrationRetry.current = retry
     // The original stable host attaches after child layout effects.
     queueMicrotask(() => { if (!cancelled) void mount().catch(failure) })
-    return () => { cancelled = true; stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null
+    return () => { cancelled = true; if (registrationRetry.current === retry) registrationRetry.current = null
+      stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null
       const current = lease.current; lease.current = null
       if (current) void api.browser.removePresentation(current.leaseId).catch(() => {}) }
   }, [browserId, presentation.occurrence.presentationId, geometry, observe, media.registered, media.ensureCapture])
+  useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
   useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
   useLayoutEffect(() => {
     const node = video.current
@@ -171,7 +232,8 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     const prepared = api.browser.activatePresentation(current.leaseId, { kind: 'prepare-first-press', navigationId, captureId,
       down: coordinates, button: event.button === 1 ? 'middle' : event.button === 2 ? 'right' : 'left', clickCount: 1, modifiers: modifiers(event) })
     press.current = prepared
-    void prepared.then(result => { if (result.outcome === 'input-unconfirmed') setNotice(result.message) }).catch(error => setNotice(String(error)))
+    void prepared.then(result => { if (result.outcome === 'input-unconfirmed') setNotice({ source: 'input', message: result.message }) })
+      .catch(error => setNotice({ source: 'input', message: String(error) }))
   }
   const up = async (event: PointerEvent<HTMLDivElement>, cancelled = false) => {
     const prepared = press.current, current = lease.current, coordinates = point(event), keys = modifiers(event)
@@ -184,18 +246,38 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       const committed = await api.browser.activatePresentation(current.leaseId, coordinates && !blocked && !cancelled
         ? { kind: 'commit-first-press', inputScopeId: result.inputScopeId, up: coordinates, modifiers: keys }
         : { kind: 'cancel-first-press', inputScopeId: result.inputScopeId })
-      if (committed.outcome === 'input-unconfirmed') setNotice(committed.message)
+      if (committed.outcome === 'input-unconfirmed') setNotice({ source: 'input', message: committed.message })
       else if (committed.outcome === 'input-dispatched') { setNotice(null); onInputSelected?.() }
-    } catch (error) { setNotice(String(error)) }
+    } catch (error) { setNotice({ source: 'input', message: String(error) }) }
   }
-  return <div className="browser-stage" data-native-browser-stage={browserId} data-browser-presentation-id={presentation.occurrence.presentationId}
-    ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}
-    onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>
-    {media.stream ? <video ref={video} muted playsInline autoPlay style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
+  return <div className="browser-presentation">
     <ServiceWindowNotice notice={notice ? { kind: 'indeterminate', notice: {
-      step: 'Browser presentation is unconfirmed', mode: `The original page is kept. ${notice}`,
-      restore: 'Keep this window in the foreground and try this page again. Reopen this presentation if it cannot reconnect.'
-    } } : null} />
-    {children}
+      step: notice.source === 'registration' ? 'Browser presentation has not connected' : 'Browser presentation is unconfirmed',
+      mode: `The original page is kept. ${notice.message}`,
+      restore: notice.source === 'registration'
+        ? 'This presentation reconnects when the Browser becomes available. You can retry without reopening the page.'
+        : notice.source === 'input'
+          ? 'Keep this window in the foreground and try this page again. The original page stays in place.'
+          : 'The presentation could not confirm its native geometry or input owner. The original page stays in place.'
+    } } : null} {...(notice ? { summary: {
+      step: notice.source === 'registration' ? 'Page connection pending' : 'Page interaction is unconfirmed',
+      mode: 'The original page and address draft stay in place.',
+      restore: notice.source === 'registration' ? 'Retry this connection.' : 'Open Details for the failed step.'
+    } } : {})} actions={notice?.source === 'registration'
+      ? <button type="button" className="small-button" onClick={() => registrationRetry.current?.(true)}>Retry connection</button> : null} />
+    <ServiceWindowNotice notice={media.notice ? { kind: 'indeterminate', notice: {
+      step: 'Live Browser preview is unconfirmed', mode: media.notice,
+      restore: 'Retry this live preview when ready. The original Browser page remains available.'
+    } } : null} {...(media.notice ? { summary: {
+      step: 'Live preview unavailable', mode: 'The page can still load and accept input.',
+      restore: 'Retry the preview if you need another view of this page.'
+    } } : {})} actions={media.notice ? <button type="button" className="small-button" disabled={!presentation.visible || blocked}
+      onClick={() => { const current = lease.current; if (current && geometry().visible) void media.retryCapture(current) }}>Retry live preview</button> : null} />
+    <div className="browser-stage" data-native-browser-stage={browserId} data-browser-presentation-id={presentation.occurrence.presentationId}
+      ref={node => { element.current = node; if (typeof stageRef === 'function') stageRef(node); else if (stageRef) stageRef.current = node }}
+      onPointerDown={down} onPointerUp={event => void up(event)} onPointerCancel={event => void up(event, true)}>
+      {media.stream ? <video ref={video} muted playsInline autoPlay style={{ width: '100%', height: '100%', objectFit: 'contain', pointerEvents: 'none' }} /> : null}
+      {children}
+    </div>
   </div>
 }

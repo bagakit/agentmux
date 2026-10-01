@@ -488,9 +488,10 @@ export class BrowserViewManager {
     const unconfirmed = (reason: Extract<BrowserPresentationActivationReceipt, { outcome: 'input-unconfirmed' }>['reason'],
       message: string): BrowserPresentationActivationReceipt => ({ outcome: 'input-unconfirmed', reason, message })
     if (activation?.kind === 'select') {
+      if (activation.focus !== undefined && activation.focus !== 'preserve') throw new Error('Unknown Browser presentation focus policy')
       if (!lease.geometry.visible) return unconfirmed('hidden', 'This Browser presentation is hidden. The original page remains available.')
       entry.firstPress = null
-      this.selectPresentation(lease)
+      this.selectPresentation(lease, activation.focus !== 'preserve')
       return { outcome: 'selected' }
     }
     if (activation?.kind === 'prepare-first-press') {
@@ -574,11 +575,11 @@ export class BrowserViewManager {
     }
   }
 
-  private selectPresentation(lease: PresentationLease): void {
+  private selectPresentation(lease: PresentationLease, claimFocus = true): void {
     if (!lease.geometry.visible) return
     this.setBounds(lease.entry.id, lease.geometry.bounds)
     lease.entry.inputLeaseId = lease.id
-    lease.entry.view.webContents.focus()
+    if (claimFocus) lease.entry.view.webContents.focus()
     this.sendPresentation({ type: 'input-owner-changed', browserId: lease.entry.id, leaseId: lease.id })
   }
 
