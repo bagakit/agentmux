@@ -9,6 +9,38 @@ const syntax = (entry: AgentMuxCliCommand) => `agentmux ${entry.method.replaceAl
 const entries = (path: string) => AGENTMUX_CLI_COMMANDS.filter(entry => entry.method === path || entry.method.startsWith(path + '.'))
 const list = (selected: readonly AgentMuxCliCommand[]) => selected.map(entry => `  ${syntax(entry)}\n    ${entry.summary}`).join('\n')
 
+const SPATIAL_GUIDE = `## Choose a split from the visible layout
+Read the exact presentation with agentmux space inspect --region REGION before choosing
+where to open. Decide from the visible view so both the old and new content stay readable
+with the least disturbance. Use the registered --region and --split destination options:
+
+agentmux agent open --executor EXECUTOR --region REGION --split right --prompt TASK --operation-id OPERATION
+
+Before opening a configured executor, use agentmux settings executors ls to find its exact ID.
+Opening a split and navigating to an existing Tab are separate operations.
+
+## Move a Region into its own Tab
+agentmux space promote --region REGION --operation-id OPERATION
+agentmux space mv --from-region REGION --expect-session SID --zone ZONE --new-tab --operation-id OPERATION
+
+promote and mv move an existing presentation; they do not duplicate it or change the
+execution cwd, Host, Session or Run. A move never starts, stops, or restarts a Run.
+For mv, use --from-display-workspace and --from-group if the source Region has several
+display placements. Name the exact source; do not choose the first location from a SID.
+
+## Read what is in a direction
+Read the Region's actual neighbors with agentmux space inspect --region REGION.
+A split in that direction names the visible Region beside you. When nothing is split there,
+left and right may name an adjacent Tab. These are not the same place.
+Up and down never name a Tab. No neighbor is an explicit answer, not a failed observation.
+
+## Confirm the actual destination
+After any move inspect the result to confirm where it landed, using the returned exact
+Region and display placement. Use --display-workspace and --group when the presentation
+needs those selectors; a resource ID alone does not prove a unique display location.
+If a reply is lost or unknown, read agentmux space inspect --operation-id OPERATION first.
+An unknown operation remains unconfirmed; do not blindly retry the move or create another Agent.`
+
 const DEVICE_GUIDE = `Device administration accepts local Unix user requests only.
 Managed Agents, ordinary approved devices, HTTP and SSH cannot administer devices.
 A Unix connection identifies the request origin; it is not user approval.
@@ -59,6 +91,7 @@ export function agentMuxCommandHelp(path: string): string | null {
   if (!selected.length) return null
   const exact = selected.find(entry => entry.method === path)
   const guide = path === 'device' || path.startsWith('device.') ? DEVICE_GUIDE
+    : path === 'space' || path.startsWith('space.') || path === 'agent.open' ? SPATIAL_GUIDE
     : path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
     : path === 'settings' || path.startsWith('settings.') ? AGENTMUX_SETTINGS_RESOURCE_GUIDE
     : path === 'goal.create' ? AGENTMUX_GOAL_CREATE_GUIDE
@@ -85,6 +118,8 @@ The actual executable command tree is:
 ${list(AGENTMUX_CLI_COMMANDS)}
 
 ${COMMON}
+
+${SPATIAL_GUIDE}
 
 Agent-first workflow:
 1. Inspect Project resources and the intended Space separately with app snapshot and space inspect.
