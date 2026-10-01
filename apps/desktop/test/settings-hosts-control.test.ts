@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
+import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,7 +15,7 @@ const ipc = vi.hoisted(() => ({ root: '',
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
 vi.mock('electron', () => ({
-  app: { getPath: () => ipc.root || tmpdir() },
+  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -56,7 +57,7 @@ async function registered() {
   const commit = vi.spyOn(runtime, 'commit').mockImplementation(() => {})
   const attach = vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
   vi.spyOn(store, 'get').mockResolvedValue(config)
-  const sender = { id: 919, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } }
+  const sender = Object.assign(new EventEmitter(), { id: 919, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
   const progressLoops = new ContinuousProgressLoopManager(ContinuousProgressLoopStore.forUserData(root),
     async () => { throw new Error('Host diagnostic cannot deliver progress input') }, undefined,
     async () => { throw new Error('Host diagnostic cannot observe progress input') })
@@ -76,13 +77,14 @@ describe('Host diagnostics use the registered Main owner', () => {
   it('preserves Main validation and not-found codes through the actual public Control Server', async () => {
     const f = await registered(), bytes = await f.bytes(), check = vi.spyOn(f.runtime, 'checkHost')
     const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
-    const socket = join(ipc.root, 'owned-control.sock'), server = new core.AgentMuxControlServer({ execute: f.execute }, socket)
+    const socket = join(ipc.root, 'owned-control.sock'), server = new core.AgentMuxControlServer({ execute: f.execute, coreClients: () => [] }, socket)
     await server.start()
+    const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
     try {
-      await expect(core.requestAgentMuxControl({ ...envelope, operation: 'settings.hosts.test', input: { ...remote, port: '22' } }, socket)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
-      await expect(core.requestAgentMuxControl({ ...envelope, operation: 'settings.hosts.test', id: 'unknown' }, socket)).rejects.toMatchObject({ code: 'SETTING_RESOURCE_NOT_FOUND' })
+      await expect(rpc.call('settings.hosts.test', { input: { ...remote, port: '22' } })).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+      await expect(rpc.call('settings.hosts.test', { id: 'unknown' })).rejects.toMatchObject({ code: 'SETTING_RESOURCE_NOT_FOUND' })
       expect(check).not.toHaveBeenCalled(); expect(await f.bytes()).toBe(bytes)
-    } finally { await server.stop(); await f.dispose() }
+    } finally { await rpc.dispose(); await server.stop(); await f.dispose() }
   })
 
   it('lists committed Hosts and captures exact saved IDs while a diagnostic remains pending', async () => {

@@ -17,7 +17,7 @@ const ipc = vi.hoisted(() => ({ root: '',
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
 vi.mock('electron', () => ({
-  app: { getPath: () => ipc.root || tmpdir() },
+  app: { getPath: () => ipc.root || tmpdir(), getAppPath: () => ipc.root || tmpdir() },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -38,7 +38,8 @@ vi.mock('../src/main/browser-ref-ledger-store.js', () => ({ BrowserRefLedgerStor
 vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
-import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
+import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } from '@agentmux/core'
+import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
@@ -48,8 +49,8 @@ import { CONFIG_CHANGED_CHANNEL } from '../src/shared/contracts.js'
 
 const roots: string[] = [], exec = promisify(execFile)
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true }))) })
-const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'owned-durable-write' } as const
-const set = { ...envelope, operation: 'settings.set', key: 'copyPathsAsAbsolute', value: 'true' } as const
+const set = { key: 'copyPathsAsAbsolute', value: 'true' } as const
+const writeFrame = { jsonrpc: '2.0', id: 'owned-durable-write', method: 'settings.set', params: set } as const
 function deferred() {
   let resolve!: () => void
   const promise = new Promise<void>(done => { resolve = done })
@@ -90,12 +91,13 @@ async function registered() {
   })
   const core = await vi.importActual<typeof import('@agentmux/core')>('@agentmux/core')
   const path = join(root, 'control.sock'), execute = vi.fn(ipc.execute!)
-  const server = new core.AgentMuxControlServer({ execute }, path)
+  const server = new core.AgentMuxControlServer({ execute, coreClients: () => [] }, path)
   await server.start()
+  const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
   return { root, store, prepare, commit, save, trace, publications, published, execute,
     bytes: () => readFile(store.filePath, 'utf8'),
     disk: async () => JSON.parse(await readFile(store.filePath, 'utf8')) as AppConfig,
-    request: (input: AgentMuxControlRequest) => core.requestAgentMuxControl(input, path), path,
+    rpc, path,
     holdSave: () => {
       const entered = deferred(), release = deferred()
       save.mockImplementationOnce(async next => {
@@ -108,6 +110,7 @@ async function registered() {
       // A disconnected peer does not cancel Main's admitted save. Finish owned executions
       // before removing their storage, including when a deliberately short budget fails.
       await Promise.allSettled(execute.mock.results.filter(result => result.type === 'return').map(result => result.value))
+      await rpc.dispose()
       await server.stop(); await dispose(); await progressLoops.stop()
     }
   }
@@ -117,7 +120,7 @@ describe('Control writes settle through the registered Main owner', () => {
   it('waits past the old short budget for actual durable save, commit and publication before replying', async () => {
     const f = await registered(), before = await f.bytes(), hold = f.holdSave()
     let settled = false
-    const reply = f.request(set).then(value => { settled = true; f.trace.push('reply'); return { ok: true, value } },
+    const reply = f.rpc.call('settings.set', set).then(value => { settled = true; f.trace.push('reply'); return { ok: true, value } },
       error => { settled = true; return { ok: false, error } })
     try {
       await hold.entered.promise
@@ -125,13 +128,13 @@ describe('Control writes settle through the registered Main owner', () => {
       expect(settled).toBe(false)
       expect(await f.bytes()).toBe(before)
       expect(f.commit).not.toHaveBeenCalled(); expect(f.publications).toEqual([])
-      const pending = await f.request({ ...envelope, operation: 'settings.get', target: 'copyPathsAsAbsolute' })
-      expect(pending.result).toMatchObject({ entries: [{ value: false }] })
+      const pending = await f.rpc.call('settings.inspect', { target: 'copyPathsAsAbsolute' })
+      expect(pending).toMatchObject({ entries: [{ value: false }] })
       hold.release.resolve()
       const result = await reply
       expect(result.ok).toBe(true)
       if (!result.ok || !('value' in result)) throw new Error('Expected the committed Control reply')
-      expect(result.value.result).toMatchObject({ entry: { key: set.key, value: true } })
+      expect(result.value).toMatchObject({ entry: { key: set.key, value: true } })
       expect(await readFile(f.store.previousVersionPath, 'utf8')).toBe(before)
       expect((await f.disk()).copyPathsAsAbsolute).toBe(true)
       expect(f.trace).toEqual(['prepare', 'save.begin', 'save.end', 'commit', 'publish', 'reply'])
@@ -144,15 +147,15 @@ describe('Control writes settle through the registered Main owner', () => {
     const f = await registered(), before = await f.bytes(), hold = f.holdSave()
     const socket = createConnection(f.path)
     socket.on('error', () => {})
-    socket.once('connect', () => socket.write(`${JSON.stringify(set)}\n`))
+    socket.once('connect', () => socket.write(`${JSON.stringify(writeFrame)}\n`))
     try {
       await hold.entered.promise
       await new Promise<void>(resolve => { socket.once('close', resolve); socket.destroy() })
       expect(await f.bytes()).toBe(before); expect(f.commit).not.toHaveBeenCalled()
       expect(f.publications).toEqual([])
       hold.release.resolve(); await f.published.promise
-      const current = await f.request({ ...envelope, operation: 'settings.get', target: set.key })
-      expect(current.result).toMatchObject({ entries: [{ key: set.key, value: true }] })
+      const current = await f.rpc.call('settings.inspect', { target: set.key })
+      expect(current).toMatchObject({ entries: [{ key: set.key, value: true }] })
       expect((await f.disk()).copyPathsAsAbsolute).toBe(true)
       expect(await readFile(f.store.previousVersionPath, 'utf8')).toBe(before)
       expect(f.trace).toEqual(['prepare', 'save.begin', 'save.end', 'commit', 'publish'])
@@ -167,33 +170,39 @@ describe('Control writes settle through the registered Main owner', () => {
       const reply = await new Promise<string>((resolve, reject) => {
         const socket = createConnection(f.path); let bytes = ''
         socket.on('error', reject); socket.on('data', chunk => { bytes += chunk.toString('utf8') })
-        socket.once('connect', () => socket.end(JSON.stringify(set)))
-        socket.once('end', () => { socket.destroy(); resolve(bytes) })
+        socket.once('connect', () => socket.end(JSON.stringify(writeFrame)))
+        socket.once('close', () => resolve(bytes))
       })
-      expect(JSON.parse(reply)).toMatchObject({ ok: false, error: { code: 'CONTROL_PROTOCOL_ERROR',
-        message: 'Control connection closed before a complete message was received.' } })
+      expect(reply).toBe('')
       expect(f.execute).not.toHaveBeenCalled(); expect(f.prepare).not.toHaveBeenCalled()
       expect(f.save).not.toHaveBeenCalled(); expect(f.commit).not.toHaveBeenCalled()
       expect(f.publications).toEqual([]); expect(await f.bytes()).toBe(before)
+      await expect(f.rpc.call('settings.inspect', { target: set.key })).resolves.toMatchObject({ entries: [{ key: set.key, value: false }] })
+      expect(f.execute).toHaveBeenCalledTimes(1)
     } finally { await f.dispose() }
   })
 
   it('routes all six exact write operations through actual Main persistence and leaves invalid/nochange requests untouched', async () => {
     const f = await registered()
-    const requests: AgentMuxControlRequest[] = [set,
-      { ...envelope, operation: 'settings.browser.links.forget', scheme: 'literal' },
-      { ...envelope, operation: 'settings.workspaces.add', input: { hostId: 'local', path: join(f.root, 'literal project') } },
-      { ...envelope, operation: 'settings.resource.add', resource: 'prompts', id: 'literal', value: { keyword: 'literal', label: 'Literal', body: '$literal\nbody' } },
-      { ...envelope, operation: 'settings.resource.update', resource: 'prompts', id: 'literal', changes: { body: 'updated literal' } },
-      { ...envelope, operation: 'settings.resource.remove', resource: 'prompts', id: 'literal' }]
+    const requests = [
+      ['settings.set', set, { entry: { key: set.key, value: true } }],
+      ['settings.browser-links.forget', { input: { scheme: 'literal' } }, { scheme: 'literal', changed: true }],
+      ['settings.workspaces.register', { input: { hostId: 'local', path: join(f.root, 'literal project') } },
+        { changed: true, item: { value: { hostId: 'local', path: join(f.root, 'literal project') } } }],
+      ['settings.prompts.create', { id: 'literal', value: { keyword: 'literal', label: 'Literal', body: '$literal\nbody' } },
+        { resource: 'prompts', changed: true, item: { id: 'literal', value: { body: '$literal\nbody' } } }],
+      ['settings.prompts.update', { id: 'literal', input: { changes: { body: 'updated literal' } } },
+        { resource: 'prompts', changed: true, item: { id: 'literal', value: { body: 'updated literal' } } }],
+      ['settings.prompts.delete', { id: 'literal' }, { resource: 'prompts', id: 'literal', removed: true }]
+    ] as const
     try {
       expect(requests).toHaveLength(6)
-      for (const request of requests) expect(await f.request(request)).toMatchObject({ ok: true, operation: request.operation })
+      for (const [method, params, expected] of requests) expect(await f.rpc.call(method, params)).toMatchObject(expected)
       expect(f.save).toHaveBeenCalledTimes(6); expect(f.prepare).toHaveBeenCalledTimes(6)
       expect(f.commit).toHaveBeenCalledTimes(6); expect(f.publications).toHaveLength(6)
       const before = await f.bytes(), previous = await readFile(f.store.previousVersionPath, 'utf8')
-      await expect(f.request(set)).resolves.toMatchObject({ result: { entry: { value: true } } })
-      await expect(f.request({ ...set, value: 'TRUE' })).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
+      await expect(f.rpc.call('settings.set', set)).resolves.toMatchObject({ entry: { value: true } })
+      await expect(f.rpc.call('settings.set', { ...set, value: 'TRUE' })).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
       expect(await f.bytes()).toBe(before); expect(await readFile(f.store.previousVersionPath, 'utf8')).toBe(previous)
       expect(f.save).toHaveBeenCalledTimes(6); expect(f.prepare).toHaveBeenCalledTimes(6)
       expect(f.commit).toHaveBeenCalledTimes(6); expect(f.publications).toHaveLength(6)
@@ -203,9 +212,8 @@ describe('Control writes settle through the registered Main owner', () => {
   it('keeps the built CLI pending past the old short budget until actual Main save and publication finish', async () => {
     const f = await registered(), before = await f.bytes(), hold = f.holdSave()
     let settled = false
-    const reply = exec(process.execPath, [resolve('packages/core/bin/agentmux'), 'settings', 'set', set.key, set.value],
-      { timeout: 10_000, env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: f.root,
-        AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined } }).then(value => {
+    const reply = exec(process.execPath, [resolve('packages/core/bin/agentmux'), '--endpoint', `unix://${f.path}`, 'settings', 'set', set.key, set.value],
+      { timeout: 10_000, env: objectCliEnvironment(f.root) }).then(value => {
       settled = true; f.trace.push('reply'); return { ok: true, value }
     }, error => { settled = true; return { ok: false, error } })
     try {
