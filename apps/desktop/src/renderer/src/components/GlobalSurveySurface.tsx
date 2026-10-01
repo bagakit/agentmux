@@ -6,16 +6,16 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { ArrowUpRight, Bot, CircleHelp, FileText, Globe2, PanelsTopLeft, PanelLeftClose, PanelLeftOpen, NotebookPen, LoaderCircle, MousePointer2, Plus, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useStore } from 'zustand'
-import { browserOpenError } from '../lib/browser-open-feedback'
+import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useReleasedBrowserRegionIds } from '../lib/surface-memory-budget-coordinator'
 import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, surveyZoneTopicFacts, type SurveyZoneSelection } from '../lib/survey-workface'
-import { type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
+import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { workbenchSurfaces, type WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
-import { SurveyBrowserTools } from './SurveyBrowserTools'
+import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
 import { SurveyItemOptions } from './SurveyItemOptions'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -68,7 +68,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const layouts = useStore(store, state => state.layouts)
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
   const currentZone = catalog?.zones.find(zone => zone.zoneId === selection?.zoneId)
-  const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? activeWorkspaceId : null)
+  const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? SCRATCH_WORKSPACE_ID : null)
   const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
   const items = useMemo(() => catalog ? surveyZoneItems(catalog, collected) : [], [catalog, collected])
   const tabsByZone = useMemo(() => {
@@ -87,6 +87,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [error, setError] = useState<string | null>(null)
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
   const [relationStatus, setRelationStatus] = useState<{ zoneId: string; pendingSpaceId: string | null; error: string | null; notice: string | null } | null>(null)
+  const [organizationTarget, setOrganizationTarget] = useState<{ zoneId: string; spaceId: string } | null>(null)
+  const [organized, setOrganized] = useState<{ zoneId: string; spaceId: string } | null>(null)
   const [navigationChoices, setNavigationChoices] = useState<AgentMuxSpaceLocation[]>([])
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
@@ -121,7 +123,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const intent = useRef(0)
   const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; surface: WorkbenchSurface | null } | null>(null)
   const [noteRecovery, setNoteRecovery] = useState(false)
-  const failedCreation = useRef<{ zone: AgentMuxZoneFact; reference: WorkbenchProjectionSelection | null; surface: WorkbenchSurface | null } | null>(null)
+  const failedCreation = useRef<SurveyBrowserPreparation | null>(null)
   useLayoutEffect(() => { intent.current += 1 }, [visible, selection, activeWorkspaceId])
   useEffect(() => { if (toolsOpen) setToolsVisited(true) }, [toolsOpen])
   useEffect(() => {
@@ -131,13 +133,30 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (controlNavigation) return
     const surface = surfaceRef.current
     if (!visible) { if (surface?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); return }
-    const browserRegion = currentBrowser ? [...surface?.querySelectorAll<HTMLElement>('[data-workbench-region-id]') ?? []]
-      .find(region => region.dataset.workbenchRegionId === selection?.active?.regionId) : null
-    const target = toolsOpen ? surface?.querySelector<HTMLElement>('[aria-label="Close browser management"]')
-      : currentBrowser ? browserRegion?.querySelector<HTMLElement>(currentBrowser.url === 'about:blank' ? '[aria-label="Search or enter a web address"]' : '[aria-label="Browser address"]')
-        : !selection ? surface?.querySelector<HTMLElement>('[aria-label="Search or enter a web address"]') : null
-    target?.focus()
-  }, [visible, selection, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation])
+    const findTarget = () => {
+      const reference = selection?.active
+      const hostId = reference && projection ? (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference) : null
+      const host = hostId ? document.getElementById(hostId) : null
+      const browserRegion = currentBrowser && host && surface?.contains(host) ? [...host.querySelectorAll<HTMLElement>('[data-workbench-region-id]')]
+        .find(region => region.dataset.workbenchRegionId === reference?.regionId) : null
+      return toolsOpen ? surface?.querySelector<HTMLElement>('[aria-label="Close browser management"]')
+        : currentBrowser ? browserRegion?.querySelector<HTMLElement>(currentBrowser.url === 'about:blank' ? '[aria-label="Search or enter a web address"]' : '[aria-label="Browser address"]')
+          : !selection ? surface?.querySelector<HTMLElement>('[aria-label="Search or enter a web address"]') : null
+    }
+    const target = findTarget()
+    if (target) { target.focus(); return }
+    if (!surface || (!toolsOpen && !currentBrowser && selection)) return
+    // The retained portal may commit after this effect. Observe only until the input exists;
+    // a newer selection, hidden surface or explicit input focus cancels this request.
+    const previousFocus = document.activeElement
+    const observer = new MutationObserver(() => {
+      if (document.activeElement !== previousFocus && document.activeElement !== document.body) { observer.disconnect(); return }
+      const mounted = findTarget()
+      if (mounted) { observer.disconnect(); mounted.focus() }
+    })
+    observer.observe(surface, { childList: true, subtree: true })
+    return () => observer.disconnect()
+  }, [visible, selection, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation, projection?.presentationId, projection?.entity.kind])
 
   function itemTitle(zone: AgentMuxZoneFact): string {
     return surveyExplorationName(explorationNames[zone.zoneId], (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? [tabs[id]!] : []))
@@ -188,41 +207,34 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   async function openBrowser(input = 'about:blank', newItem = false): Promise<void> {
     if (opening) return
-    const before = useAppStore.getState(), layout = workspace ? before.layouts[workspace.id] : undefined
-    if (!workspace || !layout?.activeGroupId) { setError(browserOpenError(undefined)); return }
+    const before = useAppStore.getState()
     const startedIntent = intent.current
     setOpening(true); setError(null)
     try {
-      let preparation = newItem ? null : failedCreation.current
-      if (preparation && preparation.zone.workspaceId !== workspace.id) throw new Error('The previous creation still belongs to its original resource workspace. Review that exact item, or explicitly create a new item here.')
-      if (!preparation) {
-        const created = await before.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })
-        preparation = { zone: created.zone, reference: null, surface: null }
-        failedCreation.current = preparation
-        if (!useAppStore.getState().setSurveyZoneCollected(created.zone.zoneId, true)) {
-          throw new Error('The original exploration was created, but its resource is now unconfirmed. Its exact target is kept.')
-        }
-        setCreationNotice(`Item created locally. ${saveNotice(created.save)}${created.issues.length ? ` ${created.issues.map(issue => issue.message).join(' ')}` : ''}`)
-      }
-      if (!preparation.reference) {
-        const tabId = before.openLauncher({ workspaceId: preparation.zone.workspaceId, zoneId: preparation.zone.zoneId, tabGroupId: layout.activeGroupId, reveal: false })
-        const launcher = tabId ? useAppStore.getState().tabs[tabId] : undefined
-        if (!launcher) throw new Error('The original resource Group is still restoring. This Zone is kept; retry here.')
-        preparation.reference = { displayWorkspaceId: workspace.id, groupId: layout.activeGroupId, tabId: launcher.id, regionId: launcher.layout.activeRegionId }
-        preparation.surface = launcher.regions[preparation.reference.regionId]!
-      }
-      const reference = preparation.reference, launcher = useAppStore.getState().tabs[reference.tabId]
-      const attached = launcher?.regions[reference.regionId]
-      const confirmedBrowser = attached?.kind === 'browser' && attached.browserId === reference.regionId && launcher?.space?.zoneId === preparation.zone.zoneId
-      if (!confirmedBrowser) {
-        if (!launcher || Object.keys(launcher.regions).length !== 1 || attached !== preparation.surface || preparation.surface?.kind !== 'launcher') throw new Error('The original preparation is unavailable or has changed. Its content and exact reference are kept; review it before retrying.')
-        await before.createBrowser(reference.groupId, { tabId: reference.tabId, regionId: reference.regionId }, input)
-      }
-      const current = useAppStore.getState(), surface = current.tabs[reference.tabId]?.regions[reference.regionId]
-      if (surface?.kind !== 'browser' || surface.browserId !== reference.regionId) throw new Error('The original Browser owner has not confirmed attachment.')
+      const preparation = await before.createSurveyBrowser({ workspaceId: newItem ? SCRATCH_WORKSPACE_ID : workspace?.id ?? SCRATCH_WORKSPACE_ID, url: input,
+        preparation: newItem ? null : failedCreation.current, onPrepared(value) { failedCreation.current = value } })
+      const reference = preparation.reference, current = useAppStore.getState()
       failedCreation.current = null
+      setCreationNotice(null)
       if (intent.current === startedIntent && current.mainSurface === 'survey' && current.surveyZoneSelection === before.surveyZoneSelection) setSelection({ zoneId: preparation.zone.zoneId, selection: [reference], active: reference })
     } catch (cause) { setError(`Browser could not open: ${presentError(cause)}. Your input and original work surface are kept; retry here.`) }
+    finally { setOpening(false) }
+  }
+
+  async function newBrowserTab(groupId: string): Promise<void> {
+    if (opening || !projection || !currentZone || !selection) return
+    const before = useAppStore.getState(), held = before.surveyZoneSelection, startedIntent = intent.current
+    setOpening(true); setError(null)
+    try {
+      const tabId = before.openLauncher({ workspaceId: currentZone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, tabGroupId: groupId, zoneId: currentZone.zoneId, reveal: false })
+      const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
+      if (!tab) throw new Error('This exact display Group is still restoring. Existing pages are kept.')
+      const reference = { displayWorkspaceId: projection.displayWorkspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId }
+      failedCreation.current = { zone: currentZone, reference, surface: tab.regions[reference.regionId]! }
+      await before.createSurveyBrowser({ workspaceId: currentZone.workspaceId, url: 'about:blank', preparation: failedCreation.current, onPrepared(value) { failedCreation.current = value } })
+      failedCreation.current = null
+      if (held && intent.current === startedIntent && useAppStore.getState().surveyZoneSelection === held) setSelection(surveySelectReference(held, reference))
+    } catch (cause) { setError(`Browser could not open: ${presentError(cause)}. Recover this same page; existing content is kept.`) }
     finally { setOpening(false) }
   }
 
@@ -297,6 +309,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         notice: `${report.outcome === 'unchanged' ? 'Link unchanged.' : report.outcome === 'linked' ? 'Link added locally.' : report.outcome === 'unlinked' ? 'Link removed locally.' : 'Link status is unconfirmed.'} ${saveNotice(report.save)}` })
     } catch (cause) { setRelationStatus({ zoneId, pendingSpaceId: null, error: presentError(cause), notice: 'Existing content and links are kept. Retry this exact relation when its owner is available.' }) }
   }
+  async function organize(): Promise<void> {
+    const target = organizationTarget
+    if (!target || target.zoneId !== currentZone?.zoneId || relationStatus?.pendingSpaceId) return
+    setRelationStatus({ zoneId: target.zoneId, pendingSpaceId: target.spaceId, error: null, notice: null })
+    try {
+      const result = await useAppStore.getState().setZoneSpaceRelation(target.zoneId, target.spaceId, true)
+      const confirmed = result.outcome === 'linked' || result.outcome === 'unchanged'
+      setRelationStatus({ zoneId: target.zoneId, pendingSpaceId: null, error: confirmed ? null : result.issues.map(issue => `${issue.message} ${issue.recovery}`).join(' ') || 'Organization is not confirmed. The original research is kept.', notice: confirmed ? saveNotice(result.save) : null })
+      if (confirmed) { setOrganized(target); setOrganizationTarget(null) }
+    } catch (cause) { setRelationStatus({ zoneId: target.zoneId, pendingSpaceId: null, error: presentError(cause), notice: 'The original research and its other locations are kept. Retry this same target.' }) }
+  }
   async function openLocation(location: AgentMuxSpaceLocation): Promise<void> {
     intent.current += 1
     try {
@@ -334,13 +357,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       pendingSpaceId: selectedStatus?.pendingSpaceId ?? null, error: selectedStatus?.error,
       notice: selectedStatus?.notice || topicSnapshot?.error ? <>{selectedStatus?.notice}{topicSnapshot?.error}</> : null,
       onLinkChange: (spaceId, linked) => void changeRelation(spaceId, linked), onOpenTopic: openTopic } : null}
+    {...(currentZone && collected[currentZone.zoneId] ? { onOrganize: (spaceId: string) => { setSidebarCollapsed(false); setOrganized(null); setOrganizationTarget({ zoneId: currentZone.zoneId, spaceId }) } } : {})}
     {...(selection && tabViewControl ? { tabViewControl } : {})}
     {...(currentZone ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
     onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
     onManageBrowsers={() => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
   const panelUnconfirmed = !!selection && !selection.active && retainedLocations.length > 0
   const relationMessage = [selectedStatus?.error, selectedStatus?.notice, topicSnapshot?.error].filter(Boolean).join('\n')
-  const contentControlsVisible = Boolean(tabViewControl?.active || navigationChoices.length || panelUnconfirmed || selectedStatus?.pendingSpaceId || relationMessage)
+  const contentControlsVisible = Boolean(tabViewControl?.active || navigationChoices.length || panelUnconfirmed)
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -350,8 +374,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New exploration" title={workspace ? `Start browsing in ${workspace.name}` : 'Choose a resource workspace in Space'} disabled={opening || !workspace} onClick={() => void openBrowser('about:blank', true)}>
-          {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>Explore</span>
+        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New tab" title="New browser tab" disabled={opening} onClick={() => void openBrowser('about:blank', true)}>
+          {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>New tab</span>
         </button><button type="button" className="survey-icon-button" aria-label="New note exploration" title="Start with a note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /></button></div>
         <div className="survey-page-list">
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
@@ -366,9 +390,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           })}
         </div>
       </aside>
+        {organizationTarget?.zoneId === currentZone?.zoneId && currentZone ? <section className="survey-organization" aria-label="Confirm research organization">
+          <strong>Organize “{itemTitle(currentZone)}” into {catalog?.spaces.find(space => space.spaceId === organizationTarget?.spaceId)?.name ?? 'the selected Topic'}?</strong>
+          <p>All tabs, split panels and notes in this research.</p>
+          <div><button type="button" className="small-button" disabled={!!selectedStatus?.pendingSpaceId} onClick={() => void organize()}>Organize research</button><button type="button" className="small-button" disabled={!!selectedStatus?.pendingSpaceId} onClick={() => setOrganizationTarget(null)}>Cancel</button></div>
+        </section> : null}
+        {organized?.zoneId === currentZone?.zoneId && organized ? <p className="survey-organization-result" role="status">Available in {catalog?.spaces.find(space => space.spaceId === organized.spaceId)?.name ?? 'the selected Topic'}. <button type="button" className="small-button" onClick={() => openTopic(organized.spaceId)}>Open in Topic</button></p> : null}
+          {selectedStatus?.pendingSpaceId != null ? <span className="survey-status" role="status">Updating Topic link…</span> : null}
+          {relationMessage ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Topic status', mode: relationMessage, restore: 'Original content and applied relationships are kept. Open Organize to inspect the exact Topic; use the original Space save action when saving is unconfirmed.' } }}
+            disclosure={{ scope: JSON.stringify(['survey-topics', selection?.zoneId]), id: 'topic-state', visible: visible && !controlsCoverPage }} /> : null}
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
         {options}
-        {selection ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Add a note in this exploration' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
+        {selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Add a note in this exploration' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
       </div>
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
         hidden={sidebarCollapsed}
@@ -390,28 +423,25 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'The active panel is not confirmed.', mode: 'Original references and content are kept.', restore: 'Choose an original panel, or continue recovery in Space. Technical references are available in the panel menu.' } }}
               title="Details" disclosure={{ scope: JSON.stringify(['survey-panel', selection?.zoneId]), id: 'active-panel', occurrence: JSON.stringify(selection?.selection), visible: visible && !controlsCoverPage }} />
           </div> : null}
-          {selectedStatus?.pendingSpaceId != null ? <span className="survey-status" role="status">Updating Topic link…</span> : null}
-          {relationMessage ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Topic status', mode: relationMessage, restore: 'Original content and applied relationships are kept. Open Organize to inspect the exact Topic; use the original Space save action when saving is unconfirmed.' } }}
-            disclosure={{ scope: JSON.stringify(['survey-topics', selection?.zoneId]), id: 'topic-state', visible: visible && !controlsCoverPage }} /> : null}
+
         </header>
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
         {noteRecovery ? <p className="survey-relation-notice" role="status">The original Note target is kept. <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Recover same note</button></p> : null}
         {creationNotice ? <p className="survey-relation-notice">{creationNotice}</p> : null}
-        {!selection ? <div className="survey-start" aria-label="Start exploring"><div className="survey-start-heading"><h1>Explore an idea</h1><p>Browse, take notes, and connect what you find.</p></div>
+        {!selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
           <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
             <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
-            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><button type="button" className="survey-start-note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /><span>Start with a note</span></button>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}<small>{workspace?.name ?? 'Choose a resource workspace in Space to start browsing'}</small>
+            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><button type="button" className="survey-start-note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /><span>Start with a note</span></button>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
         </div> : <>
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
-            This work surface is outside the Survey list. Its content and selection are kept.
-            <button type="button" className="small-button" onClick={() => { if (!setCollected(currentZone.zoneId, true)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}>Keep in Survey</button>
+            This work surface is outside the Survey list. Its content and selection are kept. Start an independent research from the page’s Research in Survey action.
           </div> : null}
-          {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} leadingChrome={contentControlsVisible ? undefined : windowControlsInset} visible={visible && !controlsCoverPage} />
+          {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} onCreateTab={groupId => void newBrowserTab(groupId)} viewOwnership="projection" viewTargets={viewTargets} leadingChrome={contentControlsVisible ? undefined : windowControlsInset} visible={visible && !controlsCoverPage} />
             : <div role="status" className="survey-restore-notice">The original work surface and precise references are kept. Choose an available location, or continue recovery in Space.</div>}
         </>}
       </div>
       {workspace && (toolsVisited || toolsOpen) ? <aside ref={managementRef} id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>
-        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><X size={14} /></button></header><SurveyBrowserTools workspace={workspace} visible={visible && toolsOpen} />
+        <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><X size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={visible && toolsOpen} />
       </aside> : null}
     </div>
   </section>

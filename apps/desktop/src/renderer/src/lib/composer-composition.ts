@@ -46,7 +46,7 @@
  *     一次无条件的整串写回就把追加的内容抹掉了（`store.appendAgentComposerDraft` 是
  *     `current + '\n\n' + text` 的读-改-写，被覆盖的正是它刚写进去的那一段）。
  *
- *     外部写入者今天有两个，都走 `appendAgentComposerDraft`：工具区那个按钮（`SurveyBrowserTools`
+ *     外部写入者今天有两个，都走 `appendAgentComposerDraft`：工具区那个按钮（`BrowserToolsPanel`
  *     的浏览器标注动作），以及对话消息上的选区注解（`SessionPane.annotateMessage`）。两个都要先
  *     把焦点移出 Composer——浏览器标注按钮是点它就移焦；注解那条更远，便签显式打开时聚焦它的
  *     `ComposerTextarea`，用户是在**那一格**里打字，Composer 根本没有焦点——所以组字都已先结束，

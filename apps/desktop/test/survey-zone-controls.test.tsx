@@ -41,6 +41,9 @@ async function mount(overrides: Partial<ComponentProps<typeof SurveyTopicRelatio
 async function open() {
   const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Exploration options"]')!
   expect(trigger).not.toBeNull(); await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
+  const details = document.querySelector<HTMLElement>('[aria-label="Item details"]')!
+  expect(details).not.toBeUndefined()
+  await act(async () => { details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
   const sub = document.querySelector<HTMLElement>('[aria-label="Link Topics"]')!
   expect(sub).not.toBeNull(); await act(async () => sub.focus()); await key(sub, 'ArrowRight')
   expect(menu()).not.toBeNull(); return trigger
@@ -132,7 +135,7 @@ it('selects the original Zone and keeps its resource and membership actions in t
   const resource = { id: 'foreign-resource', name: 'Resource project', hostId: 'remote', path: _hygiene_fixturePath("source/worktree"), branch: 'resource-branch', kind: 'worktree' as const }
   const render = async (sourceWorkspace: typeof resource | null, relatedTopics: AgentMuxSpaceFact[] | null) => {
     await act(async () => root.render(<><SurveyZoneItem zone={zone} title="Original mixed workface" glyph={<span>Mixed</span>} selected activity="Mixed" onSelect={onSelect} />
-      <SurveyItemOptions visible title="Original mixed workface" zone={zone} workspace={sourceWorkspace} relatedTopics={relatedTopics} collected={false}
+      <SurveyItemOptions visible title="Original mixed workface" zone={zone} workspace={sourceWorkspace} relatedTopics={relatedTopics} collected={true}
         onCollectedChange={onCollectedChange} activityDetails="Two Browsers: mixed control" panels={null} relations={null}
         onManageBrowsers={() => {}} onOpenWorkspace={onOpenWorkspace} /></>))
   }
@@ -146,7 +149,7 @@ it('selects the original Zone and keeps its resource and membership actions in t
   expect(main).not.toBeNull()
   const member = main.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!
   await act(async () => member.focus()); await key(member, 'Enter')
-  expect(onCollectedChange).toHaveBeenCalledExactlyOnceWith(true)
+  expect(onCollectedChange).toHaveBeenCalledExactlyOnceWith(false)
   const details = [...main.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Details')!
   expect(details).not.toBeNull(); await act(async () => details.focus()); await key(details, 'ArrowRight')
   const content = document.querySelector('.survey-item-details-content')!

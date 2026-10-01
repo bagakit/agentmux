@@ -20,11 +20,7 @@ export function restoredSurveyCollection(candidate: unknown): Record<string, tru
 }
 
 export function surveyZoneItems(catalog: AgentMuxSpaceCatalog, collected: SurveyCollection): AgentMuxZoneFact[] {
-  const browserRegions = new Set(catalog.regions.filter(region => region.kind === 'browser')
-    .map(region => JSON.stringify([region.tabId, region.regionId])))
-  const discovered = new Set(catalog.tabs.flatMap(tab => tab.zoneId && tab.regionIds.some(regionId =>
-    browserRegions.has(JSON.stringify([tab.tabId, regionId]))) ? [tab.zoneId] : []))
-  return catalog.zones.filter(zone => discovered.has(zone.zoneId) || collected[zone.zoneId] === true)
+  return catalog.zones.filter(zone => collected[zone.zoneId] === true)
 }
 
 /** Original active/recent references, or the sole confirmed occurrence; never arbitrate among locations. */

@@ -29,7 +29,7 @@ vi.mock('../src/renderer/src/store.js', () => ({
   useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
     { getState: () => fixture.state, getInitialState: () => fixture.state, subscribe: () => () => {} })
 }))
-import { SurveyBrowserTools } from '../src/renderer/src/components/SurveyBrowserTools.js'
+import { BrowserToolsPanel } from '../src/renderer/src/components/BrowserToolsPanel.js'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
@@ -84,7 +84,7 @@ beforeEach(() => {
   container = document.createElement('div'); document.body.appendChild(container); root = createRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
-async function mount() { await act(async () => root.render(<SurveyBrowserTools workspace={workspace} visible />)) }
+async function mount() { await act(async () => root.render(<BrowserToolsPanel workspace={workspace} visible />)) }
 async function click(element: Element | null) {
   expect(element).not.toBeNull(); await act(async () => (element as HTMLElement).click())
 }

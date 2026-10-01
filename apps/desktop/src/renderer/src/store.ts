@@ -1,3 +1,4 @@
+import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
@@ -42,7 +43,7 @@ import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
-import { restoredSurveyCollection, restoredSurveyZoneSelection, surveySelectReference, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type SurveyBrowserTarget } from './lib/survey-workface'
+import { restoredSurveyCollection, restoredSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -489,7 +490,7 @@ type AppState = {
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
   surveyZoneSelection: SurveyZoneSelection | null
-  /** Explicit display membership only, independent of automatic Browser discovery. */
+  /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyCollectedZones: Record<string, true>
   surveyExplorationNames: Record<string, string>
   setSurveyExplorationName(zoneId: string, name: string): boolean
@@ -501,7 +502,7 @@ type AppState = {
   setSurveySidebarWidth(width: number): void
   setSurveyZoneSelection(selection: SurveyZoneSelection | null): void
   setSurveyToolsOpen(open: boolean): void
-  openSurveyBrowserTools(target: SurveyBrowserTarget): void
+  createSurveyBrowser(input: Parameters<typeof createSurveyBrowser>[1]): ReturnType<typeof createSurveyBrowser>
   /** Durable global Board Demand records. Session links remain explicit and are derived only for the selected Demand. */
   demands: Record<string, DemandRecord>
   /** Editor-owned binding from a Demand to its dedicated PMO Teams Tab. */
@@ -2509,25 +2510,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return true
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },
-  openSurveyBrowserTools(target) {
-    const state = get()
-    const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
-    const catalog = spatialCatalog(state, topics)
-    const tab = catalog.tabs.find(tab => tab.tabId === target.tabId && tab.workspaceId === target.workspaceId && tab.regionIds.includes(target.regionId))
-    const held = state.surveyZoneSelection
-    const locations = catalog.locations.filter(location => location.tabId === target.tabId && location.regionId === target.regionId)
-    const exact = held?.active && locations.find(location => location.displayWorkspaceId === held.active!.displayWorkspaceId && location.groupId === held.active!.groupId)
-    const distinct = new Map(locations.map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId]), location]))
-    const reference = exact ?? (distinct.size === 1 ? [...distinct.values()][0] : undefined)
-    if (!tab?.zoneId || !reference) {
-      state.reportError(new Error('The exact Browser workface occurrence is unconfirmed or has multiple locations. Original content is kept; choose its Zone and Group in Survey.'))
-      set({ mainSurface: 'survey', surveyToolsOpen: true, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-      return
-    }
-    const selected = held?.zoneId === tab.zoneId ? held : { zoneId: tab.zoneId, selection: [], active: null }
-    set({ mainSurface: 'survey', surveyZoneSelection: surveySelectReference(selected, reference), surveyToolsOpen: true,
-      workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-  },
+  createSurveyBrowser(input) { return createSurveyBrowser(get, input) },
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,

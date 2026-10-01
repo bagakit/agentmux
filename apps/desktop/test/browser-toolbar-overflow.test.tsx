@@ -12,7 +12,7 @@ const fixture = vi.hoisted(() => {
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   return { state: {
-    applyBrowserEvent: vi.fn(), reportError: vi.fn(), tabs: {} as Record<string, WorkbenchTab>, openSurveyBrowserTools: vi.fn(), selectWorkspace: vi.fn(async () => {}), setMainSurface: vi.fn(),
+    applyBrowserEvent: vi.fn(), reportError: vi.fn(), tabs: {} as Record<string, WorkbenchTab>, openBrowserToolsPanel: vi.fn(), selectWorkspace: vi.fn(async () => {}), setMainSurface: vi.fn(),
     executeControl: vi.fn(async (_request: { operation: string; browserId?: string }) => ({ operation: 'browser.history', operations: [] })),
     saveBrowserBookmark: vi.fn(async () => 'Page.webloc'), openFile: vi.fn(async () => {}),
     browserAnnotationsByBrowserId: {}, noticeReadReceipts: {}, addBrowserAnnotation: vi.fn(), toolsOpen: false,
@@ -135,7 +135,7 @@ it('links actual toolbar classes to nonempty narrow-pane rules and the sole styl
 })
 
 
-it('routes the real More management action to Survey with its exact original page reference without creating a new owner', async () => {
+it('opens Browser management beside the page without Survey navigation or new entities', async () => {
   const create = vi.spyOn(api.browser, 'create')
   const container = document.createElement('div')
   document.body.appendChild(container)
@@ -143,11 +143,11 @@ it('routes the real More management action to Survey with its exact original pag
   try {
     await act(async () => root.render(<BrowserPane tab={tab} visible />))
     const menu = await openMore(container)
-    const entry = menu.querySelector('[aria-label="Browser tools in Survey"]')!
+    const entry = menu.querySelector('[aria-label="Browser tools"]')!
     expect(entry).not.toBeNull()
-    expect(entry.textContent).toBe('Browser tools in Survey…')
+    expect(entry.textContent).toBe('Browser tools…')
     await act(async () => entry.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-    expect(fixture.state.openSurveyBrowserTools).toHaveBeenCalledExactlyOnceWith({ workspaceId: tab.workspaceId, tabId: 'original-tab', regionId: tab.regionId })
+    expect(container.querySelector('[aria-label="Browser management controls"]')).not.toBeNull()
     expect(fixture.state.selectWorkspace).not.toHaveBeenCalled()
     expect(fixture.state.setMainSurface).not.toHaveBeenCalled()
     expect(create).not.toHaveBeenCalled()

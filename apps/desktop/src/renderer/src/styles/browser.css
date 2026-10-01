@@ -202,3 +202,7 @@
 }
 
 .browser-surface > .browser-toolbar { flex: 0 0 38px; }
+
+.browser-management-rail { padding: var(--sp-3); }
+.browser-management-rail > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-meta); }
+.browser-management-rail[hidden] { display: none; }
