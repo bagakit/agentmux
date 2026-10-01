@@ -5,7 +5,7 @@
 }
 .global-survey-surface {
   display: flex; height: 100%; min-width: 0; min-height: 0; overflow: hidden;
-  color: var(--text); background: var(--surface-0); gap: var(--sp-2); padding: var(--sp-2);
+  color: var(--text); background: var(--surface-0); gap: 0; padding: 0;
 }
 .global-survey-surface[hidden], .survey-management[hidden], .survey-tabs[hidden] { display: none; }
 .survey-navigation, .survey-management, .survey-start-input, .survey-topic-menu {
@@ -13,10 +13,13 @@
   backdrop-filter: blur(20px) saturate(110%); border: 1px solid var(--survey-edge);
   box-shadow: inset 0 1px var(--wash-2), var(--elev-1);
 }
-.survey-navigation { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-3); border-color: transparent; border-radius: var(--radius); container: survey-list / inline-size; }
+.survey-navigation { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-2); padding: 0; border: 0; border-right: 1px solid var(--survey-edge); border-radius: 0; box-shadow: inset 0 1px var(--wash-1); container: survey-list / inline-size; }
 .survey-navigation[data-collapsed="true"] { min-width: 40px; max-width: 40px; align-items: center; padding-inline: var(--sp-1); }
-.survey-tabs { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); }
-.survey-item-actions { display: flex; flex: none; align-items: center; gap: var(--sp-2); margin-top: auto; padding-top: var(--sp-3); border-top: 1px solid var(--survey-edge); }
+.survey-titlebar { width: 100%; justify-content: flex-end; padding-inline: var(--sp-3); }
+.survey-titlebar > button { -webkit-app-region: no-drag; }
+.survey-window-controls-inset { flex: 0 0 max(0px, calc(var(--window-controls-inset) - var(--survey-navigation-width))); width: max(0px, calc(var(--window-controls-inset) - var(--survey-navigation-width))); pointer-events: none; -webkit-app-region: drag; }
+.survey-tabs { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-3); padding-inline: var(--sp-3); }
+.survey-item-actions { display: flex; flex: none; align-items: center; gap: var(--sp-2); margin: auto var(--sp-3) var(--sp-2); padding-top: var(--sp-2); border-top: 1px solid var(--survey-edge); }
 .survey-item-actions > button { flex: 1; min-width: 0; justify-content: center; }
 .survey-navigation[data-collapsed="true"] .survey-item-actions { flex-direction: column; }
 .survey-navigation[data-collapsed="true"] .survey-item-actions > button { flex: none; width: 28px; height: 28px; padding: 0; }
@@ -33,11 +36,11 @@
 .survey-new-page:hover { background: var(--wash-2); }
 .survey-navigation button:focus-visible, .survey-management header button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .survey-navigation button:disabled { opacity: .5; cursor: default; }
-.survey-page-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-2); }
-.survey-item-row { position: relative; min-width: 0; flex: none; border-radius: var(--radius); }
+.survey-page-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-1); }
+.survey-item-row { position: relative; min-width: 0; flex: none; border-radius: var(--radius-sm); }
 .survey-item-row:hover { background: var(--wash-1); }
 .survey-item-row[data-selected="true"] { background: var(--surface-3); }
-.survey-item { display: flex; align-items: center; width: 100%; min-width: 0; min-height: 36px; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; font: inherit; }
+.survey-item { display: flex; align-items: center; width: 100%; min-width: 0; min-height: 32px; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; text-align: left; cursor: pointer; font: inherit; }
 .survey-item-glyph { display: grid; place-items: center; flex: none; color: var(--text-2); }
 .survey-item strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-body); font-weight: 450; }
 .survey-item-row[data-selected="true"] .survey-item, .survey-item-row[data-selected="true"] .survey-item-glyph { color: var(--text); }
@@ -115,11 +118,15 @@
   .survey-item-meta { gap: var(--sp-1); }
   .survey-item-actions > button > span { display: none; }
 }
+@container survey-list (max-width: 112px) {
+  /* A narrow rail puts its toggle below the shared macOS window-control row. */
+  .global-survey-surface[data-native-window-controls="true"] .survey-titlebar { height: 72px; flex-basis: 72px; align-items: flex-end; padding: 0 0 var(--sp-2); }
+}
 @supports not (backdrop-filter: blur(1px)) { .global-survey-surface, .survey-topic-menu { --survey-glass: var(--surface-1); } }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) { .global-survey-surface, .survey-topic-menu { --survey-glass: var(--surface-1); --survey-edge: var(--line); } }
 
 .survey-page-content > .survey-relation-notice { flex: none; padding: var(--sp-3) var(--sp-5); }
-@media (max-height: 480px) { .survey-navigation { gap: var(--sp-3); padding-block: var(--sp-2); } .survey-start { gap: var(--sp-4); padding: var(--sp-5); } }
+@media (max-height: 480px) { .survey-navigation { gap: var(--sp-2); } .survey-start { gap: var(--sp-4); padding: var(--sp-5); } }
 
 .survey-start-heading { max-width: 520px; text-align: center; }
 .survey-start-heading h1 { margin: 0 0 var(--sp-3); color: var(--text); font-size: var(--fs-display); font-weight: 550; letter-spacing: -.025em; }

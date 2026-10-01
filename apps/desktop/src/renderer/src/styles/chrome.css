@@ -5,6 +5,8 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
+:root { --window-controls-inset: 80px; }
+
 .window-drag-region {
   position: fixed;
   z-index: 80;
@@ -50,7 +52,7 @@
 }
 /* Global surfaces hide the Project Rail, so the topbar no longer gets its traffic-light inset from
    the rail's toggle chrome. Keep the native macOS controls and the title in separate hit areas. */
-.top-row-leading-chrome--global-inset { padding-left: 80px; }
+.top-row-leading-chrome--global-inset { padding-left: var(--window-controls-inset); }
 .sidebar-toggle-chrome {
   width: 180px;
   height: 100%;
@@ -58,7 +60,7 @@
   display: flex;
   align-items: center;
   gap:var(--sp-1);
-  padding:0 var(--sp-4) 0 80px;
+  padding:0 var(--sp-4) 0 var(--window-controls-inset);
   background: var(--surface-1);
   box-shadow: inset -1px 0 var(--line-soft), var(--hl);
   -webkit-app-region: drag;

@@ -1036,6 +1036,7 @@ function PaneGroup({
   interactiveResize,
   isRootLeaf,
   showWindowChrome = false,
+  leadingChrome,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1050,6 +1051,7 @@ function PaneGroup({
   interactiveResize: boolean
   isRootLeaf?: boolean
   showWindowChrome?: boolean
+  leadingChrome?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1151,7 +1153,7 @@ function PaneGroup({
       <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
         {showWindowChrome ? (
           <TopRowLeadingChrome />
-        ) : null}
+        ) : leadingChrome ?? null}
         {mote ? <><button type="button" className="pane-action mote-navigation-toggle" aria-label="Show Mote discussions" aria-expanded={navigation.open}
           onClick={navigation.toggle}><PanelLeft size={14} /></button><MoteDiscussionTitle tab={activeTab} /></> : tabNavigation}
         <div className="pane-tabbar__actions">
@@ -1271,6 +1273,7 @@ function SplitNode({
   interactiveResize = false,
   isRootLeaf = false,
   showWindowChrome = false,
+  leadingChrome,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1285,6 +1288,7 @@ function SplitNode({
   interactiveResize?: boolean
   isRootLeaf?: boolean
   showWindowChrome?: boolean
+  leadingChrome?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1302,6 +1306,7 @@ function SplitNode({
         interactiveResize={interactiveResize}
         isRootLeaf={isRootLeaf}
         showWindowChrome={showWindowChrome}
+        leadingChrome={leadingChrome}
         viewHostPrefix={viewHostPrefix}
         onNewTab={onNewTab}
       />
@@ -1319,6 +1324,7 @@ function SplitNode({
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
       showWindowChrome={showWindowChrome}
+      leadingChrome={leadingChrome}
       viewHostPrefix={viewHostPrefix}
       onNewTab={onNewTab}
     />
@@ -1336,6 +1342,7 @@ function SplitBranch({
   nativeSurfacesVisible,
   interactiveResize,
   showWindowChrome,
+  leadingChrome,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1349,6 +1356,7 @@ function SplitBranch({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   showWindowChrome: boolean
+  leadingChrome?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1387,6 +1395,7 @@ function SplitBranch({
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
+          leadingChrome={leadingChrome}
           viewHostPrefix={viewHostPrefix}
           onNewTab={onNewTab}
         />
@@ -1496,7 +1505,8 @@ export function WorkspaceWorkbench({
   onBrowserControlConfirmation,
   projectionTabId,
   onTabSelect,
-  projection
+  projection,
+  leadingChrome
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1521,6 +1531,8 @@ export function WorkspaceWorkbench({
   onTabSelect?: ((tabId: string) => void) | undefined
   /** Controlled exact Zone projection; the original workface keeps entity/content ownership. */
   projection?: WorkbenchProjection | undefined
+  /** Surface chrome follows the same first-Pane path without taking content ownership. */
+  leadingChrome?: ReactNode
 }) {
   const moteContext = useContext(MoteWorkfaceContext)
   const workbenchRef = useRef<HTMLDivElement>(null)
@@ -1766,6 +1778,7 @@ export function WorkspaceWorkbench({
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={viewOwnership === 'owner'}
+          leadingChrome={leadingChrome}
           viewHostPrefix={effectiveViewHostPrefix}
           onNewTab={newTab}
         /> : <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div>}

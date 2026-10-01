@@ -33,7 +33,8 @@ describe('global surface titlebar inset', () => {
   it('applies the native traffic-light inset only through the shared global chrome modifier', () => {
     expect(chromeSource).toContain('top-row-leading-chrome--global-inset')
     expect(chromeSource).toContain("mainSurface === 'agents' || mainSurface === 'board'")
-    expect(declarationsFor('.top-row-leading-chrome--global-inset')).toMatch(/padding-left\s*:\s*80px/)
+    expect(styles).toMatch(/:root\s*\{\s*--window-controls-inset\s*:\s*80px/)
+    expect(declarationsFor('.top-row-leading-chrome--global-inset')).toContain('var(--window-controls-inset)')
   })
 
   it('uses Goals as the visible goal surface name without changing the board route', () => {
