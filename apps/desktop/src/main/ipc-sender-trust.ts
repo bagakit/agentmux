@@ -71,6 +71,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:saveTaskAssetDraft': 'Browser task asset',
   'browser:saveTaskAssetVersion': 'Browser task asset',
   'browser:locateTaskAssetStep': 'Browser task asset',
+  'browser:runTaskBatch': 'Browser task batch',
+  'browser:stopTaskBatch': 'Browser task batch',
   'browser:runTaskAsset': 'Browser task asset',
   'browser:stopTaskAsset': 'Browser task asset',
   'browser:cancelElementSelection': 'Browser selection',

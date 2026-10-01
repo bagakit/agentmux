@@ -67,7 +67,8 @@ import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../sh
 import type { BrowserUploads } from './browser-uploads.js'
 import type { BrowserDownloads } from './browser-downloads.js'
 import { BrowserTaskAssets, runBrowserTaskAsset } from './browser-task-assets.js'
-import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskStepExecution, BrowserTaskStep } from '../shared/browser-task-assets.js'
+import { runBrowserTaskBatch, type BrowserTaskRunBudget } from './browser-task-batch.js'
+import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskStepExecution, BrowserTaskStep, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { recoverBrowserTaskStep, runBrowserTaskNavigation } from './browser-local-recovery.js'
 import { sanitizeBrowserElementSelection } from './browser-selection.js'
 import {
@@ -1747,7 +1748,7 @@ export class BrowserViewManager {
       if (this.owns(entry, view) && !view.webContents.isDestroyed()) { entry.taskAssets = state; this.emit(entry) }
       return state
     } catch {
-      const state: BrowserTaskAssetState = { assets: entry.taskAssets?.assets ?? [], runs: entry.taskAssets?.runs ?? [],
+      const state: BrowserTaskAssetState = { assets: entry.taskAssets?.assets ?? [], runs: entry.taskAssets?.runs ?? [], batches: entry.taskAssets?.batches ?? [],
         selectedRunId: entry.taskAssets?.selectedRunId ?? null,
         warning: 'Saved task assets could not be read. Existing Browser work remains; reopen the details to retry.' }
       if (this.owns(entry, view) && !view.webContents.isDestroyed()) { entry.taskAssets = state; this.emit(entry) }
@@ -1849,12 +1850,12 @@ export class BrowserViewManager {
     return await this.executeTaskAsset(input, 'control')
   }
 
-  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control'): Promise<BrowserTaskAssetRun> {
+  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control', budget?: BrowserTaskRunBudget): Promise<BrowserTaskAssetRun> {
     const entry = this.require(input.browserId)
     const view = entry.view
     const asset = await this.requireTaskAsset(input.browserId, input.assetId)
     const privateTaskParameters = Boolean(asset.versions.find(version => version.version === input.version)?.parameters.length)
-    if (this.taskExecutions.has(entry.id) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
+    if (this.taskExecutions.has(entry.id) || this.taskAssets!.isBrowserExecuting(entry.id, budget?.batchId) || entry.runInFlight || entry.activeRun) throw new Error('Another operation is using this Browser.')
     const execution = { entry, runId: input.runId, operationId: undefined as string | undefined, stopRequested: false }
     this.taskExecutions.set(entry.id, execution)
     try {
@@ -1865,6 +1866,9 @@ export class BrowserViewManager {
         const previous = state.runs.find(run => run.id === input.runId)
         if (!previous || previous.assetId !== asset.id || previous.version !== input.version || previous.browserId !== entry.id) {
           throw new Error('The original task continuation identity is unavailable; it was not restarted.')
+        }
+        if (state.batches?.some(batch => batch.items.some(item => item.runId === previous.id) && batch.id !== budget?.batchId)) {
+          throw new Error('Continue this item through its original batch to preserve its bounds and progress.')
         }
         if (previous.status !== 'ready' && previous.status !== 'waiting-human') {
           throw new Error('This task cannot continue from its current cursor. Inspect the retained progress.')
@@ -1924,10 +1928,40 @@ export class BrowserViewManager {
             }, privateTaskParameters, taskPage)
           } finally { execution.operationId = undefined }
         }
-      })
+      }, budget)
     } finally {
       if (this.taskExecutions.get(entry.id) === execution) this.taskExecutions.delete(entry.id)
     }
+  }
+
+  async runTaskBatch(input: BrowserTaskBatchInput): Promise<BrowserTaskBatchRun> { return await this.executeTaskBatch(input, 'human') }
+  async runControlledTaskBatch(input: BrowserTaskBatchInput): Promise<BrowserTaskBatchRun> { return await this.executeTaskBatch(input, 'control') }
+  private async executeTaskBatch(input: BrowserTaskBatchInput, intent: 'human' | 'control'): Promise<BrowserTaskBatchRun> {
+    const entry = this.require(input.browserId)
+    await this.requireTaskAsset(input.browserId, input.assetId)
+    if (intent === 'control' && (entry.humanControl || entry.activity.control === 'human')) throw new Error('The person has Browser control. Return control explicitly before running the batch.')
+    if (intent === 'control' && input.batchId) {
+      const state = await this.taskAssets!.state(input.browserId)
+      const batch = state.batches?.find(batch => batch.id === input.batchId)
+      const runId = batch?.items[batch.nextItem]?.runId
+      if (batch?.status === 'waiting-human' || state.runs.some(run => run.id === runId && run.status === 'waiting-human')) throw new Error('This batch is waiting for the person. Agent control cannot approve its checkpoint.')
+    }
+    // The actual button gesture authorizes only this invocation's first continuation.
+    // Later items share the original control owner; a new human takeover is never returned away.
+    let firstItem = true
+    return await runBrowserTaskBatch(this.taskAssets!, input, { runTask: (item, budget) => {
+      const itemIntent = firstItem ? intent : 'control'
+      firstItem = false
+      return this.executeTaskAsset(item, itemIntent, budget)
+    } })
+  }
+  async stopTaskBatch(browserId: string, batchId: string): Promise<BrowserTaskBatchRun | null> {
+    this.require(browserId)
+    if (!this.taskAssets) throw new Error('Task asset storage is unavailable.')
+    const batch = await this.taskAssets.stopBatch(browserId, batchId)
+    const runId = batch?.items[batch.nextItem]?.runId
+    if (runId) await this.stopTaskAsset(browserId, runId)
+    return batch
   }
 
   async stopTaskAsset(id: string, runId: string): Promise<BrowserTaskAssetRun | null> {

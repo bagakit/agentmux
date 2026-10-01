@@ -109,7 +109,7 @@ import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder, BROWSER_DE
 import { BrowserUploads } from './browser-uploads.js'
 import { BrowserDownloads } from './browser-downloads.js'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore, BROWSER_TASK_ASSETS_FILE } from './browser-task-assets.js'
-import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets.js'
+import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets.js'
 import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { BrowserInputHistoryStore } from './browser-input-history.js'
@@ -1038,6 +1038,15 @@ export async function registerIpc(args: {
   handleWithEvent('browser:locateTaskAssetStep', async (event, id: string, assetId: string, revision: number, stepId: string) => {
     requireTrustedSender('browser:locateTaskAssetStep', event)
     return await browsers.locateTaskAssetStep(id, assetId, revision, stepId)
+  })
+  handleWithEvent('browser:runTaskBatch', async (event, input: BrowserTaskBatchInput) => {
+    requireTrustedSender('browser:runTaskBatch', event)
+    if (!config.browser.agentAutomation) throw new Error('Browser automation is disabled in settings.')
+    return await browsers.runTaskBatch(input)
+  })
+  handleWithEvent('browser:stopTaskBatch', async (event, id: string, batchId: string) => {
+    requireTrustedSender('browser:stopTaskBatch', event)
+    return await browsers.stopTaskBatch(id, batchId)
   })
   handleWithEvent('browser:runTaskAsset', async (event, input: BrowserTaskAssetRunInput) => {
     requireTrustedSender('browser:runTaskAsset', event)

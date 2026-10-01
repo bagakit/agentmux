@@ -210,6 +210,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     value(f, '--version', true)
     return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }), ...(f.booleans.has('--step') ? { mode: 'step' } : {}), ...fields(f, { '--run': 'runId' }) }
   }, 'Only an existing immutable version runs. Fresh JSON object parameters are bounded to 64 KiB and never enter the saved asset or durable progress. This cannot approve a human checkpoint or reclaim human input ownership.'),
+  command('browser.task.batch', '--browser ID --asset ID --version N [--batch ID] < batch.json', 'Run a bounded list of items through the original immutable task version.', { '--browser': 'data', '--asset': 'data', '--version': 'value', '--batch': 'data' }, f => {
+    value(f, '--version', true)
+    return { browserId: id(f, '--browser', true), assetId: id(f, '--asset'), ...numbers(f, { '--version': 'version' }), ...fields(f, { '--batch': 'batchId' }) }
+  }, 'Fresh stdin JSON contains parameters and 1–16 items with unique ids and per-item parameters. Values never enter durable progress. Unknown results or human checkpoints stop the group; this cannot approve them. Original group limits are 256 operations and 120 seconds of execution.'),
+  command('browser.task.batch-stop', '--browser ID --batch ID', 'Stop the original batch and its current run while retaining item results.', { '--browser': 'data', '--batch': 'data' }, f => ({ browserId: id(f, '--browser', true), batchId: id(f, '--batch') })),
   command('browser.task.stop', '--browser ID --run ID', 'Stop an exact task run while retaining its original progress cursor.', { '--browser': 'data', '--run': 'data' }, f => ({ browserId: id(f, '--browser', true), runId: id(f, '--run') })),
   command('browser.history', '[--browser ID]', 'Read retained Browser operation history.', { '--browser': 'data' }, f => fields(f, { '--browser': 'browserId' })),
   command('browser.inspect', '--operation-id ID', 'Inspect one exact retained Browser operation.', OP, f => ({ operationId: id(f, '--operation-id') })),

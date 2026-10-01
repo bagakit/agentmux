@@ -61,7 +61,7 @@ import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from './bro
 import type { BrowserDemonstrationState } from './browser-demonstration'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
 export type { BrowserInputHistoryTarget, BrowserInputHistoryScope, BrowserInputHistoryEntry, BrowserInputHistorySnapshot, BrowserInputHistoryRecord } from './browser-input-history'
-import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent } from './browser-task-assets'
+import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskContent, BrowserTaskBatchInput, BrowserTaskBatchRun } from './browser-task-assets'
 export type { BrowserStepEvidenceRead } from './browser-step-evidence'
 export type { BrowserActivityState, BrowserOperator } from './browser-operation'
 export type { BrowserOperation, BrowserReplayPlan } from './browser-operation'
@@ -1599,6 +1599,8 @@ export type AgentMuxDesktopApi = {
     saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
     saveTaskAssetVersion(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
     locateTaskAssetStep(id: string, assetId: string, expectedRevision: number, stepId: string): Promise<BrowserTaskAsset>
+    runTaskBatch(input: BrowserTaskBatchInput): Promise<BrowserTaskBatchRun>
+    stopTaskBatch(id: string, batchId: string): Promise<BrowserTaskBatchRun | null>
     runTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun>
     stopTaskAsset(id: string, runId: string): Promise<BrowserTaskAssetRun | null>
     /**

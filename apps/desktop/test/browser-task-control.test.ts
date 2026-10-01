@@ -49,6 +49,7 @@ async function fixture(checkpoint = false, fill = false) {
   vi.spyOn(manager as any, 'yieldControl').mockImplementation(() => { entry.humanControl = true; entry.activity.control = 'human' })
   vi.spyOn(manager, 'runScript').mockImplementation(actions as never)
   const owner = { getTaskAssets: (id: string) => assets.state(id), getOperation: vi.fn(async () => null),
+    runControlledTaskBatch: (input: any) => manager.runControlledTaskBatch(input), stopTaskBatch: (id: string, batchId: string) => manager.stopTaskBatch(id, batchId),
     runControlledTaskAsset: (input: any) => manager.runControlledTaskAsset(input), stopTaskAsset: (id: string, runId: string) => manager.stopTaskAsset(id, runId) }
   return { assets, asset, store, entry, manager, actions, returnControl, owner }
 }
@@ -135,9 +136,19 @@ beforeAll(async () => {
       assert.equal(source.split(block).length - 1, 1, 'Unique actual public CLI parameter forwarding')
       code = source.replace(block, 'invocation.params.parameters = {}')
     }
+    if (process.env.AGENTMUX_BROWSER_TASK_MUTATION === 'batch-cli-drops-items' && path === resolve('packages/core/src/agentmux.ts')) {
+      const block = 'invocation.params.items = (supplied as Record<string, unknown>).items'
+      assert.equal(source.split(block).length - 1, 1, 'Unique actual public batch CLI item forwarding')
+      code = source.replace(block, 'invocation.params.items = []')
+    }
+    if (process.env.AGENTMUX_BROWSER_TASK_MUTATION === 'batch-cli-input-shape' && path === resolve('packages/core/src/agentmux.ts')) {
+      const block = "          Object.keys(supplied).some(key => key !== 'parameters' && key !== 'items')"
+      assert.equal(source.split(block).length - 1, 1, 'Unique actual batch stdin shape guard')
+      code = source.replace(block, '          false')
+    }
     if (process.env.AGENTMUX_BROWSER_TASK_LOADED && path.startsWith(resolve('packages/core/src') + '/')) appendFileSync(process.env.AGENTMUX_BROWSER_TASK_LOADED,
       JSON.stringify({ path: path.slice(resolve('.').length + 1), consumer: 'public-source-cli-ssr', sha256: createHash('sha256').update(source).digest('hex'),
-        loadedSha256: createHash('sha256').update(code).digest('hex'), ...(code === source ? {} : { mutation: 'cli-drops-fresh-parameters' }) }) + '\n')
+        loadedSha256: createHash('sha256').update(code).digest('hex'), ...(code === source ? {} : { mutation: process.env.AGENTMUX_BROWSER_TASK_MUTATION }) }) + '\n')
     return code === source ? undefined : { code, map: null }
   } }], build: { ssr: true, minify: false, emptyOutDir: false, outDir: directory,
     rollupOptions: { input: resolve('packages/core/src/agentmux.ts'), output: { format: 'es', entryFileNames: 'source-cli.mjs' } } } })
@@ -275,4 +286,132 @@ it('public task result requires the actual branch operation to be bound to the s
   const source = { operation: 'browser.task.run' as const, run: { ...run, branchDecisions: [{ stepId: 'another-step', operationId: run.operationIds[0], navigationId: 'real-navigation', result: 'true', nextStepId: null }] } }
   expect(() => parseBrowserTaskControlResult(source.operation, source)).toThrow('not bound to its step')
   expect(() => parseBrowserTaskControlResult(source.operation, { ...source, run: { ...source.run, stepExecutions: [] } })).toThrow('not bound to its step')
+})
+
+it('a real batch button only returns control once; subsequent items never manufacture another person gesture', async () => {
+  const f = await fixture()
+  const input = { browserId, assetId: f.asset.id, version: 1, parameters: {}, items: [{ id: 'one', parameters: {} }, { id: 'two', parameters: {} }] }
+  const result = await f.manager.runTaskBatch(input)
+  expect(result).toMatchObject({ status: 'completed', nextItem: 2, operationCount: 2 })
+  expect(f.actions).toHaveBeenCalledTimes(2); expect(f.returnControl).toHaveBeenCalledOnce()
+  expect((await f.assets.state(browserId)).runs.map(run => run.humanCheckpoints)).toEqual([[], []])
+})
+
+it('a new person takeover between batch items leaves the second item untouched', async () => {
+  const f = await fixture()
+  f.actions.mockImplementation(async () => {
+    f.entry.humanControl = true; f.entry.activity.control = 'human'
+    return { browserId, result: { changed: true }, logs: [], outcome: { kind: 'completed' }, runOperation: { id: 'first-real-operation', browserId } }
+  })
+  const result = await f.manager.runTaskBatch({ browserId, assetId: f.asset.id, version: 1, parameters: {}, items: [{ id: 'one', parameters: {} }, { id: 'two', parameters: {} }] })
+  expect(result).toMatchObject({ status: 'interrupted', nextItem: 1, items: [{ id: 'one', runId: expect.any(String) }, { id: 'two' }] })
+  expect(f.actions).toHaveBeenCalledOnce(); expect(f.returnControl).toHaveBeenCalledOnce()
+  expect(f.entry).toMatchObject({ humanControl: true, activity: { control: 'human' } })
+  expect((await f.assets.state(browserId)).runs).toMatchObject([{ status: 'completed', humanCheckpoints: [] }])
+})
+
+it('actual public batch CLI forwards each fresh value to original scripts without taking the person input', async () => {
+  const f = await fixture(false, true), writes: unknown[][] = [], secret = 'one-invocation-batch-secret'
+  const edited = await f.assets.edit(f.asset.id, f.asset.revision, { ...f.asset.draft,
+    parameters: [...f.asset.draft.parameters, { key: 'item', label: 'Per item', secret: false }],
+    steps: [...f.asset.draft.steps, { ...f.asset.draft.steps[0]!, id: 'item-fill', parameterKey: 'item' }] })
+  await f.assets.saveVersion(f.asset.id, edited.revision)
+  let operation = 0
+  f.actions.mockImplementation(async (id, code) => {
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+    const result = await new AsyncFunction('pageInfo', 'snapshot', 'fillInput', code)(async () => ({ url }),
+      async () => ({ observation: { scope: { kind: 'page', document: null }, fullObserved: 1, truncated: false, omittedFrames: [] }, missingFrames: [], nodes: [{ ref: '@e1', role: 'text input', name: 'Field' }] }), async (...args: unknown[]) => { writes.push(args) })
+    return { browserId: id, result, logs: [], outcome: { kind: 'completed' }, runOperation: { id: `batch-public-op-${++operation}`, browserId: id } }
+  })
+  vi.spyOn(api.browser, 'controlTask').mockImplementation(request => executeBrowserTaskControl(request, f.owner, true))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'control.sock'), coreClients: () => [], execute: request => useAppStore.getState().executeControl(request) })
+  const before = useAppStore.getState(), field = document.createElement('textarea'); document.body.append(field)
+  field.value = 'unsent person draft'; field.focus(); field.setSelectionRange(1, 4)
+  await server.start()
+  try {
+    const output = await cliRun(['batch', '--browser', browserId, '--asset', f.asset.id, '--version', '2'], JSON.stringify({ parameters: { fresh: secret }, items: [{ id: 'first', parameters: { item: 'first-value' } }, { id: 'second', parameters: { item: 'second-value' } }] }))
+    expect(output.code, output.stderr).toBe(0)
+    expect(objectCliReceipt(JSON.parse(output.stdout))).toMatchObject({ operation: 'browser.task.batch', result: { batch: { status: 'completed', nextItem: 2, operationCount: 4, items: [{ id: 'first' }, { id: 'second' }] } } })
+    expect(writes).toEqual([['@e1', secret], ['@e1', 'first-value'], ['@e1', secret], ['@e1', 'second-value']])
+    expect(f.actions).toHaveBeenCalledTimes(4); expect(f.returnControl).not.toHaveBeenCalled()
+    const state = await f.assets.state(browserId); expect(state.runs.map(run => run.operationIds)).toEqual([['batch-public-op-1', 'batch-public-op-2'], ['batch-public-op-3', 'batch-public-op-4']])
+    for (const value of [secret, 'first-value', 'second-value']) expect(JSON.stringify(f.store.document) + output.stdout + output.stderr).not.toContain(value)
+    const after = useAppStore.getState(); expect([after.tabs, after.layouts, after.regionCaretFocus, after.activeWorkspaceId, after.mainSurface]).toEqual([before.tabs, before.layouts, before.regionCaretFocus, before.activeWorkspaceId, before.mainSurface])
+    expect(document.activeElement).toBe(field); expect([field.value, field.selectionStart, field.selectionEnd]).toEqual(['unsent person draft', 1, 4])
+    expect(agentMuxCommandHelp('browser.task.batch')).toContain('stdin')
+  } finally { await server.stop(); field.remove() }
+})
+
+it('actual public batch CLI refuses its pending checkpoint and Stop preserves that original group', async () => {
+  const f = await fixture(true)
+  vi.spyOn(api.browser, 'controlTask').mockImplementation(request => executeBrowserTaskControl(request, f.owner, true))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'control.sock'), coreClients: () => [], execute: request => useAppStore.getState().executeControl(request) })
+  const input = JSON.stringify({ parameters: {}, items: [{ id: 'one', parameters: {} }, { id: 'two', parameters: {} }] })
+  await server.start()
+  try {
+    const output = await cliRun(['batch', '--browser', browserId, '--asset', f.asset.id, '--version', '1'], input)
+    expect(output.code, output.stderr).toBe(0)
+    const first = objectCliReceipt(JSON.parse(output.stdout)) as any
+    expect(first).toMatchObject({ result: { batch: { status: 'waiting-human', nextItem: 0, items: [{ id: 'one', runId: expect.any(String) }, { id: 'two' }] } } })
+    f.entry.humanControl = false; f.entry.activity.control = 'agent'
+    const before = await f.assets.state(browserId)
+    const refused = await cliRun(['batch', '--browser', browserId, '--asset', f.asset.id, '--version', '1', '--batch', first.result.batch.id], input)
+    expect(refused.code).toBe(1); expect(JSON.parse(refused.stderr)).toMatchObject({ error: { message: expect.stringContaining('waiting for the person') } })
+    expect(await f.assets.state(browserId)).toEqual(before); expect(f.actions).not.toHaveBeenCalled(); expect(f.returnControl).not.toHaveBeenCalled()
+    const stopped = await cliRun(['batch-stop', '--browser', browserId, '--batch', first.result.batch.id])
+    expect(stopped.code, stopped.stderr).toBe(0)
+    expect(objectCliReceipt(JSON.parse(stopped.stdout))).toMatchObject({ result: { batch: { id: first.result.batch.id, status: 'stopped', nextItem: 0 } } })
+    expect((await f.assets.state(browserId)).runs).toMatchObject([{ status: 'stopped', humanCheckpoints: [] }])
+  } finally { await server.stop() }
+})
+
+it('the actual public client rejects reordered items and state costs borrowed from another batch', async () => {
+  const f = await fixture()
+  const request = { ...base, operation: 'browser.task.batch' as const, browserId, assetId: f.asset.id, version: 1, parameters: {}, items: [{ id: 'one', parameters: {} }, { id: 'two', parameters: {} }] }
+  const original = await f.manager.runControlledTaskBatch(request)
+  const state = await f.assets.state(browserId)
+  expect(original).toMatchObject({ operationCount: 2, status: 'completed' }); expect(state.runs).toHaveLength(2)
+  expect(() => parseBrowserTaskControlResult('browser.task.assets', { state: { ...state, batches: [{ ...original, operationCount: 0 }] } })).toThrow('costs are not bound')
+  expect(() => parseBrowserTaskControlResult('browser.task.assets', { state: { ...state, activeBatchId: 'unknown-batch' } })).toThrow('active batch is not present')
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'wrong-batch.sock'), coreClients: () => [], execute: async () => ({ operation: request.operation, batch: { ...original, items: [...original.items].reverse() } }) })
+  await server.start()
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  try { await expect(client.call('browser.task.batch', { browserId, assetId: f.asset.id, version: 1, parameters: {}, items: request.items })).rejects.toThrow('another invocation') }
+  finally { await client.dispose(); await server.stop() }
+  expect(f.actions).toHaveBeenCalledTimes(2); expect(f.returnControl).not.toHaveBeenCalled()
+})
+
+it('the original UI run entry cannot approve or return control for a grouped checkpoint outside its batch', async () => {
+  const f = await fixture(true)
+  const batch = await f.manager.runTaskBatch({ browserId, assetId: f.asset.id, version: 1, parameters: {}, items: [{ id: 'one', parameters: {} }, { id: 'two', parameters: {} }] })
+  expect(batch).toMatchObject({ status: 'waiting-human', nextItem: 0 })
+  const before = await f.assets.state(browserId); f.returnControl.mockClear()
+  await expect(f.manager.runTaskAsset({ browserId, assetId: f.asset.id, version: 1, runId: batch.items[0]!.runId!, parameters: {} })).rejects.toThrow('original batch')
+  expect(await f.assets.state(browserId)).toEqual(before); expect(f.returnControl).not.toHaveBeenCalled(); expect(f.actions).not.toHaveBeenCalled()
+})
+
+
+it('actual public batch CLI refuses empty or extra-field input before the original runner executes', async () => {
+  const f = await fixture(false, true)
+  const forward = vi.spyOn(api.browser, 'controlTask').mockImplementation(request => executeBrowserTaskControl(request, f.owner, true))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'control.sock'), coreClients: () => [], execute: request => useAppStore.getState().executeControl(request) })
+  await server.start()
+  try {
+    const messages: string[] = []
+    for (const [input, expected] of [
+      [{ parameters: { fresh: 'transient-only' }, items: [] }, 'Browser task batch items or value budget are invalid.'],
+      [{ parameters: { fresh: 'transient-only' }, items: [{ id: 'one', parameters: {} }], unexpected: true }, 'Batch stdin must contain only parameters and items.']
+    ] as const) {
+      const output = await cliRun(['batch', '--browser', browserId, '--asset', f.asset.id, '--version', '1'], JSON.stringify(input))
+      expect(output.code).toBe(1)
+      const failure = JSON.parse(output.stderr)
+      expect(failure).toMatchObject({ operation: 'browser.task.batch', error: { message: expected } })
+      messages.push(failure.error.message)
+      expect(output.stdout).toBe('')
+    }
+    expect(messages).toEqual(['Browser task batch items or value budget are invalid.', 'Batch stdin must contain only parameters and items.'])
+    expect(forward).not.toHaveBeenCalled(); expect(f.actions).not.toHaveBeenCalled()
+    expect(await f.assets.state(browserId)).toMatchObject({ runs: [], batches: [], activeBatchId: null })
+    expect(agentMuxCommandHelp('browser.task.batch-stop')).toContain('original batch')
+  } finally { await server.stop() }
 })

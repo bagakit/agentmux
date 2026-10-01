@@ -1070,6 +1070,13 @@ export function BrowserPane({
             onSaveDraft={(content, event) => saveTaskAsset(content, event, false)}
             onSaveVersion={(content, event) => saveTaskAsset(content, event, true)}
             onLocateStep={(stepId, event) => { if (event.nativeEvent.isTrusted !== true || !taskAsset) return; void taskAction(event, () => api.browser.locateTaskAssetStep(tab.browserId, taskAsset.id, taskAsset.revision, stepId)).catch(reportError) }}
+            batch={tab.taskAssets?.batches?.find(batch => batch.assetId === taskAsset?.id && (batch.id === tab.taskAssets?.activeBatchId || batch.items.some(item => item.runId === tab.taskAssets?.selectedRunId))) ?? null}
+            batchRuns={tab.taskAssets?.runs ?? []}
+            onRunBatch={(input, event) => taskAction(event, async () => {
+              if (!taskAsset) return
+              await api.browser.runTaskBatch({ ...input, assetId: taskAsset.id, browserId: tab.browserId })
+            })}
+            onStopBatch={(batchId, event) => { if (event.nativeEvent.isTrusted !== true) return; void api.browser.stopTaskBatch(tab.browserId, batchId).catch(reportError) }}
             onRun={(input, event) => taskAction(event, async () => {
               if (!taskAsset) return
               await api.browser.runTaskAsset({ ...input, assetId: taskAsset.id, browserId: tab.browserId })
