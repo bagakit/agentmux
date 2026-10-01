@@ -2,6 +2,8 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { Check, ChevronDown, LayoutDashboard, Search, Settings2, X } from 'lucide-react'
 import { Fragment, memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { BrandIcon } from './BrandIcon'
+import type { SettingsNavigationRequest } from './SettingsNavigation'
+import { wasWindowOverlayDismissed } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '../lib/ime-composition-keyboard-event'
 import { desktopElementVisible } from '../lib/desktop-presentation'
@@ -13,10 +15,12 @@ import { settingsModules, visibleSettingsSections, settingsNavGroups, type Setti
 export { visibleSettingsSections, settingsNavGroups } from './settings/settings-modules'
 export type { SettingsSectionId, SettingsPageId } from './settings/settings-modules'
 
-function SettingsPanelView({ onClose, initialSection = 'overview', executorId }: {
+function SettingsPanelView({ onClose, initialSection = 'overview', executorId, toolId, navigationRequest }: {
   onClose: () => void
   initialSection?: SettingsPageId
   executorId?: string | undefined
+  toolId?: string | undefined
+  navigationRequest?: SettingsNavigationRequest | undefined
 }) {
   const config = useAppStore((state) => state.config)
   const [active, setActive] = useState<SettingsPageId>(initialSection)
@@ -33,7 +37,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId }:
   useEffect(() => {
     setQuery('')
     setActive(initialSection)
-  }, [initialSection, executorId])
+  }, [initialSection, executorId, toolId, navigationRequest])
   useEffect(() => {
     if (active === 'overview') return
     setVisited((current) => current.includes(active) ? current : [...current, active])
@@ -60,7 +64,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId }:
 
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return
+      if (event.key !== 'Escape' || event.defaultPrevented || isImeOwnedKeyboardEvent(event) || wasWindowOverlayDismissed(event)) return
       if (query) { setQuery(''); return }
       if (event.target instanceof HTMLSelectElement) return
       onClose()
@@ -143,7 +147,7 @@ function SettingsPanelView({ onClose, initialSection = 'overview', executorId }:
           const Pane = settingsModules.find((module) => module.id === pane)!.Pane
           const visible = active === pane && visibleSections.length > 0
           return <div key={pane} className="settings-content__scroll" data-settings-pane={pane} hidden={!visible} inert={!visible}>
-            <Pane config={config} onClose={onClose} active={visible} executorId={executorId} />
+            <Pane config={config} onClose={onClose} active={visible} executorId={executorId} toolId={toolId} navigationRequest={navigationRequest} />
           </div>
         })}
       </main>

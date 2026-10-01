@@ -1,3 +1,4 @@
+import { Activity } from 'lucide-react'
 import { memo, useCallback, useContext, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { resolvePerformancePreferences } from '../../../../shared/toolkit-preferences'
@@ -5,14 +6,14 @@ import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
 import { usePerformanceObservation } from '../../lib/use-performance-observation'
 import { SettingsNavigation } from '../SettingsNavigation'
-import { PerformancePopover } from './PerformancePopover'
+import { ToolkitPopover, type ToolkitPopoverSelection } from './PerformancePopover'
 import { PerformanceOverview, runKey, type RunContext } from './PerformanceOverview'
 import { PerformanceScript } from './PerformanceScript'
 
 const NO_IDENTITIES: string[] = []
 
 /** 原结果 owner 的一个按需 Renderer 消费者；暂停与关闭不调用全局 stop。 */
-export const PerformancePanel = memo(function PerformancePanel() {
+export const PerformancePanel = memo(function PerformancePanel(selection: ToolkitPopoverSelection) {
   const enabled = useAppStore(state => resolvePerformancePreferences(state.config ?? {}).enabled)
   const layout = useAppStore(state => resolvePerformancePreferences(state.config ?? {}).statusBar)
   const settings = useContext(SettingsNavigation)!
@@ -21,7 +22,7 @@ export const PerformancePanel = memo(function PerformancePanel() {
   const [scriptOpen, setScriptOpen] = useState(false)
   const [visibleKeys, setVisibleKeys] = useState<readonly string[]>([])
   const wanted = useMemo(() => new Set(visibleKeys), [visibleKeys])
-  const active = enabled && visible && !paused && !scriptOpen
+  const active = enabled && visible && selection.selectedToolId === 'performance' && !paused && !scriptOpen
   const observation = usePerformanceObservation(api.toolkit, active)
   const changeVisible = useCallback((next: boolean) => { setVisible(next); if (!next) { setScriptOpen(false); setVisibleKeys([]) } }, [])
   // 只投影可见行与所选 Run 的身份。其他 Session 的输出/状态不引发本组件渲染。
@@ -47,8 +48,8 @@ export const PerformancePanel = memo(function PerformancePanel() {
   })), [identities])
   const contextKeys = useCallback((keys: readonly string[]) => setVisibleKeys(keys), [])
   if (!enabled) return null
-  return <PerformancePopover label={layout === 'label'} onVisibleChange={changeVisible} focusKey={scriptOpen ? 'script' : 'overview'}>{close => scriptOpen
+  return <ToolkitPopover {...selection} toolId="performance" name="Performance" icon={<Activity size={14} aria-hidden="true" />} label={layout === 'label'} onVisibleChange={changeVisible} focusKey={scriptOpen ? 'script' : 'overview'}>{close => scriptOpen
     ? <PerformanceScript api={api.toolkit} back={() => setScriptOpen(false)} close={close} />
     : <PerformanceOverview {...observation} contexts={contexts} close={close} paused={paused} onPause={() => setPaused(value => !value)}
-      onVisibleRunKeysChange={contextKeys} onViewScript={() => setScriptOpen(true)} onConfigure={() => { close(); settings.open('toolkit') }} />}</PerformancePopover>
+      onVisibleRunKeysChange={contextKeys} onViewScript={() => setScriptOpen(true)} onConfigure={() => { close(); settings.open('toolkit') }} />}</ToolkitPopover>
 })

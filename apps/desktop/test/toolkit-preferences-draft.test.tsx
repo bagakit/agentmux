@@ -10,6 +10,7 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 import { configOwnerFixture, deferred } from './helpers/config-owner-fixture'
 
 const dom = composerDOM()
+const toolProps = { tools: [], writer: { add: vi.fn(), update: vi.fn() }, onRemoveTool: vi.fn(), onRunTool: vi.fn() }
 const checkbox = () => dom.container.querySelector<HTMLInputElement>('.toolkit-settings [type="checkbox"]')!
 const label = () => dom.container.querySelector<HTMLInputElement>('.toolkit-settings input[value="label"]')!
 const save = () => dom.container.querySelector<HTMLButtonElement>('.toolkit-settings .primary-button')!
@@ -55,7 +56,7 @@ describe('Toolkit preferences in the real Settings consumer', () => {
   })
   it('keeps a later edit made while its earlier save is pending', async () => {
     const held=deferred<void>(), onSave=vi.fn(() => held.promise)
-    await dom.render(<ToolkitSettingsPane active performance={{enabled:true,statusBar:'icon'}} onSave={onSave} />)
+    await dom.render(<ToolkitSettingsPane {...toolProps} active performance={{enabled:true,statusBar:'icon'}} onSave={onSave} />)
     await act(async () => { label().click() })
     await act(async () => { save().click() })
     expect(onSave).toHaveBeenCalledWith({enabled:true,statusBar:'label'},{enabled:true,statusBar:'icon'})
@@ -69,7 +70,7 @@ describe('Toolkit preferences in the real Settings consumer', () => {
   })
   it('keeps a rejected draft editable with an explicit failure', async () => {
     const onSave=vi.fn(async () => { throw new Error('Durable save unavailable') })
-    await dom.render(<ToolkitSettingsPane active performance={{enabled:true,statusBar:'icon'}} onSave={onSave} />)
+    await dom.render(<ToolkitSettingsPane {...toolProps} active performance={{enabled:true,statusBar:'icon'}} onSave={onSave} />)
     await act(async () => { checkbox().click() })
     await act(async () => { save().click() })
     expect(checkbox().checked).toBe(false)

@@ -8,6 +8,11 @@ import { dirname, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..'), mode = process.argv[2]
+if (['--ui', '--ui-mutations', '--ui-callers'].includes(mode)) {
+  const { verifyToolkitCustomUi } = await import('./verify-toolkit-custom-ui.mjs')
+  await verifyToolkitCustomUi({ root, mode })
+  process.exit(0)
+}
 assert.ok(['--cli', '--cli-mutations', '--cli-callers', '--actions', '--action-mutations', '--action-callers'].includes(mode), 'Choose an implemented custom Toolkit verification mode; UI has a separate owning Task.')
 const actions = mode.startsWith('--action')
 const base = resolve(root, ".bagakit/design/toolkit-custom-fixture/evidence"); await mkdir(base, { recursive: true })

@@ -1,51 +1,99 @@
-import { Activity, LockKeyhole } from 'lucide-react'
-import { useId } from 'react'
-import { PERFORMANCE_STATUS_BAR_IDS, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
-import { useSettingDraftRecord } from './use-setting-draft'
-import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
+import { Activity, ArrowLeft, Check, LockKeyhole, Plus, Search, Wrench, X } from 'lucide-react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import type { ToolkitToolDefinition, ToolkitToolFields } from '@agentmux/core/control'
+import type { PerformancePreferences } from '../../../../shared/toolkit-preferences'
+import { ToolkitIcon } from '../toolkit/ToolkitIcon'
+import type { SettingsNavigationRequest } from '../SettingsNavigation'
+import { BuiltinPerformanceSettings } from './BuiltinPerformanceSettings'
+import { ToolkitToolEditor } from './ToolkitToolEditor'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { toolkitDraftDirty, toolkitFields, useToolkitDrafts, type ToolkitDraftWriter } from './use-toolkit-drafts'
 
-export function ToolkitSettingsPane({ performance, active, onSave }: {
-  performance: PerformancePreferences
-  active: boolean
+function shortDirectory(path: string) {
+  const segments = path.split(/[\\/]/u).filter(Boolean)
+  return { parent: segments.length > 1 ? `${segments.length > 2 ? '…/' : '/'}${segments.at(-2)}/` : '', name: segments.at(-1) ?? path }
+}
+
+export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequest, active, writer, onSave, onRemoveTool, onRunTool }: {
+  performance: PerformancePreferences; tools: readonly ToolkitToolDefinition[]; toolId?: string | undefined
+  navigationRequest?: SettingsNavigationRequest | undefined
+  active: boolean; writer: ToolkitDraftWriter
   onSave(performance: PerformancePreferences, expected: PerformancePreferences): Promise<void>
+  onRemoveTool(id: string, expected: ToolkitToolFields): Promise<void>
+  onRunTool(definition: ToolkitToolDefinition): Promise<string>
 }) {
-  const id = useId()
-  const draft = useSettingDraftRecord(performance)
-  const save = useSettingsSave()
-  async function submit() {
-    const submitted = draft.beginSave()
-    const committed = await save.run(() => onSave(submitted.value, submitted.expected))
-    submitted.finish(committed)
+  const resource = useToolkitDrafts(tools)
+  const [selectedId, setSelectedId] = useState(toolId ?? 'performance')
+  const [query, setQuery] = useState('')
+  const [view, setView] = useState<'library' | 'editor'>(toolId ? 'editor' : 'library')
+  const [narrow, setNarrow] = useState(false)
+  const host = useRef<HTMLDivElement>(null)
+  const library = useRef<HTMLDivElement>(null)
+  const nameInput = useRef<HTMLInputElement>(null)
+  const searchInput = useRef<HTMLInputElement>(null)
+  const focusNewName = useRef(false)
+  const focusBack = useRef(false)
+  const entries = Object.entries(resource.entries)
+  const selected = Object.hasOwn(resource.entries, selectedId) ? resource.entries[selectedId] : undefined
+  const normalized = query.trim().toLowerCase()
+  const visible = entries.filter(([,entry]) => `${entry.value.name} ${entry.value.workspacePath}`.toLowerCase().includes(normalized))
+  const showPerformance = !normalized || 'performance official built-in resource use'.includes(normalized)
+  useLayoutEffect(() => {
+    const node = host.current
+    if (!node || !active) return
+    const update = () => { const width = node.getBoundingClientRect().width; setNarrow(width > 0 && width <= 660) }
+    update()
+    const observer = new ResizeObserver(update); observer.observe(node)
+    return () => observer.disconnect()
+  }, [active])
+  useEffect(() => { if (toolId) { setSelectedId(toolId); setView('editor'); setQuery('') } }, [toolId, navigationRequest])
+  useEffect(() => {
+    if (toolId === selectedId) return
+    if (selectedId !== 'performance' && !Object.hasOwn(resource.entries, selectedId)) setSelectedId('performance')
+  }, [resource.entries, selectedId, toolId])
+  useLayoutEffect(() => {
+    if (!focusNewName.current || !nameInput.current) return
+    nameInput.current.focus(); focusNewName.current = false
+  }, [selectedId])
+  useLayoutEffect(() => {
+    if (!focusBack.current || view !== 'library') return
+    const row = Array.from(library.current?.querySelectorAll<HTMLButtonElement>('[data-tool-id]') ?? []).find(item => item.dataset.toolId === selectedId)
+    ;(row ?? searchInput.current)?.focus(); focusBack.current = false
+  }, [selectedId, view])
+  function open(id: string) { setSelectedId(id); setView('editor') }
+  function add() {
+    if (entries.length >= 128) return
+    const id = `tool-${crypto.randomUUID()}`
+    resource.add(id, { name: '', icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: '', script: "console.log('Hello from your toolkit')\n", args: [], actions: [] })
+    focusNewName.current = true; setQuery(''); open(id)
   }
-  return <div className="settings-pane-stack toolkit-settings">
-    <p className="settings-lead">Small tools, right where you work.</p>
-    <section className="toolkit-settings__tool" aria-label="Performance tool">
-      <div className="toolkit-settings__identity">
-        <span className="toolkit-settings__icon"><Activity size={24} strokeWidth={1.5} /></span>
-        <div><span className="toolkit-settings__eyebrow">Built-in toolkit</span><h3>Performance</h3><p>A clear view of AgentMux and your agents’ resource use.</p></div>
-      </div>
-      <div className="toolkit-settings__preview" aria-label="Status bar preview">
-        <span>Workspace</span><span className="toolkit-settings__preview-tool" data-enabled={draft.value.enabled}>
-          <Activity size={15} />{draft.value.statusBar === 'label' && <span>Performance</span>}
-        </span><span className="toolkit-settings__preview-settings">Settings</span>
-      </div>
-      <label className="toolkit-settings__toggle">
-        <span><strong>Show Performance</strong><small>Available in the status bar. Observes only while you view it or explicitly run it.</small></span>
-        <input type="checkbox" checked={draft.value.enabled} onChange={event => draft.setField('enabled', event.target.checked)} />
-      </label>
-      <fieldset className="toolkit-settings__layout"><legend>Status bar appearance</legend>
-        <div className="toolkit-settings__choices">
-          <LiquidSelectionSurface selected={draft.value.statusBar} active={active} targetAttribute="data-settings-target" />
-          {PERFORMANCE_STATUS_BAR_IDS.map(value => <label key={value} data-settings-target={value} data-selected={draft.value.statusBar === value}>
-            <input type="radio" name={`${id}-layout`} value={value} checked={draft.value.statusBar === value} onChange={() => draft.setField('statusBar', value)} />
-            <Activity size={16} />{value === 'icon' ? 'Icon' : 'Icon and name'}
-          </label>)}
+  function back() { focusBack.current = true; setView('library') }
+  async function remove() {
+    if (!selected || selected.saving) return false
+    if (selected.expected) await onRemoveTool(selectedId, toolkitFields(selected.expected))
+    resource.forget(selectedId); setSelectedId('performance'); setView('library'); return true
+  }
+  return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view}>
+    <header className="settings-pane-toolbar toolkit-workbench__toolbar"><button type="button" className="small-button" disabled={entries.length >= 128} onClick={add}><Plus size={13} /> Add tool</button></header>
+    <div className="toolkit-workbench__body">
+      <section className="toolkit-library" aria-label="Tool library">
+        <label className="toolkit-library__search"><Search size={14} aria-hidden="true" /><input ref={searchInput} aria-label="Search tools" placeholder="Find a tool…" value={query} onChange={event => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear tool search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
+        <div ref={library} className="toolkit-library__items">
+          <LiquidSelectionSurface selected={selectedId} active={active && (!narrow || view === 'library')} targetAttribute="data-tool-id" />
+          {showPerformance ? <><p className="toolkit-library__group">Built-in</p><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={selectedId === 'performance'} onClick={() => open('performance')}><Activity size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><LockKeyhole size={12} aria-label="Official tool" /></button></> : null}
+          <p className="toolkit-library__group">Your tools</p>
+          {visible.map(([id,entry]) => {
+            const directory = shortDirectory(entry.value.workspacePath)
+            return <button type="button" className="toolkit-library__item" key={id} data-tool-id={id} aria-pressed={selectedId === id} onClick={() => open(id)}>
+            <ToolkitIcon icon={entry.value.icon} size={17} /><span><strong>{entry.value.name.trim() || 'Untitled tool'}</strong><small>{entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}</small><code title={entry.value.workspacePath}>{entry.value.workspacePath ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a fixed directory'}</code></span>{selectedId === id ? <Check size={12} aria-label="Selected tool" /> : null}
+          </button>})}
         </div>
-      </fieldset>
-      <p className="toolkit-settings__locked"><LockKeyhole size={13} /><span>Official, read-only script. Uses the same public CLI queries available to you.</span></p>
-    </section>
-    <p className="settings-hint">Turning this off hides the entry and prevents new Performance observations. It does not stop your agents.</p>
-    <SettingsSaveBar save={save} dirty={draft.dirty} label="Save toolkit" onSave={() => void submit()} />
+        {!visible.length ? <p className="settings-resource-empty">{entries.length ? 'No matching tools. Your drafts are kept.' : 'Add a local script and keep it close to your work.'}</p> : null}
+      </section>
+      <div className="toolkit-workbench__detail">
+        <div hidden={selectedId !== 'performance'} inert={selectedId !== 'performance'}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ArrowLeft size={13} /> Back to tools</button><BuiltinPerformanceSettings performance={performance} active={active && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
+        {selectedId === 'performance' ? null : selected ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={onRunTool} onBack={back} /> : <section className="toolkit-workbench__empty"><Wrench size={28} /><h3>{toolId === selectedId ? 'This saved tool is unavailable.' : 'Choose a tool to make it yours.'}</h3><p>{toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Your scripts, fixed directories and saved results stay together.'}</p></section>}
+      </div>
+    </div>
   </div>
 }

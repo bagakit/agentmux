@@ -12,6 +12,12 @@ export const OVERLAY_LAYER_BANDS = {
 export type OverlayLayerBand = (typeof OVERLAY_LAYER_BANDS)[keyof typeof OVERLAY_LAYER_BANDS]
 
 const WINDOW_OVERLAY_HOST_ID = 'agentmux-window-overlay-host'
+const dismissedOverlayEvents = new WeakSet<Event>()
+
+/** One input event dismisses one overlay layer; the original input still receives it. */
+export function markWindowOverlayDismissal(event: Event): void { dismissedOverlayEvents.add(event) }
+export function wasWindowOverlayDismissed(event: Event): boolean { return dismissedOverlayEvents.has(event) }
+
 const interactiveOverlay = '[role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-state="open"], [data-state="delayed-open"]'
 const interactionHosts = new WeakMap<HTMLElement, HTMLElement>()
 

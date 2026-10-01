@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
@@ -7,10 +9,12 @@ import { createRequire } from 'node:module'
 import { isBuiltin } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
-export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline' }) {
-  assert.ok(['full','placement','buttons'].includes(captureScope),'已知明确 capture scope')
+export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel' }) {
+  assert.ok(['full','placement','buttons','toolkit'].includes(captureScope),'已知明确 capture scope')
+  assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || fixtureName === 'toolkit-custom-ui' && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
   assert.ok(['baseline','state','focus'].includes(cssMutant)&& (captureScope==='buttons'||cssMutant==='baseline'),'明确有界私有CSS变异')
-  const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures/performance-panel')
+  const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures',fixtureName)
+  const toolkitQualification=fixtureName==='toolkit-custom-ui'&&process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE==='qualification'
   const require=createRequire(path.join(desktop,'package.json')),sha=bytes=>createHash('sha256').update(bytes).digest('hex')
   const {build,loadConfigFromFile}=await import(pathToFileURL(require.resolve('vite')).href)
   const viteRequire=createRequire(require.resolve('vite')),esbuild=viteRequire('esbuild').build
@@ -20,13 +24,14 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
   const privateRoot=await fs.mkdtemp(path.join(os.tmpdir(),'amx-performance-ui-'))
   await fs.mkdir(evidence,{recursive:true})
   const compiled=path.join(evidence,'compiled'),inputs=new Map(),artifacts=[],cssInputs=[]
-  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,cssMutant,evidence,privateRoot,processes:[],frames:[],
+  const receipt={schema:'agentmux.performance-ui-native.v1',completed:false,captureScope,cssMutant,evidence,privateRoot,processes:[],frames:[],rawInputs:[],
     actualApp:true,actualSettings:true,actualTerminalView:true,contextIsolation:true,officialOwnerQualification:false,aestheticReview:'not-performed',
     boundary:'Actual mounted product Renderer, original TerminalView input handler, ConfigOwner/ConfigStore and product isolated preload/registered Toolkit IPC. Explicit controlled Metrics DTO port and original preview Session facts; not official Toolkit CLI/Native execution or user performance.'}
   const bind=async file=>{const bytes=await fs.readFile(file),key=path.relative(root,file);if(inputs.has(key))assert.equal(sha(inputs.get(key)),sha(bytes),'实际输入构建漂移: '+key);else inputs.set(key,bytes);return bytes}
   try {
-    for(const file of [configFile,path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
+    for(const file of [configFile,path.join(desktop,'scripts/fixtures/performance-panel/capture.mjs'),path.join(root,'package.json'),path.join(root,'pnpm-lock.yaml'),path.join(desktop,'package.json'),path.join(desktop,'scripts/probe-process.mjs'),
       ...['capture.mjs','entry.tsx','main.cjs','preload.cjs','owner-entry.ts','index.html','data.ts'].map(file=>path.join(fixture,file))])await bind(file)
+    if(toolkitQualification)for(const name of ['health-entry.ts','coordinator.cjs','qualification.cjs'])await bind(path.join(fixture,name))
     const aliases=new Map()
     for(const name of ['core','demand','layout']){
       const dir=path.join(root,'packages',name),pkg=JSON.parse(await bind(path.join(dir,'package.json')))
@@ -48,18 +53,28 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     const manifest=JSON.parse((await bind(path.join(artifactRoot,'manifest.json'))).toString())
     for(const descriptor of [manifest.sdk.archive,...manifest.binaries])await bind(path.join(artifactRoot,descriptor.path))
     await fs.mkdir(compiled,{recursive:true})
+    let fixedSdkEntry
+    if (toolkitQualification) {
+      const sdkDirectory=path.join(compiled,'fixture-sdk'),archive=path.join(artifactRoot,manifest.sdk.archive.path)
+      await fs.mkdir(sdkDirectory);await promisify(execFile)('/usr/bin/tar',['-xzf',archive,'-C',sdkDirectory])
+      fixedSdkEntry=path.join(sdkDirectory,'package/dist/index.js')
+      const sdk=await import(pathToFileURL(fixedSdkEntry).href)
+      assert.equal(sdk.PROTOCOL_VERSION,manifest.product.protocol,'The actual private SDK matches the bound native artifact protocol')
+      receipt.sdkClosure={archive:path.relative(root,archive),archiveSHA256:sha(await bind(archive)),entry:path.relative(evidence,fixedSdkEntry),entrySHA256:sha(await fs.readFile(fixedSdkEntry)),actualProtocol:sdk.PROTOCOL_VERSION,manifestProtocol:manifest.product.protocol,boundary:'Only this run uses its bound SDK archive; shared node_modules and product protocol checks remain unchanged.'}
+    }
     await fs.symlink(path.join(desktop,'node_modules'),path.join(compiled,'node_modules'),'dir')
     for(const [entry,outfile,format]of [
       [path.join(desktop,'src/preload/index.ts'),path.join(compiled,'product-preload.cjs'),'cjs'],
       [path.join(fixture,'preload.cjs'),path.join(compiled,'fixture-preload.cjs'),'cjs'],
       [path.join(fixture,'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
-      [path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm']
+      [path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm'],
+      ...(toolkitQualification?[[path.join(fixture,'health-entry.ts'),path.join(compiled,'health.mjs'),'esm']]:[])
     ])await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:'external',logLevel:'error',
       plugins:[{name:'bind-product-node-source',setup(builder){
         builder.onResolve({filter:/^@agentmux\//},args=>aliases.has(args.path)?{path:aliases.get(args.path)}:undefined)
         builder.onResolve({filter:/^[^./]/},args=>{
           if(args.path==='electron'||isBuiltin(args.path)||aliases.has(args.path))return
-          if(args.path==='@ctxmux/sdk')return {path:path.join(root,'packages/core/node_modules/@ctxmux/sdk/dist/index.js'),external:true}
+          if(args.path==='@ctxmux/sdk')return {path:fixedSdkEntry??path.join(root,'packages/core/node_modules/@ctxmux/sdk/dist/index.js'),external:true}
           return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:true}
         })
         builder.onLoad({filter:/\.[cm]?tsx?$/},async args=>{
@@ -100,10 +115,14 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
     for(const phase of captureScope==='full'?['control','restart','joined']:[captureScope]){
-      const process=await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs')],
+      const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs')]
+      const executable=toolkitQualification?globalThis.process.execPath:require('electron')
+      const args=toolkitQualification?[path.join(fixture,'coordinator.cjs'),require('electron'),path.join(compiled,'health.mjs'),...guiArgs]:guiArgs
+      const process=await runProbeProcess(executable,args,
         {temporaryRoot:privateRoot,cwd:root,env,timeoutMs:90000})
       receipt.processes.push({...process,phase})
-      const raw=JSON.parse(await fs.readFile(path.join(evidence,phase+'-render.json'),'utf8'))
+      const rawFile=phase+'-render.json',rawBytes=await fs.readFile(path.join(evidence,rawFile));const raw=JSON.parse(rawBytes)
+      receipt.rawInputs.push({phase,file:rawFile,bytes:rawBytes.length,sha256:sha(rawBytes)})
       receipt.frames.push(...raw.frames)
       assert.equal(process.exitCode,0,phase+': private product Renderer退出必须成功')
       assert.equal(process.timedOut,false);assert.equal(raw.qualified,true,phase+': owning native断言必须通过')
@@ -112,6 +131,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     }
     if(captureScope==='placement')receipt.boundary='仅本次 Settings 左归属修正：实际 App 9 geometry、7 native keyboard、Settings toggle/Escape/snapshot retention、完整 Footer 图；不运行或签原full hidden/restart/joined/T004。'
     if(captureScope==='buttons')receipt.boundary='仅T005底栏七常规按钮actual App样式/几何/原生焦点与原工作面保持；私有CSS输入变异。无旧full hidden/restart/joined、Backend或用户FPS资格。'
+    if(captureScope==='toolkit')receipt.boundary=toolkitQualification?'T008 finite actual App/unique ConfigOwner/ToolkitOwner/product preload/compiled CLI/Core Raw actions, original TerminalView input and two ordinary GUI durable restoration. Actual Terminal Session scope; not Agent Provider recovery, user App/Runtime, T004 hidden or aesthetic acceptance.':'T008 actual App准备图：真实ConfigStore/ConfigOwner/ToolkitOwner/registerToolkitIpc及私有Core Raw port；现preview Session transport仍受控，无完整动作/健康Run恢复或Task资格。capture完成不代独立审美。'
     receipt.completed=true
   } catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack}}
   finally {

@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import type { MetricsObservation } from '@agentmux/core/control'
-import type { ToolkitSnapshot } from '../../../src/shared/toolkit'
+import type { ToolkitMetricsSnapshot } from '../../../src/shared/toolkit'
 import { runKey } from '../../../src/renderer/src/components/performance/PerformanceOverview'
 // 明确的有界输入；不是用户机器测量或官方链回执。
 const at = Date.now()
@@ -22,7 +22,7 @@ const observation: MetricsObservation = {
   main: available({ sessionAttachmentOwners: 3, sessionAttachmentLeases: 4, fileWatchers: 5, browserViews: 2, releasedBrowserViews: 1 }),
   renderer: available({ window: { windowId: 1, webContentsId: 1, generation: 1 }, counts: { monacoEditors: 3, monacoModels: 5, documents: 4, runtimeSubscriptions: 2, terminalViews: 3, terminalAddons: 6, terminalListeners: 9 } })
 }
-export const performanceSnapshot: ToolkitSnapshot = { schema: 'agentmux.toolkit.v1', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
+export const performanceSnapshot: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: 'preparation-execution-1', run: { hostId:'local',runId:'preparation-run-8' }, state: 'observing', reason: null, observedAt: at,
   startedAt: at - 47000, manual: false, consumerCount: 1, sequence: 1,
   observation, trend: Array.from({ length: 48 }, (_, i) => ({ observedAt: at - (47 - i) * 1000,
     appCpuPercent: i < 12 ? 3.2 + i % 4 : i < 24 ? 22 + i % 5 : i < 36 ? 11 + i % 3 : 18.4,

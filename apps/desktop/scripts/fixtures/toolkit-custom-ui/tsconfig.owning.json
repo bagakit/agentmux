@@ -1,0 +1,8 @@
+{
+  "extends": "../toolkit-custom/tsconfig.owning.json",
+  "compilerOptions": {
+    "typeRoots": ["../../../node_modules/@types", "../../../node_modules", "../../../../../node_modules/@types"]
+  },
+  "files": [],
+  "include": ["../../../src/renderer/src/**/*.ts", "../../../src/renderer/src/**/*.tsx", "../../../src/shared/**/*.ts", "../../../types/**/*.d.ts"]
+}
