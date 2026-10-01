@@ -4,7 +4,7 @@ export type OpenDestination = (typeof OPEN_DESTINATIONS)[number]
 
 export type OpenHttpLinkOrigin = {
   workspaceId: string
-  tabGroupId: string
+  tabGroupId?: string
   tabId?: string
   regionId?: string
   /** The Session whose durable surface owns this origin, when opened from a Session view. */

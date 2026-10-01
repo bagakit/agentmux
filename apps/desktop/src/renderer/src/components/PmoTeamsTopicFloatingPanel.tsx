@@ -322,7 +322,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       tabId, signal: controller.signal
     }) : (async () => {
       const topic = await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, topicId)
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) return false
       const current = useAppStore.getState()
       if (!current.config) throw new Error('The Workspace is still restoring')
       const sources = spatialSources(current.config, [topic], current.spaceZoneBindings)
@@ -334,6 +334,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
         target: { kind: 'space', spaceId: space.spaceId, zoneId: zone.zoneId }, inputPolicy: 'preserve' }, controller.signal)
       if (receipt.operation === 'focus' && receipt.navigation.state === 'rejected')
         throw new Error(receipt.issues[0]?.message ?? 'The original Topic Space could not be selected')
+      return true
     })()
     const navigation = useAppStore.getState()
     const unsubscribe = useAppStore.subscribe(state => {
@@ -347,8 +348,8 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
     const disposeNavigation = () => { unsubscribe(); controller.signal.removeEventListener('abort', disposeNavigation) }
     if (controller.signal.aborted) disposeNavigation()
     else controller.signal.addEventListener('abort', disposeNavigation, { once: true })
-    void opening.then(() => {
-      if (controller === spaceActionRef.current && !controller.signal.aborted) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+    void opening.then(opened => {
+      if (opened && controller === spaceActionRef.current && !controller.signal.aborted) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
     }).catch(error => {
       if (controller === spaceActionRef.current && !controller.signal.aborted) {
         setPreparationIssue('Opening this context in Space did not complete. The original work surface remains available.'); reportError(error)

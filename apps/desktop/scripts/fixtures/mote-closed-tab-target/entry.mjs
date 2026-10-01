@@ -12,6 +12,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } f
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URLSearchParams(location.search).get('phase')
+const retainedSurface = new URLSearchParams(location.search).get('retained') === '1'
 window.closedTabSetup.phase = 'controlled-public-data'
 const publicConfig = await api.config.get()
 const prototype = (await api.sessions.snapshot()).sessions.find(session => session.kind === 'agent')
@@ -107,7 +108,7 @@ if (phase === 'seed') {
     layouts: { [project.id]: createWorkspaceLayout('original-project-group', [projectTab.id]),
       [scratch.id]: createWorkspaceLayout('original-mote-group', [targetId, neighborId, customTabId]) },
     agentFocus: { execution: { sessionId: 'project-worker', history: [{ sessionId: 'project-worker', focusedAt: 1000 }] }, pmo: { sessionId: 'mote-primary' } },
-    viewModes: Object.fromEntries(sessions.map(session => [session.id, 'terminal'])) })
+    viewModes: Object.fromEntries(sessions.map(session => [session.id, retainedSurface && session.id.startsWith('mote-') ? 'activity' : 'terminal'])) })
   for (const session of sessions) useAppStore.getState().setAgentComposerDraft(session.id, 'Original unsent draft · ' + session.id)
   localStorage.setItem(floatingKey, JSON.stringify({ open: true, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: targetId }))
 }
@@ -129,9 +130,20 @@ const facts = () => {
       newTab: !!panel?.querySelector('[aria-label="New Tab"], [aria-label="New discussion"]') },
     initialization: { initializeCalls, seedApplied: phase === 'seed', initialDurable, initialFloating, afterOrdinaryInitialize } }
 }
+let retainedLayout
 const root = createRoot(document.getElementById('root'))
 window.closedTabProof = { ready: false, facts, ids: { targetId, neighborId, customId, customTabId },
   showGoals: () => useAppStore.getState().setMainSurface('board'),
+  suspendOriginalPlacement: () => {
+    const state = useAppStore.getState(); retainedLayout = state.layouts[scratch.id]
+    useAppStore.setState({ layouts: { ...state.layouts, [scratch.id]: { ...retainedLayout,
+      groups: retainedLayout.groups.map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => id !== targetId),
+        activeTabId: group.activeTabId === targetId ? neighborId : group.activeTabId })) } } })
+  },
+  restoreOriginalPlacement: () => { const state = useAppStore.getState(); useAppStore.setState({ layouts: { ...state.layouts, [scratch.id]: retainedLayout } }) },
+  showOriginalSpaceTree: () => useAppStore.setState({ mainSurface: 'workbench', projectRailOpen: true, toolsOpen: false,
+    workbenchSpaceSelection: { spaceId: 'original-project-space', zoneId: 'original-project-zone', workspaceId: project.id,
+      groupId: 'original-project-group', tabId: 'original-project-tab', regionId: 'original-worker-region' }, activeWorkspaceId: project.id }),
   showUnknown: () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: 'saved-unavailable-tab' }),
   dispose: () => { root.unmount(); dispose(); window.closedTabProof.ready = false } }
 window.closedTabSetup.phase = 'render-production-app'

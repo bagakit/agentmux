@@ -74,7 +74,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     const layout = state.layouts[origin.workspaceId]
     const group = layout?.groups.find(candidate => candidate.id === origin.tabGroupId)
     const occurrence = Boolean(origin.sessionId === sessionId && group?.tabOrder.includes(origin.tabId ?? '') &&
-      layout && groupIds(layout.root).includes(origin.tabGroupId) &&
+      layout && group && groupIds(layout.root).includes(group.id) &&
       tab && origin.regionId && regionIds(tab.layout.root).includes(origin.regionId) &&
       (region?.kind === 'agent' || region?.kind === 'terminal') && region.sessionId === sessionId)
     if (projectConfig !== state.config || assignedProjectId !== goal?.projectId) {

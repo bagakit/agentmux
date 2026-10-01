@@ -5,8 +5,9 @@ import { expect, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // Keep App, Settings, Workbench, SessionPane, Composer and every UI owner real.
 // Native terminal attachment and Markdown rendering are outside this DOM proof.
-vi.mock('../../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ sessionId }: { sessionId: string }) =>
-  createElement('div', { 'data-terminal-session': sessionId }) }))
+vi.mock('../../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ session, linkOrigin }: {
+  session: { id: string }; linkOrigin: { tabGroupId?: string }
+}) => createElement('div', { 'data-terminal-session': session.id, 'data-link-origin-group': linkOrigin.tabGroupId }) }))
 vi.mock('../../src/renderer/src/components/ActivityView', () => ({ ActivityView: ({ sessionId }: { sessionId: string }) =>
   createElement('div', { 'data-activity-session': sessionId }) }))
 
