@@ -186,6 +186,8 @@ it('loads one Zone item for multiple mixed original Tabs and reuses the original
   const before = useAppStore.getState(), terminal = dom.container.querySelector('[data-terminal-probe]'), fileNode = dom.container.querySelector('[data-file-probe]')
   const stage = dom.container.querySelector(`[data-native-browser-stage="${browser.id}"]`)
   expect(terminal).not.toBeNull(); expect(stage).not.toBeNull(); await enterSurvey()
+  expect(dom.container.querySelector('.topbar')).toBeNull()
+  expect(dom.container.querySelector('main.main-shell--merged')).not.toBeNull()
   expect([...dom.container.querySelectorAll('[data-survey-zone-id]')].map(row => row.getAttribute('data-survey-zone-id'))).toEqual(catalog().zones.map(zone => zone.zoneId))
   expect(dom.container.querySelectorAll('[data-survey-zone-id]')).toHaveLength(2)
   await choose()
@@ -199,6 +201,7 @@ it('loads one Zone item for multiple mixed original Tabs and reuses the original
 })
 
 it('keeps original content attached when the same addressed slot is replaced by a multi-Group tree', async () => {
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X)')
   const second = createWorkbenchTab('second', pageC)
   useAppStore.setState({ tabs: { [mixed.id]: mixed, [second.id]: second }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, second.id]) } })
   await dom.render(<App />); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
@@ -214,6 +217,10 @@ it('keeps original content attached when the same addressed slot is replaced by 
   expect(slot().querySelector('[data-terminal-probe]')).toBe(terminal); expect(address()).toBe(field)
   expect(field.value).toBe('Retain multi-Group input'); expect([field.selectionStart, field.selectionEnd]).toEqual([2, 11])
   expect(dom.container.querySelectorAll('.global-survey-surface .retained-workbench-view')).toHaveLength(2)
+  const bars = [...dom.container.querySelectorAll('.global-survey-surface .pane-tabbar')]
+  expect(bars).toHaveLength(2)
+  expect(bars[0]!.querySelectorAll('.survey-window-controls-inset')).toHaveLength(1)
+  expect(bars[1]!.querySelector('.survey-window-controls-inset')).toBeNull()
   expect(dom.container.querySelector('.global-survey-surface [data-native-browser-stage="browser-c"]')).not.toBeNull()
   await act(async () => useAppStore.setState({ surveyZoneSelection: { zoneId: originalZoneId(), selection: [a, b, { ...b, tabId: 'unknown-tab', regionId: 'unknown-region' }], active: a } }))
   expect(slot().querySelector('.retained-workbench-view')).toBe(original); expect(address()).toBe(field)
@@ -1136,4 +1143,30 @@ it('opens the sole confirmed occurrence of a never-activated exploration without
   expect(dom.container.querySelector('.survey-panel-status')).toBeNull()
   expect(dom.container.querySelector('.global-survey-surface [data-workbench-region-id="page-c"]')).not.toBeNull()
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+})
+
+it('uses the shared first-Pane window chrome without replacing the original content or reserving Mac controls on other platforms', async () => {
+  const platform = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh; Intel Mac OS X)')
+  await dom.render(<App />); await enterSurvey(); await choose()
+  const surface = dom.container.querySelector<HTMLElement>('.global-survey-surface')!
+  expect(surface).not.toBeNull()
+  expect(surface.dataset.nativeWindowControls).toBe('true')
+  expect(dom.container.querySelector('.topbar')).toBeNull()
+  const original = slot().querySelector('.retained-workbench-view')!
+  expect(original).not.toBeNull()
+  const state = useAppStore.getState(), selection = state.surveyZoneSelection
+  const bar = surface.querySelector('.pane-tabbar')!
+  expect(bar).not.toBeNull(); expect(bar.querySelectorAll('.survey-window-controls-inset')).toHaveLength(1)
+  expect(surface.querySelector('[aria-label="Survey window controls"] [aria-label="Hide Survey items"]')).not.toBeNull()
+  await dom.click('[aria-label="Hide Survey items"]')
+  expect(surface.style.getPropertyValue('--survey-navigation-width')).toBe('40px')
+  expect(bar.querySelectorAll('.survey-window-controls-inset')).toHaveLength(1)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original)
+  expect(useAppStore.getState().tabs).toBe(state.tabs); expect(useAppStore.getState().layouts).toBe(state.layouts)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(selection)
+  platform.mockReturnValue('Mozilla/5.0 (Windows NT 10.0)')
+  await dom.click('[aria-label="Show Survey items"]')
+  expect(surface.dataset.nativeWindowControls).toBe('false')
+  expect(surface.querySelector('.survey-window-controls-inset')).toBeNull()
+  expect(slot().querySelector('.retained-workbench-view')).toBe(original); healthy()
 })

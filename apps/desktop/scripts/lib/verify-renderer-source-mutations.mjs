@@ -33,7 +33,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     await mkdir(evidence, { recursive: true })
     for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file))
     await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
-    for (const pkg of ['core', 'layout', 'demand']) {
+    for (const pkg of ['core', 'layout', 'demand', 'client-ui']) {
       const destination = join(copy, 'packages', pkg)
       await mkdir(destination, { recursive: true })
       for (const entry of await readdir(join(root, 'packages', pkg))) {
@@ -49,7 +49,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const entry of await readdir(join(root, 'apps/desktop/node_modules'))) {
       if (entry !== '@agentmux') await symlink(join(root, 'apps/desktop/node_modules', entry), join(desktop, 'node_modules', entry))
     }
-    for (const pkg of ['core', 'layout', 'demand']) await symlink(join(copy, 'packages', pkg), join(desktop, 'node_modules/@agentmux', pkg))
+    for (const pkg of ['core', 'layout', 'demand', 'client-ui']) await symlink(join(copy, 'packages', pkg), join(desktop, 'node_modules/@agentmux', pkg))
     for (const [file, bytes] of original) { await mkdir(dirname(join(copy, file)), { recursive: true }); await writeFile(join(copy, file), bytes) }
     await writeFile(join(copy, 'vitest.mutation.config.mts'), `${owningConfig ? `import owning from './${owningConfig}';\n` : 'const owning = {};\n'}import { defineConfig } from 'vitest/config';
 import { readFileSync, writeFileSync } from 'node:fs'; import { createHash } from 'node:crypto';

@@ -4,7 +4,7 @@ import { useLauncherState } from '../lib/launcher-state'
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation, AgentMuxSpatialSave, AgentMuxZoneFact } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { ArrowUpRight, Bot, CircleHelp, FileText, Globe2, PanelsTopLeft, PanelLeftClose, PanelLeftOpen, NotebookPen, LoaderCircle, MousePointer2, Plus, X } from 'lucide-react'
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useStore } from 'zustand'
 import { browserOpenError } from '../lib/browser-open-feedback'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
@@ -24,6 +24,7 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
+import { isMacPlatform } from '../lib/host-platform'
 
 function saveNotice(save: AgentMuxSpatialSave): string {
   const confirmed = save.localStorageWritten && save.storageFlushRequested
@@ -112,7 +113,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const effectiveSidebarWidth = clampSidebarResizeWidth(sidebarWidth, minWidth, maxWidth)
   const reportDraftWidth = useCallback((width: number) => {
     resizeHandle.current?.setAttribute('aria-valuenow', String(clampSidebarResizeWidth(width, minWidth, maxWidth)))
-  }, [minWidth, maxWidth])
+    surfaceRef.current?.style.setProperty('--survey-navigation-width', `${sidebarCollapsed ? 40 : clampSidebarResizeWidth(width, minWidth, maxWidth)}px`)
+  }, [minWidth, maxWidth, sidebarCollapsed])
   const { containerRef: sidebarRef, isResizing, onResizeStart } = useSidebarResize<HTMLElement>({
     isOpen: !sidebarCollapsed, width: sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth, maxWidth, onDraftWidthChange: reportDraftWidth
   })
@@ -339,14 +341,18 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const panelUnconfirmed = !!selection && !selection.active && retainedLocations.length > 0
   const relationMessage = [selectedStatus?.error, selectedStatus?.notice, topicSnapshot?.error].filter(Boolean).join('\n')
   const contentControlsVisible = Boolean(tabViewControl?.active || navigationChoices.length || panelUnconfirmed || selectedStatus?.pendingSpaceId || relationMessage)
+  const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
-  return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
+  return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
+    style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
     <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
-      {sidebarCollapsed ? <button type="button" className="survey-icon-button" aria-label="Show Survey items" title="Show Survey items" onClick={() => setSidebarCollapsed(false)}><PanelLeftOpen size={16} /></button> : null}
+      <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
+        <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
+      </div>
       <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
         <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New exploration" title={workspace ? `Start browsing in ${workspace.name}` : 'Choose a resource workspace in Space'} disabled={opening || !workspace} onClick={() => void openBrowser('about:blank', true)}>
           {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>Explore</span>
-        </button><button type="button" className="survey-icon-button" aria-label="New note exploration" title="Start with a note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /></button><button type="button" className="survey-icon-button" aria-label="Hide Survey items" title="Hide Survey items" onClick={() => setSidebarCollapsed(true)}><PanelLeftClose size={16} /></button></div>
+        </button><button type="button" className="survey-icon-button" aria-label="New note exploration" title="Start with a note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /></button></div>
         <div className="survey-page-list">
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
@@ -376,6 +382,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
         <header className="survey-view-controls" hidden={!contentControlsVisible}>
+          {windowControlsInset}
           {tabViewControl?.active ? <button type="button" className="survey-tab-view" aria-label="Show full Survey item" title="Return to all original Tabs and Groups" onClick={tabViewControl.onToggle}><PanelsTopLeft size={14} /><span>All tabs</span></button> : null}
           {navigationChoices.length ? <SurveyPanelChoices choices={navigationChoices} facts={{ config, layouts, tabs }} mode="button" visible={visible && !controlsCoverPage} topic open onOpenChange={open => { if (!open) setNavigationChoices([]) }} onSelect={location => void openLocation(location)} /> : null}
           {panelUnconfirmed ? <div className="survey-panel-status"><span role="status">Panel not confirmed</span>
@@ -399,7 +406,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             This work surface is outside the Survey list. Its content and selection are kept.
             <button type="button" className="small-button" onClick={() => { if (!setCollected(currentZone.zoneId, true)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}>Keep in Survey</button>
           </div> : null}
-          {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} visible={visible && !controlsCoverPage} />
+          {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} viewOwnership="projection" viewTargets={viewTargets} leadingChrome={contentControlsVisible ? undefined : windowControlsInset} visible={visible && !controlsCoverPage} />
             : <div role="status" className="survey-restore-notice">The original work surface and precise references are kept. Choose an available location, or continue recovery in Space.</div>}
         </>}
       </div>

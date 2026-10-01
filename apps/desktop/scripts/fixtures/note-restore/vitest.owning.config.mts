@@ -16,7 +16,8 @@ const aliases = ['core', 'demand'].flatMap(pkg => {
 /** This qualification explicitly consumes current package Source, never a stale shared dist. */
 export default defineConfig({
   root,
-  resolve: { alias: [...aliases, { find: '@agentmux/layout', replacement: resolve(root, 'packages/layout/src/index.ts') }] },
+  resolve: { conditions: ['browser'], alias: [...aliases, { find: '@agentmux/layout', replacement: resolve(root, 'packages/layout/src/index.ts') }] },
+  ssr: { resolve: { conditions: ['browser'] }, noExternal: ['@agentmux/client-ui'] },
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   plugins: [{ name: 'note-owning-source-receipt', enforce: 'pre', transform(source, id) {
     const file = id.split('?')[0]!, path = relative(root, file)
