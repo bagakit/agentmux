@@ -1,11 +1,13 @@
 import { assertBrowserTaskControlTarget, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, type BrowserTaskControlResult } from '@agentmux/core'
 import type { BrowserOperation } from '../shared/browser-operation.js'
-import type { BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState } from '../shared/browser-task-assets.js'
+import type { BrowserTaskAssetRun, BrowserTaskAssetRunInput, BrowserTaskAssetState, BrowserTaskBatchInput, BrowserTaskBatchRun } from '../shared/browser-task-assets.js'
 import { getBrowserTaskReliability } from '../shared/browser-task-reliability.js'
 
 type BrowserTaskControlOwner = {
   getTaskAssets(browserId: string): Promise<BrowserTaskAssetState>
   getOperation(operationId: string): Promise<BrowserOperation | null>
+  runControlledTaskBatch(input: BrowserTaskBatchInput): Promise<BrowserTaskBatchRun>
+  stopTaskBatch(browserId: string, batchId: string): Promise<BrowserTaskBatchRun | null>
   runControlledTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun>
   stopTaskAsset(browserId: string, runId: string): Promise<BrowserTaskAssetRun | null>
 }
@@ -30,6 +32,11 @@ export async function executeBrowserTaskControl(value: unknown, owner: BrowserTa
       }
     }
     raw = { reliability: getBrowserTaskReliability({ ...request, state, operations, ...(historyWarning ? { historyWarning } : {}) }) }
+  } else if (request.operation === 'browser.task.batch-stop') {
+    raw = { batch: await owner.stopTaskBatch(request.browserId, request.batchId) }
+  } else if (request.operation === 'browser.task.batch') {
+    if (!automation) throw new Error('Browser automation is disabled in settings.')
+    raw = { batch: await owner.runControlledTaskBatch(request) }
   } else if (request.operation === 'browser.task.stop') {
     raw = { run: await owner.stopTaskAsset(request.browserId, request.runId) }
   } else {

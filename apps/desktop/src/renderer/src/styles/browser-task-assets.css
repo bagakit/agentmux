@@ -41,3 +41,7 @@
 .browser-task-asset .browser-task-branch > small { white-space: normal; line-height: 1.4; }
 
 .browser-task-asset li[data-task-has-path] .browser-task-asset__field { grid-template-columns: 32px minmax(0, 1fr); padding-inline: 0; }
+
+.browser-task-batch > small { display: block; margin-block: var(--sp-1); color: var(--text-3); line-height: 1.4; }
+.browser-task-batch__item { display: grid; min-width: 0; gap: var(--sp-1); margin-block: var(--sp-2); }
+.browser-task-batch__item > small { color: var(--text-3); overflow-wrap: anywhere; }

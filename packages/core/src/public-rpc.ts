@@ -20,6 +20,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.replay': 'browser.replay', 'browser.follow': 'browser.subscribe',
   'browser.task.assets': 'browser.task.assets', 'browser.task.reliability': 'browser.task.reliability',
   'browser.task.run': 'browser.task.run', 'browser.task.stop': 'browser.task.stop',
+  'browser.task.batch': 'browser.task.batch', 'browser.task.batch-stop': 'browser.task.batch-stop',
   'goal.ls': 'demand.list', 'goal.inspect': 'demand.show', 'goal.create': 'demand.create',
   'goal.update': 'demand.update', 'goal.delete': 'demand.delete', 'goal.assign': 'demand.assign',
   'goal.start': 'demand.start', 'goal.handoff': 'demand.handoff',

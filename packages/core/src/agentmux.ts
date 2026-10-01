@@ -130,6 +130,18 @@ async function main(): Promise<number> {
       try { invocation.params.parameters = text.trim() ? JSON.parse(text) : {} }
       catch { throw new AgentMuxError('Task parameters must be a JSON object on stdin.', 'INVALID_CLI_ARGUMENT') }
     }
+    if (method === 'browser.task.batch') {
+      const text = await readStdin(65_536)
+      let supplied: unknown
+      try { supplied = text.trim() ? JSON.parse(text) : {} }
+      catch { throw new AgentMuxError('Batch stdin must be a JSON object with parameters and items.', 'INVALID_CLI_ARGUMENT') }
+      if (!supplied || typeof supplied !== 'object' || Array.isArray(supplied) ||
+          Object.keys(supplied).some(key => key !== 'parameters' && key !== 'items')) {
+        throw new AgentMuxError('Batch stdin must contain only parameters and items.', 'INVALID_CLI_ARGUMENT')
+      }
+      invocation.params.parameters = (supplied as Record<string, unknown>).parameters
+      invocation.params.items = (supplied as Record<string, unknown>).items
+    }
     if (isAgentMuxRpcStream(method, invocation.params)) {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }

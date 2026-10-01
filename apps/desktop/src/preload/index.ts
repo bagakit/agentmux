@@ -1,5 +1,5 @@
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
-import type { BrowserTaskAssetRunInput, BrowserTaskContent } from '../shared/browser-task-assets'
+import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
 import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
@@ -390,6 +390,8 @@ const api: AgentMuxPreloadApi = {
     saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: BrowserTaskContent) => ipcRenderer.invoke('browser:saveTaskAssetDraft', id, assetId, revision, content),
     saveTaskAssetVersion: (id: string, assetId: string, revision: number, content: BrowserTaskContent) => ipcRenderer.invoke('browser:saveTaskAssetVersion', id, assetId, revision, content),
     locateTaskAssetStep: (id: string, assetId: string, revision: number, stepId: string) => ipcRenderer.invoke('browser:locateTaskAssetStep', id, assetId, revision, stepId),
+    runTaskBatch: (input: BrowserTaskBatchInput) => ipcRenderer.invoke('browser:runTaskBatch', input),
+    stopTaskBatch: (id: string, batchId: string) => ipcRenderer.invoke('browser:stopTaskBatch', id, batchId),
     runTaskAsset: (input: BrowserTaskAssetRunInput) => ipcRenderer.invoke('browser:runTaskAsset', input),
     stopTaskAsset: (id: string, runId: string) => ipcRenderer.invoke('browser:stopTaskAsset', id, runId),
     runScript: (id: string, code: string, operator?: BrowserOperator, operationId?: string) => ipcRenderer.invoke('browser:runScript', id, code, operator, operationId),

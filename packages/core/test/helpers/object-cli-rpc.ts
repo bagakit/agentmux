@@ -98,6 +98,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'browser.run': ['--browser', 'B', '--operation-id', 'BOP'], 'browser.history': [],
     'browser.task.assets': ['--browser', 'B'], 'browser.task.reliability': ['--browser', 'B', '--asset', 'A', '--version', '1'],
     'browser.task.run': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.stop': ['--browser', 'B', '--run', 'RUN'],
+    'browser.task.batch': ['--browser', 'B', '--asset', 'A', '--version', '1'], 'browser.task.batch-stop': ['--browser', 'B', '--batch', 'BATCH'],
     'browser.inspect': ['--operation-id', 'BOP'], 'browser.stop': ['--operation-id', 'BOP'],
     'browser.follow': ['--operation-id', 'BOP'], 'browser.replay': ['--browser', 'B', '--operation-id', 'BOP', '--preview'],
     'goal.ls': [], 'goal.inspect': ['--goal', ids.goal], 'goal.create': ['--title', 'Task', '--project', 'P', '--risk', 'low', '--confirm', 'user'],

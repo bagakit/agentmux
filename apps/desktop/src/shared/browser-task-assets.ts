@@ -68,8 +68,23 @@ export type BrowserTaskAssetRun = {
   startedAt: number
   updatedAt: number
 }
-export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; selectedRuns?: { browserId: string; runId: string }[] }
-export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; selectedRunId?: string | null; warning?: string }
+/** A bounded Client grouping of original runs. Values are never retained in these item records. */
+export type BrowserTaskBatchRun = {
+  id: string; browserId: string; assetId: string; version: number
+  items: { id: string; runId?: string }[]
+  nextItem: number
+  status: BrowserTaskAssetRun['status']
+  operationCount: number; executedMillis: number
+  startedAt: number; updatedAt: number; warning?: string
+}
+export type BrowserTaskBatchInput = {
+  browserId: string; assetId: string; version: number; batchId?: string
+  items: { id: string; parameters: Record<string, string> }[]
+  /** Shared fresh invocation values, including secrets; never saved with batch progress. */
+  parameters: Record<string, string>
+}
+export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRuns?: { browserId: string; runId: string }[] }
+export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; batches?: BrowserTaskBatchRun[]; selectedRunId?: string | null; activeBatchId?: string | null; warning?: string }
 export type BrowserTaskAssetRunInput = {
   assetId: string
   version: number

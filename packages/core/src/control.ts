@@ -945,6 +945,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'browser.task.assets': 'short',
   'browser.task.reliability': 'short',
   'browser.task.run': 'long',
+  'browser.task.batch': 'long',
+  'browser.task.batch-stop': 'short',
   'browser.task.stop': 'short',
   'browser.replay': 'long',
   // 取消只发一次 abort 就返回，不等被取消的那个操作真的收尾——等它等于把「停一个卡住的程序」变成
