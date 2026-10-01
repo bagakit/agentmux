@@ -5,14 +5,18 @@ import { readFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { focusFacts } from './fixtures/desktop-focus-facts.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import {
   AgentMuxControlServer,
   parseAgentMuxControlReceipt,
   parseAgentMuxControlRequest,
-  requestAgentMuxControl,
-  subscribeAgentMuxControl
+  connectAgentMuxRpc,
+  AGENTMUX_RPC_CONTROL_METHODS,
+  AgentMuxRpcLines,
+  type AgentMuxRpcStreamInitial,
+  type AgentMuxRpcFrame
 } from '../src/control-host.js'
 import {
   AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS,
@@ -38,7 +42,31 @@ function localMessage(body: string, recipient = 'semantic-1'): AgentMuxMessageEn
 }
 
 const roots: string[] = []
-afterEach(async () => await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true }))))
+const cleanups: Array<() => Promise<void>> = []
+afterEach(async () => {
+  for (const close of cleanups.splice(0).reverse()) await close()
+  await Promise.all(roots.splice(0).map(async root => await rm(root, { recursive: true, force: true })))
+  vi.restoreAllMocks()
+})
+async function publicClient(path: string) {
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
+  cleanups.push(() => client.dispose())
+  return client
+}
+async function coreOwner() {
+  const owner = await rpcOwnerFixture(['semantic-1'])
+  cleanups.push(owner.close)
+  return owner
+}
+function activeAgent(owner: Awaited<ReturnType<typeof coreOwner>>) {
+  const session = owner.client.agentSession('semantic-1')
+  return { agentSessionId: session.agentSessionId,
+    promptCondition: { expectedRun: session.run, afterSubmissionId: null },
+    projectId: null, projectName: null, workspacePath: session.workspacePath,
+    providerId: session.providerId, executorId: session.executorId,
+    processState: 'running' as const, status: 'active' as const, updatedAt: session.updatedAt }
+}
+const emptyCatalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }
 
 const agentRegion: AgentMuxAgentRegion = {
   tabId: 'tab-main',
@@ -833,142 +861,96 @@ describe('external Control control', () => {
     }
   })
 
-  it('carries the new protocol through one owner endpoint', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-composition-control-"))
-    roots.push(root)
-    const path = join(root, 'control.sock')
+  it('carries canonical public RPC through one real SDK and Unix owner endpoint', async () => {
+    const core = await coreOwner()
+    const path = join(core.root, 'control.sock')
     const seen: string[] = []
-    const server = new AgentMuxControlServer({
+    const server = new AgentMuxControlServer({ socketPath: path, coreClients: core.coreClients,
       async execute(request): Promise<AgentMuxControlResult> {
         seen.push(request.operation)
-        if (request.operation === 'inspect.tab') {
-          return {
-            operation: request.operation,
-            tab: {
-              tabId: 'tab-main',
-              workspaceId: 'workspace',
-              regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
-            }
-          }
-        }
-        if (request.operation === 'list.agents') return { operation: request.operation, agents: [{ executorId: 'codex', providerId: 'codex', label: 'Codex', availability: 'available' }] }
+        if (request.operation === 'inspect.tab') return { operation: request.operation,
+          tab: { tabId: 'tab-main', workspaceId: 'workspace', regions: [
+            { ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }
+          ] } }
+        if (request.operation === 'space.inspect') return { operation: request.operation, catalog: emptyCatalog }
         if (request.operation === 'agent.open') return { operation: request.operation, requestId: request.requestId,
           outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab-main', regionId: 'agent-left' },
           agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: upstreamFixturePath("repo"), createOperationId: 'creation', initialPrompt: 'not-requested' },
           resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
-        if (request.operation === 'open.terminal') return { operation: request.operation, region: terminalRegion }
-        if (request.operation === 'open.browser') return { operation: request.operation, region: browserRegion }
+        if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [activeAgent(core)] }
         if (request.operation === 'send') {
-          if (request.text === 'invalid candidates') {
-            throw Object.assign(new Error('Invalid candidates'), {
-              code: 'MESSAGE_TARGET_NOT_UNIQUE',
-              candidates: [{ agentSessionId: '', regionIds: [] }]
-            })
-          }
+          expect(request.message).toMatchObject({ body: request.text, recipientSessionId: 'semantic-1', recipientRunId: 'run-semantic-1' })
+          if (request.text === 'invalid candidates') throw Object.assign(new Error('Invalid candidates'), {
+            code: 'MESSAGE_TARGET_NOT_UNIQUE', candidates: [{ agentSessionId: '', regionIds: [] }]
+          })
           return { operation: request.operation, agentSessionId: 'semantic-1' }
         }
-        if (request.operation === 'focus') return focusFacts({ ...request, target: { kind: 'space', tabId: 'tab-main', regionId: 'agent-left' } })
-        if (request.operation === 'arrange') return {
-          operation: request.operation,
-          tab: {
-            tabId: 'tab-main',
-            workspaceId: 'workspace',
-            regions: [{ ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors }]
-          }
-        }
-        if (request.operation === 'inspect.region') return { operation: request.operation, region: { ...agentRegion, bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: soleRegionNeighbors } }
-        if (request.operation === 'resume') return { operation: request.operation, agentSessionId: 'semantic-1', runId: 'run-resumed' }
-        if (request.operation === 'interrupt' || request.operation === 'stop') return { operation: request.operation, agentSessionId: 'semantic-1' }
         throw new Error('Unexpected operation')
       }
-    }, path)
-    await server.start()
+    })
+    await server.start(); cleanups.push(() => server.stop())
     expect((await stat(path)).mode & 0o777).toBe(0o600)
-
-    await expect(requestAgentMuxControl({
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: 'inspect-tab',
-      operation: 'inspect.tab',
-      target: { kind: 'tab', tabId: 'tab-main' }
-    }, path)).resolves.toMatchObject({ operation: 'inspect.tab', result: { tab: { tabId: 'tab-main' } } })
-    await expect(requestAgentMuxControl({
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: 'open-agent',
-      operation: 'agent.open',
-      content: { kind: 'new-agent', executorId: 'codex' },
-      destination: { regionId: 'agent-left', split: 'right' }, focus: false
-    }, path)).resolves.toMatchObject({ operation: 'agent.open', result: { to: { tabId: 'tab-main' }, outcome: 'opened' } })
-    await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: 'send',
-      operation: 'send',
-      target: { kind: 'tab', tabId: 'tab-main' },
-      text: 'Continue', message: localMessage('Continue')
-    }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: 'semantic-1' } })
-    await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: 'invalid-candidates',
-      operation: 'send',
-      target: { kind: 'tab', tabId: 'tab-main' },
-      text: 'invalid candidates', message: localMessage('invalid candidates')
-    }, path)).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
-    expect(seen).toEqual(['inspect.tab', 'agent.open', 'send', 'send'])
-    await server.stop()
+    const client = await publicClient(path)
+    await expect(client.call('space.inspect', { target: { tabId: 'tab-main' } }))
+      .resolves.toMatchObject({ presentation: { tab: { tabId: 'tab-main' }, unavailable: [] } })
+    await expect(client.call('agent.open', { operationId: 'open-agent', content: { kind: 'new-agent', executorId: 'codex' },
+      destination: { regionId: 'agent-left', split: 'right' }, focus: false }))
+      .resolves.toMatchObject({ operationId: 'open-agent', to: { tabId: 'tab-main' }, outcome: 'opened' })
+    await expect(client.call('agent.send', { operationId: 'send', target: { kind: 'tab', tabId: 'tab-main' }, text: 'Continue' }))
+      .resolves.toMatchObject({ agentSessionId: 'semantic-1', delivery: { state: 'delivered' } })
+    await expect(client.call('agent.send', { operationId: 'invalid-candidates', target: { kind: 'tab', tabId: 'tab-main' }, text: 'invalid candidates' }))
+      .rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+    expect(seen).toEqual(['inspect.tab', 'space.inspect', 'agent.open', 'inspect.tab', 'list.active-agents', 'send',
+      'inspect.tab', 'list.active-agents', 'send'])
+    expect(core.inner.kernel.stop).not.toHaveBeenCalled()
   })
 
-  it('decodes UTF-8 only after all socket chunks are joined', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-composition-utf8-"))
-    roots.push(root)
-    const path = join(root, 'control.sock')
+  it('decodes UTF-8 only after arbitrary socket chunks are joined', async () => {
+    const core = await coreOwner(), path = join(core.root, 'control.sock')
     let seen = ''
-    const server = new AgentMuxControlServer({
-      async execute(request) {
+    const server = new AgentMuxControlServer({ socketPath: path, coreClients: core.coreClients,
+      async execute(request): Promise<AgentMuxControlResult> {
+        if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [activeAgent(core)] }
         if (request.operation !== 'send') throw new Error('Unexpected operation')
         seen = request.text
         return { operation: request.operation, agentSessionId: 'semantic-1' }
       }
-    }, path)
-    await server.start()
-    await requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: 'utf8-send',
-      operation: 'send',
-      target: { kind: 'agent-session', agentSessionId: 'semantic-1' },
-      text: '继续检查', message: localMessage('继续检查')
-    }, path)
+    })
+    await server.start(); cleanups.push(() => server.stop())
+    const request = Buffer.from(JSON.stringify({ jsonrpc: '2.0', id: 'utf8-send', method: 'agent.send', params: {
+      operationId: 'utf8-send', target: { kind: 'agent-session', agentSessionId: 'semantic-1' }, text: '继续检查'
+    } }) + '\n')
+    const cut = request.indexOf(Buffer.from('继')) + 1
+    expect(cut).toBeGreaterThan(0)
+    const response = await new Promise<unknown>((resolve, reject) => {
+      const socket = createConnection(path), lines = new AgentMuxRpcLines()
+      socket.once('connect', () => { socket.write(request.subarray(0, cut)); setImmediate(() => socket.write(request.subarray(cut))) })
+      socket.on('data', chunk => { try { lines.accept(chunk, value => { socket.destroy(); resolve(value) }) } catch (error) { socket.destroy(); reject(error) } })
+      socket.once('error', reject)
+    })
+    expect(response).toMatchObject({ jsonrpc: '2.0', id: 'utf8-send', result: { delivery: { state: 'delivered' } } })
     expect(seen).toBe('继续检查')
-    await server.stop()
+    expect(core.inner.kernel.stop).not.toHaveBeenCalled()
   })
 
-  it.each([
-    ['request ID', 'another-request', 'send'],
-    ['operation', 'expected-request', 'stop']
-  ])('rejects a valid error receipt with another %s', async (_identity, requestId, operation) => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-control-wrong-receipt-"))
-    roots.push(root)
+  it.each(['wire ID', 'legacy operation field'] as const)('rejects an error response with a mismatched %s', async identity => {
+    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-control-correlation-")); roots.push(root)
     const path = join(root, 'control.sock')
-    const server = createServer((socket) => {
-      socket.once('data', () => socket.end(`${JSON.stringify({
-        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId,
-        ok: false,
-        operation,
-        error: { code: 'REGION_NOT_OPEN', message: 'Another request failed.' }
-      })}\n`))
+    const server = createServer(socket => {
+      const lines = new AgentMuxRpcLines()
+      socket.on('data', chunk => lines.accept(chunk, value => {
+        const request = value as { id: string }
+        socket.end(JSON.stringify({ jsonrpc: '2.0', id: identity === 'wire ID' ? 'another-request' : request.id,
+          ...(identity === 'legacy operation field' ? { operation: 'stop' } : {}),
+          error: { code: -32000, message: 'Another request failed.', data: { code: 'REGION_NOT_OPEN' } }
+        }) + '\n')
+      }))
     })
-    await new Promise<void>((resolve, reject) => {
-      server.once('error', reject)
-      server.listen(path, resolve)
-    })
-
-    await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: 'expected-request',
-      operation: 'send',
-      target: { kind: 'agent-session', agentSessionId: 'agent-1' },
-      text: 'Continue', message: localMessage('Continue', 'agent-1')
-    }, path)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
-    await new Promise<void>((resolve) => server.close(() => resolve()))
+    await new Promise<void>((resolve, reject) => { server.once('error', reject); server.listen(path, resolve) })
+    cleanups.push(() => new Promise<void>(resolve => server.close(() => resolve())))
+    const client = await publicClient(path)
+    await expect(client.call('browser.inspect', { operationId: 'expected-operation' }))
+      .rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
   })
 })
 
@@ -984,7 +966,6 @@ describe('external Control control', () => {
  * 取值与语义归 core（本文件钉），「桥有没有真的从这一处取」归 desktop 那侧的守卫钉。
  */
 describe('Control 等待预算与慢操作判据只有一处', () => {
-  const hostSource = readFileSync(new URL('../src/control-host.ts', import.meta.url), 'utf8')
 
   it('长操作等长预算、短操作等短预算', () => {
     expect(agentMuxControlTimeoutMs('agent.open')).toBe(AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS)
@@ -1012,6 +993,15 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // 这条守判据侧的表不许漏人。
     const EXPECTED_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'short'> = {
       // 要等外面的。
+      'toolkit.add': 'long', 'toolkit.update': 'long', 'toolkit.remove': 'long',
+      'toolkit.list': 'short', 'toolkit.get': 'short', 'toolkit.script': 'short',
+      'toolkit.run': 'long', 'toolkit.action': 'long', 'toolkit.stop': 'long', 'toolkit.watch': 'short',
+      'metrics.get': 'short', 'metrics.watch': 'short',
+      'open.file': 'long', 'agent.view': 'long', 'space.view': 'long', 'space.swap': 'long',
+      'agent.rename': 'long', 'agent.inspect': 'short', 'space.rename': 'long',
+      'space.bind': 'long', 'space.unbind': 'long',
+      'browser.task.assets': 'short', 'browser.task.reliability': 'short',
+      'browser.task.run': 'long', 'browser.task.stop': 'short',
       'agent.open': 'long',
       'space.mv': 'long',
       'space.ls': 'short',
@@ -1133,71 +1123,34 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     }
   })
 
-  it('control-host 从 control.ts 取预算，不再自己算一遍', () => {
-    // 判 import 关系而不是「没有 60_000 这个字面量」：换个写法（`60 * 1_000`、`6e4`、一个中间常量）
-    // 就能绕过字面量判据，而「自己算一遍」这件事照旧发生。
-    const IMPORT_SHAPE = /import\s*\{[\s\S]*?\bagentMuxControlTimeoutMs\b[\s\S]*?\}\s*from\s*'\.\/control\.js'/
-    expect(
-      IMPORT_SHAPE.test(hostSource),
-      'control-host 没有从 ./control.js 导入 agentMuxControlTimeoutMs：预算又变成两处各算一遍'
-    ).toBe(true)
-    // 自检：正则认得出它要找的那种形状，否则上面那条是死代码。
-    expect(
-      IMPORT_SHAPE.test("import {\n  agentMuxControlTimeoutMs\n} from './control.js'"),
-      '判据认不出正常的导入写法'
-    ).toBe(true)
-
-    // 「哪些操作算慢」也不许在这里重写一遍（本文件曾有个 longOperation() 就是那份副本）。
-    // 判据不是「某个禁止形状不在场」——那种判法拦不住换个拼法，也会误伤本文件大量按操作解析请求的
-    // `source.operation === 'send'` 派发。这里逐个抽出每一处 setTimeout 的延时位，**分站点**质询。
-    //
-    // 为什么必须分站点：此前这里是一张两个名字的白名单，对所有站点一视同仁，于是
-    // `AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS` 在**每一处**都合法。把服务端读到请求后重排的那处与
-    // 客户端发起的那处（两处都是 `agentMuxControlTimeoutMs(request.operation)`）换成那个短常量，
-    // 长操作全部退化成 2 秒（`agentmux agent open` 起一个 Agent 必然超时），而这一族全绿——
-    // 我实测过两次，都存活。短常量只在**读到请求之前**那一处才是对的。
-    // 刻意不写行号：行号会随上游漂。这段注释上一版举的那两个号码写下时就已失准，其中一个指的恰恰是
-    // 短常量那一处——与本段论述正好相反。按「哪一处、用的哪个表达式」来指认，读者 grep 得到，也不会过期。
-    const delays = [...hostSource.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)]
-      .map((match) => match[1]!)
-    // 判据是「调的是那一处取值函数、且参数是某个请求对象的 operation」，**不是某个局部变量叫什么名字**。
-    // 此前这里钉死的是字面量 `agentMuxControlTimeoutMs(request.operation)`，于是一个把请求存进
-    // `parsed` 的新调用点（订阅那条路径就是）会被判成"第三种写法"——而它恰恰是正确的那种写法。
-    // 名字不是判据；同时这条正则仍然拦得住真正该拦的两样：写死某个操作字面量
-    // （`agentMuxControlTimeoutMs('inspect.tab')` 不匹配 `\w+\.operation`），以及自己算一遍。
-    const PER_OPERATION = /^agentMuxControlTimeoutMs\([A-Za-z_$][\w$]*\.operation\)$/
-    const PRE_PARSE = 'AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS'
-
-    // 恰好一处可以用短常量：还没读到请求，不知道是哪个操作，只能按短预算等第一条消息。
-    expect(
-      delays.filter((delay) => delay === PRE_PARSE),
-      `用短常量当延时的 setTimeout 应当恰好一处（读到请求之前那一处）；实际：${delays.join(' | ')}`
-    ).toHaveLength(1)
-    // 其余每一处都必须按操作取值。少一处就有一条路把长操作按 2 秒等。
-    const perOperation = delays.filter((delay) => PER_OPERATION.test(delay))
-    expect(
-      perOperation.length,
-      `按操作取预算的 setTimeout 少于两处（读到请求后重排、以及客户端侧发起）；实际：${delays.join(' | ')}`
-    ).toBeGreaterThanOrEqual(2)
-    // 且没有第三种写法——谁想自己算一遍，那个表达式会落在这里。
-    expect(
-      delays.filter((delay) => delay !== PRE_PARSE && !PER_OPERATION.test(delay)),
-      '有 setTimeout 的延时位既不是那一处短常量、也不是按操作取值'
-    ).toEqual([])
-
-    // 自检：抽取器真的找到了那些调用点，否则上面几条按数量判的会恒真。
-    expect(delays.length, 'setTimeout 延时位抽取器一个都没找到，上面那几条守卫是死代码').toBeGreaterThanOrEqual(3)
-    // 自检：抽取器认得出「自己算一遍」的那种拼法。
-    const historical = `socket.setTimeout(longOperation(request.operation) ? LONG : SHORT, () => socket.destroy())`
-    const probed = [...historical.matchAll(/\.setTimeout\(\s*([A-Za-z_$][\w$.]*(?:\([^()]*\))?)/g)].map((m) => m[1]!)
-    expect(probed, '抽取器认不出内联算一遍的形状，那条守卫是死代码').toEqual(['longOperation(request.operation)'])
-    // 自检：放宽成正则之后仍然拦得住写死操作字面量的那种——否则上面那条"没有第三种写法"就是空的。
-    expect(PER_OPERATION.test("agentMuxControlTimeoutMs('inspect.tab')"), '正则放得太宽：写死操作字面量也算按操作取值了').toBe(false)
-    expect(PER_OPERATION.test('agentMuxControlTimeoutMs(parsed.operation)'), '正则收得太紧：换个变量名的正确写法被判成第三种').toBe(true)
+  it('public RPC client and dispatcher use the existing owner budget for mapped methods', () => {
+    const clientSource = readFileSync(new URL('../src/public-rpc-client.ts', import.meta.url), 'utf8')
+    const wireSource = readFileSync(new URL('../src/public-rpc-wire.ts', import.meta.url), 'utf8')
+    const serverSource = readFileSync(new URL('../src/public-rpc-server.ts', import.meta.url), 'utf8')
+    const importShape = /import\s*\{[^}]*\bagentMuxControlTimeoutMs\b[^}]*\}\s*from\s*'\.\/control\.js'/
+    for (const source of [clientSource, wireSource]) {
+      expect(importShape.test(source)).toBe(true)
+      expect(source).toContain('agentMuxControlTimeoutMs(AGENTMUX_RPC_CONTROL_METHODS[method')
+    }
+    // Native methods have their explicit manifest classification; mapped methods
+    // must use the original DTO owner, never another prefix-based long predicate.
+    const mapped = Object.entries(AGENTMUX_RPC_CONTROL_METHODS)
+    expect(mapped.length).toBeGreaterThan(10)
+    expect(mapped.map(([method, operation]) => [method, agentMuxControlTimeoutMs(operation)]))
+      .toContainEqual(['agent.open', AGENTMUX_CONTROL_LONG_REQUEST_TIMEOUT_MS])
+    expect(mapped.map(([method, operation]) => [method, agentMuxControlTimeoutMs(operation)]))
+      .toContainEqual(['browser.follow', AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS])
+    // The socket only owns the pre-request deadline. Once decoded, the
+    // dispatcher owns each method's handshake; a subscription has no idle timeout.
+    const delays = [...serverSource.matchAll(/socket\.setTimeout\(([^,)]+)/g)].map(match => match[1]!.trim())
+    expect(delays).toEqual(['AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS', '0'])
+    expect(clientSource).toContain("timeout(method) + (this.endpoint.transport === 'ssh' ? SSH_STARTUP_BUDGET_MS : 0)")
+    expect(wireSource).toContain('}, duration)')
+    expect(importShape.test("import { agentMuxControlTimeoutMs } from './control.js'")).toBe(true)
   })
 })
 
-describe('Browser 进度订阅：一问多答是独立的一支，一问一答那条不许被放宽', () => {
+describe('Browser 公共 RPC 订阅：唯一 response 后按序 notification，普通请求仍独立关联', () => {
   const operationFact = (phase: string): AgentMuxControlBrowserOperation => ({
     id: 'op-stream',
     browserId: 'b1',
@@ -1259,175 +1212,145 @@ describe('Browser 进度订阅：一问多答是独立的一支，一问一答�
     const root = await mkdtemp(join(tmpdir(), 'agentmux-subscribe-'))
     roots.push(root)
     const path = join(root, 'control.sock')
-    const server = new AgentMuxControlServer(host, path)
-    await server.start()
+    const server = new AgentMuxControlServer({ ...host, coreClients: () => [], socketPath: path })
+    await server.start(); cleanups.push(() => server.stop())
     return { server, path }
   }
 
+  async function follow(path: string, params: { operationId: string; afterSequence?: number }, options: {
+    onEvent(event: AgentMuxControlBrowserEvent): void
+    onEnd?(error?: Error): void
+    onFrame?(frame: AgentMuxRpcFrame): void
+  }) {
+    const client = await publicClient(path)
+    let initial!: AgentMuxRpcStreamInitial<'browser.follow'>
+    const subscription = await client.subscribe('browser.follow', params, {
+      onInitial: value => { initial = value },
+      onEvent: event => { if (event.type === 'progress') options.onEvent(event.data) },
+      onEnd: options.onEnd, onFrame: options.onFrame
+    })
+    expect(subscription.subscriptionId).not.toBe('')
+    return { ...initial, dispose: () => subscription.dispose() }
+  }
+
   it('流出按序的多条事件，不是只在终局来一条', async () => {
-    const fake = streamingHost()
-    const { server, path } = await serve(fake.host)
-    const received: AgentMuxControlBrowserEvent[] = []
-    let ended: string | null = null
-    const opened = await subscribeAgentMuxControl(
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-many', operation: 'browser.subscribe', operationId: 'op-stream' },
-      { onEvent: (event) => received.push(event), onEnd: (reason) => { ended = reason } },
-      path
-    )
-    // 开场帧先到，且它就是"在跑"那一档——早给的这一帧不许谎称已完成。
-    expect(opened.runOperation?.phase, '开场帧把一个在跑的操作说成了别的档').toBe('running')
-    expect(opened.gap, '没有缺口时不许编一个出来').toBeNull()
+    const fake = streamingHost(), { path } = await serve(fake.host)
+    const received: AgentMuxControlBrowserEvent[] = [], frames: AgentMuxRpcFrame[] = []
+    let ended: Error | undefined | null = null
+    const opened = await follow(path, { operationId: 'op-stream' }, {
+      onEvent: event => received.push(event), onEnd: reason => { ended = reason }, onFrame: frame => frames.push(frame)
+    })
+    expect(opened.runOperation?.phase).toBe('running')
+    expect(opened.gap).toBeNull()
+    expect(frames).toHaveLength(1)
+    expect(frames[0]).toMatchObject({ jsonrpc: '2.0', result: { method: 'browser.follow', initial: { runOperation: { phase: 'running' } } } })
 
     fake.emit({ sequence: 1, event: { type: 'operation-started' } })
     fake.emit({ sequence: 2, event: { type: 'step-started', index: 0 } })
     fake.emit({ sequence: 3, event: { type: 'step-finished', index: 0 } })
     fake.emit({ sequence: 4, event: { type: 'operation-finished' } })
-    await new Promise((resolve) => setTimeout(resolve, 60))
-
-    // **整条钉死**而不是 `toBeGreaterThan(0)`：后者放过的正是"其实还是一问一答"这个缺陷——
-    // 只转发最后一条时它照旧是 1 > 0。也不写 `every`：空集合上 every 恒真（本仓的白绿一族）。
-    expect(received.map(({ sequence }) => sequence), '事件没有按序全部流出来（只在终局发一条的实现会在这里掉到 1 条）').toEqual([1, 2, 3, 4])
-    expect(received.map(({ event }) => (event as { type: string }).type), '事件内容被改写了').toEqual([
+    await vi.waitFor(() => expect(received.map(({ sequence }) => sequence)).toEqual([1, 2, 3, 4]))
+    expect(received.map(({ event }) => (event as { type: string }).type)).toEqual([
       'operation-started', 'step-started', 'step-finished', 'operation-finished'
     ])
-    expect(ended, '流还开着的时候就报了结束').toBeNull()
-
-    opened.dispose()
-    await new Promise((resolve) => setTimeout(resolve, 60))
-    expect(fake.disposals, '客户端退订之后承载方那侧的订阅没被清掉——它会继续往一条死 socket 写').toBe(1)
-    await server.stop()
+    expect(frames).toHaveLength(5)
+    expect(frames.filter(frame => 'result' in frame)).toHaveLength(1)
+    expect(frames.slice(1).map(frame => 'method' in frame ? frame.method : null))
+      .toEqual(['system.subscription.event', 'system.subscription.event', 'system.subscription.event', 'system.subscription.event'])
+    expect(ended).toBeNull()
+    await opened.dispose()
+    await vi.waitFor(() => expect(fake.disposals).toBe(1))
   })
 
-  it('一问一答那条路径没被放宽：读一条→回一条→关闭，尾随数据仍被拒', async () => {
-    // 这一条守的是本 task 最大的回归面。用**普通操作**（send）在同一个 server 上验证，因为放宽
-    // `readMessage` 的后果落在所有 14 个操作上，不只是 Browser 那几条。
-    const root = await mkdtemp(join(tmpdir(), 'agentmux-subscribe-framing-'))
-    roots.push(root)
+  it('普通 RPC 每个 id 只回一次；合法多请求独立关联，非法 JSON 不到业务 owner', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-rpc-framing-')); roots.push(root)
     const path = join(root, 'control.sock')
     let executions = 0
-    const server = new AgentMuxControlServer({
+    const server = new AgentMuxControlServer({ socketPath: path, coreClients: () => [],
       async execute(request): Promise<AgentMuxControlResult> {
         executions += 1
-        if (request.operation !== 'send') throw new Error('Unexpected operation')
-        return { operation: request.operation, agentSessionId: 'semantic-1' }
-      }
-    }, path)
-    await server.start()
-
-    const request = {promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'framing', operation: 'send' as const, target: { kind: 'tab' as const, tabId: 'tab-main' }, text: 'one', message: localMessage('one') }
-    // 一条连接上塞两条请求：第二条是尾随数据，必须被拒，而且**execute 一次都不许跑**——放宽检查的
-    // 实现会把第一条执行掉（甚至两条都执行），这里的计数当场变。
-    const raw = await new Promise<string>((resolve, reject) => {
-      const socket = createConnection(path)
-      let text = ''
-      socket.once('connect', () => socket.write(`${JSON.stringify(request)}\n${JSON.stringify({ ...request, requestId: 'framing-2' })}\n`))
-      socket.on('data', (chunk: Buffer) => { text += chunk.toString('utf8') })
-      socket.once('close', () => resolve(text))
-      socket.once('error', reject)
-    })
-    const frames = raw.split('\n').filter((line) => line.trim())
-    expect(frames.length, '一问一答那条路径回了不止一帧——framing 被放宽了').toBe(1)
-    expect(JSON.parse(frames[0]!), '尾随数据没有被拒').toMatchObject({ ok: false, error: { code: 'CONTROL_PROTOCOL_ERROR' } })
-    expect(executions, 'framing 检查该在执行之前就拒掉，它却已经把请求跑了').toBe(0)
-
-    // 正常的一条仍然照旧：读一条→回一条→关闭。
-    await expect(requestAgentMuxControl({ ...request, requestId: 'framing-ok' }, path)).resolves.toMatchObject({ operation: 'send' })
-    expect(executions, '正常请求反而没被执行').toBe(1)
-    await server.stop()
-  })
-
-  it('事件缺口在开场帧就说出来，不静默丢中段', async () => {
-    const fake = streamingHost({ gap: { droppedThrough: 40 } })
-    const { server, path } = await serve(fake.host)
-    const opened = await subscribeAgentMuxControl(
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-gap', operation: 'browser.subscribe', operationId: 'op-stream', afterSequence: 7 },
-      { onEvent: () => {} },
-      path
-    )
-    // 缺口必须是**显式的一个数**：客户端凭它知道 40 之前的事件已经不可得，可以改去读一次完整快照。
-    // 静默丢弃的实现会在这里答 null，而它给出的流看起来连续、实际上少了中段。
-    expect(opened.gap, '缺口被静默吞掉了：客户端会把一份不完整的时间线当成完整的').toEqual({ droppedThrough: 40 })
-    await server.stop()
-  })
-
-  it('订阅建立失败：既不阻断（能力照在）也不静默（说得出哪一步没走通）', async () => {
-    // 两侧都要守。只守"不阻断"会放过静默降级，只守"有说法"会放过把失败写成阻断。
-    const fake = streamingHost({ fail: Object.assign(new Error('Progress journal is unavailable.'), { code: 'CONTROL_FAILED' }) })
-    const { server, path } = await serve(fake.host)
-    await expect(subscribeAgentMuxControl(
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-fail', operation: 'browser.subscribe', operationId: 'op-stream' },
-      { onEvent: () => {} },
-      path
-    // 明说：一条带码、带话的拒绝，而不是一条空流或一次静默成功。
-    )).rejects.toMatchObject({ code: 'CONTROL_FAILED', message: 'Progress journal is unavailable.' })
-
-    // 同一个 server 随后仍然服务其余操作——订阅建立不成没有拿走任何既有能力（RED-LINES 第 2 类）。
-    // 这里**不加 `as never`**：那个 cast 会把 execute 的形参一起推成 any（实测 TS7006），于是
-    // `request.operation` 上的收窄消失——判据本身被 cast 掉了。宿主接口的 subscribe 是可选的，
-    // 只给 execute 本来就合法。
-    const working = new AgentMuxControlServer({
-      async execute(request): Promise<AgentMuxControlResult> {
         if (request.operation !== 'browser.operation') throw new Error('Unexpected operation')
         return { operation: request.operation, runOperation: operationFact('completed') }
       }
-    }, path)
-    await server.stop()
-    await working.start()
-    await expect(requestAgentMuxControl({
-      schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'still-works', operation: 'browser.operation', operationId: 'op-stream'
-    }, path)).resolves.toMatchObject({ operation: 'browser.operation', result: { runOperation: { phase: 'completed' } } })
-    await working.stop()
-  })
-
-  it('宿主不提供订阅时是一条类型化的能力协商答案，不是"暂时不可用"', async () => {
-    // 判据钉在**码**上而不是"抛了就行"：`CONTROL_UNAVAILABLE` 会让 Agent 去重试，而这件事重试一万次
-    // 也一样。折成那个码的实现在这里必须红。
-    const { server, path } = await serve({
-      async execute(): Promise<AgentMuxControlResult> { throw new Error('must not be reached') }
     })
-    await expect(subscribeAgentMuxControl(
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-unsupported', operation: 'browser.subscribe', operationId: 'op-stream' },
-      { onEvent: () => {} },
-      path
-    )).rejects.toMatchObject({ code: 'BROWSER_SUBSCRIBE_UNSUPPORTED' })
+    await server.start(); cleanups.push(() => server.stop())
+    const invalid = await new Promise<string>((resolve, reject) => {
+      const socket = createConnection(path); let text = ''
+      socket.once('connect', () => socket.write('not-json\ntrailing-data\n'))
+      socket.on('data', (chunk: Buffer) => { text += chunk.toString('utf8') })
+      socket.once('close', () => resolve(text)); socket.once('error', reject)
+    })
+    const invalidFrames = invalid.split('\n').filter(line => line.trim())
+    expect(invalidFrames).toHaveLength(1)
+    expect(JSON.parse(invalidFrames[0]!)).toMatchObject({ jsonrpc: '2.0', error: { code: -32700 } })
+    expect(executions).toBe(0)
+
+    const request = { jsonrpc: '2.0', id: 'first', method: 'browser.inspect', params: { operationId: 'op-stream' } }
+    const replies = await new Promise<Array<{ id: string; result: unknown }>>((resolve, reject) => {
+      const socket = createConnection(path), lines = new AgentMuxRpcLines(), values: Array<{ id: string; result: unknown }> = []
+      socket.once('connect', () => socket.write(JSON.stringify(request) + '\n' + JSON.stringify({ ...request, id: 'second' }) + '\n'))
+      socket.on('data', chunk => { try { lines.accept(chunk, value => {
+        values.push(value as { id: string; result: unknown })
+        if (values.length === 2) { socket.destroy(); resolve(values) }
+      }) } catch (error) { socket.destroy(); reject(error) } })
+      socket.once('error', reject)
+    })
+    expect(replies.map(reply => reply.id).sort()).toEqual(['first', 'second'])
+    expect(replies.map(reply => reply.result)).toEqual([
+      { runOperation: operationFact('completed') }, { runOperation: operationFact('completed') }
+    ])
+    expect(executions).toBe(2)
+    const client = await publicClient(path)
+    await expect(client.call('browser.inspect', { operationId: 'op-stream' }))
+      .resolves.toEqual({ runOperation: operationFact('completed') })
+    expect(executions).toBe(3)
+  })
+
+  it('事件缺口在开场帧就说出来，不静默丢中段', async () => {
+    const fake = streamingHost({ gap: { droppedThrough: 40 } }), { path } = await serve(fake.host)
+    const opened = await follow(path, { operationId: 'op-stream', afterSequence: 7 }, { onEvent: () => {} })
+    expect(opened.gap).toEqual({ droppedThrough: 40 })
+    await opened.dispose()
+  })
+
+  it('订阅建立失败：既不阻断（能力照在）也不静默（说得出哪一步没走通）', async () => {
+    const fake = streamingHost({ fail: Object.assign(new Error('Progress journal is unavailable.'), { code: 'CONTROL_FAILED' }) })
+    const { server, path } = await serve({ ...fake.host, async execute(request): Promise<AgentMuxControlResult> {
+      if (request.operation !== 'browser.operation') throw new Error('Unexpected operation')
+      return { operation: request.operation, runOperation: operationFact('completed') }
+    } })
+    await expect(follow(path, { operationId: 'op-stream' }, { onEvent: () => {} }))
+      .rejects.toMatchObject({ code: 'CONTROL_FAILED', message: 'Progress journal is unavailable.' })
+    // Use the very same owner endpoint: a failed observer cannot retire or
+    // replace the healthy service before another business operation proceeds.
+    const client = await publicClient(path)
+    await expect(client.call('browser.inspect', { operationId: 'op-stream' }))
+      .resolves.toMatchObject({ runOperation: { phase: 'completed' } })
     await server.stop()
   })
 
-  it('查不到那条 id 时订阅是成功的：没有什么可流，但那不是 Browser 坏了', async () => {
-    const fake = streamingHost({ runOperation: null })
-    const { server, path } = await serve(fake.host)
-    const opened = await subscribeAgentMuxControl(
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-unknown', operation: 'browser.subscribe', operationId: 'op-nobody' },
-      { onEvent: () => {} },
-      path
-    )
-    expect(opened.runOperation, '查不到被报成了失败——那是 RED-LINES 第 2 类').toBeNull()
-    expect(opened.gap, '查不到的操作不该带一个缺口').toBeNull()
-    opened.dispose()
-    await server.stop()
+  it('宿主不提供订阅时是一条类型化的能力协商答案，不是暂时不可用', async () => {
+    const { path } = await serve({ async execute(): Promise<AgentMuxControlResult> { throw new Error('must not be reached') } })
+    await expect(follow(path, { operationId: 'op-stream' }, { onEvent: () => {} }))
+      .rejects.toMatchObject({ code: 'BROWSER_SUBSCRIBE_UNSUPPORTED' })
+  })
+
+  it('查不到那条 id 时订阅成功：没有什么可流，但那不是 Browser 坏了', async () => {
+    const fake = streamingHost({ runOperation: null }), { path } = await serve(fake.host)
+    const opened = await follow(path, { operationId: 'op-nobody' }, { onEvent: () => {} })
+    expect(opened.runOperation).toBeNull(); expect(opened.gap).toBeNull()
+    await opened.dispose()
   })
 
   it('游标在协议入口就判，非法值不许穿到承载方', async () => {
-    // 判在入口的理由：让 -1 穿过去的结果是承载方拿它做比较，于是"从头发"还是"什么都不发"取决于
-    // 那边碰巧怎么写比较符——同一个非法输入在两个实现上两种行为。
     const seen: Array<number | undefined> = []
-    const fake = streamingHost({ onSubscribe: (request) => seen.push(request.afterSequence) })
-    const { server, path } = await serve(fake.host)
+    const fake = streamingHost({ onSubscribe: request => seen.push(request.afterSequence) }), { path } = await serve(fake.host)
     for (const bad of [-1, 1.5, Number.NaN]) {
-      await expect(subscribeAgentMuxControl(
-        { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-cursor', operation: 'browser.subscribe', operationId: 'op-stream', afterSequence: bad },
-        { onEvent: () => {} },
-        path
-      ), `afterSequence=${bad} 被放过了`).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+      await expect(follow(path, { operationId: 'op-stream', afterSequence: bad }, { onEvent: () => {} }))
+        .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
     }
-    // 0 是合法的（"从第一条开始"），别把它连坐进去。
-    const opened = await subscribeAgentMuxControl(
-      { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'sub-zero', operation: 'browser.subscribe', operationId: 'op-stream', afterSequence: 0 },
-      { onEvent: () => {} },
-      path
-    )
-    expect(seen, '非法游标穿到了承载方，或者合法的 0 被拒了').toEqual([0])
-    opened.dispose()
-    await server.stop()
+    const opened = await follow(path, { operationId: 'op-stream', afterSequence: 0 }, { onEvent: () => {} })
+    expect(seen).toEqual([0])
+    await opened.dispose()
   })
 })
