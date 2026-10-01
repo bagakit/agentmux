@@ -364,7 +364,7 @@ describe('agent markdown parser', () => {
     const content = 'I changed the retry logic in the uploader. It now backs off.'
     const markup = renderToStaticMarkup(createElement(AgentMarkdown, { content, className: 'body' }))
 
-    expect(markup).toBe(`<p class="body">${content}</p>`)
+    expect(markup).toBe(`<p class="body md-paragraph">${content}</p>`)
   })
 
   it('gives a code block its own scroll rather than widening the turn', () => {
