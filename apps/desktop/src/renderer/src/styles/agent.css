@@ -306,26 +306,42 @@
 .service-window__original > strong { font-size: var(--fs-body); }
 /* 错位 Agent 告示（T-005）：服务窗 + 一枚「找回」动作键，语汇沿用服务窗，键靠右对齐。 */
 
-/* 连续推进面板：一条状态告示 + 一排控制键，语汇沿用紧邻的 .service-window（Surface 填充 + elevation，
-   不描边——描边会与 Composer 争同一条边界）。状态用文字表达，控制键是无底色的图标键，同 .icon-button。 */
-.continuous-progress-control { min-width: 0; color: var(--text-2); font-size: var(--fs-meta); }
-.continuous-progress-control__target { display: block; overflow-wrap: anywhere; }
-.continuous-progress-control form { display: grid; gap: var(--sp-2); }
-.continuous-progress-control label { display: grid; gap: var(--sp-1); }
-.continuous-progress-control input:not([type='checkbox']), .continuous-progress-control textarea { width: 100%; min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }
-.continuous-progress-control label:has(> input[type='checkbox']) { display: flex; align-items: center; gap: var(--sp-2); }
-.continuous-progress-control input[type='checkbox'] { flex: none; width: auto; margin: 0; accent-color: var(--blue); }
-.continuous-progress-control :is(input, textarea):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
-.continuous-progress-control .continuous-progress-panel { margin: 0; padding: var(--sp-2) 0; background: transparent; box-shadow: none; }
-.continuous-progress-panel { margin:var(--sp-3) var(--sp-4) 0; padding:var(--sp-4); display: grid; gap:var(--sp-2); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); }
-.continuous-progress-panel__summary { min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap:var(--sp-2) var(--sp-4); }
-.continuous-progress-panel__summary strong { color: var(--text); font-size: var(--fs-body); font-weight: 620; }
-.continuous-progress-panel__summary span { color: var(--text-2); font-size: var(--fs-meta); }
-.continuous-progress-panel__summary time { margin-left:auto; color: var(--text-3); font-family: var(--font-mono); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
-.continuous-progress-panel__decision { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
-.continuous-progress-panel__actions { display: flex; gap:var(--sp-1); }
-.continuous-progress-panel__actions button { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; padding:0; border: 0; border-radius: var(--radius-sm); color: var(--text-2); background: transparent; cursor: pointer; transition: color var(--dur-fast) ease, background var(--dur-fast) ease; }
-.continuous-progress-panel__actions button:hover { color: var(--text); background: var(--surface-3); }
+/* Progress 沿 Settings 的轻分组和字段语言；配置、循环事实与动作各有层次，不叠卡片。 */
+.continuous-progress-control { min-width: 0; display: grid; gap: var(--sp-4); color: var(--text); font-size: var(--fs-body); line-height: 1.5; }
+.continuous-progress-control :is(h3, h4, p, dl), .continuous-progress-panel :is(h4, p, dl) { margin: 0; }
+.continuous-progress-control__heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); }
+.continuous-progress-control__heading h3 { font-size: var(--fs-body); font-weight: 600; }
+.continuous-progress-control__heading > span { margin-left: auto; color: var(--text-2); font-size: var(--fs-meta); }
+.continuous-progress-control__notice { color: var(--text-2); overflow-wrap: anywhere; white-space: pre-wrap; }
+.continuous-progress-control form, .continuous-progress-control__group, .continuous-progress-control__source-fields { display: grid; gap: var(--sp-4); min-width: 0; }
+.continuous-progress-control__group { padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.continuous-progress-control h4, .continuous-progress-panel h4 { color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
+.continuous-progress-control label { display: grid; gap: var(--sp-2); min-width: 0; }
+.continuous-progress-control input:not([type='checkbox']), .continuous-progress-control textarea { width: 100%; min-width: 0; padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-1); font: inherit; }
+.continuous-progress-control textarea { min-height: calc(var(--sp-7) * 2); resize: vertical; }
+.continuous-progress-control__interval { grid-template-columns: minmax(0, 1fr) calc(var(--sp-8) * 2); align-items: center; }
+.continuous-progress-control label:has(> input[type='checkbox']) { display: flex; align-items: flex-start; gap: var(--sp-4); }
+.continuous-progress-control input[type='checkbox'] { flex: none; width: 14px; height: 14px; margin: var(--sp-1) 0 0; accent-color: var(--green); }
+.continuous-progress-control :is(input, textarea, summary):focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.continuous-progress-control__help { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
+.continuous-progress-control__details { min-width: 0; border-top: 1px solid var(--line-soft); padding-top: var(--sp-4); }
+.continuous-progress-control__details > summary { cursor: pointer; color: var(--text-2); }
+.continuous-progress-control__details > summary > span { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.continuous-progress-control__detail-body { display: grid; gap: var(--sp-4); padding-top: var(--sp-4); min-width: 0; }
+.continuous-progress-control dl, .continuous-progress-panel__summary { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr); gap: var(--sp-2) var(--sp-4); }
+.continuous-progress-control dt, .continuous-progress-panel dt { color: var(--text-3); font-size: var(--fs-meta); }
+.continuous-progress-control dd, .continuous-progress-panel dd { min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.continuous-progress-control__prompt { white-space: pre-wrap; overflow-wrap: anywhere; }
+.continuous-progress-panel { min-width: 0; display: grid; gap: var(--sp-4); }
+.continuous-progress-panel__summary time { font-variant-numeric: tabular-nums; }
+.continuous-progress-panel__decision { display: grid; gap: var(--sp-2); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.continuous-progress-panel__decision p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.continuous-progress-panel__actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
+.continuous-progress-panel__actions button { min-height: var(--sp-8); display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text); background: var(--surface-2); font: inherit; cursor: pointer; transition: color var(--dur-fast) ease, background var(--dur-fast) ease; }
+.continuous-progress-panel__actions button > svg { flex: none; }
+.continuous-progress-panel__actions button:hover:not(:disabled) { background: var(--surface-3); }
+.continuous-progress-panel__actions button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.continuous-progress-panel__actions button:disabled { opacity: .5; cursor: default; }
 
 .surface-navigation__focus { width: auto; flex-basis: auto; gap: 5px; padding: 0 6px; }
 .focus-navigation__count { display: inline-flex; align-items: center; gap: 3px; font-size: var(--fs-micro); color: var(--text-3); font-variant-numeric: tabular-nums; }

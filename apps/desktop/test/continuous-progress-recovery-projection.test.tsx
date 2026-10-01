@@ -5,7 +5,8 @@ import { ContinuousProgressPanel } from '../src/renderer/src/components/Continuo
 describe('continuous progress recovery projection', () => {
   it('renders paused state without a fake countdown', () => {
     const html = renderToStaticMarkup(<ContinuousProgressPanel loop={{ loopId: 'l', providerLabel: 'Codex', executionState: 'unknown', loopState: 'paused', lastDecision: 'Needs inspection' }} />)
-    expect(html).toContain('unknown · paused')
+    expect(html).toContain('<dt>Loop</dt><dd>paused</dd>')
+    expect(html).toContain('<dt>Agent execution</dt><dd>unknown</dd>')
     expect(html).toContain('Resume continuous progress')
     expect(html).not.toContain('Next check')
   })

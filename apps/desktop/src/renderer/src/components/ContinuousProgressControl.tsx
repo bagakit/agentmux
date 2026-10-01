@@ -64,27 +64,56 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
   useEffect(() => { onStatusChange?.(status) }, [onStatusChange, status])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
   return <div className="continuous-progress-control" data-progress-state={status}>
-    {!loop ? <h3>Continuous progress</h3> : null}
-    {status === 'inactive' ? <p>Not enabled.</p> : status === 'unconfirmed' ? <p role="status">Unconfirmed{observedTarget !== target && !error ? ' — waiting for loop status.' : '.'}</p> : null}
-    <small className="continuous-progress-control__target">{agentProviderLabel(session.providerId)} · {target.hostId} · {target.agentSessionId}<br />{target.workspacePath}</small>
-    {error ? <p role="status">Automatic progress is unconfirmed. Manual input follows terminal readiness. {error}</p> : null}
-    {displayed?.taskSource ? <small>Task source: {displayed.taskSource.ownerId}<br />{displayed.taskSource.root}<br />{displayed.taskSource.readerPath}</small> : null}
-    {!loop && displayed?.lastDecision ? <p role="status">{displayed.lastDecision}</p> : null}
-    {loop ? <ContinuousProgressPanel loop={{ loopId: loop.loopId, providerLabel: agentProviderLabel(session.providerId),
-      executionState: session.status.state, loopState: loop.status,
-      ...(loop.status === 'active' ? { nextCheckAt: loop.nextCheckAt } : {}),
-      ...(loop.lastDecision ? { lastDecision: loop.lastDecision } : loop.lastOutcome === 'sent' ? { lastDecision: 'Host accepted the request; a new Agent turn is not yet confirmed.' } : {}) }}
+    <header className="continuous-progress-control__heading">
+      <h3>Continuous progress</h3>
+      <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>
+    </header>
+    {status === 'unconfirmed' ? <p className="continuous-progress-control__notice" role="status">Automatic progress is unconfirmed. {observedTarget !== target && !error ? 'Waiting for loop status. ' : ''}Manual input follows terminal readiness.{error ? ` ${error}` : ''}</p> : null}
+    {displayed ? <ContinuousProgressPanel loop={{ loopId: displayed.loopId, providerLabel: agentProviderLabel(session.providerId),
+      executionState: session.status.state, loopState: displayed.status,
+      ...(displayed.status === 'active' && status !== 'unconfirmed' ? { nextCheckAt: displayed.nextCheckAt } : {}),
+      ...(displayed.lastTickAt !== undefined ? { lastTickAt: displayed.lastTickAt } : {}),
+      ...(displayed.lastDecision ? { lastDecision: displayed.lastDecision } : displayed.lastOutcome === 'sent' ? { lastDecision: 'Host accepted the request; a new Agent turn is not yet confirmed.' } : {}) }}
+      unconfirmed={status === 'unconfirmed'}
       disabled={busy} onPause={() => action('pause')} onResume={() => action('resume')} onStop={() => action('stop')} onCheck={() => action('check')} />
-      : <form onSubmit={event => { event.preventDefault(); void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
-        <label>Check every (minutes)<input type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
+      : null}
+    {displayed ? <details className="continuous-progress-control__details" data-progress-details="configuration" onToggle={event => event.stopPropagation()}>
+      <summary>Saved configuration <span>Read only</span></summary>
+      <div className="continuous-progress-control__detail-body">
+        <dl><dt>Check every</dt><dd>{displayed.intervalMs / 60_000} minutes</dd></dl>
+        <div><h4>Continuation prompt</h4><p className="continuous-progress-control__prompt">{displayed.prompt}</p></div>
+        {displayed.taskSource ? <dl>
+          <dt>Feature ID</dt><dd>{displayed.taskSource.ownerId}</dd>
+          <dt>Tracker root</dt><dd>{displayed.taskSource.root}</dd>
+          <dt>Public Tracker script</dt><dd>{displayed.taskSource.readerPath}</dd>
+        </dl> : <p className="continuous-progress-control__help">No task source bound. Periodic continuation only.</p>}
+      </div>
+    </details> : null}
+    {!loop ? <form onSubmit={event => { event.preventDefault(); void run(() => api.continuousProgress.create(target, Number(interval) * 60_000, prompt, bindSource ? { root: sourceRoot, ownerId: sourceId, readerPath } : undefined)) }}>
+      <section className="continuous-progress-control__group" aria-label="Continuation settings">
+        <h4>Continuation settings</h4>
+        <label className="continuous-progress-control__interval">Check every (minutes)<input type="number" min="1" value={interval} onChange={event => setInterval(event.target.value)} /></label>
         <label>Continuation prompt<ComposerTextarea value={prompt} onValueChange={setPrompt} /></label>
+      </section>
+      <section className="continuous-progress-control__group" aria-label="Optional task source">
+        <h4>Optional task source</h4>
         <label><input type="checkbox" checked={bindSource} onChange={event => setBindSource(event.target.checked)} />Bind a read-only Feature Tracker source</label>
-        {bindSource ? <>
+        {bindSource ? <div className="continuous-progress-control__source-fields">
           <label>Tracker root<input aria-label="Tracker root" value={sourceRoot} onChange={event => setSourceRoot(event.target.value)} /></label>
           <label>Feature ID<input aria-label="Feature ID" value={sourceId} onChange={event => setSourceId(event.target.value)} /></label>
           <label>Public Tracker script<input aria-label="Public Tracker script" value={readerPath} onChange={event => setReaderPath(event.target.value)} /></label>
-        </> : <small>Periodic continuation only. This loop is not bound to a business task source.</small>}
+        </div> : <p className="continuous-progress-control__help">Periodic continuation only. This loop is not bound to a business task source.</p>}
+      </section>
         <button type="submit" className="small-button" disabled={busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
-      </form>}
+      </form> : null}
+    <details className="continuous-progress-control__details" data-progress-details="target" onToggle={event => event.stopPropagation()}>
+      <summary>Target details</summary>
+      <dl className="continuous-progress-control__detail-body">
+        <dt>Provider</dt><dd>{agentProviderLabel(session.providerId)} ({target.providerId})</dd>
+        <dt>Host</dt><dd>{target.hostId}</dd>
+        <dt>Session</dt><dd>{target.agentSessionId}</dd>
+        <dt>Workspace</dt><dd>{target.workspacePath}</dd>
+      </dl>
+    </details>
   </div>
 }
