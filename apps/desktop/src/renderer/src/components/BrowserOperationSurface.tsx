@@ -50,9 +50,8 @@ export function BrowserOperationStatus({
   const operation = activity.operation
   const terminal = operation && ['completed', 'failed', 'stopped', 'indeterminate'].includes(operation.phase)
   // A cursor is a workflow fact, not the completed Journal action or the editor's selected version.
-  // Order by the Owner's invocation timestamps; an old array position is not a current-run identity.
-  const latestRun = taskAssets?.runs.filter(run => run.browserId === browserId)
-    .sort((left, right) => right.startedAt - left.startedAt || right.updatedAt - left.updatedAt)[0]
+  // An explicitly continued older cursor remains selected by Main, regardless of timestamp order.
+  const latestRun = taskAssets?.runs.find(run => run.browserId === browserId && run.id === taskAssets.selectedRunId)
   const taskAsset = taskAssets?.assets.find(asset => asset.id === latestRun?.assetId && asset.browserId === browserId)
   const taskVersion = taskAsset?.versions.find(version => version.version === latestRun?.version)
   const taskRun = latestRun && taskVersion && (latestRun.status === 'waiting-human' || latestRun.status === 'ready') &&

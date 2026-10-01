@@ -23,6 +23,12 @@
 .browser-outcome-criteria__types label { display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; }
 .browser-outcome-criteria__types input { margin: 0; accent-color: var(--green-2); }
 
+.browser-task-reliability { min-width: 0; display: grid; gap: var(--sp-1); color: var(--text-2); overflow-wrap: anywhere; }
+.browser-task-reliability > small, .browser-task-reliability > p { display: flex; align-items: center; gap: var(--sp-1); }
+.browser-task-reliability p { margin: var(--sp-1) 0; color: var(--text-3); }
+.browser-task-reliability ul { margin: var(--sp-1) 0; padding-inline-start: var(--sp-4); }
+.browser-task-reliability li small { display: block; color: var(--text-3); }
+
 .browser-demonstration-suggestion { display: grid; min-width: 0; gap: var(--sp-1); margin-block-start: var(--sp-1); overflow-wrap: anywhere; }
 .browser-demonstration-suggestion > :is(strong, small) { overflow: visible; text-overflow: clip; white-space: normal; }
 .browser-demonstration-suggestion > small { color: var(--text-3); }

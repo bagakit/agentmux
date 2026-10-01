@@ -48,6 +48,7 @@ import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarnin
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
+import { BrowserTaskReliability, useBrowserTaskReliabilityRefresh, type BrowserTaskReliabilityRequest } from './BrowserTaskReliability'
 import type { BrowserTaskContent } from '../../../shared/browser-task-assets'
 import { BrowserStepEvidence } from './BrowserStepEvidence'
 import {
@@ -202,6 +203,7 @@ export function BrowserPane({
   const [selectedTaskAssetId, setSelectedTaskAssetId] = useState<string | null>(null)
   const [taskAssetReview, setTaskAssetReview] = useState<{ assetId: string; version: number } | null>(null)
   const taskRequest = useRef(0)
+  const taskReliabilityRefresh = useBrowserTaskReliabilityRefresh(tab.browserId)
   const annotations = useAppStore((state) => state.browserAnnotationsByBrowserId[tab.browserId]) ?? NO_BROWSER_ANNOTATIONS
   const addBrowserAnnotation = useAppStore((state) => state.addBrowserAnnotation)
 
@@ -608,7 +610,13 @@ export function BrowserPane({
   }
 
   const taskAsset = tab.taskAssets?.assets.find(asset => asset.id === selectedTaskAssetId) ?? tab.taskAssets?.assets.at(-1) ?? null
-  const taskRun = taskAsset ? tab.taskAssets?.runs.filter(run => run.assetId === taskAsset.id).at(-1) ?? null : null
+  const taskRun = taskAsset ? tab.taskAssets?.runs.find(run => run.id === tab.taskAssets?.selectedRunId && run.assetId === taskAsset.id && run.browserId === tab.browserId) ?? null : null
+  const loadTaskReliability = useCallback(async (input: BrowserTaskReliabilityRequest) => {
+    const receipt = await executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
+      operation: 'browser.task.reliability', ...input })
+    if (receipt.operation !== 'browser.task.reliability') throw new Error('The exact version reliability read is unavailable.')
+    return receipt.reliability
+  }, [executeControl])
 
   async function taskAction<T>(event: MouseEvent<HTMLButtonElement>, action: () => Promise<T>): Promise<T | undefined> {
     if (event.nativeEvent.isTrusted !== true) return
@@ -1048,6 +1056,14 @@ export function BrowserPane({
             recording={tab.demonstration?.draft ?? null}
             suggestions={tab.demonstration?.suggestions}
             run={taskRun}
+            renderReliability={version => taskAsset ? <BrowserTaskReliability browserId={tab.browserId} assetId={taskAsset.id} version={version}
+              load={loadTaskReliability} refreshKey={JSON.stringify([
+                taskReliabilityRefresh.revisionFor(taskAsset.id, version),
+                tab.taskAssets?.runs.filter(run => run.assetId === taskAsset.id && run.version === version),
+                tab.taskAssets?.selectedRunId, tab.taskAssets?.warning,
+                tab.activity?.operation && tab.taskAssets?.runs.some(run => run.assetId === taskAsset.id && run.version === version && run.operationIds.includes(tab.activity!.operation!.id))
+                  ? tab.activity.operation.outcome?.evaluation : null
+              ])} /> : null}
             {...(tab.taskAssets?.warning ? { warning: tab.taskAssets.warning } : {})}
             busy={taskBusy || tab.driving || demonstrationBusy}
             onImport={event => void importTaskAsset(event)}
@@ -1066,6 +1082,7 @@ export function BrowserPane({
                   operation.outcome.registration.assetRun.assetId === taskAsset?.id && operation.outcome.registration.assetRun.version === taskRun?.version)
                 if (!original) throw new Error('The declared producer is unavailable. Existing work remains; no action was repeated.')
                 const result = await api.browser.verifyOutcome(tab.browserId, original.id)
+                taskReliabilityRefresh.markVerified(result)
                 await loadOperationHistory()
                 return result
               })
@@ -1079,7 +1096,8 @@ export function BrowserPane({
               timelineOperation.outcome.registration.context.navigationId !== tab.navigationId))}
             onVerify={event => taskAction(event, async () => {
               if (!timelineOperation?.outcome) return
-              await api.browser.verifyOutcome(tab.browserId, timelineOperation.id)
+              const result = await api.browser.verifyOutcome(tab.browserId, timelineOperation.id)
+              taskReliabilityRefresh.markVerified(result)
               await loadOperationHistory()
             })}
             busy={taskBusy || tab.driving || demonstrationBusy}
