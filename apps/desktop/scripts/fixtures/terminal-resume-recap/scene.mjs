@@ -179,7 +179,8 @@ async function screenshot(label) {
   await active.cdp.call('Page.enable')
   const {data}=await active.cdp.call('Page.captureScreenshot',{format:'png'})
   await writeFile(path,Buffer.from(data,'base64'))
-  return {path,sha256:hash(Buffer.from(data,'base64'))}
+  const viewport=await active.cdp.evaluate('({width:innerWidth,height:innerHeight,devicePixelRatio})')
+  return {path,sha256:hash(Buffer.from(data,'base64')),viewport}
 }
 
 const quote = value => "'" + value.replaceAll("'", "'\\''") + "'"
