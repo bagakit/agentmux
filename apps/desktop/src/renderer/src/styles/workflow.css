@@ -129,12 +129,12 @@
 .wf-agent--compact { min-width: 0; }
 
 /* Real recorded steps use the same disclosure family without workflow statistics. */
-.wf-card--observation { margin-block: var(--sp-3); padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-0); overflow: hidden; }
-.wf-card--observation > .wf-head { display: flex; gap: var(--sp-4); padding: var(--sp-2) var(--sp-5); min-height: 32px; }
+.wf-card--observation { margin-block: var(--sp-2); padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); overflow: hidden; }
+.wf-card--observation > .wf-head { display: flex; gap: var(--sp-3); padding: var(--sp-1) var(--sp-4); min-height: 28px; }
 .wf-card--observation .log-fold__label { flex: 1; }
-.wf-observation__body { margin: var(--sp-1) var(--sp-4) var(--sp-2) var(--sp-5); padding-left: 0; }
+.wf-observation__body { margin: var(--sp-1) var(--sp-3) var(--sp-2) var(--sp-4); padding-left: 0; }
 .wf-observation__recorded { color: var(--text-3); font-size: var(--fs-micro); }
-.wf-observation__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2) var(--sp-4); padding: 0 var(--sp-5) var(--sp-3); color: var(--text-2); font-size: var(--fs-micro); }
+.wf-observation__summary { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-1) var(--sp-3); padding: 0 var(--sp-4) var(--sp-2); color: var(--text-2); font-size: var(--fs-micro); }
 .wf-observation__caption { margin-right: auto; color: var(--text-3); }
 .wf-observation__stat { display: inline-flex; align-items: center; gap: var(--sp-1); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .wf-observation__stat[data-state='failed'] { color: var(--red-text); }
