@@ -1,5 +1,5 @@
 import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay } from './helpers/fixture-values.js'
-import { appendFile, rename, writeFile } from 'node:fs/promises'
+import { appendFile, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -77,12 +77,13 @@ for (const provider of ['claude', 'pi'] as const) {
     expect(watched.closes.map(close => close.mock.calls.length)).toEqual([1])
   })
 
-  it(`${provider}: real unrelated directory notification does not invalidate the exact target`, async () => {
+  it(`${provider}: real unrelated file growth does not invalidate the exact target`, async () => {
     const fixture = await setup(provider)
     const events: AgentSessionHistoryObservation[] = []
     const handle = await fixture.client.observeSessionHistory('private-agent', event => events.push(event))
-    await writeFile(join(fixture.root, 'unrelated-C.jsonl'), 'Actual unrelated bytes.\n')
-    await vi.waitFor(() => expect(watched.names).toContain('unrelated-C.jsonl'))
+    const unrelated = join(fixture.root, 'unrelated-C.jsonl')
+    await writeFile(unrelated, 'Actual unrelated bytes.\n')
+    expect(await readFile(unrelated, 'utf8')).toBe('Actual unrelated bytes.\n')
     expect(events).toEqual([])
     handle.dispose()
   })

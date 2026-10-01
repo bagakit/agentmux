@@ -1,4 +1,4 @@
-import { watch } from 'node:fs'
+import { watch, type FSWatcher } from 'node:fs'
 import { stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
@@ -37,11 +37,12 @@ export async function observeNativeJsonlHistory(
   let disposed = false
   let checking = false
   let queued = false
+  let watcher: FSWatcher | undefined
   const dispose = (): void => {
     if (disposed) return
     disposed = true
     queued = false
-    watcher.close()
+    watcher?.close()
     context.signal.removeEventListener('abort', dispose)
   }
   const unavailable = (error: unknown): void => {
@@ -66,6 +67,10 @@ export async function observeNativeJsonlHistory(
           if (baseline && (!next || baseline.dev !== next.dev || baseline.ino !== next.ino || next.size < baseline.size)) {
             throw new AgentMuxError('Native history source was replaced or truncated. The existing window is retained; explicitly refresh to reopen its newest page.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
           }
+          if (!baseline && next) {
+            watchFile()
+            queued = true // Check again after transferring the missing-source watch.
+          }
           baseline = next
           context.onChange({ kind: 'invalidated', source: context.source })
         }
@@ -73,13 +78,25 @@ export async function observeNativeJsonlHistory(
       finally { checking = false }
     })()
   }
-  const watcher = watch(dirname(path), { persistent: false }, (_event, filename) => {
-    if (disposed) return
-    if (filename == null) {
-      unavailable(new AgentMuxError('Native source change had no exact filename. Refresh to read the current page.', 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE'))
-    } else if (filename.toString() === name) check()
-  })
-  watcher.on('error', unavailable)
+  const watchFile = (): void => {
+    const previous = watcher
+    // A directory watch can miss writes through an already-open file descriptor.
+    // Direct file notifications still use the same exact-path identity checks.
+    watcher = watch(path, { persistent: false }, () => check())
+    watcher.on('error', unavailable)
+    previous?.close()
+  }
+  if (baseline) watchFile()
+  else {
+    // Only a missing source needs its parent until the exact basename appears.
+    watcher = watch(dirname(path), { persistent: false }, (_event, filename) => {
+      if (disposed) return
+      if (filename == null) {
+        unavailable(new AgentMuxError('Native source change had no exact filename. Refresh to read the current page.', 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE'))
+      } else if (filename.toString() === name) check()
+    })
+    watcher.on('error', unavailable)
+  }
   context.signal.addEventListener('abort', dispose, { once: true })
   if (context.signal.aborted) {
     dispose()
