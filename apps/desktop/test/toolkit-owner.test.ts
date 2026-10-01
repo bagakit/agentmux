@@ -1,8 +1,9 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
+vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), getAppPath: () => process.cwd() } }))
 import type { AgentMuxClientEvent } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitSnapshot, type MetricsObservation } from '@agentmux/core/control'
-import { ToolkitOwner } from '../src/main/toolkit-owner.js'
+import { PerformanceToolkitOwner as ToolkitOwner } from '../src/main/toolkit-owner.js'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port.js'
 import { resolve } from 'node:path'
 
@@ -23,6 +24,7 @@ async function fixture(delayed = false) {
     if (delayed) await new Promise<void>(resolve => { releaseCreate = resolve })
     return { runId: 'owned-run', pid: 88, kind: 'terminal' } as any
   }), attach: vi.fn(async () => ({ replay: [], gap: null } as any)),
+    replay: vi.fn(async () => ({ replay: [], gap: null } as any)),
     stop: vi.fn(async () => {}), release: vi.fn(async () => {}), remove: vi.fn(async () => {}) }
   const owner = new ToolkitOwner({ openRunPort: async () => port, launch: () => ({
     runner: process.execPath, cli: _hygiene_fixturePath("private/compiled-cli.mjs"), script: resolve('apps/desktop/resources/toolkit/performance.mjs'),

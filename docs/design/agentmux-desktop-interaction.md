@@ -1380,7 +1380,11 @@ Desktop 刷新或重新 Attach 时优先投影这份 Agent 语义；新的 Run `
 
 Performance 的观察、暂停、恢复、查看官方脚本及显示配置沿同一工具身份和执行结果；暂停只释放本消费者，绝不停止 Agent 或其他观察者。Hover 预览不夺走终端或编辑输入焦点与 selection；点击及键盘可稳定进入同一非模态操作内容，原生 Tab / Shift+Tab 可到动作和具名详情，焦点在浮窗内时不因指针离开而关闭。退出归还本次实际入口；仅 hover 后退出保留原输入焦点，指针移到浮窗操作不会意外关掉。仅 hover 且焦点仍在原 Terminal 输入时，Escape 关闭预览并原样传给终端；显式进入、浮窗内操作或 Settings 编辑输入时，Escape 只关闭最上层工具，不连带关闭 Settings 或丢失草稿。显示或布局配置保留未保存草稿与原字段期望，保存和执行分开，UI / CLI 同一 owner 的冲突与 unknown 事实不可被乐观成功掩盖。
 
-首个可交付配置只含 Performance 启用与 icon / label 入口布局，缺席为 enabled / icon；不为关闭的图标或名称入口持续观察，不显示没有当前消费的 live 数字。后续定时、Agent 任务与用户工具编辑须各自闭合合同，不显示为已可用配置。显式 CLI run 保留同一手动观察理由直到 stop；UI 与 watch 各自释放消费，全部理由释放后才停止工具执行。
+Performance 原启用与 icon / label 默认、关闭入口不持续观察、手动观察理由与各消费者独立释放保持原合同。首个用户工具支持用户保存的本地 JavaScript ESM 脚本、固定目录和参数、名称与图标，普通 UI 与一条 toolkit CLI 使用同配置、执行及结果 owner。保存、显示启用、查看、hover 和订阅不执行用户脚本；只有显式 run/action 准入，关闭浮窗只释放阅读者，在途脚本到真实终局或明确 exact stop。源码可访问当前 Unix 用户本地文件、环境和网络，不承诺 sandbox、权限隔离、secret vault 或自动脱敏；定时、远程和 Agent 任务未交付前不显示成可用能力。
+
+用户工具每次准入捕获不可变配置 revision、固定目标和明确 invocation；相同已保留 invocation 不重复执行，旧请求无保留事实时不猜重放，unknown 只限制该工具新准入，不停健康 Agent。修改只影响下一次，disable 影响显示与新准入；pending/running/unknown 工具删除沿 UI/CLI 同一持久提交与执行准入完整性拒绝，不以删除配置假装停止。动作仅来自已保存配置，绑定原结果 execution/config 和目标；配置、动作、目标或最新确认结果变化时旧按钮明确冲突，输出文本不能创造命令或权限。
+
+用户脚本结果是有界 PTY 合流文本，空结果可辨，不伪称独立 stdout，不执行 HTML/脚本。自然完成以 exact Core 终态/exitCode、authoritative 最终输出字节与完整连续接收事实为准，不以静默、观察退出或动画猜成功；Gap、损坏或终局不完整明确失败/unknown。工具 owner 保有限最新确认结果与必要在途准入，仅在关键点持久，不按输出片段写盘；准入先于执行持久确认，结果先于回收持久确认，保存失败保旧确认事实及必要准入，只限对应工具 unknown。普通退出只回收自己创建的 exact 工具 Run；异常重开保结果与准入，经 exact 公开 Core 状态/replay查证，事实不足不清工作面、不猜删或自动重放副作用，不增加 DB/WAL/daemon。
 
 数据权威、Run 与 Agent 生命周期仍由原 owner 持有；指标、unknown、采样及释放只定义在《Status Bar CPU/Memory 资源面板》，通用工作量与原工作面保护沿《Terminal 连续向上阅读历史》。公开查询、脚本和 Toolkit 自身成本也计入，不能按指标或采样周期反复 spawn 多个 CLI、建立第二 sampler 或每工具常驻 loop。执行脚本与 Agent 任务复用现有 Runtime / Core 能力，不把长寿命 Agent 进程管理放进 Renderer。
 

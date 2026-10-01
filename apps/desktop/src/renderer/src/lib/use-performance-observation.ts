@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
-import type { ToolkitDesktopApi, ToolkitSnapshot } from '../../../shared/toolkit'
+import type { ToolkitDesktopApi, ToolkitMetricsSnapshot } from '../../../shared/toolkit'
 
 /** UI 只持有自己的可释放 lease；结果与趋势仍由 Toolkit owner 提供。 */
 export function usePerformanceObservation(api: Pick<ToolkitDesktopApi, 'observe'>, active: boolean) {
-  const [snapshot, setSnapshot] = useState<ToolkitSnapshot | null>(null)
+  const [snapshot, setSnapshot] = useState<ToolkitMetricsSnapshot | null>(null)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
@@ -13,8 +13,9 @@ export function usePerformanceObservation(api: Pick<ToolkitDesktopApi, 'observe'
     setPending(true); setError(null)
     try {
       // preload 同步返回跨桥可代理的 dispose；异步建立/失败仍归它持有。
-      lease = api.observe(value => {
+      lease = api.observe('performance', value => {
         if (!connected || ended) return
+        if (value.kind !== 'metrics' || value.toolId !== 'performance') { setPending(false); setError('Another tool returned this observation.'); return }
         setSnapshot(value); setPending(false)
       }, reason => {
         if (!connected) return

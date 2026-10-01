@@ -1,27 +1,32 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, type AgentMuxToolkitPort,
-  type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot } from '@agentmux/core/control'
+  type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
+import { CustomToolkitOwner } from './toolkit-custom-owner.js'
+import { executeToolkitConfig, prepareToolkitConfig, toolkitTools } from './toolkit-config.js'
+import type { ConfigOwner } from './config-owner.js'
+import type { AppConfig } from '../shared/contracts.js'
+import { ToolkitReceiptStore } from './toolkit-receipt-store.js'
 
 type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort | null; ended: boolean
   creationPending: boolean; lastAppObservedAt: number | null; cursor: number; buffer: string; decoder: TextDecoder; sequence: number }
 /** Observation state only. Core/ctxmux remains the sole Run and process owner. */
-export class ToolkitOwner implements AgentMuxToolkitPort {
+export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private readonly leases = new Set<Lease>()
   private manual = false
   private closed = false
   private starting: Promise<void> | null = null
   private stopping: Promise<void> | null = null
   private execution: Execution | null = null
-  private value: ToolkitSnapshot = { schema: 'agentmux.toolkit.v1', toolId: 'performance', executionId: null,
+  private value: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: null,
     run: null, state: 'idle', reason: null, startedAt: null, observedAt: null, observation: null,
     manual: false, consumerCount: 0, sequence: 0, trend: [] }
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
     enabled(): boolean; mainPid?: number; now?: () => number }) {}
-  get current(): ToolkitSnapshot {
+  get current(): ToolkitMetricsSnapshot {
     return structuredClone({ ...this.value, manual: this.manual, consumerCount: this.leases.size })
   }
   private publish() {
@@ -37,8 +42,8 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     if (!this.args.enabled()) throw new AgentMuxError('Performance is disabled.', 'CONTROL_UNAVAILABLE')
   }
   async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
-    if (request.toolId !== 'performance') throw new AgentMuxError('Toolkit tool is unknown.', 'INVALID_CONTROL_REQUEST')
-    if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [{ toolId: 'performance', name: 'Performance', readonly: true }] }
+    if (request.operation !== 'toolkit.list' && request.toolId !== 'performance') throw new AgentMuxError('Toolkit tool is unknown.', 'INVALID_CONTROL_REQUEST')
+    if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [{ kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true }] }
     if (request.operation === 'toolkit.script') return { operation: request.operation, script: await readPerformanceScript(this.args.launch()) }
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: this.current }
     if (request.operation === 'toolkit.run') {
@@ -210,4 +215,47 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     for (const lease of [...this.leases]) { lease.release(); lease.end() }
     await this.quiesce()
   }
+}
+
+
+/** The sole public Toolkit port routes built-in observations and configured scripts to the same RawRun owner. */
+export class ToolkitOwner implements AgentMuxToolkitPort {
+  private readonly performance: PerformanceToolkitOwner
+  private readonly custom: CustomToolkitOwner
+  constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
+    enabled(): boolean; config: ConfigOwner; receiptPath: string; mainPid?: number; now?: () => number }) {
+    this.performance = new PerformanceToolkitOwner(args)
+    const launch = args.launch()
+    this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
+      runner: launch.runner, env: launch.env, ...(args.now ? { now: args.now } : {}),
+      receipts: new ToolkitReceiptStore(args.receiptPath, () => toolkitTools(args.config.current).map(tool => tool.id)) })
+  }
+  prepareConfig(current: AppConfig, next: AppConfig): Promise<AppConfig> {
+    return prepareToolkitConfig(current, next, id => this.custom.guardDelete(id))
+  }
+  configurationChanged() { this.custom.configurationChanged() }
+  async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
+    if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [
+      { kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
+      ...toolkitTools(this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id,
+        name: tool.name, readonly: false as const, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }))
+    ] }
+    if (request.operation === 'toolkit.add' || request.operation === 'toolkit.update' || request.operation === 'toolkit.remove') {
+      return await executeToolkitConfig(request, this.args.config)
+    }
+    if (request.toolId === 'performance') return await this.performance.execute(request, signal)
+    if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }
+    if (request.operation === 'toolkit.script') return { operation: request.operation, script: this.custom.script(request.toolId) }
+    if (request.operation === 'toolkit.run') return { operation: request.operation, snapshot: await this.custom.run(request.toolId, request.input, signal) }
+    if (request.operation === 'toolkit.stop') {
+      if (request.executionId === undefined) throw new AgentMuxError('Stop requires a captured execution identity.', 'INVALID_CONTROL_REQUEST')
+      return { operation: request.operation, snapshot: await this.custom.stop(request.toolId, request.executionId) }
+    }
+    throw new AgentMuxError('Watch requires the subscription port.', 'INVALID_CONTROL_REQUEST')
+  }
+  async subscribe(toolId: string, snapshot: (value: ToolkitSnapshot) => void, end: (error?: Error) => void, signal: AbortSignal) {
+    return toolId === 'performance' ? await this.performance.subscribe('performance', snapshot, end, signal)
+      : await this.custom.subscribe(toolId, snapshot, end, signal)
+  }
+  async dispose(): Promise<void> { await Promise.all([this.performance.dispose(), this.custom.dispose()]) }
 }

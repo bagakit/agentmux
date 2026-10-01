@@ -1,3 +1,4 @@
+import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
@@ -3197,9 +3198,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }))
   },
   async executeControl(request, signal) {
-    if (request.operation === 'toolkit.list' || request.operation === 'toolkit.get' ||
-        request.operation === 'toolkit.script' || request.operation === 'toolkit.run' ||
-        request.operation === 'toolkit.stop' || request.operation === 'toolkit.watch') {
+    if (isToolkitRequest(request)) {
       throw Object.assign(new Error('Toolkit requests belong to the Main execution owner.'), { code: 'CONTROL_FAILED' })
     }
     if (request.operation === 'metrics.get' || request.operation === 'metrics.watch') {
