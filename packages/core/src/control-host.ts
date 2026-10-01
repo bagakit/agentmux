@@ -55,7 +55,7 @@ import {
 } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseMetricsObservation, type MetricsObservation, type MetricsSubscription } from './metrics.js'
-import { isToolkitOperation, parseToolkitResult } from './toolkit.js'
+import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { serveToolkitControl } from './toolkit-control-server.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
@@ -259,14 +259,13 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   const operation = Object.getOwnPropertyDescriptor(source, 'operation')
   if (operation && !('value' in operation)) throw new AgentMuxError('Control operation must be data.', 'INVALID_CONTROL_REQUEST')
   if (isSpaceControlOperation(operation?.value)) return parseSpaceControlRequest(source)
+  if (isToolkitOperation(operation?.value)) return parseToolkitRequest(source)
   if (source.schemaVersion !== AGENTMUX_CONTROL_SCHEMA_VERSION) throw new AgentMuxError('Control request version is invalid.', 'INVALID_CONTROL_REQUEST')
   const requestId = id(source.requestId, 'Control request ID is invalid.', 'INVALID_CONTROL_REQUEST')
   if (!isAgentMuxControlOperation(source.operation)) throw new AgentMuxError('Control operation is invalid.', 'INVALID_CONTROL_REQUEST')
-  if (isToolkitOperation(source.operation)) {
-    settingsFields(source, ['schemaVersion','requestId','operation','toolId'], 'INVALID_CONTROL_REQUEST')
-    if (source.toolId !== 'performance') throw new AgentMuxError('Toolkit tool is unknown.', 'INVALID_CONTROL_REQUEST')
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, toolId: 'performance' }
-  }
+  // Toolkit was handled from its own data descriptor above. Reject inherited
+  // or inconsistent operation facts and keep the shared parser's exhaustive narrowing.
+  if (isToolkitOperation(source.operation)) throw new AgentMuxError('Toolkit operation must be declared as data.', 'INVALID_CONTROL_REQUEST')
   if (source.operation === 'metrics.get' || source.operation === 'metrics.watch') {
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
       throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
@@ -1280,6 +1279,11 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   const source = object(value, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const operation = Object.getOwnPropertyDescriptor(source, 'operation')
   if (operation && !('value' in operation)) throw new AgentMuxError('Control receipt operation must be data.', 'CONTROL_PROTOCOL_ERROR')
+  if (isToolkitOperation(operation?.value)) {
+    // Validate data descriptors before reading schemaVersion, ok or requestId.
+    settingsResourceRecord(source, 'CONTROL_PROTOCOL_ERROR')
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result', 'error'], 'CONTROL_PROTOCOL_ERROR')
+  }
   if (isSpaceControlOperation(operation?.value)) {
     const ok = Object.getOwnPropertyDescriptor(source, 'ok')
     if (ok && !('value' in ok)) throw new AgentMuxError('Control receipt status must be data.', 'CONTROL_PROTOCOL_ERROR')
@@ -1735,6 +1739,9 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
       ...(receipt.error.code === 'MESSAGE_TARGET_NOT_UNIQUE' ? { candidates: receipt.error.candidates } : {})
     }
   )
+  if (isToolkitOperation(request.operation)) {
+    assertToolkitResultTarget(request, parseToolkitResult(request.operation, receipt.result))
+  }
   return receipt
 }
 

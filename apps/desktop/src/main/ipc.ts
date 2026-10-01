@@ -187,8 +187,10 @@ export async function registerIpc(args: {
   })
   args.runtime.commit(await args.runtime.prepare(config))
   let releaseExecutorConfigEdit: (() => void) | undefined
+  let toolkit: ToolkitOwner
   const configOwner = new ConfigOwner({
     read: () => config,
+    prepare: (current, next) => toolkit.prepareConfig(current, next),
     save: async (next) => {
       const validated = args.configStore.validate(next)
       const release = await args.runtime.reserveExecutorConfigEdit(config, validated)
@@ -202,6 +204,7 @@ export async function registerIpc(args: {
     publish: (saved) => {
       const paletteChanged = saved.appearance.terminalTheme !== config.appearance.terminalTheme
       config = saved
+      toolkit.configurationChanged()
       releaseExecutorConfigEdit?.()
       releaseExecutorConfigEdit = undefined
       if (paletteChanged) {
@@ -211,6 +214,9 @@ export async function registerIpc(args: {
       if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
+  toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
+    config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
+    enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id), {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
@@ -652,8 +658,6 @@ export async function registerIpc(args: {
   handle('demands:unlinkSession', async (id: string, sessionId: string) => await demands.unlinkSession(id, sessionId))
   handle('demands:activity', async (id: string, input: Omit<import('@agentmux/demand').DemandActivity, 'id' | 'createdAt'>) => await demands.addActivity(id, input))
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
-  const toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
-    enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
   handleWithEvent('ui:requestStorageFlush', async (event) => {

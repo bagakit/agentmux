@@ -941,7 +941,11 @@ export class RuntimeController {
         this.toolkitRuns.set(terminalInputKey(hostId, run.runId), onEvent)
         return run
       }),
-      attach: async (ref, afterByte) => await client.attachTerminal(ref.runId, afterByte, 'raw'),
+      attach: async (ref, afterByte, onEvent) => {
+        if (onEvent) this.toolkitRuns.set(terminalInputKey(hostId, ref.runId), onEvent)
+        return await client.attachTerminal(ref.runId, afterByte, 'raw')
+      },
+      replay: async (ref, afterByte) => await client.readRunReplay(ref, afterByte, 'raw'),
       release: async ref => await client.releaseRunAttachment(ref),
       stop: async ref => await client.stopTerminal(ref),
       remove: async ref => {

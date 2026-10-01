@@ -1,7 +1,7 @@
 import type { Socket } from 'node:net'
 import { AgentMuxError } from './errors.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from './control.js'
-import { parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitRequest, type ToolkitSnapshot } from './toolkit.js'
+import { assertToolkitResultTarget, parseToolkitResult, parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitRequest, type ToolkitSnapshot } from './toolkit.js'
 
 export async function serveToolkitControl(socket: Socket, request: ToolkitRequest,
   port: AgentMuxToolkitPort | undefined, streams: Set<Socket>): Promise<void> {
@@ -48,15 +48,19 @@ export async function serveToolkitControl(socket: Socket, request: ToolkitReques
   if (!port) { fail(new AgentMuxError('Control owner does not provide Toolkit.', 'CONTROL_UNAVAILABLE')); return }
   try {
     if (request.operation !== 'toolkit.watch') {
-      const { operation, ...result } = await port.execute(request, controller.signal)
+      const response = await port.execute(request, controller.signal)
       if (closed || controller.signal.aborted) return
+      const { operation, ...payload } = response
       if (operation !== request.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
+      const parsed = parseToolkitResult(operation, payload)
+      assertToolkitResultTarget(request, parsed)
+      const { operation: _operation, ...result } = parsed
       const line = encode({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: request.requestId, operation, ok: true, result })
       dispose(); socket.end(line, () => socket.destroy()); return
     }
     const established = await port.subscribe(request.toolId, value => {
       if (closed) return
-      try { latest = parseToolkitSnapshot(value); if (opened) send(latest) } catch (error) { fail(error) }
+      try { latest = parseToolkitSnapshot(value); if (latest.toolId !== request.toolId) throw new AgentMuxError('Toolkit snapshot belongs to another tool.', 'CONTROL_PROTOCOL_ERROR'); if (opened) send(latest) } catch (error) { fail(error) }
     }, error => {
       if (closed) return
       if (error || !opened) { fail(error ?? new AgentMuxError('Toolkit owner ended during establishment.', 'CONTROL_UNAVAILABLE')); return }
@@ -70,3 +74,4 @@ export async function serveToolkitControl(socket: Socket, request: ToolkitReques
     if (latest) send(latest)
   } catch (error) { fail(error) }
 }
+

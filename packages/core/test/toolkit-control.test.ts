@@ -6,10 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, requestAgentMuxControl, parseAgentMuxControlRequest } from '../src/control-host.js'
 import { subscribeAgentMuxToolkit } from '../src/toolkit-control.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
-import { parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitSnapshot } from '../src/toolkit.js'
+import { parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitMetricsSnapshot } from '../src/toolkit.js'
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'toolkit-owning', toolId: 'performance' } as const
-const snapshot = (): ToolkitSnapshot => ({ schema:'agentmux.toolkit.v1',toolId:'performance',executionId:null,run:null,
+const snapshot = (): ToolkitMetricsSnapshot => ({ schema:'agentmux.toolkit.v1',kind:'metrics',toolId:'performance',executionId:null,run:null,
   state:'idle',reason:null,startedAt:null,observedAt:null,observation:null,manual:false,consumerCount:0,sequence:0,trend:[] })
 const cleanups: (() => Promise<void> | void)[] = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -19,11 +19,11 @@ async function endpoint() {
   return join(directory,'control.sock')
 }
 async function server(toolkit?: AgentMuxToolkitPort) {
-  const path = await endpoint(), owner = new AgentMuxControlServer({execute:vi.fn(), toolkit},path)
+  const path = await endpoint(), owner = new AgentMuxControlServer({execute:vi.fn(), ...(toolkit ? { toolkit } : {})},path)
   await owner.start(); cleanups.push(() => owner.stop()); return {path,owner}
 }
 async function raw(path:string) {
-  const socket=createConnection({path,allowHalfOpen:true});cleanups.push(()=>socket.destroy())
+  const socket=createConnection({path,allowHalfOpen:true});cleanups.push(()=>{ socket.destroy() })
   await new Promise<void>(resolve=>socket.once('connect',resolve));socket.write(JSON.stringify({...base,operation:'toolkit.watch'})+'\n')
   return socket
 }

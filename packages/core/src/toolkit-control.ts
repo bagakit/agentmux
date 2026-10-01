@@ -51,7 +51,9 @@ export async function subscribeAgentMuxToolkit(value: ToolkitRequest,
             opened = true; clearTimeout(deadline); frame = raw
             resolve({ dispose: () => finish() })
           } else if (raw.event === 'snapshot' && Object.keys(raw.result).join() === 'snapshot') {
-            frame = { ...raw, result: { snapshot: parseToolkitSnapshot(raw.result.snapshot) } }
+            const snapshot = parseToolkitSnapshot(raw.result.snapshot)
+            if (snapshot.toolId !== request.toolId) throw new AgentMuxError('Toolkit snapshot belongs to another tool.', 'CONTROL_PROTOCOL_ERROR')
+            frame = { ...raw, result: { snapshot } }
           } else if (raw.event === 'end' && Object.keys(raw.result).join() === 'reason' && typeof raw.result.reason === 'string') frame = raw
           else throw new AgentMuxError('Toolkit stream boundary is invalid.', 'CONTROL_PROTOCOL_ERROR')
           handlers.onFrame(frame)

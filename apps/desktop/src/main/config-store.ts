@@ -3,6 +3,7 @@ import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
+import { parseToolkitToolDefinition, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { COMPOSER_PROMPT_STATES } from '../shared/composer-shortcut-library.js'
 import { workspaceLocationKey } from './workspace-location.js'
@@ -20,7 +21,21 @@ import {
   clampTerminalFontSize
 } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
-import { PERFORMANCE_STATUS_BAR_IDS } from '../shared/toolkit-preferences.js'
+import { PERFORMANCE_STATUS_BAR_IDS, TOOLKIT_ICON_IDS } from '../shared/toolkit-preferences.js'
+
+export const toolkitToolSchema = z.unknown().transform((value, context) => {
+  try {
+    const definition = parseToolkitToolDefinition(value)
+    if (!TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number]) || !definition.workspacePath.startsWith('/')) {
+      context.addIssue({ code: 'custom', message: 'Tool needs an available icon and an absolute local working directory.' })
+      return z.NEVER
+    }
+    return definition
+  } catch {
+    context.addIssue({ code: 'custom', message: 'Invalid tool definition or budget.' })
+    return z.NEVER
+  }
+})
 
 export const hostSchema = z.discriminatedUnion('kind', [
   z.object({ id: z.literal('local'), kind: z.literal('local'), label: z.string().min(1) }).strict(),
@@ -214,7 +229,10 @@ const configSchema = z
     appearance: appearanceSchema,
     browser: browserSchema,
     toolkit: z.object({
-      performance: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional()
+      performance: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),
+      tools: z.array(toolkitToolSchema).max(TOOLKIT_MAX_USER_TOOLS).superRefine((tools, context) => {
+        if (new Set(tools.map(tool => tool.id)).size !== tools.length) context.addIssue({ code: 'custom', message: 'Tool identities must be unique.' })
+      }).optional()
     }).strict().optional(),
     // Optional: a config written before this field existed is still valid, and `get()` back-fills the
     // explicit default. The mode is validated against the one tier table so an unknown id is rejected

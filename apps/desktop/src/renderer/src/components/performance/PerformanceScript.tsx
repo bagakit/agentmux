@@ -10,7 +10,7 @@ export function PerformanceScript({ api, back, close }: { api: Pick<ToolkitDeskt
   useLayoutEffect(() => { first.current?.focus({ preventScroll: true }) }, [])
   useEffect(() => {
     let connected = true
-    void api.script().then(value => { if (connected) setScript(value) }).catch(reason => {
+    void api.script('performance').then(value => { if (connected) setScript(value) }).catch(reason => {
       if (connected) setError(reason instanceof Error ? reason.message : String(reason))
     })
     return () => { connected = false }
@@ -18,7 +18,7 @@ export function PerformanceScript({ api, back, close }: { api: Pick<ToolkitDeskt
   return <>
     <header className="performance-header"><div className="performance-title"><button ref={first} type="button" className="performance-icon-button" aria-label="Back to Performance" onClick={back}><ArrowLeft size={14} /></button>
       <Code2 size={15} /><h2>Official script</h2><span className="performance-official">Read-only</span></div>
-      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-performance-close onClick={close}><X size={14} /></button></header>
+      <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><X size={14} /></button></header>
     <div className="performance-body performance-script">
       {script ? <><p className="performance-note">Performance observes resources through the public metrics API.</p>
         <textarea readOnly spellCheck={false} aria-label="Official Performance script source" value={script.text} />

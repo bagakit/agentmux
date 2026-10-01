@@ -232,16 +232,36 @@ No Runtime is started or connected. Offline host: CONTROL_UNAVAILABLE; host with
 this capability: METRICS_UNSUPPORTED. Slow output terminates instead of queueing frames.`
 
 const TOOLKIT_HELP = `Usage: agentmux toolkit list
-       agentmux toolkit get|script|run|stop|watch performance
+       agentmux toolkit get|script|run|stop|watch <tool>
+       agentmux toolkit add|update <tool> --input <file|->
+       agentmux toolkit remove <tool> [--input <file|->]
+       agentmux toolkit run|stop <tool> [--input <file|->]
+
+Create a saved local JavaScript ESM tool. Example add input:
+  {"name":"Daily summary","icon":"terminal","workspacePath":"/path/to/project",
+   "script":"console.log('Ready')"}
+Optional creation fields: enabled=true, statusBar="icon" (or "label"), args=[].
+Updates use {"changes":{...},"expected":{...}}; expected covers every changed field.
+Removal input uses {"expected":{...}} with the complete saved editable fields.
+IDs and revisions belong to the owner, never in editable input. Performance is read-only.
+
+Saving, enabling its entry, get/script/list and user-tool watch do not run scripts.
+run captures the current definition and result baseline, then explicitly admits one Run.
+Concurrent edits fail with conflict. Full run input can preserve invocationId,
+expectedRevision and expectedLatestExecutionId; query get after an unknown receipt,
+never assume the write did not run. Stop input pins executionId (null means no active Run).
+Closing a user-tool watch or floating result releases only its reader, not the script.
+Results are bounded merged terminal text, with actual execution identity and exit facts.
+Scripts use the current local Unix user's files, environment and network; no sandbox,
+secret storage, scheduling, remote execution or Agent tasks are provided by this slice.
 
 Performance is an official read-only script consuming public metrics queries.
-get/script/list only read; run holds one manual observation until stop.
-watch holds its own lease until disconnect or SIGINT; other observers continue.
-stop ends this tool's exact observation, preserves its last result, and never stops Agents.
-Source identity and per-source observation times accompany results. No scheduling is provided.`
+Its run holds one manual observation until stop; watch holds its own observation lease.
+stop ends only its exact observation and never stops Agents. Other observers retain
+independent leases. Its source identity and per-source observation times remain visible.`
 
 const HELP = new Map<string, string>([
-  ...['toolkit','toolkit.list','toolkit.get','toolkit.script','toolkit.run','toolkit.stop','toolkit.watch'].map(name => [name, TOOLKIT_HELP] as [string,string]),
+  ...['toolkit','toolkit.list','toolkit.get','toolkit.script','toolkit.run','toolkit.stop','toolkit.watch','toolkit.add','toolkit.update','toolkit.remove'].map(name => [name, TOOLKIT_HELP] as [string,string]),
   ['metrics', METRICS_HELP],
   ['metrics.get', METRICS_HELP],
   ['metrics.watch', METRICS_HELP],

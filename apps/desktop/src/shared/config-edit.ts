@@ -18,6 +18,7 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'toolkit.performance') return value ?? DEFAULT_PERFORMANCE_PREFERENCES
   if (path === 'toolkit.performance.enabled') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.enabled
   if (path === 'toolkit.performance.statusBar') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.statusBar
+  if (path === 'toolkit.tools') return value ?? []
   if (path === 'copyPathsAsAbsolute' || path === 'browser.agentAutomation') return value ?? false
   if (path === 'appearance.appAppearance') return value ?? APP_APPEARANCE_DEFAULT
   if (path === 'appearance.terminalFontSize') return value ?? TERMINAL_FONT_SIZE_DEFAULT
@@ -38,13 +39,17 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
+    // Optional Toolkit domains still merge authored fields/identities after a concurrent first tool is added.
+    if (path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.tools') {
+      actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
+    }
     // Environment is one literal launch value, never a merge of independently authored keys.
     if (/^executors\.[^.]+\.env$/.test(path)) {
       if (!configValuesEqual(actual, expected)) throw new ConfigConflict(path)
       return requested
     }
     if (Array.isArray(expected) && Array.isArray(requested) && Array.isArray(actual) &&
-        (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts')) {
+        (path === 'workspaces' || path === 'hosts' || path === 'composerShortcuts' || path === 'toolkit.tools')) {
       type RecordWithId = { id: string }
       const old = new Map((expected as RecordWithId[]).map((record) => [record.id, record]))
       const next = new Map((requested as RecordWithId[]).map((record) => [record.id, record]))

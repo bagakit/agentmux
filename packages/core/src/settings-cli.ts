@@ -1,10 +1,10 @@
-import { createReadStream } from 'node:fs'
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSettingsGetRequest,
+import { type AgentMuxControlSettingsGetRequest,
   type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest,
   type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest, type AgentMuxControlSettingsHostsRequest,
   type AgentMuxControlSettingsExecutorRefreshRequest } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
+import { readControlJsonInput } from './cli-json-input.js'
 
 type SettingsCommand =
   | Omit<AgentMuxControlSettingsGetRequest, 'schemaVersion' | 'requestId'>
@@ -69,23 +69,7 @@ async function browserLinksCommand(args: readonly string[]): Promise<WithoutEnve
   throw invalid('Run agentmux settings browser links --help for list and forget syntax.')
 }
 
-async function input(path: string): Promise<unknown> {
-  const stream = path === '-' ? process.stdin : createReadStream(path)
-  const chunks: Buffer[] = []
-  let bytes = 0
-  try {
-    for await (const chunk of stream) {
-      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
-      bytes += buffer.byteLength
-      if (bytes > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) throw invalid('Settings input exceeds the Control message budget.')
-      chunks.push(buffer)
-    }
-    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)))
-  } catch (error) {
-    if (error instanceof AgentMuxError) throw error
-    throw invalid('Settings input must be a readable UTF-8 JSON file or stdin.')
-  } finally { if (path !== '-') stream.destroy() }
-}
+const input = (path: string) => readControlJsonInput(path, 'Settings')
 
 async function resourceCommand(args: readonly string[]): Promise<ResourceCommand> {
   const resource = args[0] as 'executors' | 'prompts', action = args[1]

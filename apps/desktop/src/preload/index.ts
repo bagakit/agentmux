@@ -331,11 +331,14 @@ const api: AgentMuxPreloadApi = {
   },
   toolkit: {
     list: async () => (await ipcRenderer.invoke('toolkit:list')).tools,
-    get: async () => (await ipcRenderer.invoke('toolkit:get')).snapshot,
-    script: async () => (await ipcRenderer.invoke('toolkit:script')).script,
-    run: async () => (await ipcRenderer.invoke('toolkit:run')).snapshot,
-    stop: async () => (await ipcRenderer.invoke('toolkit:stop')).snapshot,
-    observe(onSnapshot, onEnd) {
+    get: async (toolId) => (await ipcRenderer.invoke('toolkit:get', toolId)).snapshot,
+    script: async (toolId) => (await ipcRenderer.invoke('toolkit:script', toolId)).script,
+    run: async (toolId, input) => (await ipcRenderer.invoke('toolkit:run', toolId, input)).snapshot,
+    stop: async (toolId, executionId) => (await ipcRenderer.invoke('toolkit:stop', toolId, executionId)).snapshot,
+    add: async (toolId, value) => ipcRenderer.invoke('toolkit:add', toolId, value),
+    update: async (toolId, changes, expected) => ipcRenderer.invoke('toolkit:update', toolId, changes, expected),
+    remove: async (toolId, expected) => ipcRenderer.invoke('toolkit:remove', toolId, expected),
+    observe(toolId, onSnapshot, onEnd) {
       const id = globalThis.crypto.randomUUID()
       let closed = false
       const snapshot = (_event: Electron.IpcRendererEvent, value: any) => {
@@ -349,7 +352,7 @@ const api: AgentMuxPreloadApi = {
         void ipcRenderer.invoke('toolkit:release', id).catch(() => {})
       }
       ipcRenderer.on(TOOLKIT_CHANGED_CHANNEL, snapshot); ipcRenderer.on(TOOLKIT_ENDED_CHANNEL, end)
-      void ipcRenderer.invoke('toolkit:observe', id).catch(error => {
+      void ipcRenderer.invoke('toolkit:observe', toolId, id).catch(error => {
         if (!closed) { dispose(); onEnd?.(String(error instanceof Error ? error.message : error)) }
       })
       return { dispose }
