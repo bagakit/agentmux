@@ -1,4 +1,4 @@
-import { useEffect, useState, type MouseEvent } from 'react'
+import { useEffect, useState, type MouseEvent, type ReactNode } from 'react'
 import { CircleAlert, LocateFixed, Play, Plus, Save, Square, Trash2 } from 'lucide-react'
 import type { BrowserDemonstrationDraft } from '../../../shared/browser-demonstration'
 import type { BrowserDemonstrationSuggestion } from '../../../shared/browser-demonstration-semantics'
@@ -12,6 +12,7 @@ type Props = {
   recording: BrowserDemonstrationDraft | null
   suggestions?: BrowserDemonstrationSuggestion[] | undefined
   run?: BrowserTaskAssetRun | null
+  renderReliability?: (version: number) => ReactNode
   /** A one-time Client viewing intent. It is never an execution or approval fact. */
   reviewRequest?: { assetId: string; version: number }
   onReviewRequestConsumed?: () => void
@@ -27,7 +28,7 @@ type Props = {
 }
 
 /** An editable Client asset inside existing Browser details. Values never enter its draft or versions. */
-export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
+export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, renderReliability, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
   const [draft, setDraft] = useState<BrowserTaskContent | null>(asset?.draft ?? null)
   const [versionNumber, setVersionNumber] = useState(asset?.versions.at(-1)?.version ?? 0)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -150,6 +151,7 @@ export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, rev
       <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy} onClick={event => void save(event, false)}><Save size={11} aria-hidden="true" />Save draft</button><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy || !draft.steps.length} onClick={event => void save(event, true)}>Save version</button></footer>
       {asset.versions.length ? <div className="browser-task-asset__version">
         <label className="browser-task-asset__field"><span>Run saved version</span><select aria-label="Task asset version" value={versionNumber} onChange={event => { setVersionNumber(Number(event.target.value)); setValues({}) }}>{asset.versions.map(item => <option key={item.version} value={item.version}>v{item.version} · {item.name}</option>)}</select></label>
+        {version ? renderReliability?.(version.version) : null}
         <details><summary>Preview v{versionNumber} · {version?.steps.length ?? 0} steps</summary><ol className="browser-rsi-replay__steps">{version?.steps.map((step, index) => <li key={step.id}><span>{index + 1}</span><span><strong>{step.label ?? step.target?.name ?? step.kind}</strong><small>{step.reviewed ? step.parameterKey ? `Fresh ${step.parameterKey}` : step.kind : 'Needs review'}</small></span></li>)}</ol></details>
         {parameters.map(parameter => <label key={parameter.key} className="browser-task-asset__field"><span>{parameter.label}</span><input type={parameter.secret ? 'password' : 'text'} autoComplete="off" aria-label={`Task parameter ${parameter.label}`} maxLength={16_384} value={values[parameter.key] ?? ''} onChange={event => setValues(current => ({ ...current, [parameter.key]: event.target.value }))} /></label>)}
         <footer className="browser-rsi-replay__actions"><button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={!canRun} onClick={event => void execute(event, 'step')}>Run next step</button><button type="button" className="browser-rsi-button browser-rsi-button--primary" disabled={!canRun} onClick={event => void execute(event, 'run')}><Play size={11} aria-hidden="true" />{continuing ? 'Return control and continue' : 'Run version'}</button></footer>
