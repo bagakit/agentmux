@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -6,12 +6,11 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 function terminalRun(runId: string): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: '/bin/sh',
     args: [],
-    workspacePath: fixturePath("repo"),
+    workspacePath: upstreamFixturePath("repo"),
     pid: 42,
     state: { type: 'running' },
     cols: 80,
@@ -44,7 +43,7 @@ describe('AgentMuxClient exact Runtime Subject projection', () => {
         .resolves.toMatchObject({
           kind: 'terminal',
           subjectId: 'terminal:local:run-1',
-          run: { runId: 'run-1', workspacePath: fixturePath("repo") }
+          run: { runId: 'run-1', workspacePath: upstreamFixturePath("repo") }
         })
       expect(statusCalls).toBe(1)
     } finally {

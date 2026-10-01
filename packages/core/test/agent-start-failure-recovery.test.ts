@@ -28,7 +28,7 @@ beforeEach(async () => {
     workspacePath: root, run: { runId: 'original-run' }, retiredRuns: [], hookBindingId: 'A'.repeat(43),
     hookToken: 'B'.repeat(43), createdAt: 1000, updatedAt: 1000,
     nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } }
-  oldRun = { nativeService: null, runId: old.run.runId, lifecycleOperationId: null, program: 'fixture', args: [], workspacePath: root,
+  oldRun = { runId: old.run.runId, lifecycleOperationId: null, program: 'fixture', args: [], workspacePath: root,
     pid: 100, state: { type: 'exited', code: 0, signal: null }, cols: 80, rows: 24,
     latestOutputBytes: 30, firstAvailableByte: 0, acceptedInputBytes: 10 }
   newRun = { ...oldRun, runId: 'failed-run', pid: 101, state: { type: 'exited', code: 1, signal: null }, acceptedInputBytes: 0 }
@@ -49,7 +49,7 @@ beforeEach(async () => {
     inner.publisher.publish({ type: 'process-state', agentSessionId: next?.agentSessionId,
       run: { runId: newRun.runId }, state: 'exited', pid: newRun.pid, exitCode: 1,
       evidence: { source: 'run-process', observedAt: Date.now(), run: { runId: newRun.runId } } })
-    return { terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0, run: newRun, replay: [{ data: raw }] }
+    return { run: newRun, replay: [{ data: raw }] }
   })
   inner.kernel.attach = attach
   vi.spyOn(client, 'probeAgent').mockResolvedValue({ providerId: provider.id, executable: 'fixture', installed: true,
@@ -109,7 +109,7 @@ it('does not invent startup text when an exited Run has no observed output', asy
   expect(input).not.toHaveBeenCalled()
 })
 it('uses an already exited Attachment snapshot without waiting for another live exit event or query timeout', async () => {
-  inner.kernel.attach = vi.fn(async () => ({ terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0, run: newRun, replay: [{ data: raw }] }))
+  inner.kernel.attach = vi.fn(async () => ({ run: newRun, replay: [{ data: raw }] }))
   let failure: unknown
   let settled = false
   const result = client.resumeAgent({ agentSessionId: old.agentSessionId, operationId: 'resume', prompt: 'keep original' })

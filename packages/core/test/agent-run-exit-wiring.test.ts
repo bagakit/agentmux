@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -20,12 +20,11 @@ type ClientInternals = {
 
 function exitedRun(runId: string, code: number, signal: string | null): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: 'bash',
     args: [],
-    workspacePath: fixturePath("repo"),
+    workspacePath: upstreamFixturePath("repo"),
     pid: null,
     state: { type: 'exited', code, signal },
     cols: 80,

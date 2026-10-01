@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/history-fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -18,11 +18,7 @@ import {
 } from '../src/hook-normalizer.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
 
-const isolation = await vi.hoisted(async () => {
-  const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os')
-  const { join } = await import('node:path')
-  return { homedir: join(tmpdir(), 'agentmux-fixtures', "synthetic/unset-home") }
-})
+const isolation = await vi.hoisted(async () => { const { fixturePath: upstreamFixturePath } = await import("./helpers/history-fixture-values.js"); return ({ homedir: upstreamFixturePath("synthetic/unset-home") }) })
 vi.mock('node:os', async importOriginal => ({
   ...await importOriginal<typeof import('node:os')>(), homedir: () => isolation.homedir
 }))
@@ -114,7 +110,6 @@ async function harness(profile: Profile) {
     })
   })
   const run = {
-    native_service: null,
     id: runId, spec: { program: 'synthetic-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: 123,
     durable_output_bytes: 123, first_available_byte: 0, attachments: 0, applied_input_bytes: 0,
@@ -301,7 +296,7 @@ describe('payload-dependent Hook contributions', () => {
   })
 
   it('the durable store validates declared canonical evidence and keeps unknown notifications absent', () => {
-    const base = seed(profiles[0]!, fixturePath("synthetic"))
+    const base = seed(profiles[0]!, upstreamFixturePath("synthetic"))
     const receipt = { id: 'receipt', providerId: base.providerId, agentSessionId, run: { runId }, eventName: 'notice', observedAt: 2 }
     expect(normalizeStoredAgentSession({ ...base, hookReceipt: receipt }).hookReceipt).toEqual(receipt)
     expect(normalizeStoredAgentSession({ ...base, hookReceipt: { ...receipt, lifecycleEvent: 'turn-end', outputCursorBytes: 123 } }).hookReceipt)

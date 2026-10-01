@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
@@ -21,7 +21,7 @@ function session(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: fixturePath("repo"),
+    workspacePath: upstreamFixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
@@ -41,12 +41,11 @@ function session(): AgentMuxStoredAgentSession {
 
 function run(acceptedInputBytes = 0): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: 'run-1',
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: fixturePath("repo"),
+    workspacePath: upstreamFixturePath("repo"),
     pid: 42,
     state: { type: 'running' },
     cols: 80,

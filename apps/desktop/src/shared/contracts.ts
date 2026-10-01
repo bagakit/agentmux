@@ -1,5 +1,4 @@
 import type { ToolkitDesktopApi } from './toolkit.js'
-import type { SessionInputReceipt } from './session-input-receipt.js'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
@@ -30,7 +29,6 @@ import type {
   AgentMuxRunRef,
   AgentMuxRunReplayGap,
   AgentMuxRunState,
-  AgentMuxNativeService,
   AgentTerminalCapabilityState,
   AgentTerminalPromptDeliveryState,
   AgentTerminalOutputChannelState,
@@ -893,8 +891,6 @@ type SessionSnapshotBase = {
   createdAt: number
   updatedAt: number
   processState: AgentMuxRunState
-  /** Current Core service observation; null carries no live service evidence. */
-  nativeService: AgentMuxNativeService | null
   interruptionReason?: string
   status: SessionStatus
   latestOutputBytes: number
@@ -1705,9 +1701,7 @@ export type AgentMuxDesktopApi = {
 }
 
 export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'> & {
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'write' | 'paste'> & {
-    write(...args: Parameters<AgentMuxDesktopApi['sessions']['write']>): Promise<SessionInputReceipt>
-    paste(...args: Parameters<AgentMuxDesktopApi['sessions']['paste']>): Promise<SessionInputReceipt>
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent'> & {
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void
   }

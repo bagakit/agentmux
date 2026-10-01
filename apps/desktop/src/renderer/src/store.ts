@@ -1200,7 +1200,6 @@ export function recoveryCandidateSession(
     createdAt: candidate.createdAt,
     updatedAt: Math.max(candidate.updatedAt, Date.now()),
     processState: 'interrupted',
-    nativeService: null,
     status: {
       state: recovery.kind === 'pending' ? 'disconnected' : 'error',
       source: 'run-process',

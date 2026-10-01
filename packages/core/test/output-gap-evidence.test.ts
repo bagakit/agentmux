@@ -19,7 +19,7 @@ async function fixture(view: AgentMuxRunAttachmentView, publishedByte: number) {
   const closed = new Promise<void>(resolve => { finish = resolve })
   const attachment = {
     snapshot: {
-      run: { native_service: null, id: 'gap-run', spec: null, pid: 123, state: { type: 'running' },
+      run: { id: 'gap-run', spec: null, pid: 123, state: { type: 'running' },
         latest_output_bytes: 0, first_available_byte: 0, applied_input_bytes: null, current_size: null },
       replay: { chunks: [], first_available_byte: 0, latest_output_bytes: 0, truncated: false },
       terminal: { type: 'not_requested' }, resize_revision: 0

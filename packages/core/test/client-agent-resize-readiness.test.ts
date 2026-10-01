@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -81,7 +81,7 @@ function storedSession(
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: fixturePath("tmp/resize-agent"),
+    workspacePath: upstreamFixturePath("tmp/resize-agent"),
     run: { runId: RUN_ID },
     retiredRuns: [],
     hookBindingId: 'binding-resize',
@@ -95,12 +95,11 @@ function storedSession(
 
 function runProjection(cols: number, rows: number, latestOutputBytes = 0): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: fixturePath("tmp/resize-agent"),
+    workspacePath: upstreamFixturePath("tmp/resize-agent"),
     pid: 321,
     state: { type: 'running' },
     cols,
@@ -159,7 +158,7 @@ async function resizeClient(
       run: runProjection(size.cols, size.rows, latestOutputBytes),
       replay: [],
       gap: null,
-      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { ...size }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: latestOutputBytes,
+      terminal: { type: 'basic-vt', checkpoint: { runId: RUN_ID, throughByte: latestOutputBytes,
         resizeRevision, size: { ...size } }, restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
       resizeRevision,
       close: async () => {}

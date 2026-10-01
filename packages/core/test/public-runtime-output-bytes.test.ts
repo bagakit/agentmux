@@ -13,7 +13,6 @@ function chunk(start: number, data: number[]): OutputChunk {
 }
 const runId = 'raw-byte-run'
 const run = {
-  native_service: null,
   id: runId, spec: null, lineage: null, pid: null,
   state: { type: 'running' as const }, latest_output_bytes: 9, durable_output_bytes: null,
   first_available_byte: 0, attachments: 1, applied_input_bytes: null
@@ -24,7 +23,7 @@ function fixture(replay: OutputChunk[], live: OutputChunk[] = []) {
   const detach = vi.fn(async () => {})
   const close = vi.fn()
   const attach = vi.fn(async (_runId: string, _afterByte: number) => ({
-    snapshot: { terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0, run, replay: { chunks: replay, first_available_byte: 0, latest_output_bytes: 9, truncated: false } },
+    snapshot: { run, replay: { chunks: replay, first_available_byte: 0, latest_output_bytes: 9, truncated: false } },
     async *events(): AsyncGenerator<RunEvent> {
       for (const item of live) yield { type: 'output', chunk: item }
       yield { type: 'exited', state: { type: 'exited', code: 0, signal: null } }

@@ -1,4 +1,4 @@
-import { fixtureClock, fixtureDay, fixturePath } from '../helpers/fixture-values.js'
+import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay, fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -42,7 +42,7 @@ async function harness() {
   // Write initial valid v3 session header to disk so existsSync returns true
   await writeFile(
     transcriptPath,
-    jsonl([{ type: 'session', version: 3, id: nativeId, cwd: workspacePath, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" }])
+    jsonl([{ type: 'session', version: 3, id: nativeId, cwd: workspacePath, timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0) + "Z" }])
   )
 
   const initial: AgentMuxStoredAgentSession = {
@@ -72,7 +72,6 @@ async function harness() {
   const writes: string[] = []
   const receipts = new Map<string, { start_byte: number; end_byte: number; data: string }>()
   const run = () => ({
-    native_service: null,
     id: runId,
     spec: { program: 'pi', args: [], cwd: workspacePath, env: {} },
     lineage: null,
@@ -192,7 +191,7 @@ async function loadGeneratedPiExtension(options: {
   hookToken: string
 }) {
   const plan = createPiManagedHookPlan({
-    PI_CODING_AGENT_DIR: fixturePath("tmp/pi-gen-test")
+    PI_CODING_AGENT_DIR: upstreamFixturePath("tmp/pi-gen-test")
   })
   const source = plan.mutations[0]!.content
   const module = await import(
@@ -263,7 +262,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
     expect(await h.feed('bad-prev', 'session_start', {
       session_id: 'foreign-d',
       reason: 'new',
-      previousSessionFile: fixturePath("wrong/path.jsonl")
+      previousSessionFile: upstreamFixturePath("wrong/path.jsonl")
     })).toBe(204)
     expect((await h.stored()).nativeHandle).toEqual(handleA)
 
@@ -385,7 +384,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
     expect((await h.stored()).nativeHandle).toEqual(handleB)
 
     // 7. When B's transcript is written to disk, B enriches its own transcriptPath via real extension
-    await writeFile(bTranscriptPath, jsonl([{ type: 'session', version: 3, id: bId, cwd: h.workspacePath, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" }]))
+    await writeFile(bTranscriptPath, jsonl([{ type: 'session', version: 3, id: bId, cwd: h.workspacePath, timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0) + "Z" }]))
     ext.handlers.get('agent_start')!({}, ctxB)
 
     await vi.waitFor(async () => {
@@ -575,13 +574,13 @@ describe('Pi session analysis, native identity and hook settlement', () => {
     const nativeSessionId = 'pi-test-session-v3'
 
     const entries = [
-      { type: 'session', version: 3, id: nativeSessionId, cwd: workspacePath, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" },
+      { type: 'session', version: 3, id: nativeSessionId, cwd: workspacePath, timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0) + "Z" },
       // 1. user message with text + image
       {
         type: 'message',
         id: 'user-1',
         parentId: null,
-        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 1, 0) + "Z",
+        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 1, 0) + "Z",
         message: {
           role: 'user',
           content: [
@@ -595,7 +594,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
         type: 'message',
         id: 'assistant-1',
         parentId: 'user-1',
-        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 2, 0) + "Z",
+        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 2, 0) + "Z",
         message: {
           role: 'assistant',
           content: [
@@ -610,7 +609,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
         type: 'message',
         id: 'tool-1',
         parentId: 'assistant-1',
-        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 3, 0) + "Z",
+        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 3, 0) + "Z",
         message: {
           role: 'toolResult',
           toolCallId: 'call-1',
@@ -628,7 +627,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
         type: 'message',
         id: 'assistant-2',
         parentId: 'tool-1',
-        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 4, 0) + "Z",
+        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 4, 0) + "Z",
         message: {
           role: 'assistant',
           content: [
@@ -642,7 +641,7 @@ describe('Pi session analysis, native identity and hook settlement', () => {
         type: 'compaction',
         id: 'compact-1',
         parentId: 'assistant-2',
-        timestamp: fixtureDay(1) + "T" + fixtureClock(0, 5, 0) + "Z",
+        timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 5, 0) + "Z",
         summary: 'Compacted 4 messages',
         firstKeptEntryId: 'assistant-2',
         tokensBefore: 200
@@ -766,8 +765,8 @@ describe('Pi session analysis, native identity and hook settlement', () => {
 
     // Foreign id
     await writeFile(transcriptPath, jsonl([
-      { type: 'session', version: 3, id: 'wrong-id', cwd: workspacePath, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" },
-      { type: 'message', id: 'm1', parentId: null, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 1, 0) + "Z", message: { role: 'user', content: 'hi' } }
+      { type: 'session', version: 3, id: 'wrong-id', cwd: workspacePath, timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0) + "Z" },
+      { type: 'message', id: 'm1', parentId: null, timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 1, 0) + "Z", message: { role: 'user', content: 'hi' } }
     ]))
     const storePath = join(root, 'agent-sessions.json')
     const store = new AgentMuxFileAgentSessionStore(storePath)
