@@ -7,7 +7,8 @@ import { useAppStore } from '../store'
 
 export type AgentSessionControlInput = AgentSessionControl
 
-const MAX_NATIVE_RECORDS = 90
+const MAX_NATIVE_ACTIVITY_RECORDS = 90
+const MAX_NATIVE_MESSAGES = 200
 const MAX_NATIVE_BYTES = 12 * 1024 * 1024
 const MAX_REVALIDATION_PAGES = 3
 type ReadMode = 'initial' | 'earlier' | 'revalidate' | 'replace' | 'reveal'
@@ -33,6 +34,7 @@ type SessionEntry = {
   observationReady: Promise<void> | null
   observationError: Error | null
   windowFrozen: boolean
+  windowIncomplete: boolean
   refreshTimer: ReturnType<typeof setTimeout> | null
 }
 
@@ -71,6 +73,7 @@ function getOrCreateEntry(control: AgentSessionControlInput): SessionEntry {
       observationReady: null,
       observationError: null,
       windowFrozen: false,
+      windowIncomplete: false,
       refreshTimer: null
     }
     sessionRegistry.set(key, entry)
@@ -98,13 +101,33 @@ function sourceChanged(entry: SessionEntry | undefined): boolean {
 }
 
 function withinWindow(items: AgentSessionHistoryPage['items']): boolean {
-  if (items.length > MAX_NATIVE_RECORDS) return false
+  const activities = items.filter(item => item.kind === 'activity').length
+  if (activities > MAX_NATIVE_ACTIVITY_RECORDS || items.length - activities > MAX_NATIVE_MESSAGES) return false
   let bytes = 0
   for (const item of items) {
     bytes += new TextEncoder().encode(JSON.stringify(item)).byteLength
     if (bytes > MAX_NATIVE_BYTES) return false
   }
   return true
+}
+
+/** Keep conversation and process retention independent, within the same source window. */
+function retainReadingWindow(items: AgentSessionHistoryPage['items']): AgentSessionHistoryPage['items'] {
+  let messages = 0, activities = 0
+  // Select the latest records in source order; tool bursts cannot evict speech.
+  const retained = [...items].reverse().filter(item => item.kind === 'activity'
+    ? ++activities <= MAX_NATIVE_ACTIVITY_RECORDS : ++messages <= MAX_NATIVE_MESSAGES).reverse()
+  const sizes = retained.map(item => new TextEncoder().encode(JSON.stringify(item)).byteLength)
+  if (sizes.at(-1)! > MAX_NATIVE_BYTES) throw new Error('The latest native record exceeds the reading budget. Existing messages are kept; History remains available.')
+  let bytes = sizes.reduce((sum, size) => sum + size, 0)
+  while (bytes > MAX_NATIVE_BYTES) {
+    const activity = retained.findIndex(item => item.kind === 'activity')
+    const index = activity < 0 ? 0 : activity
+    bytes -= sizes[index]!
+    sizes.splice(index, 1)
+    retained.splice(index, 1)
+  }
+  return retained
 }
 
 function pauseEntry(entry: SessionEntry): void {
@@ -212,7 +235,7 @@ async function fetchSessionHistoryPage(
       if (!current()) return null
       let items = page.items
       let nextCursor = page.nextCursor
-      let windowLimitError: Error | null = null
+      let windowIncomplete = mode === 'initial' || mode === 'replace' ? false : entry.windowIncomplete
       if (mode === 'initial' || mode === 'replace') {
         if (!withinWindow(items)) throw new Error('The native page exceeds the reading window budget. Earlier records remain available in History.')
         // Find input context only when opening a window. Process records can
@@ -224,12 +247,9 @@ async function fetchSessionHistoryPage(
           if (!sameSource(page.source, earlier.source)) throw new Error('Native source changed while opening the reading window.')
           const combined = [...earlier.items, ...items]
           if (!withinWindow(combined)) {
-            const error = new Error('The native reading window reached its record or byte limit. The unread page remains available in History.')
-            if (entry.historyPage || !items.length) {
-              entry.windowFrozen = true
-              throw error
-            }
-            windowLimitError = error
+            items = retainReadingWindow(combined)
+            nextCursor = earlier.nextCursor
+            windowIncomplete = true
             break
           }
           items = combined
@@ -251,10 +271,7 @@ async function fetchSessionHistoryPage(
           nextCursor = earlier.nextCursor
           index = incoming.findIndex(item => item.id === boundary)
         }
-        if (index < 0) {
-          entry.windowFrozen = true
-          return entry.historyPage
-        }
+        if (index < 0) windowIncomplete = true
         // Retain old raw IDs and their objects. Only newly observed records are
         // appended; reread overlap updates a record only when its facts changed.
         const refreshed = new Map(incoming.map(item => [item.id, item]))
@@ -262,18 +279,18 @@ async function fetchSessionHistoryPage(
         items = [...entry.items.map(item => {
           const latest = refreshed.get(item.id)
           return latest && JSON.stringify(latest) !== JSON.stringify(item) ? latest : item
-        }), ...incoming.slice(index + 1).filter(item => !existing.has(item.id))]
+        }), ...incoming.slice(index < 0 ? 0 : index + 1).filter(item => !existing.has(item.id))]
         nextCursor = entry.nextCursor
       }
       if (!withinWindow(items)) {
-        entry.windowFrozen = true
-        return entry.historyPage
+        items = retainReadingWindow(items)
+        windowIncomplete = true
       }
       entry.items = items
       entry.nextCursor = nextCursor
       entry.historyPage = { ...page, items, nextCursor }
-      entry.error = windowLimitError
-      if (mode === 'initial' || mode === 'replace') entry.windowFrozen = windowLimitError !== null
+      entry.windowIncomplete = windowIncomplete
+      if (mode === 'initial' || mode === 'replace') entry.windowFrozen = false
       return entry.historyPage
     } catch (error) {
       if (current()) entry.error = error instanceof Error ? error : new Error(String(error))
@@ -298,7 +315,7 @@ export function useSessionUserMessages(
   options?: { enabled?: boolean }
 ): {
   messages: AgentSessionUserMessage[]
-  /** The same bounded Provider page, observed by this consumer's current control. */
+  /** Retained original records; the cursor remains a real Provider page boundary. */
   nativeHistoryPage: AgentSessionHistoryPage | null
   nextCursor: string | null
   hasMore: boolean
@@ -306,6 +323,7 @@ export function useSessionUserMessages(
   error: Error | null
   observationError: Error | null
   windowFrozen: boolean
+  windowIncomplete: boolean
   sourceChanged: boolean
   loadEarlier: () => Promise<void>
   refresh: () => Promise<void>
@@ -393,7 +411,7 @@ export function useSessionUserMessages(
   const loadEarlier = useCallback(async () => {
     if (!active || !control) return
     const entry = sessionRegistry.get(sessionKey)
-    if (!entry || !entry.nextCursor || entry.loading || entry.items.length >= MAX_NATIVE_RECORDS) return
+    if (!entry || !entry.nextCursor || entry.loading || entry.items.length >= MAX_NATIVE_ACTIVITY_RECORDS + MAX_NATIVE_MESSAGES) return
     await fetchSessionHistoryPage(control, entry, 'earlier')
   }, [active, sessionKey])
 
@@ -407,7 +425,7 @@ export function useSessionUserMessages(
     else if (!loaded && !entry.windowFrozen && !sourceChanged(entry) && (!currentPage || matchesSource)) {
       // Unlike refresh(), this does not queue behind an in-flight read. The existing bounded
       // operation is the one allowance; otherwise only one earlier/latest page is requested.
-      if (entry.subscribers.size && (!currentPage || entry.nextCursor) && entry.items.length < MAX_NATIVE_RECORDS) {
+      if (entry.subscribers.size && (!currentPage || entry.nextCursor) && entry.items.length < MAX_NATIVE_ACTIVITY_RECORDS + MAX_NATIVE_MESSAGES) {
         await fetchSessionHistoryPage(control, entry, currentPage ? 'earlier' : 'reveal')
       }
     }
@@ -469,6 +487,7 @@ export function useSessionUserMessages(
     error: entry?.error ?? null,
     observationError: entry?.observationError ?? null,
     windowFrozen: entry?.windowFrozen ?? false,
+    windowIncomplete: entry?.windowIncomplete ?? false,
     sourceChanged: sourceChanged(entry),
     loadEarlier,
     refresh,
