@@ -3,9 +3,10 @@ import type { WorkspaceLayout } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import type { WorkbenchTab } from './workbench-tabs'
+import { workbenchProjectionSlotId } from './workbench-projection'
 import { tabGroupForTab } from './workbench-tabs'
 import { layoutForActiveTopic } from './scratch-topic-layout'
-import type { WorkbenchViewTarget } from './workbench-presentation'
+import type { WorkbenchViewTarget, WorkbenchViewTargets } from './workbench-presentation'
 import { subscribeWorkbenchTabRemoved } from './workbench-tab-removal'
 import { scratchTopicKind, scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { effectiveSessionViewMode, sessionPresentationById } from './session-presentation'
@@ -136,15 +137,19 @@ export function createPmoTeamsTopicTargetSelector(floating: PmoTeamsTopicFloatin
 export function pmoTeamsTopicFloatingViewTargets(
   floating: PmoTeamsTopicFloatingState, tabs: Readonly<Record<string, WorkbenchTab>>,
   layout: WorkspaceLayout | undefined, pmoSessionId: string | null
-): Readonly<Record<string, WorkbenchViewTarget>> | undefined {
+): WorkbenchViewTargets | undefined {
   if (!(floating.open || floating.preview) || !layout) return undefined
   const topicId = pmoTeamsTopicFloatingTargetTopicId(floating, tabs)
   const tabId = pmoTeamsTopicFloatingTargetTabId(floating, tabs, layout, pmoSessionId)
   const tab = tabId ? tabs[tabId] : undefined
   if (!tab || tab.workspaceId !== SCRATCH_WORKSPACE_ID || tab.topicId !== topicId || !tabGroupForTab(layout, tab.id)) return undefined
-  const targets: Record<string, WorkbenchViewTarget> = {}
+  const targets: Record<string, WorkbenchViewTarget[]> = {}
   for (const group of layoutForActiveTopic(layout, tabs, topicId, false, tabId).groups) {
-    if (group.activeTabId) targets[group.activeTabId] = { hostId: PMO_FLOATING_TAB_SLOT_PREFIX + ':' + group.activeTabId, active: floating.open }
+    const member = group.activeTabId ? tabs[group.activeTabId] : undefined
+    if (!member?.regions[member.layout.activeRegionId]) continue
+    const reference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: group.id, tabId: member.id, regionId: member.layout.activeRegionId }
+    ;(targets[member.id] ??= []).push({ hostId: workbenchProjectionSlotId(PMO_FLOATING_TAB_SLOT_PREFIX, reference),
+      active: floating.open, visible: true, surface: 'mote', reference })
   }
   return targets
 }

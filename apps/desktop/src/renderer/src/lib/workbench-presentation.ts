@@ -11,7 +11,8 @@ export function useWorkbenchPresentationActive(): boolean { return useContext(Wo
 /** The existing View owner supplies only the retained hint applicable to this presentation. */
 export function useWorkbenchRetainedRegionId(): string | null { return useContext(WorkbenchPresentationContext).retainedRegionId }
 export function useWorkbenchBrowserPresentation() { return useContext(WorkbenchPresentationContext) }
-export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'survey' | 'focus' | 'space'; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
+export type WorkbenchViewTargets = Readonly<Record<string, readonly WorkbenchViewTarget[]>>
+export type WorkbenchViewTarget = { hostId: string; active: boolean; visible?: boolean; surface?: 'survey' | 'focus' | 'space' | 'mote'; controlsOpen?: boolean; retainedRegionId?: string; headerPortalTargetId?: string; onSelectRegion?: (regionId: string) => void; projection?: WorkbenchProjection; reference?: WorkbenchProjectionSelection }
 
 /** A shared entity in multiple Groups has no uniquely proven ordinary home occurrence. */
 export function workbenchHomePresentationReferences(layout: WorkspaceLayout | undefined, displayWorkspaceId: string, tabs: Readonly<Record<string, WorkbenchTab>>): ReadonlyMap<string, WorkbenchProjectionSelection | null> {
@@ -25,3 +26,10 @@ export function workbenchHomePresentationReferences(layout: WorkspaceLayout | un
   }
   return references
 }
+
+/** A stage address is always the full occurrence, never the resource Workspace. */
+export function workbenchBrowserStageHostId(target: WorkbenchViewTarget, regionId: string): string {
+  const reference = target.reference!
+  return `${target.hostId}:browser:${JSON.stringify([reference.displayWorkspaceId, reference.groupId, reference.tabId, regionId])}`
+}
+export const WorkbenchBrowserTargetsContext = createContext<readonly WorkbenchViewTarget[]>([])

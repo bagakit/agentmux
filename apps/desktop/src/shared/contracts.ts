@@ -1309,6 +1309,49 @@ export type BrowserPresentationOccurrence = {
     'displayWorkspaceId' | 'groupId' | 'tabId' | 'regionId'>
 }
 export type BrowserPresentationGeometry = { visible: false } | { visible: true; bounds: BrowserBounds }
+export type BrowserPresentationViewportPoint = { x: number; y: number }
+export type BrowserPresentationMouseButton = 'left' | 'middle' | 'right'
+export type BrowserPresentationMouseModifier = 'shift' | 'control' | 'alt' | 'meta'
+/** Actual original Native extent in DIPs, not MediaStream's scaled videoWidth/videoHeight. */
+export type BrowserPresentationSourceViewport = { width: number; height: number; zoomFactor: number }
+
+export type BrowserPresentationActivation =
+  | { kind: 'select' }
+  | {
+      kind: 'prepare-first-press'
+      /** Exact current original BrowserSnapshot.navigationId, never the displayed URL/title. */
+      navigationId: string
+      /** Original holder's authorized capture epoch, not a Renderer WC/Profile identifier. */
+      captureId: string
+      /** [0,1) within the actual contain-painted source frame; not the whole stage or Window. */
+      down: BrowserPresentationViewportPoint
+      button: BrowserPresentationMouseButton
+      clickCount: 1 | 2
+      modifiers: readonly BrowserPresentationMouseModifier[]
+    }
+  | {
+      kind: 'commit-first-press'
+      /** Main-issued one-shot scope. This scope pins the original view/Profile/nav/geometry. */
+      inputScopeId: string
+      up: BrowserPresentationViewportPoint
+      modifiers: readonly BrowserPresentationMouseModifier[]
+    }
+  | { kind: 'cancel-first-press'; inputScopeId: string }
+
+export type BrowserPresentationActivationReceipt =
+  | { outcome: 'selected' }
+  | { outcome: 'prepared'; inputScopeId: string; sourceViewport: BrowserPresentationSourceViewport }
+  | { outcome: 'input-dispatched'; inputScopeId: string }
+  | { outcome: 'already-dispatched'; inputScopeId: string }
+  | { outcome: 'cancelled'; inputScopeId: string }
+  | {
+      outcome: 'input-unconfirmed'
+      reason: 'source-changed' | 'navigation-changed' | 'capture-changed'
+        | 'geometry-changed' | 'hidden' | 'window-not-focused' | 'unknown-input-scope'
+        | 'input-dispatch-failed'
+      message: string
+    }
+
 export type BrowserPresentationLease = { leaseId: string }
 export type BrowserPresentationCapture = { captureId: string; browserId: string }
 export type BrowserPresentationCaptureAck =
@@ -1642,7 +1685,7 @@ export type AgentMuxDesktopApi = {
     removePresentation(leaseId: string): Promise<void>
     armPresentationCapture(leaseId: string): Promise<BrowserPresentationCapture>
     ackPresentationCapture(captureId: string, ack: BrowserPresentationCaptureAck): Promise<void>
-    activatePresentation(leaseId: string): Promise<void>
+    activatePresentation(leaseId: string, activation: BrowserPresentationActivation): Promise<BrowserPresentationActivationReceipt>
     onPresentationEvent(listener: (event: BrowserPresentationEvent) => void): () => void
     /** Release only the Main-owned native page surface; the Renderer Region remains present. */
     release(id: string): Promise<void>

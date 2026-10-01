@@ -1,0 +1,10 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": [
+    "../../../test/browser-presentation-product.test.tsx",
+    "../../../test/fixtures/mote-workface.ts",
+    "vitest.product.config.mts",
+    "vitest.product-adjacent.config.mts",
+    "../../../src/renderer/src/global.d.ts"
+  ]
+}
