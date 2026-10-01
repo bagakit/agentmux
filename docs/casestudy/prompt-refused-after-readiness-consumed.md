@@ -1,5 +1,7 @@
 # 一个还活着的 Agent 永远收不到消息了
 
+本文是历史故障复盘。以下 Run、源码位置与修复建议保留当时的观察范围，不声明当前候选仍有该缺陷或已通过回归。当前阻断判据与执行要求见 [RED-LINES](../../RED-LINES.md)，现行交互约束见[设计 SSOT](../design/agentmux-desktop-interaction.md)。
+
 ## 定性
 
 **P0。**

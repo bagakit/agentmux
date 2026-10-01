@@ -3,15 +3,14 @@ meta: AgentMux Terminal / CtxMux 运行时架构。
 目的：解释终端从字节到像素的端到端链路、各层所有权矩阵，以及 Terminal
 palette 与 TUI 自身表现层的边界。
 只记录有证据支撑的事实；所有引用为 repo-relative。
-入口：docs/plans/mux-runtime-decision.md。
+入口：docs/README.md。
 -->
 
 # Terminal 运行时：CtxMux 内核与外观所有权
 
-本文只描述当前源码能证明的事实。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/agentmux-desktop-interaction.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 设计](../plans/pmo-cross-workspace-worktree-cli-design.md)。
+本文描述源码中的端到端链路与所有权，不声明当前安装或运行实例已通过验证。产品对象只引用 [交互合同《统一概念与空间寻址》](../design/agentmux-desktop-interaction.md#统一概念与空间寻址)，技术来源名称保留 `packages/core` 与 Desktop 的实际 symbol（Run、Attachment、AgentSession、Provider、OSC 等）。Space/Zone/Tab/Region 是 client 空间，Project/Workspace 是来源与目录事实；空间移动不改原 Session/Run/cwd。空间命令与失败保留合同见[空间 CLI 使用合同](../guides/agentmux-cli-object-control.md)。
 
-CtxMux 作为唯一 Run Kernel 的取舍见 `docs/plans/mux-runtime-decision.md`。本文只做
-端到端链路与所有权的技术还原。
+ctxmux 独立 Runtime 与 Core 的分层见 [Core 接入说明](../../packages/core/README.md#runtime-边界)。当前随包身份唯一取自 [manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)；不能从该身份推断正在服务的 daemon 已被更新。
 
 ## 1. 端到端链路
 
@@ -39,14 +38,14 @@ TerminalView (Renderer, xterm)          apps/desktop/src/renderer/src/components
 像素
 ```
 
-反向的输入路径：xterm `onData` → `api.sessions.write`
-（`TerminalView.tsx:151`）→ `RuntimeController.write`
-（`runtime-controller.ts:468`）→ `AgentMuxClient.writeTerminal` /
-`writeAgent` → `CtxmuxRunAdapter.input`（`ctxmux-run-adapter.ts:738`）→
+反向的输入路径：[TerminalView](../../apps/desktop/src/renderer/src/components/TerminalView.tsx) 的 xterm `onData` → `api.sessions.write`
+→ [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts) 的 `write`
+→ [AgentMuxClient](../../packages/core/src/client.ts) 的 `writeTerminal` /
+`writeAgent` → [CtxmuxRunAdapter](../../packages/core/src/ctxmux-run-adapter.ts) 的 `input` →
 CtxMux 的累计 Input cursor → PTY。
 
-关键性质：**主题语义只存在于 Desktop；CtxMux、RunSpec、`packages/core` 只持有
-原始字节、尺寸与生命周期**。`packages/core` 的公共类型里没有主题字段（`client.ts` 的
+关键性质：**Desktop 持有主题；物理终端通路只传输字节、尺寸与生命周期，不承载 Desktop theme**。
+Core 另持有 Provider、AgentSession 等 Agent 语义。此处的公共物理终端类型没有主题字段（`client.ts` 的
 `AgentMuxTerminalCreateInput`、`ctxmux-run-adapter.ts` 的 `CtxmuxAdapterRun` 均无颜色/主题
 字段）。
 
@@ -62,7 +61,7 @@ managed Agent → agentmux CLI → control.sock → Desktop Main Control Host
                                   RuntimeController → Core → ctxmuxd
 ```
 
-Core 的 Control 合同只表达类型化的
+Core 的 [Control 合同](../../packages/core/src/control.ts) 只表达类型化的
 `inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop`
 请求和 receipt；它不保存
 布局。Desktop Main 组合跨进程控制并通过公开 Core API 执行长期 Agent lifecycle；Renderer 的既有 Workbench/layout owner 持有当前 Tab/Region、Workspace/Topic 绑定与 split tree。Agent 与 Terminal 创建经长期 RuntimeController，Browser 创建经 Main Browser owner。空间命令在同一个持久 Workbench 中记录 Space/Zone 绑定和最小 request 关联，先保存意图再调用既有 Main Git/config owner 与公开 Core 创建能力。Core 记录同一次 Agent 创建的首次投递事实；Renderer 的空间归属独立于执行 cwd，恢复时保留布局并自动尝试原 Session。创建后投影或保存失败时返回 partial/unknown，健康 Session 保持可发现；查询 request 不重启、不重发、不重新执行 Git。历史 Control 设计见 `docs/plans/agentmux-ai-native-desktop-composition-cli.md`；当前空间命令以实施合同为准。布局变化最终只通过既有 viewport
@@ -86,21 +85,21 @@ lineage，但只有 AgentMux Provider 可以解释这些证据。
 
 | 关注点 | Owner | 权威源码 |
 | --- | --- | --- |
-| PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | `ctxmux-run-adapter.ts:418`（`decodeChunk`）、`ctxmux-run-adapter.ts:829`（`emitRunEvent`） |
-| Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | `ctxmux-run-adapter.ts:587`（`start`）、`:774`（`resize`）、`:787`（`interrupt`）、`:795`（`stop`） |
-| Control transaction（inspect.tab/inspect.region/list.agents/agent.open/space.ls/space.inspect/space.mv/open.terminal/open.browser/send/focus/arrange/interrupt/resume/stop） | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | `apps/desktop/src/main/ipc.ts`、`packages/core/src/control-host.ts` |
-| Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | `apps/desktop/src/renderer/src/store.ts`、`lib/control.ts`、`lib/workbench-view-layout.ts`、`lib/workbench-layout.ts` |
+| PTY raw bytes（stdout/stdin 原始字节） | CtxMux daemon，经 `CtxmuxRunAdapter` 投影 | [ctxmux-run-adapter.ts](../../packages/core/src/ctxmux-run-adapter.ts)，`decodeChunk` / `emitRunEvent` |
+| Run lifecycle（start/stop/interrupt/resize） | CtxMux，经 adapter 暴露稳定投影 | 同一 adapter 的 `start` / `stop` / `interrupt` / `resize` |
+| Control transaction | Desktop Main；通过一个版本化 endpoint 连接 CLI 与 Renderer | [ipc.ts](../../apps/desktop/src/main/ipc.ts)、[control-host.ts](../../packages/core/src/control-host.ts) |
+| Tab/Region layout 与 placement | Desktop Renderer 的 Layout Store/reducer | [store.ts](../../apps/desktop/src/renderer/src/store.ts)、[control.ts](../../apps/desktop/src/renderer/src/lib/control.ts)、[Layout 公共合同](../../packages/layout/README.md) |
 | Tab 关闭与后台保留决策 | Desktop Renderer；停止动作通过 Core public API 下达 | 关闭承载最后一个 Terminal Region 的完整 Tab 即 Stop Run；Agent 默认 Stop，只有确认保留才继续后台运行；关闭 Tab 内 Region 只改变布局 |
-| Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | `terminal-viewport-sync.ts`、`TerminalView.tsx`、`runtime-controller.ts` |
-| Owner-confirmed live PTY size | CtxMux `RunInfo.current_size` 与 `RunEvent::Resized`；AgentMux 投影不得用 `RunSpec.size` 冒充当前尺寸，unknown 保持 `null`。`current_size` 是 protocol 16 的**必填**字段：daemon 每次快照都给出答案，`null` 是「没有 owner 能确认」这个真答案（tmux 托管的 pane、历史 Run），不是「字段缺失」。跨客户端 resize 通过广播给所有 attachment 的 `RunEvent::Resized` 收到 | `ctxmux-run-adapter.ts`、`screen-evidence.ts` |
-| Replay（重连时的字节回放） | CtxMux 快照，adapter 解码 | `ctxmux-run-adapter.ts:609`（`attach`）、`:641`（`replay`）、`:665`（`observeOutput`） |
-| Input（带累计 cursor 的可恢复写入） | CtxMux，adapter 用 `recoverableInput` 重试一次 | `ctxmux-run-adapter.ts:738`（`input`，`attempt < 2` + `disposition === 'unknown'`） |
-| Core Provider handshake（终端能力握手） | `AgentMuxClient` | `client.ts:1139`（`ensureTerminalHandshake`） |
-| Desktop OSC 10/11 capability reply（Agent 无 Renderer 时） | `RuntimeController`（Main） | `runtime-controller.ts:721`（`publish`）、`:776`（`replyToAgentColorQuery`） |
-| Desktop OSC 10/11 capability reply（普通 terminal，Renderer 在场） | Renderer（xterm parser handler） | `terminal-capability-replies.ts:10`、`TerminalView.tsx:155` |
-| OSC 查询回复所用的前景/背景色 | Desktop shared palette，经 `setTerminalViewColors` 注入 Main | `runtime-controller.ts:184`、`ipc.ts:46`、`ipc.ts:101` |
-| xterm theme（终端外观 `ITheme`） | Renderer，源自 shared palette | `terminal-theme.ts:31`、`terminal-palettes.ts:32` |
-| App chrome（产品外框视觉） | Desktop 应用外框（与终端外观分离） | `terminal-theme.ts:12`（注释确立边界） |
+| Viewport grid（何时 fit、向 PTY 提交哪个尺寸） | Desktop Renderer 决定 grid；Desktop Main 用 Region 的 Attachment capability 绑定 exact Run；CtxMux 只应用最终提交的 PTY 尺寸。UI 测得的 cols/rows 是请求，applied `current_size` 才是已生效尺寸 | [terminal-viewport-sync.ts](../../apps/desktop/src/renderer/src/lib/terminal-viewport-sync.ts)、TerminalView、RuntimeController |
+| Owner-confirmed live PTY size | CtxMux `RunInfo.current_size` 与 `RunEvent::Resized`；AgentMux 不用 `RunSpec.size` 冒充当前尺寸，unknown 保持 `null`。`null` 是「没有 owner 能确认」，不是缺省回启动尺寸；跨客户端 resize 按公开事件投影 | adapter 的 `snapshotCurrentSize` / `liveResizedSize`、[screen-evidence.ts](../../packages/core/src/screen-evidence.ts) |
+| Replay 与 terminal continuation | CtxMux 持有 raw bytes、Gap、checkpoint 与 Resize 顺序；Core 映射公开事实，不生成第二份 Runtime 真相 | adapter 的 `attach` / `observeOutput`；[terminal-continuation.ts](../../packages/core/src/terminal-continuation.ts) 的 `terminalContinuationSteps` |
+| Input（带累计 cursor 的可恢复写入） | CtxMux 公共 SDK 的 `recoverableInput` 持有 recoverable operation；adapter 映射 receipt，不另写一套次数循环或在 unknown 时盲目重发 | `CtxmuxRunAdapter.input` |
+| Core Provider handshake（终端能力握手） | `AgentMuxClient` | `ensureTerminalHandshake` |
+| Desktop OSC 10/11 capability reply（Agent 无 Renderer 时） | `RuntimeController`（Main） | `publish` / `replyToAgentColorQuery` |
+| Desktop OSC 10/11 capability reply（普通 terminal，Renderer 在场） | Renderer（xterm parser handler） | [terminal-capability-replies.ts](../../apps/desktop/src/renderer/src/lib/terminal-capability-replies.ts)、TerminalView |
+| OSC 查询回复所用的前景/背景色 | Desktop shared palette，经 `setTerminalViewColors` 注入 Main | RuntimeController / IPC、[terminal-palettes.ts](../../apps/desktop/src/shared/terminal-palettes.ts) |
+| xterm theme（终端外观 `ITheme`） | Renderer，源自 shared palette | [terminal-theme.ts](../../apps/desktop/src/renderer/src/lib/terminal-theme.ts)、shared palette |
+| App chrome（产品外框视觉） | Desktop 应用外框（与终端外观分离） | 同一 theme 文件的边界说明 |
 
 Provider-specific executable probe、session id、native resume argv、semantic replay、
 working/waiting/done、Permission、Hook 和 A2A 不进入 ctxmux。Provider-native Resume 由
@@ -108,7 +107,7 @@ AgentMux 物化通用 `RunSpec` 后交给 ctxmux；Level B provenance 不足时�
 Level A restart。相反，daemon activation、Run wait、权威生命周期时间与 revision 等不理解
 Agent 也成立的能力应由 ctxmux 公共 SDK 提供，AgentMux 不长期维护第二份实现。
 
-一句话概括所有权分层（`terminal-theme.ts:12` 注释原文）：*"App chrome owns product
+一句话概括所有权分层（`terminal-theme.ts` 注释原文）：*"App chrome owns product
 surfaces, xterm owns terminal appearance, and the PTY/CtxMux path owns bytes only."*
 
 ### 2.1 Workbench View 关闭事务
@@ -143,7 +142,7 @@ Desktop 启动时通过用户 `SHELL` 的交互式登录模式读取全部导出
 
 Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建读取当前进程环境。Run 显式 env 覆盖这份基线；SDK 的 `RunSpec.env` 仍然是 additive，删除 client 的 key 不会清掉常驻 daemon 已持有的同名变量。`terminalEnvironment()` 与 `agentEnvironment()` 继续拥有终端能力、CLI 路径与 Agent 身份注入；不由 Desktop 复制这些语义。
 
-基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`。最终 `CtxmuxRunAdapter.start` 用系统 `/usr/bin/env -u … -- program args…` 显式 unset 清理后缺省的策略 key，再 exec 原程序；PID、PTY、cwd、literal argv 和退出/信号语义保持，显式有效覆盖值继续生效。新建与 semantic resume 都走该边界，已启动进程的环境不能在线改写。产品修复与实际安装现场验收分开记录，见[颜色修复交付证据](../reviews/resume-terminal-colors-product-delivery.md)。
+基线声明 `TERM=xterm-256color`、`COLORTERM=truecolor`、`TERM_PROGRAM=AgentMux`，版本来自验证过的 `CTXMUX_VERSION`，开启 hyperlink。沿既有终端策略移除宿主遗留的 `NO_COLOR` 与值为 `0` 的 `FORCE_COLOR`/`CLICOLOR`。最终 `CtxmuxRunAdapter.start` 用系统 `/usr/bin/env -u … -- program args…` 显式 unset 清理后缺省的策略 key，再 exec 原程序；PID、PTY、cwd、literal argv 和退出/信号语义保持，显式有效覆盖值继续生效。新建与 semantic resume 都走该边界，已启动进程的环境不能在线改写。产品源码与实际安装现场验收分开记录；[颜色修复交付证据](../reviews/resume-terminal-colors-product-delivery.md) 是可选本机历史记录，缺席时不证明当前候选通过。
 
 ## 4. 完整 ANSI palette 与 Graphite 工作面
 
@@ -180,59 +179,57 @@ Core 的 `localProcessEnvironment()` 为 daemon 启动及每次本地 Run 创建
 ### 4.3 OSC 10/11 回复的编码
 
 回复格式在 `apps/desktop/src/shared/terminal-osc-color-query.ts`：`cssColorToOscRgb`
-（`:36`）把 `#rrggbb` 转成 `rgb:RRRR/GGGG/BBBB` 的 16-bit 形式（每字节重复成 4 位十六进制），
-`terminalOscColorQueryReply`（`:83`）据 slot 10/11 选 foreground/background 并包上
-OSC 终止符。`terminal-osc-color-query.test.ts:10` 锁定该格式
+把 `#rrggbb` 转成 `rgb:RRRR/GGGG/BBBB` 的 16-bit 形式（每字节重复成 4 位十六进制），
+`terminalOscColorQueryReply` 据 slot 10/11 选 foreground/background 并包上
+OSC 终止符。`terminal-osc-color-query.test.ts` 锁定该格式
 （如 `#000000 → rgb:0000/0000/0000`）。
 
 ## 5. OSC ready gate、replay 不回复、历史 Run 只读
 
 Codex 可能在 Renderer 尚未 attach 时就发出 OSC 10/11 查询。若在 Core 完成自己的 Terminal
-handshake（`client.ts:1139`）之前抢答，会与 handshake 争用同一个 CtxMux Input cursor。为此有三条防线：
+handshake（`client.ts`）之前抢答，会与 handshake 争用同一个 CtxMux Input cursor。为此有三条防线：
 
 ### 5.1 Agent 路径：Main 缓冲，Session ready 后再回
 
-`RuntimeController.publish`（`runtime-controller.ts:721`）在每个 `terminal-output` 事件上
-用 `scanTerminalOscColorQueries`（含跨 chunk 的 `remainder`）识别完整或分片的查询（`:724`）：
+`RuntimeController.publish`（`runtime-controller.ts`）在每个 `terminal-output` 事件上
+用 `scanTerminalOscColorQueries`（含跨 chunk 的 `remainder`）识别完整或分片的查询：
 
 - 若该 Run 尚未有 ready 的 Agent Session（`readyAgentColorQueryRuns` 无记录），回复被暂存进
-  `pendingAgentColorQueryReplies`，且有 4 KiB 上限（`:737`–`:740`）。
-- 当 Core 发布 `agent-session` 事件（`:743`），把该 Run 标记为 ready 并 flush 暂存的回复，
-  经 `replyToAgentColorQuery` → `writeAgent`（`:745`–`:755`、`:776`）写回。
-- Run 结束或移除时清理三张表（`:756`–`:763`）。
+  `pendingAgentColorQueryReplies`，且有 4 KiB 上限。
+- 当 Core 发布 `agent-session` 事件，把该 Run 标记为 ready 并 flush 暂存的回复，
+  经 `replyToAgentColorQuery` → `writeAgent` 写回。
+- Run 结束或移除时清理三张表。
 
 回归测试：`apps/desktop/test/runtime-controller.test.ts`「answers split Codex color queries only after
 Core publishes the ready Agent Session」——先发一个**跨两个 chunk**的 `OSC 10;?;?` 查询，
-断言 `writeAgent` **未**被调用；发布 `agent-session` 后，断言回复
-`\x1b]10;rgb:ffff/ffff/ffff\x1b\\\x1b]11;rgb:2828/2c2c/3434\x1b\\` 被写回。
-该测试同时证明 Main 回复与 Graphite shared palette 一致。
+断言 `writeAgent` **未**被调用；发布 `agent-session` 后，断言当前 foreground/background 的 OSC 回复被写回。测试来源以同一 shared palette 的 Graphite 纯黑背景核对 Main 回复，不另存一套颜色示例当作当前 palette。
 
 ### 5.2 普通 terminal 路径：Renderer 内答，但 replay 不答
 
 对 `session.kind === 'terminal'`，由 Renderer 的 xterm parser handler 应答
-（`TerminalView.tsx:155`–`:161`，`respondFromRenderer: session.kind === 'terminal'`）。
-`installTerminalColorQueryReplyHandlers`（`terminal-capability-replies.ts:10`）为 slot 10/11
+（`TerminalView.tsx`，`respondFromRenderer: session.kind === 'terminal'`）。
+`installTerminalColorQueryReplyHandlers`（`terminal-capability-replies.ts`）为 slot 10/11
 注册 OSC handler：
 
-- 仅当 `respondFromRenderer && !isReplaying()` 才回复（`:23`）；`isReplaying` 绑定到
-  `() => !readyForLiveOutput`（`TerminalView.tsx:156`）。
-- **无论是否回复都 `return true`**（`:29`），即 xterm **消费**该 OSC 但在回放期不作答。
+- 仅当 `respondFromRenderer && !isReplaying()` 才回复；`isReplaying` 绑定到
+  `() => !readyForLiveOutput`（`TerminalView.tsx`）。
+- **无论是否回复都 `return true`**，即 xterm **消费**该 OSC 但在回放期不作答。
 
-意义（`terminal-capability-replies.ts:7` 注释）：Main 已在无 Renderer 时应答 live 查询；
+意义（`terminal-capability-replies.ts` 注释）：Main 已在无 Renderer 时应答 live 查询；
 xterm 消费 replay 里的旧查询但不再次作答，避免重开 Tab 后把**历史响应**注入当前前台进程。
 
 ### 5.3 历史 Run 只读
 
 `TerminalView` 用 `canControlRun = session.processState === 'running'`
-（`TerminalView.tsx:50`）作为总闸：
+（`TerminalView.tsx`）作为总闸：
 
-- 键盘输入仅在 `canControlRun && readyForLiveOutput` 时写回（`:152`）。
-- OSC 回复的 `sendInput` 同样受 `canControlRun && readyForLiveOutput` 约束（`:158`–`:160`）。
-- 仅 `canControlRun` 时才启动 viewport 的 live 尺寸同步（`:212`）。
+- 键盘输入仅在 `canControlRun && readyForLiveOutput` 时写回。
+- OSC 回复的 `sendInput` 同样受 `canControlRun && readyForLiveOutput` 约束。
+- 仅 `canControlRun` 时才启动 viewport 的 live 尺寸同步。
 
 因此已退出的历史 Run 在 UI 上是只读回放，不会向已死进程写入按键、尺寸或 OSC 回复。
 多个 Renderer View 并发 attach 同一 Run 时，Main 复用同一个 CtxMux Attachment、后续 View 走
-`readRunReplay`（`runtime-controller.ts:397`–`:400`；测试 `runtime-controller.test.ts:310`）。
+`readRunReplay`（`runtime-controller.ts`；测试 `runtime-controller.test.ts`）。
 
 ### 5.4 Resize 只提交稳定、最新的网格
 
@@ -258,13 +255,10 @@ xterm 的 `onRender` 只用于证明首帧已经可测量：`TerminalView` 在�
 监听，再请求一次 viewport 同步。普通 TUI 输出不是 geometry 事件，绝不能持续进入 fit 链路；
 否则 Codex 重绘与一列宽度波动会形成 render → fit → PTY resize → render 的反馈环。
 
-Attach replay 是状态恢复，不是历史动画。`TerminalView` 将 CtxMux 返回的有序 replay chunk
-合并为一次 xterm parser write，并在 replay 与启动期 pending output 排空前保持终端画布不可见，
-只展示恢复态。最终状态完成后再原子揭示画布；真实 attach 失败则揭示红色错误。
-这样既保留字节顺序与最终 TUI 状态，也不会把数千个历史重绘帧播放成“终端自己 resize”。
+Attach continuation 是状态恢复，不是历史动画。`TerminalView.applyContinuation` 先验证公开步骤顺序，再恢复 checkpoint、应用 ordered Resize 与 Output；合并和有界排空只改变消费方式，不改变原字节顺序。在恢复阶段通过已有揭示 owner 控制画布，避免将历史重绘帧播放成“终端自己 resize”；失败、未知或 deadline 到期不能永久遮住健康终端。
 
 **原子揭示有 deadline，超时后揭示优先于原子性。** 隐藏画布的正当理由只有一个：避免把历史重绘
-帧当动画播出去。它**不是**一个可以无限期持有的权利——`AGENTS.md` 原则 11 在这里的含义是，
+帧当动画播出去。它**不是**一个可以无限期持有的权利——`AGENTS.md` 的健康能力边界 在这里的含义是，
 一个我们等不到的步骤不得把一个健康的终端永久藏起来。恢复态此前只有两个出口（全链成功、attach
 抛错），于是"链上某处永不 settle"这一类在界面上表现为**永久转圈**，而 ctxmux、Run、PTY 全都好着。
 
@@ -273,18 +267,13 @@ Attach replay 是状态恢复，不是历史动画。`TerminalView` 将 CtxMux �
 排在揭示之前，它经由 resize 与 attach 争用同一把按 Run 串行的锁，该 Run 上任一卡住的操作都会让
 揭示永不到来。此外揭示本身带一个 deadline：到点仍未揭示则**强制揭示**，画布交还给用户。
 
-强制揭示不得静默：它按原则 11 走服务窗告示（第 2 类——我们的步骤没走通，Agent 没坏），说清哪一步
+强制揭示不得静默：它按健康能力边界 走服务窗告示（第 2 类——我们的步骤没走通，Agent 没坏），说清哪一步
 没走通、现在按什么状态在跑、怎么恢复完整能力。恢复态本身仍是诚实信号，不因"看着烦"而删除；
 被削弱的只是它无限期遮挡画布的权利。
 
-CtxMux 的原始 Replay 有界；Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已经淘汰，
-保留后缀不能被宣称为完整终端屏幕。`TerminalView` 因此不再把 Gap 文案写进 xterm 字节流，
-而是在画布上方显示独立提示。对仍在运行的 Run，Replay 和启动期 Live Output 排空后，
-`TerminalViewportSynchronizer.requestContentRedraw()` 通过唯一 Resize Owner 临时减少一行，再恢复
-最终 xterm 网格，促使 TUI 在同一个 Run 上输出当前完整画面；用户也可以从提示中手动重试。
-历史 Run 没有可重绘的 PTY，只显示保留内容和缺失提示，不发送 Resize 或 Input。这个行为恢复的
-是“当前可用画面”，不是已经淘汰的滚动记录；完整要求见
-`docs/plans/agentmux-terminal-replay-gap-recovery.md`。
+CtxMux 的原始 Replay 有界；Gap 表示请求 cursor 与 `firstAvailableByte` 之间的字节已经淘汰，保留后缀不能被宣称为完整终端屏幕。当前 Core 与 Renderer 经 `terminalContinuationSteps` 消费公开 continuation：`basic-vt` 的 checkpoint、restore bytes 及后续 ordered output/Resize，或没有 checkpoint 的原始字节恢复。restore bytes 是恢复材料，不计为新的 PTY output；checkpoint 能恢复当前画面不代表缺失 scrollback 已补全。
+
+缺失提示留在 xterm 字节流之外。仍在运行的 Run 确需重绘时，`TerminalViewportSynchronizer.requestContentRedraw()` 经唯一 Resize Owner 临时减少一行再恢复最终网格，促使同一 Run 重新输出当前画面。历史 Run 不发送 Resize 或 Input。这只是当前画面的恢复动作，不能作为原始历史恢复或活跃终端连续向上阅读的通过证据；后者按[设计 SSOT](../design/agentmux-desktop-interaction.md#terminal-连续向上阅读历史) 验收。
 
 PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间尺寸串成 Promise 队列。
 它只保留一个 in-flight 请求和一个可替换的 pending size（`requestResize`/`drainPendingResizes`）；新尺寸覆盖尚未
@@ -300,18 +289,19 @@ PTY resize 仍可能慢于 UI 拖拽，所以 synchronizer 不再把所有中间
 | Graphite 工作面或 cursor accent 偏离稳定纯黑 | `apps/desktop/test/terminal-theme.test.ts` | Graphite `background === cursorAccent === '#000000'`；`black === '#1d1f21'` 且与工作面不同 |
 | palette 残缺导致 TUI 无法分层 | `apps/desktop/test/terminal-theme.test.ts` | 每个 catalog palette 恰好 22 键 |
 | OSC 抢答争用 Input cursor / Session 未就绪即回复 | `apps/desktop/test/runtime-controller.test.ts` | ready 前 `writeAgent` 未调用；ready 后写回 shared Graphite 前景/背景 |
-| 跨 chunk 的 OSC 查询被漏答或重复答 | `apps/desktop/test/terminal-osc-color-query.test.ts:30` | 分片查询保留 `remainder`，合并后只答一次 |
-| replay 旧查询被再次注入当前进程 | `terminal-capability-replies.ts:23`（`!isReplaying()` 门控）；`terminal-osc-color-query.test.ts:44` | 回放期不作答；malformed/颜色变更查询被忽略 |
-| OSC 回复格式漂移 | `terminal-osc-color-query.test.ts:10` | 16-bit `rgb:RRRR/GGGG/BBBB` 形式 |
-| 历史 Run 被误写输入 | `TerminalView.tsx:50`（`canControlRun` 门控，见 §5.3） | 非 running 时输入/OSC/resize 均不写回 |
+| 跨 chunk 的 OSC 查询被漏答或重复答 | `apps/desktop/test/terminal-osc-color-query.test.ts` | 分片查询保留 `remainder`，合并后只答一次 |
+| replay 旧查询被再次注入当前进程 | `terminal-capability-replies.ts`（`!isReplaying()` 门控）；`terminal-osc-color-query.test.ts` | 回放期不作答；malformed/颜色变更查询被忽略 |
+| OSC 回复格式漂移 | `terminal-osc-color-query.test.ts` | 16-bit `rgb:RRRR/GGGG/BBBB` 形式 |
+| 历史 Run 被误写输入 | `TerminalView.tsx`（`canControlRun` 门控，见 §5.3） | 非 running 时输入、OSC 回复与 Resize 均不写回 |
 | 拖拽后 Codex 因陈旧 PTY 尺寸队列持续闪烁 | `apps/desktop/test/terminal-viewport-sync.test.ts` | proposal 稳定后才 fit；未发送的中间尺寸被最新网格替换 |
 | 静止态 WebGL/DOM cell-metric 抖动使一列网格反复 reflow 画花 Codex（wobble） | `apps/desktop/test/terminal-viewport-sync.test.ts`（"skips a one-column grid wobble…"、"fits and resizes when container pixels actually change"） | 容器 CSS 像素未变时跳过 fit+resize；像素真变化才 fit（`measureViewport`/`samePixels`） |
 | 首帧 render 监听未注销导致 TUI 自发 resize | `TerminalView.tsx` 的 one-shot `terminal.onRender` | 首个 render 先 dispose；后续输出不再触发 viewport 同步 |
 | Attach 逐条写入数千个 replay event，历史 TUI 帧看起来像持续 resize | `apps/desktop/test/terminal-replay.test.ts` | replay 合并为一次 parser write；恢复完成前隐藏画布 |
 
-`docs/testing/strategy.md` 记录了整体测试策略；本表只列与终端运行时直接相关的回归点。
+[测试策略](../testing/strategy.md) 记录整体 oracle 与证据范围；本表列回归意图，测试存在不代表本轮候选已通过。
 
 ## 7. 交叉引用
 
-- `docs/plans/mux-runtime-decision.md` —— 选择 CtxMux 作为唯一 Run Kernel 的取舍。
-- `docs/plans/ctxmux-cutover.md` —— cutover 计划与桌面侧 daemon 退役。
+- [Core 接入说明](../../packages/core/README.md) —— 公共 API 与唯一 Run owner。
+- [终端交互分层](../design/agentmux-terminal-interaction-layers.md) —— 宿主、xterm 与 Agent 的职责。
+- [文档导航](../README.md) —— 产品约束、运行时与验证的阅读入口。

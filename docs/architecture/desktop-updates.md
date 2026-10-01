@@ -1,14 +1,17 @@
 # Desktop updates
 
-`pnpm update:local` builds the candidate and selects the least disruptive supported route.
+This document describes the update mechanisms in the current source, not an installation receipt. `pnpm update:local` builds the candidate and selects a route through [update-local.mjs](../../apps/desktop/scripts/update-local.mjs) and [update-policy.ts](../../apps/desktop/src/shared/update-policy.ts). Product constraints belong to the [interaction SSOT](../design/agentmux-desktop-interaction.md).
 
 | Candidate change | Route | Running work |
 | --- | --- | --- |
 | Renderer only; host and ctxmux fingerprints match | Activate versioned frontend resources | Main and Runs stay alive; the renderer checkpoints drafts, dirty buffers and layout, then reattaches |
 | Main, preload, IPC, Core or dependencies changed; ctxmux unchanged | Package, install and gracefully restart AgentMux | Existing ctxmux Runs remain available; Core owns attachment and semantic resume |
-| ctxmux fingerprint changed or runtime identity is unknown | Stop before quitting and require runtime compatibility/resume review | Current application and Agents remain untouched |
+| ctxmux fingerprint changed or fingerprint identity is unknown; ordinary update | Require runtime compatibility/resume review before installation | Review rejection leaves the current application and Agents running |
+| Explicit UI-only install intent | Install the application while retaining the existing compatible Runtime | UI and Native outcomes are reported separately; Native upgrade is deferred |
 
 The first update needs `pnpm package:mac:install` to install the frontend loader. Subsequent compatible UI work can use `pnpm update:local` or explicitly `pnpm update:renderer`. The latter rejects host/runtime changes. Both build before selecting or activating a release. Packaging requires a clean committed checkout; a separate worktree can preserve unfinished work in the development tree.
+
+`pnpm update:local --ui-only` selects application installation with UI-only intent. Direct packaging uses `pnpm package:mac:install --ui-only` (`--ui-only` requires `--install` on the packaging script). This is an explicit route, not permission to declare Native upgraded or to replace the daemon. [installApplication](../../apps/desktop/scripts/package-macos.mjs) compares the actual runtime trees and qualifies the existing listener. Without an outgoing workbench observation, an active candidate GUI still leaves complete workbench recovery `unknown`.
 
 Use `pnpm update:renderer:rollback` or **View > Revert frontend update** to return to the preceding compatible frontend. Rollback changes code, not user edits or Session facts. Reapplying the current release preserves the rollback pointer.
 
@@ -22,6 +25,8 @@ The frontend uses the existing workbench persistence owner for composer drafts, 
 
 ## Restart boundary
 
-The installer compares the actual installed and candidate ctxmux trees before requesting quit. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. Session/Run/PID continuity must be checked after installation.
+The installer compares the actual installed and candidate ctxmux trees before requesting quit. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
 
-Runtime changes need evidence about the currently running daemon's compatibility and each Provider's native resume handle. A changed binary alone does not authorize killing the daemon. If neither Session retention nor semantic resume is possible, explain the loss and obtain the user's explicit confirmation before any destructive restart. The ordinary updater deliberately has no force flag that bypasses this boundary.
+Full installation with changed runtime trees requires a nonempty review artifact passed as `--runtime-reviewed=<path>` to the packaging script. The artifact does not prove continuity by itself: the installer also uses the public same-Runtime planned-exec path and confirms the handoff before starting the new GUI. UI-only intent defers that Native transaction and retains the compatible service. Neither route may treat missing startup provenance as proof that healthy Runs must be replaced.
+
+A changed binary alone does not authorize killing the daemon. If neither Session retention nor semantic resume is possible, explain the loss and obtain the user's explicit confirmation before any destructive restart. The ordinary updater has no force flag that bypasses this boundary. Task acceptance and visual review follow [AGENTS](../../AGENTS.md); packaging reuses their evidence and does not add unrelated regression or review work as an installation prerequisite.
