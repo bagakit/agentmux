@@ -6,7 +6,7 @@
 
 **本页章节**
 
-- [AgentMux 对 Agent 说的话](#agentmux-对-agent-说的话)
+- [AgentMux 注入上下文](#agentmux-注入上下文)
 - [启动握手与自命名](#启动握手与自命名)
 - [交出去与派出去](#交出去与派出去)
 - [持久消息的显式消费与派发等待](#持久消息的显式消费与派发等待)
@@ -32,14 +32,30 @@
 - [A2A 消息要让人一眼看懂](#a2a-消息要让人一眼看懂)
 - [按 amux id 搜索 Agent](#按-amux-id-搜索-agent)
 
-## AgentMux 对 Agent 说的话
+## AgentMux 注入上下文
 
-- **AgentMux 自己发给 Agent 的话，收敛到一个模块**。今天这类文本散在启动提示、discuss 首条消息、send、resume 四处各拼各的，唯一共用的只有终端粘贴的字节封装（bracketed paste），那是**字节层**的包裹，不是**语义层**的署名。散着拼的后果不是难看而是不可演进：想给所有出站消息加一个字段，得记得改四个地方，漏掉的那个不会有测试变红。
-- **出站消息要结构化，让 Agent 能分辨这句话是谁说的**。形如 `<amux from="amux" …>…</amux>` 的显式信封，把"AgentMux 在对你说话"与"用户在对你说话"分开——没有信封时，一段系统注入的运行时说明和用户的真实请求在 Agent 眼里是同一段文本，它只能靠措辞猜。信封是**给 Agent 读的**，因此格式要人类可读、可嵌套在自然语言里，而不是另造一套需要解析器的线协议。
-- **信封承载的是已有的事实，不新建第二份消息台账**。作者、因果、投递状态已经在 Core 的 Message/Delivery 类型里；信封只是把其中该让 Agent 知道的那几项序列化进它真正读到的文本。这条明确划清与已否决的 agent 间可信通信（capability 签名、幂等 ledger）的边界：那套东西的前提是 **Agent 之间要互相认证**，而我们的模型里**人是信任锚**——信封不做认证，它只做署名与可读性。
-- **因此 `from="amux"` 是声明，不是凭证——它可被伪造，任何代码都不得把它当已核实的信任凭据**。信封无签名无校验，一段 `<amux from="amux">…</amux>` 是纯文本，谁都能写出字面相同的一段。这在 discuss 这条链上是真实注入面：发起方 Agent 的正文按用户段透传，它完全可以在正文里嵌一段假信封冒充 AgentMux，而发起方不是人——"人是信任锚"的论证在 Agent 对 Agent 时并不成立。所以入站侧**绝不**把 `<amux>` 解析回任何信任或授权决策；信封只服务于"给 Agent 读、让它区分这话是谁说的"，越过可读性去当安全边界用就是误用。真正的身份判定仍走 Core 的 capability（见《消息账本》），与这层文本署名两回事。
-- **用户内容永远不被信封改写**。信封包裹的是 AgentMux 自己的话；用户那句原文照旧原样送达，不被塞进属性、不被转义成另一种形状。Agent 收到的用户文本必须与用户敲的一致，否则复现问题时没人知道 Agent 究竟读到了什么。
-- 跨 AgentMux Session 的 Agent 消息来源、首条消息与原正文约束只见[《A2A 身份信封与持久化全局消息队列》](#a2a-身份信封与持久化全局消息队列)；AgentMux 系统引导的署名不能代替发起 Agent 的来源。
+原《AgentMux 对 Agent 说的话》中平台自身生成的内容在此统一为注入上下文规范；跨 Session 通信继续由原 A2A owner 定义。
+
+**AgentMux 注入上下文（AgentMux Injected Context）**指 AgentMux 自身生成、通过 User message 送给 Agent 的内容，用来明确平台说明与原请求的边界。这是内容归属，不改变 Provider 的消息角色，不另造运行时协议。外部 Skill 或作者声明包、Provider 原生注入、A2A 结构化记录及 RPC 回执不属于此规范；它们沿各自 owner，不能因正文看起来相似而合并。
+
+- **用途与投递形式分别表达。** 启动引导、运行上下文和提醒是用途；独立发送、附加在原请求前是投递形式。同一用途不只限首条或独立发送，同一形式也不代表用途、触发频率或优先级。提醒列为用途不证明已有周期调度；默认与本次选择、未确认语义仍见[《System Reminder 的默认与单次选择》](conversation-input.md#system-reminder-的默认与单次选择)。本规范不新增持续提醒、开关或调度功能。
+- **共享行为规则按职责单处定义。** 启动引导、运行时提醒与随请求附带的上下文按需复用同一职责 owner 的规则，不在各入口复制维护多份正文，避免语义漂移。这里只确定内容归属与复用边界，不新增规则注册表、配置层或调度设计。
+- **只使用现有统一包装 `<amux from="amux">…</amux>`。** 平台自身生成的说明共用一个组装 owner，不按用途另造包装；`amux:xxx`、`type`、`topic` 等命名空间或额外属性不是当前规范。原始用户或发起 Agent 的正文保持独立且逐字节不被包装改写，不塞入属性、不被转义成另一种形状；普通用户 prompt 无需因此包裹。跨 Session 的来源头与作者核验只见[《A2A 身份信封与持久化全局消息队列》](#a2a-身份信封与持久化全局消息队列)，`from="amux"` 不能代替发起 Agent 的身份。
+- **组合与读取必须解释同一边界。** 独立发送可以只有完整平台上下文；附加发送时上下文在原请求前，多个完整前导上下文按实际组装顺序保留。生成、实际输入、阅读展开与完整 Copy 必须一致，真实尾文不能被吞掉或补造；平台内容中的尖括号、实体或标记不能破坏包装边界或改变内容。本项定义一致性结果，不把尚未修复的生成与读取失配写成已满足。原记录内的阅读、引用与代码边界以及完整复制只见[《完整前导声明上下文的同记录阅读》](terminal-reading.md#terminal-连续向上阅读历史)。
+- **文本声明不是已核来源。** `from="amux"` 可被用户、Agent 或其他输入伪造，不是认证、权限或信任凭据。平台归属来自实际 producer 与受信提交记录，不能从标签、首条位置、时间或旧混合正文反推 System。平台注入、Topic/Wiki 等历史内容也不能覆盖当前用户指令、权限或权威 Runtime、Session、Run、Project、Task 事实。声明阅读不创建消息或身份台账，不改变原作者、parts、顺序或 recorded time；未识别、不完整或含糊的声明保持全文可读，不扫描正文猜来源。
+- **注入失败不阻断健康 Agent。** 保存或投递未确认沿原 receipt 与服务窗如实说明，不假报送达、不自动重发，不取消已有可用输入、启动或健康 Run。阅读识别失败不等于未投递；本规范不增加恢复前置门，不改原 Session、布局、阅读位置或草稿。字节层的 bracketed paste 继续负责终端输入定界，不替代这层内容归属。
+
+以下是当前源码机制与已知缺口；规范约束不代表实现已经满足。
+
+| 当前路径 | 实际 owner 与状态 |
+| --- | --- |
+| 启动 guide、Scratch Topic/Wiki/SOUL | [Core `composeAgentLaunchPrompt`](../../../packages/core/src/agent-outbound-message.ts) 将 guide 与 `agentMuxNote` 放在同一 amux 包装；[Desktop `RuntimeController`](../../../apps/desktop/src/main/runtime-controller.ts) 提供 Topic note，[Core Client](../../../packages/core/src/client.ts) 从实际 producer 保留独立 `systemContext` 记录。 |
+| Goal/PMO 任务上下文 | [Desktop `openGoalPmo`](../../../apps/desktop/src/renderer/src/store.ts) 生成 amux 后当普通 prompt 提交；它是自产文本声明，不能由标签升级为已核 System。 |
+| Goals 探索与 Browser annotations | [Goals `startGoalExploration`](../../../apps/desktop/src/renderer/src/lib/goals-entry-actions.ts) 将项目上下文附加为纯文本；[Browser context formatter](../../../apps/desktop/src/renderer/src/lib/browser-annotations.ts) 输出纯文本，经 [Survey Browser Tools](../../../apps/desktop/src/renderer/src/components/SurveyBrowserTools.tsx) 加入可编辑草稿。当前没有专用 Goal、Task 或 Browser 信封。 |
+| 普通 submit 与 resume 输入 | [Core Client](../../../packages/core/src/client.ts) 使用普通 user 段，不额外生成平台包装。 |
+| Mailbox Progress | [Desktop `deliverContinuousProgress`](../../../apps/desktop/src/main/continuous-progress-delivery.ts) 将用户配置的 `loop.prompt` 原样自动提交，目前不自动附加平台注入或共享消息规则。用户选择的 continuation prompt 仍是用户内容，不因自动提交升级为平台自产上下文。 |
+| System Reminder | 目前为 proposal-only，尚无 AgentMux 主动持续注入；默认与单次覆盖关系已确认，正文、触发与兑现范围未定。状态与未决范围见上述 Reminder owner。 |
+| 包装读取的一致性缺口 | [Core `parseAgentMuxMessagePrefix`](../../../packages/core/src/agent-message-render.ts) 严格读取精确 amux 开头、仅 `from` 属性及 XML 文本节点；生成器未转义平台内容，现启动 guide 含 [共享消息规则](../../../packages/core/src/agent-messaging-guidance.ts) 的字面 `<canonical Session ID>`，无法识别为完整声明上下文。未识别文本仍完整可读；该生成／读取一致性缺口尚存。 |
 
 ## 启动握手与自命名
 
