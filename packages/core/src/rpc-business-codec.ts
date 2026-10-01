@@ -129,6 +129,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
   if (isToolkitRequest(request) && isToolkitRequest(result)) assertToolkitResultTarget(request, result)
   const actual = result as unknown as Record<string, unknown>
   switch (request.operation) {
+    case 'browser.targets':
+      if (request.workspaceId && (result as Extract<AgentMuxControlResult, { operation: 'browser.targets' }>).targets.some(target => target.workspaceId !== request.workspaceId)) fail()
+      break
     case 'agent.view': case 'agent.rename': case 'agent.inspect':
       if (actual.agentSessionId !== request.agentSessionId) fail()
       break

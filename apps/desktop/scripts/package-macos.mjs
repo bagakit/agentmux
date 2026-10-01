@@ -195,6 +195,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
   await cp(join(desktopRoot, 'out'), join(appResources, 'out'), { recursive: true })
   await cp(join(desktopRoot, 'resources'), join(appResources, 'resources'), { recursive: true })
+  await cp(join(desktopRoot, 'browser-extension'), join(appResources, 'browser-extension'), { recursive: true })
   await cp(join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'), join(appResources, 'THIRD_PARTY_NOTICES.md'))
   await writeFile(join(appResources, 'package.json'), `${JSON.stringify({
     name: 'agentmux-desktop',
@@ -265,6 +266,7 @@ export async function copyRuntimeApplication(appPath, source) {
   )
   await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
+  await materializeDependency(desktopRoot, 'ws', join(appResources, 'node_modules', 'ws'))
   const outBin = join(appResources, 'out', 'bin')
   await mkdir(outBin, { recursive: true })
   await cp(join(coreRoot, 'bin'), outBin, { recursive: true })

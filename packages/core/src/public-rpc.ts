@@ -15,7 +15,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'space.unbind': 'space.unbind', 'space.focus': 'focus', 'space.promote': 'promote.region',
   'space.arrange': 'arrange', 'file.open': 'open.file', 'file.view': 'space.view',
   'terminal.open': 'open.terminal', 'browser.open': 'open.browser',
-  'browser.run': 'browser.run', 'browser.history': 'browser.history',
+  'browser.targets': 'browser.targets', 'browser.run': 'browser.run', 'browser.history': 'browser.history',
   'browser.inspect': 'browser.operation', 'browser.stop': 'browser.stop',
   'browser.replay': 'browser.replay', 'browser.follow': 'browser.subscribe',
   'browser.task.assets': 'browser.task.assets', 'browser.task.reliability': 'browser.task.reliability',

@@ -1,5 +1,19 @@
 export const EXTERNAL_BROWSER_PROTOCOL = 1
 export const MAX_BRIDGE_BYTES = 16 * 1024 * 1024
+export const BROWSER_OPERATION_FEEDBACK_WORLD_NAME = 'agentmux-browser-operation-feedback'
+
+/** Only our already-created isolated-world state; no page facts or another operation. */
+function clearOwnedFeedback(operationId) {
+  const state = globalThis.__agentMuxBrowserOperationFeedback
+  if (!state || state.operationId !== operationId) return false
+  globalThis.__agentMuxBrowserOperationFeedbackBridge?.clear?.('invalidate')
+  state.hide?.('invalidate')
+  state.cleanup?.()
+  return true
+}
+export function buildOwnedFeedbackClearScript(operationId) {
+  return `(${clearOwnedFeedback.toString()})(${JSON.stringify(operationId)})`
+}
 
 export function isShareUrl(value) {
   try {

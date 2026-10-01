@@ -1049,6 +1049,13 @@ const mockApi: AgentMuxDesktopApi = {
     observe: () => { throw new Error('Toolkit observation requires the Desktop Main owner.') }
   },
   browser: {
+    listRetainedUploads: async () => { throw new Error('Selected-file snapshots require the Desktop Main owner.') },
+    discardRetainedUpload: async () => { throw new Error('Selected-file cleanup requires the Desktop Main owner and local person confirmation.') },
+    listTargets: async () => ({ targets: [], warning: 'Browser target discovery requires the Desktop Main owner.' }),
+    createExternalPairing: async () => { throw new Error('External Browser connections require the Desktop Main owner.') },
+    revealExternalExtension: async () => { throw new Error('External Browser connections require the Desktop Main owner.') },
+    stopSharingExternal: async () => { throw new Error('External Browser connections require the Desktop Main owner.') },
+    onTargetsChanged: () => () => {},
     forgetAppLinkScheme: async (scheme, expected) => {
       const next = applyAppLinkForget(mockConfig, scheme, expected)
       if (next === mockConfig) return

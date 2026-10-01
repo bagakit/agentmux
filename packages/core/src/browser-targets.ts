@@ -1,7 +1,7 @@
 /** One addressable page, with its actual transport capabilities. No host UI or profile object. */
 export type AgentMuxBrowserTarget = {
   id: string
-  workspaceId: string
+  workspaceId: string | null
   source: 'embedded' | 'external'
   status: 'ready' | 'disconnected' | 'revoked' | 'closed' | 'unavailable'
   url: string

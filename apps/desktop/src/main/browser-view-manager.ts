@@ -5,7 +5,7 @@ import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type
 import { randomUUID } from 'node:crypto'
 import { WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import { BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
+import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserTarget } from '@agentmux/core'
 import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
@@ -40,6 +40,7 @@ import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './br
 import { browserPngFromNativeImage } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
+import { safeBrowserUrl, startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
 import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import {
   appLinkOutcome,
@@ -166,51 +167,6 @@ type BrowserTaskPageExecution = { cursor: BrowserTaskStepExecution; step?: Brows
 
 const BROWSER_WAIT_PAGE_CALLS = new Set(browserPageCapabilityNames('wait'))
 
-function summarizeBrowserValue(value: unknown): string {
-  if (value === null) return 'null'
-  if (Array.isArray(value)) return `array(${value.length})`
-  if (typeof value === 'object') return 'object'
-  return typeof value
-}
-
-function safeBrowserUrl(value: string): string {
-  try {
-    const url = new URL(value)
-    url.username = ''
-    url.password = ''
-    url.search = ''
-    url.hash = ''
-    return url.toString()
-  } catch {
-    return 'about:blank'
-  }
-}
-
-function startBrowserOperationStep(operation: BrowserOperation, method: string, args: unknown[]): BrowserOperationStep {
-  const sensitive = method === 'fillInput' || method === 'typeText' || method === 'js' || method === 'cdp'
-  const replay: BrowserReplayStep = {
-    method,
-    url: safeBrowserUrl(operation.url),
-    args: sensitive
-      ? []
-      : (typeof args[0] === 'string' && args[0].startsWith('@') ? args.slice(1) : args)
-          .map((arg) => typeof arg === 'string' && arg.length > 120 ? '[redacted]' : arg),
-    ...(method === 'fillInput' || method === 'typeText' ? { inputKey: 'value', blockedReason: 'Sensitive input is requested again at replay time.' } : {}),
-    ...(method === 'js' || method === 'cdp' ? { blockedReason: 'Opaque page code or protocol input requires explicit review.' } : {})
-  }
-  const step: BrowserOperationStep = {
-    sequence: operation.steps.length + 1,
-    method,
-    label: method,
-    startedAt: Date.now(),
-    status: 'running',
-    ...(typeof args[0] === 'string' && args[0].startsWith('@') ? { ref: args[0] } : {}),
-    replay
-  }
-  operation.steps.push(step)
-  operation.summary = `Running ${method}`
-  return step
-}
 
 /**
  * 哪些 `input-event` 算「人伸手了」。
@@ -353,6 +309,21 @@ export function normalizeBrowserUrl(value: string): string {
 export class BrowserViewManager {
   /** Window Chrome listens to the current native owner without a second Browser/input registry. */
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
+  /** Facts from real embedded page owners; external tabs never enter this registry. */
+  targets(): AgentMuxBrowserTarget[] {
+    return [...this.entries.values()].map(entry => {
+      const contents = entry.view.webContents
+      const available = !contents.isDestroyed()
+      const workspaceId = entry.workspaceId
+      return { id: entry.id, workspaceId, source: 'embedded', status: available ? 'ready' : 'unavailable',
+        url: available ? contents.getURL() : '', title: available ? contents.getTitle().slice(0, 512) : '',
+        navigationId: entry.navigationId,
+        capabilities: workspaceId ? [...BROWSER_PAGE_CAPABILITY_NAMES] : BROWSER_PAGE_CAPABILITY_NAMES.filter(name =>
+          !['uploadFiles', 'download', 'readDownload', 'extractStructured', 'readResult'].includes(name)),
+        ...(!available ? { warning: 'The embedded page surface is unavailable. Its original Region remains.' } :
+          !workspaceId ? { warning: 'This embedded page has no verified Workspace binding. Workspace file and durable result capabilities are unavailable.' } : {}) }
+    })
+  }
   private readonly entries = new Map<string, BrowserEntry>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private readonly webAuthnSessions = new Map<Session, () => void>()
@@ -2055,7 +2026,7 @@ export class BrowserViewManager {
         const view = requireLive()
         if (view !== observingView) throw new Error('The Browser view changed before upload.')
         return { workspaceId: entry.workspaceId, browserId: entry.id, operationId: operation.id,
-          navigationId: entry.navigationId, currentNavigationId: () => {
+          navigationId: entry.navigationId, documentSurvivesClient: false, currentNavigationId: () => {
             const currentView = requireLive()
             if (currentView !== observingView) throw new Error('The Browser view changed during upload.')
             if (signal?.aborted) throw new Error('This Browser operation stopped before file assignment could be confirmed.')
@@ -2624,7 +2595,6 @@ export class BrowserViewManager {
         // known-good projection with an unsupported target if an embedder emits this callback first.
         return
       }
-      if (!details.isSameDocument) this.releaseUploadFiles(entry)
       this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded by navigation'))
       entry.selectionOperation = null
       void entry.feedback?.clear()
@@ -2657,6 +2627,7 @@ export class BrowserViewManager {
     })
     contents.on('did-navigate', (_event, url) => {
       if (!this.owns(entry, view)) return
+      this.releaseUploadFiles(entry)
       entry.requestedUrl = url
       entry.error = null
       this.emit(entry)

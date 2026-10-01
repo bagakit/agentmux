@@ -2,11 +2,20 @@
   "extends": "../../../tsconfig.json",
   "compilerOptions": {
     "allowJs": true,
-    "types": ["node"],
+    "types": [
+      "node"
+    ],
     "baseUrl": "../../../../..",
     "paths": {
-      "@agentmux/core/control": ["packages/core/src/control.ts"],
-      "@agentmux/core": ["apps/desktop/scripts/fixtures/browser-external-target/core-exports.ts"]
+      "@agentmux/core/control": [
+        "packages/core/src/control.ts"
+      ],
+      "@agentmux/core": [
+        "apps/desktop/scripts/fixtures/browser-external-target/core-exports.ts"
+      ],
+      "@agentmux/client-ui/pasted-images": [
+        "packages/client-ui/src/lib/pasted-images.ts"
+      ]
     }
   },
   "include": [
@@ -16,6 +25,10 @@
     "../../../test/browser-page-dispatch.test.ts",
     "../../../src/main/browser-external-bridge.ts",
     "../../../src/main/browser-external-target.ts",
-    "../../../test/browser-external-target.test.ts"
+    "../../../src/main/browser-external-owner.ts",
+    "../../../../../packages/core/src/control-browser-targets.ts",
+    "../../../test/browser-external-target.test.ts",
+    "../../../test/browser-external-public-cli.test.ts",
+    "../../../test/browser-external-main-glue.test.ts"
   ]
 }

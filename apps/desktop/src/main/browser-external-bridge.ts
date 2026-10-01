@@ -12,7 +12,8 @@ const grantSchema = z.object({ tabId: z.number().int().nonnegative(), grantId: z
   navigationId: id, url: z.string().max(8192).refine(isShareUrl), title: z.string().max(512) }).strict()
 const savedSchema = grantSchema.extend({ id: z.string().uuid(), workspaceId: id,
   extensionId: z.string().regex(/^[a-p]{32}$/), instanceId: z.string().uuid(),
-  status: z.enum(['ready', 'disconnected', 'revoked', 'closed', 'unavailable']), warning: z.string().max(2000).optional() })
+  status: z.enum(['ready', 'disconnected', 'revoked', 'closed', 'unavailable']), warning: z.string().max(2000).optional(),
+  ledgerNavigationId: id.optional() })
 const documentSchema = z.object({ version: z.literal(1), targets: z.array(savedSchema).max(64) }).strict()
 
 type Grant = z.infer<typeof grantSchema>
@@ -58,7 +59,8 @@ export class ExternalBrowserBridge {
   private starting: Promise<void> | null = null
   private disposed = false
   private persistenceWarning: string | undefined
-  constructor(private readonly path: string, private readonly changed: () => void = () => {}) {
+  constructor(private readonly path: string, private readonly changed: () => void = () => {},
+    private readonly documentEnded: (browserId: string, navigationId: string) => void = () => {}) {
     this.readyPromise = this.load()
   }
   async ready(): Promise<void> { await this.readyPromise }
@@ -150,6 +152,7 @@ export class ExternalBrowserBridge {
         else this.send(connection, { type: 'rejected', grantId: grant.data.grantId, reason: 'This target could not be shared. Remove unused bindings or explicitly share the original tab again.' })
       } else if (message.type === 'revoked') {
         const row = this.original(connection, message.tabId, message.grantId)
+        if (row && message.reason === 'closed') this.documentEnded(row.id, row.navigationId)
         if (row) this.revoke(row, message.reason === 'closed' ? 'closed' : message.reason === 'unavailable' ? 'unavailable' : 'revoked',
           'The original tab stopped sharing. Sent actions are not replayed; share it explicitly to grant control again.')
       } else if (message.type === 'response') this.response(connection, message)
@@ -271,6 +274,7 @@ export class ExternalBrowserBridge {
       if (!grant.success || grant.data.tabId !== row.tabId || grant.data.grantId !== row.grantId || grant.data.navigationId !== message.navigationId) {
         pending.reject(new ExternalBrowserRequestFailure('The attached page identity was not confirmed. No replacement is selected.', true)); return
       }
+      if (row.navigationId !== grant.data.navigationId) this.documentEnded(row.id, row.navigationId)
       Object.assign(row, grant.data)
     } else if (pending.allowNavigation) row.navigationId = message.navigationId
     pending.resolve(message.value)
@@ -279,6 +283,7 @@ export class ExternalBrowserBridge {
     const row = this.original(connection, message.tabId, message.grantId)
     if (!row || row.status !== 'ready' || typeof message.method !== 'string' || typeof message.navigationId !== 'string') return
     if (message.mainDocumentNavigation === true && !message.sessionId) {
+      if (message.method === 'Page.frameNavigated' && row.navigationId !== message.navigationId) this.documentEnded(row.id, row.navigationId)
       row.navigationId = message.navigationId
       if (typeof message.url === 'string' && isShareUrl(message.url)) row.url = message.url
       void this.persist(); this.changed()
@@ -294,6 +299,18 @@ export class ExternalBrowserBridge {
     return row
   }
   has(id: string): boolean { return this.targets.has(id) }
+  recordLedger(id: string, navigationId: string): void {
+    const row = this.require(id)
+    if (row.status !== 'ready' || row.navigationId !== navigationId) throw new Error('The original document changed before its refs could be recorded.')
+    row.ledgerNavigationId = navigationId
+    void this.persist()
+  }
+  stopSharing(id: string): void {
+    const row = this.require(id)
+    const connection = [...this.connections].find(item => item.id === row.connection?.id)
+    if (connection) this.send(connection, { type: 'stop-sharing', tabId: row.tabId, grantId: row.grantId })
+    this.revoke(row, 'revoked', 'The person stopped sharing this original tab. Grant control explicitly before another action.')
+  }
   get warning(): string | undefined { return this.persistenceWarning }
   list(): AgentMuxBrowserTarget[] {
     return [...this.targets.values()].map(row => ({ id: row.id, workspaceId: row.workspaceId, source: 'external', status: row.status,

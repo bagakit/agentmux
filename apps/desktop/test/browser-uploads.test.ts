@@ -35,9 +35,9 @@ async function fixture() {
     }
     throw new Error('Unexpected CDP method: '+method)
   })
-  const context: BrowserUploadContext = {workspaceId:workspace.id,browserId:'browser',operationId:'operation',navigationId,
+  const context: BrowserUploadContext = {workspaceId:workspace.id,browserId:'browser',operationId:'operation',navigationId,documentSurvivesClient:false,
     currentNavigationId:()=>navigationId,target:{objectId:'exact-object',sendCommand:send}}
-  return {owner,files,root,staging,context,send,selected:()=>selected,
+  return {owner,files,workspace,root,staging,context,send,selected:()=>selected,
     navigate:()=>{navigationId='document-2'},single:()=>{multiple=false},invalidate:()=>{valid=false}}
 }
 
@@ -159,11 +159,14 @@ it('enforces file count and whole-file byte bounds without a partial file upload
 it('the aggregate staging budget is shared by independent Browser documents', async () => {
   const f=await fixture(), bytes=Buffer.alloc(16*1024*1024)
   vi.spyOn(f.files,'snapshotBytes').mockResolvedValue({bytes,totalBytes:bytes.length,revision:'sha256:test',offset:0,returnedBytes:bytes.length,nextOffset:null,readCost:{payloadBytes:bytes.length}})
-  for(let index=0;index<8;index++)await uploadBrowserFiles(f.owner,{...f.context,browserId:'browser-'+index},['file.bin'])
-  await expect(uploadBrowserFiles(f.owner,{...f.context,browserId:'browser-over-budget'},['file.bin'])).rejects.toThrow('Upload byte budget is full')
+  for(let index=0;index<8;index++)await uploadBrowserFiles(f.owner,{...f.context,browserId:'browser-'+index,documentSurvivesClient:true},['file.bin'])
+  await f.owner.dispose()
+  const restored = new BrowserUploads(f.staging, f.files, () => f.workspace)
+  expect(await restored.retained()).toMatchObject({ selectionCount: 8, byteLength: 128 * 1024 * 1024 })
+  await expect(uploadBrowserFiles(restored,{...f.context,browserId:'browser-over-budget'},['file.bin'])).rejects.toThrow('Upload byte budget is full')
   expect(f.send.mock.calls.filter(call=>call[0]==='DOM.setFileInputFiles')).toHaveLength(8)
-  await f.owner.releaseBrowser('browser-0')
-  expect((await uploadBrowserFiles(f.owner,{...f.context,browserId:'browser-over-budget'},['file.bin'])).byteLength).toBe(bytes.length)
+  await restored.releaseDocument('browser-0', 'document-1')
+  expect((await uploadBrowserFiles(restored,{...f.context,browserId:'browser-over-budget',documentSurvivesClient:true},['file.bin'])).byteLength).toBe(bytes.length)
 },20_000)
 
 it('dispose cleans only upload snapshots and preserves unrelated files in its private namespace', async () => {

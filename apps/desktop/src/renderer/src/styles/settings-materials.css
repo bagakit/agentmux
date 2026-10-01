@@ -80,3 +80,14 @@
   .settings-sidebar nav > button { transition: none; }
   .settings-pane-stack { animation: none; }
 }
+
+.external-browser-connections__actions, .external-browser-connections__link { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+.external-browser-connections .small-button { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.external-browser-connections__link input { min-width: 0; flex: 1; }
+.external-browser-connections__targets { list-style: none; margin: 0; padding: 0; }
+.external-browser-connections__targets li { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-2) 0; }
+.external-browser-connections__targets li > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.external-browser-connections__targets strong { font-size: var(--fs-body); font-weight: 500; }
+.external-browser-connections__targets small { display: block; color: var(--text-3); font-size: var(--fs-micro); }
+.external-browser-connections__targets p { margin: var(--sp-1) 0; color: var(--text-3); font-size: var(--fs-micro); }
+.external-browser-connections__targets button { flex-shrink: 0; }

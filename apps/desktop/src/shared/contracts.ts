@@ -1,4 +1,5 @@
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
+import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
@@ -1567,6 +1568,13 @@ export type AgentMuxDesktopApi = {
   }
   toolkit: ToolkitDesktopApi
   browser: {
+    listRetainedUploads(): Promise<import('./browser-upload.js').BrowserRetainedUploads>
+    discardRetainedUpload(selectionId: string): Promise<boolean>
+    listTargets(workspaceId?: string): Promise<{ targets: AgentMuxBrowserTarget[]; warning?: string }>
+    createExternalPairing(workspaceId: string): Promise<AgentMuxExternalBrowserPairing>
+    revealExternalExtension(): Promise<void>
+    stopSharingExternal(id: string): Promise<void>
+    onTargetsChanged(listener: () => void): () => void
     /** Forget only the answer displayed on this row; a newer answer is a conflict. */
     forgetAppLinkScheme(scheme: string, expected: AppLinkSchemeChoice): Promise<void>
     /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */

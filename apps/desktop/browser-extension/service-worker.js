@@ -1,4 +1,4 @@
-import { EXTERNAL_BROWSER_PROTOCOL, MAX_BRIDGE_BYTES, isShareUrl, isTabScopedCommand } from './protocol.js'
+import { EXTERNAL_BROWSER_PROTOCOL, MAX_BRIDGE_BYTES, isShareUrl, isTabScopedCommand, BROWSER_OPERATION_FEEDBACK_WORLD_NAME, buildOwnedFeedbackClearScript } from './protocol.js'
 
 /** Authority stays with the extension popup's explicit share, never a CDP caller's tab argument. */
 export class SharedTabWorker {
@@ -124,6 +124,7 @@ export class SharedTabWorker {
           if (grant) void this.revoke(grant.tabId, 'revoked')
         }
         else if (message.type === 'request') this.enqueueRequest(message, socket, generation)
+        else if (message.type === 'stop-sharing' && this.grants.get(message.tabId)?.grantId === message.grantId) void this.revoke(message.tabId, 'revoked')
       })
       socket.addEventListener('close', () => {
         if (this.socket === socket) this.disconnect('AgentMux disconnected. Sent actions are not replayed.')
@@ -172,10 +173,24 @@ export class SharedTabWorker {
     }
     await this.persist()
   }
-  async releaseAttach(grant) {
+  async releaseAttach(grant, clearFeedback = true) {
     const lease = this.attachOwners.get(grant.tabId)
     if (lease?.grant !== grant) return
     lease.cancelled = true
+    if (clearFeedback && lease.feedbackWorlds.size) {
+      // Revocation removes authority first. Clear only contexts actually created by
+      // this lease, without reattaching, reading a frame tree, or touching page data.
+      let timer
+      const cleanup = Promise.all([...lease.feedbackWorlds.values()].map(async world => {
+        if (this.attachOwners.get(grant.tabId) !== lease) return
+        try { await this.api.debugger.sendCommand({ tabId: grant.tabId, ...(world.sessionId ? { sessionId: world.sessionId } : {}) },
+          'Runtime.evaluate', { contextId: world.contextId, expression: buildOwnedFeedbackClearScript(lease.operationId), returnByValue: true }) }
+        catch { /* The original document/debugger may already have ended. No substitute is attached. */ }
+      }))
+      try { await Promise.race([cleanup, new Promise(resolve => { timer = setTimeout(resolve, 120) })]) }
+      finally { clearTimeout(timer) }
+    }
+    if (this.attachOwners.get(grant.tabId) !== lease) return
     try { await this.api.debugger.detach({ tabId: grant.tabId }) } catch { /* Closed/detached is already unavailable. */ }
     if (this.attachOwners.get(grant.tabId) === lease) this.attachOwners.delete(grant.tabId)
   }
@@ -201,10 +216,10 @@ export class SharedTabWorker {
     const mainDocumentNavigation = (method === 'Page.frameNavigated' && !source.sessionId && !params.frame?.parentId) ||
       (method === 'Page.navigatedWithinDocument' && !source.sessionId && params.frameId === grant.rootFrameId)
     if (mainDocumentNavigation) {
-      grant.navigationId = params.frame?.loaderId || crypto.randomUUID()
+      if (method === 'Page.frameNavigated') grant.navigationId = params.frame?.loaderId || crypto.randomUUID()
       grant.url = params.frame?.url || params.url || grant.url
       if (!isShareUrl(grant.url)) { void this.revoke(grant.tabId, 'unavailable'); return }
-      grant.frames.clear()
+      if (method === 'Page.frameNavigated') grant.frames.clear()
     }
     this.send({ type: 'event', tabId: grant.tabId, grantId: grant.grantId, navigationId: grant.navigationId,
       ...(source.sessionId ? { sessionId: source.sessionId } : {}), mainDocumentNavigation, method, params, url: grant.url, title: grant.title })
@@ -231,7 +246,7 @@ export class SharedTabWorker {
       let value
       if (message.action === 'attach') {
         if (grant.attached || this.attachOwners.has(grant.tabId)) throw new Error('Another operation is attached to or releasing this shared tab.')
-        const lease = { grant, generation, operationId: message.operationId, callerId: message.callerId, cancelled: false }
+        const lease = { grant, generation, operationId: message.operationId, callerId: message.callerId, cancelled: false, feedbackWorlds: new Map() }
         this.attachOwners.set(grant.tabId, lease)
         sent = true
         try { await this.api.debugger.attach(target, '1.3'); current(false); if (lease.cancelled) throw new Error('The original operation stopped during debugger attachment.') }
@@ -254,7 +269,7 @@ export class SharedTabWorker {
         if (lease) lease.cancelled = true
         if (grant.attached) {
           grant.attached = false; grant.frames.clear()
-          await this.releaseAttach(grant)
+          await this.releaseAttach(grant, false)
         }
         value = {}
       } else if (message.action === 'command') {
@@ -263,6 +278,11 @@ export class SharedTabWorker {
         if (!grant.attached || !isTabScopedCommand(message.method, message.params)) throw new Error('This command is outside the shared-tab capability.')
         current(false); sent = true
         value = await this.api.debugger.sendCommand(target, message.method, message.params || {})
+        if (message.method === 'Page.createIsolatedWorld' && message.params?.worldName === BROWSER_OPERATION_FEEDBACK_WORLD_NAME &&
+          Number.isSafeInteger(value?.executionContextId) && value.executionContextId > 0) {
+          lease.feedbackWorlds.set(`${message.sessionId || ''}:${value.executionContextId}`,
+            { contextId: value.executionContextId, ...(message.sessionId ? { sessionId: message.sessionId } : {}) })
+        }
         current(message.method === 'Page.navigate')
       } else throw new Error('Unknown shared-tab action.')
       current(message.action === 'attach' || message.action === 'detach' || message.method === 'Page.navigate')
