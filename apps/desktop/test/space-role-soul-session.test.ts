@@ -13,7 +13,7 @@ import type { CtxmuxAdapterRun, CtxmuxRunAdapter } from '../../../packages/core/
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { RuntimeController } from '../src/main/runtime-controller'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
-import { MOTE_SOUL_PATH, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, MOTE_COORDINATION_ROLE, MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
 // Keep the real Desktop controller, Core lifecycle, provider planning, outbound envelope,
 // Session store and filesystem. Only transport/host selection is isolated from user Runs.
@@ -111,6 +111,26 @@ async function fixture() {
   }, config)
   return { root, workspace, topics, core, inner, config, controller, starts, runs, stop, launch }
 }
+
+
+it('delivers the new primary knowledge defaults once through RuntimeController and the Core outbound envelope', async () => {
+  const h = await fixture()
+  const primary = await h.topics.ensure(h.workspace, PMO_TEAMS_TOPIC_ID)
+  const launched = await h.launch(primary.id, 'default-primary-session', 'Continue my established delivery decision.')
+  expect(launched.session.id).toBe('default-primary-session')
+  expect(h.starts).toHaveLength(1)
+  const delivered = h.starts[0]!.args.at(-1)!
+  expect(delivered.length).toBeGreaterThan(1500)
+  expect(h.starts[0]!.cwd).toBe(join(h.root, primary.directoryPath))
+  expect(delivered).toContain(DEFAULT_MOTE_SOUL)
+  expect(delivered).toContain(DEFAULT_PMO_TEAMS_TOPIC_WIKI)
+  expect(delivered).toContain('Read back a saved change before saying it is remembered.')
+  expect(delivered.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
+  const boundary = delivered.indexOf('</amux>')
+  expect(boundary).toBeGreaterThan(-1)
+  expect(delivered.slice(boundary)).toContain('Continue my established delivery decision.')
+  expect(h.core.agentSessions().map(session => session.agentSessionId)).toEqual(['default-primary-session'])
+})
 
 it('delivers saved SOUL through the product controller and actual Core envelope to distinct Sessions with one global Mote identity', async () => {
   const h = await fixture()
