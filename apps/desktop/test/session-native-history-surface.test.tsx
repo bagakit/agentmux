@@ -4,18 +4,18 @@ import { act, useEffect } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { AgentSessionHistoryPage } from '@agentmux/core'
-import type { AgentSessionControl, AgentSessionRecoveryCandidate, SessionSnapshot } from '../src/shared/contracts'
+import type { AgentSessionHistoryDescriptor, AgentSessionHistoryPage } from '@agentmux/core'
+import type { AgentSessionControl, AgentSessionRecoveryCandidate, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import * as recapFacts from '../src/renderer/src/lib/launcher-resume'
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 
 const fixture = vi.hoisted(() => ({
-  historyPage: vi.fn(), write: vi.fn(), clipboard: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
+  historyPage: vi.fn(), historySources: vi.fn(), write: vi.fn(), clipboard: vi.fn(), terminalMount: vi.fn(), terminalUnmount: vi.fn(),
   resizeObservers: [] as Array<() => void>,
-  state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [], hosts: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
-    timelines: {}, agentNames: {}, viewModes: {}, regionCaretFocus: null,
+  state: { sessions: [] as SessionSnapshot[], config: { appearance: { terminalTheme: 'graphite' }, executors: {}, workspaces: [] as WorkspaceRecord[], hosts: [] }, pendingAgentLaunches: {}, recoveryCandidates: [] as AgentSessionRecoveryCandidate[],
+    timelines: {}, agentNames: {}, viewModes: {} as Record<string, 'activity' | 'terminal'>, regionCaretFocus: null,
     tabs: {}, layouts: {}, demandPmoTabIds: {}, demands: {}, scratchTopicSnapshots: {},
     spaceZoneBindings: {}, spatialRequests: {}, localHome: '', noticeReadReceipts: {},
     acquireNativeSurfaceOverlay: vi.fn(), releaseNativeSurfaceOverlay: vi.fn(),
@@ -23,7 +23,7 @@ const fixture = vi.hoisted(() => ({
     recoverSession: vi.fn(), respondInteraction: vi.fn(), openFile: vi.fn(), reportError: vi.fn(), openHttpLink: vi.fn() }
 }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: {
-  sessions: { historyPage: fixture.historyPage, write: fixture.write },
+  sessions: { historyPage: fixture.historyPage, historySources: fixture.historySources, write: fixture.write },
   ui: { writeClipboardText: fixture.clipboard }
 } }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign(
@@ -58,6 +58,9 @@ beforeEach(() => {
   fixture.state.sessions = [session]
   fixture.state.recoveryCandidates = []
   fixture.state.timelines = {}
+  fixture.state.viewModes = {}
+  fixture.state.config.workspaces = []
+  fixture.historySources.mockReset().mockResolvedValue([])
   fixture.historyPage.mockReset().mockResolvedValue(page('latest','older-1'))
   fixture.state.recoverSession.mockReset().mockResolvedValue(undefined)
   fixture.clipboard.mockResolvedValue(undefined)
@@ -65,7 +68,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.useRealTimers(); vi.unstubAllGlobals() })
 async function mountReader(nextControl = control) {
-  await act(async () => root.render(<SessionHistoryView control={nextControl} label="Reader" onClose={() => {}} visible themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
+  await act(async () => root.render(<SessionHistoryView control={nextControl} readingKey={nextControl.run.runId} label="Reader" onClose={() => {}} visible themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
 }
 function button(text: string) {
   const found=Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((candidate) => candidate.textContent?.trim()===text.trim())
@@ -76,6 +79,92 @@ async function wheelUp() {
   expect(viewport).not.toBeNull(); viewport.scrollTop=0
   await act(async () => viewport.dispatchEvent(new WheelEvent('wheel',{deltaY:-120,bubbles:true})))
 }
+
+it('fences an unfinished native read when the same Agent binds a new Run', async () => {
+  let finishOld!: (value: AgentSessionHistoryPage) => void
+  fixture.historyPage.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>(done => { finishOld = done }))
+  await mountReader()
+  const nextControl = { ...control, run: { runId: 'replacement-run' } }
+  fixture.historyPage.mockResolvedValueOnce(page('new-run-record', null))
+  await mountReader(nextControl)
+  expect(fixture.historyPage).toHaveBeenCalledTimes(2)
+  expect(container.textContent).toContain('body new-run-record')
+  await act(async () => finishOld(page('old-run-record', null)))
+  expect(container.textContent).not.toContain('body old-run-record')
+  expect(container.textContent).toContain('body new-run-record')
+})
+
+it('keeps a visible restore action interactive in Activity while covered and healthy hidden terminals remain inert', async () => {
+  fixture.state.sessions = [{ ...session, processState: 'interrupted' }]
+  fixture.state.viewModes = { [session.id]: 'activity' }
+  const renderPane = () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />)
+  await act(async () => renderPane())
+  expect(button('Resume').closest('[inert]')).toBeNull()
+  await act(async () => button('Resume').click())
+  expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  await openAgentHistory(container)
+  expect(container.querySelector('.full-page-loading')?.closest('[inert]')).not.toBeNull()
+  await act(async () => button('Session').click())
+  expect(button('Resume').closest('[inert]')).toBeNull()
+  fixture.state.sessions = [session]
+  fixture.state.viewModes = { [session.id]: 'terminal' }
+  await act(async () => renderPane())
+  fixture.state.viewModes = { [session.id]: 'activity' }
+  await act(async () => renderPane())
+  const retainedTerminal = Array.from(container.querySelectorAll('div')).find(node => node.textContent === 'Retained terminal surface')!
+  expect(retainedTerminal.closest('[inert]')).not.toBeNull()
+  expect(retainedTerminal.closest('[hidden]')).not.toBeNull()
+  expect(fixture.terminalUnmount).not.toHaveBeenCalled()
+})
+
+const retiredSource: AgentSessionHistoryDescriptor = {
+  agentSessionId: session.id, hostId: 'local', state: 'retired', retiredAt: 10,
+  history: { providerId: 'codex', executorId: 'saved-executor', workspacePath: _hygiene_fixturePath("synthetic"), createdAt: 1,
+    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-main' } }
+}
+
+it('reads Core-retired native records in the original SessionPane without inventing an Agent or Run', async () => {
+  fixture.state.sessions = []
+  fixture.state.config.workspaces = [{ id: 'workspace', hostId: 'local', path: _hygiene_fixturePath("synthetic"), kind: 'folder', name: 'Reader project' }]
+  fixture.historySources.mockResolvedValue([retiredSource])
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(container.textContent).toContain('Session closed')
+  expect(container.textContent).toContain('Codex · saved-executor')
+  expect(container.textContent).toContain('native-main')
+  expect(container.querySelector('[aria-label="Original Agent composer"]')).toBeNull()
+  await act(async () => button('Read conversation history').click())
+  expect(fixture.historyPage).toHaveBeenCalledExactlyOnceWith({ hostId: 'local', agentSessionId: session.id }, undefined)
+  expect(container.textContent).toContain('body latest')
+  await act(async () => button('Session').click())
+  expect(button('Read conversation history')).toBeDefined()
+  expect(fixture.state.sessions).toEqual([])
+  expect(fixture.state.recoveryCandidates).toEqual([])
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+  expect(fixture.write).not.toHaveBeenCalled()
+  expect(fixture.terminalMount).not.toHaveBeenCalled()
+})
+
+it('does not infer retirement from a catalogue failure or a foreign Host and retries metadata without launching', async () => {
+  fixture.state.sessions = []
+  fixture.state.config.workspaces = [{ id: 'workspace', hostId: 'local', path: _hygiene_fixturePath("synthetic"), kind: 'folder', name: 'Reader project' }]
+  fixture.historySources.mockRejectedValueOnce(new Error('History catalogue offline')).mockResolvedValue([ { ...retiredSource, hostId: 'another-host' } ])
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(container.textContent).toContain('History catalogue offline')
+  expect(container.textContent).not.toContain('Session closed')
+  await act(async () => button('Check again').click())
+  expect(fixture.historySources).toHaveBeenCalledTimes(2)
+  expect(container.textContent).not.toContain('Session closed')
+  expect(fixture.historyPage).not.toHaveBeenCalled()
+  expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+  expect(fixture.write).not.toHaveBeenCalled()
+})
+
+it('does not load retained metadata for a hidden original Agent Region', async () => {
+  fixture.state.sessions = []
+  await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible={false} linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))
+  expect(fixture.historySources).not.toHaveBeenCalled()
+  expect(fixture.historyPage).not.toHaveBeenCalled()
+})
 
 it('opens native history in the actual SessionPane while keeping the original Terminal and composer mounted', async () => {
   await act(async () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />))

@@ -4,6 +4,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
+import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
@@ -34,7 +35,64 @@ beforeEach(() => {
   vi.spyOn(api.config, 'get').mockResolvedValue(composerConfig)
   vi.spyOn(api.providers, 'list').mockResolvedValue([])
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
+})
+async function missingReferencesFixture(catalogue: AgentSessionHistoryDescriptor[]) {
+  const tabs = Object.fromEntries(ids.map(id => [`tab-${id}`, createWorkbenchTab(`tab-${id}`, {
+    kind: 'agent', regionId: `region-${id}`, workspaceId: 'workspace', sessionId: id, phase: 'attached'
+  })]))
+  useAppStore.setState({ restoredWorkbench: { tabs, layouts: { workspace: createWorkspaceLayout('original-group', Object.keys(tabs)) } },
+    loading: true, activeWorkspaceId: 'workspace' })
+  vi.mocked(api.sessions.historySources).mockResolvedValue(catalogue)
+  const unrelated = { ...empty(), sessions: [composerSession('healthy-neighbor')],
+    timelines: { 'healthy-neighbor': { agentSessionId: 'healthy-neighbor', revision: 1, items: [] } } }
+  let finish!: (snapshot: RuntimeSnapshot) => void
+  const deferred = new Promise<RuntimeSnapshot>(resolve => { finish = resolve })
+  releasePending = () => finish(unrelated)
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValueOnce(unrelated).mockReturnValue(deferred)
+  const recover = vi.spyOn(api.sessions, 'recover')
+  await act(async () => { root.render(<Notices />); dispose = await useAppStore.getState().initialize() })
+  return { tabs, recover, settle: async () => { await act(async () => { finish(unrelated); await new Promise(done => setTimeout(done, 0)) }) } }
+}
+
+it('classifies original closed history before counting missing Runtime references and settles a removed reference', async () => {
+  const f = await missingReferencesFixture([{ agentSessionId: ids[0]!, hostId: 'local', state: 'retired' }])
+  expect(useAppStore.getState().error).toContain('1 saved Session reference(s) have no current Runtime facts')
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual([ids[1]])
+  expect(useAppStore.getState().tabs).toEqual(f.tabs)
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(['healthy-neighbor'])
+  expect(f.recover).not.toHaveBeenCalled()
+  await act(async () => useAppStore.setState({ tabs: { [`tab-${ids[0]}`]: f.tabs[`tab-${ids[0]}`]! } }))
+  await f.settle()
+  expect(useAppStore.getState().error).toBeNull()
+  expect(useAppStore.getState().errorNoticeContext).toBeNull()
+  expect(useAppStore.getState().tabs[`tab-${ids[0]}`]).toEqual(f.tabs[`tab-${ids[0]}`])
+})
+
+it('keeps a foreign Host or merely active history descriptor out of closed-reference classification', async () => {
+  const f = await missingReferencesFixture([
+    { agentSessionId: ids[0]!, hostId: 'foreign-host', state: 'retired' },
+    { agentSessionId: ids[1]!, hostId: 'local', state: 'active' }
+  ])
+  expect(useAppStore.getState().error).toContain('2 saved Session reference(s) have no current Runtime facts')
+  await f.settle()
+  expect(useAppStore.getState().error).toContain('2 saved Session reference(s) have no current Runtime facts')
+  expect(useAppStore.getState().tabs).toEqual(f.tabs)
+  expect(f.recover).not.toHaveBeenCalled()
+})
+
+it('settles retained closed references from their own later Core catalogue without washing away another startup failure', async () => {
+  vi.mocked(api.providers.list).mockRejectedValue(new Error('Unrelated Provider discovery failure'))
+  const f = await missingReferencesFixture([])
+  expect(useAppStore.getState().error).toContain('2 saved Session reference(s) have no current Runtime facts')
+  vi.mocked(api.sessions.historySources).mockResolvedValue(ids.map(agentSessionId => ({ agentSessionId, hostId: 'local', state: 'retired' })))
+  await f.settle()
+  expect(useAppStore.getState().error).toContain('Unrelated Provider discovery failure')
+  expect(useAppStore.getState().error).not.toContain('no current Runtime facts')
+  expect(useAppStore.getState().errorNoticeContext).toBeNull()
+  expect(useAppStore.getState().tabs).toEqual(f.tabs)
+  expect(f.recover).not.toHaveBeenCalled()
 })
 afterEach(async () => {
   await act(async () => {

@@ -55,7 +55,7 @@ import {
   type AgentMuxSpaceAddress, type AgentMuxZoneFact, type AgentMuxSpaceBindingReport
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
-import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor, LaunchOptionSelection } from '@agentmux/core'
 import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { primaryMoteExecutorId } from './lib/primary-mote-executor'
@@ -361,6 +361,7 @@ export type ErrorNoticeContext = {
   startupSessionSnapshot?: {
     sessionIds: readonly string[]
     remainingMessage: string | null
+    missingRuntimeFacts?: true
   }
 }
 
@@ -1612,6 +1613,20 @@ function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: 
   })
 }
 
+function retiredHistoryReferenceIds(sources: readonly AgentSessionHistoryDescriptor[], tabs: AppState['tabs'], config: AppConfig | null): Set<string> {
+  const retired = new Map(sources.filter(source => source.state === 'retired').map(source => [source.agentSessionId, source]))
+  return new Set(Object.values(tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface => {
+    if (surface.kind !== 'agent') return []
+    const source = retired.get(surface.sessionId)
+    const hostId = config?.workspaces.find(workspace => workspace.id === surface.workspaceId)?.hostId
+    return source && source.hostId === hostId ? [surface.sessionId] : []
+  })))
+}
+
+function missingSavedRuntimeFactsNotice(count: number): string {
+  return `${count} saved Session reference(s) have no current Runtime facts. Their Regions remain visible; retry recovery when the Runtime can confirm them.`
+}
+
 function startSessionMembershipResync(
   event?: RuntimeEvent,
   options: { reportFailure?: boolean; recoverSavedAgents?: boolean } = {}
@@ -1643,6 +1658,11 @@ function startSessionMembershipResync(
         entry.overflowed = false
         const snapshot = await api.sessions.snapshot()
         if (entry.overflowed) continue
+        let historySources: readonly AgentSessionHistoryDescriptor[] = []
+        if (entry.startupNotice?.startupSessionSnapshot) {
+          try { historySources = await api.sessions.historySources() }
+          catch { /* A failed metadata read cannot settle the original unknown-facts notice. */ }
+        }
         // A cold-start observation may have contained no usable Session facts. The saved shell is
         // already visible now; admit its later canonical candidates through the same recovery
         // policy and action as ordinary startup, without another initialize or lifecycle owner.
@@ -1694,12 +1714,21 @@ function startSessionMembershipResync(
           const source = notice?.startupSessionSnapshot
           let resolvedStartupNotice: Partial<AppState> = {}
           if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0) {
-            if (startupSnapshotConfirmsSessions(snapshot, source.sessionIds)) {
+            const currentReferences = persistedSessionSurfaceIds(projectPersistedWorkbench(projected))
+            const retiredReferences = retiredHistoryReferenceIds(historySources, projected.tabs, state.config)
+            const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id)
+              && !startupSnapshotConfirmsSessions(snapshot, [id]))
+            if (unresolved.length === 0) {
               resolvedStartupNotice = {
                 error: source.remainingMessage,
                 lastError: source.remainingMessage,
                 errorNoticeContext: null
               }
+            } else if (source.missingRuntimeFacts && unresolved.length !== source.sessionIds.length) {
+              const updated = { ...notice, startupSessionSnapshot: { ...source, sessionIds: unresolved } }
+              entry.startupNotice = updated
+              const message = [source.remainingMessage, missingSavedRuntimeFactsNotice(unresolved.length)].filter(Boolean).join(' ')
+              resolvedStartupNotice = { error: message, lastError: message, errorNoticeContext: updated }
             }
           }
           return { ...projected, ...resolvedStartupNotice, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
@@ -2658,6 +2687,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const startupWarnings: string[] = []
       let emptySessionSnapshotWarning: string | null = null
+      let missingRuntimeReferenceIds: string[] | null = null
       let snapshot = initialSnapshotResult.status === 'fulfilled'
         ? initialSnapshotResult.value
         : emptyRuntimeSnapshot()
@@ -2826,10 +2856,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         retiredSessionIds: retiredAgentIds
       })
       const observedSessionIds = new Set(visibleSessions.map(session => session.id))
-      const unobservedSavedSessions = [...persistedSessionIds].filter(id => !retiredAgentIds.has(id) && !observedSessionIds.has(id))
-      if (snapshotVerified && !emptySessionSnapshotWarning && unobservedSavedSessions.length > 0) startupWarnings.push(
-        `${unobservedSavedSessions.length} saved Session reference(s) have no current Runtime facts. Their Regions remain visible; retry recovery when the Runtime can confirm them.`
-      )
+      let unobservedSavedSessions = [...persistedSessionIds].filter(id => !retiredAgentIds.has(id) && !observedSessionIds.has(id)
+        && hasAttachedSessionView(workbench.tabs, id))
+      if (snapshotVerified && !emptySessionSnapshotWarning && unobservedSavedSessions.length > 0) {
+        try {
+          const historySources = await api.sessions.historySources()
+          const retiredReferences = retiredHistoryReferenceIds(historySources, workbench.tabs, config)
+          unobservedSavedSessions = unobservedSavedSessions.filter(id => !retiredReferences.has(id))
+        } catch (error) {
+          startupWarnings.push(startupWorkflowWarning('Saved conversation metadata', error,
+            'The original Regions remain visible. Their current Session state is unconfirmed; retry the metadata read.'))
+        }
+        if (unobservedSavedSessions.length > 0) {
+          missingRuntimeReferenceIds = unobservedSavedSessions
+          emptySessionSnapshotWarning = missingSavedRuntimeFactsNotice(unobservedSavedSessions.length)
+        }
+      }
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
@@ -2869,8 +2911,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         errorNoticeContext: emptySessionSnapshotWarning ? {
           kind: 'indeterminate',
           startupSessionSnapshot: {
-            sessionIds: [...persistedSessionIds],
-            remainingMessage: otherStartupError || null
+            sessionIds: missingRuntimeReferenceIds ?? [...persistedSessionIds],
+            remainingMessage: otherStartupError || null,
+            ...(missingRuntimeReferenceIds ? { missingRuntimeFacts: true as const } : {})
           }
         } : null,
         errorDismissed: false

@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperti
 import { ArrowDown, ArrowLeft, History, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import type { AgentSessionControl, TerminalThemeId } from '../../../shared/contracts'
+import type { SessionHistoryReference, TerminalThemeId } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
@@ -71,10 +71,12 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
-  control, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, describeSpeaker,
+  control, readingKey, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, describeSpeaker,
   expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation
 }: {
-  control: AgentSessionControl
+  control: SessionHistoryReference
+  /** A live caller fences its reading window when its retained Run changes. Retired readers have no Run. */
+  readingKey?: string
   label: string
   onClose?(): void
   onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
@@ -206,7 +208,7 @@ export function SessionHistoryView({
 
   useEffect(() => {
     setLocalDisclosures(new Set<string>())
-  }, [control.hostId, control.agentSessionId, control.run.runId])
+  }, [control.hostId, control.agentSessionId, readingKey])
 
   useEffect(() => {
     generationRef.current += 1
@@ -218,7 +220,7 @@ export function SessionHistoryView({
     return () => {
       generationRef.current += 1
     }
-  }, [control.hostId, control.agentSessionId, control.run.runId])
+  }, [control.hostId, control.agentSessionId, readingKey])
 
 
   useEffect(() => {
