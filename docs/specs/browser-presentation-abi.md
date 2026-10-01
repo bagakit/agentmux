@@ -1,6 +1,6 @@
 # Browser 展示媒体 ABI
 
-Root `/root` 已批准本接口设计进入原 `f-2gn8f5azk/T-004`；见 [批准记录](../reviews/shared-native-browser-presentation-abi-review.json)。以下为待实施签名，不声明现源码已导出这些方法，不代签 Native 输入、物理停轨或 Task done。产品须先由 Root 完成持久 refs 和公共 Tracker update/start。
+Root `/root` 已批准本接口设计进入原 `f-2gn8f5azk/T-004`；见 批准记录（本机过程资料：`docs/reviews/shared-native-browser-presentation-abi-review.json`）。以下为待实施签名，不声明现源码已导出这些方法，不代签 Native 输入、物理停轨或 Task done。产品须先由 Root 完成持久 refs 和公共 Tracker update/start。
 
 行为寿命唯一消费 [资源合同](browser-presentation-resource-contract.md) 与两份设计 SSOT。先沿原 BVM/shared/preload/registered IPC 资源 holder 实施；Workspace/Stable 等 T002 接缝不在首片，BrowserPane 按准确 hunk 协商。
 

@@ -2,7 +2,7 @@
 
 AgentMux 把本地 Coding Agent 的 Provider、Agent Session、Hook、Permission、ACP 与 Client 投影收口成一个可嵌入的 TypeScript Core；Desktop 是它的第一方 Client。
 
-产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。Agent-first 空间 CLI 的命令、失败保留与查询合同见[空间 CLI 使用合同](docs/guides/agentmux-cli-object-control.md)。
+产品对象的唯一词典见 [交互合同《统一概念与空间寻址》](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)。Space/Zone/Tab/Region 表达 client 空间，Project/Workspace 表达真实来源与工作目录，AgentSession/Run 保留各自执行 owner；空间移动不改变 Agent 执行 cwd。Agent-first 空间 CLI 的命令、失败保留与查询合同见[空间 CLI 使用合同](docs/guides/agentmux-cli-object-control.md)。
 
 Run 层只有一个 Owner：`ctxmux`。AgentMux 不持有 PTY、子进程、Replay、Socket wire 或进程树，也没有 Backend Selector、兼容层和 fallback。
 
@@ -21,6 +21,8 @@ Desktop / CLI / external Node client
        bundled @ctxmux/sdk + ctxmuxd
  Run / PTY / byte replay / resize / interrupt / stop
 ```
+
+项目全貌见[系统职责地图](docs/architecture/system-ownership.md)，接入时从[公共能力源码入口](docs/specs/public-capabilities.md)定位当前合同。约束、操作和验证按[文档导航](docs/README.md)选择入口。
 
 ## AgentMux 与 ctxmux 的分层
 

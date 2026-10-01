@@ -1,9 +1,20 @@
-# 过程目录
+# 过程资料的留存与提交边界
 
-`docs/reviews/`、`docs/plans/`、`docs/handoffs/`、`docs/delivery/`、`docs/status/`、`docs/prototypes/`、`docs/ideas/` 是短期目录。评审、计划、交接、交付清单、状态快照、原型和想法留在本机。这些目录从进入仓库起就不跟踪，由根目录 `.gitignore` 默认忽略。
+**过程性文档不提交。** 本轮调研、计划、评审、交接、交付清单、状态快照、原型、想法和原始测量结果留在本机，根 `.gitignore` 忽略它们。不得用 `git add -f` 将其加入提交；文件已经进入索引或历史时，先保全本机内容和暂存版本，再移出 Git 跟踪，不能为了清理删除未保存的工作。
 
-`docs/benchmarks/results/` 是测量结果，同样忽略。
+| 本机目录 | 内容 |
+| --- | --- |
+| `docs/research/` | 调研素材、参考评估、待确认建议 |
+| `docs/plans/`、`docs/reviews/` | 本轮方案、任务计划、评审与验收证据 |
+| `docs/handoffs/`、`docs/delivery/`、`docs/status/` | 交接、交付清单和状态快照 |
+| `docs/prototypes/`、`docs/ideas/` | 探索原型与尚未确认的想法 |
+| `docs/benchmarks/results/` | 原始测量输出与候选结果 |
+| `.bagakit/`、`.tmp/`、`.local/` | Tracker、任务 artifacts、临时脚本和本机证据 |
 
-长期文件在 `docs/design/`、`docs/architecture/`、`docs/specs/`、`docs/guides/`、`docs/testing/`、`docs/casestudy/`，以及 `docs/benchmarks/` 里的协议正文、`docs/settings-module-contributions.md` 和本说明。
+已审核、具有长期读者价值的结论，应提炼进原 owning 设计、架构、接口、指南或事故案例，注明依据及适用范围；不把整份过程记录搬入长期目录。研究推断不冒充已确认约束，计划不冒充当前实现，旧验收不冒充新候选的通过结果。
 
-读者入口见[项目文档导航](README.md)，事实归属与更新规则见[文档事实与维护](guides/document-truth-and-maintenance.md)。本页只拥有过程目录的留存与跟踪边界。
+长期文档包括设计专题、架构机制、接口合同、操作指南、测试策略、可复用事故案例，以及 Benchmark 的测量协议。案例的现场草稿、逐轮排查日志和采样证据仍是本机过程资料；进入 `docs/casestudy/` 的是经过整理、来源和历史范围明确的案例，写法见[事故案例写作指南](guides/incident-writing.md)。
+
+长期入口必须在没有本机过程目录时仍能解释规则和机制，不以忽略路径作为必要的合同来源。引用本机证据时明确其可选、仅本机和观察范围；证据缺席说明缺证，不推定通过。日常 diff 检查同时核对提交清单，确保没有过程目录内容；目录改成 ignored 不会自动清除已经暂存或跟踪的文件。
+
+读者入口见[文档导航](README.md)，事实归属与维护规则见[文档事实与维护](guides/document-truth-and-maintenance.md)。本页唯一持有留存与提交边界。

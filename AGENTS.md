@@ -15,7 +15,7 @@
 | AgentMux Core | Provider、AgentSession、Hook、Permission、Prompt readiness、Agent status 与 semantic resume |
 | Desktop / client | 展示布局、焦点及宿主编辑、文件、Git、Browser 能力；通过 Core 操作 Agent |
 
-Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另一侧的 Runtime 或语义实现。空间身份与执行身份按 [交互 SSOT《统一概念与空间寻址》](docs/design/agentmux-desktop-interaction.md#统一概念与空间寻址) 区分，移动展示不改变执行 cwd。请求 Level B 语义恢复时，不得暗中降为 Level A 重启。
+Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另一侧的 Runtime 或语义实现。空间身份与执行身份按 [交互 SSOT《统一概念与空间寻址》](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址) 区分，移动展示不改变执行 cwd。请求 Level B 语义恢复时，不得暗中降为 Level A 重启。
 
 ## 不可破坏的行为
 
@@ -32,9 +32,9 @@ Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另
 
 ### 工作面恢复与终端阅读
 
-- 重启、重装或 Runtime 暂不可用后，先恢复 durable 的 Tab、Tab Group、Region、焦点与分割布局。健康 Run 自动接回；已结束或丢失 Run 的恢复时机遵循 [交互 SSOT《冷启动按需恢复》](docs/design/agentmux-desktop-interaction.md#冷启动按需恢复p0-末位)，通过 Core 执行，不要求冷启动批量恢复所有 CLI。
+- 重启、重装或 Runtime 暂不可用后，先恢复 durable 的 Tab、Tab Group、Region、焦点与分割布局。健康 Run 自动接回；已结束或丢失 Run 的恢复时机遵循 [交互 SSOT《冷启动按需恢复》](docs/design/behavior/session-recovery.md#冷启动按需恢复p0-末位)，通过 Core 执行，不要求冷启动批量恢复所有 CLI。
 - 空快照、握手超时、探测失败或未释放的 lifecycle lease 都不是删除投影的理由。只有 Core 明确确认 Session 终局事实才允许移除；观测 unknown / unavailable 不冒充终局。失败保留原工作面和服务窗，不伪装成新 Session。
-- 活跃终端连续向上阅读与性能是 P0。结果、成本与观测条件唯一见 [交互 SSOT《Terminal 连续向上阅读历史》](docs/design/agentmux-desktop-interaction.md#terminal-连续向上阅读历史) 和密度 SSOT 对应章节。另一页可读、局部测试通过或安装成功都不能代替真实活跃会话的连续阅读。
+- 活跃终端连续向上阅读与性能是 P0。结果、成本与观测条件唯一见 [交互 SSOT《Terminal 连续向上阅读历史》](docs/design/behavior/terminal-reading.md#terminal-连续向上阅读历史) 和密度 SSOT 对应章节。另一页可读、局部测试通过或安装成功都不能代替真实活跃会话的连续阅读。
 - 热路径工作量须随真正相关的消费者和事实增长，不因无关 Session 放大；验收同时保护正常使用、原工作面和健康 Run。
 
 ### 通用机制与 Provider 适配
@@ -52,7 +52,7 @@ Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、
 
 动手改实现前完成两件事：
 
-1. 将用户确认的行为约束原位合入 `docs/design/agentmux-desktop-interaction.md`；视觉、密度与控件语言归 `docs/design/agentmux-surface-density.md`。同一约束只定义一次，另一处引用；不把聊天过程或实现步骤追加成设计合同。
+1. 从 `docs/design/agentmux-desktop-interaction.md` 定位 owning 行为专题并原位合入用户确认约束；视觉、密度与控件语言从 `docs/design/agentmux-surface-density.md` 定位 owning 呈现专题。两入口只维护范围和导航；同一约束只定义一次，相邻文档引用，不把聊天过程或实现步骤追加成设计合同。
 2. 通过 `feature-tracker.sh` 建或更新同 Closure 的 Feature。新计划使用 `bagakit.feature-task-plan.v1` 与 approved review artifact；每项 Task 有可证伪 acceptance 和 verification command。脚本从已安装的 feature-tracker skill 定位，走 `.sh`；路径失效时重新查找，排除 `node_modules/`、`.tmp/` 和 `-adopt-worktree` 副本。
 
 验收随改动类型成立，不能用一种证据代替另一种：
@@ -66,6 +66,7 @@ Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、
 
 - 协作消息默认中文，代码、命令、标识符与原始证据保留原文。用户反馈由下属完成调研、设计 SSOT 和 Tracker 登记；Root 在交付节点安排实现、评审和验收。
 - 协调者管理目标、优先级、依赖、交付节点、冲突和集成；同事保有实现自主权。下属主要承担稳定切片的独立 review、关键行为、回归与性能检查，必要时做明确小切片。方向一致时不逐步催报或重复指挥；只在失配、跑偏、长期不响应或交付节点介入，不以冻结同事强制串行。
+- 过程性文档不提交；调研、计划、评审与任务证据留本机，已有暂存或跟踪内容先保全再移出 Git，边界见[过程资料规则](docs/process-directories.md)。
 - 并发可带上他人的提交，先确认影响，完整保全工作。小修改在当前树闭环；大改动用 worktree，频繁将已验收完整切片合入 main。不得用 stash、切分支或破坏性清场处理冲突。
 - 打包前将本批已验收改动集成 main，从 main 构建完整交付物，核对源码、编译内容与实际安装包身份。
 - 打包安装只做构建、组装、签名、身份核对及保护用户数据的安装动作，复用任务验收。除用户明确要求，不把全量回归、功能 E2E、重复图审、多轮全文件比对、无关验收或等待后续提交加成前置条件。

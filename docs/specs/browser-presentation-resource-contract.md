@@ -1,8 +1,8 @@
 # Browser 展示媒体资源合同
 
-Root `/root` 已批准本合同和准确 ABI 进入原 `f-2gn8f5azk/T-004`；[批准记录](../reviews/shared-native-browser-presentation-abi-review.json) 只批准设计和实施边界，不声明产品已实现、Task 已 start/done 或物理输入已通过。
+Root `/root` 已批准本合同和准确 ABI 进入原 `f-2gn8f5azk/T-004`；批准记录（本机过程资料：`docs/reviews/shared-native-browser-presentation-abi-review.json`） 只批准设计和实施边界，不声明产品已实现、Task 已 start/done 或物理输入已通过。
 
-产品约束唯一消费交互SSOT《Zone→Tabs→Regions 的实体与展示绑定》，视觉只消费密度同节。T004依赖已完成T001/T003，原三验收和product门不变；普通二GUI恢复只由T005签。本合同不把T003严格sourceDoc-pin试验policy搬成产品规则。
+产品约束唯一消费交互SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)，视觉只消费密度同节。T004依赖已完成T001/T003，原三验收和product门不变；普通二GUI恢复只由T005签。本合同不把T003严格sourceDoc-pin试验policy搬成产品规则。
 
 ## 身份与资源
 
