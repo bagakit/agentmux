@@ -1836,6 +1836,14 @@ Readiness 是 Provider 输入框的观测证据，不是健康 Run 的永久发�
 - 加载意图属于这次启动请求，必须在发请求前保存；不能从正在输入的新草稿或相邻 Session 猜测。无初始 Prompt 时诚实说明，恢复已有 Session 不伪造初始 Prompt。动效不代表虚构的进度百分比。
 - 新建、恢复与未知 Session 等待应说明各自事实；视觉约束见密度 SSOT 同名小节。
 
+### Terminal resume 画面中的 recap
+
+用户要求「terminal 加载 (resume) 画面上, 可以显示一下 recap 吗」。Session 保留的待恢复画面（含 resume 进行中）及对应 Terminal 的输出恢复、首段输出等待画面中，有可读 recap 时应直接看到该 Session 最近回复或请求的有界摘录及其来源；它帮助回忆上次在做什么，不表示本次恢复已成功、当前任务进度或新生成的总结。摘录复用现有会话记录事实，不能用 Topic 说明、Agent 名、状态文字、邻近 Session 或终端画面猜补；无内容、读取失败与未知用简短真实状态表达，错误是独立旁注，不自动重试或编造 recap。本次只补上述实际舞台，不扩到隐藏／parked 终端、普通 Shell 或其他 loading 面，不改变原启动文案与生命周期。
+
+recap 与恢复、attach、输入和原历史阅读分别推进：已有内容先显示，读取迟到或失败不延迟原恢复和可用输入，不触发模型请求、消息发送、自动 resume、停止或重建健康 Run。补读只属于当前可见恢复面引用的精确 Host／Session，经原有历史 owner 有界读取；不遍历其他 Session、不扫 transcript 全文、不增加轮询或持久摘要账本。切换 Session、关闭／隐藏恢复面后旧回包不得显示在新对象上，也不改已确认作者、投递或生命周期事实。
+
+恢复步骤、失败三事实与原恢复动作仍优先。recap 不能遮住已经可显示的终端或使 xterm 重挂、改变网格、resize、阅读位置和草稿；Tab／Group／Region／焦点与分割布局继续从 durable 状态先恢复，同一 Session 自动尝试续接。展示层次与长文预算唯一见密度 SSOT《Terminal resume 的 recap 密度》。
+
 ### Connecting 与 Terminal 恢复页的全页状态舞台
 
 - **Connecting 是当前 Region 的全页状态舞台，不是一个挤在中间的小卡片**。它占满当前 Agent/Terminal Region 的内容面，保留窗口级 Titlebar、Tab、分屏边界与可导航的工作面；不覆盖整个应用窗口，也不把用户带到脱离原 Tab 的独立欢迎页。布局、Session 身份与用户已经输入的启动意图在舞台切换期间保持不变。
