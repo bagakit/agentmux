@@ -68,6 +68,11 @@ const NEXT: Readonly<Record<AgentDeliveryState, readonly AgentDeliveryState[]>> 
   cancelled: []
 }
 
+/** The delivery state machine owns the accepted public vocabulary. */
+export function isAgentDeliveryState(value: unknown): value is AgentDeliveryState {
+  return typeof value === 'string' && Object.hasOwn(NEXT, value)
+}
+
 export function advanceDelivery(
   current: AgentDelivery,
   next: AgentDeliveryState,

@@ -3,8 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createConnection, createServer, type Socket, type Server } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer, requestAgentMuxControl, parseAgentMuxControlRequest } from '../src/control-host.js'
-import { subscribeAgentMuxToolkit } from '../src/toolkit-control.js'
+import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlRequest } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
 import { parseToolkitSnapshot, type AgentMuxToolkitPort, type ToolkitMetricsSnapshot } from '../src/toolkit.js'
 
@@ -19,24 +18,35 @@ async function endpoint() {
   return join(directory,'control.sock')
 }
 async function server(toolkit?: AgentMuxToolkitPort) {
-  const path = await endpoint(), owner = new AgentMuxControlServer({execute:vi.fn(), ...(toolkit ? { toolkit } : {})},path)
+  const path = await endpoint(), owner = new AgentMuxControlServer({coreClients:()=>[],execute:vi.fn(), ...(toolkit ? { toolkit } : {})},path)
   await owner.start(); cleanups.push(() => owner.stop()); return {path,owner}
 }
 async function raw(path:string) {
   const socket=createConnection({path,allowHalfOpen:true});cleanups.push(()=>{ socket.destroy() })
-  await new Promise<void>(resolve=>socket.once('connect',resolve));socket.write(JSON.stringify({...base,operation:'toolkit.watch'})+'\n')
+  await new Promise<void>(resolve=>socket.once('connect',resolve));socket.write(JSON.stringify({jsonrpc:'2.0',id:base.requestId,method:'toolkit.watch',params:{toolId:base.toolId}})+'\n')
   return socket
 }
 function firstFrame(socket:Socket): Promise<any> {
   return new Promise((resolve,reject)=>{let buffer='';socket.on('data',chunk=>{buffer+=chunk.toString();if(buffer.includes('\n'))resolve(JSON.parse(buffer.split('\n')[0]!))});socket.once('error',reject)})
 }
+async function toolkitInspect(path:string) {
+  const client=await connectAgentMuxRpc({endpoint:{transport:'unix',path}})
+  try{return await client.call('toolkit.inspect',{toolId:base.toolId})}finally{await client.dispose()}
+}
+async function toolkitWatch(path:string,options:{onFrame(value:any):void;onEnd(error?:Error):void;signal?:AbortSignal}) {
+  const client=await connectAgentMuxRpc({endpoint:{transport:'unix',path}})
+  cleanups.push(()=>client.dispose())
+  return await client.subscribe('toolkit.watch',{toolId:base.toolId},{...options,onInitial:()=>{},onEvent:()=>{}})
+}
+function opening(id:string) { return {jsonrpc:'2.0',id,result:{subscriptionId:'reader',method:'toolkit.watch',initial:{toolId:base.toolId}}} }
+function snapshotFrame(sequence:number) { return {jsonrpc:'2.0',method:'system.subscription.event',params:{subscriptionId:'reader',method:'toolkit.watch',sequence,event:{type:'snapshot',data:snapshot()}}} }
 const flush=()=>new Promise(resolve=>setImmediate(resolve))
 const port=(subscribe:AgentMuxToolkitPort['subscribe']):AgentMuxToolkitPort=>({execute:async request=>({operation:request.operation as 'toolkit.get',snapshot:snapshot()}),subscribe})
 
 describe('public Toolkit Control lifecycle and framing',()=>{
   it('keeps unsupported typed, validates exact public schema and operation budgets',async()=>{
     const {path}=await server()
-    await expect(requestAgentMuxControl({...base,operation:'toolkit.get'},path)).rejects.toMatchObject({code:'CONTROL_UNAVAILABLE'})
+    await expect(toolkitInspect(path)).rejects.toMatchObject({code:'TOOLKIT_UNSUPPORTED'})
     expect(parseToolkitSnapshot(snapshot()).state).toBe('idle')
     expect(()=>parseAgentMuxControlRequest({...base,operation:'toolkit.get',extra:true})).toThrow()
     expect(()=>parseToolkitSnapshot({...snapshot(),observedAt:10})).toThrow()
@@ -50,49 +60,53 @@ describe('public Toolkit Control lifecycle and framing',()=>{
     const {owner,path}=await server(port(async()=>{enter();return await new Promise(resolve=>{settle=resolve})}))
     const socket=await raw(path),frames:string[]=[];socket.on('data',chunk=>frames.push(chunk.toString()));await entered
     if(kind==='FIN')socket.end();else if(kind==='close')socket.destroy();else if(kind==='stop')await owner.stop()
-    else expect(await firstFrame(socket)).toMatchObject({ok:false,error:{code:'CONTROL_TIMEOUT'}})
+    else expect(await firstFrame(socket)).toMatchObject({jsonrpc:'2.0',id:base.requestId,error:{data:{code:'CONTROL_TIMEOUT'}}})
     await flush();await flush();settle({dispose});await vi.waitFor(()=>expect(dispose).toHaveBeenCalledOnce())
-    expect(frames.join('')).not.toContain('"event":"snapshot"');expect(frames.join('')).not.toContain('"event":"attached"')
+    expect(frames.join('')).not.toContain('"type":"snapshot"');expect(frames.join('')).not.toContain('"subscriptionId"')
   })
   it('coalesces synchronous snapshots after real opening backpressure',async()=>{
     const dispose=vi.fn(),{owner,path}=await server(port(async (_toolId,push)=>{for(let i=0;i<50;i++)push({...snapshot(),sequence:i});return {dispose}}))
     let serverSocket!:Socket
     ;(owner as unknown as {server:Server}).server.once('connection',s=>{serverSocket=s;(s as any)._writableState.highWaterMark=1})
     const frames:any[]=[]
-    const lease=await subscribeAgentMuxToolkit({...base,operation:'toolkit.watch'},{onFrame:f=>frames.push(f),onEnd:vi.fn()},{path})
-    await vi.waitFor(()=>expect(frames).toHaveLength(2));expect(frames.map(f=>f.event)).toEqual(['attached','snapshot'])
-    expect(frames[1].result.snapshot.sequence).toBe(49);expect(serverSocket.writableHighWaterMark).toBe(1)
-    lease.dispose();await vi.waitFor(()=>expect(dispose).toHaveBeenCalledOnce())
+    const lease=await toolkitWatch(path,{onFrame:f=>frames.push(f),onEnd:vi.fn()})
+    await vi.waitFor(()=>expect(frames).toHaveLength(2));expect(frames.map(f=>'result' in f?'response':f.params.event.type)).toEqual(['response','snapshot'])
+    expect(frames[1].params.event.data.sequence).toBe(49);expect(serverSocket.writableHighWaterMark).toBe(1)
+    await lease.dispose();await vi.waitFor(()=>expect(dispose).toHaveBeenCalledOnce())
   })
   it.each(['complete JSON without LF','partial JSON'] as const)('rejects %s at real EOF after attachment',async kind=>{
-    const path=await endpoint(), rawServer=createServer(socket=>socket.once('data',()=>{
-      const {toolId:_,...identity}=base,env={...identity,operation:'toolkit.watch',ok:true}
-      socket.end(JSON.stringify({...env,event:'attached',result:{}})+'\n'+(kind==='partial JSON'?'{' : JSON.stringify({...env,event:'snapshot',result:{snapshot:snapshot()}})))
+    const path=await endpoint(), rawServer=createServer(socket=>socket.once('data',chunk=>{
+      const request=JSON.parse(chunk.toString())
+      socket.end(JSON.stringify(opening(request.id))+'\n'+(kind==='partial JSON'?'{' : JSON.stringify(snapshotFrame(1))))
     }))
     await new Promise<void>(resolve=>rawServer.listen(path,resolve));cleanups.push(()=>new Promise<void>(resolve=>rawServer.close(()=>resolve())))
     const events:string[]=[],ends:unknown[]=[]
-    await subscribeAgentMuxToolkit({...base,operation:'toolkit.watch'},{onFrame:f=>events.push(f.event),onEnd:e=>ends.push(e)},{path})
-    await vi.waitFor(()=>expect(ends).toHaveLength(1));expect(ends[0]).toMatchObject({code:'CONTROL_PROTOCOL_ERROR'});expect(events).toEqual(['attached'])
+    await toolkitWatch(path,{onFrame:f=>events.push('result' in f?'response':f.params.event.type),onEnd:e=>ends.push(e)})
+    await vi.waitFor(()=>expect(ends).toHaveLength(1));expect(ends[0]).toMatchObject({code:'CONTROL_PROTOCOL_ERROR'});expect(events).toEqual(['response'])
   })
   it('stops same-chunk dispatch immediately when the attached consumer aborts',async()=>{
-    const path=await endpoint(),{toolId:_,...identity}=base,env={...identity,operation:'toolkit.watch',ok:true}
-    const rawServer=createServer(socket=>socket.once('data',()=>socket.write([
-      {...env,event:'attached',result:{}},{...env,event:'snapshot',result:{snapshot:snapshot()}},{...env,event:'snapshot',result:{snapshot:snapshot()}}
-    ].map(f=>JSON.stringify(f)+'\n').join(''))))
+    const path=await endpoint()
+    const rawServer=createServer(socket=>socket.once('data',chunk=>{
+      const request=JSON.parse(chunk.toString())
+      socket.write([opening(request.id),snapshotFrame(1),snapshotFrame(2)].map(f=>JSON.stringify(f)+'\n').join(''))
+    }))
     await new Promise<void>(resolve=>rawServer.listen(path,resolve));cleanups.push(()=>new Promise<void>(resolve=>rawServer.close(()=>resolve())))
     const signal=new AbortController(),events:string[]=[],ends:unknown[]=[]
-    await subscribeAgentMuxToolkit({...base,operation:'toolkit.watch'},{onFrame:f=>{events.push(f.event);signal.abort()},onEnd:e=>ends.push(e)},{path,signal:signal.signal})
-    await flush();expect(events).toEqual(['attached']);expect(ends).toEqual([expect.objectContaining({code:'CONTROL_CANCELLED'})])
+    await expect(toolkitWatch(path,{onFrame:f=>{events.push('result' in f?'response':f.params.event.type);signal.abort()},onEnd:e=>ends.push(e),signal:signal.signal})).rejects.toMatchObject({code:'CONTROL_CANCELLED'})
+    await flush();expect(events).toEqual(['response']);expect(ends).toEqual([expect.objectContaining({code:'CONTROL_CANCELLED'})])
   })
   it('rejects malformed UTF8 watch bytes after a nonempty attached frame',async()=>{
-    const path=await endpoint(),{toolId:_,...identity}=base,env={...identity,operation:'toolkit.watch',ok:true}
-    const line=Buffer.from(JSON.stringify({...env,event:'snapshot',result:{snapshot:{...snapshot(),reason:'#'}}})+'\n')
+    const path=await endpoint()
+    const frame=snapshotFrame(1);frame.params.event.data.reason='#'
+    const line=Buffer.from(JSON.stringify(frame)+'\n')
     const index=line.indexOf(35);expect(index).toBeGreaterThan(0);line[index]=255
-    const rawServer=createServer(socket=>socket.once('data',()=>socket.end(Buffer.concat([
-      Buffer.from(JSON.stringify({...env,event:'attached',result:{}})+'\n'),line]))))
+    const rawServer=createServer(socket=>socket.once('data',chunk=>{
+      const request=JSON.parse(chunk.toString())
+      socket.end(Buffer.concat([Buffer.from(JSON.stringify(opening(request.id))+'\n'),line]))
+    }))
     await new Promise<void>(resolve=>rawServer.listen(path,resolve));cleanups.push(()=>new Promise<void>(resolve=>rawServer.close(()=>resolve())))
     const events:string[]=[],ends:unknown[]=[]
-    await subscribeAgentMuxToolkit({...base,operation:'toolkit.watch'},{onFrame:f=>events.push(f.event),onEnd:e=>ends.push(e)},{path})
-    await vi.waitFor(()=>expect(ends).toHaveLength(1));expect(events).toEqual(['attached']);expect(ends[0]).toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
+    await toolkitWatch(path,{onFrame:f=>events.push('result' in f?'response':f.params.event.type),onEnd:e=>ends.push(e)})
+    await vi.waitFor(()=>expect(ends).toHaveLength(1));expect(events).toEqual(['response']);expect(ends[0]).toMatchObject({code:'CONTROL_PROTOCOL_ERROR'})
   })
 })

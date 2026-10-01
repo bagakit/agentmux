@@ -5,12 +5,13 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { describe, expect, it, vi } from 'vitest'
+import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
-import { AgentMuxControlServer, requestAgentMuxControl } from '../src/control-host.js'
+import { AgentMuxControlServer } from '../src/control-host.js'
 import type { AgentMuxControlHost, AgentMuxControlSendRequest } from '../src/control.js'
 import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession, AgentMuxRunInputData } from '../src/types.js'
@@ -21,6 +22,7 @@ const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 type Inner = {
   connected: boolean
   registry: AgentMuxAgentSessionRegistry
+  messageQueue: DurableAgentMuxMessageQueue
   kernel: {
     isConnected(): boolean
     identity(): { daemonInstanceId: string }
@@ -41,7 +43,7 @@ async function fixture() {
   const template = new AgentProviderRegistry().get('codex')
   const provider = defineAgentProvider({
     catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
-    hook: template.hook, buildArgs: (_prompt, args) => [...args]
+    hook: template.hook, planManagedHooks: template.planManagedHooks, buildArgs: (_prompt, args) => [...args]
   })
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'receipt-agent', executorId: 'generic', providerId: 'generic',
@@ -57,6 +59,7 @@ async function fixture() {
     const inner = owner as unknown as Inner
     await inner.registry.load('local')
     inner.connected = true
+    inner.messageQueue = new DurableAgentMuxMessageQueue(join(root, 'messages.ndjson'))
     const writes: Array<{ operationId: string; data: AgentMuxRunInputData }> = []
     const stops: string[] = []
     let cursor = 0
@@ -106,13 +109,13 @@ async function fixture() {
         return { operation: request.operation, agentSessionId: stored.agentSessionId }
       }
     }
-    server = new AgentMuxControlServer(host, join(root, 'control.sock'))
+    server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: owner }], execute: request => host.execute(request) })
     await server.start()
-    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_')))
+    const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
     async function failSend() {
-      const result = await execute(process.execPath, [cli, 'send', '--to-session', stored.agentSessionId,
+      const result = await execute(process.execPath, [cli, 'agent', 'send', '--operation-id', 'original-operation', '--to-session', stored.agentSessionId,
         '--text', '  original message\n第二行  ', '--message-id', 'original-message'], {
-        env: { ...env, HOME: root, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
+        env: { ...env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
           AGENTMUX_AGENT_SESSION_STORE: store.path, AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') },
         timeout: 10_000, maxBuffer: 256 * 1024
       }).then(() => { throw new Error('CLI unexpectedly accepted the blocked prompt.') }, error => {
@@ -124,7 +127,7 @@ async function fixture() {
         const receipts = error.stderr.split('\n').filter((line: string) => line.startsWith('{'))
         expect(receipts).toHaveLength(1)
         return JSON.parse(receipts[0]!) as {
-          schemaVersion: number; requestId: string; operation: string; ok: boolean
+          operationId: string; operation: string; ok: boolean
           error: { code: string; message: string }
         }
       })
@@ -150,16 +153,22 @@ describe('public Prompt errors through Control and built CLI', () => {
         const reply = code === 'AGENT_PROMPT_SUBMISSION_BUSY'
           ? await h.store.withPromptSubmission('receipt-agent', h.failSend)
           : await (async () => {
-              const missingRead = vi.spyOn(h.store, 'load').mockResolvedValueOnce([])
-              restoreMissingRead = () => missingRead.mockRestore()
+              // Ingress now reads durable identities before handing the request
+              // to its owner. Inject the original missing-read fault at the
+              // actual SDK producer, after that independent admission.
+              const original = h.owner.submitAgentPrompt.bind(h.owner)
+              const producer = vi.spyOn(h.owner, 'submitAgentPrompt').mockImplementationOnce(async request => {
+                const missingRead = vi.spyOn(h.store, 'load').mockResolvedValueOnce([])
+                try { return await original(request) } finally { missingRead.mockRestore() }
+              })
+              restoreMissingRead = () => producer.mockRestore()
               return await h.failSend()
             })()
         restoreMissingRead?.()
         expect(h.requests).toHaveLength(1)
         expect(h.failures).toHaveLength(1)
         expect(h.failures[0]!.code).toBe(code)
-        expect(reply).toEqual({ schemaVersion: h.requests[0]!.schemaVersion,
-          requestId: h.requests[0]!.requestId, operation: 'send', ok: false,
+        expect(reply).toEqual({ operationId: 'original-operation', operation: 'agent.send', ok: false,
           error: { code, message: h.failures[0]!.message } })
         expect(h.failures[0]!.message.length).toBeGreaterThan(0)
         expect(h.requests[0]!.text).toBe('  original message\n第二行  ')
@@ -169,8 +178,13 @@ describe('public Prompt errors through Control and built CLI', () => {
         expect(h.writes).toEqual([])
         expect(h.stops).toEqual([])
         expect(h.run()).toMatchObject({ runId: 'receipt-run', pid: 123, state: { type: 'running' }, acceptedInputBytes: 0 })
-        const recovered = await requestAgentMuxControl(h.requests[0]!, join(h.root, 'control.sock'))
-        expect(recovered).toMatchObject({ ok: true, requestId: reply.requestId, operation: 'send', result: { agentSessionId: 'receipt-agent' } })
+        const sameReceipt = await h.failSend()
+        expect(sameReceipt.error.code).toBe('AGENT_PROMPT_UNCONFIRMED')
+        expect(h.requests).toHaveLength(1)
+        expect(h.writes).toEqual([])
+        // An explicit caller can use the original SDK prompt operation after
+        // restoring the failing producer. The public send receipt never auto-retries.
+        await h.owner.submitAgentPrompt({ agentSessionId: 'receipt-agent', ...h.requests[0]!.promptCondition, prompt: h.requests[0]!.text, operationId: 'original-message', allowUncertainTurn: true })
         const admitted = h.owner.agentSession('receipt-agent').promptCompletionAdmission
         expect(admitted).toMatchObject({ submissionId: 'original-message', acknowledged: true })
         expect(h.writes).toEqual([{ operationId: admitted!.operationId, data: '  original message\n第二行  \r' }])

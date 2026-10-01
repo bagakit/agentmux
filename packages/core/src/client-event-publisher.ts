@@ -30,6 +30,16 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 
 export class AgentMuxClientEventPublisher {
   private readonly listeners = new Set<(event: AgentMuxClientEvent) => void>()
+  private readonly statusListeners = new Set<(event: AgentMuxClientEvent) => void>()
+
+  /** Low-frequency owner facts; these listeners never join ordered-byte dispatch. */
+  onStatusEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
+    if (!this.statusListeners.has(listener) && this.statusListeners.size >= MAX_EVENT_LISTENERS) {
+      throw new AgentMuxError('AgentMux Client status listener limit reached.', 'CLIENT_EVENT_LISTENER_LIMIT')
+    }
+    this.statusListeners.add(listener)
+    return () => this.statusListeners.delete(listener)
+  }
 
   onEvent(listener: (event: AgentMuxClientEvent) => void): () => void {
     if (!this.listeners.has(listener) && this.listeners.size >= MAX_EVENT_LISTENERS) {
@@ -41,14 +51,18 @@ export class AgentMuxClientEventPublisher {
 
   dispose(): void {
     this.listeners.clear()
+    this.statusListeners.clear()
   }
 
   publish(event: AgentMuxClientEvent): void {
-    for (const listener of [...this.listeners]) {
+    const listeners = event.type === 'agent-error' || event.type === 'connection-state'
+      ? [...this.listeners, ...this.statusListeners] : [...this.listeners]
+    for (const listener of listeners) {
       try {
         const result = (listener as (value: AgentMuxClientEvent) => unknown)(event)
         if (isPromiseLike(result)) {
           this.listeners.delete(listener)
+          this.statusListeners.delete(listener)
           void Promise.resolve(result).catch(() => {})
         }
       } catch {

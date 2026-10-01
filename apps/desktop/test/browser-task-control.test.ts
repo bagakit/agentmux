@@ -9,7 +9,9 @@ import { tmpdir } from 'node:os'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import assert from 'node:assert/strict'
-import { AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxControlReceipt, requestAgentMuxControl } from '../../../packages/core/src/control-host.js'
+import { AgentMuxControlServer, parseAgentMuxControlRequest, parseAgentMuxControlReceipt, connectAgentMuxRpc } from '../../../packages/core/src/control-host.js'
+import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
+import { objectCliReceipt } from '../../../packages/core/test/helpers/object-cli-receipt.js'
 import { parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from '../../../packages/core/src/browser-task-control.js'
 import { agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help.js'
 import { executeBrowserTaskControl } from '../src/main/browser-task-control.js'
@@ -129,9 +131,9 @@ beforeAll(async () => {
     const path = id.split('?')[0]!
     let code = source
     if (process.env.AGENTMUX_BROWSER_TASK_MUTATION === 'cli-drops-fresh-parameters' && path === resolve('packages/core/src/agentmux.ts')) {
-      const block = 'parameters: supplied'
+      const block = 'invocation.params.parameters = text.trim() ? JSON.parse(text) : {}'
       assert.equal(source.split(block).length - 1, 1, 'Unique actual public CLI parameter forwarding')
-      code = source.replace(block, 'parameters: {}')
+      code = source.replace(block, 'invocation.params.parameters = {}')
     }
     if (process.env.AGENTMUX_BROWSER_TASK_LOADED && path.startsWith(resolve('packages/core/src') + '/')) appendFileSync(process.env.AGENTMUX_BROWSER_TASK_LOADED,
       JSON.stringify({ path: path.slice(resolve('.').length + 1), consumer: 'public-source-cli-ssr', sha256: createHash('sha256').update(source).digest('hex'),
@@ -144,7 +146,7 @@ afterAll(async () => { if (directory) await rm(directory, { recursive: true }); 
 async function cliRun(args: string[], input = '') {
   return await new Promise<{ code: number; stdout: string; stderr: string }>((accept, reject) => {
     const child = spawn(process.execPath, [cli, 'browser', 'task', ...args], { cwd: resolve('.'),
-      env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtimeRoot, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined }, stdio: ['pipe', 'pipe', 'pipe'] })
+      env: objectCliEnvironment(runtimeRoot), stdio: ['pipe', 'pipe', 'pipe'] })
     let stdout = '', stderr = ''; const timer = setTimeout(() => { child.kill(); reject(new Error('Private Source CLI did not finish')) }, 10_000)
     child.stdout.setEncoding('utf8').on('data', value => { stdout += value }); child.stderr.setEncoding('utf8').on('data', value => { stderr += value })
     child.stdin.on('error', () => {}); child.once('error', reject)
@@ -156,20 +158,20 @@ it('actual CLI → socket → Store → Main read/stop and checkpoint refusal pr
   const first = await f.manager.runTaskAsset({ browserId, assetId: f.asset.id, version: 1, parameters: {} })
   f.entry.humanControl = false; f.entry.activity.control = 'agent'; f.returnControl.mockClear()
   const forward = vi.spyOn(api.browser, 'controlTask').mockImplementation(request => executeBrowserTaskControl(request, f.owner, true))
-  const server = new AgentMuxControlServer({ async execute(request) { seen.push(request.operation); return useAppStore.getState().executeControl(request) } }, join(runtimeRoot, 'control.sock'))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'control.sock'), coreClients: () => [], async execute(request) { seen.push(request.operation); return useAppStore.getState().executeControl(request) } })
   const before = useAppStore.getState(); const beforeAssets = await f.assets.state(browserId)
   const focused = document.createElement('textarea'); document.body.appendChild(focused); focused.focus(); focused.value = 'unsent'; focused.setSelectionRange(1, 4)
   await server.start()
   try {
     const assets = await cliRun(['assets', '--browser', browserId]); expect(assets.code, assets.stderr).toBe(0)
-    expect(parseAgentMuxControlReceipt(JSON.parse(assets.stdout))).toMatchObject({ operation: 'browser.task.assets', result: { state: { assets: [{ id: f.asset.id }], selectedRunId: first.id } } })
+    expect(objectCliReceipt(JSON.parse(assets.stdout))).toMatchObject({ operation: 'browser.task.assets', result: { state: { assets: [{ id: f.asset.id }], selectedRunId: first.id } } })
     const reliability = await cliRun(['reliability', '--browser', browserId, '--asset', f.asset.id, '--version', '1']); expect(reliability.code, reliability.stderr).toBe(0)
-    expect(parseAgentMuxControlReceipt(JSON.parse(reliability.stdout))).toMatchObject({ result: { reliability: { passRate: null, population: { pendingRuns: 1 } } } })
+    expect(objectCliReceipt(JSON.parse(reliability.stdout))).toMatchObject({ result: { reliability: { passRate: null, population: { pendingRuns: 1 } } } })
     const pending = await cliRun(['run', '--browser', browserId, '--asset', f.asset.id, '--version', '1', '--run', first.id], '{}')
     expect(pending.code).toBe(1); expect(JSON.parse(pending.stderr)).toMatchObject({ operation: 'browser.task.run', error: { message: expect.stringContaining('waiting for the person') } })
     expect(await f.assets.state(browserId)).toEqual(beforeAssets); expect(f.actions).not.toHaveBeenCalled(); expect(f.returnControl).not.toHaveBeenCalled()
     const stop = await cliRun(['stop', '--browser', browserId, '--run', first.id]); expect(stop.code, stop.stderr).toBe(0)
-    expect(parseAgentMuxControlReceipt(JSON.parse(stop.stdout))).toMatchObject({ result: { run: { id: first.id, status: 'stopped' } } })
+    expect(objectCliReceipt(JSON.parse(stop.stdout))).toMatchObject({ result: { run: { id: first.id, status: 'stopped' } } })
     expect(seen).toEqual(['browser.task.assets', 'browser.task.reliability', 'browser.task.run', 'browser.task.stop']); expect(forward).toHaveBeenCalledTimes(4)
     const after = useAppStore.getState(); expect([after.tabs, after.layouts, after.activeWorkspaceId, after.regionCaretFocus, after.mainSurface]).toEqual([before.tabs, before.layouts, before.activeWorkspaceId, before.regionCaretFocus, before.mainSurface])
     expect(document.activeElement).toBe(focused); expect([focused.value, focused.selectionStart, focused.selectionEnd]).toEqual(['unsent', 1, 4])
@@ -179,15 +181,16 @@ it('actual CLI → socket → Store → Main read/stop and checkpoint refusal pr
 
 it('real public client refuses reliability borrowed from a different requested version', async () => {
   const f = await fixture()
-  const server = new AgentMuxControlServer({ async execute(request) {
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'wrong.sock'), coreClients: () => [], async execute(request) {
     const result = await executeBrowserTaskControl(request, f.owner, false)
     if (result.operation !== 'browser.task.reliability') throw new Error('Expected exact reliability read')
     return { ...result, reliability: { ...result.reliability, version: 2 } }
-  } }, join(runtimeRoot, 'wrong.sock'))
+  } })
   await server.start()
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   try {
-    await expect(requestAgentMuxControl({ ...base, operation: 'browser.task.reliability', browserId, assetId: f.asset.id, version: 1 }, server.path)).rejects.toThrow('another version')
-  } finally { await server.stop() }
+    await expect(client.call('browser.task.reliability', { browserId, assetId: f.asset.id, version: 1 })).rejects.toThrow('another version')
+  } finally { await client.dispose(); await server.stop() }
 })
 
 it('positive public CLI run passes fresh values into the actual compiled fill without durable secrets or input takeover', async () => {
@@ -203,13 +206,13 @@ it('positive public CLI run passes fresh values into the actual compiled fill wi
     return { browserId: id, result, logs: [], outcome: { kind: 'completed' }, runOperation: { id: 'positive-cli-operation', browserId: id } }
   })
   vi.spyOn(api.browser, 'controlTask').mockImplementation(request => executeBrowserTaskControl(request, f.owner, true))
-  const server = new AgentMuxControlServer({ execute: request => useAppStore.getState().executeControl(request) }, join(runtimeRoot, 'control.sock'))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeRoot, 'control.sock'), coreClients: () => [], execute: request => useAppStore.getState().executeControl(request) })
   const before = useAppStore.getState(), field = document.createElement('textarea'); field.value = 'person draft'; document.body.append(field); field.focus(); field.setSelectionRange(2, 6)
   await server.start()
   try {
     const output = await cliRun(['run', '--browser', browserId, '--asset', f.asset.id, '--version', '1'], JSON.stringify({ fresh: input }))
     expect(output.code, output.stderr).toBe(0)
-    expect(parseAgentMuxControlReceipt(JSON.parse(output.stdout))).toMatchObject({ operation: 'browser.task.run', result: { run: { status: 'completed', operationIds: ['positive-cli-operation'], nextStep: 1 } } })
+    expect(objectCliReceipt(JSON.parse(output.stdout))).toMatchObject({ operation: 'browser.task.run', result: { run: { status: 'completed', operationIds: ['positive-cli-operation'], nextStep: 1 } } })
     expect(writes).toEqual([['@e1', input]]); expect(f.actions).toHaveBeenCalledOnce(); expect(f.returnControl).not.toHaveBeenCalled()
     expect(JSON.stringify(f.store.document)).not.toContain(input); expect(output.stdout + output.stderr).not.toContain(input)
     const after = useAppStore.getState(); expect([after.tabs, after.layouts, after.regionCaretFocus, after.activeWorkspaceId, after.mainSurface]).toEqual([before.tabs, before.layouts, before.regionCaretFocus, before.activeWorkspaceId, before.mainSurface])

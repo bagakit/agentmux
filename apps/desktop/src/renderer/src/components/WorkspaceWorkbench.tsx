@@ -1099,7 +1099,10 @@ function PaneGroup({
     group.id,
     groupIds(layout.root).length
   )
-  const activeRegionId = activeTab ? logicalRegionId(activeTab, projection?.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId ?? retainedSpatialFocus?.regionId) : null
+  const retainedHere = retainedSpatialFocus?.displayWorkspaceId === workspaceId && retainedSpatialFocus.groupId === group.id &&
+    retainedSpatialFocus.tabId === activeTab?.id
+  const activeRegionId = activeTab ? logicalRegionId(activeTab, retainedHere ? retainedSpatialFocus.regionId :
+    projection?.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId) : null
   const activeSurface = activeTab && activeRegionId ? activeTab.regions[activeRegionId] : null
   // Route through isSessionSurface (SSOT in workbench-surface-kinds.ts). This site was invisible
   // to the exhaustiveness guard for months because it read `.kind` off a nullable receiver
@@ -1786,6 +1789,9 @@ export function WorkspaceWorkbench({
         const regionTarget = projection?.projection?.entity.kind === 'region' ? projection : undefined
         const tabProjection = regionTarget ? undefined : projection
         const targetId = tabProjection?.hostId ?? null
+        const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
+        const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
+          primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
         const homeId = homeReferences.get(tab.id) ? workbenchProjectionSlotId(viewHostPrefix, homeReferences.get(tab.id)!) : `${viewHostPrefix}:${tab.id}`
         const primaryHostId = targetId ?? homeId
         const tabVisible = (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
@@ -1813,7 +1819,8 @@ export function WorkspaceWorkbench({
           onSelectRegion={tabProjection?.onSelectRegion}
           projection={tabProjection?.projection}
           reference={targetId === null ? homeReferences.get(tab.id) ?? undefined : projection?.reference}
-          retainedRegionId={tabProjection?.retainedRegionId ?? (targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null)}>
+          retainedRegionId={retainedHere && (targetId === null || tabProjection?.surface === 'space')
+            ? retainedSpatialFocus.regionId : tabProjection?.retainedRegionId ?? null}>
           {originalOwnerId && !confirmedDisplayGroup && !homeReferences.get(tab.id) && !tabProjection ? <ServiceWindowNotice
             disclosure={{ scope: JSON.stringify(['local:retained-tab-placement', workspaceId, tab.id]), id: 'tab-placement',
               occurrence: tab.id, cause: 'placement-unconfirmed', visible: tabVisible }}

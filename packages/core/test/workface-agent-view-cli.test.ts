@@ -17,7 +17,7 @@ describe('Agent view public CLI wire', () => {
   })
   it('passes a typed explicit preference and preserves partial applied state as one JSON exit 1', async () => {
     h.setReply({ ...body, storedOverride: 'activity', effectiveMode: 'activity', changed: true, outcome: 'partial', save: { ...saved, reason: 'flush failed' } })
-    expect(await h.receipt(['agent', 'view', '--session=agent-exact', '--mode', 'activity', '--request-id', 'request-exact'], 1)).toMatchObject({ requestId: 'request-exact', result: { effectiveMode: 'activity', changed: true, outcome: 'partial' } })
+    expect(await h.receipt(['agent', 'view', '--session=agent-exact', '--mode', 'activity', '--operation-id', 'request-exact'], 1)).toMatchObject({ operationId: 'request-exact', result: { effectiveMode: 'activity', changed: true, outcome: 'partial' } })
     expect(h.seen.at(-1)).toEqual({ ...base, operation: 'agent.view', agentSessionId: 'agent-exact', mode: 'activity' })
     h.setReply(body)
   })

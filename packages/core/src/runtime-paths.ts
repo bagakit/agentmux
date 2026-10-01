@@ -12,8 +12,8 @@ export const CTXMUX_MANIFEST_SHA256 = '5c17ba362d6a89431ceab92e62d4f9e19342971a4
 // recreated; persistent state uses the same namespace under the user's durable directory.
 const CTXMUX_RUNTIME_ID = '1e19b1caf5c6ddd1aa8b5cac'
 
-export function defaultAgentMuxRuntimeDirectory(): string {
-  const override = process.env.AGENTMUX_RUNTIME_DIRECTORY?.trim()
+export function defaultAgentMuxRuntimeDirectory(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  const override = env.AGENTMUX_RUNTIME_DIRECTORY?.trim()
   if (override) {
     if (!isAbsolute(override)) {
       throw new Error('AGENTMUX_RUNTIME_DIRECTORY must be an absolute path.')
@@ -43,8 +43,8 @@ export function defaultCtxmuxStateDirectory(): string {
   return join(defaultAgentMuxStateDirectory(), 'ctxmux')
 }
 
-export function defaultAgentMuxControlSocketPath(): string {
-  return join(defaultAgentMuxRuntimeDirectory(), 'control.sock')
+export function defaultAgentMuxControlSocketPath(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  return join(defaultAgentMuxRuntimeDirectory(env), 'control.sock')
 }
 
 export function defaultAgentMuxMessageQueuePath(

@@ -9,7 +9,8 @@ Space 是组织工作面的空间，Project 是仓库／目录归属；两者不
 先发现 Executor 与空间：
 
 ```sh
-agentmux list agents
+agentmux settings executors ls
+agentmux app snapshot
 agentmux space ls
 ```
 
@@ -19,32 +20,32 @@ agentmux space ls
 agentmux agent open --executor '<executor-id>' --zone '<zone-id>' --new-tab --prompt '完成这份任务'
 ```
 
-在明确 Space 创建 Git Zone，并直接拉起 Agent：
+明确选择 Project 资源与 Space 落点，创建 Git Zone，并直接拉起 Agent：
 
 ```sh
-agentmux agent open --executor '<executor-id>' --space '<space-id>' --new-zone --worktree --new-branch feat/task --path "$WORKTREE_PATH" --prompt '完成这份任务'
+agentmux agent open --executor '<executor-id>' --project '<project-id>' --space '<space-id>' --new-zone --worktree --new-branch feat/task --path "$WORKTREE_PATH" --prompt '完成这份任务'
 ```
 
-非 Git 来源使用 `--new-zone --directory "$EXISTING_DIRECTORY"`。存在多个绑定／展示位置时，需要从 `space ls` 取得准确的 `--space`、`--display-workspace`、`--group`，不能猜第一项。后台打开是默认行为，`--focus` 才导航过去。
+新 Zone 必须指定资源 `--project`；Project 多个来源且没有唯一根目录时，用 `--source-workspace` 选择精确来源，不从当前目录或第一个 worktree 猜起点。非 Git 来源使用 `--new-zone --directory "$EXISTING_DIRECTORY"`。存在多个绑定／展示位置时，需要从 `space ls` 取得准确的 `--space`、`--display-workspace`、`--group`，不能猜第一项。后台打开是默认行为，`--focus` 才导航过去。
 
 最终 JSON 的 `result.agent.agentSessionId` 是新 Session 号，`result.to` 是已确认的位置。失败后分别看 `resource`、`agent`、`to`、`issues` 和 `save`，它们说明目录、Session 和工作面走到了哪一步；非零退出不代表全部没创建。失败不会自动删除已生成的 worktree 或停止已创建的健康 Session。回执区分初始任务交付与保存事实；`confirmed` 只证明初始任务交付协议，不能当作 Agent 已接受或完成任务。
 
 后续任务用精确 SID：
 
 ```sh
-agentmux send --to-session '<session-id>' --text '继续下一步'
-agentmux inspect --session '<session-id>'
+agentmux agent send --to-session '<session-id>' --text '继续下一步'
+agentmux agent inspect --session '<session-id>'
 ```
 
-如果创建回执丢失，先按原请求号 `agentmux space inspect --request '<request-id>'` 对账，不能盲目重建、拉 Agent 或重发初始任务。`settings workspaces add` 仅登记已有目录，不建 Git worktree，也不拉起 Agent。
+如果创建回执丢失，先按原 `--operation-id` 业务操作号 `agentmux space inspect --operation-id '<operation-id>'` 对账，不能盲目重建、拉 Agent 或重发初始任务。`settings workspaces register` 仅登记已有目录，不建 Git worktree，也不拉起 Agent。
 
 ## 移动和切换位置
 
 ```sh
 agentmux space mv --from-region '<region-id>' --expect-session '<session-id>' --zone '<zone-id>' --new-tab
-agentmux focus --region '<region-id>'
-agentmux focus --goal '<demand-id>'
-agentmux inspect --client
+agentmux space focus --region '<region-id>'
+agentmux goal focus --goal '<goal-id>'
+agentmux app inspect
 ```
 
 移动改变空间位置，保留原 Session、Run、执行目录；`--expect-session` 防止位置内容已更换后操作另一个 Agent。源位置有歧义时，提供准确 `--from-space`／`--from-display-workspace`／`--from-group`。当前不支持移动所属 Tab 有多个 Group 展示的 Region，拒绝时保留全部引用和健康 Agent。`focus` 默认保留当前输入；明确需要把输入转给目标时才用 `--input target`。选择到目标与目标已经可见、已拿到输入，是回执里的不同事实。
@@ -54,15 +55,15 @@ agentmux inspect --client
 ## 打开文件，切换正文，交换格子
 
 ```sh
-agentmux open file --zone '<zone-id>' --path 'docs/设计.md'
+agentmux file open --zone '<zone-id>' --path 'docs/设计.md'
 agentmux agent view --session '<session-id>' --mode activity
-agentmux space view --region '<file-region-id>' --mode diff
+agentmux file view --region '<file-region-id>' --mode diff
 agentmux space swap --region '<region-a>' --with '<region-b>'
 ```
 
 文件路径相对 Zone 的真实目录。默认后台打开或复用原 File Tab；`--focus` 才导航到它，多个展示位置用准确 `--display-workspace`／`--group` 指定。目录不会顺带打开 Explorer；媒体与二进制沿原预览，书签文件按源码打开。回执分别报告 `resource`、`placement`、`data`、`navigation`、`save`。读取或导航失败后，已打开的原工作面仍保留；不能用非零退出判断“什么都没创建”，也不能在回执未知时自动重试。
 
-`agent view` 的 `terminal|activity` 偏好属于 Session，会作用于它的全部展示位置。`space view` 的 `source|diff|preview` 偏好属于准确 File Region；同一文件的另一格可以保持自己的模式。省略 `--mode` 只读当前事实，不加载正文、保存或聚焦。File 回执的 `supportedModes` 来自实际格式和读取事实，未知时为 `null`；模式已应用和正文已读到是两件事。File 模式是临时偏好，重启后按原格式默认恢复。
+`agent view` 的 `terminal|activity` 偏好属于 Session，会作用于它的全部展示位置。`file view` 的 `source|diff|preview` 偏好属于准确 File Region；同一文件的另一格可以保持自己的模式。省略 `--mode` 只读当前事实，不加载正文、保存或聚焦。File 回执的 `supportedModes` 来自实际格式和读取事实，未知时为 `null`；模式已应用和正文已读到是两件事。File 模式是临时偏好，重启后按原格式默认恢复。
 
 `space swap` 交换同一 Tab 的两个 Region 位置，作用于这个 Tab 的全部展示位置；它保留原 Session、Run、执行目录、文档、草稿、分割比例和逻辑活动 Region。跨 Tab、正在关闭或不唯一的目标会在改动前拒绝，自己与自己交换返回 `unchanged`。这四个入口都不默认抢输入；操作完成后原输入失去资格，回执会如实返回 `partial` 和输入问题，保留已应用结果。保存回执仍不能当作磁盘确认。
 
@@ -74,7 +75,7 @@ agentmux agent inspect --session '<session-id>'
 agentmux space rename --tab '<tab-id>' --name '评审'
 ```
 
-两种改名都支持 `--clear`；名称文本可以使用 `--name=--help`。改名只改桌面显示名称。保存失败会保留已应用的值，返回 `partial` 并退出非零；保存请求不代表磁盘已确认。稍后 `agent inspect` 读取的是当前桌面显示覆盖名（`override`，字符串或 `null`），不能确认早先请求的结果，也不能从 `null` 推断 Session 是否存在、退休或健康。要看 Core Session 事实，使用 `inspect --session`。
+两种改名都支持 `--clear`；名称文本可以使用 `--name=--help`。改名只改桌面显示名称。保存失败会保留已应用的值，返回 `partial` 并退出非零；保存请求不代表磁盘已确认。稍后 `agent inspect` 分别报告 Core Session 与桌面显示事实。桌面覆盖名不能确认早先请求的结果，也不能从覆盖名 `null` 推断 Session 是否存在、退休或健康；桌面不可用时仍保留能读取到的 Core 事实。
 
 右键 Agent 名片用 SID 发送与检查；知道点击的准确 Region 时，另外给空间检查、保输入导航和需填写目标的移动模板。向 Tab 发送时按不同 SID 消歧：同一个 SID 的多个 Region 仍是一个收件人；多个不同 SID 会返回真实候选。最终 owner 发现内容已替换时拒绝原投递，不改投、重发或冒称成功。
 
@@ -86,14 +87,29 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 | --- | --- |
 | 在指定 Space／Zone 开 Agent，交第一份任务 | `agent open` |
 | 发现空间、准确查询、绑定、解绑、移动、改名 | `space ls/inspect/bind/unbind/mv/rename` |
-| 导航 Space／Goal／工作面，观察选择与输入归属 | `focus`、`inspect --client` |
-| 打开 Terminal／Browser，操作已开的 Browser | `open terminal/browser`、`browser` |
-| 按 Zone 目录后台打开或复用文件 | `open file` |
-| 读取或切换 Agent／File Region 正文模式 | `agent view`、`space view` |
+| 导航 Space／Goal／工作面，观察选择与输入归属 | `space focus`、`goal focus`、`app focus/inspect` |
+| 打开 Terminal／Browser，操作已开的 Browser | `terminal open`、`browser open`、`browser` |
+| 按 Zone 目录后台打开或复用文件 | `file open` |
+| 读取或切换 Agent／File Region 正文模式 | `agent view`、`file view` |
 | 交换同一 Tab 的两个 Region 位置 | `space swap` |
-| 提升 Region 为 Tab、调整布局 | `promote`、`arrange` |
-| PMO 观察、Demand 和显式 Session 关系 | `pmo`、`demand` |
-| 已支持的偏好、诊断与资源观察 | `settings`、`diagnostics`、`metrics` |
-| Session 消息、输出、生命周期 | `send`、`deliveries`、`dispatch`、`output`、`interrupt/resume/stop` |
+| 提升 Region 为 Tab、调整布局 | `space promote/arrange` |
+| 跨对象观察、Goal 和显式 Session 关系 | `app snapshot`、`goal`；方法手册 `mote playbook pmo` |
+| 已支持的偏好、诊断与资源观察 | `settings`、`system crash-log/metrics/doctor` |
+| Session 消息、输出、生命周期 | `agent send/output/interrupt/resume/stop`、`message inbox/dispatch` |
 
 “全部桌面操作”还没有完成。共享投影在各界面的完整输入／可见性闭环仍需补齐，上述入口也不保证全部 UI 控件已可操作；不在 help 中的能力不要猜命令。共享实体／展示关系继续由同一 Store owner 提供，CLI 消费它，不另建一套空间模型。
+
+## RPC 与远程调用
+
+命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint，不创建服务。
+
+```sh
+agentmux system endpoint
+agentmux --endpoint 'unix:/path/to/control.sock' agent ls
+agentmux --endpoint 'http://127.0.0.1:8787/' app snapshot
+agentmux --endpoint 'ssh://user@host/' app inspect
+```
+
+HTTP 服务默认关闭，宿主必须显式配置监听地址与授权 token；HTTP client 从 `AGENTMUX_RPC_HTTP_TOKEN` 取得 token。Agent 的 Session capability 仍在同一服务里验证。SSH 需要远端已有服务和 `agentmux` 可执行文件；远端 `rpc-stdio` 只做转发。SSH endpoint 可以通过 `socket` 或 `command` 查询参数选择远端 socket 或可执行文件，值按 URI 编码。
+
+订阅取消只释放该 reader，保留原 Agent/Run。持续输出携带完整帧、原始 bytes 的 base64 与 cursor；丢失回执后读原操作号，不盲目再发送首任务。

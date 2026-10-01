@@ -12,6 +12,7 @@ import { WorktreeService } from '../../../src/main/worktree-service'
 import { registerWorkspace } from '../../../src/main/settings-workspace-add-control'
 import { createSpaceZoneResource } from '../../../src/main/space-zone-resources'
 import { ScratchTopics } from '../../../src/main/scratch-topics'
+import { observeClientRpcSnapshot } from '../../../src/main/rpc-client-observations'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { AppConfig } from '../../../src/shared/contracts'
 
@@ -62,7 +63,7 @@ ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
       host: id => runtime.executionHost(id), worktrees, register: fields => registerWorkspace(fields, owner, id => runtime.executionHost(id)) })
     case 'launch': return runtime.launchAgent(args[0], config)
     case 'creation': return runtime.agentCreation(args[0], args[1])
-    case 'snapshot': if (emptySnapshot) { emptySnapshot = false; return { sessions: [], timelines: {}, recoveryCandidates: [] } }; return runtime.snapshot(config)
+    case 'snapshot': if (emptySnapshot) return { sessions: [], timelines: {}, recoveryCandidates: [] }; return runtime.snapshot(config)
     case 'recover': return runtime.recoverSession(args[0], config, args[1])
     case 'attach': return runtime.attachSession(win.webContents.id, args[0], args[1], config)
     case 'replay': return runtime.readSessionReplay(win.webContents.id, args[0], args[1])
@@ -72,6 +73,7 @@ ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
     case 'paste': return runtime.paste(args[0], args[1], args[2])
     case 'respond': return runtime.respondInteraction(args[0], args[1])
     case 'submit': return runtime.submitPrompt(args[0], args[1], args[2], args[3], undefined, args[4], args[5])
+    case 'submit-message': return runtime.submitMessage(args[0], args[1])
     case 'resolve': return runtime.resolveSession(args[0], config)
     case 'refresh': return runtime.refresh(args[0], config)
     case 'stop': throw new Error('No product path in this proof is authorized to stop a healthy Agent')
@@ -108,7 +110,7 @@ const until = async (expression: string, budget = 15000) => {
   throw new Error(`Private condition did not settle: ${expression}`)
 }
 async function cli(args: string[], expectedExit = 0) {
-  process.stderr.write(`private-cli-start ${args.slice(0, 2).join(' ')} ${args[args.indexOf('--request-id') + 1] ?? ''}\n`)
+  process.stderr.write(`private-cli-start ${args.slice(0, 2).join(' ')} ${args[args.indexOf('--operation-id') + 1] ?? ''}\n`)
   let stdout: string, stderr: string, exitCode = 0
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   // This process is an independent PMO/human CLI, not the parent Agent's managed identity.
@@ -117,6 +119,7 @@ async function cli(args: string[], expectedExit = 0) {
   env.AGENTMUX_AGENT_SESSION_STORE = path.join(privateRoot, 'agent-sessions.json')
   try { const value = await execFile(nodeExecutable, [cliPath, ...args], { env, timeout: 25000, maxBuffer: 1024 * 1024 }); stdout = value.stdout; stderr = value.stderr }
   catch (error: any) { stdout = error.stdout; stderr = error.stderr; exitCode = typeof error.code === 'number' ? error.code : -1 }
+  assert.ok(stdout.trim(), `${args.join(' ')}: no success receipt; exit=${exitCode}\n${stderr}`)
   const lines = stdout.trim().split('\n')
   assert.equal(lines.length, 1, 'CLI returns one final JSON object')
   const receipt = JSON.parse(lines[0])
@@ -161,9 +164,13 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('window.spaceReady === true && !window.spaceState().loading')
     if (phase === 'seed') await win.webContents.executeJavaScript('window.spaceSelectCaller()')
-    server = new AgentMuxControlServer({ execute: request => bridge.execute(request) })
+    server = new AgentMuxControlServer({ execute: request => bridge.execute(request), coreClients: () => runtime.rpcClients(),
+      snapshot: params => observeClientRpcSnapshot(config, topics, params) })
     await server.start()
     result.initial = await state()
+    // Keep the deliberate startup outage active until its visible state is observed.
+    // Runtime events can otherwise request a second canonical snapshot before this read.
+    emptySnapshot = false
     const discovered = await cli(['space', 'ls'])
     const catalog = discovered.catalog
     const repo = catalog.spaces.find((one: any) => one.directoryPath === path.join(privateRoot, 'repo'))
@@ -171,46 +178,71 @@ app.whenReady().then(async () => {
     const other = catalog.zones.find((one: any) => one.directoryPath === path.join(privateRoot, 'other'))
     const mote = catalog.spaces.find((one: any) => one.kind === 'mote')
     assert.ok(repo && caller && other && mote)
+    const moteHome = catalog.zones.filter((one: any) => one.kind === 'home' && one.directoryPath === mote.directoryPath)
+    assert.equal(moteHome.length, 1, 'Choose the actual Mote Home Zone before adding other execution Zones')
+    const resources = await cli(['app', 'snapshot', '--include', 'projects,workspaces,motes'])
+    assert.ok(resources.workspaces.some((one: any) => one.workspaceId === 'repo'))
+    const observedMote = resources.motes.find((one: any) => one.topicId === PMO_TEAMS_TOPIC_ID)
+    assert.ok(observedMote?.soul?.content, 'Mote metadata comes from its actual private SOUL file')
+    assert.equal(observedMote.spaceId, mote.spaceId)
+    const project = resources.projects.find((one: any) => one.path === path.join(privateRoot, 'repo'))
+    assert.ok(project?.projectId, 'Project resource is discovered independently of Space')
     assert.equal((await state()).activeWorkspaceId, result.initial.activeWorkspaceId, 'Metadata discovery does not navigate')
     if (phase === 'seed') {
-      const opened = await cli(['agent', 'open', '--executor', 'fixture', '--space', repo.spaceId,
+      const opened = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--project', project.projectId,
         '--new-zone', '--worktree', '--new-branch', 'private-cli', '--path', path.join(privateRoot, 'worktree'),
-        '--prompt', 'First private task', '--request-id', 'private:git-open'])
+        '--prompt', 'First private task', '--operation-id', 'private:git-open'])
       assert.equal(opened.outcome, 'opened'); assert.equal(opened.agent.initialPrompt, 'confirmed')
       assert.equal(opened.agent.cwd, path.join(privateRoot, 'worktree'))
+      assert.equal(opened.resource.projectId, project.projectId)
+      assert.equal(opened.resource.sourceWorkspaceId, 'repo')
+      assert.equal(opened.to.spaceId, mote.spaceId)
+      assert.notEqual(project.projectId, mote.spaceId, 'Execution Project and display Space are different identities')
       assert.equal(opened.save.diskDurability, 'unconfirmed')
       assert.equal(opened.save.localStorageWritten, true)
-      assert.equal(opened.to.zoneId, (await cli(['space', 'inspect', '--request', 'private:git-open'])).request.report.to.zoneId)
+      assert.equal(opened.to.zoneId, (await cli(['space', 'inspect', '--operation-id', 'private:git-open'])).request.report.to.zoneId)
       const count = calls.filter(one => one.operation === 'launch').length
-      const repeated = await cli(['agent', 'open', '--executor', 'fixture', '--space', repo.spaceId,
+      const repeated = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--project', project.projectId,
         '--new-zone', '--worktree', '--new-branch', 'private-cli', '--path', path.join(privateRoot, 'worktree'),
-        '--prompt', 'First private task', '--request-id', 'private:git-open'])
+        '--prompt', 'First private task', '--operation-id', 'private:git-open'])
       assert.equal(repeated.agent.agentSessionId, opened.agent.agentSessionId)
       assert.equal(calls.filter(one => one.operation === 'launch').length, count)
       assert.equal(calls.filter(one => one.operation === 'create-resource').length, 1)
       const topic = catalog.spaces.find((one: any) => one.kind === 'topic')
-      const topicOpened = await cli(['agent', 'open', '--executor', 'fixture', '--space', topic.spaceId, '--prompt', 'Topic task', '--request-id', 'private:topic-open'])
-      const moteOpened = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--prompt', 'Mote task', '--focus', '--request-id', 'private:mote-open'])
+      const topicOpened = await cli(['agent', 'open', '--executor', 'fixture', '--space', topic.spaceId, '--prompt', 'Topic task', '--operation-id', 'private:topic-open'])
+      const moteOpened = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--zone', moteHome[0].zoneId, '--prompt', 'Mote task', '--focus', '--operation-id', 'private:mote-open'])
       assert.equal(topicOpened.agent.cwd, await fs.realpath(topic.directoryPath))
       assert.equal(moteOpened.agent.cwd, await fs.realpath(mote.directoryPath))
       assert.equal((await state()).activeWorkspaceId, SCRATCH_WORKSPACE_ID)
       assert.equal((await state()).agentFocus.pmo.sessionId, moteOpened.agent.agentSessionId)
-      const directoryOpened = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId,
-        '--new-zone', '--directory', path.join(privateRoot, 'directory'), '--prompt', 'Directory task', '--request-id', 'private:directory-open'])
+      const moteDisplayGroup = (await state()).layouts[SCRATCH_WORKSPACE_ID].activeGroupId
+      const directoryOpened = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--project', project.projectId,
+        '--display-workspace', SCRATCH_WORKSPACE_ID, '--group', moteDisplayGroup,
+        '--new-zone', '--directory', path.join(privateRoot, 'directory'), '--prompt', 'Directory task', '--operation-id', 'private:directory-open'])
+      assert.equal(directoryOpened.to.displayWorkspaceId, SCRATCH_WORKSPACE_ID)
+      assert.equal(directoryOpened.to.groupId, moteDisplayGroup)
+      assert.equal(directoryOpened.to.workspaceId, directoryOpened.resource.workspaceId)
+      const callerGroup = (await state()).layouts.caller.activeGroupId
+      await cli(['space', 'bind', '--tab', directoryOpened.to.tabId, '--display-workspace', 'caller', '--group', callerGroup,
+        '--operation-id', 'private:directory-second-display'])
+      const directoryReadback = await cli(['space', 'inspect', '--operation-id', 'private:directory-open'])
+      assert.equal(directoryReadback.request.report.outcome, 'opened')
+      assert.deepEqual(directoryReadback.request.report.to, directoryOpened.to)
+      result.exactDisplayReadback = { initial: directoryOpened.to, secondDisplayWorkspaceId: 'caller', readback: directoryReadback.request.report.to }
       assert.equal(directoryOpened.agent.cwd, path.join(privateRoot, 'directory'))
       assert.equal(directoryOpened.resource.kind, 'directory')
-      const ambiguous = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--request-id', 'private:ambiguous'], 1)
-      assert.equal(ambiguous.issues[0].candidates.length, 2)
-      const first = await cli(['agent', 'open', '--session', opened.agent.agentSessionId, '--zone', caller.zoneId, '--new-tab', '--focus', '--request-id', 'private:projection'])
+      const ambiguous = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--operation-id', 'private:ambiguous'], 1)
+      assert.ok(ambiguous.issues[0].candidates.length > 1, 'Actual multiple Zone candidates stay explicit')
+      const first = await cli(['agent', 'open', '--session', opened.agent.agentSessionId, '--zone', caller.zoneId, '--new-tab', '--focus', '--operation-id', 'private:projection'])
       await until(`window.spaceNativeReady(${JSON.stringify(first.to.regionId)}, ${JSON.stringify(opened.agent.agentSessionId)}, ${JSON.stringify(opened.agent.runId)})`)
       await until(`document.activeElement?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === ${JSON.stringify(first.to.regionId)}`)
       result.beforeBackgroundSplit = await state()
-      const second = await cli(['agent', 'open', '--session', topicOpened.agent.agentSessionId, '--region', first.to.regionId, '--split', 'right', '--request-id', 'private:second'])
+      const second = await cli(['agent', 'open', '--session', topicOpened.agent.agentSessionId, '--region', first.to.regionId, '--split', 'right', '--operation-id', 'private:second'])
       await until(`window.spaceNativeReady(${JSON.stringify(second.to.regionId)}, ${JSON.stringify(topicOpened.agent.agentSessionId)}, ${JSON.stringify(topicOpened.agent.runId)})`)
       await until(`window.spaceNativeReady(${JSON.stringify(first.to.regionId)}, ${JSON.stringify(opened.agent.agentSessionId)}, ${JSON.stringify(opened.agent.runId)})`)
       await until(`document.activeElement?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === ${JSON.stringify(first.to.regionId)}`)
       assert.equal(await win.webContents.executeJavaScript("document.activeElement?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId"), first.to.regionId, 'Background split does not move the caret to B')
-      const third = await cli(['agent', 'open', '--session', moteOpened.agent.agentSessionId, '--region', second.to.regionId, '--split', 'below', '--request-id', 'private:third'])
+      const third = await cli(['agent', 'open', '--session', moteOpened.agent.agentSessionId, '--region', second.to.regionId, '--split', 'below', '--operation-id', 'private:third'])
       await until(`window.spaceNativeReady(${JSON.stringify(third.to.regionId)}, ${JSON.stringify(moteOpened.agent.agentSessionId)}, ${JSON.stringify(moteOpened.agent.runId)})`)
       await until(`window.spaceNativeReady(${JSON.stringify(first.to.regionId)}, ${JSON.stringify(opened.agent.agentSessionId)}, ${JSON.stringify(opened.agent.runId)})`)
       await until(`document.activeElement?.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId === ${JSON.stringify(first.to.regionId)}`)
@@ -243,7 +275,7 @@ app.whenReady().then(async () => {
       await until(`window.spaceState().focusedSessionId === ${JSON.stringify(opened.agent.agentSessionId)}`)
       const before = await state()
       const moved = await cli(['space', 'mv', '--from-region', first.to.regionId, '--expect-session', opened.agent.agentSessionId,
-        '--zone', other.zoneId, '--new-tab', '--request-id', 'private:move'])
+        '--zone', other.zoneId, '--new-tab', '--operation-id', 'private:move'])
       assert.equal(moved.outcome, 'moved'); assert.equal(moved.to.regionId, first.to.regionId)
       assert.equal(moved.agent.cwd, opened.agent.cwd)
       await until('window.spaceState().neutralNotice !== null')
@@ -284,7 +316,7 @@ app.whenReady().then(async () => {
       assert.equal((await store.load()).filter(one => Boolean(one.nativeHandle)).length, 4)
       const beforeFollowup = (await client().readRunReplay({ runId: opened.agent.runId })).run
       const beforeFollowupCalls = calls.length
-      const send = await cli(['send', '--to-session', opened.agent.agentSessionId, '--text', 'Private follow-up task', '--message-id', 'private-followup'])
+      const send = await cli(['agent', 'send', '--to-session', opened.agent.agentSessionId, '--text', 'Private follow-up task', '--message-id', 'private-followup'])
       assert.equal(send.agentSessionId, opened.agent.agentSessionId)
       assert.equal(send.delivery.state, 'delivered')
       const expectedPrompt = '[Message from unverified local process]\nPrivate follow-up task'
@@ -298,37 +330,56 @@ app.whenReady().then(async () => {
       const output = followup.replay.map((chunk: any) => Buffer.from(chunk.dataBytes).toString('utf8')).join('').replaceAll('\r\n', '\n')
       assert.equal(output.split(expectedFrame).length - 1, 1, 'Exactly one fresh accepted task frame')
       assert.equal(followup.run.runId, opened.agent.runId)
-      const submitted = calls.slice(beforeFollowupCalls).filter(one => one.operation === 'submit')
+      const submitted = calls.slice(beforeFollowupCalls).filter(one => one.operation === 'submit-message')
       assert.equal(submitted.length, 1)
-      assert.deepEqual(submitted[0]!.args.slice(0, 3), [{ kind: 'agent', hostId: 'local', agentSessionId: opened.agent.agentSessionId, run: { runId: opened.agent.runId } }, expectedPrompt, 'private-followup'])
+      assert.deepEqual(submitted[0]!.args[0], { kind: 'agent', hostId: 'local', agentSessionId: opened.agent.agentSessionId, run: { runId: opened.agent.runId } })
+      const submittedMessage = submitted[0]!.args[1] as any
+      assert.equal(submittedMessage.envelope.messageId, 'private-followup')
+      assert.equal(submittedMessage.envelope.body, 'Private follow-up task')
+      assert.equal(submittedMessage.envelope.recipientSessionId, opened.agent.agentSessionId)
+      assert.equal(submittedMessage.envelope.recipientRunId, opened.agent.runId)
+      assert.deepEqual(submittedMessage.condition.expectedRun, { runId: opened.agent.runId })
+      assert.equal(calls.slice(beforeFollowupCalls).filter(one => one.operation === 'submit').length, 0, 'Public messaging must use the authenticated Runtime entry')
       result.publicSend = { agentSessionId: opened.agent.agentSessionId, runId: opened.agent.runId, send,
         beforeOutput: beforeFollowup.latestOutputBytes, rawNewOutput: output, exactSubmit: submitted[0],
         acceptedInputBytes: followup.run.acceptedInputBytes, observedExactBodyInRawReplay: true }
       registrationFault = true
-      const retained = await cli(['agent', 'open', '--executor', 'fixture', '--space', repo.spaceId, '--new-zone', '--worktree',
-        '--new-branch', 'private-retained', '--path', path.join(privateRoot, 'retained-worktree'), '--request-id', 'private:retained-resource'], 1)
+      const retained = await cli(['agent', 'open', '--executor', 'fixture', '--space', mote.spaceId, '--project', project.projectId, '--new-zone', '--worktree',
+        '--new-branch', 'private-retained', '--path', path.join(privateRoot, 'retained-worktree'), '--operation-id', 'private:retained-resource'], 1)
       assert.equal(retained.outcome, 'partial'); assert.equal(retained.agent, null); assert.equal(retained.resource.workspaceId, null)
       assert.equal((await fs.stat(path.join(privateRoot, 'retained-worktree'))).isDirectory(), true)
       const resourceCalls = calls.filter(one => one.operation === 'create-resource').length
-      await cli(['space', 'inspect', '--request', 'private:retained-resource'], 1)
+      await cli(['space', 'inspect', '--operation-id', 'private:retained-resource'], 1)
       assert.equal(calls.filter(one => one.operation === 'create-resource').length, resourceCalls)
       result.resourceRetained = retained
       // Move the first (selected by the existing navigation policy) projection into a Topic Tab
       // that already contains a healthy sibling. The other projection stays independently placed.
       const primaryMoved = await cli(['space', 'mv', '--from-region', opened.to.regionId, '--expect-session', opened.agent.agentSessionId,
-        '--region', topicOpened.to.regionId, '--split', 'right', '--request-id', 'private:primary-topic-move'])
+        '--region', topicOpened.to.regionId, '--split', 'right', '--operation-id', 'private:primary-topic-move'])
       assert.equal(primaryMoved.outcome, 'moved')
       assert.equal(primaryMoved.to.workspaceId, SCRATCH_WORKSPACE_ID)
       assert.equal(primaryMoved.to.tabId, topicOpened.to.tabId)
       assert.equal(primaryMoved.agent.cwd, opened.agent.cwd)
       await win.webContents.executeJavaScript('window.spaceFlush()')
       await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(durable(await state())))
-      await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify({ opened, moved, primaryMoved, caller, other, first, second }))
+      await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify({ opened, moved, primaryMoved, caller, other, first, second, directoryOpened }))
       result.backgroundCommands = commands
       result.created = { opened, topicOpened, moteOpened, directoryOpened, moved }
     } else {
       const expected = JSON.parse(await fs.readFile(path.join(privateRoot, 'expected.json'), 'utf8'))
-      assert.deepEqual(durable(result.initial), expected, 'The actual private process restart retains exact durable Space/Zone/Tab/Region/focus')
+      const ids = JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8'))
+      const restored = durable(result.initial)
+      const addedLayoutIds = Object.keys(restored.layouts).filter(id => !Object.hasOwn(expected.layouts, id))
+      for (const id of addedLayoutIds) {
+        assert.equal(id, ids.directoryOpened.resource.workspaceId, 'Only the newly registered resource may initialize an empty layout')
+        const layout = restored.layouts[id]
+        assert.equal(layout.groups.length, 1)
+        assert.deepEqual(layout.root, { type: 'leaf', groupId: layout.activeGroupId })
+        assert.deepEqual(layout.groups[0], { id: layout.activeGroupId, tabOrder: [], activeTabId: null, recentTabIds: [] })
+      }
+      result.initializedEmptyResourceLayouts = Object.fromEntries(addedLayoutIds.map(id => [id, restored.layouts[id]]))
+      assert.deepEqual({ ...restored, layouts: Object.fromEntries(Object.keys(expected.layouts).map(id => [id, restored.layouts[id]])) },
+        expected, 'The actual private process restart retains every original durable Space/Zone/Tab/Region/focus exactly')
       assert.equal(calls.filter(one => one.operation === 'launch').length, 0, 'Restart does not create another Agent')
       assert.equal(calls.some(one => one.operation === 'stop'), false)
       if (phase === 'empty-restore') {
@@ -342,12 +393,15 @@ app.whenReady().then(async () => {
         assert.deepEqual(commands.results, [false, false]); assert.deepEqual(commands.before, commands.after)
         result.restoredCommands = commands
       }
-      const ids = JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8'))
-      const inspected = await cli(['space', 'inspect', '--request', 'private:git-open'], 1)
+      const directoryRestored = await cli(['space', 'inspect', '--operation-id', 'private:directory-open'])
+      assert.equal(directoryRestored.request.report.outcome, 'opened')
+      assert.deepEqual(directoryRestored.request.report.to, ids.directoryOpened.to)
+      result.exactDisplayRestored = directoryRestored.request.report.to
+      const inspected = await cli(['space', 'inspect', '--operation-id', 'private:git-open'], 1)
       assert.equal(inspected.request.report.agent.agentSessionId, ids.opened.agent.agentSessionId)
       assert.equal(inspected.request.report.agent.cwd, ids.opened.agent.cwd)
       assert.equal(inspected.request.report.outcome, 'unknown', 'The intentionally moved original projection no longer confirms its former placement')
-      const projection = await cli(['space', 'inspect', '--request', 'private:projection'], 1)
+      const projection = await cli(['space', 'inspect', '--operation-id', 'private:projection'], 1)
       assert.equal(projection.request.report.outcome, 'unknown', 'A later intentional projection move does not pretend its old placement still exists')
       if (phase === 'restore') {
         const beforeNavigation = await state()
@@ -360,11 +414,12 @@ app.whenReady().then(async () => {
         await until(`window.spaceNativeReady(${JSON.stringify(ids.primaryMoved.to.regionId)}, ${JSON.stringify(ids.opened.agent.agentSessionId)}, ${JSON.stringify(ids.opened.agent.runId)})`)
         const afterNavigation = await state()
         const placementGraph = (value: any) => Object.entries(value.layouts).flatMap(([workspaceId, layout]: any) =>
-          layout.groups.flatMap((group: any) => group.tabOrder.map((tabId: string) => ({ workspaceId, tabId }))))
+          layout.groups.flatMap((group: any) => group.tabOrder.map((tabId: string) => ({ workspaceId, groupId: group.id, tabId }))))
         assert.deepEqual(placementGraph(afterNavigation), placementGraph(beforeNavigation))
         const placements = placementGraph(afterNavigation)
         assert.ok(placements.length > 0)
-        assert.equal(new Set(placements.map((one: any) => one.tabId)).size, placements.length, 'One Tab belongs to exactly one durable Workspace layout')
+        assert.equal(new Set(placements.map((one: any) => JSON.stringify([one.workspaceId, one.groupId, one.tabId]))).size, placements.length, 'Every durable Tab occurrence has one exact display Workspace and Group address')
+        assert.equal(placements.filter((one: any) => one.tabId === ids.directoryOpened.to.tabId).length, 2, 'Both references to the same Tab survive restart and navigation')
         for (const [tabId, beforeTab] of Object.entries(beforeNavigation.tabs) as any) {
           const afterTab = afterNavigation.tabs[tabId]
           assert.equal(afterTab.workspaceId, beforeTab.workspaceId)
@@ -382,7 +437,7 @@ app.whenReady().then(async () => {
           agentSessionId: ids.opened.agent.agentSessionId, runId: ids.opened.agent.runId, cwd: ids.opened.agent.cwd }
         await fs.writeFile(path.join(evidence, 'restored-open-session.png'), (await win.capturePage()).toPNG())
         const focused = await cli(['space', 'mv', '--from-region', ids.moved.to.regionId, '--expect-session', ids.opened.agent.agentSessionId,
-          '--region', ids.moved.to.regionId, '--focus', '--request-id', 'private:focus-target'])
+          '--region', ids.moved.to.regionId, '--focus', '--operation-id', 'private:focus-target'])
         assert.equal(focused.outcome, 'unchanged')
         assert.equal((await state()).activeWorkspaceId, ids.moved.to.workspaceId)
         await until(`window.spaceState().focusedSessionId === ${JSON.stringify(ids.opened.agent.agentSessionId)} && window.spaceState().terminalCount > 0`)
@@ -413,7 +468,7 @@ app.whenReady().then(async () => {
         await fs.writeFile(path.join(evidence, 'explicit-target-focus.png'), (await win.capturePage()).toPNG())
         // Return to a held logical source using another exact background move through the public CLI.
         const moved = await cli(['space', 'mv', '--from-region', ids.moved.to.regionId, '--expect-session', ids.opened.agent.agentSessionId,
-          '--zone', ids.caller.zoneId, '--new-tab', '--request-id', 'private:move-again'])
+          '--zone', ids.caller.zoneId, '--new-tab', '--operation-id', 'private:move-again'])
         assert.equal((await state()).retainedSpatialFocus.regionId, ids.first.to.regionId)
         ids.moved = moved
         await win.webContents.executeJavaScript('window.spaceFlush()')
@@ -423,16 +478,16 @@ app.whenReady().then(async () => {
         admissionArmed = true
         // The private owner intentionally exits from the FIRST admission save before this CLI returns.
         void cli(['space', 'mv', '--from-region', ids.moved.to.regionId, '--expect-session', ids.opened.agent.agentSessionId,
-          '--zone', ids.other.zoneId, '--new-tab', '--request-id', 'private:admission-only']).catch(() => {})
+          '--zone', ids.other.zoneId, '--new-tab', '--operation-id', 'private:admission-only']).catch(() => {})
         return
       } else if (phase === 'after-admission') {
-        const interrupted = await cli(['space', 'inspect', '--request', 'private:admission-only'], 1)
+        const interrupted = await cli(['space', 'inspect', '--operation-id', 'private:admission-only'], 1)
         assert.equal(interrupted.request.report.outcome, 'unknown')
         assert.equal(interrupted.request.report.to.tabId, ids.moved.to.tabId, 'The exact Region remains at its real source')
         assert.equal(interrupted.request.report.issues[0].code, 'SPACE_PLACEMENT_UNKNOWN')
         const before = durable(await state())
         const replay = await cli(['space', 'mv', '--from-region', ids.moved.to.regionId, '--expect-session', ids.opened.agent.agentSessionId,
-          '--zone', ids.other.zoneId, '--new-tab', '--request-id', 'private:admission-only'], 1)
+          '--zone', ids.other.zoneId, '--new-tab', '--operation-id', 'private:admission-only'], 1)
         assert.equal(replay.outcome, 'unknown')
         assert.deepEqual(durable(await state()), before)
         result.admissionOnlyReconciled = interrupted

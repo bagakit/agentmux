@@ -8,7 +8,7 @@ const body = { operation: 'open.file' as const, requestedPath: 'notes 中文.md'
   resource: { hostId: 'local', workspaceId: 'resource-exact', workspacePath: upstreamFixturePath("workspace"), zoneId: 'zone-exact', zonePath: upstreamFixturePath("workspace/topic"), path: 'topic/notes 中文.md' },
   placement: { status: 'created' as const, tabId: 'tab-exact', regionId: 'region-exact', locations: [location] },
   data: { kind: 'text' as const, reason: null }, navigation: 'background' as const, changed: true, outcome: 'opened' as const, save: saved, issues: [] }
-const args = ['open', 'file', '--zone', 'zone-exact', '--path', 'notes 中文.md']
+const args = ['file', 'open', '--zone', 'zone-exact', '--path', 'notes 中文.md']
 describe('File opening public CLI wire', () => {
   const h = workfaceCliFixture(body)
   it('passes the literal Zone path and preserves background as the explicit default', async () => {
@@ -17,16 +17,16 @@ describe('File opening public CLI wire', () => {
     expect(isLongAgentMuxControlOperation('open.file')).toBe(true)
   })
   it('passes exact display parents and explicit navigation separately from the resource root', async () => {
-    await h.receipt([...args, '--space', 'space-exact', '--display-workspace', 'display-exact', '--group', 'group-exact', '--focus', '--request-id', 'file-request'])
+    await h.receipt([...args, '--space', 'space-exact', '--display-workspace', 'display-exact', '--group', 'group-exact', '--focus', '--operation-id', 'file-request'])
     expect(h.seen.at(-1)).toEqual({ ...base, operation: 'open.file', path: 'notes 中文.md', zoneId: 'zone-exact', spaceId: 'space-exact', displayWorkspaceId: 'display-exact', groupId: 'group-exact', focus: true })
   })
   it('keeps option-looking paths as data and reports failed reads without fabricating editable text', async () => {
     h.setReply({ ...body, requestedPath: '--help', data: { kind: 'failed', reason: 'read unavailable' }, outcome: 'partial' })
-    expect(await h.receipt(['open', 'file', '--zone', 'zone-exact', '--path', '--help'], 1)).toMatchObject({ result: { requestedPath: '--help', placement: { status: 'created' }, data: { kind: 'failed' } } })
+    expect(await h.receipt(['file', 'open', '--zone', 'zone-exact', '--path', '--help'], 1)).toMatchObject({ result: { requestedPath: '--help', placement: { status: 'created' }, data: { kind: 'failed' } } })
     expect(h.seen.at(-1)).toMatchObject({ path: '--help' }); h.setReply(body)
   })
   it('rejects missing exact roots, half display addresses and unsupported line navigation before contact', async () => {
-    for (const bad of [['open', 'file', '--path', 'a'], [...args, '--display-workspace', 'display-exact'], [...args, '--line', '8']]) {
+    for (const bad of [['file', 'open', '--path', 'a'], [...args, '--display-workspace', 'display-exact'], [...args, '--line', '8']]) {
       const count = h.seen.length; expect((await h.run(bad)).code).toBe(1); expect(h.seen).toHaveLength(count)
     }
   })
@@ -46,7 +46,7 @@ describe('File opening public CLI wire', () => {
     const foreign = await h.run(args)
     expect(foreign.code).toBe(1); expect(JSON.parse(foreign.stderr)).toMatchObject({ error: { code: 'CONTROL_PROTOCOL_ERROR' } })
     h.setReply(body)
-    const count = h.seen.length, help = await h.run(['open', 'file', '--help'])
-    expect(help.code).toBe(0); expect(help.stdout).toContain('Zone-relative-path'); expect(h.seen).toHaveLength(count)
+    const count = h.seen.length, help = await h.run(['file', 'open', '--help'])
+    expect(help.code).toBe(0); expect(help.stdout).toContain('PATH'); expect(h.seen).toHaveLength(count)
   })
 })

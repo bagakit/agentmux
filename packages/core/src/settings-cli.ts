@@ -1,102 +1,48 @@
-import { type AgentMuxControlSettingsGetRequest,
-  type AgentMuxControlSettingsSetRequest, type AgentMuxControlSettingsResourceRequest,
-  type AgentMuxControlSettingsBrowserLinksRequest, type AgentMuxControlSettingsWorkspaceAddRequest, type AgentMuxControlSettingsHostsRequest,
-  type AgentMuxControlSettingsExecutorRefreshRequest } from './control.js'
 import { AgentMuxError } from './errors.js'
-import { settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { readControlJsonInput } from './cli-json-input.js'
 
-type SettingsCommand =
-  | Omit<AgentMuxControlSettingsGetRequest, 'schemaVersion' | 'requestId'>
-  | Omit<AgentMuxControlSettingsSetRequest, 'schemaVersion' | 'requestId'>
-  | ResourceCommand
-  | WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>
-  | Omit<AgentMuxControlSettingsWorkspaceAddRequest, 'schemaVersion' | 'requestId'>
-  | WithoutEnvelope<AgentMuxControlSettingsHostsRequest>
-  | Omit<AgentMuxControlSettingsExecutorRefreshRequest, 'schemaVersion' | 'requestId'>
-type WithoutEnvelope<T> = T extends AgentMuxControlSettingsResourceRequest | AgentMuxControlSettingsBrowserLinksRequest | AgentMuxControlSettingsHostsRequest ? Omit<T, 'schemaVersion' | 'requestId'> : never
-type ResourceCommand = WithoutEnvelope<AgentMuxControlSettingsResourceRequest>
-
-/** Positional scalar values are data, including literal --help and empty strings. */
-export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCommand> {
-  if (args[0] === 'executors' && args[1] === 'refresh') {
-    if (args.length !== 5 || !args[2]?.length || args[3] !== '--host' || !args[4]?.length) {
-      throw invalid('Refresh requires exact Executor and Host IDs. Run agentmux settings executors refresh --help.')
-    }
-    return { operation: 'settings.executors.refresh', executorId: args[2], hostId: args[4] }
-  }
-  if (args[0] === 'hosts') {
-    if (args[1] === 'list' && args.length === 2) return { operation: 'settings.hosts.list' }
-    // Three arguments select an exact saved ID, including literal --input or --help.
-    if (args[1] === 'test' && args.length === 3 && args[2]!.length) return { operation: 'settings.hosts.test', id: args[2]! }
-    if (args[1] === 'test' && args.length === 4 && args[2] === '--input') {
-      return { operation: 'settings.hosts.test', input: settingsResourceRecord(await input(args[3]!), 'INVALID_CLI_ARGUMENT') }
-    }
-    throw invalid('Run agentmux settings hosts --help for exact ID or complete draft Test syntax.')
-  }
-  if (args[0] === 'executors' || args[0] === 'prompts') return resourceCommand(args)
-  if (args[0] === 'browser') return browserLinksCommand(args)
-  if (args[0] === 'workspaces') {
-    if (args[1] !== 'add' || args.length !== 4 || args[2] !== '--input') {
-      throw invalid('Workspace add requires --input <file|->. Run agentmux settings workspaces --help.')
-    }
-    return { operation: 'settings.workspaces.add', input: settingsResourceRecord(await input(args[3]!), 'INVALID_CLI_ARGUMENT') }
-  }
-  if (args[0] === 'get' && args.length <= 2) {
-    const target = args[1]
-    if (target?.startsWith('-')) throw invalid('settings get accepts a target, not options.')
-    return { operation: 'settings.get', ...(target === undefined ? {} : { target }) }
-  }
-  if (args[0] === 'set' && args.length === 3) {
-    const key = args[1]!
-    if (!key.trim() || key.startsWith('-')) throw invalid('A setting key is required.')
-    return { operation: 'settings.set', key, value: args[2]! }
-  }
-  throw invalid('Run agentmux settings --help for supported commands.')
-}
-
-async function browserLinksCommand(args: readonly string[]): Promise<WithoutEnvelope<AgentMuxControlSettingsBrowserLinksRequest>> {
-  if (args[1] === 'links' && args[2] === 'list' && args.length === 3) return { operation: 'settings.browser.links.list' }
-  if (args[1] === 'links' && args[2] === 'forget') {
-    // A single positional argument is always data, even --input, --help or an empty string.
-    if (args.length === 4) return { operation: 'settings.browser.links.forget', scheme: args[3]! }
-    if (args.length === 5 && args[3] === '--input') {
-      const envelope = settingsResourceEnvelope(await input(args[4]!), ['scheme'], 'INVALID_CLI_ARGUMENT')
-      if (!Object.hasOwn(envelope, 'scheme') || typeof envelope.scheme !== 'string') throw invalid('Browser link input requires exactly {"scheme": string}.')
-      return { operation: 'settings.browser.links.forget', scheme: envelope.scheme }
-    }
-  }
-  throw invalid('Run agentmux settings browser links --help for list and forget syntax.')
-}
-
+export interface SettingsCliCommand { method: string; params: Record<string, unknown> }
+const invalid = (message: string): never => { throw new AgentMuxError(message, 'INVALID_CLI_ARGUMENT') }
 const input = (path: string) => readControlJsonInput(path, 'Settings')
 
-async function resourceCommand(args: readonly string[]): Promise<ResourceCommand> {
-  const resource = args[0] as 'executors' | 'prompts', action = args[1]
-  if (action === 'list' && args.length === 2) return { operation: 'settings.resource.list', resource }
-  const id = args[2]
-  if (typeof id !== 'string' || !id.trim()) throw invalid('A resource ID is required.')
-  if (action === 'get' && args.length === 3) return { operation: 'settings.resource.get', resource, id }
-  const hasInput = args.length === 5 && args[3] === '--input'
-  if (action === 'remove' && args.length === 3) return { operation: 'settings.resource.remove', resource, id }
-  if (!hasInput || (action !== 'add' && action !== 'update' && action !== 'remove')) {
-    throw invalid('Resource add/update require --input <file|->; remove accepts one optional input. Run settings executors --help.')
+/** Parse carriers only. Resource fields, CAS and save semantics belong to the service. */
+export async function parseSettingsCommand(args: readonly string[]): Promise<SettingsCliCommand> {
+  const [resource, action, id] = args
+  if (resource === 'inspect' && args.length <= 2) {
+    if (action?.startsWith('-')) invalid('settings inspect accepts a target, not options.')
+    return { method: 'settings.inspect', params: action === undefined ? {} : { target: action } }
   }
-  const value = await input(args[4]!)
-  if (action === 'add') {
-    const fields = settingsResourceRecord(value, 'INVALID_CLI_ARGUMENT')
-    if (Object.hasOwn(fields, 'id')) throw invalid('Resource ID belongs in the positional argument, not the input object.')
-    return { operation: 'settings.resource.add', resource, id, value: fields }
+  if (resource === 'set' && args.length === 3) {
+    if (!action?.trim() || action.startsWith('-')) invalid('A setting key is required.')
+    return { method: 'settings.set', params: { key: action, value: id } }
   }
-  const envelope = settingsResourceEnvelope(value, action === 'update' ? ['changes', 'expected'] : ['expected'], 'INVALID_CLI_ARGUMENT')
-  const expected = Object.hasOwn(envelope, 'expected')
-    ? { expected: settingsResourceRecord(envelope.expected, 'INVALID_CLI_ARGUMENT') } : {}
-  if (action === 'remove') return { operation: 'settings.resource.remove', resource, id, ...expected }
-  const changes = settingsResourceRecord(envelope.changes, 'INVALID_CLI_ARGUMENT')
-  if (Object.keys(changes).length === 0) throw invalid('Resource changes must contain at least one field.')
-  return { operation: 'settings.resource.update', resource, id, changes, ...expected }
-}
-
-function invalid(message: string): AgentMuxError {
-  return new AgentMuxError(message, 'INVALID_CLI_ARGUMENT')
+  if (resource === 'executors' || resource === 'prompts') {
+    const method = `settings.${resource}.${action}`
+    if (action === 'ls' && args.length === 2) return { method, params: {} }
+    if (!id?.length) invalid('An exact resource ID is required.')
+    if (resource === 'executors' && action === 'refresh' && args.length === 5 && args[3] === '--host' && args[4]?.length) {
+      return { method, params: { executorId: id, hostId: args[4] } }
+    }
+    if (action === 'inspect' && args.length === 3) return { method, params: { id } }
+    if (action === 'delete' && args.length === 3) return { method, params: { id } }
+    if (!['create', 'update', 'delete'].includes(action ?? '') || args.length !== 5 || args[3] !== '--input') invalid('Use create/update/delete <id> --input <file|->.')
+    const value = await input(args[4]!)
+    if (action === 'create') return { method, params: { id, value } }
+    return { method, params: { id, input: value } }
+  }
+  if (resource === 'hosts') {
+    if (action === 'ls' && args.length === 2) return { method: 'settings.hosts.ls', params: {} }
+    if (action === 'test' && args.length === 3 && id?.length) return { method: 'settings.hosts.test', params: { id } }
+    if (action === 'test' && args.length === 4 && id === '--input') return { method: 'settings.hosts.test', params: { input: await input(args[3]!) } }
+  }
+  if (resource === 'workspaces' && action === 'register' && args.length === 4 && id === '--input') {
+    return { method: 'settings.workspaces.register', params: { input: await input(args[3]!) } }
+  }
+  if (resource === 'browser-links') {
+    if (action === 'ls' && args.length === 2) return { method: 'settings.browser-links.ls', params: {} }
+    // A lone positional value is data, including an empty scheme or --help.
+    if (action === 'forget' && args.length === 3) return { method: 'settings.browser-links.forget', params: { input: { scheme: id } } }
+    if (action === 'forget' && args.length === 4 && id === '--input') return { method: 'settings.browser-links.forget', params: { input: await input(args[3]!) } }
+  }
+  return invalid('Unsupported settings command. Run agentmux settings --help.')
 }

@@ -3,6 +3,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
+import { observeClientRpcSnapshot } from './rpc-client-observations.js'
 import { SessionHistoryObservationOwners } from './session-history-observation.js'
 import { createResourceMetricsPort, observeRendererResources } from './resource-usage-control.js'
 import { ToolkitOwner } from './toolkit-owner.js'
@@ -41,6 +42,7 @@ import {
 } from 'electron'
 import {
   AgentMuxControlServer,
+  agentMuxRpcHttpOptions,
   AgentMuxError,
   type AgentPromptCondition,
   type AgentExecutorId,
@@ -1106,8 +1108,12 @@ export async function registerIpc(args: {
   ) => await browsers.restore(id, { ...input, workspaceId: verifiedBrowserWorkspace(config.workspaces, input.workspaceId) }))
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
+  const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
     execute: executeControl,
+    coreClients: () => args.runtime.rpcClients(),
+    snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
+    ...(rpcHttp ? { http: rpcHttp } : {}),
     metrics,
     toolkit,
     /**

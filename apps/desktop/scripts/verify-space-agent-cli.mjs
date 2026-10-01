@@ -1,4 +1,3 @@
-import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { execFile as execFileCallback } from 'node:child_process'
@@ -6,6 +5,7 @@ import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
@@ -18,9 +18,9 @@ const evidence = path.resolve(process.argv[2] ?? path.join(root, '.tmp/space-age
 const require = createRequire(path.join(desktop, 'package.json'))
 const { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
-const privateRoot = await fs.realpath(await fs.mkdtemp(_hygiene_fixturePath("tmp/amx-space-")))
+const privateRoot = await fs.realpath(await fs.mkdtemp(path.join(tmpdir(), 'amx-space-')))
 const hash = value => createHash('sha256').update(value).digest('hex')
-const receipt = { schema: 'agentmux.space-agent-cli.native.v1', passed: false, phases: [], inputs: null, inputsAfter: null, cleanup: null,
+const receipt = { schema: 'agentmux.space-agent-cli.native.v1', passed: false, phases: [], inputs: null, inputsAfter: null, tools: null, toolsAfter: null, cleanup: null,
   limitations: ['Private ordinary Electron generations share one private ctxmux daemon and private durable AgentSession store.',
     'Actual CLI bin/dist, Control socket, production Desktop IPC bridge, Renderer API, App/Store/WorkspaceWorkbench/SessionPane/TerminalView, Main resource owners and public Core are exercised.',
     'The native Provider process is the repository fake Codex CLI; it emits authenticated hooks and a real native handle. No upstream Provider version is claimed.',
@@ -35,13 +35,14 @@ const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scri
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/core/vendor/ctxmux')),
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
-  path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'), electron]
+  path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml')]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 let client
 await fs.mkdir(evidence, { recursive: true })
 try {
   receipt.inputs = await hashes()
+  receipt.tools = { electron: { path: electron, sha256: hash(await fs.readFile(electron)) } }
   for (const directory of ['repo', 'caller', 'other', 'topics', 'directory']) await fs.mkdir(path.join(privateRoot, directory))
   await execFile('git', ['init', '-b', 'main', path.join(privateRoot, 'repo')])
   await fs.writeFile(path.join(privateRoot, 'repo/input.txt'), 'Private proof source\n')
@@ -93,6 +94,8 @@ try {
   assert.equal(receipt.phases.find(one => one.phase === 'empty-restore').native.emptySnapshotRetained, true)
   assert.ok(receipt.phases.find(one => one.phase === 'after-admission').native.admissionOnlyReconciled)
   receipt.inputsAfter = await hashes()
+  receipt.toolsAfter = { electron: { path: electron, sha256: hash(await fs.readFile(electron)) } }
+  assert.deepEqual(receipt.toolsAfter, receipt.tools, 'Private Electron tool changed during verification')
   assert.deepEqual(receipt.inputsAfter, receipt.inputs, 'Source changed during private verification')
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }

@@ -226,6 +226,9 @@ importers:
 
   packages/core:
     dependencies:
+      json-rpc-2.0:
+        specifier: 1.8.1
+        version: 1.8.1
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../demand
@@ -297,6 +300,8 @@ importers:
 
 packages:
 
+  json-rpc-2.0@1.8.1:
+    resolution: {integrity: sha512-BmN42JKn6FI36pcMMzHCXQhpKNEfbeqgSIcUYHKnifq0/4Ey6PDinovwUOgajT7NsgUtpWdDXaCWlpI4LHXN3g==}
   '@babel/code-frame@7.29.7':
     resolution: {integrity: sha512-Aup7aUOfpbAUg2ROOJN6Iw5f9DMBlzu0mIkm/malLQFN/YQgO48wCj0Kxa3sEHJvPVFg7siR+qRInwXd2qhQKw==}
     engines: {node: '>=6.9.0'}
@@ -2445,6 +2450,7 @@ packages:
 
 snapshots:
 
+  json-rpc-2.0@1.8.1: {}
   '@babel/code-frame@7.29.7':
     dependencies:
       '@babel/helper-validator-identifier': 7.29.7

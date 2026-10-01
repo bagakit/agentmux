@@ -8,7 +8,7 @@ const body = { operation: 'space.swap' as const, scope: 'tab-layout' as const, r
 describe('Region exchange public CLI wire', () => {
   const h = workfaceCliFixture(body)
   it('sends only two exact entity IDs and returns the actual shared layout order', async () => {
-    expect(await h.receipt(['space', 'swap', '--region', 'region-exact', '--with', 'region-other', '--request-id', 'swap-request'])).toMatchObject({ result: { beforeOrder: body.beforeOrder, afterOrder: body.afterOrder, activeRegionId: 'region-exact' } })
+    expect(await h.receipt(['space', 'swap', '--region', 'region-exact', '--with', 'region-other', '--operation-id', 'swap-request'])).toMatchObject({ result: { beforeOrder: body.beforeOrder, afterOrder: body.afterOrder, activeRegionId: 'region-exact' } })
     expect(h.seen.at(-1)).toEqual({ ...base, operation: 'space.swap', regionId: 'region-exact', withRegionId: 'region-other' })
     expect(isLongAgentMuxControlOperation('space.swap')).toBe(true)
     const longId = 'region:file:resource:' + 'folder/'.repeat(90) + 'note.md'
@@ -40,6 +40,6 @@ describe('Region exchange public CLI wire', () => {
   it('does not accept a replacement target receipt and describes replay consequences', async () => {
     h.setReply({ ...body, withRegionId: 'replacement' }); expect((await h.run(['space', 'swap', '--region', 'region-exact', '--with', 'region-other'])).code).toBe(1); h.setReply(body)
     const count = h.seen.length, help = await h.run(['space', 'swap', '--help'])
-    expect(help.code).toBe(0); expect(help.stdout).toContain('never repeat blindly'); expect(h.seen).toHaveLength(count)
+    expect(help.code).toBe(0); expect(help.stdout).toContain('do not automatically retry'); expect(h.seen).toHaveLength(count)
   })
 })

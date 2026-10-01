@@ -3,7 +3,7 @@ import type { ConfigOwner } from './config-owner.js'
 import { scalarSettings as settings } from './settings/setting-catalog.js'
 
 function unsupported(key: string): Error {
-  return Object.assign(new Error(`Unsupported setting: ${key}. Run agentmux settings get to see the currently supported settings.`), { code: 'UNSUPPORTED_SETTING' })
+  return Object.assign(new Error(`Unsupported setting: ${key}. Run agentmux settings inspect to see the currently supported settings.`), { code: 'UNSUPPORTED_SETTING' })
 }
 
 export async function executeSettingsControl(

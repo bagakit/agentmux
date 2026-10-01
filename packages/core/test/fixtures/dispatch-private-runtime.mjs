@@ -1,33 +1,6 @@
-import { tmpdir as upstreamFixtureTmpdir } from 'node:os'
-import { join as upstreamFixtureJoin, parse as upstreamFixtureParse, sep as upstreamFixtureSep } from 'node:path'
-import { pathToFileURL as upstreamFixturePathToFileURL } from 'node:url'
-const upstreamFixtureRoot = upstreamFixtureJoin(upstreamFixtureTmpdir(), 'agentmux-fixtures');
-const upstreamFixtureDayMilliseconds = 24 * 60 * 60 * 1_000;
-/** Preserve lexical path cases while deriving the absolute root from this Host. */
-function upstreamFixturePath(relative) {
-    const temporary = relative.replace(/^(?:private\/)?tmp\//u, '');
-    const base = temporary === relative ? upstreamFixtureRoot : upstreamFixtureTmpdir();
-    return base + upstreamFixtureSep + temporary.replaceAll('/', upstreamFixtureSep);
-}
-/** Deterministic time from Unix zero and explicit relative units. */
-function upstreamFixtureEpoch(days, seconds = 0, milliseconds = 0) {
-    return days * upstreamFixtureDayMilliseconds + seconds * 1_000 + milliseconds;
-}
-function upstreamFixtureDay(days, separator = '-') {
-    return new Date(upstreamFixtureEpoch(days)).toISOString().slice(0, 10).replaceAll('-', separator);
-}
-function upstreamFixtureClock(hour, minute, second, milliseconds) {
-    const units = second === undefined ? [hour, minute] : [hour, minute, second];
-    const clock = units.map(value => String(value).padStart(2, '0')).upstreamFixtureJoin(':');
-    return milliseconds === undefined ? clock : clock + '.' + milliseconds;
-}
-function upstreamFixtureFileUrl(relative) {
-    return upstreamFixturePathToFileURL(upstreamFixturePath(relative)).href;
-}
-/** A short Host-rooted display path keeps captured terminal rows within their viewport. */
-function upstreamFixtureDisplayPath(relative) {
-    return upstreamFixtureJoin(upstreamFixtureParse(upstreamFixtureTmpdir()).root, relative);
-}
+import { tmpdir as fixtureTmpdir } from 'node:os'
+import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
+const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -37,10 +10,10 @@ import { fileURLToPath } from 'node:url'
 
 const packageRoot = fileURLToPath(new URL('../../', import.meta.url))
 const sourceFiles = ['src/agent-handoff.ts', 'src/agent-global-message-queue.ts', 'src/client.ts',
-  'src/agentmux.ts', 'src/agentmux-cli-help.ts', 'scripts/verify-dispatch-consumer-restart.mjs',
+  'src/agentmux.ts', 'src/agentmux-cli-help.ts', 'src/agentmux-cli-commands.ts', 'src/public-rpc-service.ts', 'src/public-rpc-client.ts', 'src/public-rpc-wire.ts', 'src/rpc-business-codec.ts', 'scripts/verify-dispatch-consumer-restart.mjs',
   'test/fixtures/dispatch-private-runtime.mjs', 'test/fixtures/fake-codex-cli.mjs']
 const compiledFiles = ['dist/agent-handoff.js', 'dist/agent-global-message-queue.js', 'dist/client.js',
-  'dist/agentmux.js', 'dist/agentmux-cli-help.js', 'dist/ctxmux-run-adapter.js']
+  'dist/agentmux.js', 'dist/agentmux-cli-help.js', 'dist/agentmux-cli-commands.js', 'dist/public-rpc-service.js', 'dist/public-rpc-client.js', 'dist/public-rpc-wire.js', 'dist/rpc-business-codec.js', 'dist/ctxmux-run-adapter.js']
 const nativeFiles = ['vendor/ctxmux/darwin-arm64/manifest.json', 'vendor/ctxmux/darwin-arm64/bin/ctxmuxd']
 
 async function fingerprint() {
@@ -84,7 +57,7 @@ async function stopOwnedChild(child, signal = 'SIGTERM') {
 export async function runDispatchProof(scenario) {
   assert(['cli', 'restart'].includes(scenario), 'Unknown private proof scenario')
   const before = await fingerprint()
-  const fixtureRoot = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-dispatch-"))
+  const fixtureRoot = await mkdtemp(fixturePath("tmp/amx-dispatch-"))
   const runtimeDirectory = join(fixtureRoot, 'runtime')
   const stateDirectory = join(fixtureRoot, 'state')
   const captureDirectory = join(fixtureRoot, 'captures')
@@ -106,6 +79,8 @@ export async function runDispatchProof(scenario) {
   }
   const core = await import(new URL('../../dist/index.js', import.meta.url))
   const client = new core.AgentMuxClient({ store: new core.AgentMuxFileAgentSessionStore(storePath) })
+  const { AgentMuxControlServer } = await import(new URL('../../dist/control-host.js', import.meta.url))
+  const server = new AgentMuxControlServer({ socketPath: join(runtimeDirectory, 'control.sock'), coreClients: () => [{ hostId: 'local', client }] })
   const queue = new core.DurableAgentMuxMessageQueue(queuePath)
   const daemon = spawn(join(packageRoot, 'vendor/ctxmux/darwin-arm64/bin/ctxmuxd'), [
     '--socket', join(runtimeDirectory, 'ctxmux.sock'), '--state-dir', join(stateDirectory, 'ctxmux'), '--readiness-fd', '3'
@@ -130,6 +105,7 @@ export async function runDispatchProof(scenario) {
     const hold = join(fixtureRoot, 'hold-consumer.mjs')
     await writeFile(hold, 'setInterval(() => {}, 1000)\n', { mode: 0o600 })
     await client.connect()
+    await server.start()
     for (const agentSessionId of ['owner', 'worker']) {
       const session = await client.createAgent({ agentSessionId, providerId: 'codex', executorId: 'codex',
         commandOverride: wrapper, workspacePath: fixtureRoot, injectAgentMuxGuide: false,
@@ -180,7 +156,7 @@ export async function runDispatchProof(scenario) {
       return { child, receipt }
     }
     const sourceArguments = ['--source-message', 'source']
-    const dispatch = (actor, verb, rest = []) => invoke(actor, ['dispatch', verb, ...sourceArguments, ...rest])
+    const dispatch = (actor, verb, rest = []) => invoke(actor, ['message', 'dispatch', verb === 'show' ? 'inspect' : verb, ...sourceArguments, ...rest])
     const record = (actor, id, kind) => dispatch(actor, 'report', ['--reply-message', id, '--kind', kind])
     const healthyBefore = await client.statusAgent('owner')
     assert.equal(healthyBefore.run.state, 'running')
@@ -189,7 +165,7 @@ export async function runDispatchProof(scenario) {
     for (const id of ['question-one', 'question-two', 'done']) await queue.append(message(id, 'worker', 'owner', 'source'))
     const opened = (await dispatch('owner', 'open')).receipt
     assert.equal(opened.ok, true)
-    assert.equal(opened.operation, 'dispatch.open')
+    assert.equal(opened.operation, 'message.dispatch.open')
     assert.deepEqual(opened.result, { sourceMessageId: 'source', ownerAgentSessionId: 'owner',
       workerAgentSessionId: 'worker', threadId: 'private-dispatch-thread', openedAt: opened.result.openedAt,
       originAwaits: true, events: [] })
@@ -210,7 +186,7 @@ export async function runDispatchProof(scenario) {
     assert.equal((await record('worker', 'question-one', 'worker_done')).receipt.error.code, 'DISPATCH_EVENT_CONFLICT')
     assert.deepEqual(await readFile(queuePath), journalBeforeInvalid)
     if (scenario === 'restart') {
-      const interrupted = await invoke('owner', ['deliveries', 'check', '--limit', '1'], true)
+      const interrupted = await invoke('owner', ['message', 'inbox', 'check', '--limit', '1'], true)
       assert.equal(interrupted.receipt.ok, true)
       const batch = interrupted.receipt.result
       assert.deepEqual(batch.messages.map(value => value.envelope.messageId), ['question-one'])
@@ -219,15 +195,15 @@ export async function runDispatchProof(scenario) {
       await stopOwnedChild(interrupted.child, 'SIGKILL')
       assert.equal(interrupted.child.signalCode, 'SIGKILL')
       await queue.append(message('question-three', 'worker', 'owner', 'source'))
-      const replay = (await invoke('owner', ['deliveries', 'check', '--limit', '100'])).receipt
+      const replay = (await invoke('owner', ['message', 'inbox', 'check', '--limit', '100'])).receipt
       assert.equal(replay.ok, true)
       assert.deepEqual(replay.result, batch)
       assert.equal((await dispatch('owner', 'show')).receipt.result.originAwaits, true)
-      const ack = (await invoke('owner', ['deliveries', 'ack', '--generation', String(batch.generation),
+      const ack = (await invoke('owner', ['message', 'inbox', 'ack', '--generation', String(batch.generation),
         '--reader-run', batch.readerRun.runId])).receipt
       assert.equal(ack.ok, true)
       assert.deepEqual(ack.result.acknowledgedMessageIds, ['question-one'])
-      const next = (await invoke('owner', ['deliveries', 'check', '--limit', '100'])).receipt
+      const next = (await invoke('owner', ['message', 'inbox', 'check', '--limit', '100'])).receipt
       assert.equal(next.ok, true)
       assert.deepEqual(next.result.messages.map(value => value.envelope.messageId), ['question-two', 'done', 'question-three'])
       assert.equal((await dispatch('owner', 'show')).receipt.result.originAwaits, true)
@@ -269,6 +245,7 @@ export async function runDispatchProof(scenario) {
     for (const value of sessions) {
       try { await client.stopAgent(value.agentSessionId, value.run) } catch (error) { failures.push(error) }
     }
+    try { await server.stop() } catch (error) { failures.push(error) }
     try { await client.dispose() } catch (error) { failures.push(error) }
     for (const pid of ownedAgentPids) {
       try { await waitFor(async () => pidGone(pid) ? true : undefined, 'owned Agent process exit') } catch (error) { failures.push(error) }

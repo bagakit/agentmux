@@ -20,6 +20,7 @@ import {
 } from './agent-native-locator.js'
 import type {
   AgentHookReceipt,
+  AgentMuxAgentSession,
   AgentMuxEvidence,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
@@ -1067,13 +1068,14 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
     prompt: bytes(source.prompt), plan: input }
 }
 
-export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
+/** Public and durable Session facts share the same validation owner. */
+export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   const source = record(value, 'Agent Session')
   if (source.kind !== 'agent') {
     throw new AgentMuxError('Only Agent Sessions may be persisted.', 'INVALID_AGENT_SESSION_STORE')
   }
   const currentRun = runRef(source.run)
-  const session: AgentMuxStoredAgentSession = {
+  const session: AgentMuxAgentSession = {
     kind: 'agent',
     agentSessionId: string(source.agentSessionId, 'agentSessionId'),
     providerId: string(source.providerId, 'providerId'),
@@ -1082,13 +1084,6 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     workspacePath: string(source.workspacePath, 'workspacePath', MAX_PATH_BYTES),
     run: currentRun,
     retiredRuns: retiredRuns(source.retiredRuns, currentRun),
-    hookBindingId: string(source.hookBindingId, 'hookBindingId'),
-    hookToken: string(source.hookToken, 'hookToken'),
-    // 只有 hash 落盘。缺失是合法的（旧记录或尚未激活），故按可选读取——
-    // 但一旦有值就必须是字符串，不接受混入别的类型。
-    ...(source.capabilityHash === undefined
-      ? {}
-      : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }),
     createdAt: timestamp(source.createdAt, 'createdAt'),
     updatedAt: timestamp(source.updatedAt, 'updatedAt'),
     ...(source.launchOptions === undefined
@@ -1233,6 +1228,14 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
     throw new AgentMuxError('Terminal prompt submission did not atomically consume its readiness epoch.', 'INVALID_AGENT_SESSION_STORE')
   }
   return session
+}
+
+export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
+  const source = record(value, 'Agent Session')
+  return { ...normalizeAgentSession(source),
+    hookBindingId: string(source.hookBindingId, 'hookBindingId'),
+    hookToken: string(source.hookToken, 'hookToken'),
+    ...(source.capabilityHash === undefined ? {} : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }) }
 }
 
 function normalizeAgentSessions(values: readonly unknown[]): AgentMuxStoredAgentSession[] {

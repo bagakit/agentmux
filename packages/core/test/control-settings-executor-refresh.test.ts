@@ -73,7 +73,7 @@ it('the strict bounded primitive owns exactly the two IDs and uses the existing 
   const request = { ...envelope, executorId: 'exact', hostId: '--help' }
   expect(parseAgentMuxControlRequest(request)).toEqual(request)
   expect(await parseSettingsCommand(['executors', 'refresh', 'exact', '--host', '--help']))
-    .toEqual({ operation: request.operation, executorId: 'exact', hostId: '--help' })
+    .toEqual({ method: 'settings.executors.refresh', params: { executorId: 'exact', hostId: '--help' } })
   expect(isLongAgentMuxControlOperation(request.operation)).toBe(true)
   for (const fields of [{ executorId: '', hostId: 'local' }, { executorId: 'exact' }, { executorId: 1, hostId: 'local' },
     { ...request, input: {} }, { ...request, path: upstreamFixturePath("arbitrary") }, { ...request, caller: {} },

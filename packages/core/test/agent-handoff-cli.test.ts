@@ -1,72 +1,55 @@
-import { describe, expect, it } from 'vitest'
-import { readFileSync } from 'node:fs'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { describe, expect, it, vi } from 'vitest'
+import { AgentMuxControlServer } from '../src/control-host.js'
+import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
+import { hashAgentCapability, issueAgentCapability } from '../src/agent-capability.js'
+import { privateRpcCorePort } from './helpers/private-rpc-core.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
-// T-005 的接线守护：证明 CLI 的 handoff verb 真的接到了 Core 既有的 client.handOff 上，而不是退化成
-// 一条普通 send，也不在 CLI 侧重实现所有权转移。这个文件读 src 文本——与走 dist 的 CLI 行为测试
-// （agentmux-cli-help.test.ts）各守一侧：那边证明 verb 真被分发，这边锁定被分发到的代码的形状。
-// gate agent-handoff.test.ts 只测三个纯函数，两侧它都守不住。
-
-const cliCode = readFileSync(new URL('../src/agentmux.ts', import.meta.url), 'utf8')
-
-function handoffSlice(): string {
-  const start = cliCode.indexOf('async function handoffCommand(')
-  const end = cliCode.indexOf('\n}\n', start)
-  expect(start).toBeGreaterThanOrEqual(0)
-  expect(end).toBeGreaterThan(start)
-  return cliCode.slice(start, end)
-}
-
-describe('handoff verb 接到 Core 既有 handOff，不退化成 send', () => {
-  it('调用 client.handOff，而不是 send / composeOutboundMessage / requestAgentMuxControl', () => {
-    const handoff = handoffSlice()
-    // 走 Core 既有能力：client.handOff。把它换成 send 就是"用普通消息模拟交接"，这条会红。
-    expect(handoff).toContain('client.handOff(')
-    // 绝不退化成消息投递或 Control 面 send。
-    expect(handoff).not.toContain('composeOutboundMessage')
-    expect(handoff).not.toContain("operation: 'send'")
-    expect(handoff).not.toContain('requestAgentMuxControl')
-  })
-
-  it('身份经 managed caller + capability 交回 Core 验证，不自证', () => {
-    const handoff = handoffSlice()
-    // 与 discuss 同口径：raw capability 从环境取出交回 Core，callerAgentSessionId 只是上下文。
-    expect(handoff).toContain('managedCaller()')
-    expect(handoff).toContain('AGENTMUX_AGENT_CAPABILITY')
-    // 光有这些符号"出现"还不够——必须把它们真的绑进 handOff 的入参：capability 交回 Core，
-    // caller 是 managedCaller() 解析出来的那个，而不是硬编码 'self' 之类的自证值。只测 presence
-    // 时，把 callerAgentSessionId 写死成 'self' 仍会绿；测 value binding 才挡得住。
-    expect(handoff).toContain('capability,')
-    expect(handoff).toContain('callerAgentSessionId: caller.agentSessionId')
-  })
-
-  it('目标与 task 用既有 CLI 寻址词汇：--to-session（显式 id）+ --task', () => {
-    const handoff = handoffSlice()
-    // 复用 T-003 同一套 CLI flag 词汇与解析 helper，不另写一份寻址。
-    expect(handoff).toContain("'--to-session'")
-    expect(handoff).toContain("'--task'")
-    // 目标必须是显式 id——交给"自己"没有意义，故走 explicitSelectorId（它拒 self）。
-    expect(handoff).toContain('explicitSelectorId(')
-  })
-
-  it('只转移所有权：不接受 --text，不夹带消息投递', () => {
-    const handoff = handoffSlice()
-    // handoff 一旦带 --text 就同时是"转移所有权"和"投递指令"，那正是被否决的 agent 自主派活回路
-    // 的雏形（见 io-fidelity-plan 边界节）。它的 flag 规格里绝不能出现 --text。
-    expect(handoff).not.toContain("'--text'")
-  })
-
-  it('originAwaits 由 Core 决定，CLI 如实回显不另判；回执贴 handoff 标签且回显 Core 的 taskId', () => {
-    const handoff = handoffSlice()
-    // CLI 输出的是 Core 返回的 result.originAwaits，不是 CLI 自己写死的 false——后者会让 CLI 与
-    // Core 的分界各写一份，漂移时不会有测试变红。
-    expect(handoff).toContain('result.originAwaits')
-    expect(handoff).toContain('result.ownerAgentSessionId')
-    // 不在 CLI 侧硬编码 originAwaits 的值。
-    expect(handoff).not.toContain('originAwaits: false')
-    expect(handoff).not.toContain('originAwaits: true')
-    // 成功回执必须打 'handoff' 标签——写成 'send' 就把交接伪装成普通投递，这条会红。
-    expect(handoff).toContain("printSuccess('handoff'")
-    // taskId 如实回显 Core 返回的那个，而不是 CLI 从入参里回抄或省略。
-    expect(handoff).toContain('taskId: result.taskId')
+describe('compiled object handoff delegates to the original authenticated Core owner', () => {
+  it('declares communication ownership without sending text, returns Core facts and rejects forged carriers', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'oh-'))
+    const storePath = join(root, 'sessions.json'), queuePath = join(root, 'messages.ndjson')
+    const capability = issueAgentCapability(), store = new AgentMuxFileAgentSessionStore(storePath)
+    for (const agentSessionId of ['sender', 'recipient']) await store.compareAndSwap(null, {
+      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: root,
+      run: { runId: `original-${agentSessionId}` }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`,
+      hookToken: `synthetic-${agentSessionId}`, createdAt: 1, updatedAt: 1,
+      ...(agentSessionId === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {})
+    })
+    const core = await privateRpcCorePort(storePath, queuePath)
+    const handoff = vi.spyOn(core.client, 'handOff')
+    const execute = vi.fn()
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: core.clients, execute })
+    await server.start()
+    const env = objectCliEnvironment(root, { AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: capability })
+    const args = ['agent', 'handoff', '--to-session', 'recipient', '--task', '--help']
+    try {
+      const body = await runCompiledObjectCli(args, env)
+      expect(body.code, body.stderr).toBe(0)
+      expect(JSON.parse(body.stdout)).toEqual({ ok: true, operation: 'agent.handoff', result: {
+        taskId: '--help', ownerAgentSessionId: 'recipient', originAwaits: false, at: expect.any(Number)
+      } })
+      expect(handoff).toHaveBeenCalledExactlyOnceWith({ capability, callerAgentSessionId: 'sender', toAgentSessionId: 'recipient', taskId: '--help' })
+      expect(execute).not.toHaveBeenCalled()
+      for (const invalid of [
+        [...args, '--text', 'not a handoff'], ['agent', 'handoff', '--to-session', 'self', '--task', 'T'],
+        ['agent', 'handoff', '--to-session', 'recipient'], [...args, '--task', 'duplicate']
+      ]) {
+        const failure = await runCompiledObjectCli(invalid, env)
+        expect(failure.code).toBe(1)
+        expect(JSON.parse(failure.stderr).error.code).toBe('INVALID_CLI_ARGUMENT')
+      }
+      const forged = await runCompiledObjectCli(args, { ...env, AGENTMUX_AGENT_CAPABILITY: 'forged' })
+      expect(forged.code).toBe(1)
+      expect(JSON.parse(forged.stderr).error.code).toBe('AGENT_CAPABILITY_INVALID')
+      const human = await runCompiledObjectCli(args, objectCliEnvironment(root))
+      expect(human.code).toBe(1)
+      expect(JSON.parse(human.stderr).error.code).toBe('MANAGED_AGENT_CONTEXT_REQUIRED')
+      expect(handoff).toHaveBeenCalledTimes(1)
+      expect(execute).not.toHaveBeenCalled()
+    } finally { vi.restoreAllMocks(); await server.stop(); await core.dispose(); await rm(root, { recursive: true, force: true }) }
   })
 })

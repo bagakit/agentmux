@@ -307,16 +307,57 @@ describe('public Desktop spatial Control owner', () => {
     expect(useAppStore.getState().tabs).toEqual({ source })
   })
 
+  it('puts a new Project Zone first Tab in the exact requested display Group while keeping its execution resource', async () => {
+    const display = createWorkspaceLayout('display-group')
+    useAppStore.setState(state => ({ config: { ...state.config!, hosts: [...state.config!.hosts,
+      { id: 'remote', kind: 'ssh', hostname: 'fixture.invalid', label: 'Display' }],
+      workspaces: [...state.config!.workspaces, { id: 'display', hostId: 'remote', name: 'Display', path: _hygiene_fixturePath("display"), kind: 'folder' }] },
+      layouts: { ...state.layouts, display } }))
+    const createResource = vi.spyOn(api.workspaces, 'createZoneResource').mockImplementation(async input => {
+      expect(input.resource).toEqual({ kind: 'directory', projectId: directoryIdentity('local', _hygiene_fixturePath("repo")), path: _hygiene_fixturePath("new-dir") })
+      const workspace = { id: 'new-zone-workspace', hostId: 'local', name: 'New', path: _hygiene_fixturePath("new-dir"), kind: 'folder' as const }
+      return { config: { ...useAppStore.getState().config!, workspaces: [...useAppStore.getState().config!.workspaces, workspace] }, workspace,
+        resource: { projectId: directoryIdentity('local', _hygiene_fixturePath("repo")), sourceWorkspaceId: 'repo', hostId: 'local', path: _hygiene_fixturePath("new-dir"),
+          workspaceId: workspace.id, kind: 'directory', branch: null }, issue: null }
+    })
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      expect(input).toMatchObject({ hostId: 'local', workspacePath: _hygiene_fixturePath("new-dir"), prompt: 'one first task' })
+      return launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!)
+    })
+    const stop = vi.spyOn(api.sessions, 'stop')
+    const opening = { operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'one first task' },
+      destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("other")), displayWorkspaceId: 'display', groupId: 'display-group',
+        newZone: { kind: 'directory', projectId: directoryIdentity('local', _hygiene_fixturePath("repo")), path: _hygiene_fixturePath("new-dir") } }, focus: false }
+    const opened = await control(opening)
+    if (opened.operation !== 'agent.open') throw new Error('Wrong operation')
+    expect(opened.outcome, JSON.stringify(opened)).toBe('opened')
+    expect(opened.to).toMatchObject({ displayWorkspaceId: 'display', groupId: 'display-group', workspaceId: 'new-zone-workspace' })
+    expect(opened.agent).toMatchObject({ hostId: 'local', cwd: _hygiene_fixturePath("new-dir"), initialPrompt: 'confirmed' })
+    expect(useAppStore.getState().layouts.display?.groups[0]?.tabOrder).toEqual([opened.to!.tabId])
+    expect(useAppStore.getState().layouts['new-zone-workspace']).toBeUndefined()
+    expect(useAppStore.getState().spatialRequests[opened.requestId]?.target).toMatchObject({ displayWorkspaceId: 'display', groupId: 'display-group' })
+    vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("new-dir"))),
+      creation: { createOperationId: opened.requestId, initialPrompt: 'confirmed' } }))
+    useAppStore.setState(state => ({ layouts: { ...state.layouts, other: createWorkspaceLayout('later-group', [opened.to!.tabId]) } }))
+    const writeReadback = await control({ ...opening, requestId: opened.requestId })
+    expect(writeReadback).toMatchObject({ operation: 'agent.open', outcome: 'opened', agent: { agentSessionId: opened.agent!.agentSessionId }, to: opened.to })
+    const repeated = await control({ operation: 'space.inspect', target: { requestId: opened.requestId } })
+    expect(repeated).toMatchObject({ request: { known: true, report: { outcome: 'opened',
+      to: { displayWorkspaceId: 'display', groupId: 'display-group', tabId: opened.to!.tabId, regionId: opened.to!.regionId } } } })
+    expect(createResource).toHaveBeenCalledTimes(1); expect(created).toHaveBeenCalledTimes(1)
+    expect(stop).not.toHaveBeenCalled()
+  })
+
   it('new Zone receipts and repeat inspection conform to strict wire fields, while resource failure retains the resource', async () => {
     vi.spyOn(api.workspaces, 'createZoneResource').mockImplementation(async input => {
       const workspace = { id: 'new-resource', hostId: 'local', name: 'New', path: input.resource.path, kind: 'folder' as const }
       return { config: { ...config, workspaces: [...config.workspaces, workspace] }, workspace,
-        resource: { hostId: 'local', path: workspace.path, workspaceId: workspace.id, kind: 'directory', branch: null } }
+        resource: { projectId: input.resource.projectId, sourceWorkspaceId: 'repo', hostId: 'local', path: workspace.path, workspaceId: workspace.id, kind: 'directory', branch: null } }
     })
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
     vi.spyOn(api.sessions, 'creation').mockImplementation(async (_host, id) => ({ ...agentCreationFixture(agent(id, _hygiene_fixturePath("new-dir"))), creation: { createOperationId: 'op', initialPrompt: 'confirmed' } }))
     const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture' },
-      destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), newZone: { kind: 'directory', path: _hygiene_fixturePath("new-dir") } }, focus: false })
+      destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("repo")), newZone: { kind: 'directory', projectId: directoryIdentity('local', _hygiene_fixturePath("repo")), path: _hygiene_fixturePath("new-dir") } }, focus: false })
     const opened = await useAppStore.getState().executeControl(input)
     expect(opened).toMatchObject({ outcome: 'opened', resource: { workspaceId: 'new-resource' } })
     const queried = request({ operation: 'space.inspect', target: { requestId: input.requestId } })

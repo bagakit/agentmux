@@ -39,21 +39,21 @@ type AddressKind = keyof typeof ADDRESS_FLAGS
 
 /** 发消息给这个地址的命令。 */
 function sendCommand(kind: AddressKind, id: string): string {
-  return `agentmux send ${ADDRESS_FLAGS[kind].send}=${shellArgument(id)} --text "..."`
+  return `agentmux agent send ${ADDRESS_FLAGS[kind].send}=${shellArgument(id)} --text "..."`
 }
 
 /** 查看这个地址的命令。 */
 function inspectCommand(kind: AddressKind, id: string): string {
-  return `agentmux inspect ${ADDRESS_FLAGS[kind].inspect}=${shellArgument(id)}`
+  return `agentmux ${kind === 'session' ? 'agent' : 'space'} inspect ${ADDRESS_FLAGS[kind].inspect}=${shellArgument(id)}`
 }
 
 /**
  * 列出还活着的 Agent Session。
  *
- * 是 `list sessions` 不是 `list agents`：后者列的是配好的 executor 类型（codex / claude / …），
+ * `agent ls` 列真实 Session；配置好的 Executor 由 `settings executors ls` 发现，
  * 不是此刻活着的 Session——名字像，答非所问。
  */
-const LIST_SESSIONS = 'agentmux list sessions'
+const LIST_SESSIONS = 'agentmux agent ls'
 
 /**
  * 哪个 Agent。
@@ -122,7 +122,7 @@ export function formatMessagingAddress(target: {
 ${inspectCommand('region', target.regionId)}
 
 在主面选择这一格（保留当前输入）：
-agentmux focus --region=${shellArgument(target.regionId)}
+agentmux space focus --region=${shellArgument(target.regionId)}
 
 列出可选择的目标空间：
 agentmux space ls
@@ -160,7 +160,7 @@ export function addressingRecovery(error: {
     return formatTargetNotUnique(error.candidates ?? [])
   }
   if (error.code === 'MESSAGE_TARGET_NOT_AGENT') {
-    // 这里**故意不给命令**。想给的那条是 `agentmux inspect --region=<regionId>`——这个码只在
+    // 这里**故意不给命令**。想给的那条是 `agentmux space inspect --region=<regionId>`——这个码只在
     // Region 分支抛（store.ts 里 `region.kind !== 'agent'` 那一处，全仓仅此一处），所以丢掉的是
     // regionId 而不是 tabId。但抛出点只带 code 与 message 过来，恢复层拿不到它。凑一条跑不了的
     // 命令比不给更糟：它看起来像出路，粘贴过去却只会撞 INVALID_CLI_ARGUMENT，把人引向第二次失败。

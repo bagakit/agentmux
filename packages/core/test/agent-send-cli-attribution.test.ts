@@ -1,4 +1,6 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { privateRpcCorePort } from './helpers/private-rpc-core.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm, stat } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -18,25 +20,11 @@ const exec = promisify(execFile)
 const cli = fileURLToPath(new URL('../bin/agentmux', import.meta.url))
 
 
-async function stopPrivateRuntime(runtime: string): Promise<void> {
-  const daemon = fileURLToPath(new URL('../vendor/ctxmux/darwin-arm64/bin/ctxmuxd', import.meta.url))
-  const owned = async () => (await exec('/bin/ps', ['-axo', 'pid=,command='])).stdout.split('\n').flatMap(line => {
-    const match = /^\s*(\d+)\s+(.+)$/.exec(line)
-    return match && match[2]!.startsWith(daemon + ' ') &&
-      match[2]!.includes('--socket ' + join(runtime, 'ctxmux.sock') + ' ') &&
-      match[2]!.includes('--state-dir ' + join(runtime, 'durable', 'ctxmux') + ' ') ? [Number(match[1])] : []
-  })
-  for (const pid of await owned()) process.kill(pid, 'SIGTERM')
-  const deadline = Date.now() + 5000
-  while ((await owned()).length && Date.now() < deadline) await new Promise(done => setTimeout(done, 25))
-  expect(await owned()).toEqual([])
-}
-
 async function seedSessions(path: string, ids: readonly string[], capability?: string): Promise<void> {
   const store = new AgentMuxFileAgentSessionStore(path)
   for (const agentSessionId of ids) {
     const session: AgentMuxStoredAgentSession = {
-      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: upstreamFixturePath("repo"),
+      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("repo"),
       run: { runId: `run-${agentSessionId}` }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`, hookToken: `token-${agentSessionId}`,
       ...(capability && agentSessionId === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {}),
        createdAt: 1, updatedAt: 1
@@ -46,12 +34,14 @@ async function seedSessions(path: string, ids: readonly string[], capability?: s
 }
 
 it('real CLI send retains managed authors for every target without inventing an author for human CLI use', async () => {
-  const runtime = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-mail-cli-"))
-  const sessionStorePath = join(runtime, 'sessions.json')
-  await seedSessions(sessionStorePath, ['other', 'recipient'])
+  const runtime = await mkdtemp(fixturePath("tmp/amux-mail-cli-"))
+  const sessionStorePath = join(runtime, 'sessions.json'), queuePath = join(runtime, 'state', 'global-messages.ndjson')
+  const capability = issueAgentCapability()
+  await seedSessions(sessionStorePath, ['sender', 'other', 'recipient'], capability)
   const requests: AgentMuxControlRequest[] = []
   const delivered: string[] = []
-  const server = new AgentMuxControlServer({ execute: async (request) => {
+  const core = await privateRpcCorePort(sessionStorePath, queuePath)
+  const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {
     if (request.operation === 'list.active-agents') {
       const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
       return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
@@ -68,17 +58,20 @@ it('real CLI send retains managed authors for every target without inventing an 
     if (request.operation === 'inspect.tab') return { operation: 'inspect.tab', tab: { tabId: 'tab', workspaceId: 'workspace', regions: [{ kind: 'agent', regionId: 'region', tabId: 'tab', workspaceId: 'workspace', agentSessionId: 'recipient', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 }, neighbors: { left: { kind: 'none' }, right: { kind: 'none' }, up: { kind: 'none' }, down: { kind: 'none' } } }] } }
     if (request.operation === 'agent.open') return { operation: 'agent.open', requestId: request.requestId,
       outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'new-region' },
-      agent: { agentSessionId: 'recipient', runId: 'run-recipient', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: upstreamFixturePath("repo"), createOperationId: 'creation', initialPrompt: 'confirmed' },
+      agent: { agentSessionId: 'recipient', runId: 'run-recipient', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: fixturePath("repo"), createOperationId: 'creation', initialPrompt: 'confirmed' },
       resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
-    if (request.operation === 'send') delivered.push(renderAgentMuxMessageEnvelope(request.message))
-    return { operation: 'send', agentSessionId: 'recipient' }
-  } }, join(runtime, 'control.sock'))
+    if (request.operation === 'send') {
+      delivered.push(renderAgentMuxMessageEnvelope(request.message))
+      return { operation: 'send', agentSessionId: request.target.kind === 'agent-session' ? request.target.agentSessionId : 'recipient' }
+    }
+    throw new Error('Unexpected operation ' + request.operation)
+  } })
   await server.start()
   try {
     const outputs: Array<Record<string, any>> = []
     for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab']]) {
-      const result = await exec(cli, ['send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
-        ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed'
+      const result = await exec(cli, ['agent', 'send', flag!, id!, '--text', 'actual mail'], { timeout: 5000, env: {
+        ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined
       } })
       outputs.push(JSON.parse(result.stdout) as Record<string, any>)
     }
@@ -87,25 +80,34 @@ it('real CLI send retains managed authors for every target without inventing an 
       [{ kind: 'region', regionId: 'region' }, undefined, 'actual mail'],
       [{ kind: 'tab', tabId: 'tab' }, undefined, 'actual mail']
     ])
-    const humanEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: 'not-managed' }
-    await exec(cli, ['send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
+    const humanEnv = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: join(runtime, 'state', 'global-messages.ndjson'), AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+    await exec(cli, ['agent', 'send', '--to-session', 'other', '--text', 'human mail'], { timeout: 5000, env: humanEnv })
     expect(requests.at(-1)).toMatchObject({ operation: 'send', text: 'human mail' })
     expect(requests.at(-1)).not.toHaveProperty('caller')
     const queue = new DurableAgentMuxMessageQueue(join(runtime, 'state', 'global-messages.ndjson'))
     const records = await queue.listAfter(0)
     expect(records).toHaveLength(4)
-    expect(outputs[0]).toMatchObject({ operation: 'send', result: { queueId: expect.any(String), receiptId: expect.any(String), messageId: expect.any(String), delivery: { state: 'delivered' } } })
-    expect((outputs[0]!.result as Record<string, unknown>).messageId).not.toBe(outputs[0]!.requestId)
+    expect(outputs[0]).toMatchObject({ operation: 'agent.send', result: { queueId: expect.any(String), receiptId: expect.any(String), messageId: expect.any(String), delivery: { state: 'delivered' } } })
+    expect((outputs[0]!.result as Record<string, unknown>).messageId).not.toBe(outputs[0]!.operationId)
     expect(records[0]!.envelope.sender).toEqual({ kind: 'human', principal: 'local-cli' })
     expect(records[0]!.envelope.recipient).toEqual({ kind: 'agent-session', agentSessionId: 'other' })
     expect(records[0]!.envelope.body).toBe('actual mail')
     expect(requests.filter((request) => request.operation === 'send')[0]).toMatchObject({ operation: 'send', message: { sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: 'other' } } })
     expect(delivered[0]).toBe('[Message from unverified local process]\nactual mail')
-    await expect(exec(cli, ['send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
+    await expect(exec(cli, ['agent', 'send', '--to-session', 'self', '--text', 'not allowed'], { timeout: 5000, env: humanEnv }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     expect(requests.filter((request) => request.operation === 'send')).toHaveLength(4)
+    const managedEnv = { ...humanEnv, AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: capability }
+    for (const [flag, id] of [['--to-session', 'other'], ['--to-region', 'region'], ['--to-tab', 'tab']]) {
+      await exec(cli, ['agent', 'send', flag!, id!, '--text', 'verified author'], { timeout: 5000, env: managedEnv })
+    }
+    const managedSends = requests.filter(request => request.operation === 'send').slice(4)
+    expect(managedSends).toHaveLength(3)
+    for (const request of managedSends) expect(request).toMatchObject({ caller: { agentSessionId: 'sender', capability },
+      message: { sender: { kind: 'agent-session', agentSessionId: 'sender' }, senderSessionId: 'sender', senderRunId: 'run-sender' } })
+    expect(await queue.listAfter(0)).toHaveLength(7)
     const open = ['agent', 'open', '--executor', 'codex', '--region', 'region', '--split', 'right', '--prompt', 'first mail']
-    await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: 'managed-open-capability' } })
+    await exec(cli, open, { timeout: 5000, env: { ...humanEnv, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender', AGENTMUX_AGENT_CAPABILITY: capability } })
     expect(requests.filter((request) => request.operation === 'agent.open')[0]).toMatchObject({ operation: 'agent.open', caller: { agentSessionId: 'sender' },
       content: { kind: 'new-agent', prompt: 'first mail' } })
     await exec(cli, open, { timeout: 5000, env: humanEnv })
@@ -114,17 +116,18 @@ it('real CLI send retains managed authors for every target without inventing an 
     expect(requests.filter((request) => request.operation === 'agent.open')).toHaveLength(2)
   } finally {
     await server.stop()
-    await stopPrivateRuntime(runtime)
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 })
 
 it('real CLI retries the same messageId across new processes with the original durable receipt', async () => {
-  const runtime = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-mail-cli-retry-"))
+  const runtime = await mkdtemp(fixturePath("tmp/amux-mail-cli-retry-"))
   const queuePath = join(runtime, 'state', 'global-messages.ndjson')
   const sessionStorePath = join(runtime, 'sessions.json')
   await seedSessions(sessionStorePath, ['recipient'])
-  const server = new AgentMuxControlServer({ execute: async (request) => {
+  const core = await privateRpcCorePort(sessionStorePath, queuePath)
+  const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {
     if (request.operation === 'list.active-agents') {
       const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
       return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
@@ -136,32 +139,33 @@ it('real CLI retries the same messageId across new processes with the original d
     }
     if (request.operation === 'send') return { operation: 'send', agentSessionId: 'recipient' }
     return { operation: 'send', agentSessionId: 'recipient' }
-  } }, join(runtime, 'control.sock'))
+  } })
   await server.start()
   try {
-    const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '' }
-    const first = await exec(cli, ['send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
-    const second = await exec(cli, ['send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
+    const env = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+    const first = await exec(cli, ['agent', 'send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
+    const second = await exec(cli, ['agent', 'send', '--to-session', 'recipient', '--message-id', 'stable-id', '--text', 'retry body'], { timeout: 5000, env })
     const firstPayload = JSON.parse(first.stdout) as { result: { receiptId: string; messageId: string } }
     const secondPayload = JSON.parse(second.stdout) as { result: { receiptId: string; messageId: string } }
     expect(secondPayload.result).toMatchObject({ receiptId: firstPayload.result.receiptId, messageId: 'stable-id' })
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
     await server.stop()
-    await stopPrivateRuntime(runtime)
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 })
 
 it.each([false, true])('cold CLI retry after a lost Control ACK retains the first condition (later admission: %s)', async laterAdmission => {
-  const runtime = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-mail-ack-"))
+  const runtime = await mkdtemp(fixturePath("tmp/amux-mail-ack-"))
   const sessionStorePath = join(runtime, 'sessions.json'), queuePath = join(runtime, 'messages.ndjson')
   const upstream = join(runtime, 'host.sock'), endpoint = join(runtime, 'control.sock')
   await seedSessions(sessionStorePath, ['recipient'])
   const store = new AgentMuxFileAgentSessionStore(sessionStorePath)
   const sends: Extract<AgentMuxControlRequest, { operation: 'send' }>[] = []
   let reads = 0
-  const server = new AgentMuxControlServer({ execute: async request => {
+  const core = await privateRpcCorePort(sessionStorePath, queuePath)
+  const server = new AgentMuxControlServer({ socketPath: upstream, coreClients: core.clients, execute: async request => {
     if (request.operation === 'list.active-agents') {
       reads += 1
       expect(request.agentSessionId).toBe('recipient')
@@ -175,7 +179,7 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     sends.push(request)
     if (sends.length > 1 && laterAdmission) throw new AgentMuxError('The historical message is unknown.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
     return { operation: 'send', agentSessionId: 'recipient' }
-  } }, upstream)
+  } })
   await server.start()
   const sockets = new Set<Socket>()
   let loseAck = true
@@ -187,20 +191,20 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     let wire = '', operation: string | undefined
     socket.on('data', data => {
       wire += data.toString()
-      if (wire.includes('\n')) operation = (JSON.parse(wire) as { operation: string }).operation
+      if (wire.includes('\n')) operation = (JSON.parse(wire) as { method: string }).method
       host.write(data)
     })
     socket.on('end', () => host.end())
     host.on('data', data => {
-      if (loseAck && operation === 'send') { loseAck = false; socket.destroy(); host.destroy() }
+      if (loseAck && operation === 'agent.send') { loseAck = false; socket.destroy(); host.destroy() }
       else socket.write(data)
     })
     host.on('end', () => socket.end())
   })
   await new Promise<void>(resolve => proxy.listen(endpoint, resolve))
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
-    AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: '', AGENTMUX_AGENT_CAPABILITY: '' }
-  const args = ['send', '--to-session', 'recipient', '--message-id', 'lost-control-ack', '--text', 'original exact body']
+  const env = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_MESSAGE_QUEUE_PATH: queuePath,
+    AGENTMUX_AGENT_SESSION_STORE: sessionStorePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
+  const args = ['agent', 'send', '--operation-id', 'lost-business-operation', '--to-session', 'recipient', '--message-id', 'lost-control-ack', '--text', 'original exact body']
   try {
     await expect(exec(cli, args, { env, timeout: 15000 })).rejects.toMatchObject({ stderr: expect.stringContaining('CONTROL_') })
     expect(sends).toHaveLength(1)
@@ -210,12 +214,12 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     const later = { ...original, updatedAt: 2, promptCompletionAdmission: {
       submissionId: 'later-message', operationId: 'later-native-input', startByte: 0, endByte: 1, acknowledged: true } }
     if (laterAdmission) await store.compareAndSwap(original, later)
-    const retry = exec(cli, args, { env, timeout: 15000 })
-    if (laterAdmission) await expect(retry).rejects.toMatchObject({ stderr: expect.stringContaining('AGENT_PROMPT_INPUT_UNCONFIRMED') })
-    else expect(JSON.parse((await retry).stdout).result.delivery).toMatchObject({ state: 'delivered' })
-    expect(sends).toHaveLength(2)
+    const retry = await exec(cli, args, { env, timeout: 15000 })
+    // The service owns durable delivery, so the response may be lost after it has
+    // recorded delivery. A new wire ID reads the same business fact, never re-inputs.
+    expect(JSON.parse(retry.stdout).result.delivery).toMatchObject({ state: 'delivered' })
+    expect(sends).toHaveLength(1)
     expect(sends.map(request => [request.message?.messageId, request.text, request.promptCondition])).toEqual([
-      ['lost-control-ack', 'original exact body', first.promptCondition],
       ['lost-control-ack', 'original exact body', first.promptCondition]
     ])
     expect(reads).toBe(1)
@@ -224,18 +228,18 @@ it.each([false, true])('cold CLI retry after a lost Control ACK retains the firs
     expect(messages).toHaveLength(1)
     expect(messages[0]).toMatchObject({ promptCondition: first.promptCondition,
       envelope: { messageId: 'lost-control-ack', body: 'original exact body' },
-      delivery: laterAdmission ? { state: 'queued', reason: expect.stringContaining('unconfirmed') } : { state: 'delivered' } })
+      delivery: { state: 'delivered' } })
   } finally {
     for (const socket of sockets) socket.destroy()
     await new Promise<void>(resolve => proxy.close(() => resolve()))
     await server.stop()
-    await stopPrivateRuntime(runtime)
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 })
 
 it('restarted CLI processes resolve durable compact and existing long IDs, and refuse later prefix collisions before send', async () => {
-  const runtime = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-mail-id-"))
+  const runtime = await mkdtemp(fixturePath("tmp/amux-mail-id-"))
   const sessionStorePath = join(runtime, 'sessions.json')
   const queuePath = join(runtime, 'messages.ndjson')
   const coreUrl = new URL('../dist/index.js', import.meta.url).href
@@ -246,7 +250,7 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     const id = mintAgentSessionId();
     const store = new AgentMuxFileAgentSessionStore(process.argv[1]);
     for (const agentSessionId of [id, process.argv[2]]) await store.compareAndSwap(null, {
-      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '${upstreamFixturePath("repo")}',
+      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: '${fixturePath("repo")}',
       run: {runId: 'run-' + agentSessionId}, retiredRuns: [], hookBindingId: 'hook-' + agentSessionId,
       hookToken: 'token-' + agentSessionId, outputCursorBytes: 0, createdAt: 1, updatedAt: 1
     });
@@ -255,7 +259,8 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
   const compactId = create.stdout
   expect(compactId).toMatch(/^[A-Za-z0-9_-]{16}$/u)
   const requests: AgentMuxControlRequest[] = []
-  const server = new AgentMuxControlServer({ execute: async (request) => {
+  const core = await privateRpcCorePort(sessionStorePath, queuePath)
+  const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {
     if (request.operation === 'list.active-agents') {
       const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
       return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
@@ -266,15 +271,15 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
       })) }
     }
     requests.push(request)
-    if (request.operation === 'send') return { operation: 'send', agentSessionId: compactId }
+    if (request.operation === 'send') return { operation: 'send', agentSessionId: request.target.kind === 'agent-session' ? request.target.agentSessionId : compactId }
     throw new AgentMuxError('Captured resolved command.', 'CONTROL_FAILED')
-  } }, join(runtime, 'control.sock'))
+  } })
   await server.start()
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
-    AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: '' }
+  const env = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+    AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
   try {
     for (const selector of [compactId.slice(0, 8), compactId, longId.slice(0, 8)]) {
-      await exec(cli, ['send', '--to-session', selector, '--text', 'restarted identity'], { env, timeout: 15000 })
+      await exec(cli, ['agent', 'send', '--to-session', selector, '--text', 'restarted identity'], { env, timeout: 15000 })
     }
     expect(requests.map((request) => request.operation === 'send' ? request.target : null)).toEqual([
       { kind: 'agent-session', agentSessionId: compactId }, { kind: 'agent-session', agentSessionId: compactId },
@@ -282,9 +287,9 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     ])
     const prefix = compactId.slice(0, 8)
     const routedCommands = [
-      ['interrupt', '--session', prefix], ['resume', '--session', prefix, '--text', 'continue'], ['stop', '--session', prefix],
+      ['agent', 'interrupt', '--session', prefix], ['agent', 'resume', '--session', prefix, '--text', 'continue'], ['agent', 'stop', '--session', prefix],
       ['agent', 'open', '--session', compactId, '--region', 'region', '--split', 'right'],
-      ['demand', 'start', '--demand', 'demand', '--session', prefix],
+      ['goal', 'start', '--goal', 'demand', '--session', prefix],
     ]
     for (const args of routedCommands) {
       await expect(exec(cli, args, { env, timeout: 15000 })).rejects.toMatchObject({ stderr: expect.stringContaining('CONTROL_FAILED') })
@@ -301,19 +306,19 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     await seedSessions(sessionStorePath, [collisionId])
     const before = requests.length
     const refusing = [
-      ...routedCommands.filter(args => args[0] !== 'agent'), ['send', '--to-session', prefix, '--text', 'must not append'],
-      ['output', '--session', prefix], ['inspect', '--session', prefix],
-      ['pmo', 'agents', '--session', prefix], ['pmo', 'sessions', '--session', prefix], ['pmo', 'agents', '--agent', prefix]
+      ...routedCommands.filter(args => args[1] !== 'open'), ['agent', 'send', '--to-session', prefix, '--text', 'must not append'],
+      ['agent', 'output', '--session', prefix], ['agent', 'inspect', '--session', prefix],
+      ['agent', 'inspect', '--session', prefix]
     ]
     for (const args of refusing) {
       await expect(exec(cli, args, { env, timeout: 15000 })).rejects.toMatchObject({ stderr: expect.stringContaining('AMBIGUOUS_AGENT_SESSION') })
     }
-    await expect(exec(cli, ['send', '--to-session', 'unknown-prefix', '--text', 'must not append'], { env, timeout: 15000 }))
+    await expect(exec(cli, ['agent', 'send', '--to-session', 'unknown-prefix', '--text', 'must not append'], { env, timeout: 15000 }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('UNKNOWN_AGENT_SESSION') })
     expect(requests).toHaveLength(before)
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(3)
     // Exact canonical identity still wins despite a colliding prefix.
-    await exec(cli, ['send', '--to-session', compactId, '--text', 'full identity'], { env, timeout: 15000 })
+    await exec(cli, ['agent', 'send', '--to-session', compactId, '--text', 'full identity'], { env, timeout: 15000 })
     expect(requests.at(-1)).toMatchObject({ operation: 'send', target: { agentSessionId: compactId } })
     const restored = await new AgentMuxFileAgentSessionStore(sessionStorePath).load()
     expect(restored.map((session) => (session as AgentMuxStoredAgentSession).agentSessionId)).toEqual([compactId, longId, collisionId])
@@ -330,27 +335,28 @@ it('restarted CLI processes resolve durable compact and existing long IDs, and r
     const replacement = longId.slice(0, -1) + 'b'
     await seedSessions(sessionStorePath, [replacement])
     const beforeRetiredPrefix = requests.length
-    await expect(exec(cli, ['send', '--to-session', longId.slice(0, 8), '--text', 'must not rebound'], { env, timeout: 15000 }))
+    await expect(exec(cli, ['agent', 'send', '--to-session', longId.slice(0, 8), '--text', 'must not rebound'], { env, timeout: 15000 }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('AMBIGUOUS_AGENT_SESSION') })
-    await expect(exec(cli, ['send', '--to-session', longId, '--text', 'retired identity'], { env, timeout: 15000 }))
+    await expect(exec(cli, ['agent', 'send', '--to-session', longId, '--text', 'retired identity'], { env, timeout: 15000 }))
       .rejects.toMatchObject({ stderr: expect.stringContaining('UNKNOWN_AGENT_SESSION') })
     expect(requests).toHaveLength(beforeRetiredPrefix)
     await expect(stat(join(runtime, 'ctxmux.sock'))).rejects.toMatchObject({ code: 'ENOENT' })
   } finally {
     await server.stop()
-    await stopPrivateRuntime(runtime)
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 }, 60000)
 
 it('capability proof alone supplies the managed author; missing, forged and superseded credentials never append', async () => {
-  const runtime = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-mail-proof-"))
+  const runtime = await mkdtemp(fixturePath("tmp/amux-mail-proof-"))
   const sessionStorePath = join(runtime, 'sessions.json')
   const queuePath = join(runtime, 'messages.ndjson')
   const capability = issueAgentCapability()
   await seedSessions(sessionStorePath, ['sender', 'recipient'], capability)
   const requests: AgentMuxControlRequest[] = []
-  const server = new AgentMuxControlServer({ execute: async (request) => {
+  const core = await privateRpcCorePort(sessionStorePath, queuePath)
+  const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {
     if (request.operation === 'list.active-agents') {
       const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
       return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
@@ -362,11 +368,11 @@ it('capability proof alone supplies the managed author; missing, forged and supe
     }
     requests.push(request)
     return { operation: 'send', agentSessionId: 'recipient' }
-  } }, join(runtime, 'control.sock'))
+  } })
   await server.start()
-  const baseEnv = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+  const baseEnv = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
     AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '1', AGENTMUX_AGENT_SESSION_ID: 'sender' }
-  const send = async (proof: string, selector = 'reci') => await exec(cli, ['send', '--to-session', selector, '--text', 'verified body'], {
+  const send = async (proof: string, selector = 'reci') => await exec(cli, ['agent', 'send', '--to-session', selector, '--text', 'verified body'], {
     env: { ...baseEnv, AGENTMUX_AGENT_CAPABILITY: proof }, timeout: 15000
   })
   try {
@@ -377,12 +383,12 @@ it('capability proof alone supplies the managed author; missing, forged and supe
         recipient: { kind: 'agent-session', agentSessionId: 'recipient' }, recipientRunId: 'run-recipient', body: 'verified body' } })
     await expect(send('')).rejects.toMatchObject({ stderr: expect.stringContaining('MANAGED_AGENT_CONTEXT_REQUIRED') })
     await expect(send('forged-capability')).rejects.toMatchObject({ stderr: expect.stringContaining('AGENT_CAPABILITY_INVALID') })
-    const handoff = await exec(cli, ['handoff', '--to-session', 'reci', '--task', 'task-proof'], {
+    const handoff = await exec(cli, ['agent', 'handoff', '--to-session', 'reci', '--task', 'task-proof'], {
       env: { ...baseEnv, AGENTMUX_AGENT_CAPABILITY: capability }, timeout: 15000
     })
-    expect(JSON.parse(handoff.stdout)).toMatchObject({ operation: 'handoff', result: { ownerAgentSessionId: 'recipient' } })
+    expect(JSON.parse(handoff.stdout)).toMatchObject({ operation: 'agent.handoff', result: { ownerAgentSessionId: 'recipient' } })
     await seedSessions(sessionStorePath, ['recipient-other'])
-    await expect(exec(cli, ['handoff', '--to-session', 'reci', '--task', 'task-ambiguous'], {
+    await expect(exec(cli, ['agent', 'handoff', '--to-session', 'reci', '--task', 'task-ambiguous'], {
       env: { ...baseEnv, AGENTMUX_AGENT_CAPABILITY: capability }, timeout: 15000
     })).rejects.toMatchObject({ stderr: expect.stringContaining('AMBIGUOUS_AGENT_SESSION') })
     const store = new AgentMuxFileAgentSessionStore(sessionStorePath)
@@ -393,20 +399,21 @@ it('capability proof alone supplies the managed author; missing, forged and supe
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
     await server.stop()
-    await stopPrivateRuntime(runtime)
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 }, 60000)
 
 it('real CLI consumes a --leading canonical Session ID verbatim and still rejects absent selector values', async () => {
-  const runtime = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-leading-id-"))
+  const runtime = await mkdtemp(fixturePath("tmp/amux-leading-id-"))
   const sessionStorePath = join(runtime, 'sessions.json')
   const queuePath = join(runtime, 'messages.ndjson')
   const canonical = '--AbCdEfGhIjKlMn'
   expect(canonical).toMatch(/^[A-Za-z0-9_-]{16}$/u)
   await seedSessions(sessionStorePath, [canonical])
   const requests: AgentMuxControlRequest[] = []
-  const server = new AgentMuxControlServer({ execute: async (request) => {
+  const core = await privateRpcCorePort(sessionStorePath, queuePath)
+  const server = new AgentMuxControlServer({ socketPath: join(runtime, 'control.sock'), coreClients: core.clients, execute: async (request) => {
     if (request.operation === 'list.active-agents') {
       const sessions = await new AgentMuxFileAgentSessionStore(sessionStorePath).load() as AgentMuxStoredAgentSession[]
       return { operation: 'list.active-agents', agents: sessions.filter(session => session.agentSessionId === request.agentSessionId).map(session => ({
@@ -419,25 +426,25 @@ it('real CLI consumes a --leading canonical Session ID verbatim and still reject
     requests.push(request)
     if (request.operation === 'interrupt') return { operation: 'interrupt', agentSessionId: canonical }
     return { operation: 'send', agentSessionId: canonical }
-  } }, join(runtime, 'control.sock'))
+  } })
   await server.start()
-  const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
-    AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined }
+  const env = { ...objectCliEnvironment(runtime), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: join(runtime, 'durable'), AGENTMUX_AGENT_SESSION_STORE: sessionStorePath,
+    AGENTMUX_MESSAGE_QUEUE_PATH: queuePath, AGENTMUX_ENV: '', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
   try {
-    await exec(cli, ['send', '--to-session', canonical, '--text', 'canonical body'], { env, timeout: 15000 })
-    await exec(cli, ['interrupt', '--session', canonical.slice(0, 8)], { env, timeout: 15000 })
+    await exec(cli, ['agent', 'send', '--to-session', canonical, '--text', 'canonical body'], { env, timeout: 15000 })
+    await exec(cli, ['agent', 'interrupt', '--session', canonical.slice(0, 8)], { env, timeout: 15000 })
     expect(requests).toMatchObject([
       { operation: 'send', target: { kind: 'agent-session', agentSessionId: canonical } },
       { operation: 'interrupt', target: { kind: 'agent-session', agentSessionId: canonical } }
     ])
-    for (const args of [['send', '--text', 'body', '--to-session'], ['interrupt', '--session'], ['send', '--to-session', '--text', 'body']]) {
+    for (const args of [['agent', 'send', '--text', 'body', '--to-session'], ['agent', 'interrupt', '--session'], ['agent', 'send', '--to-session', '--text', 'body']]) {
       await expect(exec(cli, args, { env, timeout: 15000 })).rejects.toMatchObject({ stderr: expect.stringContaining('INVALID_CLI_ARGUMENT') })
     }
     expect(requests).toHaveLength(2)
     expect(await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)).toHaveLength(1)
   } finally {
     await server.stop()
-    await stopPrivateRuntime(runtime)
+    await core.dispose()
     await rm(runtime, { recursive: true, force: true })
   }
 })

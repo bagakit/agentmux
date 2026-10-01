@@ -9,7 +9,7 @@ import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { spatialSources, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
+import { projectResourceWorkspace, spatialSources, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
   type SpaceZoneResourceInput, type SpaceZoneResourceResult } from '../../../shared/space-addresses'
 import { addWorkbenchRegion, assertRegionInvariant, createWorkbenchTab, removeWorkbenchRegion,
   type AgentWorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
@@ -368,7 +368,9 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
     catch (error) { issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', error)) }
   }
   const workspace = binding.resource && state.config?.workspaces.find(item => item.hostId === binding.resource!.hostId && item.path === binding.resource!.path)
-  const resource = binding.resource ? { hostId: binding.resource.hostId, path: binding.resource.path,
+  const source = binding.resource && state.config?.workspaces.find(item => item.id === binding.resource!.sourceWorkspaceId)
+  const resource = binding.resource ? { projectId: source ? directoryIdentity(source.hostId, source.repoPath ?? source.path) : null,
+    sourceWorkspaceId: binding.resource.sourceWorkspaceId ?? null, hostId: binding.resource.hostId, path: binding.resource.path,
     kind: binding.resource.kind, branch: binding.resource.branch, workspaceId: workspace?.id ?? null } : null
   if (!atTarget) issues.push(issue('layout-read', 'SPACE_PLACEMENT_UNKNOWN', 'The request has a durable correlation, but its reserved target placement is not observed. Its current Region location is returned without claiming completion.'))
   if (agent?.initialPrompt === 'unconfirmed' || agent?.initialPrompt === 'unknown' && binding.createAgent) {
@@ -466,10 +468,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (resourceInput) {
       const space = catalog.spaces.find(item => item.spaceId === request.destination.spaceId)
       if (!space || !request.destination.spaceId || request.destination.zoneId || request.destination.tabId || request.destination.regionId || request.destination.split) failure('SPACE_NEW_ZONE_TARGET', 'A new Zone requires one exact Space and no child target.')
-      const sourceWorkspace = ports.get().config!.workspaces.find(workspace => workspace.hostId === space.hostId && (workspace.repoPath ?? workspace.path) === space.directoryPath)
-      if (resourceInput.kind === 'worktree' && (space.kind !== 'folder' || !sourceWorkspace)) failure('SPACE_WORKTREE_REQUIRES_PROJECT', 'A Git worktree Zone requires a Folder Space backed by the existing Git owner.')
-      resourceReference = { hostId: space.hostId, path: resourceInput.path, kind: resourceInput.kind,
-        branch: resourceInput.kind === 'worktree' ? resourceInput.branch : null, sourceWorkspaceId: sourceWorkspace?.id ?? SCRATCH_WORKSPACE_ID }
+      const sourceWorkspace = projectResourceWorkspace(ports.get().config!.workspaces, resourceInput.projectId, resourceInput.sourceWorkspaceId)
+      resourceReference = { hostId: sourceWorkspace.hostId, path: resourceInput.path, kind: resourceInput.kind,
+        branch: resourceInput.kind === 'worktree' ? resourceInput.branch : null, sourceWorkspaceId: sourceWorkspace.id }
     } else if (selfMove) destination = { kind: 'empty', address: from!, anchor: from!.regionId }
     else {
       destination = spatialDestination(catalog, request.destination, mint, ports.get().layouts)
@@ -483,7 +484,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind === 'new-agent',
       ...(executionHostId ? { executionHostId } : {}),
-      ...(from ? { from } : {}), target: destination ? { ...(destination.address.spaceId ? { spaceId: destination.address.spaceId } : {}), ...(destination.address.zoneId ? { zoneId: destination.address.zoneId } : {}), tabId: destination.address.tabId, regionId: destination.anchor ?? destination.address.regionId, displayWorkspaceId: destination.address.displayWorkspaceId, groupId: destination.address.groupId } : { spaceId: request.destination.spaceId! },
+      ...(from ? { from } : {}), target: destination ? { ...(destination.address.spaceId ? { spaceId: destination.address.spaceId } : {}), ...(destination.address.zoneId ? { zoneId: destination.address.zoneId } : {}), tabId: destination.address.tabId, regionId: destination.anchor ?? destination.address.regionId, displayWorkspaceId: destination.address.displayWorkspaceId, groupId: destination.address.groupId } : { spaceId: request.destination.spaceId!,
+        ...(request.destination.displayWorkspaceId ? { displayWorkspaceId: request.destination.displayWorkspaceId } : {}),
+        ...(request.destination.groupId ? { groupId: request.destination.groupId } : {}) },
       ...(resourceReference ? { resource: resourceReference } : {}) }
     ports.patch({ spatialRequests: { ...ports.get().spatialRequests, [request.requestId]: binding } })
     const admitted = await ports.save(false)
@@ -506,9 +509,16 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       }
       const zoneId = workspaceZoneId(request.destination.spaceId!, result.workspace.id)
       ports.patch({ spaceZoneBindings: { ...ports.get().spaceZoneBindings, [zoneId]: { spaceId: request.destination.spaceId!, workspaceId: result.workspace.id } },
-        spatialRequests: { ...ports.get().spatialRequests, [request.requestId]: { ...binding, target: { spaceId: request.destination.spaceId!, zoneId } } } })
+        spatialRequests: { ...ports.get().spatialRequests, [request.requestId]: { ...binding, target: { ...binding.target, spaceId: request.destination.spaceId!, zoneId } } } })
       catalog = spatialCatalog(ports.get(), topics)
-      destination = spatialDestination(catalog, { spaceId: request.destination.spaceId!, zoneId, newTab: true }, mint, ports.get().layouts)
+      destination = spatialDestination(catalog, { spaceId: request.destination.spaceId!, zoneId, newTab: true,
+        ...(request.destination.displayWorkspaceId ? { displayWorkspaceId: request.destination.displayWorkspaceId } : {}),
+        ...(request.destination.groupId ? { groupId: request.destination.groupId } : {}) }, mint, ports.get().layouts)
+      const placed = destination.address
+      ports.patch({ spatialRequests: { ...ports.get().spatialRequests, [request.requestId]: { ...binding, target: {
+        spaceId: request.destination.spaceId!, zoneId, tabId: placed.tabId, regionId: placed.regionId,
+        displayWorkspaceId: placed.displayWorkspaceId, groupId: placed.groupId
+      } } } })
     }
     const target = destination!
     if (ports.closing(target.address.tabId)) failure('SPACE_TARGET_CLOSING', 'The target Tab is closing.')
