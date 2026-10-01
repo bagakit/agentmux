@@ -133,6 +133,27 @@ export function BrowserPane({
   const openFile = useAppStore((state) => state.openFile)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
+  // Selection comes from the owning surface, never the first rendered occurrence.
+  const selectedPresentationId = useAppStore(state => {
+    const selected = presentations.filter(presentation => {
+      const { target, occurrence, visible, active } = presentation
+      const reference = target.reference, location = occurrence.location
+      if (!visible || !active || !reference || reference.displayWorkspaceId !== location.displayWorkspaceId ||
+        reference.groupId !== location.groupId || reference.tabId !== location.tabId) return false
+      // Keep the existing Space Group initialization for its visible Browser siblings.
+      if (target.surface === 'space') return state.mainSurface === 'workbench' &&
+        state.layouts[location.displayWorkspaceId]?.activeGroupId === location.groupId
+      if (reference.regionId !== location.regionId) return false
+      if (target.surface === 'survey') {
+        const current = state.surveyZoneSelection?.active
+        return state.mainSurface === 'survey' && current?.displayWorkspaceId === location.displayWorkspaceId &&
+          current.groupId === location.groupId && current.tabId === location.tabId && current.regionId === location.regionId
+      }
+      if (target.surface === 'focus') return state.mainSurface === 'agents'
+      return false
+    })
+    return selected.length === 1 ? selected[0]!.occurrence.presentationId : null
+  })
   const media = useBrowserPresentationCapture(tab.browserId)
   const [presentationHosts, setPresentationHosts] = useState<ReadonlyMap<string, HTMLElement>>(() => new Map())
   const presentationKey = presentations.map(presentation => presentation.occurrence.presentationId).join('\n')
@@ -1059,7 +1080,7 @@ export function BrowserPane({
       }} actions={annotationSync.retryAvailable ? <button type="button" className="small-button" onClick={annotationSync.retry}>Retry annotations</button> : null} />
       <div className="browser-body">
       {presentation && !__AGENTMUX_WEB_PREVIEW__ ? <BrowserPresentationStage browserId={tab.browserId} navigationId={tab.navigationId} presentation={presentation}
-        inputSelected={presentation.target.surface === 'space' && presentation.occurrence.location.groupId === useAppStore.getState().layouts[presentation.occurrence.location.displayWorkspaceId]?.activeGroupId}
+        inputSelected={presentation.occurrence.presentationId === selectedPresentationId}
         onInputSelected={() => onPresentationInputSelected?.(presentation.target)}
         blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
         : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}

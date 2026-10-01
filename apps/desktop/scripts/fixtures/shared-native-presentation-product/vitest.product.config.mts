@@ -3,11 +3,14 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import assert from 'node:assert/strict'
-import original from '../../../../../vitest.config'
+import original from '../note-restore/vitest.owning.config.mts'
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutations = {
   'one-occurrence': ['apps/desktop/src/renderer/src/App.tsx', '(targets[tabId] ??= []).push(target)', '(targets[tabId] = [target])'],
   'independent-capture': ['apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx', 'if (media.current) return Promise.resolve()', 'if (false) return Promise.resolve()'],
+  'space-only-initialization': ['apps/desktop/src/renderer/src/components/BrowserPane.tsx', "if (target.surface === 'survey')", "if (false)"],
+  'hidden-consumes-selection': ['apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx', 'visible && initialInputOwner', 'initialInputOwner'],
+  'unconfirmed-consumes-selection': ['apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx', "if (receipt.outcome !== 'selected')", "if (false)"],
   'global-visibility': ['apps/desktop/src/renderer/src/App.tsx', "visible: target.visible !== false && mainSurface === 'workbench' && !settingsRoute", 'visible: target.visible !== false']
 } as const
 export default defineConfig({ ...original, root, define: { __AGENTMUX_WEB_PREVIEW__: 'false' },

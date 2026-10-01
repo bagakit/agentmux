@@ -9,8 +9,7 @@ const bridge = vi.hoisted(() => ({
   onPresentationEvent: vi.fn(), getZoomFactor: vi.fn()
 }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { browser: bridge, ui: bridge } }))
-// This optional disclosure is not used by the Stage's persistent service notice.
-vi.mock('../src/renderer/src/components/ServiceNoticeDisclosure', () => ({ ServiceNoticeDisclosure: () => null }))
+// Consume the actual persistent disclosure; a null mock would hide the source failure.
 import { BrowserPresentationStage, useBrowserPresentationCapture } from '../src/renderer/src/components/BrowserPresentationStage'
 
 type StageProps = Omit<ComponentProps<typeof BrowserPresentationStage>, 'media'>
@@ -146,7 +145,7 @@ it('does not poll or retry the same failed identity on unrelated rerenders', asy
 it('allows an explicit connection retry without reopening the page or taking focus', async () => {
   bridge.registerPresentation.mockRejectedValueOnce(new Error('Unknown browser: browser-one'))
   await render()
-  const retry = container.querySelector<HTMLButtonElement>('button')
+  const retry = container.querySelector<HTMLButtonElement>('.browser-presentation-notice > .small-button')
   expect(retry?.textContent).toBe('Retry connection')
   await act(async () => retry!.click())
   expect(bridge.registerPresentation).toHaveBeenCalledTimes(2)
@@ -184,7 +183,7 @@ it('does not clear a failure from a separate input authority when registration s
   await render({ navigationId: 'second-navigation' })
   expect(bridge.registerPresentation).toHaveBeenCalledTimes(1)
   expect(container.textContent).toContain('Input owner is unconfirmed')
-  expect(container.querySelector('button')).toBeNull()
+  expect(container.querySelector('.browser-presentation-notice > .small-button')?.textContent).toBe('Retry preview')
 })
 
 it('delays initial input ownership until the existing registered Stage has actual positive geometry', async () => {
@@ -253,7 +252,8 @@ it('keeps native selection and geometry working after a capture timeout without 
   expect(bridge.activatePresentation.mock.calls).toEqual([['actual-lease', { kind: 'select', focus: 'preserve' }]])
   expect(container.textContent).toContain('Timeout starting video source')
   const retainedStage = container.querySelector('[data-native-browser-stage]')
-  const service = [...container.querySelectorAll('[role="status"]')].find(node => node.textContent?.includes('Live preview'))!
+  const service = container.querySelector('.browser-presentation-notice')!
+  expect(service.querySelector('.service-disclosure')).not.toBeNull()
   expect(service.parentElement).toBe(retainedStage!.parentElement)
   expect(retainedStage!.contains(service)).toBe(false)
   await render({ navigationId: 'next-navigation', blocked: true })
@@ -271,7 +271,7 @@ it('retries only the current live preview on an explicit action and clears failu
   const capture = vi.mocked(navigator.mediaDevices.getDisplayMedia)
   capture.mockRejectedValueOnce(new Error('Timeout starting video source'))
   await render()
-  const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry live preview')!
+  const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry preview')!
   expect(retry).not.toBeUndefined()
   await act(async () => retry.click())
   expect(capture).toHaveBeenCalledTimes(2)
@@ -287,7 +287,7 @@ it('does not retry live capture from a hidden or blocked presentation', async ()
   capture.mockRejectedValueOnce(new Error('Timeout starting video source'))
   await render()
   await render({ blocked: true })
-  const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry live preview')!
+  const retry = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry preview')!
   expect(retry.disabled).toBe(true)
   await act(async () => retry.click())
   expect(capture).toHaveBeenCalledTimes(1)

@@ -208,4 +208,7 @@
 .browser-management-rail > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); font-size: var(--fs-meta); }
 .browser-management-rail[hidden] { display: none; }
 
-.browser-presentation > .service-window > .small-button { grid-column: 2; justify-self: start; }
+.browser-presentation-notice { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; padding-inline: var(--sp-2); flex: none; }
+.browser-presentation-notice > .service-disclosure { flex: 1; padding-inline: 0; }
+.browser-presentation-notice > .small-button { flex: none; min-height: 26px; padding: 0 var(--sp-2); border: 0; background: transparent; box-shadow: none; font-weight: 400; }
+.browser-presentation-notice > .small-button:hover { background: var(--surface-2); }

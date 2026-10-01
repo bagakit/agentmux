@@ -7,12 +7,23 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
+import { surveyInitialZoneSelection } from '../../../src/renderer/src/lib/survey-workface'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import '../../../src/renderer/src/styles/index.css'
 Object.assign(api.browser, window.agentmux.browser)
 Object.assign(api.ui, window.agentmux.ui)
+const surveyInitial = new URLSearchParams(location.search).has('survey')
+if (new URLSearchParams(location.search).has('preview-failure')) {
+ const acquire = navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices)
+ let fail = true
+ navigator.mediaDevices.getDisplayMedia = async options => {
+  if (fail) { fail = false; throw new Error('Private fixture: video source could not start') }
+  return await acquire(options)
+ }
+}
 const config = await api.config.get()
-const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: _hygiene_fixturePath("private/shared-native-product/topics"), name: 'Topics', kind: 'folder' }
+const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: new URLSearchParams(location.search).get('workspace') ?? _hygiene_fixturePath("private/shared-native-product/topics"), name: 'Topics', kind: 'folder' }
 const topicId = 'launcher:shared-native-product', directoryPath = workspace.path + '/' + scratchTopicDirectoryName(topicId)
 const topic = { id: topicId, title: 'Native shared product', summary: 'One original Browser in two actual workfaces.',
   directoryPath, topicPath: directoryPath + '/topic.md', collaborators: [],
@@ -27,10 +38,14 @@ const surface = { ...browser, kind: 'browser', regionId: 'product-region', works
 const tab = { ...createWorkbenchTab('product-tab', surface), topicId }
 window.localStorage.setItem('agentmux.leader-topic-floating.v1', JSON.stringify({ open: false, targetTopicId: topicId, targetTabId: tab.id, railMode: 'avatars' }))
 useAppStore.setState({ loading: false, initialize: async () => () => {}, config: { ...config, workspaces: [workspace] },
-  activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: { [tab.id]: tab }, sessions: [], toolsOpen: false, projectRailOpen: false,
+  activeWorkspaceId: workspace.id, mainSurface: surveyInitial ? 'survey' : 'workbench', tabs: { [tab.id]: tab }, sessions: [], toolsOpen: false, projectRailOpen: false,
   scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 1, topics: [topic], error: null, reading: false } },
   layouts: { [workspace.id]: createWorkspaceLayout('product-group', [tab.id]) },
   agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
+if (surveyInitial) {
+ const state = useAppStore.getState(), catalog = spatialCatalog(state, [topic]), zoneId = catalog.tabs.find(value => value.tabId === tab.id).zoneId
+ useAppStore.setState({ surveyCollectedZones: { [zoneId]: true }, surveyZoneSelection: surveyInitialZoneSelection(catalog, zoneId, state.layouts, state.tabs, workspace.id), surveyToolsOpen: false })
+}
 api.browser.onEvent(event => useAppStore.getState().applyBrowserEvent(event))
 window.nativeProductProof = { paintIsPageFrame:paint=>Boolean(paint&&paint[3]===255&&((paint[0]>200&&paint[1]<80&&paint[2]<100)||(paint[0]<50&&paint[1]>150&&paint[2]<100))), facts() { const state = useAppStore.getState();return {
   tabId: tab.id, regionId: surface.regionId, browserId: browser.id, layout: state.layouts[workspace.id], tabs: Object.keys(state.tabs),
