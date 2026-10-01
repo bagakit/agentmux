@@ -1,4 +1,5 @@
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 // T-005 of f-25k8f8m9k：身份绑定与重启恢复的 durable 边界。
 //
 // 两条会静默腐烂的性质，各配一条**被破坏时会红**的测试，都跑在真的收敛 owner 上（渲染层的持久化
@@ -290,7 +291,7 @@ describe('public Hook native identity survives a new Client and Desktop durable 
 
       // A new FileStore and RuntimeController create a fresh public Core Client. Real Desktop
       // snapshot/history/recovery delegates supply the facts consumed by Store.initialize.
-      desktop = new RuntimeController(new AgentMuxFileAgentSessionStore(storePath))
+      desktop = new RuntimeController(new AgentMuxFileAgentSessionStore(storePath), localRuntimeConnector)
       const trackedRun = vi.spyOn(desktop.resourceSampler,'trackRun')
       desktop.commit(await desktop.prepare(privateConfig))
       for (const mutation of repairPlan!.mutations) await expect(readFile(mutation.path)).rejects.toMatchObject({code:'ENOENT'})

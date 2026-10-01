@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -161,7 +162,7 @@ beforeEach(async () => {
   kernel.prepareStop = async (runId: string) => ({ daemonInstance: 'private-flow', operationKey: `stop-${runId}`, runId })
   stop = vi.fn(); kernel.stop = stop
   core.onEvent(event => { events.push(event); if (event.type === 'agent-error') beforeDiagnostic = useAppStore.getState() })
-  runtime = new RuntimeController(durable, {} as ScratchTopics)
+  runtime = new RuntimeController(durable, localRuntimeConnector, {} as ScratchTopics)
   runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })

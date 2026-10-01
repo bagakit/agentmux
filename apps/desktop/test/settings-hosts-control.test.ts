@@ -1,3 +1,4 @@
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { EventEmitter } from 'node:events'
 import { tmpdir } from 'node:os'
@@ -52,7 +53,7 @@ async function registered() {
   const config = await store.save({ ...structuredClone(DEFAULT_CONFIG), hosts: [DEFAULT_CONFIG.hosts[0]!, remote],
     workspaces: [{ id: '__scratch__', name: 'Private Topics', path: join(root, 'topics'), hostId: 'local', kind: 'folder' }] })
   const preparation: RuntimePreparation = { hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() }
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   const prepare = vi.spyOn(runtime, 'prepare').mockResolvedValue(preparation)
   const commit = vi.spyOn(runtime, 'commit').mockImplementation(() => {})
   const attach = vi.spyOn(runtime, 'attach').mockReturnValue(() => {})

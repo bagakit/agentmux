@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
@@ -145,7 +146,7 @@ beforeAll(async () => {
     if (typeof run.pid !== 'number') throw new Error('The private Run must expose its actual PID')
     originalPids.set(name, run.pid)
   }
-  controller = new RuntimeController(store)
+  controller = new RuntimeController(store, localRuntimeConnector)
   controller.commit({ hosts: [{ id: 'local', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   config = { ...structuredClone(DEFAULT_CONFIG), hosts: [{ id: 'local', kind: 'local', label: 'Private' }], executors: { 'private-claude': { providerId: 'claude', label: 'Private reader', command: process.execPath, args: [cli], env: {}, injectAgentMuxGuide: false } },
     workspaces: ['alpha', 'beta'].map(id => ({ id, hostId: 'local', kind: 'folder' as const, name: id === 'alpha' ? 'Alpha' : 'Beta', path: join(directory, id) })) }

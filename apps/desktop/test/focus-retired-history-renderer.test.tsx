@@ -1,5 +1,6 @@
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -72,7 +73,7 @@ async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: NOW - HO
   const kernel = (client as unknown as { kernel: Record<string, (...args: unknown[]) => unknown> }).kernel
   const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw new Error(`Unexpected Run control ${name}`) }))
   const connect = vi.spyOn(client, 'connect').mockRejectedValue(new Error('No private Runtime'))
-  const controller = new RuntimeController(store)
+  const controller = new RuntimeController(store, localRuntimeConnector)
   controller.commit({ hosts: [{ id: 'private-host', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: [], executors: { 'private-claude': { providerId: 'claude', label: 'Private', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })

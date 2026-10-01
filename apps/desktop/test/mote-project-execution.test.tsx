@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -50,7 +51,7 @@ describe('Mote coordination reaches original execution owners', () => {
     const input: AgentMuxAgentCreateInput[] = []
     const created = { kind: 'agent' as const, agentSessionId: 'private-mote', providerId: 'codex', executorId: 'fixture', hostId: 'local', workspacePath: root, run: { runId: 'private-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
     const client = { connect: async () => {}, onEvent: () => () => {}, dispose: async () => {}, createAgentWithDelivery: async (value: AgentMuxAgentCreateInput) => { input.push(value); return { session: created, creation: { createOperationId: 'private-create', initialPrompt: 'confirmed' } } }, runtimeSubject: async () => { throw new Error('Private projection unavailable') }, sessionTimeline: async () => { throw new Error('Private timeline unavailable') } } as unknown as AgentMuxClient
-    const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), topics)
+    const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, topics)
     runtime.commit({ hosts: [{ id: 'local', client, executionHost: { kind: 'local', dispose: async () => {} } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     const config = { hosts: [{ id: 'local', kind: 'local', label: 'Private' }], workspaces: [scratch], executors: { fixture: { providerId: 'codex', label: 'Private', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true } } } as AppConfig
     const prompt = '我有一些点子，我们开始尝试一个项目'

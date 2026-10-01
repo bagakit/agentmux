@@ -1,3 +1,4 @@
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { execFile } from 'node:child_process'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -64,7 +65,7 @@ async function registered() {
     browser: { ...DEFAULT_CONFIG.browser, appLinkSchemes: { literal: 'allow' } }, composerShortcuts: [],
     workspaces: [{ id: '__scratch__', name: 'Owned Topics', path: join(root, 'topics'), hostId: 'local', kind: 'folder' }] })
   vi.spyOn(store, 'get').mockResolvedValue(initial)
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   const preparation: RuntimePreparation = { hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] }
   const trace: string[] = []
   const prepare = vi.spyOn(runtime, 'prepare').mockImplementation(async () => { trace.push('prepare'); return preparation })

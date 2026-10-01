@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
@@ -17,7 +18,7 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', label: 'Private F
   executors: { codex: { label: 'Private retained Agent fixture', providerId: 'codex', command: nodeExecutable, args: [path.join(privateRoot, 'fake-codex-cli.mjs')], env: { AGENTMUX_FAKE_READY_MODE: 'before' }, injectAgentMuxGuide: false } },
   workspaces: ['alpha', 'beta'].map(id => ({ id, hostId: 'local', name: id === 'alpha' ? 'Alpha · retained work' : 'Beta · closed work', kind: 'folder' as const, path: path.join(privateRoot, id) })),
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')))
+const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')), localRuntimeConnector)
 const calls: { operation: string; args: unknown[] }[] = []
 const result: Record<string, any> = { passed: false, phase, pid: process.pid, boundary: 'Actual App/Store/Focus/Workbench/Terminal, a private public Core Agent keepSession and Terminal Runs. Focus timestamps are controlled fixture inputs. The Agent CLI is the repository fixture; Terminal archive facts do not qualify Agent native messages, upstream Provider writers or user installation.' }
 let win: BrowserWindow

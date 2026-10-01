@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
@@ -16,7 +17,7 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, labe
   workspaces: [scratch], appearance: { terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const topics = new ScratchTopics()
-const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')), topics)
+const runtime = new RuntimeController(new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')), localRuntimeConnector, topics)
 const calls: { operation: string; args: any[]; at: number }[] = []
 let win: BrowserWindow
 const result: Record<string, any> = { passed: false, phase, pid: process.pid,

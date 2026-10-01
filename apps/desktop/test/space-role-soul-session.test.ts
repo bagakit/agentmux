@@ -1,3 +1,4 @@
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, realpath, rename, rm, unlink, mkdir, lstat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -105,7 +106,7 @@ async function fixture() {
       { id: 'project-b', name: 'Project B', hostId: 'local', path: join(root, 'project-b'), kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' },
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-  const controller = new RuntimeController(store, topics)
+  const controller = new RuntimeController(store, localRuntimeConnector, topics)
   controller.commit(await controller.prepare(config))
   disposals.push(() => controller.dispose())
   const launch = (topicId: string, sessionId: string, prompt: string, executorId = providers[0]!.id) => controller.launchAgent({

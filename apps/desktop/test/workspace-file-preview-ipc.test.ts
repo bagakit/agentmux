@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises'
@@ -42,7 +43,7 @@ it('actual preload and registered Main IPC retain Workspace identity, raw PNG by
   ]
   const bytes = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADElEQVR42mNk+M/wHwAF/gL+3fVbWQAAAABJRU5ErkJggg==', 'base64')
   await Promise.all([writeFile(join(firstRoot, 'same.png'), 'wrong workspace bytes'), writeFile(join(secondRoot, 'same.png'), bytes)])
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), workspaces }
   const files = new WorkspaceFiles(() => new LocalExecutionHost())

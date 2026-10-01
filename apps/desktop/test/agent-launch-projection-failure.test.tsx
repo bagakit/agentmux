@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -120,7 +121,7 @@ beforeEach(async () => {
   config = { ...structuredClone(DEFAULT_CONFIG), executors: { fixture: { label: 'Fixture', providerId: provider.id,
     command: provider.executable, args: [], env: { CODEX_HOME: join(dir, 'home') }, injectAgentMuxGuide: false } }, workspaces: [workspace] }
   topicId = (await topics.ensureMote(workspace, 'launcher:projection')).id
-  runtime = new RuntimeController(durable, topics)
+  runtime = new RuntimeController(durable, localRuntimeConnector, topics)
   runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })

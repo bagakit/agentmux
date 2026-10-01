@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
@@ -76,7 +77,7 @@ export async function nativeMain() {
   vi.spyOn(assets,'performanceLaunch').mockReturnValue({ runner:process.execPath, cli:process.env.AGENTMUX_TOOLKIT_CLI!,
     script:process.env.AGENTMUX_TOOLKIT_ASSET ?? resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:join(directory,'work'),env:{ELECTRON_RUN_AS_NODE:'1'} })
   let sampler=new ProcessResourceSampler()
-  let runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(),undefined,sampler)
+  let runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector,undefined,sampler)
   let store=new ConfigStore(join(directory,'config.json'));await store.save(structuredClone(DEFAULT_CONFIG));let config=await store.get()
   const makeSender=()=>new class extends EventEmitter {
     readonly id=71;readonly mainFrame={framesInSubtree:[]};readonly events: {channel:string;value:any}[]=[]
@@ -127,7 +128,7 @@ export async function nativeMain() {
   const restart=async()=>{
     await dispose!();detachRenderer();await runtime.dispose();sampler.dispose()
     fixture.handlers.clear();fixture.ipc.listeners.clear()
-    sampler=new ProcessResourceSampler();runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(),undefined,sampler)
+    sampler=new ProcessResourceSampler();runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector,undefined,sampler)
     // Reopen the actual durable stores and same private Native. Never recreate defaults or the daemon.
     store=new ConfigStore(join(directory,'config.json'));config=await store.get();sender=makeSender();detachRenderer=runtime.attach(sender as any)
     dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,

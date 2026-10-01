@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -77,7 +78,7 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
       endByte: input.expectedByte + Buffer.byteLength(input.data) } }
   })
   vi.spyOn(state.screenEvidence, 'wait').mockResolvedValue(0)
-  const runtime = new RuntimeController(store)
+  const runtime = new RuntimeController(store, localRuntimeConnector)
   runtime.setContinuousProgressInputObserver(async () => false)
   // Already-connected host I/O seam; no connect/start/attach is performed.
   ;(runtime as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client })

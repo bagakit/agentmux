@@ -6,9 +6,6 @@ import {
   validateAgentPromptCondition,
   type AgentPromptCondition,
   type AgentMuxAgentMessageInput,
-  AgentMuxMemoryAgentSessionStore,
-  connectLocalAgentMux,
-  connectSshAgentMux,
   runtimeStorageUsage,
   loadAgentSessions,
   loadSessionHistorySources,
@@ -20,7 +17,6 @@ import {
   type AgentSessionHistoryPage,
   type AgentSessionHistoryObservation,
   type AgentSessionHistoryObservationHandle,
-  type AgentMuxClient,
   type AgentMuxClientEvent,
   type AgentMuxInteractionResponse,
   type AgentMuxAgentSessionStore,
@@ -31,6 +27,7 @@ import {
   type AgentMuxRuntimeSubjectTarget,
   type ExecutionHost
 } from '@agentmux/core'
+import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } from './desktop-host.js'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
@@ -339,6 +336,7 @@ export class RuntimeController {
 
   constructor(
     private readonly agentSessionStore: AgentMuxAgentSessionStore,
+    private readonly connectRuntimeClient: DesktopRuntimeConnector,
     private readonly scratchTopics: ScratchTopics = new ScratchTopics(),
     /**
      * 进程资源采样器。挂在 controller 上是因为 pid 从这条事件流上流过；采样本身仍由订阅
@@ -528,7 +526,8 @@ export class RuntimeController {
   async checkHost(config: HostConfig): Promise<{ detail: string }> {
     let prepared: PreparedRuntimeHost | null = null
     try {
-      prepared = await this.prepareHost(config, new AgentMuxMemoryAgentSessionStore())
+      prepared = await this.prepareHost(config)
+      await prepared.client.connect()
       const identity = prepared.client.runtimeIdentity()
       return {
         detail: `Runtime ${identity.buildIdentity} · protocol ${identity.protocolVersion}`
@@ -1539,20 +1538,7 @@ export class RuntimeController {
     const executionHost = createExecutionHost(config)
     let client: AgentMuxClient | null = null
     try {
-      if (config.kind === 'local') {
-        client = await connectLocalAgentMux({ store })
-      } else {
-        client = await connectSshAgentMux({
-          store,
-          target: {
-            hostId: config.id,
-            hostname: config.hostname,
-            ...(config.user ? { user: config.user } : {}),
-            ...(config.port ? { port: config.port } : {}),
-            ...(config.identityFile ? { identityFile: config.identityFile } : {})
-          },
-        })
-      }
+      client = await this.connectRuntimeClient(config, store)
       return { id: config.id, executionHost, client }
     } catch (error) {
       const cleanup = await Promise.allSettled([
@@ -1604,6 +1590,7 @@ export class RuntimeController {
     }
     throw lastError instanceof Error ? lastError : new AgentMuxError('Agent caller capability could not be verified.', 'AGENT_CAPABILITY_INVALID')
   }
+
 
   private async trackHostLifecycleOperation<T>(hostId: string, operation: () => Promise<T>): Promise<T> {
     if (this.hostReconfigurationReservations.has(hostId)) {

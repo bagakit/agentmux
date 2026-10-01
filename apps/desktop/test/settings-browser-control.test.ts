@@ -1,3 +1,4 @@
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -160,7 +161,7 @@ describe('Browser settings share the sole typed Main owner', () => {
 
   it('routes registered native answers, public Control and UI Forget through the same actual Main ConfigOwner', async () => {
     const f = await privateConfig(), sender = { id: 918, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } }
-    const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     vi.spyOn(runtime, 'prepare').mockImplementation(vi.mocked(f.runtime.prepare).getMockImplementation()!)
     vi.spyOn(runtime, 'attach').mockReturnValue(() => {})
     const progressLoops = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(f.root, 'loops.json')),

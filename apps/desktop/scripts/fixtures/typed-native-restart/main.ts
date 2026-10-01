@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
@@ -16,7 +17,7 @@ const config = { version: 9, hosts: [{ id: 'local', kind: 'local' as const, labe
   workspaces: [{ id: 'native-workspace', hostId: 'local', name: 'Private proof', path: path.join(privateRoot, 'workspace'), kind: 'folder' as const }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
-const runtime = new RuntimeController(store)
+const runtime = new RuntimeController(store, localRuntimeConnector)
 const calls: { operation: string; args: any[] }[] = []
 const result: Record<string, any> = { passed: false, phase, pid: process.pid }
 let win: BrowserWindow

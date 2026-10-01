@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFile as execFileCallback } from 'node:child_process'
@@ -41,7 +42,7 @@ let config = phase === 'seed' ? initialConfig : JSON.parse(await fs.readFile(con
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
 const topics = new ScratchTopics()
 const demands = openDemandStore({ root: path.join(privateRoot, 'user-data', 'demands') })
-const runtime = new RuntimeController(store, topics)
+const runtime = new RuntimeController(store, localRuntimeConnector, topics)
 const configOwner = new ConfigOwner({ read: () => config,
   save: async next => { await fs.writeFile(configFile, JSON.stringify(next)); return next }, publish: next => { config = next } })
 const worktrees = new WorktreeService(id => runtime.executionHost(id), { save: (next, before) => configOwner.edit(before, next) })

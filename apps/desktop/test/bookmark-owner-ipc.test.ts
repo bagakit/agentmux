@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { createHash } from 'node:crypto'
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile, truncate } from 'node:fs/promises'
@@ -44,7 +45,7 @@ it('registered bookmark IPC and Store report a byte-budget rejection without fal
   const root = await mkdtemp(join(tmpdir(), 'agentmux-bookmark-ipc-'))
   const workspace: WorkspaceRecord = { id: 'bookmark-project', name: 'Bookmarks', kind: 'folder', hostId: 'local', path: root }
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), workspaces: [workspace] }
-  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+  const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const files = new WorkspaceFiles(() => new LocalExecutionHost())
   const sender = Object.assign(new EventEmitter(), { id: 711, isDestroyed: () => false, send: vi.fn() })

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -56,7 +57,7 @@ app.whenReady().then(async () => {
         fact.outcome = 'rejected'; throw error
       })
     }
-    controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore())
+    controller = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
     controller.prepare = async () => ({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     const config = { ...structuredClone(DEFAULT_CONFIG), hosts: [], workspaces: [] }
     dispose = await registerIpc({ window, runtime: controller, configStore: { get: async () => config } as never,

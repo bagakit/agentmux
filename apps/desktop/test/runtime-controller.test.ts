@@ -1,4 +1,5 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { mkdir, mkdtemp, readFile, realpath, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -320,7 +321,7 @@ const remoteHost: SshHostConfig = {
 }
 
 async function configuredController(): Promise<RuntimeController> {
-  const controller = new RuntimeController(store)
+  const controller = new RuntimeController(store, localRuntimeConnector)
   controller.commit(await controller.prepare(localConfig))
   return controller
 }
@@ -2756,7 +2757,7 @@ describe('RuntimeController configuration transaction', () => {
         () => 1_000_000,
         () => []
       )
-      const controller = new RuntimeController(store, undefined, sampler)
+      const controller = new RuntimeController(store, localRuntimeConnector, undefined, sampler)
       return { controller, sampler }
     }
 

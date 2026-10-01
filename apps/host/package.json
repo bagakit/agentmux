@@ -1,0 +1,9 @@
+{
+  "name": "@agentmux/host",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "build": "node scripts/build.mjs", "typecheck": "tsc --noEmit -p tsconfig.json", "prepare:private-access": "node dist/prepare-private-access.js" },
+  "dependencies": { "@agentmux/core": "workspace:*" },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0", "esbuild": "^0.25.0" }
+}

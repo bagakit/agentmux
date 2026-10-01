@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { localRuntimeConnector } from '../../../test/helpers/local-runtime-connector'
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import { execFile as execFileCallback } from 'node:child_process'
@@ -34,7 +35,7 @@ const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'loc
 let config: AppConfig = phase === 'seed' ? initialConfig : JSON.parse(await fs.readFile(path.join(privateRoot, 'config.json'), 'utf8'))
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
 const topics = new ScratchTopics()
-const runtime = new RuntimeController(store, topics)
+const runtime = new RuntimeController(store, localRuntimeConnector, topics)
 let registrationFault = false
 const owner = new ConfigOwner({ read: () => config, save: async next => {
   if (registrationFault) { registrationFault = false; throw new Error('Private registration receipt is unavailable after Git creation') }
