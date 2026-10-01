@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, afterEach, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { AgentMuxError } from '../src/errors.js'
@@ -183,7 +183,7 @@ function storedSession() {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: fixturePath("tmp/degrade-agent"),
+    workspacePath: upstreamFixturePath("tmp/degrade-agent"),
     run: { runId: 'degrade-run' },
     retiredRuns: [],
     hookBindingId: 'binding',
@@ -212,12 +212,11 @@ class CapabilityMarkerFailingStore extends AgentMuxMemoryAgentSessionStore {
 
 function runningRun(acceptedInputBytes: number | null = 37): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: 'degrade-run',
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: fixturePath("tmp/degrade-agent"),
+    workspacePath: upstreamFixturePath("tmp/degrade-agent"),
     pid: 123,
     state: { type: 'running' },
     cols: 80,
@@ -267,15 +266,15 @@ describe('AgentMuxClient 握手超时行为（真实 registry/store 边界）', 
   it('public connect isolates one vanished Run and still connects the other Session', async () => {
     vi.useFakeTimers()
     const store = new AgentMuxMemoryAgentSessionStore()
-    const failed = sessionFor('failed-agent', 'failed-run', fixturePath("tmp/failed-agent"))
-    const healthy = sessionFor('healthy-agent', 'healthy-run', fixturePath("tmp/healthy-agent"))
+    const failed = sessionFor('failed-agent', 'failed-run', upstreamFixturePath("tmp/failed-agent"))
+    const healthy = sessionFor('healthy-agent', 'healthy-run', upstreamFixturePath("tmp/healthy-agent"))
     await store.compareAndSwap(null, failed)
     await store.compareAndSwap(null, healthy)
 
     const client = new AgentMuxClient({ store })
     const kernel = (client as unknown as { kernel: Record<string, unknown> }).kernel
-    const failedRun = runFor('failed-run', fixturePath("tmp/failed-agent"))
-    const healthyRun = runFor('healthy-run', fixturePath("tmp/healthy-agent"))
+    const failedRun = runFor('failed-run', upstreamFixturePath("tmp/failed-agent"))
+    const healthyRun = runFor('healthy-run', upstreamFixturePath("tmp/healthy-agent"))
     const query = '\u001b[?u'
     const queryEvent = {
       type: 'data' as const,

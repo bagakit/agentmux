@@ -1,16 +1,15 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { projectAgentMuxRuntimeSubjects } from '../src/runtime.js'
 import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
 const run: AgentMuxRun = {
-  nativeService: null,
   runId: 'run-1',
   kind: 'agent',
   providerId: 'codex',
   executorId: 'codex',
   agentSessionId: 'semantic-1',
-  workspacePath: fixturePath("repo"),
+  workspacePath: upstreamFixturePath("repo"),
   pid: 42,
   state: 'running',
   cols: 80,
@@ -26,7 +25,7 @@ const agentSession: AgentMuxAgentSession = {
   providerId: 'codex',
   executorId: 'codex',
   hostId: 'local',
-  workspacePath: fixturePath("repo"),
+  workspacePath: upstreamFixturePath("repo"),
   run: { runId: 'run-1' },
   retiredRuns: [],
 

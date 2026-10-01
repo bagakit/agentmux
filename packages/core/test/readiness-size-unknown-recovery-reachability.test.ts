@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
@@ -44,7 +44,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: fixturePath("repo"),
+    workspacePath: upstreamFixturePath("repo"),
     run: { runId: RUN_ID },
     retiredRuns: [],
     hookBindingId: 'binding-size-unknown-recovery'.padEnd(43, 'A'),
@@ -109,12 +109,11 @@ async function harness(): Promise<{
   internals.connected = true
   internals.kernel.isConnected = () => true
   internals.kernel.status = async () => ({
-    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: fixturePath("repo"),
+    workspacePath: upstreamFixturePath("repo"),
     pid: 999,
     state: { type: 'running' },
     cols: 80,

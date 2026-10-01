@@ -83,7 +83,6 @@ function storedSession(): AgentMuxStoredAgentSession {
 
 function run(latestOutputBytes: number): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'claude',

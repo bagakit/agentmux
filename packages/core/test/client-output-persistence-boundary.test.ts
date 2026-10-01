@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -41,12 +41,12 @@ function sdkTransport(workspacePath: string) {
   let replay: OutputChunk[] = []
   let latest = 0
   let state: RunInfo['state'] = {type:'running'}
-  const info = (id: string) => ({ native_service: null, id,spec:{program:'codex',args:[],cwd:workspacePath,env:{}},state,pid:4321,
+  const info = (id: string) => ({id,spec:{program:'codex',args:[],cwd:workspacePath,env:{}},state,pid:4321,
     latest_output_bytes:latest,first_available_byte:0,applied_input_bytes:0,current_size:{cols:80,rows:24}} as unknown as RunInfo)
   const status = vi.fn(async (id: string) => info(id))
   const attach = vi.fn(async (id: string, after: number) => {
     const stream = new Events(); streams.push(stream)
-    return { snapshot:{ terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0,run:info(id),replay:{chunks:replay.filter(c=>c.end_byte>after),first_available_byte:0,latest_output_bytes:latest,truncated:false}},
+    return { snapshot:{run:info(id),replay:{chunks:replay.filter(c=>c.end_byte>after),first_available_byte:0,latest_output_bytes:latest,truncated:false}},
       events:() => stream.read(),close:() => stream.close(),detach:async () => stream.close() }
   })
   const sdk = { attach,status }
@@ -91,7 +91,7 @@ describe('output transport owns no durable Agent Session reading cursor', () => 
   })
 
   it('publishes replay before live and preserves exact Run continuation through wire loss/reentrant notification', async () => {
-    const t=sdkTransport(fixturePath("private/continuation"));const seen:number[][]=[]
+    const t=sdkTransport(upstreamFixturePath("private/continuation"));const seen:number[][]=[]
     t.adapter.onEvent(event=>{if(event.type==='data') {seen.push([event.startByte,event.endByte]);t.internals.markConnectionLost()}})
     try {
       t.setReplay([chunk(0,[1,2,3,4])])
@@ -113,7 +113,7 @@ describe('output transport owns no durable Agent Session reading cursor', () => 
   })
 
   it('replay publication may synchronously lose the wire without reinstalling its closed owner', async () => {
-    const t=sdkTransport(fixturePath("private/replay-reentry"));const seen:number[][]=[]
+    const t=sdkTransport(upstreamFixturePath("private/replay-reentry"));const seen:number[][]=[]
     try {
       t.setReplay([chunk(0,[1,2,3,4])])
       await t.adapter.attach('run-A',0,snapshot=>{
@@ -133,7 +133,7 @@ describe('output transport owns no durable Agent Session reading cursor', () => 
   })
 
   it('old pump completion cannot clear a replacement owner; terminal facts dispose retained continuation', async () => {
-    const t=sdkTransport(fixturePath("private/owners"))
+    const t=sdkTransport(upstreamFixturePath("private/owners"))
     try {
       t.setReplay([chunk(0,[1,2,3])]);await t.adapter.attach('run-A',0)
       t.adapter.resetConnection();t.internals.client=t.sdk
@@ -151,7 +151,7 @@ describe('output transport owns no durable Agent Session reading cursor', () => 
   })
 
   it('authoritative missing Run disposes its disconnected continuation without clearing a different Run', async () => {
-    const t=sdkTransport(fixturePath("private/missing"))
+    const t=sdkTransport(upstreamFixturePath("private/missing"))
     try {
       t.setReplay([chunk(0,[1,2,3])]);await t.adapter.attach('run-A',0)
       t.setReplay([chunk(0,[4,5])]);await t.adapter.attach('run-B',0)

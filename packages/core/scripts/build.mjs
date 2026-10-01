@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
-const expectedManifestSha256 = '1bbe48d8b4705646cb65cd453611e58a62c275f96bf9faf73cf8c7a62dc9fa3f'
+const expectedManifestSha256 = '5c17ba362d6a89431ceab92e62d4f9e19342971a478f51608f2942c6a74b4a70'
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const buildRoot = join(packageRoot, '.ctxmux-build')
 const artifactRoot = join(
@@ -42,11 +42,11 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
     manifest.schema !== 'ctxmux.local-artifacts.v1' ||
-    manifest.source.commit !== '6a0b92a502e9130649df1131ca2ec833b47980a8' ||
-    manifest.source.tree !== 'e842a8c247e427272f00d4d3bef6ced77bcd9885' ||
+    manifest.source.commit !== 'e4d3dd7d32dccc82e6dcd54620e0c79dec0f4943' ||
+    manifest.source.tree !== 'f1f7fdf6e62541e18181340a0d3dc91a0b8e94db' ||
     manifest.source.worktree_clean !== true ||
     manifest.product.version !== '0.1.0' ||
-    manifest.product.protocol !== 21 ||
+    manifest.product.protocol !== 18 ||
     manifest.support.platform !== process.platform ||
     manifest.support.architecture !== process.arch ||
     manifest.support.transport !== 'unix'

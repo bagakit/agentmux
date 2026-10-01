@@ -1,4 +1,4 @@
-import { fixturePath } from '../helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from '../helpers/history-fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -11,11 +11,7 @@ import { agentTurnCompletionIdentity, agentTurnEndEvidence } from '../../src/age
 import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 
-const isolation = await vi.hoisted(async () => {
-  const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os')
-  const { join } = await import('node:path')
-  return { homedir: join(tmpdir(), 'agentmux-fixtures', "synthetic/cursor-unset") }
-})
+const isolation = await vi.hoisted(async () => { const { fixturePath: upstreamFixturePath } = await import("../helpers/history-fixture-values.js"); return ({ homedir: upstreamFixturePath("synthetic/cursor-unset") }) })
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(),
   homedir: () => isolation.homedir }))
 const cleanups: Array<() => Promise<void>> = []
@@ -52,7 +48,7 @@ async function harness() {
   let inputCursor = 10
   const writes: string[] = []
   const receipts = new Map<string, { start_byte: number; end_byte: number; data: string }>()
-  const run = () => ({ native_service: null, id: runId,
+  const run = () => ({ id: runId,
     spec: { program: 'cursor-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: 0,
     durable_output_bytes: 0, first_available_byte: 0, attachments: 0,
@@ -135,7 +131,7 @@ describe('Cursor native identity and completion through built public Core', () =
     expect(await h.feed('forged', 'beforeSubmitPrompt', { conversation_id: 'forged' }, true)).toBe(403)
     await establish(h)
     const main = (await h.stored()).nativeHandle
-    const body = { conversation_id: h.nativeId, transcript_path: fixturePath("synthetic/child.jsonl"), subagent_id: 'child-native-id' }
+    const body = { conversation_id: h.nativeId, transcript_path: upstreamFixturePath("synthetic/child.jsonl"), subagent_id: 'child-native-id' }
     expect(await h.feed('child-start', 'subagentStart', body)).toBe(204)
     expect(await h.feed('child-stop', 'stop', { ...body, status: 'completed' })).toBe(204)
     expect((await h.stored()).nativeHandle).toEqual(main)
@@ -185,7 +181,7 @@ describe('Cursor native identity and completion through built public Core', () =
     const h = await harness()
     await establish(h)
     expect(await h.feed('child-born', 'subagentStart', {
-      conversation_id: h.nativeId, subagent_id: 'known-child', transcript_path: fixturePath("synthetic/child.jsonl")
+      conversation_id: h.nativeId, subagent_id: 'known-child', transcript_path: upstreamFixturePath("synthetic/child.jsonl")
     })).toBe(204)
     expect(await h.feed('parent-ended', 'stop', { conversation_id: h.nativeId, status: 'completed' })).toBe(204)
     const waiting = await h.stored()
@@ -195,7 +191,7 @@ describe('Cursor native identity and completion through built public Core', () =
     expect(await h.feed('foreign-ended', 'stop', { conversation_id: 'foreign-main', status: 'error' })).toBe(204)
     expect((await h.stored()).semanticStatus?.state).toBe('working')
     expect(await h.feed('child-finished', 'subagentStop', {
-      conversation_id: h.nativeId, subagent_id: 'known-child', transcript_path: fixturePath("synthetic/child.jsonl")
+      conversation_id: h.nativeId, subagent_id: 'known-child', transcript_path: upstreamFixturePath("synthetic/child.jsonl")
     })).toBe(204)
     const complete = await h.stored()
     expect(complete.semanticStatus?.state).toBe('done')

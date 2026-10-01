@@ -1,4 +1,4 @@
-import { fixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -13,7 +13,7 @@ import type {
 // Drive the real client/coordinator/evidence store; only ctxmux I/O is replaced.
 const RUN_ID = 'submit-run'
 const AGENT_SESSION_ID = 'submit-agent'
-const WORKSPACE = fixturePath("tmp/submit-agent")
+const WORKSPACE = upstreamFixturePath("tmp/submit-agent")
 
 // initial-composer readiness normalization requires readyThroughByte to be strictly greater than the
 // epoch's outputCursorBytes, so it cannot be 0.
@@ -55,7 +55,6 @@ function storedSession(
 
 function runProjection(acceptedInputBytes: number) {
   return {
-    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',
@@ -113,7 +112,7 @@ async function submitClient(
   state.kernel.observeOutput = async (): Promise<CtxmuxAdapterOutputObservation> => {
     observeCalls += 1
     return { run: runProjection(0), replay: [], gap: null, resizeRevision: 0, close: async () => {},
-      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: 0,
+      terminal: { type: 'basic-vt', checkpoint: { runId: RUN_ID, throughByte: 0,
         resizeRevision: 0, size: { cols: 80, rows: 24 } },
         restoreBytes: new TextEncoder().encode('\u001bc'), resizes: [] } }
   }
