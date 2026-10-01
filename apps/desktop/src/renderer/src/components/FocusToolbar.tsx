@@ -2,10 +2,13 @@ import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ArrowUpRight, Inbox, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import { findGroup } from '@agentmux/layout'
 import type { FocusContext } from '../lib/focus-context'
 import type { WorkbenchTab } from '../lib/workbench-tabs'
 import { isSessionSurface } from '../lib/workbench-surface-kinds'
+import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
@@ -14,14 +17,16 @@ export function FocusToolbar({ children, selectedId, selected, tab, onReview, on
 }) {
   return <header className="focus-toolbar">
     <div className="focus-toolbar__filters">{children}</div>
-    {selectedId ? <FocusToolbarContext key={selectedId} selectedId={selectedId} selected={selected} tab={tab} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
+    {selectedId ? <FocusToolbarContext key={JSON.stringify([selectedId, tab?.id])} selectedId={selectedId} selected={selected} tab={tab} onReview={onReview} onCloseWorkspace={onCloseWorkspace} regionOnly={regionOnly} onToggleRegion={onToggleRegion} /> : null}
   </header>
 }
 function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
   selectedId: string; selected: FocusContext | undefined; tab: WorkbenchTab | null; onReview(): void; onCloseWorkspace(): void; regionOnly?: boolean | undefined; onToggleRegion?: (() => void) | undefined
 }) {
-  const renameAgent = useAppStore(state => state.renameAgent)
   const renameTab = useAppStore(state => state.renameTab)
+  const sessions = useWorkbenchTabSessions(tab ?? undefined)
+  const agentNames = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab ?? undefined)))
+  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab ?? undefined)))
   const setMainSurface = useAppStore(state => state.setMainSurface)
   const [draft, setDraft] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -31,7 +36,7 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
   const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
   const renameCancelledRef = useRef(false)
   const originalTerminal = tab && Object.values(tab.regions).some(surface => surface.kind === 'terminal' && surface.sessionId === selectedId)
-  const name = (originalTerminal ? tab.name || 'Terminal' : null) || selected?.name || 'Session awaiting recovery'
+  const name = tab ? workbenchTabDisplayName(tab, sessions, agentNames, timelines) : selected?.name || 'Session awaiting recovery'
   const statusLabel = selected?.stateLabel ?? (originalTerminal ? 'Terminal' : 'Recovery unknown')
   useEffect(() => {
     if (draft !== null) { renameRef.current?.focus(); renameRef.current?.select() }
@@ -47,8 +52,7 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
   function commitRename() {
     if (draft === null) return
     const value = draft.trim() || null
-    if (selected?.kind === 'agent') renameAgent(selectedId, value)
-    else if (tab) renameTab(tab.id, value)
+    if (tab) renameTab(tab.id, value)
     setDraft(null)
   }
   function continueInSpace() {
@@ -63,14 +67,14 @@ function FocusToolbarContext({ selectedId, selected, tab, onReview, onCloseWorks
     }
   }
   const actions = [
-    ...(selected?.kind === 'agent' || tab ? [{ key: 'rename', label: selected?.kind === 'agent' ? 'Rename Agent' : 'Rename Tab', icon: Pencil, run: () => setDraft(name) }] : []),
+    ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: Pencil, run: () => setDraft(name) }] : []),
     ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: Square, run: onToggleRegion }] : []),
     { key: 'space', label: 'Continue in Space', icon: ArrowUpRight, run: continueInSpace },
     ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: Inbox, run: onReview }] : []),
     { key: 'close', label: 'Close Focus workspace', icon: PanelRightClose, run: onCloseWorkspace }
   ]
   return <div className="focus-toolbar__context">
-    {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Focus context" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; setDraft(null) } }} /> : <ContextMenu.Root>
+    {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; setDraft(null) } }} /> : <ContextMenu.Root>
       <ContextMenu.Trigger asChild><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${statusLabel} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{selected?.stateLabel}</small></button></ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>}

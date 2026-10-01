@@ -3,11 +3,12 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 
 // The actual Toolbar and Radix focus scopes are mounted. Only the external
 // action owners are mocked; this suite does not assert Core/Run authority.
-const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), focusExecutionSession: vi.fn() }))
+const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {} }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ activeWorkspaceId: null, layouts: {}, tabs: {} }) }) }))
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 
@@ -17,6 +18,7 @@ const selected: FocusContext = {
   workspaceName: 'Original workspace', workspacePath: _hygiene_fixturePath("fixture/original"), workspace: undefined,
   liveAgent: true, actionable: true, lastActivityAt: null, processState: 'running', runId: 'original-run', workingEnteredAt: null
 }
+const tab = createWorkbenchTab('original-tab', { regionId: 'original-region', kind: 'agent', phase: 'attached', workspaceId: selected.workspaceId, sessionId: selected.id }, 'Original Tab · distinct name')
 let root: Root, container: HTMLDivElement, destination: HTMLButtonElement, review: ReturnType<typeof vi.fn>
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
 const identity = () => container.querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
@@ -29,7 +31,7 @@ beforeEach(async () => {
   owners.setMainSurface.mockImplementation(() => destination.focus())
   owners.focusExecutionSession.mockImplementation(() => destination.focus())
   root = createRoot(container)
-  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab: null, onReview: review, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
+  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab, onReview: review, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
 })
 afterEach(async () => {
   await act(async () => root.unmount()); await settle()
@@ -68,14 +70,14 @@ it.each(['dropdown', 'context', 'keyboard'] as const)('Escape returns to the ori
   expect(document.activeElement).toBe(origin)
 })
 it('Rename keeps input focus after menu cleanup, then Escape returns to the current identity without committing', async () => {
-  await open('dropdown'); await pick('Rename Agent')
-  const input = container.querySelector<HTMLInputElement>('[aria-label="Rename Focus context"]')!
+  await open('dropdown'); await pick('Rename Tab')
+  const input = container.querySelector<HTMLInputElement>('[aria-label="Rename Tab"]')!
   expect(input).toBeTruthy(); expect(document.activeElement).toBe(input)
   await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
   await settle()
-  expect(container.querySelector('[aria-label="Rename Focus context"]')).toBeNull()
+  expect(container.querySelector('[aria-label="Rename Tab"]')).toBeNull()
   expect(owners.renameAgent).not.toHaveBeenCalled(); expect(owners.renameTab).not.toHaveBeenCalled()
-  expect(identity().textContent).toContain(selected.name)
+  expect(identity().textContent).toContain(tab.name)
   expect(document.activeElement).toBe(identity())
 })
 it.each(['Continue in Space', 'Close Focus workspace', 'Review request'])('%s leaves focus with the selected action owner after menu cleanup', async label => {
@@ -97,12 +99,12 @@ it('Outside interaction after a previous Escape keeps the newly chosen target', 
   expect(document.activeElement).toBe(destination)
 })
 it('Rename blur commits through the existing owner and keeps the newly focused target', async () => {
-  await open('dropdown'); await pick('Rename Agent')
-  const input = container.querySelector<HTMLInputElement>('[aria-label="Rename Focus context"]')!
+  await open('dropdown'); await pick('Rename Tab')
+  const input = container.querySelector<HTMLInputElement>('[aria-label="Rename Tab"]')!
   expect(input).toBeTruthy(); expect(document.activeElement).toBe(input)
   await act(async () => destination.focus()); await settle()
-  expect(owners.renameAgent).toHaveBeenCalledExactlyOnceWith(selected.id, selected.name)
-  expect(container.querySelector('[aria-label="Rename Focus context"]')).toBeNull()
+  expect(owners.renameTab).toHaveBeenCalledExactlyOnceWith(tab.id, tab.name); expect(owners.renameAgent).not.toHaveBeenCalled()
+  expect(container.querySelector('[aria-label="Rename Tab"]')).toBeNull()
   expect(identity()).toBeTruthy()
   expect(document.activeElement).toBe(destination)
 })

@@ -2,8 +2,7 @@ import { focusFilterOptions } from './fixtures/focus-filter-menu'
 import { resolve } from 'node:path'
 // @vitest-environment happy-dom
 import { act, createElement, memo, Profiler, Fragment } from 'react'
-import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { addTabPlacement, createWorkspaceLayout, regionIds } from '@agentmux/layout'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
@@ -90,7 +89,12 @@ beforeEach(async () => {
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 const agentIds = ['agent', 'attention', 'disconnected', 'healthy-lost', 'idle', 'results']
-async function expandDisconnected() { const toggle=container.querySelector<HTMLButtonElement>('[data-bucket="disconnected"] .focus-recovery-toggle');expect(toggle).not.toBeNull();await act(async()=>toggle!.click()) }
+async function expandDisconnected() {
+  const entry = container.querySelector<HTMLButtonElement>('[data-bucket="disconnected"] .focus-disconnected-entry')
+  expect(entry).not.toBeNull()
+  await act(async () => entry!.click())
+  expect(container.querySelector('[aria-label="Disconnected projects"] .focus-recovery-toggle')?.getAttribute('aria-expanded')).toBe('true')
+}
 // Agent-only membership is the left lane collection, not the separately retained right work surface.
 function renderedIds() { return [...container.querySelectorAll<HTMLElement>('.global-focus-main [data-session-id]')].map(node=>node.dataset.sessionId).sort() }
 function focusSurface() {
@@ -104,10 +108,12 @@ it('mounted lanes exclude ordinary running, failed and disconnected Terminals an
   await act(async()=>root.render(focusSurface()));await expandDisconnected()
   expect(renderedIds()).toEqual(agentIds)
   expect(row('agent').dataset.bucket).toBe('working');expect(row('attention').dataset.bucket).toBe('attention');expect(row('results').dataset.bucket).toBe('results');expect(row('idle').dataset.bucket).toBe('idle')
-  expect(row('healthy-lost').closest('[data-bucket="idle"]')).not.toBeNull();expect(row('disconnected').closest('[data-bucket="disconnected"]')).not.toBeNull()
+  expect(row('healthy-lost').closest('[data-bucket="idle"]')).not.toBeNull()
+  expect(row('disconnected').closest('[aria-label="Disconnected projects"]')).not.toBeNull()
+  expect(row('disconnected').dataset.state).toBe('disconnected')
   const options=(await focusFilterOptions(container,'state')).map(option=>option.text)
   expect(options).toEqual(['All states','Attention · 1','Working · 1','Results · 1','Idle / Recovery · 2','Disconnected · 1'])
-  const axes=[...container.querySelectorAll<HTMLButtonElement>('.focus-project-lanes__axis')];expect(axes).toHaveLength(1);expect(axes[0]!.title).toContain('· 5 live ·')
+  const axes=[...container.querySelectorAll<HTMLButtonElement>('.focus-project-lanes__axis')].filter(axis => !axis.closest('.focus-disconnected-projects'));expect(axes).toHaveLength(1);expect(axes[0]!.title).toContain('· 5 live ·')
 })
 it('actual hover totals and permanent counts consume the same Agent-only set',async()=>{
   await act(async()=>root.render(createElement(Fragment,null,createElement(FocusNavigationButton,{'aria-label':'Focus'},'Focus'),createElement(FocusNavigationPreview))))
@@ -123,7 +129,7 @@ it('exclusion keeps the actual selected Terminal workspace, owner, Region, Run, 
   const before=useAppStore.getState(), runs=before.sessions.map(session=>session.control.run)
   await act(async()=>root.render(focusSurface()))
   expect(renderedIds()).not.toContain('first');expect(container.querySelector('.focused-tab-workspace')?.getAttribute('data-focus-tab-id')).toBe('original')
-  expect(container.querySelector('.focus-toolbar__identity strong')?.textContent).toBe('Terminal');expect(container.querySelector('.focus-toolbar__identity')?.getAttribute('title')).not.toContain('Recovery unknown')
+  expect(container.querySelector('.focus-toolbar__identity strong')?.textContent).toBe('Terminal · Same project');expect(container.querySelector('.focus-toolbar__identity')?.getAttribute('title')).not.toContain('Recovery unknown')
   const after=useAppStore.getState();expect(after.agentFocus).toBe(before.agentFocus);expect(after.tabs).toBe(before.tabs);expect(after.layouts).toBe(before.layouts);expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(after.activeWorkspaceId).toBe(workspaceId);expect(after.tabs.original?.layout.activeRegionId).toBe('original-left');expect(tabForFocusedSession(after.tabs,'first')?.id).toBe('original')
   after.sessions.forEach((session,index)=>expect(session.control.run).toBe(runs[index]));expect(after.agentFocus.execution.history.length).toBeGreaterThan(0)

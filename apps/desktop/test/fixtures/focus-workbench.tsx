@@ -8,7 +8,7 @@ import { spatialCatalog } from '../../src/renderer/src/lib/space-agent-control'
 import { scratchTopicsForWorkspace } from '../../src/renderer/src/lib/scratch-topic-snapshots'
 import { isSessionSurface } from '../../src/renderer/src/lib/workbench-surface-kinds'
 import { workbenchProjectionSlotId, type WorkbenchProjection } from '../../src/renderer/src/lib/workbench-projection'
-import type { WorkbenchViewTarget } from '../../src/renderer/src/lib/workbench-presentation'
+import type { WorkbenchViewTargets } from '../../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../../src/renderer/src/store'
 
 /** Explicit private fixture resources for the real public spatial catalog. */
@@ -34,11 +34,11 @@ export function FocusWorkbenchFixture({ workspaceId, showGlobal = true }: { work
     [state.agentFocus.execution, state.tabs, catalog, onSelect])
   const projection = state.mainSurface === 'agents' ? presentation.projection : null
   const reference = projection?.selection[0]
-  const viewTargets: Record<string, WorkbenchViewTarget> = reference && projection ? {
-    [reference.tabId]: { hostId: workbenchProjectionSlotId(`${projection.presentationId}-slot`, reference),
+  const viewTargets: WorkbenchViewTargets = reference && projection ? {
+    [reference.tabId]: [{ hostId: workbenchProjectionSlotId(`${projection.presentationId}-slot`, reference),
       active: true, visible: true, surface: 'focus', retainedRegionId: reference.regionId,
       headerPortalTargetId: 'focus-workspace-slot-header', projection, reference,
-      onSelectRegion: regionId => onSelect({ ...reference, regionId }) }
+      onSelectRegion: regionId => onSelect({ ...reference, regionId }) }]
   } : {}
   return <>{state.mainSurface === 'agents' && showGlobal ? <GlobalFocusSurface presentation={presentation} viewTargets={viewTargets} /> : null}
     <WorkspaceWorkbench workspaceId={workspaceId} visible={state.mainSurface === 'workbench'} viewTargets={viewTargets} /></>
