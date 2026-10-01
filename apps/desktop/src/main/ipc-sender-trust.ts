@@ -91,6 +91,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:returnControl': 'Browser handoff',
   'browser:stopOperationById': 'Browser handoff',
   'browser:runReplay': 'Browser replay',
+  'browser:controlTask': 'Browser task control',
   [CONTROL_RESPONSE_CHANNEL]: 'control response'
 } as const
 

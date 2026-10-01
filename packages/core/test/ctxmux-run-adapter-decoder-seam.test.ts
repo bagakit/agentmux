@@ -1,10 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import type { OutputChunk, RunEvent } from '@ctxmux/sdk'
 import {
-  CtxmuxRunAdapter,
+  CtxmuxRunAdapter as DefaultAdapter,
   type CtxmuxAdapterEvent,
   type CtxmuxAdapterObservationEvent
 } from '../src/ctxmux-run-adapter.js'
+
+const CtxmuxRunAdapter: typeof DefaultAdapter = process.env.AGENTMUX_TEST_A2A_ADAPTER
+  ? (await import(process.env.AGENTMUX_TEST_A2A_ADAPTER)).CtxmuxRunAdapter : DefaultAdapter
 
 // #451a: `decodeChunk` 用有状态的流式解码 `decoder.decode(bytes, { stream: true })`。一个多字节
 // UTF-8 字符被切在「replay 的最后一个 chunk」与「第一个 live chunk」之间时，前半截留在 decoder 的
@@ -56,6 +59,8 @@ async function* seamEvents(): AsyncGenerator<RunEvent, void, void> {
 function seamAttachment(events: () => AsyncGenerator<RunEvent, void, void>) {
   return {
     snapshot: {
+      terminal: { type: 'not_requested' as const },
+      resize_revision: 0,
       run: {
         id: 'seam-run',
         spec: null,
@@ -81,7 +86,7 @@ function seamAttachment(events: () => AsyncGenerator<RunEvent, void, void>) {
   }
 }
 
-function primeWithSeamAttachment(adapter: CtxmuxRunAdapter): void {
+function primeWithSeamAttachment(adapter: DefaultAdapter): void {
   // requireClient() 只调 client.attach(runId, afterByte)；给它一个每次都返回同一个接缝 attachment 的
   // 假 client。cast 走 disconnect 测试同款私有字段注入。
   ;(adapter as unknown as { client: unknown }).client = {
@@ -133,4 +138,12 @@ describe('CtxmuxRunAdapter 接缝处的多字节字符解码（replay↔live 共
     // 整串就不等——这一句红，钉住「它是对的」。
     expect(text).toBe(EXPECTED_SEAM_TEXT)
   })
+})
+
+
+it('an unsupported native event is an explicit observation error, never a Run exit', () => {
+  const adapter = new CtxmuxRunAdapter()
+  const translate = adapter as unknown as { translateLiveEvent(id: string, decoder: TextDecoder, event: unknown): CtxmuxAdapterObservationEvent }
+  expect(translate.translateLiveEvent('private-observation-run', new TextDecoder(), { type: 'fixture_observation' }))
+    .toMatchObject({ type: 'error', runId: 'private-observation-run', error: { code: 'CTXMUX_EVENT_INVALID' } })
 })

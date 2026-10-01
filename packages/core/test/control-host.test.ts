@@ -1,4 +1,5 @@
 import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import type { AgentMuxMessageEnvelope } from '../src/agent-global-message-queue.js'
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
 import { createConnection, createServer } from 'node:net'
@@ -28,6 +29,13 @@ import {
   type AgentMuxControlResult,
   type AgentMuxRegion
 } from '../src/control.js'
+
+function localMessage(body: string, recipient = 'semantic-1'): AgentMuxMessageEnvelope {
+  return { schema: 'agentmux.a2a.v1', messageId: 'test-message', operationId: 'test-operation', createdAt: 1,
+    sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: recipient },
+    senderSessionId: null, senderRunId: null, recipientSessionId: recipient, recipientRunId: null,
+    threadId: 'test-thread', correlationId: 'test-correlation', replyTo: null, workspaceId: null, body }
+}
 
 const roots: string[] = []
 afterEach(async () => await Promise.all(roots.splice(0).map(async (root) => await rm(root, { recursive: true, force: true }))))
@@ -167,6 +175,12 @@ describe('Control protocol', () => {
       operation: 'context',
       caller: { agentSessionId: 'semantic-1' }
     })).toThrow('operation')
+  })
+
+  it('rejects a managed send without an envelope before delivery', () => {
+    expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'bare-send', operation: 'send',
+      target: { kind: 'agent-session', agentSessionId: 'semantic-1' }, text: 'body', caller: { agentSessionId: 'caller', capability: 'capability' },
+      promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null } })).toThrow('envelope')
   })
 
   it('binds an A2A sender to the managed caller and its explicit Control target', () => {
@@ -839,7 +853,7 @@ describe('external Control control', () => {
         }
         if (request.operation === 'list.agents') return { operation: request.operation, agents: [{ executorId: 'codex', providerId: 'codex', label: 'Codex', availability: 'available' }] }
         if (request.operation === 'agent.open') return { operation: request.operation, requestId: request.requestId,
-          outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', tabId: 'tab-main', regionId: 'agent-left' },
+          outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab-main', regionId: 'agent-left' },
           agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: upstreamFixturePath("repo"), createOperationId: 'creation', initialPrompt: 'not-requested' },
           resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
         if (request.operation === 'open.terminal') return { operation: request.operation, region: terminalRegion }
@@ -889,14 +903,14 @@ describe('external Control control', () => {
       requestId: 'send',
       operation: 'send',
       target: { kind: 'tab', tabId: 'tab-main' },
-      text: 'Continue'
+      text: 'Continue', message: localMessage('Continue')
     }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: 'semantic-1' } })
     await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
       requestId: 'invalid-candidates',
       operation: 'send',
       target: { kind: 'tab', tabId: 'tab-main' },
-      text: 'invalid candidates'
+      text: 'invalid candidates', message: localMessage('invalid candidates')
     }, path)).rejects.toMatchObject({ code: 'CONTROL_FAILED' })
     expect(seen).toEqual(['inspect.tab', 'agent.open', 'send', 'send'])
     await server.stop()
@@ -920,7 +934,7 @@ describe('external Control control', () => {
       requestId: 'utf8-send',
       operation: 'send',
       target: { kind: 'agent-session', agentSessionId: 'semantic-1' },
-      text: '继续检查'
+      text: '继续检查', message: localMessage('继续检查')
     }, path)
     expect(seen).toBe('继续检查')
     await server.stop()
@@ -952,7 +966,7 @@ describe('external Control control', () => {
       requestId: 'expected-request',
       operation: 'send',
       target: { kind: 'agent-session', agentSessionId: 'agent-1' },
-      text: 'Continue'
+      text: 'Continue', message: localMessage('Continue', 'agent-1')
     }, path)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
@@ -1300,7 +1314,7 @@ describe('Browser 进度订阅：一问多答是独立的一支，一问一答�
     }, path)
     await server.start()
 
-    const request = {promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'framing', operation: 'send' as const, target: { kind: 'tab' as const, tabId: 'tab-main' }, text: 'one' }
+    const request = {promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'framing', operation: 'send' as const, target: { kind: 'tab' as const, tabId: 'tab-main' }, text: 'one', message: localMessage('one') }
     // 一条连接上塞两条请求：第二条是尾随数据，必须被拒，而且**execute 一次都不许跑**——放宽检查的
     // 实现会把第一条执行掉（甚至两条都执行），这里的计数当场变。
     const raw = await new Promise<string>((resolve, reject) => {

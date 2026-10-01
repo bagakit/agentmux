@@ -432,6 +432,10 @@ describe('agentmux CLI discovery', () => {
     const everyRelativeImport = new Set(
       [...cliSource.matchAll(/from '\.\/([a-z0-9-]+)\.js'/g)].map((match) => match[1]!)
     )
+    const typeOnlyImports = new Set(
+      [...cliSource.matchAll(/^import\s+type\s+[^\n]*?from '\.\/([a-z0-9-]+)\.js'/gm)].map(match => match[1]!)
+    )
+    expect(typeOnlyImports.size).toBeGreaterThan(0)
     const TYPE_ONLY_OR_DELIBERATE: Record<string, string> = {
       // 这条豁免的**理由曾经是错的**，写的是「只取了一个类型，运行时没有这条边」。直接 import 确实
       // 只有一个类型，但 CLI 经 `client.resolveAgentSession` 进程内调到了这个模块的 throw——审计据此
@@ -447,7 +451,7 @@ describe('agentmux CLI discovery', () => {
       control: 'no-throw'
     }
     const missed = [...everyRelativeImport].filter(
-      (name) => !modules.includes(name) && !(name in TYPE_ONLY_OR_DELIBERATE)
+      (name) => !modules.includes(name) && !typeOnlyImports.has(name) && !(name in TYPE_ONLY_OR_DELIBERATE)
     )
     expect(
       missed.sort(),

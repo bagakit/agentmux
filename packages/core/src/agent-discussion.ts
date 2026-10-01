@@ -48,8 +48,8 @@ export function planDiscussion(input: {
   // 先定 author：后面每一条事实都挂在它上面，身份不成立就无从谈起。
   const author = resolveCapabilityAuthor(input.capability, input.binding, input.currentRunId)
 
-  const body = input.body.trim()
-  if (!body) {
+  const body = input.body
+  if (!body.trim()) {
     throw new AgentMuxError('A Discussion needs a first message.', 'INVALID_AGENT_PROMPT')
   }
   // P0 只允许同一 Workspace 内的显式授权 source 与 target；跨 Workspace 默认拒绝。

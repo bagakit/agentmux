@@ -8,7 +8,8 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 const roots: string[] = []
-afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
+const clients: AgentMuxClient[] = []
+afterEach(async () => { for (const client of clients.splice(0)) await client.dispose(); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))) })
 const RUN_ID = 'ingress-run'
 const AGENT_SESSION_ID = 'ingress-agent'
 const WORKSPACE = upstreamFixturePath("tmp/ingress-agent")
@@ -63,6 +64,7 @@ async function ingressClient(
   roots.push(dirname(store.path))
   await store.compareAndSwap(null, storedSession(extra))
   const client = new AgentMuxClient({ store })
+  clients.push(client)
   const state = client as unknown as Internals
   await state.registry.load('local')
 
@@ -90,15 +92,15 @@ async function ingressClient(
 
 
 describe('durable mailbox attribution', () => {
-  it('records actual input author only after delivery and retains it through store reopen', async () => {
+  it('records original input only after delivery and retains unknown authors through store reopen', async () => {
     const { client, store, writes } = await ingressClient()
-    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'agent-send', prompt: 'Review this', authorAgentSessionId: 'reviewer' })
-    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'user-send', prompt: 'Continue' })
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'original-send', prompt: 'Review this', allowUncertainTurn: true })
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'user-send', prompt: 'Continue', allowUncertainTurn: true })
     expect(writes).toEqual(['Review this\r', 'Continue\r'])
     const reopened = new AgentMuxFileAgentSessionStore(store.path)
     const timeline = await reopened.loadTimeline(AGENT_SESSION_ID)
     expect(timeline.items.map(({ id, content, authorAgentSessionId, status }) => ({ id, content, authorAgentSessionId, status }))).toEqual([
-      { id: 'prompt:agent-send', content: 'Review this', authorAgentSessionId: 'reviewer', status: 'complete' },
+      { id: 'prompt:original-send', content: 'Review this', authorAgentSessionId: undefined, status: 'complete' },
       { id: 'prompt:user-send', content: 'Continue', authorAgentSessionId: undefined, status: 'complete' }
     ])
     expect(await client.sessionTimeline(AGENT_SESSION_ID)).toEqual(timeline)
@@ -106,7 +108,7 @@ describe('durable mailbox attribution', () => {
   it('never claims delivery or creates an inbox item when submission fails', async () => {
     const { client, store, writes, setRunState } = await ingressClient()
     setRunState('exited')
-    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'failed', prompt: 'Late', authorAgentSessionId: 'reviewer' })).rejects.toThrow()
+    await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID, operationId: 'failed', prompt: 'Late' })).rejects.toThrow()
     expect(writes).toEqual([])
     expect((await store.loadTimeline(AGENT_SESSION_ID)).items).toEqual([])
   })

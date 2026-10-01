@@ -1,4 +1,6 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { composeAgentLaunchPrompt } from '../src/agent-outbound-message.js'
@@ -10,6 +12,10 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume', 'claude'], ['discuss', 'kimi'], ['discuss', 'claude']] as const)('%s %s records actual delivery and retains a healthy Run on uncertain input', async (operation, providerId) => {
   for (const confirmed of providerId === 'kimi' ? [false, true] : [true]) {
+    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-launch-mail-"))
+    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
+    vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
+    vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
     const store = new AgentMuxMemoryAgentSessionStore()
     const client = new AgentMuxClient({ store })
     const internals = client as unknown as {
@@ -62,7 +68,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
         ? await client.createAgent({ agentSessionId: 'mail-agent', executorId: providerId, providerId, workspacePath: upstreamFixturePath("repo"), prompt: 'exact words', injectAgentMuxGuide: false })
         : await client.resumeAgent({ agentSessionId: 'mail-agent', operationId: 'resume-mail', prompt: 'exact words' })
       if (discussion) {
-        expect(discussion.thread.delivery.state).toBe(confirmed ? 'delivered' : 'failed')
+        expect(discussion.thread.delivery.state).toBe(confirmed ? 'delivered' : 'queued')
         expect(discussion.thread.targetAgentSessionId).toBe(result.agentSessionId)
         expect(discussion.thread.messages.map(({ authorAgentSessionId }) => authorAgentSessionId)).toEqual(['mail-agent'])
       }
@@ -75,12 +81,12 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
           ...(operation === 'discuss' ? [{ kind: 'system_message', source: 'agentmux',
             content: composeAgentLaunchPrompt('exact words', true).systemContext,
             status: confirmed ? 'complete' : 'failed', authorAgentSessionId: undefined }] : []),
-          { kind: 'user_message', source: 'user', content: 'exact words', status: confirmed ? 'complete' : 'failed',
+          { kind: 'user_message', source: 'user', content: operation === 'discuss' ? '[Message from Agent mail-agent]\nexact words' : 'exact words', status: confirmed ? 'complete' : 'failed',
             authorAgentSessionId: operation === 'discuss' ? 'mail-agent' : undefined }
         ])
       expect(errors).toHaveLength(confirmed ? 0 : 1)
       if (!confirmed) expect(errors[0]).toMatchObject({ message: expect.stringContaining('was not confirmed') })
       expect((await client.agentSession(result.agentSessionId)).run.runId).toBe('new-run')
-    } finally { await client.dispose() }
+    } finally { await client.dispose(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) }
   }
 })

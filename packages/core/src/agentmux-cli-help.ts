@@ -1,3 +1,4 @@
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { browserPageCapabilityNames } from './browser-page-capability.js'
 
 /**
@@ -719,6 +720,7 @@ Usage:
   agentmux browser stop --operation <operation-id>
   agentmux browser follow --operation <operation-id> [--after-sequence <n>]
   agentmux browser replay --browser <browser-id> --operation <operation-id> [--preview | --step <n> | --run]
+  agentmux browser task <assets|reliability|run|stop> --help
 
 \`open browser\` opens one; \`browser run\` drives one that is already open. Two different
 things, two commands — neither replaces the other.
@@ -1365,6 +1367,8 @@ splits a new Region. Decide by the visible view, keep both old and new content r
 the least disturbance, and after any move inspect the result to confirm where it landed.
 
 ## Send without guessing
+
+${AGENTMUX_AGENT_MESSAGING_GUIDANCE}
 
 \`\`\`bash
 agentmux send --to-session self --text "Continue"

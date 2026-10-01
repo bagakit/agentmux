@@ -39,7 +39,9 @@ describe('public Control views through the real owner endpoint', () => {
       })
       await expect(requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'inspect-view', operation: 'inspect.region', target: { kind: 'region', regionId: view.regionId } }, path)).resolves.toMatchObject({ operation: 'inspect.region', result: { region: inspectedView } })
       await expect(requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'focus-view', operation: 'focus', target: { kind: 'space', tabId: view.tabId, regionId: view.regionId }, inputPolicy: 'preserve' }, path)).resolves.toMatchObject({ operation: 'focus', result: { navigation: { selection: { space: { tabId: view.tabId, regionId: view.regionId } } } } })
-      await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'send-adjacent-agent', operation: 'send', target: { kind: 'agent-session', agentSessionId: agent.agentSessionId }, text: 'Continue' }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: agent.agentSessionId } })
+      await expect(requestAgentMuxControl({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'send-adjacent-agent', operation: 'send', target: { kind: 'agent-session', agentSessionId: agent.agentSessionId }, text: 'Continue', message: { schema: 'agentmux.a2a.v1', messageId: 'adjacent-message', operationId: 'adjacent-operation', createdAt: 1,
+        sender: { kind: 'human', principal: 'local-cli' }, recipient: { kind: 'agent-session', agentSessionId: agent.agentSessionId },
+        senderSessionId: null, senderRunId: null, recipientSessionId: agent.agentSessionId, recipientRunId: null, threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: null, body: 'Continue' } }, path)).resolves.toMatchObject({ operation: 'send', result: { agentSessionId: agent.agentSessionId } })
       expect(seen).toEqual(['inspect.tab', 'inspect.region', 'focus', 'send'])
       expect(resolveAgentMuxRegion([view, agent], { kind: 'region', regionId: view.regionId })).toEqual(view)
       expect(resolveAgentMuxRegion([view, agent], { kind: 'agent-session', agentSessionId: agent.agentSessionId })).toEqual(agent)
@@ -80,7 +82,8 @@ describe('public Control views through the real owner endpoint', () => {
     expect(receipt).toEqual({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'generic-view', ok: true, operation: 'inspect.region', result: { region: inspectedView } })
     expect(() => parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-open-view', operation: 'open.view', destination: { kind: 'tab', workspaceId: 'workspace' } })).toThrow()
     expect(() => parseAgentMuxControlRequest({ promptCondition: { expectedRun: { runId: 'control-run' }, afterSubmissionId: null },  schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-view-target', operation: 'send', target: { kind: 'view', regionId: view.regionId }, text: 'Unsupported target' })).toThrow()
-    const address = { spaceId: 'space', zoneId: 'zone', workspaceId: view.workspaceId, tabId: view.tabId, regionId: agent.regionId }
+    const address = { spaceId: 'space', zoneId: 'zone', workspaceId: view.workspaceId, displayWorkspaceId: view.workspaceId,
+      groupId: 'group', tabId: view.tabId, regionId: agent.regionId }
     const opened = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'no-agent-view', ok: true, operation: 'agent.open', result: {
       requestId: 'no-agent-view', outcome: 'opened', from: null, to: address,
       agent: { agentSessionId: agent.agentSessionId, runId: 'control-run', providerId: agent.providerId, executorId: agent.executorId,
@@ -89,7 +92,8 @@ describe('public Control views through the real owner endpoint', () => {
     } }
     expect(parseAgentMuxControlReceipt(opened)).toEqual(opened)
     expect(() => parseAgentMuxControlReceipt({ ...opened, result: { ...opened.result, agent: view } })).toThrow('Settings resource JSON')
-    const catalog = { spaces: [], zones: [], tabs: [], regions: [{ ...address, kind: 'file', agentSessionId: null, runId: null, execution: null }] }
+    const catalog = { spaces: [], zones: [], tabs: [], bindings: [], locations: [],
+      regions: [{ tabId: address.tabId, regionId: address.regionId, kind: 'file', agentSessionId: null, runId: null, execution: null }] }
     const listed = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'generic-space-view', ok: true, operation: 'space.ls', result: { catalog } }
     expect(parseAgentMuxControlReceipt(listed)).toEqual(listed)
     expect(() => parseAgentMuxControlReceipt({ ...listed, result: { catalog: { ...catalog, regions: [{ ...catalog.regions[0], kind: 'view' }] } } })).toThrow('Region kind')

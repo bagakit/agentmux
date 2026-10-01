@@ -344,18 +344,6 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
-    if (request.operation === 'send' && request.message?.sender.kind === 'agent-session') {
-      if (!request.caller?.capability) throw new AgentMuxError('Managed send capability is required.', 'AGENT_CAPABILITY_INVALID')
-      await args.runtime.authorizeAgentMessage({
-        capability: request.caller.capability,
-        callerAgentSessionId: request.caller.agentSessionId,
-        senderAgentSessionId: request.message.sender.agentSessionId,
-        senderSessionId: request.message.senderSessionId,
-        senderRunId: request.message.senderRunId,
-        recipientSessionId: request.message.recipientSessionId,
-        recipientRunId: request.message.recipientRunId
-      })
-    }
     return projectBrowserControlResult(await controlBridge.execute(request))
   }
   ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
@@ -846,19 +834,20 @@ export async function registerIpc(args: {
     prompt: string,
     operationId: string,
     condition: AgentPromptCondition,
-    authorAgentSessionId?: string,
     choice?: { allowUncertainTurn: true },
     authorHuman?: boolean
   ) => {
     let effectiveAuthorHuman = false
     if (authorHuman === true) {
       assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-      if (authorAgentSessionId === undefined) {
-        effectiveAuthorHuman = true
-      }
+      effectiveAuthorHuman = true
     }
     pauseUserProgress(session, 'Paused for your message.')
-    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, authorAgentSessionId, choice, effectiveAuthorHuman)
+    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman)
+  })
+  handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => {
+    await args.runtime.submitMessage(session, message)
+    pauseUserProgress(session, 'Paused for your message.')
   })
   handle('sessions:respondInteraction', async (
     session: AgentSessionControl,
@@ -1038,7 +1027,7 @@ export async function registerIpc(args: {
   })
   handleWithEvent('browser:controlTask', async (event, request: unknown) => {
     requireTrustedSender('browser:controlTask', event)
-    return await executeBrowserTaskControl(request, browsers, config.browser.agentAutomation)
+    return await executeBrowserTaskControl(request, browsers, config.browser.agentAutomation === true)
   })
   handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
     requireTrustedSender('browser:importTaskAsset', event)

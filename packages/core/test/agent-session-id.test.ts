@@ -1,11 +1,18 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
-import { mintAgentSessionId, resolveAgentSessionId } from '../src/agent-session-id.js'
+import { deriveAgentSessionId, mintAgentSessionId, resolveAgentSessionId } from '../src/agent-session-id.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 describe('canonical Agent Session identity', () => {
+  it('derives stable creation IDs in the complete canonical space', async () => {
+    const ids = await Promise.all(['operation-a', 'operation-b', 'Operation-a'].map(deriveAgentSessionId))
+    expect(ids).toHaveLength(3)
+    expect(new Set(ids).size).toBe(3)
+    for (const id of ids) expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{15}$/u)
+    expect(await deriveAgentSessionId('operation-a')).toBe(ids[0])
+  })
   it('preserves every accepted sampled byte with the same browser-safe canonical format', () => {
     const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues').mockImplementation((array) => {
       expect(array).toBeInstanceOf(Uint8Array)
@@ -43,7 +50,7 @@ describe('canonical Agent Session identity', () => {
     const reserved: string[] = []
     internals.registry.reserveNew = async (id) => { reserved.push(id); throw new Error('reservation reached') }
     try {
-      await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: upstreamFixturePath("repo"), injectAgentMuxGuide: false })).rejects.toThrow('reservation reached')
+      await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: fixturePath("repo"), injectAgentMuxGuide: false })).rejects.toThrow('reservation reached')
       expect(reserved).toHaveLength(1)
       expect(reserved[0]).toMatch(/^[A-Za-z0-9][A-Za-z0-9_-]{15}$/u)
     } finally { await client.dispose() }
@@ -70,7 +77,7 @@ describe('canonical Agent Session identity', () => {
     const reserved: string[] = []
     internals.registry.reserveNew = async id => { reserved.push(id); throw new Error('reservation reached') }
     try {
-      await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: upstreamFixturePath("repo"),
+      await expect(client.createAgent({ executorId: 'codex', providerId: 'codex', workspacePath: fixturePath("repo"),
         injectAgentMuxGuide: false })).rejects.toThrow('reservation reached')
       expect(reserved).toEqual(['AAECAwQFBgcI_f7_'])
       expect(entropy).toHaveBeenCalledTimes(3)
@@ -89,7 +96,7 @@ describe('canonical Agent Session identity', () => {
       const entropy = vi.spyOn(globalThis.crypto, 'getRandomValues')
       try {
         await expect(client.createAgent({ agentSessionId, executorId: 'codex', providerId: 'codex',
-          workspacePath: upstreamFixturePath("repo"), injectAgentMuxGuide: false })).rejects.toThrowError(expect.objectContaining({ code: 'INVALID_SESSION_ID' }))
+          workspacePath: fixturePath("repo"), injectAgentMuxGuide: false })).rejects.toThrowError(expect.objectContaining({ code: 'INVALID_SESSION_ID' }))
         expect(reserve).not.toHaveBeenCalled()
         expect(entropy).not.toHaveBeenCalled()
       } finally { entropy.mockRestore(); await client.dispose() }
@@ -100,7 +107,7 @@ describe('canonical Agent Session identity', () => {
     const store = new AgentMuxMemoryAgentSessionStore()
     const previous: AgentMuxStoredAgentSession = {
       kind: 'agent', agentSessionId: '765ae7ef-b886-4681-b9b5-0bbc561e8f1a', providerId: 'codex', executorId: 'codex',
-      hostId: 'local', workspacePath: upstreamFixturePath("repo"), run: { runId: 'previous-run' }, retiredRuns: [],
+      hostId: 'local', workspacePath: fixturePath("repo"), run: { runId: 'previous-run' }, retiredRuns: [],
       hookBindingId: 'hook', hookToken: 'token',  createdAt: 1, updatedAt: 1
     }
     await store.compareAndSwap(null, previous)

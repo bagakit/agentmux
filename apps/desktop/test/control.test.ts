@@ -134,6 +134,13 @@ function request<T extends AgentMuxControlRequest>(value: DistributiveOmit<T, 's
   } as T
 }
 
+function envelope(body: string): AgentMuxMessageEnvelope {
+  return { schema: 'agentmux.a2a.v1', messageId: 'resolved-message', operationId: 'resolved-request', createdAt: 1,
+    sender: { kind: 'agent-session', agentSessionId: 'caller' }, recipient: { kind: 'agent-session', agentSessionId: 'caller' },
+    threadId: 'thread', correlationId: 'correlation', replyTo: null, workspaceId: 'workspace',
+    senderSessionId: 'caller', senderRunId: 'run-caller', recipientSessionId: 'caller', recipientRunId: 'run-caller', body }
+}
+
 function launch(session: Extract<SessionSnapshot, { kind: 'agent' }>, input: AgentLaunchInput): AgentLaunchResult {
   const creation: NonNullable<AgentLaunchResult['creation']> = {
     createOperationId: input.createOperationId!,
@@ -247,20 +254,20 @@ describe('Desktop Control owner', () => {
       regionId: 'region-caller-2', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'caller'
     })
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    const submit = vi.spyOn(api.sessions, 'submitMessage').mockResolvedValue()
     await useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', caller: { agentSessionId: 'caller' },
+      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', message: envelope('continue'), caller: { agentSessionId: 'caller', capability: 'test-capability' },
       promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
     }))
-    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, 'continue', expect.any(String),
-      { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, 'caller', { allowUncertainTurn: true })
+    expect(submit).toHaveBeenCalledExactlyOnceWith(agent('caller').control, { envelope: envelope('continue'),
+      condition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, caller: { agentSessionId: 'caller', capability: 'test-capability' } })
 
     tab = addWorkbenchRegion(tab, 'region-caller-2', 'down', {
       regionId: 'region-reviewer', kind: 'agent', phase: 'attached', workspaceId: 'workspace', sessionId: 'reviewer'
     })
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
     await expect(useAppStore.getState().executeControl(request({
-      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue',
+      operation: 'send', target: { kind: 'tab', tabId: tab.id }, text: 'continue', message: envelope('continue'),
       promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
     }))).rejects.toMatchObject({
       code: 'MESSAGE_TARGET_NOT_UNIQUE',
@@ -285,7 +292,7 @@ describe('Desktop Control owner', () => {
     const replacement = createWorkbenchTab(tab.id, { regionId: 'region-caller', kind: 'agent', phase: 'attached',
       workspaceId: 'workspace', sessionId: 'reviewer' })
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: replacement } }))
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    const submit = vi.spyOn(api.sessions, 'submitMessage').mockResolvedValue()
     await expect(useAppStore.getState().executeControl(request({ operation: 'send',
       target: { kind: 'tab', tabId: tab.id }, text: message.body, message,
       promptCondition: { expectedRun: { runId: original.control.run.runId }, afterSubmissionId: null }
@@ -298,23 +305,23 @@ describe('Desktop Control owner', () => {
   it('delivers the verified A2A envelope to the resolved recipient instead of dropping to bare text', async () => {
     const tab = fixture()
     useAppStore.setState((state) => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
-    const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+    const submit = vi.spyOn(api.sessions, 'submitMessage').mockResolvedValue()
     const message: AgentMuxMessageEnvelope = {
       schema: 'agentmux.a2a.v1', messageId: 'message-envelope-1', operationId: 'control-request-1', createdAt: 1,
       sender: { kind: 'agent-session', agentSessionId: 'caller' },
-      recipient: { kind: 'target', target: { kind: 'tab', tabId: tab.id } },
+      recipient: { kind: 'agent-session', agentSessionId: 'caller' },
       threadId: 'thread-1', correlationId: 'correlation-1', replyTo: null, workspaceId: 'workspace',
       senderSessionId: 'caller', senderRunId: 'run-caller', recipientSessionId: 'caller', recipientRunId: 'run-caller',
       body: 'keep this exact body'
     }
     await useAppStore.getState().executeControl({
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-request-1', operation: 'send',
-      target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller' }, message,
+      target: { kind: 'tab', tabId: tab.id }, text: message.body, caller: { agentSessionId: 'caller', capability: 'test-capability' }, message,
       promptCondition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }
     })
-    expect(submit).toHaveBeenCalledWith(agent('caller').control, '[Message from Agent caller]\nkeep this exact body', 'message-envelope-1',
-      { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, 'caller', { allowUncertainTurn: true })
-    expect(submit.mock.calls[0]?.[1]).toContain('keep this exact body')
+    expect(submit).toHaveBeenCalledWith(agent('caller').control, { envelope: message,
+      condition: { expectedRun: { runId: 'run-caller' }, afterSubmissionId: null }, caller: { agentSessionId: 'caller', capability: 'test-capability' } })
+    expect(submit.mock.calls[0]?.[1].envelope.body).toBe('keep this exact body')
   })
 
   // T-002 身份关联 + 环境安全：新开的 Agent Region 与它的 Session（agentSessionId）、Run（runId）、
@@ -329,11 +336,11 @@ describe('Desktop Control owner', () => {
     vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async (input) => launch(agent(input.agentSessionId!), input))
 
     const opened = await useAppStore.getState().executeControl(request({
-      operation: 'agent.open', caller: { agentSessionId: 'caller' },
+      operation: 'agent.open', caller: { agentSessionId: 'caller', capability: 'test-capability' },
       content: { kind: 'new-agent', executorId: 'codex', prompt: 'write' },
       destination: { regionId: 'region-caller', split: 'right' }, focus: false
     }))
-    expect(api.sessions.launchAgent).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'write', authorAgentSessionId: 'caller' }))
+    expect(api.sessions.launchAgent).toHaveBeenCalledWith(expect.objectContaining({ prompt: 'write', initialMessage: { callerAgentSessionId: 'caller', capability: 'test-capability' } }))
     if (opened.operation !== 'agent.open') throw new Error('Unexpected result')
     expect(opened.outcome).toBe('opened')
     expect(opened.issues).toEqual([])
@@ -811,7 +818,7 @@ describe('Desktop Control owner', () => {
     // 「移动不调用 Runtime lifecycle」是断言出来的，不是读源码读出来的：搬一格不许起/停/重启底层 Run。
     const launchAgent = vi.spyOn(api.sessions, 'launchAgent')
     const launchTerminal = vi.spyOn(api.sessions, 'launchTerminal')
-    const submitPrompt = vi.spyOn(api.sessions, 'submitPrompt')
+    const submitPrompt = vi.spyOn(api.sessions, 'submitMessage')
     const resume = vi.spyOn(api.sessions, 'resume')
     const interrupt = vi.spyOn(api.sessions, 'interrupt')
     const stop = vi.spyOn(api.sessions, 'stop')

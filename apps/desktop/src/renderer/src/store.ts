@@ -55,7 +55,6 @@ import {
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, LaunchOptionSelection } from '@agentmux/core'
-import { renderAgentMuxMessageEnvelope } from '@agentmux/core/agent-message-render'
 import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { primaryMoteExecutorId } from './lib/primary-mote-executor'
@@ -3787,28 +3786,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         session = agentSession({ kind: 'agent-session', agentSessionId: candidates[0]!.agentSessionId })
       }
       requireActive()
-      // This validated command explicitly steers one message. Its envelope keeps the same
-      // operation on replay; a command without an envelope gets a new one-shot identity.
-      const prompt = request.message
-        ? renderAgentMuxMessageEnvelope(request.message)
-        : request.text
-      if (request.message) {
-        if (request.message.body !== request.text) throw controlFailure('MESSAGE_ENVELOPE_INVALID', 'Message body does not match Control text.')
-        if (request.message.recipient.kind === 'agent-session' && request.message.recipient.agentSessionId !== session.id) {
-          throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient is not the resolved Agent Session.')
-        }
-        if (request.message.recipientSessionId !== null && request.message.recipientSessionId !== session.id) {
-          throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient Session is not the resolved Agent Session.')
-        }
-        if (request.message.recipientRunId !== null && request.message.recipientRunId !== session.control.run.runId) {
-          throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient Run is not the resolved Run.')
-        }
+      if (!request.message) throw controlFailure('MESSAGE_ENVELOPE_INVALID', 'Control send requires a message envelope.')
+      if (request.message.body !== request.text) throw controlFailure('MESSAGE_ENVELOPE_INVALID', 'Message body does not match Control text.')
+      if (request.message.recipient.kind !== 'agent-session' || request.message.recipient.agentSessionId !== session.id ||
+        request.message.recipientSessionId !== session.id ||
+        request.message.recipientRunId !== null && request.message.recipientRunId !== session.control.run.runId) {
+        throw controlFailure('MESSAGE_RECIPIENT_MISMATCH', 'Message recipient is not the resolved Agent Session/Run.')
       }
       const condition = validateAgentPromptCondition(request.promptCondition)
       if (condition.expectedRun.runId !== session.control.run.runId) throw controlFailure(
         'STALE_AGENT_SESSION', 'Message intent targets another Run.')
-      await api.sessions.submitPrompt(session.control, prompt, request.message?.messageId ?? request.requestId, condition,
-        request.caller?.agentSessionId, { allowUncertainTurn: true })
+      await api.sessions.submitMessage(session.control, { envelope: request.message, condition,
+        ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       return { operation: request.operation, agentSessionId: session.id }
     }
     if (request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') {
@@ -7089,7 +7078,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const condition = validateAgentPromptCondition(pending.promptCondition)
             if (!steerEntryTargetsRun(pending, session.control.run.runId) || condition.expectedRun.runId !== session.control.run.runId) throw new Error(
               'The bound Run changed before dispatch. This message will not be sent to another Run.')
-            await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition, undefined,
+            await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
               explicitAttempt ? { allowUncertainTurn: true } : undefined,
               pending.origin === 'manual')
             set((current) => {
