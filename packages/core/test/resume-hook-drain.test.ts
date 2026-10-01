@@ -18,7 +18,6 @@ it('resumes the original Agent after an old Hook times out without waiting for i
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'review-native' }
   }
   const ended: CtxmuxAdapterRun = {
-    nativeService: null,
     runId: 'old-run', lifecycleOperationId: null, program: 'claude', args: [],
     workspacePath: current.workspacePath, pid: null,
     state: { type: 'interrupted', reason: 'daemon_restart' }, cols: 80, rows: 24,

@@ -46,7 +46,6 @@ function storedSession(providerId: AgentProviderId = 'codex'): AgentMuxStoredAge
 
 function runningRun(): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: 'run-1',
     lifecycleOperationId: null,
     program: 'codex',

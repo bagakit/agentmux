@@ -5,7 +5,6 @@ import type { CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 
 function terminalRun(runId: string): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId,
     lifecycleOperationId: null,
     program: '/bin/sh',

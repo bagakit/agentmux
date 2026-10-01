@@ -24,7 +24,7 @@ it.each([['create', 'kimi'], ['resume', 'kimi'], ['create', 'claude'], ['resume'
     if (operation !== 'create') await store.compareAndSwap(null, { ...old, capabilityHash: hashAgentCapability('valid-capability') })
     await internals.registry.load('local')
     internals.connected = true
-    const run = (id: string): CtxmuxAdapterRun => ({ nativeService: null, runId: id, lifecycleOperationId: null, program: providerId, args: [], workspacePath: '/repo',
+    const run = (id: string): CtxmuxAdapterRun => ({ runId: id, lifecycleOperationId: null, program: providerId, args: [], workspacePath: '/repo',
       pid: 123, state: id === 'old-run' ? { type: 'exited', code: 0, signal: null } : { type: 'running' },
       cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 })
     internals.kernel.isConnected = () => true

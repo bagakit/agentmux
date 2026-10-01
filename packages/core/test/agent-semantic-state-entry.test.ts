@@ -63,7 +63,6 @@ async function harness(initial = session(), store: AgentMuxAgentSessionStore = n
   const accepted = new Map<string, Ack>()
   let beforeAck: (() => Promise<void>) | undefined
   const run = (): CtxmuxAdapterRun => ({
-    nativeService: null,
     runId: 'entry-run', lifecycleOperationId: null, program: 'codex', args: [], workspacePath: '/repo',
     pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor

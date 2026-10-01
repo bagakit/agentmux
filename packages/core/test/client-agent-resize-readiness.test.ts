@@ -94,7 +94,6 @@ function storedSession(
 
 function runProjection(cols: number, rows: number, latestOutputBytes = 0): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',
@@ -158,7 +157,7 @@ async function resizeClient(
       run: runProjection(size.cols, size.rows, latestOutputBytes),
       replay: [],
       gap: null,
-      terminal: { type: 'basic-vt', checkpoint: { restoreSize: { ...size }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: RUN_ID, throughByte: latestOutputBytes,
+      terminal: { type: 'basic-vt', checkpoint: { runId: RUN_ID, throughByte: latestOutputBytes,
         resizeRevision, size: { ...size } }, restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
       resizeRevision,
       close: async () => {}

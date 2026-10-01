@@ -111,7 +111,6 @@ describe('Hook event name source end-to-end integration', () => {
     const capturedLaunchEnvs: Array<Record<string, string>> = []
 
     const run = () => ({
-      native_service: null,
       id: runId,
       spec: { program: 'synthetic-agent', args: [], cwd: workspacePath, env: {} },
       lineage: null,
@@ -162,7 +161,7 @@ describe('Hook event name source end-to-end integration', () => {
         snapshot: {
           run: run(),
           resize_revision: 0,
-          terminal: { type: 'basic_vt', checkpoint: { restore_size: { cols: 80, rows: 24 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } }, resizes: [] },
+          terminal: { type: 'basic_vt', checkpoint: { run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } }, resizes: [] },
           terminal_restore: new TextEncoder().encode('\u001bc'),
           replay: { chunks: [...chunks], first_available_byte: 0, latest_output_bytes: outputCursor, truncated: false }
         },

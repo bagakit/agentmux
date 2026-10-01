@@ -211,7 +211,6 @@ class CapabilityMarkerFailingStore extends AgentMuxMemoryAgentSessionStore {
 
 function runningRun(acceptedInputBytes: number | null = 37): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: 'degrade-run',
     lifecycleOperationId: null,
     program: 'codex',

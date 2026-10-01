@@ -52,7 +52,6 @@ describe('Runtime compatibility independent of launch provenance', () => {
   it('reports the connected listener rather than assigning the new bundle source to a nonempty older Runtime', async () => {
     const { directory } = await fixture()
     const original: RunInfo = {
-      native_service: null,
       id: '33333333-3333-4333-8333-333333333333', spec: null, lineage: null,
       backend: { type: 'native' },
       capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: true, fork_level_b: false, replay: 'raw_from_start' },

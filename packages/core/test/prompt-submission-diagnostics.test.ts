@@ -40,7 +40,6 @@ function session(): AgentMuxStoredAgentSession {
 
 function run(acceptedInputBytes = 0): CtxmuxAdapterRun {
   return {
-    nativeService: null,
     runId: 'run-1',
     lifecycleOperationId: null,
     program: 'codex',

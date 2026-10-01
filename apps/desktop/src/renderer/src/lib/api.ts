@@ -28,7 +28,6 @@ import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
-import { createRendererSessionInput } from './session-input'
 import {
   DEFAULT_TOPIC_WIKI,
   MOTE_SOUL_PATH,
@@ -177,7 +176,6 @@ const mockSessions: SessionSnapshot[] = [
     agentSessionUpdatedAt: now,
     promptSubmissionPredecessor: null,
     processState: 'running',
-    nativeService: null,
     status: { state: 'working', source: 'native-hook', observedAt: now, detail: 'PreToolUse' },
     latestOutputBytes: 0,
     control: {
@@ -201,7 +199,6 @@ const mockSessions: SessionSnapshot[] = [
     agentSessionUpdatedAt: now - 20_000,
     promptSubmissionPredecessor: null,
     processState: 'interrupted',
-    nativeService: null,
     status: { state: 'error', source: 'run-process', observedAt: now - 20_000, detail: 'SSH connection to Studio Box is unavailable.' },
     latestOutputBytes: 0,
     control: {
@@ -791,7 +788,6 @@ const mockApi: AgentMuxDesktopApi = {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        nativeService: null,
         status: { state: 'running', source: 'run-process', observedAt: Date.now() },
         latestOutputBytes: 0,
         control: {
@@ -827,7 +823,6 @@ const mockApi: AgentMuxDesktopApi = {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        nativeService: null,
         status: { state: 'running', source: 'run-process', observedAt: Date.now() },
         latestOutputBytes: 0,
         control: {
@@ -1009,7 +1004,6 @@ const mockApi: AgentMuxDesktopApi = {
         createdAt: Date.now(),
         updatedAt: Date.now(),
         processState: 'running',
-        nativeService: null,
         status: { state: 'running', source: 'run-process', observedAt: Date.now() },
         latestOutputBytes: 0,
         control: { kind: 'terminal', hostId: control.hostId, runId, run: { runId } }
@@ -1271,7 +1265,6 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     control: createRendererControlApi(preload.control),
     sessions: {
       ...preload.sessions,
-      ...createRendererSessionInput(preload.sessions),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
   }

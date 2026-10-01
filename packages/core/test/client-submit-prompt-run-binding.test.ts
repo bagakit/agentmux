@@ -59,7 +59,6 @@ async function fixture(singlePhase = false) {
   let beforeStatus: (() => Promise<void>) | undefined
   let beforeAck: (() => Promise<void>) | undefined
   const run = (runId: string): CtxmuxAdapterRun => ({
-    nativeService: null,
     runId, lifecycleOperationId: null, program: 'codex', args: [], workspacePath: '/repo',
     pid: runId === 'original-run' ? 123 : 124, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0

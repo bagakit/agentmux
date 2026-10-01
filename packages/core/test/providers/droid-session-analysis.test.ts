@@ -531,7 +531,6 @@ describe('Droid session analysis and native history', () => {
       vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'queue.ndjson'))
 
       const run = {
-        native_service: null,
         id: runId,
         spec: { program: 'droid', args: [], cwd: root, env: {} },
         lineage: null,

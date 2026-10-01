@@ -12,7 +12,6 @@ it('Core status observes the ended Run instead of reusing a stale working hook',
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
   }
   const run: CtxmuxAdapterRun = {
-    nativeService: null,
     runId: 'status-run', lifecycleOperationId: null, program: 'claude', args: [], workspacePath: '/fixture', pid: null,
     state: { type: 'interrupted', reason: 'daemon_restart' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0

@@ -109,7 +109,6 @@ async function harness(profile: Profile) {
     })
   })
   const run = {
-    native_service: null,
     id: runId, spec: { program: 'synthetic-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: 123,
     durable_output_bytes: 123, first_available_byte: 0, attachments: 0, applied_input_bytes: 0,

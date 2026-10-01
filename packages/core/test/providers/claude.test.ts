@@ -278,7 +278,6 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
     const chunks: OutputChunk[] = []
     const streams = new Set<{ push(event: RunEvent): void; close(): void }>()
     const run = () => ({
-      native_service: null,
       id: runId,
       spec: { program: 'claude', args: [], cwd: workspacePath, env: {} },
       lineage: null,
@@ -338,7 +337,7 @@ describe('Claude Stop pre-decision observation through built public Core and Fil
           resize_revision: 0,
           terminal: {
             type: 'basic_vt',
-            checkpoint: { restore_size: { cols: 80, rows: 24 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } },
+            checkpoint: { run_id: runId, through_byte: 0, resize_revision: 0, size: { cols: 80, rows: 24 } },
             resizes: []
           },
           terminal_restore: new TextEncoder().encode('\u001bc'),

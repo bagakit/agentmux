@@ -108,7 +108,6 @@ async function harness(mode: Mode, receiptTime?: number | null) {
   const writes: string[] = [], chunks: OutputChunk[] = []
   const streams = new Set<{ push(event: RunEvent): void; close(): void }>()
   const run = () => ({
-    native_service: null,
     id: runId, spec: { program: 'synthetic-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: outputCursor,
     durable_output_bytes: outputCursor, first_available_byte: 0, attachments: streams.size,
@@ -162,7 +161,7 @@ async function harness(mode: Mode, receiptTime?: number | null) {
     streams.add(stream)
     return {
       snapshot: { run: run(), resize_revision: 0,
-        terminal: { type: 'basic_vt', checkpoint: { restore_size: { cols: 80, rows: 24 }, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: runId, through_byte: 0,
+        terminal: { type: 'basic_vt', checkpoint: { run_id: runId, through_byte: 0,
           resize_revision: 0, size: { cols: 80, rows: 24 } }, resizes: [] },
         terminal_restore: new TextEncoder().encode('\u001bc'),
         replay: { chunks: [...chunks], first_available_byte: 0,

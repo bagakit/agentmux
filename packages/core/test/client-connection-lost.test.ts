@@ -104,7 +104,6 @@ describe('AgentMuxClient connection-lost wiring', () => {
     state.reconnectSleep = async () => {}
 
     const liveRun = {
-      nativeService: null,
       runId: 'run-1',
       pid: 4321,
       state: { type: 'running' as const },
@@ -396,7 +395,6 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
       openObservations += 1
       return {
         run: {
-          nativeService: null,
           runId: 'readiness-run',
           lifecycleOperationId: null,
           program: 'codex',
@@ -414,7 +412,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
         // 「屏幕永不再变」在生产上就是这个形状。
         replay: [] as CtxmuxAdapterObservationEvent[],
         gap: null,
-        terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: 'readiness-run', throughByte: 0,
+        terminal: { type: 'basic-vt', checkpoint: { runId: 'readiness-run', throughByte: 0,
           resizeRevision: 0, size: { cols: 80, rows: 24 } },
           restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] },
         resizeRevision: 0,

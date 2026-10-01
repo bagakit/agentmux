@@ -53,7 +53,6 @@ async function fixture(providerId: 'codex' | 'claude') {
   inner.kernel.identity = () => ({ daemonInstanceId: 'synthetic-daemon' })
   let acceptedBytes = 0
   const run = (): CtxmuxAdapterRun => ({
-    nativeService: null,
     runId: stored.run.runId, lifecycleOperationId: null, program: providerId, args: [],
     workspacePath: '/synthetic', pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: acceptedBytes
@@ -81,7 +80,7 @@ function blankTerminalObservation(run: CtxmuxAdapterRun, close: () => Promise<vo
   return {
     run, replay: [], gap: null, resizeRevision: 0, close,
     // An owner-confirmed blank checkpoint restores a screen without advancing original output.
-    terminal: { type: 'basic-vt', checkpoint: { restoreSize: { cols: run.cols, rows: run.rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0, runId: run.runId, throughByte: 0,
+    terminal: { type: 'basic-vt', checkpoint: { runId: run.runId, throughByte: 0,
       resizeRevision: 0, size: { cols: run.cols, rows: run.rows } },
       restoreBytes: new TextEncoder().encode('\x1bc'), resizes: [] }
   }

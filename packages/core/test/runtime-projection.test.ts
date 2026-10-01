@@ -3,7 +3,6 @@ import { projectAgentMuxRuntimeSubjects } from '../src/runtime.js'
 import type { AgentMuxAgentSession, AgentMuxRun } from '../src/types.js'
 
 const run: AgentMuxRun = {
-  nativeService: null,
   runId: 'run-1',
   kind: 'agent',
   providerId: 'codex',

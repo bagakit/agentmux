@@ -4,7 +4,6 @@ import {
   AGENT_SCREEN_SCROLLBACK_ROWS
 } from './agent-prompt-budget.js'
 import { AgentMuxError } from './errors.js'
-import { assertTerminalCheckpointRestore } from './terminal-continuation.js'
 import type { AgentMuxTerminalCheckpoint } from './types.js'
 
 const { Terminal } = headless
@@ -62,17 +61,8 @@ export class AgentTerminalScreen {
 
   /** Import an owner-confirmed seed without claiming that it is original PTY output. */
   async restore(checkpoint: AgentMuxTerminalCheckpoint, restoreBytes: Uint8Array): Promise<void> {
-    assertTerminalCheckpointRestore(checkpoint, restoreBytes)
-    const scrollback = this.terminal.options.scrollback!
-    this.terminal.resize(checkpoint.restoreSize.cols, checkpoint.restoreSize.rows)
-    if (checkpoint.restoreScrollbackRows !== null) this.terminal.options.scrollback = checkpoint.restoreScrollbackRows
-    try {
-      await new Promise<void>((resolve) => this.terminal.write(restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), resolve))
-    } finally {
-      this.terminal.options.scrollback = scrollback
-    }
     this.terminal.resize(checkpoint.size.cols, checkpoint.size.rows)
-    await new Promise<void>((resolve) => this.terminal.write(restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes), resolve))
+    await new Promise<void>((resolve) => this.terminal.write(restoreBytes, resolve))
     this.nextByte = checkpoint.throughByte
     this.resizeRevision = checkpoint.resizeRevision
     this.trusted = true

@@ -47,7 +47,7 @@ async function harness() {
   let inputCursor = 10
   const writes: string[] = []
   const receipts = new Map<string, { start_byte: number; end_byte: number; data: string }>()
-  const run = () => ({ native_service: null, id: runId,
+  const run = () => ({ id: runId,
     spec: { program: 'cursor-agent', args: [], cwd: workspacePath, env: {} },
     lineage: null, pid: 123, state: { type: 'running' as const }, latest_output_bytes: 0,
     durable_output_bytes: 0, first_available_byte: 0, attachments: 0,

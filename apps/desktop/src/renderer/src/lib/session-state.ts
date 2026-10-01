@@ -252,7 +252,6 @@ function eventAgentSessionId(event: RuntimeEvent['event']): string | null {
   if (event.type === 'agent-session') return event.session.agentSessionId
   if (
     event.type === 'process-state' ||
-    event.type === 'run-service' ||
     event.type === 'agent-error' ||
     event.type === 'run-removed'
   ) return event.agentSessionId ?? null
@@ -626,17 +625,6 @@ export function projectRuntimeEvent(
   if (pendingAgentSessionId && !existingEventSession) {
     return { state, sessionMembershipGap: true }
   }
-  if (core.type === 'run-service') {
-    const index = state.sessions.findIndex(item => item.hostId === event.hostId &&
-      ownsRunEvent(item, core.agentSessionId, core.run))
-    if (index < 0) return { state }
-    const current = state.sessions[index]!
-    if (current.nativeService !== null && core.nativeService.revision <= current.nativeService.revision) return { state }
-    const sessions = state.sessions.slice()
-    sessions[index] = { ...current, nativeService: structuredClone(core.nativeService),
-      updatedAt: Math.max(current.updatedAt, core.evidence.observedAt) }
-    return { state: { ...state, sessions } }
-  }
   if (core.type === 'process-state') {
     // 「进程事实 → 界面那一行状态」走 Core 的共享投影，与主进程快照路径（runtime-controller 的
     // projectSession）是**同一个**实现。这里只负责把事件的字段形状取出来喂给它。
@@ -724,7 +712,6 @@ export function projectRuntimeEvent(
       workspacePath: core.session.workspacePath,
       updatedAt: Math.max(item.updatedAt, core.session.updatedAt),
       agentSessionUpdatedAt: core.session.updatedAt,
-      nativeService: sameRun(item.control.run, core.session.run) ? item.nativeService : null,
       ...(core.session.creation ? { creation: structuredClone(core.session.creation) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(core.session),
       // Mirror the Core fact independently of the display freshness gate below.

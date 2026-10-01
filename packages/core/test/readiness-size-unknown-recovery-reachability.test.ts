@@ -108,7 +108,6 @@ async function harness(): Promise<{
   internals.connected = true
   internals.kernel.isConnected = () => true
   internals.kernel.status = async () => ({
-    nativeService: null,
     runId: RUN_ID,
     lifecycleOperationId: null,
     program: 'codex',

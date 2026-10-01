@@ -40,12 +40,12 @@ function sdkTransport(workspacePath: string) {
   let replay: OutputChunk[] = []
   let latest = 0
   let state: RunInfo['state'] = {type:'running'}
-  const info = (id: string) => ({ native_service: null, id,spec:{program:'codex',args:[],cwd:workspacePath,env:{}},state,pid:4321,
+  const info = (id: string) => ({id,spec:{program:'codex',args:[],cwd:workspacePath,env:{}},state,pid:4321,
     latest_output_bytes:latest,first_available_byte:0,applied_input_bytes:0,current_size:{cols:80,rows:24}} as unknown as RunInfo)
   const status = vi.fn(async (id: string) => info(id))
   const attach = vi.fn(async (id: string, after: number) => {
     const stream = new Events(); streams.push(stream)
-    return { snapshot:{ terminal: { type: 'not_requested' }, terminal_restore: new Uint8Array(0), resize_revision: 0,run:info(id),replay:{chunks:replay.filter(c=>c.end_byte>after),first_available_byte:0,latest_output_bytes:latest,truncated:false}},
+    return { snapshot:{run:info(id),replay:{chunks:replay.filter(c=>c.end_byte>after),first_available_byte:0,latest_output_bytes:latest,truncated:false}},
       events:() => stream.read(),close:() => stream.close(),detach:async () => stream.close() }
   })
   const sdk = { attach,status }
