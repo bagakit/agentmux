@@ -4,6 +4,7 @@ import { memo, useMemo } from 'react'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
+import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation'>
@@ -13,11 +14,12 @@ type Props = ReadingProps & {
   sessionId: string
   describeSpeaker?: DescribeSpeaker
   onContinue?: (prompt: string) => void
+  locatedMessageKey?: string | null
 }
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationNativeThread = memo(function ConversationNativeThread({
-  page, sessionId, describeSpeaker, onContinue, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
@@ -44,6 +46,7 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
       const described = speaker ? describeSpeaker?.(speaker) : undefined
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         <ConversationMessage messageId={user?.id ?? recordId} conversationSessionId={sessionId}
+          located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
           content={item.contentParts} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
           name={described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}

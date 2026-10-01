@@ -34,6 +34,8 @@ import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conver
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
+import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'
 
 /**
  * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
@@ -638,6 +640,7 @@ export function ActivityView({
   userMessages,
   nativeHistoryPage,
   userMessageRead,
+  revealRequest,
   capability,
   displayState,
   openWorkspaceFile,
@@ -656,6 +659,7 @@ export function ActivityView({
   userMessages?: readonly AgentSessionUserMessage[]
   nativeHistoryPage?: AgentSessionHistoryPage | null
   userMessageRead?: UserMessageReadState
+  revealRequest?: ConversationRevealRequest | null
   capability: 'unavailable' | 'complete-events' | 'streaming'
   /** Session 的显示状态——「这个 turn 在不在工作」的唯一真相，不从时间轴形状反推。 */
   displayState?: AgentDisplayState
@@ -714,6 +718,13 @@ export function ActivityView({
 
   const logRef = useRef<HTMLDivElement>(null)
   const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
+  const [locatedMessageKey, setLocatedMessageKey] = useState<string | null>(null)
+  useEffect(() => {
+    if (!locatedMessageKey) return
+    const timer = window.setTimeout(() => setLocatedMessageKey(null), 2200)
+    return () => window.clearTimeout(timer)
+  }, [locatedMessageKey])
+  useEffect(() => { setLocatedMessageKey(null) }, [sessionId])
   // 跟随状态是一个**值**，判定全在 lib 里；组件只负责把几何量喂进去、把决定执行掉。
   // 这样"什么时候该贴底"能被断言，而不是埋在一个 effect 里——本仓库测试不跑 effect。
   const followRef = useRef(initFollowState())
@@ -779,6 +790,28 @@ export function ActivityView({
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
   }, [unifiedItems, feedEl])
+
+  useEffect(() => {
+    if (!revealRequest || !feedEl) return
+    const frame = requestAnimationFrame(() => {
+      if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
+      const matches = Array.from(feedEl.querySelectorAll<HTMLElement>('.log-turn[data-message-source-key]'))
+        .filter(node => node.dataset.messageSourceKey === revealRequest.sourceKey)
+      if (matches.length !== 1) { revealRequest.complete(false); return }
+      const node = matches[0]!
+      const head = node.querySelector<HTMLElement>('.log-turn__head') ?? node
+      followRef.current = { ...followRef.current, following: false }
+      // No smooth scrolling or animation, including under reduced-motion preferences.
+      head.scrollIntoView({ block: 'center', behavior: 'instant' })
+      if (!revealRequest.isCurrent()) { revealRequest.complete(false); return }
+      node.focus({ preventScroll: true })
+      const r = head.getBoundingClientRect(), viewport = feedEl.getBoundingClientRect()
+      const inView = r.width > 0 && r.height > 0 && r.bottom > viewport.top && r.top < viewport.bottom
+      if (inView) setLocatedMessageKey(revealRequest.sourceKey)
+      revealRequest.complete(inView)
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
@@ -893,6 +926,7 @@ export function ActivityView({
       {nativeHistoryPage ? <ConversationNativeThread
         page={nativeHistoryPage}
         sessionId={sessionId}
+        locatedMessageKey={locatedMessageKey}
         {...(onContinue ? { onContinue } : {})}
         workspaceRoot={workspaceRoot}
         homeDir={homeDir}
@@ -962,6 +996,7 @@ export function ActivityView({
                   messageId={entry.message.id}
                   conversationSessionId={sessionId}
                   inputSource={entry.message.source}
+                  located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
                   {...(describeSpeaker ? { describeSpeaker } : {})}
                   content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
                   {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
@@ -983,6 +1018,7 @@ export function ActivityView({
                   messageId={entry.item.id}
                   conversationSessionId={sessionId}
                   {...(entry.item.kind === 'user_message' ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id } } : {})}
+                  located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
                   {...(describeSpeaker ? { describeSpeaker } : {})}
                   content={entry.item.content ?? ''}
                   status={entry.item.status}

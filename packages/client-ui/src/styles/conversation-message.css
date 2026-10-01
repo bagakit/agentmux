@@ -146,11 +146,11 @@
 .log-turn[data-compact='true'] .log-turn__who { flex: 1 1 100px; min-width: 0; font-size: var(--fs-body); }
 .log-turn[data-compact='true'] .log-turn__body { font-size: var(--fs-body); }
 .log-turn[data-compact='true'] .md-paragraph { color: var(--text); }
-.log-turn[data-compact='true'] .log-turn__head { display: grid; grid-template-columns: minmax(0, 1fr) repeat(4, auto); }
-.log-turn[data-compact='true'] .log-turn__context,
-.log-turn[data-compact='true'] .log-turn__declared-source,
-.log-turn[data-compact='true'] .log-turn__packet-declaration,
-.log-turn[data-compact='true'] .conversation-input-details__body { grid-column: 1 / -1; }
+.log-turn[data-compact='true'] .log-turn__head { display: flex; }
+.log-turn[data-compact='true'] .log-turn__packet-declaration { flex-basis: 100%; }
 .log-turn[data-compact='true'] .log-turn__actions { opacity: 1; }
 .log-turn[data-compact='true'] .log-turn__head .conversation-input-details { position: static; }
 .log-turn[data-compact='true'] .conversation-input-details__body { margin-block: var(--sp-2); }
+/* The short reveal state takes precedence over each speaker's ordinary bubble fill. */
+.log-turn[data-message-located] { background: var(--surface-2) !important; outline: 1px solid var(--focus-line); outline-offset: 3px; }
+.log-turn__location { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }

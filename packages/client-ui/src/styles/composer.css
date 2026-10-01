@@ -251,6 +251,13 @@
 .composer-mailbox__back > button { padding: 0 var(--sp-2); min-height: var(--sp-7); }
 .composer-mailbox__messages { list-style: none; margin: 0; padding: 0; }
 .composer-mailbox__messages > li { margin: 0; padding: 0; border-top: 1px solid var(--line-soft); }
+.composer-mailbox__record-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-3); }
+.composer-mailbox__reveal { display: inline-flex; align-items: center; min-height: var(--sp-6); padding: var(--sp-1) var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
+.composer-mailbox__reveal:hover { background: var(--surface-3); color: var(--text); }
+.composer-mailbox__reveal:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.composer-mailbox__reveal:disabled { cursor: default; color: var(--text-3); }
+.composer-mailbox__navigation-feedback, .composer-mailbox__pending-location { color: var(--text-3); font-size: var(--fs-meta); }
+.composer-mailbox__pending-location { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-2); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
 .composer-mailbox__row:hover { background: var(--surface-3); }
 .composer-mailbox__row:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; background: var(--surface-3); }

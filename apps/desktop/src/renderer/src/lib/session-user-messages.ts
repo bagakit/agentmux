@@ -10,7 +10,7 @@ export type AgentSessionControlInput = AgentSessionControl
 const MAX_NATIVE_RECORDS = 90
 const MAX_NATIVE_BYTES = 12 * 1024 * 1024
 const MAX_REVALIDATION_PAGES = 3
-type ReadMode = 'initial' | 'earlier' | 'revalidate' | 'replace'
+type ReadMode = 'initial' | 'earlier' | 'revalidate' | 'replace' | 'reveal'
 
 type SessionEntry = {
   key: string
@@ -89,6 +89,14 @@ function sameSource(a: AgentSessionHistoryPage['source'], b: AgentSessionHistory
   return a.providerId === b.providerId && a.nativeSessionId === b.nativeSessionId
 }
 
+function changedSourceError(message: string): Error {
+  return Object.assign(new Error(message), { code: 'native-source-changed' })
+}
+
+function sourceChanged(entry: SessionEntry | undefined): boolean {
+  return [entry?.error, entry?.observationError].some(error => (error as (Error & { code?: string }) | null)?.code === 'native-source-changed')
+}
+
 function withinWindow(items: AgentSessionHistoryPage['items']): boolean {
   if (items.length > MAX_NATIVE_RECORDS) return false
   let bytes = 0
@@ -144,7 +152,7 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
         }
         const source = entry.observationHandle?.source
         if (source && !sameSource(source, observation.source)) {
-          entry.observationError = new Error('Native source changed. The current window is kept; refresh its source.')
+          entry.observationError = changedSourceError('Native source changed. The current window is kept; refresh its source.')
           notifySubscribers(entry)
           return
         }
@@ -153,7 +161,7 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
       if (!current()) { handle.dispose(); return }
       if (!replacing && entry.historyPage && !sameSource(entry.historyPage.source, handle.source)) {
         handle.dispose()
-        entry.observationError = new Error('Native source changed. The current window is kept; refresh its source.')
+        entry.observationError = changedSourceError('Native source changed. The current window is kept; refresh its source.')
       } else if (entry.observationError) handle.dispose()
       else entry.observationHandle = handle
     } catch (error) {
@@ -193,10 +201,10 @@ async function fetchSessionHistoryPage(
         const page = await api.sessions.historyPage(control, { limit: 30, ...(cursor ? { cursor } : {}) })
         if (page.agentSessionId !== entry.agentSessionId) throw new Error('Native page belongs to another Session.')
         if (entry.observationHandle && !sameSource(entry.observationHandle.source, page.source)) {
-          throw new Error('Native source changed after observation was established. Refresh its source.')
+          throw changedSourceError('Native source changed after observation was established. Refresh its source.')
         }
         if (entry.historyPage && mode !== 'replace' && !sameSource(entry.historyPage.source, page.source)) {
-          throw new Error('Native source changed. The current window is kept; refresh its source.')
+          throw changedSourceError('Native source changed. The current window is kept; refresh its source.')
         }
         return page
       }
@@ -298,8 +306,11 @@ export function useSessionUserMessages(
   error: Error | null
   observationError: Error | null
   windowFrozen: boolean
+  sourceChanged: boolean
   loadEarlier: () => Promise<void>
   refresh: () => Promise<void>
+  /** Join an existing read or read one page; navigation never queues a refresh or scans history. */
+  readForReveal: (source: AgentSessionUserMessage['source']) => Promise<{ page: AgentSessionHistoryPage | null; error: Error | null; windowFrozen: boolean; sourceChanged: boolean }>
 } {
   const enabled = options?.enabled ?? true
   const isAgent = control?.kind === 'agent'
@@ -386,6 +397,23 @@ export function useSessionUserMessages(
     await fetchSessionHistoryPage(control, entry, 'earlier')
   }, [active, sessionKey])
 
+  const readForReveal = useCallback(async (source: AgentSessionUserMessage['source']) => {
+    const entry = sessionKey ? sessionRegistry.get(sessionKey) : undefined
+    if (!entry || !control || source.kind !== 'native') return { page: null, error: null, windowFrozen: false, sourceChanged: false }
+    const currentPage = entry.historyPage
+    const matchesSource = currentPage && sameSource(currentPage.source, source)
+    const loaded = matchesSource && currentPage.items.some(item => item.kind === 'user-message' && item.id === source.recordId)
+    if (entry.inFlight) await entry.inFlight
+    else if (!loaded && !entry.windowFrozen && !sourceChanged(entry) && (!currentPage || matchesSource)) {
+      // Unlike refresh(), this does not queue behind an in-flight read. The existing bounded
+      // operation is the one allowance; otherwise only one earlier/latest page is requested.
+      if (entry.subscribers.size && (!currentPage || entry.nextCursor) && entry.items.length < MAX_NATIVE_RECORDS) {
+        await fetchSessionHistoryPage(control, entry, currentPage ? 'earlier' : 'reveal')
+      }
+    }
+    return { page: entry.historyPage, error: entry.error, windowFrozen: entry.windowFrozen, sourceChanged: sourceChanged(entry) }
+  }, [sessionKey])
+
   // Non-speculative read during render: do not create entry on uncommitted/aborted renders
   const entry = sessionKey ? sessionRegistry.get(sessionKey) : undefined
   const committed = committedSnapshotRef.current.key === sessionKey ? committedSnapshotRef.current : null
@@ -441,7 +469,9 @@ export function useSessionUserMessages(
     error: entry?.error ?? null,
     observationError: entry?.observationError ?? null,
     windowFrozen: entry?.windowFrozen ?? false,
+    sourceChanged: sourceChanged(entry),
     loadEarlier,
-    refresh
+    refresh,
+    readForReveal
   }
 }

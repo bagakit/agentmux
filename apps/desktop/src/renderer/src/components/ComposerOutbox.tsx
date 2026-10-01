@@ -53,6 +53,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove,
           : !selected.deliverable ? 'Bound Run unavailable. Delivery is unknown.' : 'Delivery needs attention. See Info for the recorded reason.'}
       </p> : null}
       <ConversationMessage {...reading} compact recordedIdentity messageId={`queue:${selected.id}`}
+        messageActions={<span className="composer-mailbox__pending-location"><button type="button" className="composer-mailbox__reveal" disabled>在对话中查看</button><span>尚未发送，暂无对话位置</span></span>}
         speaker={{ role: 'unknown', id: UNKNOWN_SPEAKER_ID }} content={selected.text}
         {...(selected.enqueuedAt === undefined ? {} : { createdAt: selected.enqueuedAt })}
         {...(onCopy ? { onCopy } : {})}
@@ -67,7 +68,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove,
         label={entry.sending ? entry.status === 'restoring' ? 'Restoring' : 'Sending' : entry.id === retryEntry?.id ? 'Next to send' : 'Pending message'}
         avatar={<ConversationSpeakerAvatar speaker={{ role: 'unknown', id: UNKNOWN_SPEAKER_ID }} name="Author unknown" size={18} />}
         text={entry.text} metadata={<>{entry.status === 'failed' || entry.status === 'restoring' || entry.sending ? <span>{entry.sending ? 'In progress' : entry.status}</span> : null}<MailboxTime value={entry.enqueuedAt} />{!entry.deliverable ? <span>Bound Run unavailable</span> : null}</>}
-        onOpen={(_key, event) => onSelect(entry.id, event)} /></li>)}
+        onOpen={(_key, event) => onSelect(entry.id, event)} /><div className="composer-mailbox__record-actions composer-mailbox__pending-location"><button type="button" className="composer-mailbox__reveal" disabled>在对话中查看</button><span>尚未发送，暂无对话位置</span></div></li>)}
     </ol>
     {retryEntry ? send(retryEntry) : null}
     {onCopy ? <button type="button" className="composer-tool" onClick={() => onCopy(queued.map(entry => entry.text).join('\n\n'))}>Copy {queued.length === 1 ? 'message' : 'all'}</button> : null}

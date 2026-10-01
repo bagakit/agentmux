@@ -11,6 +11,7 @@ import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationAnnotationSelection } from '../lib/conversation-annotation.js'
+import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
@@ -19,6 +20,9 @@ export type ConversationMessageProps = {
   compact?: boolean
   recordedIdentity?: boolean
   messageDetails?: ReactNode
+  /** Independent host actions; the shared reader remains the only message body. */
+  messageActions?: ReactNode
+  located?: boolean
   /** Original text for records with structured parts; never reconstructed by the host. */
   copyText?: string
   /** A client retains its feedback owner and returns the actual clipboard result. */
@@ -96,7 +100,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  compact = false, recordedIdentity = false, messageDetails, copyText, onCopy,
+  compact = false, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, inputSource, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
@@ -203,6 +207,9 @@ export function ConversationMessage({
       data-compact={compact || undefined}
       data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}
+      data-message-source-key={conversationMessageSourceKey(conversationSessionId, inputSource)}
+      data-message-located={located || undefined}
+      tabIndex={-1}
       data-speaker-role={speaker?.role}
       data-speaker-relation={isPeerAgent ? 'other-agent' : undefined}
       data-message-direction={isIncoming ? 'incoming' : 'outgoing'}
@@ -232,13 +239,15 @@ export function ConversationMessage({
           ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {renderClock(createdAt)}
         </span>}
-        {hasCopyContent ? <span className="log-turn__actions" data-copy-state={copyState}>
+        {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
+        {hasCopyContent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
+          {messageActions}
           {copyState === 'failed' ? (
             <span className="log-turn__copy-error" role="alert">Copy failed</span>
           ) : null}
-          <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
+          {hasCopyContent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
-          </button>
+          </button> : null}
         </span> : null}
         {isIncoming || speaker?.role === 'agent' || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
           declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
