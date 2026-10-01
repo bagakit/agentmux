@@ -63,10 +63,30 @@
 }
 
 
-/* Space 自动字母牌用中性身份，不借用会话说话人的颜色。灰度也约束原生彩色 emoji。 */
+/* Default navigation monograms remain neutral, including native colored emoji. */
 .project-rail-row__icon[data-monogram] {
   overflow: hidden; font-size: var(--fs-micro); font-weight: 560; line-height: 1;
   color: var(--text-3); background: var(--surface-2); filter: grayscale(1);
+}
+
+/* Only automatic Space Folders carry this fact and their durable identity hue. */
+.project-rail-row__icon[data-monogram][data-folder-icon-recency] {
+  color: hsl(var(--folder-icon-hue) 28% 66%); background-color: hsl(var(--folder-icon-hue) 20% 50% / .09); filter: saturate(.2);
+}
+.project-rail-row__icon[data-monogram][data-folder-icon-recency="full"] {
+  color: hsl(var(--folder-icon-hue) 52% 74%); background-color: hsl(var(--folder-icon-hue) 40% 50% / .22); filter: saturate(.8);
+}
+.project-rail-row__icon[data-monogram][data-folder-icon-recency="subdued"] {
+  color: hsl(var(--folder-icon-hue) 42% 70%); background-color: hsl(var(--folder-icon-hue) 35% 50% / .16); filter: saturate(.65);
+}
+:root[data-appearance="light"] .project-rail-row__icon[data-monogram][data-folder-icon-recency] {
+  color: hsl(var(--folder-icon-hue) 20% 44%); background-color: hsl(var(--folder-icon-hue) 20% 40% / .06);
+}
+:root[data-appearance="light"] .project-rail-row__icon[data-monogram][data-folder-icon-recency="full"] {
+  color: hsl(var(--folder-icon-hue) 40% 36%); background-color: hsl(var(--folder-icon-hue) 40% 40% / .16);
+}
+:root[data-appearance="light"] .project-rail-row__icon[data-monogram][data-folder-icon-recency="subdued"] {
+  color: hsl(var(--folder-icon-hue) 32% 40%); background-color: hsl(var(--folder-icon-hue) 32% 40% / .11);
 }
 
 .conversation-avatar--system { color: var(--text-3); background: var(--surface-2); }
