@@ -38,6 +38,7 @@ try {
   assert.equal(owner.setSurveyZoneCollected(zones[1].zone.zoneId, true), true)
   const reference = { displayWorkspaceId: 'display', groupId: 'second-group', tabId: file.id, regionId: 'second-file' }
   owner.setSurveyZoneSelection({ zoneId: zones[1].zone.zoneId, selection: [reference], active: reference })
+  assert.equal(owner.setSurveyExplorationName(zones[1].zone.zoneId, 'Reading into a durable idea'), true)
   owner.setSurveySidebarCollapsed(true); owner.setSurveySidebarWidth(213)
   useAppStore.setState(state => ({ surveyCollectedZones: { ...state.surveyCollectedZones, 'retained-unknown-zone': true } }))
   useLauncherState.getState().setDraft('region:first-launcher', 'note', 'Unsent Launcher input')
@@ -46,11 +47,12 @@ try {
   assert.equal(useAppStore.getState().surveyCollectedZones[zones[2].zone.zoneId], undefined)
   await prepareRendererUpdate('quit')
   for (const name of ['agentmux-workbench-v1', 'agentmux-launcher']) { const saved = window.localStorage.getItem(name); assert.ok(saved); await writeFile(join(evidence, `${name}.json`), saved) }
-  await writeFile(join(evidence, 'expected.json'), JSON.stringify({ items: items(), layouts: useAppStore.getState().layouts, tabs: useAppStore.getState().tabs, selection: useAppStore.getState().surveyZoneSelection, collected: useAppStore.getState().surveyCollectedZones, sidebarCollapsed: true, sidebarWidth: 213, key, content: content + '\n', launcherDraft: useLauncherState.getState().drafts['region:first-launcher'] }))
+  await writeFile(join(evidence, 'expected.json'), JSON.stringify({ items: items(), layouts: useAppStore.getState().layouts, tabs: useAppStore.getState().tabs, selection: useAppStore.getState().surveyZoneSelection, collected: useAppStore.getState().surveyCollectedZones, names: useAppStore.getState().surveyExplorationNames, sidebarCollapsed: true, sidebarWidth: 213, key, content: content + '\n', launcherDraft: useLauncherState.getState().drafts['region:first-launcher'] }))
  } else {
   const expected = JSON.parse(await readFile(join(evidence, 'expected.json'), 'utf8')), current = useAppStore.getState()
   assert.deepEqual(current.tabs, expected.tabs); assert.deepEqual(current.layouts, expected.layouts)
   assert.deepEqual(current.surveyZoneSelection, expected.selection); assert.deepEqual(current.surveyCollectedZones, expected.collected)
+  assert.deepEqual(current.surveyExplorationNames, expected.names); assert.equal(Object.values(current.surveyExplorationNames)[0], 'Reading into a durable idea')
   assert.equal(current.mainSurface, 'survey'); assert.equal(current.surveySidebarCollapsed, true); assert.equal(current.surveySidebarWidth, 213)
   assert.equal(current.documents[expected.key].content, expected.content); assert.equal(current.dirtyDocuments[expected.key], true)
   assert.deepEqual(useLauncherState.getState().drafts['region:first-launcher'], expected.launcherDraft)

@@ -2,7 +2,7 @@
 .note-file-view { height: 100%; min-height: 0; overflow: auto; background: var(--surface-0); container-type: inline-size; }
 .note-surface > .note-file-view { flex: 1; height: auto; }
 .note-surface > .note-knowledge-notice, .note-source-choices { flex: none; padding: 8px 16px; }
-.note-directory-sources { flex: none; padding: 7px 16px; border-bottom: 1px solid var(--line); color: var(--text-2); font-size: 11px; }
+.note-directory-sources { flex: none; padding: 7px 16px; border-top: 1px solid var(--line); color: var(--text-2); font-size: 11px; }
 .note-directory-sources summary { cursor: pointer; }
 .note-directory-sources summary span { margin-left: 8px; color: var(--text-3); }
 .note-directory-sources > .note-text-button { margin-top: 8px; padding: 3px 0; font-size: 11px; }
@@ -51,3 +51,6 @@
 .note-knowledge-notice, .note-invalid { margin: 12px 0; color: var(--text-2); font-size: 12px; line-height: 1.6; overflow-wrap: anywhere; }
 .note-file-view > .note-knowledge-notice, .note-invalid { padding: 12px 20px; }
 @container (max-width: 420px) { .note-editor { padding: 10px 14px 30px; } .note-tool--label { margin-left: 0; } .note-reference-picker__row { flex-wrap: wrap; } .note-reference-picker__row > span { flex-basis: 100%; } }
+
+.note-block-content { position: relative; }
+.note-editor[data-note-empty="true"] .note-block-content::before { content: 'Write a thought…'; position: absolute; inset: 0 auto auto 0; color: var(--text-3); pointer-events: none; }

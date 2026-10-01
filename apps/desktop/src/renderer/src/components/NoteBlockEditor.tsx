@@ -146,7 +146,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     editor.chain().focus().insertContent({ type: 'blockReference', attrs: { target, mode } }).run()
     setPicker(false); setQuery('')
   }
-  return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen }}><div className="note-editor">
+  return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     <div className="note-editor__tools" role="toolbar" aria-label="Note block tools">
       <button type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={15} /></button>
       <button type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!editor?.can().sinkListItem('listItem')} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><IndentIncrease size={15} /></button>

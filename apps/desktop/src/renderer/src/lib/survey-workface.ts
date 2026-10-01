@@ -1,5 +1,5 @@
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
-import type { WorkspaceLayout } from '@agentmux/layout'
+import { groupIds, type WorkspaceLayout } from '@agentmux/layout'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'
 import type { BrowserWorkbenchSurface, WorkbenchTab } from './workbench-tabs'
 
@@ -27,7 +27,7 @@ export function surveyZoneItems(catalog: AgentMuxSpaceCatalog, collected: Survey
   return catalog.zones.filter(zone => discovered.has(zone.zoneId) || collected[zone.zoneId] === true)
 }
 
-/** Original active/recent references, with no first-member or resource-workspace fallback. */
+/** Original active/recent references, or the sole confirmed occurrence; never arbitrate among locations. */
 export function surveyInitialZoneSelection(catalog: AgentMuxSpaceCatalog, zoneId: string, layouts: Readonly<Record<string, WorkspaceLayout>>,
   tabs: Readonly<Record<string, WorkbenchTab>>, preferredDisplayWorkspaceId: string | null): SurveyZoneSelection {
   const members = new Set(catalog.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId))
@@ -42,6 +42,21 @@ export function surveyInitialZoneSelection(catalog: AgentMuxSpaceCatalog, zoneId
     const reference = { displayWorkspaceId, groupId: group.id, tabId: tab.id, regionId: tab.layout.activeRegionId }
     selection.push(reference)
     if (group.id === layout.activeGroupId && displayWorkspaceId === preferredDisplayWorkspaceId) active = reference
+  }
+  if (!active && catalog.zones.some(zone => zone.zoneId === zoneId && zone.kind !== 'unknown')) {
+    const occurrences = new Map<string, WorkbenchProjectionSelection>()
+    for (const location of catalog.locations) {
+      if (location.zoneId !== zoneId || !members.has(location.tabId)) continue
+      const tab = tabs[location.tabId], layout = layouts[location.displayWorkspaceId]
+      if (!tab || location.regionId !== tab.layout.activeRegionId || !tab.regions[location.regionId] || !layout ||
+        !groupIds(layout.root).includes(location.groupId) || !layout.groups.some(group => group.id === location.groupId && group.tabOrder.includes(location.tabId))) continue
+      const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
+      occurrences.set(JSON.stringify(reference), reference)
+    }
+    if (occurrences.size === 1) {
+      active = [...occurrences.values()][0]!
+      if (!selection.some(reference => sameWorkbenchProjectionSelection(reference, active!))) selection.push(active)
+    }
   }
   return { zoneId, selection, active }
 }
