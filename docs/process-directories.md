@@ -7,11 +7,14 @@
 | `docs/research/` | 调研素材、参考评估、待确认建议 |
 | `docs/plans/`、`docs/reviews/` | 本轮方案、任务计划、评审与验收证据 |
 | `docs/handoffs/`、`docs/delivery/`、`docs/status/` | 交接、交付清单和状态快照 |
-| `docs/prototypes/`、`docs/ideas/` | 探索原型与尚未确认的想法 |
+| `docs/prototypes/` | 探索原型 |
+| `docs/ideas/` | 有价值需求或思路的记录与整合，包括待讨论和已确认但尚未执行的内容 |
 | `docs/benchmarks/results/` | 原始测量输出与候选结果 |
 | `.bagakit/`、`.tmp/`、`.local/` | Tracker、任务 artifacts、临时脚本和本机证据 |
 
 已审核、具有长期读者价值的结论，应提炼进原 owning 设计、架构、接口、指南或事故案例，注明依据及适用范围；不把整份过程记录搬入长期目录。研究推断不冒充已确认约束，计划不冒充当前实现，旧验收不冒充新候选的通过结果。
+
+idea 记录和整合的顺序见[文档维护规范](guides/document-truth-and-maintenance.md#以-idea-为原点记录和整合)。需求确认后，原 idea 仍是本机过程资料；确认内容进入长期文档，不因此将 idea 文件加入提交。
 
 长期文档包括设计专题、架构机制、接口合同、操作指南、测试策略、可复用事故案例，以及 Benchmark 的测量协议。案例的现场草稿、逐轮排查日志和采样证据仍是本机过程资料；进入 `docs/casestudy/` 的是经过整理、来源和历史范围明确的案例，写法见[事故案例写作指南](guides/incident-writing.md)。
 
