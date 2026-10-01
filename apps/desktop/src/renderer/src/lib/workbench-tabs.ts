@@ -80,7 +80,7 @@ export type BrowserWorkbenchSurface = BrowserSnapshot & {
    * 二进制。只为「查看源码」服务：有它才显示那个按钮（普通网页没有源可看），`binary` 决定按钮灰不灰
    * （二进制 plist 过 `files.read` 的 utf8 会坏，那一档不给看，§2.7）。缺省即「不是从书签开的」。
    *
-   * **瞬时事实，不进持久化**：browser 面冷启动整面剥离（见 workbench-persistence 的说明），这一位随之而去。
+   * 稳定书签来源随工作面持久保存；冷启动恢复后仍可按原文件事实查看或禁用源码入口。
    * 页内导航（`reduceBrowserEvent` 的 `updated`）经 `...surface` 保留它——`event.browser` 是纯快照没这字段。
    */
   bookmarkOrigin?: { path: string; binary: boolean }

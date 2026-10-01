@@ -1,6 +1,6 @@
 import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../shared/scratch-topics.js'
-import { isBinaryContent } from '../shared/bookmark-file.js'
+import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
@@ -1208,16 +1208,20 @@ export class WorkspaceFiles {
       if (host.kind === 'local') {
         const resolved = await localReadablePath(workspace.path, requestedPath)
         if ((await stat(resolved.target)).isDirectory()) return null
-        return await runLocalWorker(dirname(resolved.target), resolved.root, {
-          action: 'read',
-          name: basename(resolved.target)
+        const payload = await runLocalWorker(dirname(resolved.target), resolved.root, {
+          action: 'read-bytes',
+          name: basename(resolved.target),
+          offset: 0,
+          maxBytes: BOOKMARK_FILE_MAX_BYTES,
+          maxFileBytes: BOOKMARK_FILE_MAX_BYTES
         })
+        return Buffer.from((JSON.parse(payload.toString('utf8')) as { data: string }).data, 'base64')
       }
       const path = await remoteReadablePath(host, workspace.path, requestedPath)
       const result = await host.run(
         'sh',
         ['-c', 'if [ -d "$1" ]; then exit 3; fi; exec cat -- "$1"', 'agentmux-read', path],
-        { timeoutMs: 15_000, maxOutputBytes: 4 * 1024 * 1024 }
+        { timeoutMs: 15_000, maxOutputBytes: BOOKMARK_FILE_MAX_BYTES }
       )
       if (result.exitCode !== 0) return null
       // 远端 host 的 `run` 只给 utf8 解码后的 string（`process-runner.ts:16/78`），二进制 plist 经它
@@ -1226,7 +1230,11 @@ export class WorkspaceFiles {
       // 伪装成坏文件。文本书签（`.url` 恒是、`.webloc` 的 XML 形态）不含 NUL，远端照常可用。
       if (isBinaryContent(result.stdout)) return null
       return Buffer.from(result.stdout, 'utf8')
-    } catch {
+    } catch (error) {
+      // A known budget rejection must not fall through to the unbounded text reader.
+      if ((error as { code?: string } | null)?.code === 'WORKSPACE_FILE_BYTE_LIMIT') {
+        throw Object.assign(new Error('This bookmark exceeds the 4 MiB preview limit.'), { code: 'WORKSPACE_FILE_BYTE_LIMIT' })
+      }
       return null
     }
   }
