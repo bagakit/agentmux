@@ -14,7 +14,7 @@ const paneTest = 'apps/desktop/test/session-native-history-surface.test.tsx'
 const terminalTest = 'apps/desktop/test/terminal-history-wheel.test.tsx'
 const mutations = [
   { name: 'product-wire', assertionIncludes: "'Reading saved conversation…'", source: pane, test: paneTest, title: 'keeps the real pending SessionPane stage', edits: [
-    { before: "                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked} /> : null}", after: '' }
+    { before: "                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} /> : null}", after: '' }
   ] },
   { name: 'foreign-native', assertionIncludes: "'Recap could not be read.'", source: recap, test: recapTest, title: 'ignores a foreign timeline owner', edits: [
     { before: "        if (page.agentSessionId !== agentSessionId) throw new Error('Recap belongs to another Session.')", after: '' }
@@ -28,6 +28,9 @@ const mutations = [
   ] },
   { name: 'resume-gate', assertionIncludes: 'expected true to be false', source: pane, test: paneTest, title: 'keeps the real pending SessionPane stage', edits: [
     { before: 'disabled={recovering} onClick={() => void recover()}', after: 'disabled={true} onClick={() => void recover()}', matches: 2 }
+  ] },
+  { name: 'covered-recap', assertionIncludes: 'to be null', source: pane, test: paneTest, title: 'hides the real retained recap while History', edits: [
+    { before: 'visible={visible && !parked && !historyOpen}', after: 'visible={visible && !parked}' }
   ] },
   { name: 'stage-observation', assertionIncludes: '"historyPage" to be called once with arguments:', source: terminal, test: terminalTest, title: 'keeps the actual starting-agent stage', edits: [
     { before: '              key="terminal-recovery"\n', after: '', matches: 2, all: true }
@@ -80,6 +83,6 @@ for (const mutation of mutations) {
   writeFileSync(receiptPath, JSON.stringify({ schema: 'agentmux.terminal-resume-recap.source-mutations.v1', passed: false, mutations: receipts }, null, 2) + '\n')
   console.log(`${mutation.name}: Assertion RED -> exact restored GREEN`)
 }
-requireFact(receipts.length === 6, 'Mutation set is incomplete')
+requireFact(receipts.length === 7, 'Mutation set is incomplete')
 writeFileSync(receiptPath, JSON.stringify({ schema: 'agentmux.terminal-resume-recap.source-mutations.v1', passed: true, mutations: receipts }, null, 2) + '\n')
 console.log(relative(root, receiptPath))

@@ -8,6 +8,7 @@ import type { AgentSessionHistoryPage } from '@agentmux/core'
 import type { AgentSessionControl, AgentSessionRecoveryCandidate, SessionSnapshot } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import * as recapFacts from '../src/renderer/src/lib/launcher-resume'
 import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
 
 const fixture = vi.hoisted(() => ({
@@ -56,6 +57,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { constructor(callback: () => void) { fixture.resizeObservers.push(callback) } observe() {} disconnect() {} })
   fixture.state.sessions = [session]
   fixture.state.recoveryCandidates = []
+  fixture.state.timelines = {}
   fixture.historyPage.mockReset().mockResolvedValue(page('latest','older-1'))
   fixture.state.recoverSession.mockReset().mockResolvedValue(undefined)
   fixture.clipboard.mockResolvedValue(undefined)
@@ -158,6 +160,59 @@ it('keeps the real pending SessionPane stage and Resume independent of a hanging
   expect(button('Resume').disabled).toBe(false)
   expect(fixture.write).not.toHaveBeenCalled()
   expect(fixture.terminalMount).not.toHaveBeenCalled()
+})
+
+it('marks only pending Agent recovery for full failure facts while keeping Resume and a healthy Run banner intact', async () => {
+  const detail = 'The process ended unexpectedly. The original Session and draft are retained; Resume can restore this same Agent conversation.'
+  const renderPane = () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />)
+  fixture.state.sessions = [{ ...session, processState: 'interrupted', status: { ...session.status, state: 'disconnected', detail } }]
+  await act(async () => renderPane())
+  const pending = container.querySelector<HTMLElement>('.terminal-recovery[data-pending-agent-restore]')
+  expect(pending).not.toBeNull()
+  expect(pending!.querySelector<HTMLSpanElement>(':scope > div > span')!.textContent).toBe(detail)
+  expect(button('Resume').disabled).toBe(false)
+  await act(async () => button('Resume').click())
+  expect(fixture.state.recoverSession).toHaveBeenCalledExactlyOnceWith(session.id)
+  fixture.state.sessions = [{ ...session, status: { ...session.status, state: 'disconnected', detail } }]
+  await act(async () => renderPane())
+  const healthy = container.querySelector<HTMLElement>('.terminal-recovery')
+  expect(healthy).not.toBeNull()
+  expect(healthy!.hasAttribute('data-pending-agent-restore')).toBe(false)
+  expect(healthy!.querySelector<HTMLSpanElement>(':scope > div > span')!.textContent).toBe(detail)
+  expect(fixture.terminalMount).toHaveBeenCalledTimes(1)
+  expect(fixture.state.recoverSession).toHaveBeenCalledTimes(1)
+})
+
+it('hides the real retained recap while History covers it and reuses its observation after closing History', async () => {
+  const format = vi.spyOn(recapFacts, 'launcherTimelineRecap')
+  let completeRecap!: (value: AgentSessionHistoryPage) => void
+  fixture.historyPage.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>(done => { completeRecap = done }))
+  fixture.state.sessions = [{ ...session, processState: 'interrupted' }]
+  const renderPane = () => root.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{workspaceId:'workspace',tabGroupId:'group',tabId:'tab',regionId:'region'}} />)
+  try {
+    await act(async () => renderPane())
+    expect(container.textContent).toContain('Reading saved conversation…')
+    await openAgentHistory(container)
+    expect(container.querySelector('[aria-label="Conversation history"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
+    fixture.state.timelines = { [control.agentSessionId]: { agentSessionId: control.agentSessionId, revision: 1,
+      items: [{ id: 'covered', agentSessionId: control.agentSessionId, kind: 'assistant_message', status: 'complete',
+        source: 'native-hook', title: 'Reply', createdAt: 1, updatedAt: 1, content: 'Covered captured excerpt' }] } }
+    await act(async () => renderPane())
+    expect(format).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('Covered captured excerpt')
+    await act(async () => completeRecap(page('hidden-recap', null)))
+    expect(container.querySelector('[aria-label="Session recap"]')).toBeNull()
+    fixture.state.timelines = {}
+    await act(async () => button('Session').click())
+    expect(container.querySelector('[aria-label="Conversation history"]')).toBeNull()
+    expect(container.textContent).toContain('body hidden-recap')
+    expect(fixture.historyPage.mock.calls).toEqual([
+      [{ hostId: control.hostId, agentSessionId: control.agentSessionId }, { limit: 6 }], [control, undefined]
+    ])
+    expect(fixture.state.recoverSession).not.toHaveBeenCalled()
+    expect(fixture.write).not.toHaveBeenCalled()
+  } finally { format.mockRestore() }
 })
 
 it('does not start independent history reads for a hidden pending view', async () => {
