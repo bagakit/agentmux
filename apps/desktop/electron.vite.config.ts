@@ -4,7 +4,13 @@ import { resolve } from 'node:path'
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ['@agentmux/client-ui'] })],
+    resolve: {
+      // Main consumes this pure module from the same source as Renderer, without a UI runtime dependency.
+      alias: {
+        '@agentmux/client-ui/pasted-images': resolve(import.meta.dirname, '../../packages/client-ui/src/lib/pasted-images.ts')
+      }
+    },
     build: { rollupOptions: { input: resolve(import.meta.dirname, 'src/main/index.ts') } }
   },
   preload: {
