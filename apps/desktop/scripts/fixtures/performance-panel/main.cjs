@@ -386,38 +386,50 @@ app.whenReady().then(async()=>{
       await capture('1480-dark-unknown.png','Unavailable App source / no fabricated zero / other source details retained')
       await click(q('[data-performance-observation-toggle]'));assert.equal(leases.size,0,'Pause释放此consumer');await capture('1480-dark-paused.png','Pause only here / latest reading kept')
       await click(q('[data-performance-observation-toggle]'));assert.equal(leases.size,1)
-      // private realwindow.hide：不改getter、不fake visibilityevent、不固定动画clock。
-      raw.windowPhase='hide-requested'
-      await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:false})
-      win.minimize();win.hide()
-      raw.visibilityBeforeWait={visible:win.isVisible(),minimized:win.isMinimized(),page:await read('({hidden:document.hidden,visibilityState:document.visibilityState})')}
-      await until('document.hidden===true');await pause(100)
-      raw.windowPhase='hidden-checkpoint'
-      const nativeBeforeHiddenRead={visible:win.isVisible(),minimized:win.isMinimized()}
-      const hiddenPage=await read('({hidden:document.hidden,visibilityState:document.visibilityState,popoverPresent:!!document.querySelector(".performance-popover")})')
-      const nativeAfterHiddenRead={visible:win.isVisible(),minimized:win.isMinimized()}
-      raw.hidden={at:Date.now(),documentHidden:hiddenPage.hidden,visibilityState:hiddenPage.visibilityState,
-        leases:leases.size,popoverPresent:hiddenPage.popoverPresent,nativeBeforeHiddenRead,nativeAfterHiddenRead}
-      assert.equal(nativeBeforeHiddenRead.visible,false,'显式恢复前原生窗口保持隐藏，真实page读取前')
-      assert.equal(nativeAfterHiddenRead.visible,false,'显式恢复前原生窗口保持隐藏，真实page读取后')
-      assert.equal(hiddenPage.hidden,true,'显式恢复前真实页面仍为hidden')
-      assert.equal(hiddenPage.visibilityState,'hidden','显式恢复前真实visibilityState仍为hidden')
-      assert.equal(raw.hidden.leases,0,'True hidden释放真实此UI lease')
-      assert.equal(hiddenPage.popoverPresent,false,'True hidden原浮窗DOM离场')
-      raw.windowPhase='explicit-show-after-hidden'
-      raw.actions.push({type:'explicit-show-after-hidden',at:Date.now()})
-      win.restore();win.showInactive();await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await until('document.hidden===false&&!!document.querySelector(".performance-popover")');await settle()
-      const nativeBeforeShownRead={visible:win.isVisible(),minimized:win.isMinimized()}
-      const shownPage=await read('({hidden:document.hidden,visibilityState:document.visibilityState,popoverPresent:!!document.querySelector(".performance-popover")})')
-      const nativeAfterShownRead={visible:win.isVisible(),minimized:win.isMinimized()}
-      raw.shown={at:Date.now(),documentHidden:shownPage.hidden,visibilityState:shownPage.visibilityState,
-        leases:leases.size,popoverPresent:shownPage.popoverPresent,nativeBeforeShownRead,nativeAfterShownRead}
-      assert.equal(nativeBeforeShownRead.visible,true,'显式恢复后原生窗口可见，真实page读取前')
-      assert.equal(nativeAfterShownRead.visible,true,'显式恢复后原生窗口可见，真实page读取后')
-      assert.equal(shownPage.hidden,false,'显式恢复后真实页面可见')
-      assert.equal(shownPage.visibilityState,'visible','显式恢复后真实visibilityState可见')
-      assert.equal(shownPage.popoverPresent,true,'显式恢复后浮窗真实恢复')
-      assert.equal(raw.shown.leases,1,'Show restores one owned observation')
+      // Separate real hide/minimize actions; keep native/page/lease/DOM oracles.
+      // Issuing both asynchronous actions together also failed without product code.
+      for (const operation of ['hide', 'minimize']) {
+        raw.windowPhase=operation+'-requested'
+        await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:false})
+        win[operation]()
+        raw[operation+'BeforeWait']={visible:win.isVisible(),minimized:win.isMinimized(),page:await read('({hidden:document.hidden,visibilityState:document.visibilityState})')}
+        await until('document.hidden===true');await pause(100)
+        raw.windowPhase=operation+'-checkpoint'
+        const nativeBeforeHiddenRead={visible:win.isVisible(),minimized:win.isMinimized()}
+        const hiddenPage=await read('({hidden:document.hidden,visibilityState:document.visibilityState,popoverPresent:!!document.querySelector(".performance-popover")})')
+        const nativeAfterHiddenRead={visible:win.isVisible(),minimized:win.isMinimized()}
+        const hidden={at:Date.now(),documentHidden:hiddenPage.hidden,visibilityState:hiddenPage.visibilityState,
+          leases:leases.size,popoverPresent:hiddenPage.popoverPresent,nativeBeforeHiddenRead,nativeAfterHiddenRead}
+        raw[operation==='hide'?'hidden':'minimized']=hidden
+        assert.equal(nativeBeforeHiddenRead.visible,false,'显式恢复前原生窗口保持隐藏，真实page读取前')
+        assert.equal(nativeAfterHiddenRead.visible,false,'显式恢复前原生窗口保持隐藏，真实page读取后')
+        if(operation==='minimize') {
+          assert.equal(nativeBeforeHiddenRead.minimized,true,'Actual minimized positive control before the page read')
+          assert.equal(nativeAfterHiddenRead.minimized,true,'Actual minimized positive control after the page read')
+        }
+        assert.equal(hiddenPage.hidden,true,'显式恢复前真实页面仍为hidden')
+        assert.equal(hiddenPage.visibilityState,'hidden','显式恢复前真实visibilityState仍为hidden')
+        assert.equal(hidden.leases,0,'True hidden释放真实此UI lease')
+        assert.equal(hiddenPage.popoverPresent,false,'True hidden原浮窗DOM离场')
+        raw.windowPhase='explicit-show-after-'+operation
+        raw.actions.push({type:raw.windowPhase,at:Date.now()})
+        if(operation==='minimize')win.restore()
+        win.showInactive();await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await until('document.hidden===false&&!!document.querySelector(".performance-popover")');await settle()
+        const nativeBeforeShownRead={visible:win.isVisible(),minimized:win.isMinimized()}
+        const shownPage=await read('({hidden:document.hidden,visibilityState:document.visibilityState,popoverPresent:!!document.querySelector(".performance-popover")})')
+        const nativeAfterShownRead={visible:win.isVisible(),minimized:win.isMinimized()}
+        const shown={at:Date.now(),documentHidden:shownPage.hidden,visibilityState:shownPage.visibilityState,
+          leases:leases.size,popoverPresent:shownPage.popoverPresent,nativeBeforeShownRead,nativeAfterShownRead}
+        raw[operation==='hide'?'shown':'restored']=shown
+        assert.equal(nativeBeforeShownRead.visible,true,'显式恢复后原生窗口可见，真实page读取前')
+        assert.equal(nativeAfterShownRead.visible,true,'显式恢复后原生窗口可见，真实page读取后')
+        assert.equal(nativeBeforeShownRead.minimized,false,'Actual restored window is not minimized before the page read')
+        assert.equal(nativeAfterShownRead.minimized,false,'Actual restored window is not minimized after the page read')
+        assert.equal(shownPage.hidden,false,'显式恢复后真实页面可见')
+        assert.equal(shownPage.visibilityState,'visible','显式恢复后真实visibilityState可见')
+        assert.equal(shownPage.popoverPresent,true,'显式恢复后浮窗真实恢复')
+        assert.equal(shown.leases,1,'Show restores one owned observation')
+      }
       await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
       await pause(500)
       assert.equal(await read('[...document.querySelector(".performance-popover").querySelectorAll("*")].flatMap(n=>n.getAnimations()).filter(a=>a.playState==="running").length'),0,'Reduced浮窗无持续animation')
