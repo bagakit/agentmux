@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "rootDir": "../../../../..", "module": "ESNext", "moduleResolution": "Bundler", "noEmit": true, "allowImportingTsExtensions": true },
+  "include": ["../../native-conversation-process.test.ts", "vitest.owning.config.mts"]
+}
