@@ -1,6 +1,6 @@
 import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress } from '@agentmux/core/control'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from './scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicPhysicalPath } from './scratch-topics'
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
 export function directoryIdentity(hostId: string, path: string): string {
@@ -71,6 +71,11 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
   const seeds = new Map<string, Set<string>>()
   const conflictingResources = new Set<string>()
   const workspaces = new Map(config?.workspaces.map(workspace => [workspace.id, workspace]))
+  const scratchWorkspace = workspaces.get(SCRATCH_WORKSPACE_ID)
+  const topicHomes = new Map(scratchWorkspace ? topics.map(topic => [
+    directoryIdentity(scratchWorkspace.hostId, scratchTopicIdentityPath(scratchWorkspace, topic)),
+    scratchTopicPhysicalPath(scratchWorkspace, topic)
+  ]) : [])
   const addZone = (zoneId: string, workspaceId: string, spaceId: string, homePath?: string): void => {
     const workspace = workspaces.get(workspaceId)
     // Read the original factory/context pair without minting or rewriting its opaque identity.
@@ -78,7 +83,7 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     try { homeContext = JSON.parse(zoneId); directoryContext = JSON.parse(spaceId) } catch { /* Unknown original context is retained. */ }
     const originalHome = Array.isArray(homeContext) && homeContext.length === 2 && homeContext[1] === 'home' &&
       typeof homeContext[0] === 'string' && homeZoneId(homeContext[0]) === zoneId
-    const resourcePath = homePath ?? (originalHome && zoneId === homeZoneId(spaceId) && workspace?.id === SCRATCH_WORKSPACE_ID &&
+    const resourcePath = homePath ?? topicHomes.get(spaceId) ?? (originalHome && zoneId === homeZoneId(spaceId) && workspace?.id === SCRATCH_WORKSPACE_ID &&
       Array.isArray(directoryContext) && directoryContext.length === 2 && directoryContext[0] === workspace.hostId &&
       typeof directoryContext[1] === 'string' && (directoryContext[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(directoryContext[1]) || directoryContext[1].startsWith('\\\\')) ? directoryContext[1] : undefined)
     const fact: AgentMuxZoneFact = workspace && (!originalHome || resourcePath) ? {
@@ -114,8 +119,8 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
       hostId: scratch.hostId, directoryPath: scratch.path, projectId: null })
     addZone(homeZoneId(container), scratch.id, container, scratch.path)
     for (const topic of topics) {
-      const path = topic.directoryPath.startsWith('/') ? topic.directoryPath : `${scratch.path.replace(/\/$/, '')}/${topic.directoryPath}`
-      const spaceId = directoryIdentity(scratch.hostId, path)
+      const path = scratchTopicPhysicalPath(scratch, topic)
+      const spaceId = directoryIdentity(scratch.hostId, scratchTopicIdentityPath(scratch, topic))
       spaces.set(spaceId, { spaceId, kind: topic.id === PMO_TEAMS_TOPIC_ID || topic.soul ? 'mote' : 'topic',
         name: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title, hostId: scratch.hostId,
         directoryPath: path, projectId: null, topicId: topic.id, ...(topic.readError ? { issue: topic.readError } : {}) })

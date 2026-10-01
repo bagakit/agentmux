@@ -17,7 +17,7 @@
 #error "Atomic confined no-replace Workspace move is unavailable on this platform"
 #endif
 
-static void fail_with_errno(const char *operation) {
+static _Noreturn void fail_with_errno(const char *operation) {
   fprintf(stderr, "errno=%d operation=%s message=%s\n", errno, operation, strerror(errno));
   exit(1);
 }
@@ -68,18 +68,152 @@ static int atomic_move_no_replace(
   );
 }
 
+static void commit_barrier(int enabled, int ready_fd, int release_fd, const char *phase) {
+  if (!enabled) return;
+  char signal = 'R';
+  if (write(ready_fd, &signal, 1) != 1) fail_with_errno(phase);
+  if (read(release_fd, &signal, 1) != 1) fail_with_errno(phase);
+}
+
+static int ascii_identity_character(char value) {
+  return (value >= 'a' && value <= 'z') || (value >= 'A' && value <= 'Z') ||
+    (value >= '0' && value <= '9');
+}
+
+static const char *alias_basename(const char *source, const char *destination, const char **parent) {
+  if (strncmp(source, "scratch/", 8) != 0) {
+    errno = EINVAL;
+    fail_with_errno("validate-alias-source");
+  }
+  const char *name = source + 8;
+  const char *identity = NULL;
+  if (strncmp(name, "topic--launcher--", 17) == 0) identity = name + 17;
+  if (strncmp(name, "topic--session--", 16) == 0) identity = name + 16;
+  if (strncmp(name, "topic--view--", 13) == 0) identity = name + 13;
+  if (identity == NULL || !ascii_identity_character(identity[0]) || strlen(identity) > 128) {
+    errno = EINVAL;
+    fail_with_errno("validate-alias-identity");
+  }
+  for (const char *cursor = identity; *cursor != '\0'; cursor += 1) {
+    if (!ascii_identity_character(*cursor) && *cursor != '-' && *cursor != '_') {
+      errno = EINVAL;
+      fail_with_errno("validate-alias-identity");
+    }
+  }
+  const char *destination_name;
+  if (strncmp(destination, "motes/", 6) == 0) {
+    *parent = "motes";
+    destination_name = destination + 6;
+  } else if (strncmp(destination, "topics/", 7) == 0) {
+    *parent = "topics";
+    destination_name = destination + 7;
+  } else {
+    errno = EINVAL;
+    fail_with_errno("validate-alias-destination");
+  }
+  if (strcmp(name, destination_name) != 0) {
+    errno = EINVAL;
+    fail_with_errno("validate-alias-basename");
+  }
+  return name;
+}
+
+static void verify_entry(int fd, const char *name, const struct stat *expected, int directory,
+                         const char *operation) {
+  struct stat current;
+  if (fstatat(fd, name, &current, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) != 0) {
+    fail_with_errno(operation);
+  }
+  if (current.st_dev != expected->st_dev || current.st_ino != expected->st_ino ||
+      (directory ? !S_ISDIR(current.st_mode) : !S_ISLNK(current.st_mode))) {
+    errno = ESTALE;
+    fail_with_errno(operation);
+  }
+}
+
+static void atomic_alias_swap(int root_fd, const char *source, const char *destination,
+                              unsigned long long expected_dev, unsigned long long expected_ino,
+                              int before_barrier, int after_barrier) {
+  const char *parent = NULL;
+  const char *name = alias_basename(source, destination, &parent);
+  const int source_fd = openat(root_fd, "scratch", O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (source_fd < 0) fail_with_errno("open-alias-source-parent");
+  const int destination_fd = openat(root_fd, parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (destination_fd < 0) fail_with_errno("open-alias-destination-parent");
+  struct stat source_parent, destination_parent, original, existing;
+  if (fstat(source_fd, &source_parent) != 0 || fstat(destination_fd, &destination_parent) != 0) {
+    fail_with_errno("stat-alias-parent");
+  }
+  if (fstatat(source_fd, name, &original, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) != 0) {
+    fail_with_errno("stat-alias-source");
+  }
+  if (!S_ISDIR(original.st_mode) || (unsigned long long)original.st_dev != expected_dev ||
+      (unsigned long long)original.st_ino != expected_ino) {
+    errno = ESTALE;
+    fail_with_errno("verify-alias-source");
+  }
+  if (original.st_dev != destination_parent.st_dev) {
+    errno = EXDEV;
+    fail_with_errno("verify-alias-device");
+  }
+  if (fstatat(destination_fd, name, &existing, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) == 0) {
+    errno = EEXIST;
+    fail_with_errno("verify-alias-destination-absent");
+  }
+  if (errno != ENOENT) fail_with_errno("verify-alias-destination-absent");
+  const size_t link_size = strlen(parent) + strlen(name) + 5;
+  char *link_text = malloc(link_size);
+  if (link_text == NULL) fail_with_errno("allocate-alias-link");
+  snprintf(link_text, link_size, "../%s/%s", parent, name);
+  if (symlinkat(link_text, destination_fd, name) != 0) fail_with_errno("create-alias-stage");
+  struct stat staged;
+  if (fstatat(destination_fd, name, &staged, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) != 0) {
+    fail_with_errno("stat-alias-stage");
+  }
+  commit_barrier(before_barrier, 3, 4, "before-commit-alias-barrier");
+  verify_entry(root_fd, "scratch", &source_parent, 1, "verify-alias-source-parent");
+  verify_entry(root_fd, parent, &destination_parent, 1, "verify-alias-destination-parent");
+  verify_entry(source_fd, name, &original, 1, "verify-alias-source");
+  verify_entry(destination_fd, name, &staged, 0, "verify-alias-stage");
+  char *observed_link = malloc(link_size);
+  if (observed_link == NULL) fail_with_errno("allocate-alias-observation");
+  const ssize_t length = readlinkat(destination_fd, name, observed_link, link_size);
+  if (length < 0) fail_with_errno("read-alias-stage");
+  if ((size_t)length != strlen(link_text) || memcmp(observed_link, link_text, (size_t)length) != 0) {
+    errno = ESTALE;
+    fail_with_errno("verify-alias-link");
+  }
+  if (renameatx_np(source_fd, name, destination_fd, name,
+                   RENAME_SWAP | RENAME_NOFOLLOW_ANY | RENAME_RESOLVE_BENEATH) != 0) {
+    fail_with_errno("alias-swap");
+  }
+  commit_barrier(after_barrier, 5, 6, "after-commit-alias-barrier");
+  verify_entry(source_fd, name, &staged, 0, "after-commit-verify-alias");
+  verify_entry(destination_fd, name, &original, 1, "after-commit-verify-destination");
+  if (fsync(source_fd) != 0 || fsync(destination_fd) != 0) fail_with_errno("after-commit-sync-alias");
+  free(observed_link);
+  free(link_text);
+  close(source_fd);
+  close(destination_fd);
+}
+
 int main(int argc, char **argv) {
-  if (argc < 6 || argc > 8) {
+  const int alias_swap = argc > 1 && strcmp(argv[1], "--alias-swap") == 0;
+  if (alias_swap) { argc -= 1; argv += 1; }
+  const int required = alias_swap ? 8 : 6;
+  if (argc < required || argc > required + 2) {
     fprintf(
       stderr,
       "usage: workspace-move <root> <dev> <ino> <source> <destination> "
       "[--before-commit-barrier] [--after-commit-barrier]\n"
+      "       workspace-move --alias-swap <root> <dev> <ino> <source> <destination> "
+      "<source-dev> <source-ino> [--before-commit-barrier] [--after-commit-barrier]\n"
     );
     return 64;
   }
   int before_commit_barrier = 0;
   int after_commit_barrier = 0;
-  for (int index = 6; index < argc; index += 1) {
+  for (int index = required; index < argc; index += 1) {
     if (strcmp(argv[index], "--before-commit-barrier") == 0) {
       before_commit_barrier = 1;
     } else if (strcmp(argv[index], "--after-commit-barrier") == 0) {
@@ -103,6 +237,12 @@ int main(int argc, char **argv) {
 
   validate_relative_path(argv[4]);
   validate_relative_path(argv[5]);
+  if (alias_swap) {
+    atomic_alias_swap(root_fd, argv[4], argv[5], parse_identity(argv[6], "source device"),
+                      parse_identity(argv[7], "source inode"), before_commit_barrier, after_commit_barrier);
+    close(root_fd);
+    return 0;
+  }
   struct stat existing;
   if (fstatat(
         root_fd,

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
@@ -17,7 +17,8 @@ afterEach(async () => {
 async function fixture() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-default-knowledge-')))
   roots.push(root)
-  const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'folder' }
+  const path = join(root, 'scratch'); await mkdir(path)
+  const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path, kind: 'folder' }
   return { root, workspace, topics: new ScratchTopics() }
 }
 
@@ -33,8 +34,8 @@ it('delivers new primary defaults and exactly one app-owned role through the act
   expect(prepared.prompt).toContain('no particular memory filename or taxonomy is required.')
   expect(prepared.prompt).toContain('do not claim to have inherited unseen conversation, running tools or another Agent\'s context.')
   expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
-  expect(prepared.absolutePath).toBe(join(h.root, primary.directoryPath))
-  expect(await readFile(join(h.root, primary.directoryPath, MOTE_SOUL_PATH), 'utf8')).toBe(DEFAULT_MOTE_SOUL)
+  expect(prepared.absolutePath).toBe(primary.physicalDirectoryPath!)
+  expect(await readFile(join(primary.physicalDirectoryPath!, MOTE_SOUL_PATH), 'utf8')).toBe(DEFAULT_MOTE_SOUL)
 })
 
 it('keeps custom Mote Topic Wiki and ordinary Topic defaults on their original owners', async () => {
@@ -62,7 +63,7 @@ it('preserves both edited homes and intentionally repeated user Wiki byte-for-by
   const retained: Array<{ id: string; soul: string; wiki: string; directory: string; result: string }> = []
   for (const id of ids) {
     const mote = await h.topics.ensureMote(h.workspace, id)
-    const directory = join(h.root, mote.directoryPath)
+    const directory = mote.physicalDirectoryPath!
     const soul = '# SOUL\n\nUser personality for ' + id + '.\n'
     const wiki = '# User Guide\n\n' + MOTE_COORDINATION_ROLE + '\n\nKeep my local receipt.\n'
     const result = 'User result and original source ' + id + '\n'
@@ -91,7 +92,7 @@ it('preserves both edited homes and intentionally repeated user Wiki byte-for-by
 it('changes the primary Wiki only on explicit reset and keeps saved personality and custom defaults', async () => {
   const h = await fixture()
   const primary = await h.topics.ensureMote(h.workspace, PMO_TEAMS_TOPIC_ID)
-  const directory = join(h.root, primary.directoryPath)
+  const directory = primary.physicalDirectoryPath!
   const savedSoul = '# SOUL\n\nRetain this user personality.\n'
   const savedWiki = '# User Wiki\n\nKeep it until I explicitly reset.\n'
   await writeFile(join(directory, MOTE_SOUL_PATH), savedSoul)

@@ -5,8 +5,7 @@ import {
   Rocket, Shapes, SquareTerminal, Wrench
 } from 'lucide-react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
-import { joinWorkspacePath } from './workspace-paths'
+import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from '../../../shared/scratch-topics'
 import type { WorkspaceProject } from './workspace-projects'
 import { directoryIdentity } from '../../../shared/space-addresses'
 
@@ -69,9 +68,9 @@ export function folderSpaceIconTarget(project: Pick<WorkspaceProject, 'hostId' |
 
 export function topicSpaceIconTarget(
   workspace: Pick<WorkspaceRecord, 'hostId' | 'path'> & { id?: string },
-  topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'title' | 'soul'>
+  topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'title' | 'soul' | 'identityDirectoryPath'>
 ): SpaceIconTarget {
-  const key = spaceObjectIdentityKey(workspace.hostId, absoluteDirectory(topic.directoryPath) ? topic.directoryPath : joinWorkspacePath(workspace.path, topic.directoryPath))
+  const key = spaceObjectIdentityKey(workspace.hostId, scratchTopicIdentityPath(workspace, topic))
   return {
     key,
     name: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title,

@@ -104,7 +104,12 @@ export type ScratchTopicCollaborator = {
 
 export type ScratchTopicSnapshot = {
   id: string
+  /** File/document addresses stay relative to the original logical container. */
   directoryPath: string
+  /** Confirmed physical home; new execution and filesystem access use this path. */
+  physicalDirectoryPath?: string
+  /** Original durable directory identity, independent of a home relocation. */
+  identityDirectoryPath?: string
   topicPath: string
   title: string
   summary: string
@@ -147,15 +152,58 @@ function trimTrailingSeparators(path: string): string {
   return path.replace(/[\\/]+$/, '') || path
 }
 
+export function scratchTopicStorageRoots(scratchRoot: string): { legacy: string; topics: string; motes: string } {
+  const legacy = trimTrailingSeparators(scratchRoot)
+  const index = Math.max(legacy.lastIndexOf('/'), legacy.lastIndexOf('\\'))
+  const parent = legacy.slice(0, index + 1)
+  return { legacy, topics: `${parent}topics`, motes: `${parent}motes` }
+}
+
+function absoluteDirectory(path: string): boolean {
+  return path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\')
+}
+
+function directoryChild(root: string, child: string): string {
+  return `${trimTrailingSeparators(root)}${root.includes('\\') && !root.includes('/') ? '\\' : '/'}${child}`
+}
+
+export function scratchTopicIdentityPath(workspace: { path: string }, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath'>): string {
+  return topic.identityDirectoryPath ?? (absoluteDirectory(topic.directoryPath) ? topic.directoryPath : directoryChild(workspace.path, topic.directoryPath))
+}
+
+export function scratchTopicPhysicalPath(workspace: { path: string }, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'physicalDirectoryPath'>): string {
+  return topic.physicalDirectoryPath ?? (absoluteDirectory(topic.directoryPath) ? topic.directoryPath : directoryChild(workspace.path, topic.directoryPath))
+}
+
+export function scratchTopicLogicalPath(workspace: { path: string }, topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath'>): string | null {
+  const name = scratchTopicDirectoryName(topic.id)
+  return topic.directoryPath === name || scratchTopicIdFromWorkspacePath(workspace.path, topic.directoryPath) === topic.id ? name : null
+}
+
+/** Convert a logical file address for copy/new terminals; filesystem authority remains in Main. */
+export function scratchWorkspaceFilePath(workspace: { id: string; path: string }, topics: readonly ScratchTopicSnapshot[] | null | undefined, path: string): string | null {
+  if (path.startsWith('/') || path.includes('\\') || path.split('/').some(part => part === '.' || part === '..')) return null
+  if (workspace.id !== SCRATCH_WORKSPACE_ID || !path) return path ? directoryChild(workspace.path, path) : workspace.path
+  const [name, ...parts] = path.split('/')
+  const id = scratchTopicIdFromDirectoryName(name!)
+  if (!id) return directoryChild(workspace.path, path)
+  const topic = topics?.find(item => item.id === id)
+  if (!topic || topic.readError) return null
+  const physical = scratchTopicPhysicalPath(workspace, topic)
+  return parts.length ? directoryChild(physical, parts.join('/')) : physical
+}
+
 export function scratchTopicIdFromWorkspacePath(
   scratchRoot: string,
   workspacePath: string
 ): string | null {
-  const root = trimTrailingSeparators(scratchRoot)
-  if (!workspacePath.startsWith(`${root}/`) && !workspacePath.startsWith(`${root}\\`)) return null
-  const relative = workspacePath.slice(root.length + 1)
-  if (!relative || relative.includes('/') || relative.includes('\\')) return null
-  return scratchTopicIdFromDirectoryName(relative)
+  for (const root of Object.values(scratchTopicStorageRoots(scratchRoot))) {
+    if (!workspacePath.startsWith(`${root}/`) && !workspacePath.startsWith(`${root}\\`)) continue
+    const relative = workspacePath.slice(root.length + 1)
+    if (!relative || relative.includes('/') || relative.includes('\\')) return null
+    return scratchTopicIdFromDirectoryName(relative)
+  }
+  return null
 }
 
 export function workspaceOwnsSessionPath(

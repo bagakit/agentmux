@@ -1,8 +1,8 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { EventEmitter } from 'node:events'
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient as ActualCoreClient, type AgentMuxAgentPromptInput } from '../../../packages/core/src/client.js'
 import { AgentMuxMemoryAgentSessionStore as ActualCoreMemoryStore } from '../../../packages/core/src/agent-session-store.js'
@@ -661,7 +661,8 @@ describe('RuntimeController configuration transaction', () => {
   })
 
   it('launches a Scratch Agent inside its filesystem Topic with wiki context', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'agentmux-runtime-topic-'))
+    const parent = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-runtime-topic-')))
+    const root = join(parent, 'scratch'); await mkdir(root)
     try {
       const controller = await configuredController()
       const client = runtimeFixture.FakeClient.instances[0]!
@@ -696,10 +697,10 @@ describe('RuntimeController configuration transaction', () => {
       }, config)).rejects.toThrow('stopped after input capture')
 
       expect(client.createAgent).toHaveBeenCalledWith(expect.objectContaining({
-        workspacePath: expect.stringMatching(/topic--view--shared-work$/),
+        workspacePath: join(await realpath(parent), 'topics', 'topic--view--shared-work'),
         env: expect.objectContaining({
           EXECUTOR_SETTING: 'kept',
-          AGENTMUX_WIKI_DIR: expect.stringMatching(/topic--view--shared-work$/)
+          AGENTMUX_WIKI_DIR: join(await realpath(parent), 'topics', 'topic--view--shared-work')
         }),
         // Topic 说明是 AgentMux 自己的话：作为 agentMuxNote 分开传给 Core 的信封出口署名，
         // 不再被拼进用户段。用户的真实请求原样留在 prompt。
@@ -707,16 +708,17 @@ describe('RuntimeController configuration transaction', () => {
         prompt: 'Ship the result'
       }))
     } finally {
-      await rm(root, { recursive: true, force: true })
+      await rm(parent, { recursive: true, force: true })
     }
   })
 
   it('forwards the original main Mote notes through the public Core composer while keeping the visible exploration request raw', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'agentmux-main-mote-notes-'))
+    const parent = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-main-mote-notes-')))
+    const root = join(parent, 'scratch'); await mkdir(root)
     try {
       const workspace = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'folder' as const }
       const topics = new ScratchTopics(), snapshot = await topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)
-      const directory = join(root, snapshot.directoryPath), soul = '# User-owned main Mote personality\nKeep this original identity.\n', wiki = '# User-owned guide\nPreserve these original notes.\n'
+      const directory = snapshot.physicalDirectoryPath!, soul = '# User-owned main Mote personality\nKeep this original identity.\n', wiki = '# User-owned guide\nPreserve these original notes.\n'
       await writeFile(join(directory, 'SOUL.md'), soul); await writeFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), wiki)
       const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
       const config: AppConfig = { ...localConfig, workspaces: [workspace], executors: {
@@ -735,11 +737,12 @@ describe('RuntimeController configuration transaction', () => {
       expect(wire.text).toMatch(new RegExp(`</amux>\\n\\n${user}$`))
       expect(wire.systemContext).toContain(MOTE_COORDINATION_ROLE); expect(wire.systemContext).not.toContain(user)
       expect(await readFile(join(directory, 'SOUL.md'), 'utf8')).toBe(soul); expect(await readFile(join(directory, SCRATCH_TOPIC_WIKI_PATH), 'utf8')).toBe(wiki)
-      expect(await readdir(root)).toEqual([snapshot.directoryPath])
+      expect(await readdir(dirname(directory))).toEqual([snapshot.directoryPath])
+      expect(await readdir(root)).toEqual([])
       await recordGoalCoordinationEvidence('initial-main-mote', { executorId: input.executorId, providerId: input.providerId, workspacePath: input.workspacePath,
         prompt: input.prompt, agentMuxNote: input.agentMuxNote, finalWire: wire.text, systemContext: wire.systemContext,
         boundary: 'actual Main createAgent input, then actual public Core composeAgentLaunchPrompt; no process execution asserted' })
-    } finally { await rm(root, { recursive: true, force: true }) }
+    } finally { await rm(parent, { recursive: true, force: true }) }
   })
 
   it('launches two Executors through one Provider with their own commands and arguments', async () => {

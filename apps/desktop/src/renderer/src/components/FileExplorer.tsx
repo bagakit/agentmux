@@ -34,7 +34,7 @@ import {
 } from 'lucide-react'
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
-import { scratchTopicIdFromDirectoryName } from '../../../shared/scratch-topics'
+import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'
@@ -45,10 +45,8 @@ import {
   isNavigationKey,
   resolveFileExplorerNavigationTarget
 } from './file-tree/file-explorer-keyboard-navigation'
-import {
-  getRevealAncestorPaths,
-  joinWorkspacePath
-} from '../lib/workspace-paths'
+import { getRevealAncestorPaths } from '../lib/workspace-paths'
+import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
@@ -453,11 +451,15 @@ export function FileExplorer({
   // 见 file-tree/file-explorer-refresh.ts：把结构与 git 状态收成一个动作，是因为它们分开时
   // 漏掉的那一半完全静默——#750 就是 git 那半边从来没人调。
   const refreshExplorer = useCallback(
-    async () => await refreshFileExplorer({
-      refreshTree: tree.refreshTree,
-      refreshGitStatus
-    }),
-    [refreshGitStatus, tree.refreshTree]
+    async () => {
+      await Promise.all([
+        refreshFileExplorer({ refreshTree: tree.refreshTree, refreshGitStatus }),
+        workspaceId && isScratchWorkspaceId(workspaceId)
+          ? useAppStore.getState().refreshScratchTopics(workspaceId, true)
+          : Promise.resolve()
+      ])
+    },
+    [refreshGitStatus, tree.refreshTree, workspaceId]
   )
 
   function setExpanded(update: SetStateAction<Set<string>>): void {
@@ -669,10 +671,21 @@ export function FileExplorer({
       : [node.path]
   }
 
+  function physicalFilePath(path: string): string | null {
+    if (!workspace) return null
+    const absolute = scratchWorkspaceFilePath(workspace,
+      scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace), path)
+    if (absolute === null) reportError(new Error('The original directory read is not confirmed. Refresh Files and retry this operation.'))
+    return absolute
+  }
+
   async function copyContextPaths(node: TreeNode, kind: 'absolute' | 'relative'): Promise<void> {
     if (!workspace) return
+    const paths = pathsForContext(node)
+    const absolutePaths = kind === 'absolute' ? paths.map(physicalFilePath) : null
+    if (absolutePaths?.some(path => path === null)) return
     // 缩写只对本机绝对路径做：相对路径不含 home，远程主机的路径套本机 home 会指向对面不存在的地方。
-    const formatted = formatPathsForCopy(pathsForContext(node), kind, workspace.path)
+    const formatted = absolutePaths ? absolutePaths.join('\n') : formatPathsForCopy(paths, kind, workspace.path)
     const text =
       kind === 'absolute' && workspace.hostId === 'local'
         ? applyCopyPathStyle(formatted, { home: localHome, copyPathsAsAbsolute })
@@ -683,7 +696,9 @@ export function FileExplorer({
   async function openDirectoryInTerminal(node: TreeNode): Promise<void> {
     if (!workspace || !activePaneId || !node.isDirectory) return
     if (onOpenTerminal) { await onOpenTerminal(node.path); return }
-    await launchTerminal(activePaneId, undefined, joinWorkspacePath(workspace.path, node.path))
+    const path = physicalFilePath(node.path)
+    if (path === null) return
+    await launchTerminal(activePaneId, undefined, path)
   }
 
   async function openDirectoryAsProject(node: TreeNode): Promise<void> {
@@ -696,8 +711,10 @@ export function FileExplorer({
         isDirectory: node.isDirectory
       })
       if (!projectInput) return
+      const path = physicalFilePath(node.path)
+      if (path === null) return
       // Main resolves duplicates atomically and publishes before replying; do not replay a get snapshot.
-      const created = await api.workspaces.add(projectInput)
+      const created = await api.workspaces.add({ ...projectInput, path })
       await useAppStore.getState().selectWorkspace(created.id)
     } catch (error) {
       reportError(error)

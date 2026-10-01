@@ -1,11 +1,12 @@
 import { gitIgnoredNames } from './workspace-git-ignore.js'
-import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../shared/scratch-topics.js'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
+import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './scratch-topic-directories.js'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { realpath, stat } from 'node:fs/promises'
-import { basename, dirname, resolve, sep } from 'node:path'
+import { basename, dirname, relative, resolve, sep } from 'node:path'
 import { posix } from 'node:path'
 import type { Readable, Writable } from 'node:stream'
 import type { ExecutionHost } from '@agentmux/core'
@@ -390,7 +391,7 @@ function assertMutableRelativePath(requested: string): void {
 
 function assertCanonicalWorkspacePath(requested: string): void {
   assertMutableRelativePath(requested)
-  if (requested.startsWith('/') || posix.normalize(requested) !== requested) {
+  if (requested.startsWith('/') || posix.normalize(requested) !== requested || requested.split('/').some(part => part === '.' || part === '..')) {
     throw Object.assign(new Error(`Workspace path must be a canonical relative path: ${requested}`), {
       code: 'WORKSPACE_MOVE_INVALID_PATH'
     })
@@ -401,7 +402,20 @@ function isRelativePathWithin(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`)
 }
 
-async function localExistingPathWithin(root: string, requested: string): Promise<LocalExistingPath> {
+async function localFileScope(owner: string | WorkspaceRecord, requested: string): Promise<{ root: string; requested: string }> {
+  const root = typeof owner === 'string' ? owner : owner.path
+  const lexical = localPathWithin(root, requested)
+  if (typeof owner === 'string' || owner.id !== SCRATCH_WORKSPACE_ID || owner.hostId !== 'local') return { root, requested }
+  const parts = relative(resolve(root), lexical).split(sep)
+  const id = scratchTopicIdFromDirectoryName(parts[0]!)
+  if (!id) return { root, requested }
+  const directory = await resolveScratchTopicDirectory(root, id)
+  if (!directory) throw Object.assign(new Error('This Topic directory is unavailable. Refresh its files before retrying.'), { code: 'ENOENT' })
+  return { root: dirname(directory), requested: [basename(directory), ...parts.slice(1)].join(sep) }
+}
+
+async function localExistingPathWithin(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalExistingPath> {
+  const { root, requested } = await localFileScope(owner, requestedPath)
   const lexicalTarget = localPathWithin(root, requested)
   const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(lexicalTarget)])
   assertRealPathWithin(realRoot, realTarget, sep)
@@ -410,7 +424,8 @@ async function localExistingPathWithin(root: string, requested: string): Promise
 
 // Explorer follows explicit links for reads only. Mutations retain real-root confinement.
 // Resolve each lexical ancestor to detect directory cycles before adding another expandable level.
-async function localReadablePath(root: string, requested: string): Promise<LocalExistingPath> {
+async function localReadablePath(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalExistingPath> {
+  const { root, requested } = await localFileScope(owner, requestedPath)
   const lexical = localPathWithin(root, requested)
   const realRoot = await realpath(root)
   const seen = new Set([realRoot])
@@ -430,7 +445,8 @@ async function localReadablePath(root: string, requested: string): Promise<Local
 // open", and a second error would answer nothing. Walk up to the nearest ancestor that still exists
 // inside the workspace so the caller can reveal the folder the file used to live in. Every candidate
 // is realpath-confined, so an intermediate symlink escaping the root still throws rather than reveals.
-export async function localExistingAncestorWithin(root: string, requested: string): Promise<LocalExistingPath> {
+export async function localExistingAncestorWithin(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalExistingPath> {
+  const { root, requested } = await localFileScope(owner, requestedPath)
   const realRoot = await realpath(root)
   let lexicalTarget = localPathWithin(root, requested)
   for (;;) {
@@ -448,7 +464,8 @@ export async function localExistingAncestorWithin(root: string, requested: strin
   }
 }
 
-async function localMutablePathWithin(root: string, requested: string): Promise<LocalMutablePath> {
+async function localMutablePathWithin(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalMutablePath> {
+  const { root, requested } = await localFileScope(owner, requestedPath)
   assertMutableRelativePath(requested)
   const lexicalTarget = localPathWithin(root, requested)
   const [realRoot, realParent] = await Promise.all([realpath(root), realpath(dirname(lexicalTarget))])
@@ -907,7 +924,8 @@ export class WorkspaceFiles {
     // Delete unlinks a leaf symlink; resolve only its parent, matching the actual worker operation.
     const address = resolve(await canonical(dirname(target)), basename(target))
     const primaryName = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
-    const protectedAddress = resolve(await canonical(primary.path), primaryName)
+    const physicalPrimary = await resolveScratchTopicDirectory(primary.path, PMO_TEAMS_TOPIC_ID)
+    const protectedAddress = physicalPrimary ?? resolve(await canonical(primary.path), primaryName)
     let protectedEntry = address === protectedAddress || protectedAddress.startsWith(address + sep)
     // The original config path must also remain reachable if it uses a backing-root alias.
     for (let entry = resolve(primary.path, primaryName); !protectedEntry && dirname(entry) !== entry; entry = dirname(entry)) {
@@ -964,7 +982,7 @@ export class WorkspaceFiles {
         { code: 'REMOTE_WORKSPACE_FILE_OBSERVATION_UNSUPPORTED' }
       )
     }
-    const resolved = await localReadablePath(workspace.path, requestedPath)
+    const resolved = await localReadablePath(workspace, requestedPath)
     if (this.disposed) throw new Error('WorkspaceFiles is disposed')
     const parent = dirname(resolved.target)
     const name = basename(resolved.target)
@@ -1044,7 +1062,7 @@ export class WorkspaceFiles {
   async localPathForReveal(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') throw new Error('Reveal in file manager is available only for local paths')
-    const resolved = await localExistingAncestorWithin(workspace.path, requestedPath || '.')
+    const resolved = await localExistingAncestorWithin(workspace, requestedPath || '.')
     if (resolved.target === resolved.root) {
       return (await runLocalWorker(resolved.root, resolved.root, { action: 'reveal', name: null })).toString('utf8')
     }
@@ -1062,7 +1080,7 @@ export class WorkspaceFiles {
   async localPathForSystemOpen(workspace: WorkspaceRecord, requestedPath: string): Promise<string> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind !== 'local') throw new Error('Open with the system is available only for local paths')
-    const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    const resolved = await localExistingPathWithin(workspace, requestedPath)
     return (await runLocalWorker(dirname(resolved.target), resolved.root, {
       action: 'reveal',
       name: basename(resolved.target)
@@ -1076,7 +1094,18 @@ export class WorkspaceFiles {
     this.options.onReadDirectoryStart?.(workspace, requestedPath)
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const directory = await localReadablePath(workspace.path, requestedPath || '.')
+      if (workspace.id === SCRATCH_WORKSPACE_ID && (!requestedPath || requestedPath === '.')) {
+        const ids = await scratchStorageTopicIds(workspace.path)
+        const entities = await Promise.all(ids.map(async id => {
+          const name = scratchTopicDirectoryName(id)
+          await resolveScratchTopicDirectory(workspace.path, id)
+          return { name, path: name, isDirectory: true, isSymlink: false }
+        }))
+        const directory = await localReadablePath(workspace.path, '.')
+        const oldEntries = JSON.parse((await runLocalWorker(directory.target, directory.root, { action: 'list' })).toString('utf8')) as WorkspaceDirectoryEntry[]
+        return sortDirectoryEntries([...oldEntries.filter(entry => !scratchTopicIdFromDirectoryName(entry.name)), ...entities])
+      }
+      const directory = await localReadablePath(workspace, requestedPath || '.')
       const entries = JSON.parse((await runLocalWorker(
         directory.target,
         directory.root,
@@ -1137,7 +1166,7 @@ export class WorkspaceFiles {
     try {
       const host = this.hostFor(workspace.hostId)
       if (host.kind === 'local') {
-        const resolved = await localReadablePath(workspace.path, requestedPath)
+        const resolved = await localReadablePath(workspace, requestedPath)
         // A directory is not a read failure: the caller reveals it in the file tree. Only Main can
         // tell — path detection in the Renderer is pure-string. `resolved.target` is already the
         // root-confined realpath, so this stat classifies exactly the object the worker would open.
@@ -1206,7 +1235,7 @@ export class WorkspaceFiles {
     try {
       const host = this.hostFor(workspace.hostId)
       if (host.kind === 'local') {
-        const resolved = await localReadablePath(workspace.path, requestedPath)
+        const resolved = await localReadablePath(workspace, requestedPath)
         if ((await stat(resolved.target)).isDirectory()) return null
         const payload = await runLocalWorker(dirname(resolved.target), resolved.root, {
           action: 'read-bytes',
@@ -1276,7 +1305,7 @@ export class WorkspaceFiles {
       }
       const format = workspaceFilePreviewFormat(requestedPath)
       if (!format) return { status: 'unsupported', message: 'This file format has no built-in bytes preview.' }
-      const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+      const resolved = await localExistingPathWithin(workspace, requestedPath)
       if ((await stat(resolved.target)).isDirectory()) return { status: 'directory' }
       const snapshot = await this.snapshotBytes(workspace, requestedPath, options)
       if (format.kind === 'pdf' && Buffer.from(snapshot.bytes.subarray(0, 5)).toString('ascii') !== '%PDF-') {
@@ -1297,7 +1326,7 @@ export class WorkspaceFiles {
   private async readByteRange(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number }): Promise<WorkspaceFileByteRead> {
     if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
     const { offset, maxBytes } = options
-    const resolved = await localExistingPathWithin(workspace.path, requestedPath)
+    const resolved = await localExistingPathWithin(workspace, requestedPath)
     const document = JSON.parse((await runLocalWorker(dirname(resolved.target), resolved.root, {
       action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: WORKSPACE_FILE_MAX_BYTES,
       ...(options.expectedRevision !== undefined ? { expectedRevision: options.expectedRevision } : {})
@@ -1322,7 +1351,7 @@ export class WorkspaceFiles {
             message: 'Revision-aware atomic save is not available for remote workspaces.'
           }
         }
-        const resolved = await localMutablePathWithin(workspace.path, input.path)
+        const resolved = await localMutablePathWithin(workspace, input.path)
         const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
         return await this.serializeWrite(this.writeTails, key, async () => {
           try {
@@ -1353,7 +1382,7 @@ export class WorkspaceFiles {
   async create(workspace: WorkspaceRecord, input: CreateWorkspacePathInput): Promise<void> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const resolved = await localMutablePathWithin(workspace.path, input.path)
+      const resolved = await localMutablePathWithin(workspace, input.path)
       await runLocalWorker(resolved.parent, resolved.root, {
         action: 'create',
         name: resolved.name,
@@ -1412,8 +1441,16 @@ export class WorkspaceFiles {
 
       const host = this.hostFor(sourceWorkspace.hostId)
       if (host.kind === 'local') {
-        await this.assertPrimaryMoteRetained(sourceWorkspace, localPathWithin(sourceWorkspace.path, input.source.path))
-        await this.assertPrimaryMoteRetained(destinationWorkspace, localPathWithin(destinationWorkspace.path, input.destination.path))
+        const source = await localFileScope(sourceWorkspace, input.source.path)
+        const destination = await localFileScope(destinationWorkspace, input.destination.path)
+        const sourceAddress = localPathWithin(source.root, source.requested)
+        const destinationAddress = localPathWithin(destination.root, destination.requested)
+        await this.assertPrimaryMoteRetained(sourceWorkspace, sourceAddress)
+        await this.assertPrimaryMoteRetained(destinationWorkspace, destinationAddress)
+        const sourceParent = await localMutablePathWithin(source.root, source.requested)
+        const destinationParent = await localMutablePathWithin(destination.root, destination.requested)
+        const canonicalSource = resolve(sourceParent.parent, sourceParent.name)
+        const canonicalDestination = resolve(destinationParent.parent, destinationParent.name)
         if (process.platform !== 'darwin') {
           return moveError(
             Object.assign(new Error('Atomic confined Workspace move is not available on this platform'), {
@@ -1422,7 +1459,17 @@ export class WorkspaceFiles {
             'source'
           )
         }
-        const root = await realpath(sourceWorkspace.path)
+        let root = await realpath(source.root)
+        const destinationRoot = await realpath(destination.root)
+        if (root !== destinationRoot) {
+          const allowed = await Promise.all(Object.values(scratchTopicStorageRoots(sourceWorkspace.path)).map(path => realpath(path).catch(error => {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return resolve(path)
+            throw error
+          })))
+          if (sourceWorkspace.id !== SCRATCH_WORKSPACE_ID || !allowed.includes(root) || !allowed.includes(destinationRoot) || dirname(root) !== dirname(destinationRoot))
+            throw new Error('Move locations do not share their original Topic storage owner.')
+          root = dirname(root)
+        }
         const rootInfo = await stat(root, { bigint: true })
         try {
           await runAtomicLocalMove(
@@ -1430,8 +1477,8 @@ export class WorkspaceFiles {
             root,
             rootInfo.dev,
             rootInfo.ino,
-            input.source.path,
-            input.destination.path,
+            relative(root, canonicalSource),
+            relative(root, canonicalDestination),
             this.options.beforeLocalMoveCommit,
             this.options.afterLocalMoveCommit
           )
@@ -1462,7 +1509,7 @@ export class WorkspaceFiles {
   async delete(workspace: WorkspaceRecord, requestedPath: string): Promise<void> {
     const host = this.hostFor(workspace.hostId)
     if (host.kind === 'local') {
-      const resolved = await localMutablePathWithin(workspace.path, requestedPath)
+      const resolved = await localMutablePathWithin(workspace, requestedPath)
       await this.assertPrimaryMoteRetained(workspace, resolve(resolved.parent, resolved.name))
       await runLocalWorker(resolved.parent, resolved.root, {
         action: 'delete',

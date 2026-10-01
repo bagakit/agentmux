@@ -7,6 +7,7 @@
   "main": "./out/main/index.js",
   "scripts": {
     "build:workspace-move-helper": "node scripts/build-workspace-move-helper.mjs",
+    "migrate:topic-directories": "node scripts/migrate-topic-directories.mjs",
     "predev": "pnpm build:workspace-move-helper",
     "dev": "node scripts/dev-desktop.mjs",
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",

@@ -1,5 +1,5 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
@@ -21,8 +21,9 @@ afterEach(async () => {
 })
 
 async function scratchWorkspace(): Promise<WorkspaceRecord> {
-  const path = await mkdtemp(join(tmpdir(), 'agentmux-scratch-topic-'))
-  roots.push(path)
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-scratch-topic-')))
+  roots.push(parent)
+  const path = join(parent, 'scratch'); await mkdir(path)
   return { id: SCRATCH_WORKSPACE_ID, name: 'Scratch', hostId: 'local', path, kind: 'folder' }
 }
 
@@ -40,9 +41,10 @@ describe('filesystem-backed Scratch Topics', () => {
       id: topicId,
       directoryPath: 'topic--view--wiki-view',
       topicPath: 'topic--view--wiki-view/topic.md',
+      physicalDirectoryPath: join(await realpath(dirname(workspace.path)), 'topics', 'topic--view--wiki-view'),
       title: 'Untitled Topic'
     })
-    expect(await readdir(join(workspace.path, first.directoryPath))).toEqual(
+    expect(await readdir(first.physicalDirectoryPath!)).toEqual(
       expect.arrayContaining(['.agents', '.agentmux', 'outcome', 'refs', 'topic.md'])
     )
   })
@@ -51,8 +53,8 @@ describe('filesystem-backed Scratch Topics', () => {
     const workspace = await scratchWorkspace()
     const topics = new ScratchTopics()
     const topic = await topics.ensure(workspace, 'view:wiki-state')
-    const wikiPath = join(workspace.path, topic.directoryPath, SCRATCH_TOPIC_WIKI_PATH)
-    const statePath = join(workspace.path, topic.directoryPath, SCRATCH_TOPIC_WIKI_STATE_PATH)
+    const wikiPath = join(topic.physicalDirectoryPath!, SCRATCH_TOPIC_WIKI_PATH)
+    const statePath = join(topic.physicalDirectoryPath!, SCRATCH_TOPIC_WIKI_STATE_PATH)
     await writeFile(wikiPath, `${DEFAULT_TOPIC_WIKI}\nUser rule: keep receipts.\n`)
 
     const edited = await topics.read(workspace, topic.id)
@@ -99,7 +101,7 @@ describe('filesystem-backed Scratch Topics', () => {
       sessionId: 'agent-one'
     })
     const beforeDirectory = prepared.snapshot.directoryPath
-    const topicPath = join(workspace.path, prepared.snapshot.topicPath)
+    const topicPath = join(prepared.snapshot.physicalDirectoryPath!, 'topic.md')
     await writeFile(topicPath, '# Before\n\nKeep this summary.\n\n## Context\n\nDurable body.\n')
 
     const renamed = await topics.renameTitle(workspace, topicId, '  Shared outcome  ')
@@ -114,14 +116,15 @@ describe('filesystem-backed Scratch Topics', () => {
     expect(await readFile(topicPath, 'utf8')).toBe(
       '# Shared outcome\n\nKeep this summary.\n\n## Context\n\nDurable body.\n'
     )
-    expect(await readdir(workspace.path)).toEqual([beforeDirectory])
+    expect(await readdir(dirname(renamed.physicalDirectoryPath!))).toEqual([beforeDirectory])
+    expect(await readdir(workspace.path)).toEqual([])
   })
 
   it('adds a missing title and rejects invalid titles without changing topic.md', async () => {
     const workspace = await scratchWorkspace()
     const topics = new ScratchTopics()
     const topic = await topics.ensure(workspace, 'launcher:title-validation')
-    const topicPath = join(workspace.path, topic.topicPath)
+    const topicPath = join(topic.physicalDirectoryPath!, 'topic.md')
     await writeFile(topicPath, 'Preserve this body.\n')
 
     await expect(topics.renameTitle(workspace, topic.id, '')).rejects.toThrow('cannot be empty')
@@ -146,7 +149,7 @@ describe('filesystem-backed Scratch Topics', () => {
       sessionId: 'agent-one'
     })
 
-    expect(prepared.absolutePath).toBe(join(await realpath(workspace.path), 'topic--launcher--topic-owner'))
+    expect(prepared.absolutePath).toBe(join(await realpath(dirname(workspace.path)), 'topics', 'topic--launcher--topic-owner'))
     expect(prepared.prompt).toContain('Read topic.md')
     expect(prepared.prompt).toContain('Inspect .agents/')
     expect(prepared.snapshot.collaborators).toEqual([expect.objectContaining({
