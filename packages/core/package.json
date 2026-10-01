@@ -111,6 +111,10 @@
     "./public-rpc-http": {
       "types": "./dist/public-rpc-http.d.ts",
       "import": "./dist/public-rpc-http.js"
+    },
+    "./hosted": {
+      "types": "./dist/hosted.d.ts",
+      "import": "./dist/hosted.js"
     }
   },
   "bin": {
