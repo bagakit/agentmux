@@ -1737,6 +1737,7 @@ export class BrowserViewManager {
       return state
     } catch {
       const state: BrowserTaskAssetState = { assets: entry.taskAssets?.assets ?? [], runs: entry.taskAssets?.runs ?? [],
+        selectedRunId: entry.taskAssets?.selectedRunId ?? null,
         warning: 'Saved task assets could not be read. Existing Browser work remains; reopen the details to retry.' }
       if (this.owns(entry, view) && !view.webContents.isDestroyed()) { entry.taskAssets = state; this.emit(entry) }
       return state
@@ -1829,6 +1830,15 @@ export class BrowserViewManager {
 
   /** Trusted Client action. Existing Browser control is the only checkpoint authority. */
   async runTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun> {
+    return await this.executeTaskAsset(input, 'human')
+  }
+
+  /** CLI/control is never evidence of the person's checkpoint approval. */
+  async runControlledTaskAsset(input: BrowserTaskAssetRunInput): Promise<BrowserTaskAssetRun> {
+    return await this.executeTaskAsset(input, 'control')
+  }
+
+  private async executeTaskAsset(input: BrowserTaskAssetRunInput, intent: 'human' | 'control'): Promise<BrowserTaskAssetRun> {
     const entry = this.require(input.browserId)
     const view = entry.view
     const asset = await this.requireTaskAsset(input.browserId, input.assetId)
@@ -1848,7 +1858,10 @@ export class BrowserViewManager {
         if (previous.status !== 'ready' && previous.status !== 'waiting-human') {
           throw new Error('This task cannot continue from its current cursor. Inspect the retained progress.')
         }
-        if (previous.status === 'waiting-human' && previous.pendingCheckpointId) {
+        if (intent === 'control' && previous.status === 'waiting-human') {
+          throw new Error('This task is waiting for the person. Agent control cannot approve or continue its checkpoint.')
+        }
+        if (intent === 'human' && previous.status === 'waiting-human' && previous.pendingCheckpointId) {
           await this.taskAssets!.recordHumanCheckpoint({ runId: previous.id, browserId: previous.browserId,
             assetId: previous.assetId, version: previous.version }, previous.pendingCheckpointId,
           { pendingCheckpointId: previous.pendingCheckpointId, nextStep: previous.nextStep,
@@ -1859,7 +1872,7 @@ export class BrowserViewManager {
         throw new Error('The original Browser owner is unavailable; the task was not replayed.')
       }
       if (execution.stopRequested) throw new Error('This task was stopped before control returned. Its progress remains.')
-      this.returnControl(entry.id)
+      if (intent === 'human') this.returnControl(entry.id)
       return await runBrowserTaskAsset(this.taskAssets!, input, {
         onRunPrepared: runId => { execution.runId = runId },
         control: id => { const owner = this.require(id); return owner.humanControl ? 'human' : owner.activity.control },

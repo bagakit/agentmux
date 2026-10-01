@@ -56,7 +56,7 @@ export type BrowserTaskAssetRun = {
   updatedAt: number
 }
 export type BrowserTaskAssetDocument = { version: 1; assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; selectedRuns?: { browserId: string; runId: string }[] }
-export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; warning?: string }
+export type BrowserTaskAssetState = { assets: BrowserTaskAsset[]; runs: BrowserTaskAssetRun[]; selectedRunId?: string | null; warning?: string }
 export type BrowserTaskAssetRunInput = {
   assetId: string
   version: number

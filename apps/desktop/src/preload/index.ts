@@ -384,6 +384,7 @@ const api: AgentMuxPreloadApi = {
     stopDemonstration: (id: string) => ipcRenderer.invoke('browser:stopDemonstration', id),
     getDemonstration: (id: string) => ipcRenderer.invoke('browser:getDemonstration', id),
     getTaskAssets: (id: string) => ipcRenderer.invoke('browser:getTaskAssets', id),
+    controlTask: request => ipcRenderer.invoke('browser:controlTask', request),
     importTaskAsset: (id: string, name?: string) => ipcRenderer.invoke('browser:importTaskAsset', id, name),
     saveTaskAssetDraft: (id: string, assetId: string, revision: number, content: BrowserTaskContent) => ipcRenderer.invoke('browser:saveTaskAssetDraft', id, assetId, revision, content),
     saveTaskAssetVersion: (id: string, assetId: string, revision: number, content: BrowserTaskContent) => ipcRenderer.invoke('browser:saveTaskAssetVersion', id, assetId, revision, content),

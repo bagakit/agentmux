@@ -58,6 +58,7 @@ import { parseMetricsObservation, type MetricsObservation, type MetricsSubscript
 import { assertToolkitResultTarget, isToolkitOperation, parseToolkitRequest, parseToolkitResult } from './toolkit.js'
 import { serveToolkitControl } from './toolkit-control-server.js'
 import { parseDesktopFocusRequest, parseDesktopFocusSuccessReceipt } from './desktop-focus-parser.js'
+import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from './browser-task-control.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
@@ -501,6 +502,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     } as AgentMuxControlRequest
   }
   if (source.operation === 'focus') return parseDesktopFocusRequest(source)
+  if (isBrowserTaskControlOperation(source.operation)) return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ...parseBrowserTaskControlPayload(source) }
   if (source.operation === 'browser.run') {
     // caller 是可选的：CLI 直接发一条也合法（那时没有 managed caller）。没有 self 语义，所以不像别的
     // 操作那样需要"self 必须配 caller"那道闸——browserId 永远是显式的。
@@ -1082,6 +1084,10 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
   }
   if (operation === 'demand.decision-log') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demandId: id(result.demandId, 'Control demand id is invalid.', 'CONTROL_PROTOCOL_ERROR'), decisions: parseDemandDecisions(result.decisions) } }
+  if (isBrowserTaskControlOperation(operation)) {
+    const { operation: _, ...body } = parseBrowserTaskControlResult(operation, result)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: body } as AgentMuxControlSuccessReceipt
+  }
   if (operation === 'browser.run') {
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -1741,6 +1747,9 @@ export async function requestAgentMuxControl(value: AgentMuxControlRequest, path
   )
   if (isToolkitOperation(request.operation)) {
     assertToolkitResultTarget(request, parseToolkitResult(request.operation, receipt.result))
+  }
+  if (isBrowserTaskControlOperation(request.operation)) {
+    assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, receipt.result))
   }
   return receipt
 }

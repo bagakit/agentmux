@@ -80,6 +80,7 @@ export class BrowserTaskAssets {
     return copy({
       assets: this.document.assets.filter(asset => !browserId || asset.browserId === browserId),
       runs: this.document.runs.filter(run => !browserId || run.browserId === browserId).map(run => this.projectRun(run)),
+      ...(browserId ? { selectedRunId: this.document.selectedRuns?.find(item => item.browserId === browserId)?.runId ?? null } : {}),
       ...(this.warning ? { warning: this.warning } : {})
     })
   }
