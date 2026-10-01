@@ -1032,6 +1032,7 @@ export function BrowserPane({
       {timelineOpen ? (
         <aside className="browser-trace-rail" aria-label="Browser activity trace">
           <BrowserDemonstrationSurface
+            suggestions={tab.demonstration?.suggestions}
             draft={tab.demonstration?.draft ?? null}
             collapseSteps={Boolean(taskAsset)}
             {...(tab.demonstration?.warning ? { warning: tab.demonstration.warning } : {})}
@@ -1045,6 +1046,7 @@ export function BrowserPane({
             {...(taskAssetReview ? { reviewRequest: taskAssetReview } : {})}
             onReviewRequestConsumed={() => setTaskAssetReview(null)}
             recording={tab.demonstration?.draft ?? null}
+            suggestions={tab.demonstration?.suggestions}
             run={taskRun}
             {...(tab.taskAssets?.warning ? { warning: tab.taskAssets.warning } : {})}
             busy={taskBusy || tab.driving || demonstrationBusy}

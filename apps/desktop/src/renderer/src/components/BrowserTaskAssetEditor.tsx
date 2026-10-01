@@ -1,13 +1,16 @@
 import { useEffect, useState, type MouseEvent } from 'react'
 import { CircleAlert, LocateFixed, Play, Plus, Save, Square, Trash2 } from 'lucide-react'
 import type { BrowserDemonstrationDraft } from '../../../shared/browser-demonstration'
+import type { BrowserDemonstrationSuggestion } from '../../../shared/browser-demonstration-semantics'
 import type { BrowserTaskAsset, BrowserTaskAssetRun, BrowserTaskContent } from '../../../shared/browser-task-assets'
 import type { BrowserOutcomeEvaluation } from '../../../shared/browser-outcome-criteria'
+import { BrowserDemonstrationSuggestion as DemonstrationSuggestion } from './BrowserDemonstrationSuggestion'
 
 type ActionEvent = MouseEvent<HTMLButtonElement>
 type Props = {
   asset: BrowserTaskAsset | null
   recording: BrowserDemonstrationDraft | null
+  suggestions?: BrowserDemonstrationSuggestion[] | undefined
   run?: BrowserTaskAssetRun | null
   /** A one-time Client viewing intent. It is never an execution or approval fact. */
   reviewRequest?: { assetId: string; version: number }
@@ -24,7 +27,7 @@ type Props = {
 }
 
 /** An editable Client asset inside existing Browser details. Values never enter its draft or versions. */
-export function BrowserTaskAssetEditor({ asset, recording, run, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
+export function BrowserTaskAssetEditor({ asset, recording, suggestions, run, reviewRequest, onReviewRequestConsumed, warning, busy = false, onImport, onSaveDraft, onSaveVersion, onLocateStep, onRun, onStop, onVerify }: Props) {
   const [draft, setDraft] = useState<BrowserTaskContent | null>(asset?.draft ?? null)
   const [versionNumber, setVersionNumber] = useState(asset?.versions.at(-1)?.version ?? 0)
   const [values, setValues] = useState<Record<string, string>>({})
@@ -49,6 +52,15 @@ export function BrowserTaskAssetEditor({ asset, recording, run, reviewRequest, o
   const parameters = version?.parameters.filter(parameter => requiredKeys.has(parameter.key)) ?? []
   const canRun = Boolean(version && !busy && parameters.every(parameter => Boolean(values[parameter.key])))
   function change(next: BrowserTaskContent): void { setDraft(next); setError(undefined) }
+  function useSuggestion(stepId: string): void {
+    if (!draft || asset?.sourceRecordingId !== recording?.id) return
+    const suggestion = suggestions?.find(item => item.stepId === stepId && item.status === 'available')
+    if (!suggestion?.title || !draft.steps.some(step => step.id === stepId)) return
+    const title = suggestion.title
+    change({ ...draft, steps: draft.steps.map(step => step.id === stepId ? { ...step, label: title } : step),
+      parameters: draft.parameters.map(parameter => parameter.key === suggestion.parameter?.key && parameter.label === parameter.key
+        ? { ...parameter, label: suggestion.parameter.label } : parameter) })
+  }
   function completion(criteria: NonNullable<BrowserTaskContent['completion']>['criteria']): void {
     if (!draft) return
     const { completion: previous, ...content } = draft
@@ -105,7 +117,13 @@ export function BrowserTaskAssetEditor({ asset, recording, run, reviewRequest, o
       <label className="browser-task-asset__field"><span>Name</span><input aria-label="Task asset name" maxLength={240} value={draft.name} onChange={event => change({ ...draft, name: event.target.value })} /></label>
       <ol className="browser-rsi-replay__steps">{draft.steps.length ? draft.steps.map((step, index) => <li key={step.id} className={!step.reviewed ? 'is-blocked' : undefined} data-task-step-id={step.id}>
         <span className="browser-rsi-replay__step-number">{index + 1}</span>
-        <span><strong>{step.kind === 'checkpoint' ? step.label || 'Human checkpoint' : `${step.kind} · ${step.target?.name ?? (step.kind === 'navigate' ? step.url : 'Target needs location')}`}</strong>
+        <span><strong>{step.kind === 'checkpoint' ? step.label || 'Human checkpoint' : step.label || `${step.kind} · ${step.target?.name ?? (step.kind === 'navigate' ? step.url : 'Target needs location')}`}</strong>
+          {step.kind !== 'checkpoint' ? <><input aria-label={`Task step ${index + 1} title`} value={step.label ?? ''} maxLength={240}
+            placeholder="Step title" onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, label: event.target.value } : item) })} />
+            <DemonstrationSuggestion suggestion={asset.sourceRecordingId === recording?.id ? suggestions?.find(item => item.stepId === step.id) : undefined} />
+            {asset.sourceRecordingId === recording?.id && suggestions?.some(item => item.stepId === step.id && item.status === 'available') ?
+              <button type="button" className="browser-rsi-button browser-rsi-button--quiet" disabled={busy}
+                onClick={() => useSuggestion(step.id)}>Use suggestion</button> : null}</> : null}
           {step.warning && !step.reviewed ? <small>{step.warning}</small> : null}
           {step.kind !== 'checkpoint' ? <label className="browser-task-asset__check"><input type="checkbox" aria-label={`Review task step ${index + 1}`} checked={step.reviewed} disabled={step.kind !== 'navigate' && (!step.target || step.target.count !== 1)} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, reviewed: event.target.checked } : item) })} />Reviewed</label> : <><small>Hands control to the person; never approves itself</small><input aria-label={`Checkpoint ${index + 1} label`} value={step.label ?? ''} maxLength={240} onChange={event => change({ ...draft, steps: draft.steps.map(item => item.id === step.id ? { ...item, label: event.target.value } : item) })} /></>}
         </span>

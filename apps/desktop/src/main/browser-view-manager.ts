@@ -61,6 +61,7 @@ import type { BrowserResultContext, BrowserResultReadOptions, BrowserResultArtif
 import type { BrowserStructuredOutputReceipt } from '../shared/browser-structured-output.js'
 import type { BrowserScopedSnapshot } from '../shared/browser-snapshot-query.js'
 import { BrowserDemonstrationCapture } from './browser-demonstration-capture.js'
+import { BrowserDemonstrationInterpreter } from './browser-demonstration-interpretation.js'
 import type { BrowserDemonstrationRecorder } from './browser-demonstration-recorder.js'
 import type { BrowserDemonstrationDraft, BrowserDemonstrationState } from '../shared/browser-demonstration.js'
 import type { BrowserUploads } from './browser-uploads.js'
@@ -111,6 +112,7 @@ type BrowserEntry = {
   feedbackRevision: number
   feedback?: BrowserOperationFeedback
   demonstration?: BrowserDemonstrationState
+  demonstrationInterpreter?: BrowserDemonstrationInterpreter
   taskAssets?: BrowserTaskAssetState
   /** Transient resources for this entity; never a second durable binding catalogue. */
   presentationLeaseIds: Set<string>
@@ -1511,7 +1513,13 @@ export class BrowserViewManager {
   private publishDemonstration(entry: BrowserEntry, draft: BrowserDemonstrationDraft | null, warning?: string): void {
     if (draft && entry.demonstration?.draft?.id === draft.id && entry.demonstration.draft.revision > draft.revision) return
     const notice = warning ?? this.demonstrations?.getPersistenceWarning() ?? draft?.warning
-    entry.demonstration = { draft, ...(notice ? { warning: notice } : {}) }
+    entry.demonstrationInterpreter ??= new BrowserDemonstrationInterpreter(suggestions => {
+      if (this.entries.get(entry.id) !== entry || !entry.demonstration) return
+      entry.demonstration = { ...entry.demonstration, suggestions }
+      this.emit(entry)
+    })
+    const suggestions = entry.demonstrationInterpreter.update(draft)
+    entry.demonstration = { draft, suggestions, ...(notice ? { warning: notice } : {}) }
     this.emit(entry)
   }
 
