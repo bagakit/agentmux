@@ -7,7 +7,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { RuntimeEvent, SessionAttachResult, SessionSnapshot } from '../src/shared/contracts'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
-import { TERMINAL_REPLAY_BATCH_BYTES } from '../src/renderer/src/lib/terminal-replay'
+import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 type FixtureTerminal = BrowserTerminal & {
@@ -106,11 +106,15 @@ vi.mock('../src/renderer/src/lib/api', () => ({ api: { sessions: {
 vi.mock('../src/renderer/src/store', () => {
   const state = {
     config: null, regionCaretFocus: null,
+    noticeReadReceipts: {}, acquireNativeSurfaceOverlay: vi.fn(), releaseNativeSurfaceOverlay: vi.fn(),
     clearRegionCaretFocus: vi.fn(), recoverSession: vi.fn(),
     openHttpLink: vi.fn(), openFile: vi.fn(), reportError: vi.fn()
   }
   return { useAppStore: Object.assign((select: (value: typeof state) => unknown) => select(state), {
-    getState: () => state
+    getState: () => state,
+    setState: (update: Partial<typeof state> | ((value: typeof state) => Partial<typeof state>)) => {
+      Object.assign(state, typeof update === 'function' ? update(state) : update)
+    }
   }) }
 })
 vi.mock('../src/renderer/src/lib/terminal-viewport-sync', () => ({

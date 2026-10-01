@@ -22,7 +22,7 @@ const critical = [
   path.join(pkg, 'src/browser/scrollable/mouseEvent.ts'), path.join(pkg, 'lib/xterm.js'), path.join(pkg, 'lib/xterm.mjs'),
   path.join(desktop, 'src/renderer/src/components/TerminalView.tsx'), path.join(desktop, 'src/renderer/src/components/SessionPane.tsx'),
   path.join(desktop, 'src/renderer/src/store.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-reveal.ts'),
-  path.join(desktop, 'src/renderer/src/lib/terminal-replay.ts'), path.join(desktop, 'src/renderer/src/styles/index.css'),
+  path.join(desktop, 'src/renderer/src/lib/terminal-replay.ts'), path.join(root, 'packages/client-ui/src/terminal/live-output.ts'), path.join(root, 'packages/client-ui/src/terminal/replay.ts'), path.join(desktop, 'src/renderer/src/styles/index.css'),
   ...['entry.tsx','xterm-instrumented.ts','index.html','main.cjs'].map(name => path.join(fixture, name)), fileURLToPath(import.meta.url)
 ]
 const hashes = async files => Object.fromEntries(await Promise.all(files.map(async file => [file,

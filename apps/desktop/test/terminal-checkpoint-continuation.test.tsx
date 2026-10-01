@@ -11,7 +11,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
-import { TERMINAL_REPLAY_BATCH_BYTES } from '../src/renderer/src/lib/terminal-replay'
+import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 // Real public xterm parser/buffers/modes, TerminalView, Store and viewport synchronizer.

@@ -275,7 +275,7 @@ async function identity() {
  ...assets.map(name=>'apps/desktop/out/renderer/assets/'+name),...styles.map(name=>'apps/desktop/out/renderer/assets/'+name),...core.map(name=>'packages/core/dist/'+name),
  ...manifest.binaries.map(binary=>vendor+'/'+binary.path),vendor+'/'+manifest.sdk.archive.path,
  'apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/shared/contracts.ts',
- 'apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/lib/session-events.ts','apps/desktop/src/renderer/src/lib/terminal-live-output.ts',
+ 'apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/lib/session-events.ts','packages/client-ui/src/terminal/live-output.ts',
  'apps/desktop/src/renderer/src/styles/terminal.css','apps/desktop/src/renderer/src/styles/full-page-loading.css',
  'packages/core/src/ctxmux-run-adapter.ts','packages/core/src/terminal-continuation.ts','packages/core/src/types.ts','packages/core/src/client.ts',
  'apps/desktop/scripts/verify-region-terminal-refresh.mjs',

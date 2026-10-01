@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import headless from '@xterm/headless'
 import { readFileSync } from 'node:fs'
-import { finishTerminalReplayRecovery, hydrateTerminalReplay, terminalReplayGeometryOutcome, terminalViewportSyncOutcome } from '../src/renderer/src/lib/terminal-replay'
+import { hydrateTerminalReplay } from '@agentmux/client-ui/terminal/replay'
+import { finishTerminalReplayRecovery, terminalReplayGeometryOutcome, terminalViewportSyncOutcome } from '../src/renderer/src/lib/terminal-replay'
 import { classifyServiceNotice } from '../src/renderer/src/lib/service-window-notice'
 import { TerminalViewportSynchronizer } from '../src/renderer/src/lib/terminal-viewport-sync'
 

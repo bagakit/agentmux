@@ -325,7 +325,7 @@ async function identity() {
  ...assets.map(name=>'apps/desktop/out/renderer/assets/'+name),...core.map(name=>'packages/core/dist/'+name),
  ...manifest.binaries.map(binary=>vendor+'/'+binary.path),vendor+'/'+manifest.sdk.archive.path,
  'apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/shared/contracts.ts',
- 'apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/lib/session-events.ts','apps/desktop/src/renderer/src/lib/terminal-live-output.ts',
+ 'apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/lib/session-events.ts','packages/client-ui/src/terminal/live-output.ts',
  'packages/core/src/ctxmux-run-adapter.ts','packages/core/src/terminal-continuation.ts','packages/core/src/types.ts','packages/core/src/client.ts',
  'apps/desktop/scripts/verify-terminal-checkpoint-continuation.mjs','apps/desktop/scripts/probe-process.mjs']
  const hashes=Object.fromEntries(await Promise.all(files.map(async name=>{const bytes=await readFile(join(repositoryRoot,name));assert.ok(bytes.length>0,name);return [name,digest(bytes)]})))

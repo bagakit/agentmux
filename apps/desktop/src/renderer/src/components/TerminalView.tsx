@@ -58,7 +58,8 @@ import {
   TERMINAL_SEARCH_HIGHLIGHT_LIMIT,
   subscribeTerminalSearchCount
 } from '../lib/terminal-search-count'
-import { finishTerminalReplayRecovery, hydrateTerminalReplay, recoverTerminalRetainedOutput, restoreTerminalCheckpoint, terminalContinuationOutcome, terminalHistoryBoundary, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, yieldTerminalWork, type TerminalContinuationAbsence } from '../lib/terminal-replay'
+import { boundedTerminalHistoryRead, finishTerminalReplayRecovery, terminalContinuationOutcome, terminalReplayGeometryOutcome, terminalViewportSyncOutcome, type TerminalContinuationAbsence } from '../lib/terminal-replay'
+import { hydrateTerminalReplay, recoverTerminalRetainedOutput, restoreTerminalCheckpoint, terminalHistoryBoundary, yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 import { acquireTerminalResourceOwners } from '../lib/terminal-resource-owners'
 import { TerminalViewportSynchronizer } from '../lib/terminal-viewport-sync'
 import {
@@ -70,7 +71,7 @@ import {
   TerminalLiveOutputQueue,
   composeTerminalLiveOutputWrite,
   type TerminalLiveItem
-} from '../lib/terminal-live-output'
+} from '@agentmux/client-ui/terminal/live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import { isVanishedAgentRunError } from '../lib/terminal-attach-recovery'
 import {
@@ -847,7 +848,7 @@ export function TerminalView({
         const recovered = await recoverTerminalRetainedOutput({
           cursor,
           throughByte,
-          read: (afterByte) => api.sessions.replay(attachmentId!, afterByte),
+          read: (afterByte) => boundedTerminalHistoryRead(api.sessions.replay(attachmentId!, afterByte)),
           write: writeOutput
         })
         if (disposed) return

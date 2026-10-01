@@ -1,9 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
-import {
-  finishTerminalReplayRecovery,
-  hydrateTerminalReplay,
-  TERMINAL_REPLAY_BATCH_BYTES
-} from '../src/renderer/src/lib/terminal-replay'
+import { hydrateTerminalReplay, TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
+import { finishTerminalReplayRecovery } from '../src/renderer/src/lib/terminal-replay'
 
 describe('hydrateTerminalReplay', () => {
   it('restores ordered replay bytes through one xterm write', async () => {

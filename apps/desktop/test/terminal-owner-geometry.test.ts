@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it, vi } from 'vitest'
 import headless from '@xterm/headless'
 import { TerminalViewportSynchronizer } from '../src/renderer/src/lib/terminal-viewport-sync'
-import { TerminalLiveOutputQueue, composeTerminalLiveOutputWrite, type TerminalLiveItem } from '../src/renderer/src/lib/terminal-live-output'
+import { TerminalLiveOutputQueue, composeTerminalLiveOutputWrite, type TerminalLiveItem } from '@agentmux/client-ui/terminal/live-output'
 
 function harness() {
   const terminal = new headless.Terminal({ cols: 80, rows: 24, allowProposedApi: true })
@@ -119,7 +119,7 @@ describe('long-lived View follows its PTY owner', () => {
     expect(accept).toContain("event.hostId === session.hostId && core.type === 'terminal-resized'")
     expect(accept).toContain('core.run.runId === session.control.run.runId')
     expect(accept).toContain('if (resize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(resize)')
-    expect(source).toContain('applyOwnerGrid: ({ cols, rows }) => terminal.resize(cols, rows)')
+    expect(source).toContain('applyOwnerGrid: ({ cols, rows }) => preserveRowResizeReading(() => terminal.resize(cols, rows))')
     expect(source).toContain('viewport.acceptOwnerSize(resize.size)')
     expect(source).toContain('if (droppedPendingResize && droppedPendingResize.resizeRevision > resizeRevision) scheduleLiveOutputDrain(droppedPendingResize)')
   })

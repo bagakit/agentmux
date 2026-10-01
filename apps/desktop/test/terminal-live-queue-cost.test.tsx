@@ -10,7 +10,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
-import { TERMINAL_REPLAY_BATCH_BYTES } from '../src/renderer/src/lib/terminal-replay'
+import { TERMINAL_REPLAY_BATCH_BYTES } from '@agentmux/client-ui/terminal/replay'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 
 // Real public xterm parser/buffers/modes, TerminalView, Store and viewport synchronizer.
@@ -111,8 +111,8 @@ afterEach(async () => {
 
 // Instrument actual incoming queue-item property reads and composition calls. The original
 // production algorithms and original raw bytes still run; this does not substitute a queue.
-vi.mock('../src/renderer/src/lib/terminal-live-output', async original => {
-  const actual = await original<typeof import('../src/renderer/src/lib/terminal-live-output')>()
+vi.mock('@agentmux/client-ui/terminal/live-output', async original => {
+  const actual = await original<typeof import('@agentmux/client-ui/terminal/live-output')>()
   return { ...actual,
     TerminalLiveOutputQueue: class extends actual.TerminalLiveOutputQueue {
       admit(incoming: Parameters<typeof actual.TerminalLiveOutputQueue.prototype.admit>[0]) {
@@ -172,7 +172,7 @@ it.each([128,256])('admits %i real held-parser items with linear boundary work a
   expect(fixture.terminals).toEqual([terminal])
   expect(recover).not.toHaveBeenCalled()
   await act(async()=>terminal.input('z'))
-  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z')
+  expect(write).toHaveBeenCalledExactlyOnceWith(session.control,'z','user')
 })
 
 it('composes a normal nonempty same-turn batch only once through the mounted consumer', async () => {

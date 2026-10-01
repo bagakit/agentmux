@@ -4,7 +4,7 @@ import {
   rememberTerminalViewport,
   restoreTerminalViewport
 } from '../src/renderer/src/lib/terminal-viewport-memory'
-import { TerminalLiveOutputQueue } from '../src/renderer/src/lib/terminal-live-output'
+import { TerminalLiveOutputQueue } from '@agentmux/client-ui/terminal/live-output'
 
 const terminalView = readFileSync(
   new URL('../src/renderer/src/components/TerminalView.tsx', import.meta.url),
