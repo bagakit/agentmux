@@ -686,14 +686,17 @@ function WorkbenchRegionNode({
 // 一格（leaf）单独成组件：消费键盘关格意图的 effect、以及「关这一格要不要确认」的决定，都得跑在组件顶层
 // hook 里——它们够不着 node.type 分支之后。拆出来后这些 hook 无条件执行，套路同 WorkbenchRegionBranch。
 type WorkbenchRegionLeafProps = Parameters<typeof WorkbenchRegionContent>[0] & { regionTarget?: WorkbenchViewTarget | undefined }
-function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
-  const parent = useWorkbenchBrowserPresentation()
+function confirmedRegionTarget(regionTarget: WorkbenchViewTarget | undefined, tabId: string, regionId: string): WorkbenchViewTarget | undefined {
   const reference = regionTarget?.reference
   const scope = regionTarget?.projection
-  const projected = scope?.entity.kind === 'region' && scope.entity.regionId === props.node.regionId &&
-    reference?.regionId === props.node.regionId && reference.tabId === props.tab.id && reference.displayWorkspaceId === scope.displayWorkspaceId &&
+  return scope?.entity.kind === 'region' && scope.entity.regionId === regionId &&
+    reference?.regionId === regionId && reference.tabId === tabId && reference.displayWorkspaceId === scope.displayWorkspaceId &&
     scope.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))
-  const target = projected ? regionTarget : undefined
+    ? regionTarget : undefined
+}
+function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
+  const parent = useWorkbenchBrowserPresentation()
+  const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
   const homeId = `${parent.tabHostId}:region:${props.node.regionId}`
   const visible = target ? target.visible !== false : props.surfaceVisible
   return <>
@@ -1543,6 +1546,7 @@ export function WorkspaceWorkbench({
   const workbenchRef = useRef<HTMLDivElement>(null)
   const projectionEntity = projection?.entity
   const projectionKey = projectionEntity ? `${projection?.presentationId}:${projectionEntity.kind}:${projectionEntity.kind === 'zone' ? projectionEntity.zoneId : projectionEntity.kind === 'tab' ? projectionEntity.tabId : projectionEntity.regionId}` : null
+  const projectionSlotKey = projection && JSON.stringify([projection.entity, projection.selection])
   const [projectionActiveGroupId, setProjectionActiveGroupId] = useState<string | null>(null)
   useEffect(() => setProjectionActiveGroupId(null), [projectionKey])
   const effectiveViewHostPrefix = projection ? `${projection.presentationId}-slot` : viewHostPrefix
@@ -1729,7 +1733,7 @@ export function WorkspaceWorkbench({
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
         {projectionNotice}
-        {confirmed ? <div id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
+        {confirmed ? <div key={projectionSlotKey} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={reference.tabId} data-workbench-group-id={reference.groupId} className="workbench-region-slot" />
           : <div role="status" className="workbench-restore-notice">The exact Region occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
       </div>
@@ -1747,7 +1751,7 @@ export function WorkspaceWorkbench({
     return <WorkbenchProjectionContext.Provider value={projectionContext}>
       <div ref={workbenchRef} className="workspace-workbench">
         {projectionNotice}
-        {confirmed ? <div id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
+        {confirmed ? <div key={projectionSlotKey} id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
           data-workbench-tab-id={tab.id} data-workbench-group-id={reference.groupId} className="workbench-tab-slot" />
           : <div role="status" className="workbench-restore-notice">The exact Tab occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
       </div>
@@ -1806,6 +1810,9 @@ export function WorkspaceWorkbench({
         const ownerId = projection?.surface === 'space' && confirmedDisplayGroup ? confirmedDisplayGroup : originalOwnerId ?? confirmedDisplayGroup
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
         const regionTarget = projection?.projection?.entity.kind === 'region' ? projection : undefined
+        const projectedSurface = regionTarget?.reference ? tab.regions[regionTarget.reference.regionId] : undefined
+        const nativeRegionTarget = projectedSurface && projectedSurface.kind !== 'browser'
+          ? confirmedRegionTarget(regionTarget, tab.id, projectedSurface.regionId) : undefined
         const tabProjection = regionTarget ? undefined : projection
         const targetId = tabProjection?.hostId ?? null
         const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
@@ -1815,7 +1822,7 @@ export function WorkspaceWorkbench({
         const primaryHostId = targetId ?? homeId
         const tabVisible = (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <WorkbenchBrowserTargetsContext.Provider key={tab.id} value={targets}>
-        {targets.filter(target => target.hostId !== primaryHostId && target.reference).map(target =>
+        {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionTarget?.hostId && target.reference).map(target =>
           <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}
             active={target.active} surface={target.surface} retainedRegionId={target.reference!.regionId} reference={target.reference}>
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />

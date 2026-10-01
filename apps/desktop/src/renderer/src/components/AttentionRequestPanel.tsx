@@ -7,11 +7,25 @@ import { nextAttentionSessionId } from '../lib/agent-attention'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { isNeedsYouState } from '../lib/attention-vocabulary'
+import { api } from '../lib/api'
+import type { SessionSnapshot } from '../../../shared/contracts'
 
 type SubmittedInteraction = {
   hostId: string
   requestId: string
   runId: string | undefined
+}
+
+type FailedClose = {
+  sessionId: string
+  hostId: string
+  runId: string
+  label: string
+  phase: 'requesting' | 'unconfirmed' | 'confirmed'
+}
+
+function canCloseFailure(session: SessionSnapshot | undefined): boolean {
+  return session?.kind === 'agent' && session.status.state === 'error' && session.processState === 'exited'
 }
 
 function runIdFor(session: { control: { kind: string; run?: { runId?: string } } }): string | undefined {
@@ -53,6 +67,9 @@ export function AttentionRequestPanel({
   const submittedRef = useRef<SubmittedInteraction | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [caughtUp, setCaughtUp] = useState(false)
+  const [failedClose, setFailedClose] = useState<FailedClose | null>(null)
+  const failedCloseRef = useRef<FailedClose | null>(null)
+  const closeDeadline = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const displayPath = usePathDisplay()
   const sessions = useAppStore((state) => state.sessions)
@@ -76,7 +93,34 @@ export function AttentionRequestPanel({
     submittedRef.current = null
     setActionError(null)
     setCaughtUp(false)
+    failedCloseRef.current = null
+    setFailedClose(null)
+    clearTimeout(closeDeadline.current)
   }, [sessionId])
+
+  // Observe the existing semantic event owner only while this failed Session is being reviewed.
+  // Its dispatcher excludes terminal bytes. Absence or a fulfilled stop promise is not retirement.
+  const failed = session?.kind === 'agent' && session.status.state === 'error'
+  useEffect(() => {
+    if (!failed) return
+    return api.sessions.onEvent((event) => {
+      const claim = failedCloseRef.current
+      const core = event.event
+      if (!claim || core.type !== 'run-removed' || event.hostId !== claim.hostId
+        || core.agentSessionId !== claim.sessionId || core.run.runId !== claim.runId) return
+      const latest = useAppStore.getState().sessions.find(item => item.id === claim.sessionId)
+      if (latest && (latest.kind !== 'agent' || latest.hostId !== claim.hostId || runIdFor(latest) !== claim.runId)) return
+      clearTimeout(closeDeadline.current)
+      const confirmed = { ...claim, phase: 'confirmed' as const }
+      failedCloseRef.current = confirmed
+      setFailedClose(confirmed)
+    })
+  }, [activeSessionId, failed])
+
+  useEffect(() => () => {
+    failedCloseRef.current = null
+    clearTimeout(closeDeadline.current)
+  }, [])
 
   function clearSubmission(claim: SubmittedInteraction): boolean {
     if (submittedRef.current !== claim) return false
@@ -90,6 +134,16 @@ export function AttentionRequestPanel({
     setActionError(null)
     setCaughtUp(false)
   }, [activeSessionId, session?.hostId, session?.kind === 'agent' ? session.control.run.runId : undefined, request?.id])
+
+  useEffect(() => {
+    const claim = failedCloseRef.current
+    if (!claim || claim.phase === 'confirmed' || !session) return
+    if (session.kind === 'agent' && session.hostId === claim.hostId && runIdFor(session) === claim.runId) return
+    failedCloseRef.current = null
+    setFailedClose(null)
+    clearTimeout(closeDeadline.current)
+    setActionError('The Session or Run changed. The current Session was kept; the old close was not confirmed.')
+  }, [session])
 
   // Focus the first useful action when a request changes. Do not steal focus from an action inside
   // this panel while the Store is merely repainting a Session status.
@@ -122,7 +176,7 @@ export function AttentionRequestPanel({
       setActionError(null)
       // Removing the answered typed request confirms that answer, not the Provider's semantic
       // state. Keep this Session visible while Core still says it needs attention.
-      if (isNeedsYouState(session.status.state)) {
+      if (isNeedsYouState(session.status.state) || session.status.state === 'error') {
         setCaughtUp(false)
         return
       }
@@ -187,6 +241,34 @@ export function AttentionRequestPanel({
     }
   }
 
+  async function closeFailedSession(): Promise<void> {
+    if (!canCloseFailure(session) || !session || failedCloseRef.current?.phase === 'requesting') return
+    const latest = useAppStore.getState().sessions.find(item => item.id === activeSessionId)
+    // Recheck the displayed identity immediately before the existing control owner reads it.
+    if (!canCloseFailure(latest) || !latest || latest.hostId !== session.hostId || runIdFor(latest) !== runIdFor(session)) {
+      setActionError('The Session changed. Its current Run was kept; review the current facts before closing it.')
+      return
+    }
+    const claim: FailedClose = { sessionId: latest.id, hostId: latest.hostId, runId: latest.control.run.runId, label: latest.label, phase: 'requesting' }
+    failedCloseRef.current = claim
+    setFailedClose(claim)
+    setActionError(null)
+    const unconfirmed = (): void => {
+      if (failedCloseRef.current !== claim) return
+      const waiting = { ...claim, phase: 'unconfirmed' as const }
+      failedCloseRef.current = waiting
+      setFailedClose(waiting)
+      clearTimeout(closeDeadline.current)
+    }
+    // The existing service window reports stop failures. A deadline restores the retry action
+    // without guessing whether a slow IPC stopped anything, or hiding the original work surface.
+    closeDeadline.current = setTimeout(unconfirmed, 5_000)
+    try { await useAppStore.getState().stopSession(claim.sessionId) }
+    catch (error) {
+      if (failedCloseRef.current === claim) setActionError(presentError(error))
+    } finally { unconfirmed() }
+  }
+
   function handleKeyDown(event: KeyboardEvent<HTMLElement>): void {
     if (event.key === 'Escape') {
       event.preventDefault()
@@ -202,47 +284,68 @@ export function AttentionRequestPanel({
   }
 
   if (!session || session.kind !== 'agent') {
+    const confirmed = failedClose?.phase === 'confirmed'
     return (
       <aside ref={panelRef} className="attention-request-panel" aria-label="Attention request" tabIndex={-1} onKeyDown={handleKeyDown}>
         <header className="attention-request-panel__header">
-          <div><span>Needs you</span><strong>Session unavailable</strong></div>
+          <div><span>{confirmed ? 'Session closed' : 'Needs you'}</span><strong>{confirmed ? failedClose.label : 'Session unavailable'}</strong></div>
           <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><X size={14} /></button>
         </header>
-        <div className="attention-request-panel__empty" role="status">The Session is not currently available. Return to Agents and try again.</div>
+        <div className="attention-request-panel__empty" role="status">{confirmed ? 'Core confirmed that this failed Session was closed. Your other work remains open.' : 'The Session is not currently available. Its close has not been confirmed. Return to Agents and try again.'}</div>
       </aside>
     )
   }
 
   const submitting = submitted !== null
   const resolved = !request && !isNeedsYouState(session.status.state)
+  const failureTitle = canCloseFailure(session) ? 'Failed Session' : 'Session attention'
+  const requestCard = request ? (
+    <AgentInteractionCard
+      key={JSON.stringify([session.hostId, session.id, session.control.run.runId, request.id])}
+      request={request}
+      responseUnavailableReason={session.interactionResponseUnavailableReason}
+      onOpenTerminal={() => {
+        useAppStore.getState().setViewMode(session.id, 'terminal')
+        selectSession(session.id)
+      }}
+      disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting}
+      onRespond={respond}
+    />
+  ) : null
   return (
     <aside ref={panelRef} className="attention-request-panel" aria-label={`Request from ${session.label}`} tabIndex={-1} onKeyDown={handleKeyDown}>
       <header className="attention-request-panel__header">
-        <div><span>{request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small title={displayPath(session.workspacePath, session.hostId)}>{displayPath(session.workspacePath, session.hostId)}</small></div>
+        <div><span>{failed ? failureTitle : request ? 'Needs you' : 'No current request'}</span><strong>{session.label}</strong><small title={displayPath(session.workspacePath, session.hostId)}>{displayPath(session.workspacePath, session.hostId)}</small></div>
         <div className="attention-request-panel__actions">
           <button type="button" className="small-button" onClick={() => selectSession(session.id)}><ArrowUpRight size={12} /> Open Session</button>
           <button ref={closeButtonRef} type="button" className="icon-button" aria-label="Close request" title="Close request" onClick={close}><X size={14} /></button>
         </div>
       </header>
       {actionError ? <div className="attention-request-panel__error" role="alert" aria-live="polite">{actionError}</div> : null}
-      {caughtUp ? (
+      {failed ? (
+        <>
+          <div className="attention-request-panel__error" role="status">{[
+            session.status.detail?.trim(),
+            session.status.exitCode === undefined ? null : `Exit code ${session.status.exitCode}`,
+            session.status.exitReason === 'crashed' ? 'Process crashed' : session.status.exitReason === 'user-stopped' ? 'Stopped by you' : null
+          ].filter(Boolean).join(' · ') || 'Core reported a Session error. Open the Session to inspect it.'}</div>
+          <div className="attention-request-panel__empty" role="status">{failedClose?.phase === 'requesting'
+            ? 'Closing this failed Session. Waiting for Core confirmation; its work surface stays here.'
+            : failedClose?.phase === 'unconfirmed' ? 'Close is not confirmed. The Session remains here. Check the service message or retry.'
+              : canCloseFailure(session) ? 'Core reports that this process exited. You can close this failed Session.'
+                : session.processState === 'running' ? 'The Run is still alive. Open the Session to inspect the error; its input remains available.'
+                  : 'The process state is not confirmed as exited. The Session and its work surface are kept.'}</div>
+          {canCloseFailure(session) ? <button type="button" className="small-button attention-request-panel__next" disabled={failedClose?.phase === 'requesting'} onClick={() => void closeFailedSession()}>{failedClose?.phase === 'requesting' ? 'Closing…' : failedClose?.phase === 'unconfirmed' ? 'Retry closing failed Session' : 'Close failed Session'}</button> : null}
+          {session.processState === 'running' ? requestCard : null}
+        </>
+      ) : caughtUp ? (
         <div className="attention-request-panel__empty" role="status" tabIndex={-1}>
           <CheckCircle2 size={15} aria-hidden="true" /> <span>All caught up. No other Agent is waiting for you.</span>
         </div>
       ) : resolved ? (
         <div className="attention-request-panel__empty" role="status">No current request. This view follows the same Core facts as the Session.</div>
       ) : request ? (
-        <AgentInteractionCard
-          key={JSON.stringify([session.hostId, session.id, session.control.run.runId, request.id])}
-          request={request}
-          responseUnavailableReason={session.interactionResponseUnavailableReason}
-          onOpenTerminal={() => {
-            useAppStore.getState().setViewMode(session.id, 'terminal')
-            selectSession(session.id)
-          }}
-          disabled={session.processState !== 'running' || session.status.state === 'disconnected' || submitting}
-          onRespond={respond}
-        />
+        requestCard
       ) : (
         <div className="attention-request-panel__empty" role="status">This Session needs attention, but Core has not exposed a typed request. Open the Session to inspect it.</div>
       )}

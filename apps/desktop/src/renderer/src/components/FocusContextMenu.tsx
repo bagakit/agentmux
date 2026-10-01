@@ -1,5 +1,7 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import type { ReactNode } from 'react'
+import { useRef, type ReactNode } from 'react'
+import { ArrowUpRight, Pencil } from 'lucide-react'
+import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -8,15 +10,15 @@ import { RegionMenuEntryView } from './RegionContextMenu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** A Context card knows its semantic SID, not which of its Regions to address. */
-export function FocusContextMenu({ sessionId, children }: { sessionId: string; children: ReactNode }) {
-  const actions = agentRosterMenuActions({
-    sessionId,
-    sharingMetadata: () => resolveAgentSharingMetadata(sessionId, useAppStore.getState()),
-    writeClipboardText: async text => {
-      await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
-    }
-  })
-  return <ContextMenu.Root modal={false}>
+export function FocusContextMenu({ context, children, onOpenChange, onSelect, onRename, onRestoreFocus }: {
+  context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onSelect(id: string): void; onRename(): void; onRestoreFocus(): void
+}) {
+  const sessionId = context.id
+  const actionOwnsFocus = useRef(false)
+  const actions = agentRosterMenuActions({ sessionId, sharingMetadata: () => resolveAgentSharingMetadata(sessionId, useAppStore.getState()), writeClipboardText: async text => {
+    await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
+  } })
+  return <ContextMenu.Root modal={false} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>
     <ContextMenu.Trigger asChild onKeyDown={event => {
       if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
       event.preventDefault()
@@ -24,8 +26,20 @@ export function FocusContextMenu({ sessionId, children }: { sessionId: string; c
       event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: rect.left, clientY: rect.bottom }))
     }}>{children}</ContextMenu.Trigger>
     <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-      <ContextMenu.Content className="tab-context-menu focus-context-menu" data-agent-session-id={sessionId} collisionPadding={8}>
-        {actions.map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
+      <ContextMenu.Content className="tab-context-menu focus-context-menu" data-agent-session-id={sessionId} collisionPadding={8}
+        onCloseAutoFocus={event => {
+          const active = document.activeElement
+          const closing = event.target
+          const laterFocus = active instanceof HTMLElement && active !== document.body &&
+            closing instanceof HTMLElement && !closing.contains(active)
+          if (actionOwnsFocus.current || laterFocus) { event.preventDefault(); actionOwnsFocus.current = false }
+          else onRestoreFocus()
+        }}>
+        <ContextMenu.Label className="focus-context-menu__identity"><strong>{context.name}</strong><span>{context.stateLabel}</span><code title={sessionId}>{sessionId}</code></ContextMenu.Label>
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onSelect(sessionId) }}><ArrowUpRight size={14} /><span>Open in Focus</span></ContextMenu.Item>
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><Pencil size={14} /><span>Rename Agent</span></ContextMenu.Item>
+        <ContextMenu.Separator className="tab-context-menu__separator" />
+        {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
       </ContextMenu.Content>
     </ContextMenu.Portal>
   </ContextMenu.Root>

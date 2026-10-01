@@ -5,23 +5,28 @@ import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
+import type { AgentMuxInteractionRequest } from '@agentmux/core'
+import { composerSession } from './helpers/composer-dom-fixture'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 // See attention-request-resolution.test.ts for the same reason: mock TerminalView so
 // GlobalFocusSurface's fallback SessionObservationRegions path doesn't trip.
 vi.mock('../src/renderer/src/components/TerminalView.js', () => ({ TerminalView: () => null }))
+// Keep the original Focus/Attention request, without selecting a disabled duplicate in PTY paint.
+vi.mock('../src/renderer/src/components/SessionPane.js', () => ({ SessionPane: () => null }))
 
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { api } from '../src/renderer/src/lib/api.js'
 
 type AgentSnapshot = Extract<SessionSnapshot, { kind: 'agent' }>
-const request = { kind: 'question', id: 'request-a', questions: [{ id: 'channel', title: 'Choose a release channel', prompt: 'Where should this go?', options: [{ id: 'stable', label: 'Stable' }, { id: 'canary', label: 'Canary' }] }] } as never
+const request = { kind: 'question', id: 'request-a', agentSessionId: 'attention-a', evidence: { source: 'native-hook', observedAt: 2, run: { runId: 'run-a' } }, questions: [{ id: 'channel', title: 'Choose a release channel', prompt: 'Where should this go?', options: [{ id: 'stable', label: 'Stable' }, { id: 'canary', label: 'Canary' }] }] } satisfies AgentMuxInteractionRequest
 const session = {
+  ...composerSession('attention-a'),
   id: 'attention-a', kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), label: 'Release agent',
   createdAt: 1, updatedAt: 2, processState: 'running', latestOutputBytes: 0, status: { state: 'waiting', source: 'run-process', observedAt: 2 },
-  capabilities: {}, pendingInteraction: request, control: { kind: 'agent', hostId: 'local', agentSessionId: 'attention-a', run: { runId: 'run-a' } }
-} as unknown as AgentSnapshot
+  pendingInteraction: request, control: { kind: 'agent', hostId: 'local', agentSessionId: 'attention-a', run: { runId: 'run-a' } }
+} satisfies AgentSnapshot
 
 // GlobalFocusSurface renders session cards inside project lanes derived from `config.workspaces`.
 // Without a workspace matching fixtureRoot/repo, deriveFocusProjectLanes returns [] and no session card is

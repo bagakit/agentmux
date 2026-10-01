@@ -1,10 +1,10 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { createElement } from 'react'
-import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
+import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
-import { useAppStore } from '../../../src/renderer/src/store'
+import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
@@ -25,22 +25,57 @@ const now = Date.now()
 function agent(id, state, path = alpha.path) { return { ...agentBase, id, label: id === 'original' ? 'Original investigation' : 'Offline context ' + id, workspacePath: path, processState: state === 'disconnected' ? 'interrupted' : 'running', status: { ...agentBase.status, state, source: 'native-hook', observedAt: now }, control: { ...base.control, agentSessionId: id, run: { runId: 'typed-lane-' + id } } } }
 const original = agent('original', 'working')
 const tab = createWorkbenchTab('original', { regionId: 'original-region', workspaceId: alpha.id, kind: 'agent', phase: 'attached', sessionId: original.id }, 'Original work')
+const heightScene = new URLSearchParams(location.search).get('height') === '1'
+const originalInitialize = useAppStore.getState().initialize
+if (heightScene) {
+  api.config.get = async () => ({ ...config, workspaces: [alpha, scratch] })
+  api.sessions.snapshot = async () => ({ ...snapshot, sessions: [original], timelines: {}, recoveryCandidates: [] })
+}
 window.presentationLeaves = { mounts: [], unmounts: [] }
 const calls = { stop: 0, resume: 0, launchAgent: 0, write: 0, interrupt: 0 }
 for (const key of Object.keys(calls)) { const original = api.sessions[key]; api.sessions[key] = (...args) => { calls[key]++; return original(...args) } }
 const reads = { historyPage: 0, timeline: 0, historySources: 0, topics: 0, appearance: 0 }
 for (const key of ['historyPage', 'timeline', 'historySources']) { const original = api.sessions[key]; api.sessions[key] = (...args) => { reads[key]++; return original(...args) } }
 for (const [port, key, counter] of [[api.scratch, 'listTopics', 'topics'], [api.workspaces, 'appearance', 'appearance']]) { const original = port[key]; port[key] = (...args) => { reads[counter]++; return original(...args) } }
-useAppStore.setState({ loading: false, initialize: async () => () => {}, config: { ...config, workspaces: [alpha, scratch] }, sessions: [original],
+if (!heightScene) useAppStore.setState({ loading: false, initialize: async () => () => {}, config: { ...config, workspaces: [alpha, scratch] }, sessions: [original],
   activeWorkspaceId: alpha.id, mainSurface: 'workbench', toolsOpen: false, projectRailOpen: false,
   tabs: { original: tab }, layouts: { alpha: createWorkspaceLayout('original-group', [tab.id]), [scratch.id]: createWorkspaceLayout('topics-group') }, timelines: {},
   agentNames: { original: 'Original investigation' }, scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 0, topics, error: null, reading: false } },
   agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { original: 'Original unsent draft' } })
 createRoot(document.getElementById('root')).render(createElement(App))
-let retained, originalDraft, originalSearch
+let retained, originalDraft, originalSearch, heightSeedCount = 0
 window.laneProof = {
   ready: true,
   scratchProjectId: scratch.id,
+  heightReady() { return !useAppStore.getState().loading && useAppStore.getState().initialize === originalInitialize },
+  seedHeight() {
+    if (!heightScene || heightSeedCount) throw new Error('One initial private presentation seed only')
+    heightSeedCount++
+    useAppStore.setState({ tabs: { original: tab }, layouts: { alpha: createWorkspaceLayout('original-group', [tab.id]), [scratch.id]: createWorkspaceLayout('topics-group') },
+      activeWorkspaceId: alpha.id, mainSurface: 'agents', toolsOpen: false, projectRailOpen: false, agentNames: { original: 'Original investigation' },
+      agentFocus: { execution: { sessionId: 'original', history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { original: 'Original unsent draft' } })
+  },
+  async flushHeight() { await prepareRendererUpdate('quit') },
+  heightFacts() { const state = useAppStore.getState(); return { initialized: !state.loading, originalInitialize: state.initialize === originalInitialize, seedCount: heightSeedCount,
+    tabs: state.tabs, layouts: state.layouts, draft: state.agentComposerDrafts.original, focus: state.agentFocus.execution.sessionId,
+    original: state.sessions.find(session => session.id === 'original')?.control, leaves: [...document.querySelectorAll('[data-fixture-session]')].map(node => ({ session: node.dataset.fixtureSession, tab: node.dataset.ownerTab, region: node.dataset.ownerRegion })), calls: { ...calls }, reads: { ...reads } } },
+  heightMode(kind) {
+    let sessions = [original], timelines = {}
+    const answer = id => ({ agentSessionId: id, revision: 1, items: [{ id: 'answer-' + id, agentSessionId: id, kind: 'assistant_message', source: 'native-hook', status: 'complete', title: 'Answer', content: '已确认的结果：保留原上下文与具体文件信息。', createdAt: now - 1000, updatedAt: now - 1000 }] })
+    if (kind === 'skewed' || kind === 'mixed') {
+      sessions = [original, ...Array.from({ length: 11 }, (_, i) => agent('working-' + i, 'working')), ...Array.from({ length: 5 }, (_, i) => agent('result-' + i, 'done')), agent('idle', 'running')]
+      timelines = Object.fromEntries(sessions.filter(session => session.status.state === 'done').map(session => [session.id, answer(session.id)]))
+      if (kind === 'mixed') {
+        const failed = agent('failure', 'error')
+        sessions.push({ ...agent('permission', 'waiting_permission'), pendingInteraction: { id: 'p', kind: 'permission', title: '允许读取当前工作区里这个具体文件以继续核对吗？', operation: 'edit' } },
+          { ...failed, processState: 'exited', semanticStatus: { ...failed.semanticStatus, state: 'error', detail: 'Agent startup failed: executable not found' }, status: { ...failed.status, detail: 'Agent startup failed: executable not found' } })
+        timelines.original = { ...answer('original'), items: [...answer('original').items, { id: 'tool', agentSessionId: 'original', kind: 'tool_call', title: 'Read', toolName: 'Read', toolInput: JSON.stringify({ file_path: alpha.path + '/src/components/repair-scroll-anchor.tsx' }), status: 'streaming', source: 'native-hook', createdAt: now, updatedAt: now }] }
+      }
+    } else if (kind === 'single-topic') sessions = [agent('topic-single', 'working', topics[0].directoryPath)]
+    else if (kind === 'double-results') { sessions = [agent('result-a', 'done'), agent('result-b', 'done')]; timelines = { 'result-a': answer('result-a'), 'result-b': answer('result-b') } }
+    else if (kind !== 'restore') throw new Error('Explicit height scene required')
+    useAppStore.setState({ sessions, timelines, agentNames: Object.fromEntries(sessions.map(session => [session.id, session.id === 'original' ? 'Original investigation' : kind === 'mixed' ? '长中文任务名称：保持具体动作与已观察摘录 ' + session.id : session.id])), scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 0, topics, error: null, reading: false } } })
+  },
   enter() {
     useAppStore.getState().focusRegion(alpha.id, tab.id, 'original-region', 'pointer', 'original-group')
     originalDraft = document.querySelector('[data-owner-tab="original"][data-owner-region="original-region"] textarea')

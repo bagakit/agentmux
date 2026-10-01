@@ -67,12 +67,11 @@ it('titles and renames the exact Tab through its owner while preserving Agent an
   expect(container.querySelector(`[data-session-id="${id}"] strong`)!.textContent).toBe('Agent task · distinct from Tab')
   expect(useAppStore.getState().agentFocus).toBe(beforeFocus)
 })
-it('keyboard menu continues in Space through the existing navigation owner and close only dismisses observation', async () => {
-  const identity = container.querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
+it('direct Space control uses the existing navigation owner and close only dismisses observation', async () => {
   const selectSession = vi.fn(); await act(async () => useAppStore.setState({ selectSession }))
-  await act(async () => identity.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'F10', shiftKey: true })))
-  await pick('Continue in Space')
-  expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(selectSession).toHaveBeenCalledWith(id)
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View in Space"]')!.click())
+  expect(useAppStore.getState().mainSurface).toBe('workbench'); expect(selectSession).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentFocus.execution.reference?.tabId).toBe(tabId)
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(id)
   const sessions = useAppStore.getState().sessions
   await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close Focus workspace"]')!.click())

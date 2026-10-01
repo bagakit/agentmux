@@ -1,0 +1,8 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": [
+    "../../../src/renderer/src/components/WorkspaceWorkbench.tsx",
+    "../../../src/renderer/src/**/*.d.ts",
+    "../../../test/focus-region-slot-switch.test.tsx"
+  ]
+}

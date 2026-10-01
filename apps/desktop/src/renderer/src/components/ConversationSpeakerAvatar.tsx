@@ -4,6 +4,8 @@ import type { CSSProperties } from 'react'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
 import { AgentProviderIcon } from './AgentProviderIcon'
+import type { MoteConversationIdentity } from '../lib/mote-conversation-identity'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
 
 /**
  * 说话人头像：把一个 `{role, id}` 身份画成一枚可扫视的小圆片。
@@ -57,6 +59,7 @@ export function ConversationSpeakerAvatar({
   speaker,
   name,
   providerId,
+  mote,
   size = 16
 }: {
   /** 身份：唯一的身份输入，来自 `speakerOf(item)`。role 选画法，id 派生颜色。 */
@@ -65,6 +68,7 @@ export function ConversationSpeakerAvatar({
   name: string
   /** 这个 agent 怎么画；由调用方用 `speaker.id` 去 store 查得。human 不需要。 */
   providerId?: AgentProviderId
+  mote?: MoteConversationIdentity | undefined
   /** 边长。轴上取 16、对话正文取 20，两者都有生产调用者，所以两条尺寸路径都要可用。 */
   size?: number
 }) {
@@ -81,13 +85,16 @@ export function ConversationSpeakerAvatar({
 
   return (
     <span
-      className={`conversation-avatar conversation-avatar--${speaker.role}`}
+      className={`conversation-avatar conversation-avatar--${speaker.role}${isAgent && mote ? ' conversation-avatar--mote' : ''}`}
+      data-speaker-avatar={isAgent && mote ? 'mote' : undefined}
+      data-speaker-id={speaker.id}
       role="img"
       aria-label={name}
       title={name}
       style={style}
     >
-      {isAgent ? (
+      {isAgent && mote ? <SpaceObjectIcon kind="mote" name={name} manualIcon={mote.icon} visible={false}
+        avatarObjectKey={mote.objectKey} avatarWorkspaceId={mote.workspaceId} avatarTopicId={mote.topicId} /> : isAgent ? (
         // `providerId` 原样传下去，缺失就是缺失——`AgentProviderIcon` 的签名承认这一路（缺失走 Bot
         // 兜底），所以这里不需要把「查不到」编码成一个假值。`exactOptionalPropertyTypes` 下显式
         // `undefined` 不能喂给 optional 属性，故按缺席传，而不是退回 `?? ''` 那种假值。

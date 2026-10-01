@@ -1,0 +1,9 @@
+{
+  "extends": "../../../tsconfig.json",
+  "include": [
+    "../../../src/renderer/src/components/AttentionRequestPanel.tsx",
+    "../../../src/renderer/src/lib/focus-context.ts",
+    "../../../src/renderer/src/**/*.d.ts",
+    "../../../test/focus-failed-session-close.test.tsx"
+  ]
+}

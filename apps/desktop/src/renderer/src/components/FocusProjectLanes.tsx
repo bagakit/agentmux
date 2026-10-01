@@ -1,19 +1,20 @@
 import { ChevronRight, GitBranch, Hash } from 'lucide-react'
-import type { ReactNode } from 'react'
+import type { ReactNode, Ref } from 'react'
 import type { FocusProjectLane } from '../lib/focus-project-lanes'
 import { ProjectIcon } from './ProjectIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
-export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, renderLane }: {
+export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, renderLane, rowsRef }: {
+  rowsRef?: Ref<HTMLDivElement>
   lanes: readonly FocusProjectLane[]; selectedWorkspaceId: string
   onSelect(workspaceId: string): void; renderLane(lane: FocusProjectLane, heading: ReactNode): ReactNode
 }) {
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
   return <section className="focus-project-lanes" aria-label="Project contexts">
-    <div className="focus-project-lanes__rows">
+    <div className="focus-project-lanes__rows" ref={rowsRef}>
       {lanes.map(lane => <article className={`focus-project-lanes__row${selectedWorkspaceId === lane.projectId ? ' is-selected' : ''}`} data-project-id={lane.projectId} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">

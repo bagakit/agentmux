@@ -145,16 +145,14 @@ it('retains the original single owner across History, Space, Focus rename and pr
   const identity = toolbar().querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
   await act(async () => { identity.focus(); identity.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })) })
   const focusMenu = document.querySelector<HTMLElement>('[role="menu"]')!; expect(focusMenu).not.toBeNull()
-  expect([...focusMenu.querySelectorAll('[role="menuitem"]')].map(x => x.textContent?.trim())).toEqual(['Rename Agent', 'Continue in Space', 'Close Focus workspace'])
-  await act(async () => item(focusMenu, 'Rename Agent').click())
-  const rename = toolbar().querySelector<HTMLInputElement>('[aria-label="Rename Focus context"]')!; expect(document.activeElement).toBe(rename)
+  expect([...focusMenu.querySelectorAll('[role="menuitem"]')].map(x => x.textContent?.trim())).toEqual(['Rename Tab', 'Close Focus workspace'])
+  await act(async () => item(focusMenu, 'Rename Tab').click())
+  const rename = toolbar().querySelector<HTMLInputElement>('[aria-label="Rename Tab"]')!; expect(document.activeElement).toBe(rename)
   await act(async () => rename.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
   expect(useAppStore.getState().agentNames[sessionIds[0]!]).toBe(name)
   expect(document.activeElement).toBe(toolbar().querySelector('.focus-toolbar__identity'))
-  const currentIdentity = toolbar().querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
-  await act(async () => currentIdentity.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })))
-  const spaceMenu = document.querySelector<HTMLElement>('[role="menu"]')!; expect(spaceMenu).not.toBeNull()
-  await act(async () => item(spaceMenu, 'Continue in Space').click())
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  await act(async () => toolbar().querySelector<HTMLButtonElement>('[aria-label="View in Space"]')!.click())
   expect(localHeaderName()).toBe(name)
   expect(region().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
   expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
@@ -174,7 +172,9 @@ it('retains the original single owner across History, Space, Focus rename and pr
 it('returns a retained but currently unconfirmed durable owner to its original local Header', async () => {
   await mount(); const originalPaint = region().querySelector('[data-terminal-paint]'), before = useAppStore.getState()
   await act(async () => useAppStore.setState({ layouts: {} }))
-  expect(container.textContent).toContain('Workspace layout is still restoring')
+  const notice = container.querySelector('.focus-location-recovery')!
+  expect(notice.textContent).toContain('No work surface occurrence is currently confirmed')
+  expect(notice.textContent).toContain('The original Session and work surfaces are retained')
   expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
   expect(localHeaderName()).toBe(name)
   expect(region().querySelector('[data-terminal-paint]')).toBe(originalPaint)
