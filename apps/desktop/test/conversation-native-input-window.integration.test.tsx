@@ -13,7 +13,7 @@ import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-mes
 const captured = vi.hoisted(() => ({ witness: null as ReturnType<typeof useSessionUserMessages> | null }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({session}: {session: SessionSnapshot}) => { return <div data-leaf="terminal" /> } }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({ AgentSessionComposer: ({sessionId,disabled=false}: {sessionId:string;disabled?:boolean}) => <div data-leaf="composer" data-session={sessionId} data-disabled={String(disabled)} /> }))
-vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegionHeader: ({sessionId,onHistory}: {sessionId:string;onHistory?:()=>void}) => <header data-leaf="header" data-session={sessionId}>{onHistory ? <button type="button" onClick={onHistory}>History</button> : null}</header> }))
+vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegionHeader: ({sessionId,onHistory}: {sessionId:string;onHistory?:()=>void}) => <header data-leaf="header" data-session={sessionId}><button type="button" className="agent-region-header__more" onClick={onHistory}>History</button></header> }))
 vi.mock('../src/renderer/src/components/SessionConnectingSurface', () => ({ SessionConnectingSurface: () => <div data-leaf="connecting" /> }))
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
 vi.mock('../src/renderer/src/components/AgentLifecycleFeedback', () => ({ AgentLifecycleFeedback: () => null }))
@@ -50,20 +50,20 @@ function notice(){return feed().querySelector<HTMLElement>('.activity-feed__read
 function emptyTimeline(){useAppStore.setState({timelines:{a:{agentSessionId:'a',revision:1,items:[]}}})}
 
 describe('Native input read window in the actual conversation and original History',()=>{
- it('explains an empty latest raw window and reads an original nonempty earlier input through the same History',async()=>{
+ it('opens the bounded native window through its original earlier input and retains the independent History cursor',async()=>{
   emptyTimeline();read.mockImplementation(async(control,options)=>options?.cursor?older(control.agentSessionId):latestWindow(control.agentSessionId))
   await render(pane('a'))
-  expect(read.mock.calls.map(([control,options])=>[control,options])).toEqual([[agent('a').control,{limit:30}]])
-  expect(feed().querySelectorAll('.log-turn__body')).toHaveLength(0)
-  expect(notice()?.textContent ?? '').toContain('Earlier conversation records are available')
-  const trigger=button('Read earlier records',feed());await click(trigger)
+  expect(read.mock.calls.map(([control,options])=>[control,options])).toEqual([[agent('a').control,{limit:30}],[agent('a').control,{limit:30,cursor:'opaque-earlier-records'}]])
+  expect([...feed().querySelectorAll('.log-turn__body')].map(node=>node.textContent)).toEqual(['Original earlier human-shaped input; author unrecorded',...Array.from({length:30},(_,i)=>`Assistant record ${i}`)])
+  expect([...feed().querySelectorAll('button')].map(node=>node.textContent?.trim())).not.toContain('Read earlier records')
+  const trigger=button('History');await click(trigger)
   const history=container.querySelector<HTMLElement>('.session-history')!;expect(history).not.toBeNull()
   expect([...history.querySelectorAll('[data-history-item-id]')].map(node=>node.getAttribute('data-history-item-id'))).toEqual(Array.from({length:30},(_,i)=>`assistant-${i}`))
   await click(button('Load earlier records',history))
   const original=history.querySelector('[data-history-item-id="older-input-original-id"]')!
   expect(original).not.toBeNull();expect(original.textContent).toContain('Original earlier human-shaped input; author unrecorded')
   expect([...history.querySelectorAll('[data-history-item-id]')].map(node=>node.getAttribute('data-history-item-id'))).toEqual(['older-input-original-id',...Array.from({length:30},(_,i)=>`assistant-${i}`)])
-  expect(read.mock.calls.map(([control,options])=>[control,options])).toEqual([[agent('a').control,{limit:30}],[agent('a').control,undefined],[agent('a').control,{cursor:'opaque-earlier-records'}]])
+  expect(read.mock.calls.map(([control,options])=>[control,options])).toEqual([[agent('a').control,{limit:30}],[agent('a').control,{limit:30,cursor:'opaque-earlier-records'}],[agent('a').control,undefined],[agent('a').control,{cursor:'opaque-earlier-records'}]])
   await click(button('Activity',history));await frame()
   expect(history.hidden).toBe(true);expect(document.activeElement).toBe(trigger);assertHealthy('a')
  })
@@ -73,7 +73,7 @@ describe('Native input read window in the actual conversation and original Histo
   expect(notice()?.textContent ?? '').toContain('Reading native inputs')
   expect(feed().textContent).not.toContain('No structured activity yet')
   await act(async()=>finish(page('a')));await flush()
-  expect([...feed().querySelectorAll('.log-turn__body')].map(node=>node.textContent)).toEqual([BODY,BODY]);expect(notice()).toBeNull();assertHealthy('a')
+  expect([...feed().querySelectorAll('.log-turn__body')].map(node=>node.textContent)).toEqual([BODY,BODY]);expect(notice()?.textContent).toContain('Automatic native updates are unavailable');expect(button('Refresh',feed())).toBeDefined();assertHealthy('a')
  })
  it('shows an initial read failure and retries the same hook once into real nonempty input records',async()=>{
   emptyTimeline();read.mockRejectedValueOnce(new Error('private read unavailable'))
@@ -82,7 +82,7 @@ describe('Native input read window in the actual conversation and original Histo
   let finish!:(p:AgentSessionHistoryPage)=>void;read.mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve}))
   await click(retry);expect(notice()?.textContent ?? '').toContain('Reading native inputs');expect([...feed().querySelectorAll('button')].map(node=>node.textContent?.trim())).not.toContain('Retry');expect(read).toHaveBeenCalledTimes(2)
   await act(async()=>finish(page('a')));await flush()
-  expect([...feed().querySelectorAll('.log-turn__body')].map(node=>node.textContent)).toEqual([BODY,BODY]);expect(notice()).toBeNull();assertHealthy('a')
+  expect([...feed().querySelectorAll('.log-turn__body')].map(node=>node.textContent)).toEqual([BODY,BODY]);expect(notice()?.textContent).toContain('Automatic native updates are unavailable');expect(button('Refresh',feed())).toBeDefined();assertHealthy('a')
  })
  it('keeps existing body nodes and Range while a refresh fails and while History covers its original Activity',async()=>{
   read.mockImplementation(async control=>({...page(control.agentSessionId),nextCursor:'opaque-earlier-records'}))
