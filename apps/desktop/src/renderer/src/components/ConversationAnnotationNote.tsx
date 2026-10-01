@@ -1,6 +1,6 @@
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { autoUpdate, computePosition, flip, inline, offset, shift, size } from '@floating-ui/dom'
-import { ChevronDown, X } from 'lucide-react'
+import { ChevronDown, Plus, X } from 'lucide-react'
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type RefObject } from 'react'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
 import { ComposerTextarea } from './ComposerTextarea'
@@ -126,7 +126,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
           shift({ boundary: region, padding: 8 }), size({ boundary: region, padding: 8,
             apply({ availableWidth, availableHeight }) {
               if (disposed || !availableRef.current || request !== revision) return
-              surface.style.maxWidth = `${Math.max(0, Math.min(280, availableWidth))}px`
+              surface.style.maxWidth = `${Math.max(0, Math.min(256, availableWidth))}px`
               surface.style.maxHeight = `${Math.max(0, availableHeight)}px`
             }
           })]
@@ -216,9 +216,9 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
       <summary aria-label="Selected passage"><span className="conversation-annotation-note__preview">{edit.target.quote}</span><ChevronDown size={12} aria-hidden="true" /></summary>
       <blockquote className="log-turn__annotation-quote" tabIndex={0} aria-label="Selected passage">{edit.target.quote}</blockquote>
     </details>
-    <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="Add a note…" rows={2} />
+    <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="Add a note…" rows={1} />
     {error ? <div className="conversation-annotation-note__error" role="alert">{error}</div> : null}
-    <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" onClick={discard}>Discard note</button><button type="button" className="primary-button" disabled={!note.trim()} onClick={add}>Add to reply draft</button></div>
+    <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" onClick={discard}>Discard note</button><button type="button" className="conversation-annotation-note__add" aria-label="Add to reply draft" disabled={!note.trim()} onClick={add}><Plus size={12} aria-hidden="true" />Add to draft</button></div>
   </div>
 
   return <>

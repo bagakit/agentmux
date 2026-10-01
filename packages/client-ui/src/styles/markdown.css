@@ -1,4 +1,4 @@
-/* Markdown inside a turn. The turn body already sets 13px/1.6 and every element below INHERITS it —
+/* Markdown inside a turn. The turn body uses the client body token and every element below INHERITS it —
    including headings, deliberately. Heading levels differ by weight, colour and the space above them,
    never by size: the surface contract forbids buying hierarchy with type scale, and a transcript full of
    large headings destroys the density that makes a trace scannable. A heading in an agent's answer is a
@@ -236,7 +236,7 @@
 .log-turn__head { gap: var(--sp-1) var(--sp-2); }
 .log-turn__who { flex: 1 1 140px; min-width: min(140px, 100%); font-size: var(--fs-body); }
 .log-turn__context { order: 1; flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
-.log-turn__body { line-height: 1.55; }
+.log-turn__body { line-height: 1.5; }
 .log-turn__continue { margin-top: var(--sp-2); font-size: var(--fs-micro); }
 .log-turn__source-caption { color: var(--text-3); font-weight: 400; }
 .log-turn__declared-source { flex-basis: 100%; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
