@@ -1,0 +1,1 @@
+html{font:14px system-ui;color:#25362f;background:#f1f4f1}body{margin:24px}main{max-width:560px}h1{font-size:20px}form,section{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}input,button{font:inherit;padding:6px 9px}input{min-width:0;max-width:100%}li{padding:4px 0}#status{font-weight:600}

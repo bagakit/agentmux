@@ -1,0 +1,4 @@
+{
+  "extends": "../browser-task-batch/tsconfig.owning.json",
+  "include": ["main.ts"]
+}
