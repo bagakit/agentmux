@@ -43,6 +43,7 @@ import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
 import { SessionResultReviewContent } from './SessionResultReviewContent'
 import { SessionHistoryView } from './SessionHistoryView'
+import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import { AgentRegionHeader } from './AgentRegionHeader'
@@ -111,8 +112,11 @@ export function SessionPane({
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
+  const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
+  const historyHostId = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
+  const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
   const runtimeOwnershipWarnings = useAppStore((state) => state.runtimeOwnershipWarnings)
-  const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId)
+  const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId ?? retainedHistory?.history?.executorId)
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
@@ -525,8 +529,8 @@ export function SessionPane({
   async function recover(): Promise<void> {
     if (recovering) return
     setRecovering(true)
-    await recoverSession(sessionId)
-    setRecovering(false)
+    try { await recoverSession(sessionId) }
+    finally { setRecovering(false) }
   }
 
   // Terminals whose backend restarted (daemon_restart) can never come back by refreshing —
@@ -581,6 +585,37 @@ export function SessionPane({
     </section>
   }
 
+  // Retirement is Core's terminal fact, not a missing Runtime observation. Its native history
+  // needs only a reading reference; never fabricate a Run or an active Agent to make it readable.
+  if (!session && retainedHistory?.state === 'retired' && terminalThemeId) {
+    const reference = { hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }
+    const metadata = retainedHistory.history
+    const label = userName ?? tabName ?? metadata?.executorId ?? sessionId
+    return <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
+      <div className="agent-body"><div className="agent-terminal-stage">
+        {historyOpen ? <SessionHistoryView
+          key={JSON.stringify([reference.hostId, reference.agentSessionId])}
+          control={reference} label={label} onClose={closeHistory} visible={visible && !parked}
+          returnLabel="Session" themeId={terminalThemeId} fontSize={terminalFontSize}
+          workspaceRoot={metadata?.workspacePath ?? ''} openWorkspaceFile={openWorkspaceFile}
+          openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker}
+        /> : <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Retained conversation"
+          title="Session closed"
+          detail={metadata ? `${agentProviderLabel(metadata.providerId)} · ${connectingExecutor?.label ?? metadata.executorId}. The original conversation is retained for reading.`
+            : 'Core confirmed this Session was closed. Its saved identity is retained.'}
+          actions={<button type="button" className="small-button" onClick={event => openHistory(event.currentTarget)}>
+            Read conversation history
+          </button>}
+          details={{ summary: label, content: <dl>
+            <dt>Session ID</dt><dd>{reference.agentSessionId}</dd>
+            {metadata ? <><dt>Provider</dt><dd>{agentProviderLabel(metadata.providerId)}</dd>
+              <dt>Executor</dt><dd>{connectingExecutor?.label ?? metadata.executorId}</dd>
+              <dt>Native Session</dt><dd>{metadata.nativeHandle?.sessionId ?? 'Not recorded'}</dd></> : null}
+          </dl> }} />}
+      </div></div>
+    </section>
+  }
+
   // A launching Region exists before Core returns its Session snapshot. Keep that handoff
   // neutral; interrupted and exited Sessions use the explicit recovery banners below.
   if (!session || !terminalThemeId) {
@@ -593,6 +628,12 @@ export function SessionPane({
           executor={connectingExecutor}
           appearance={connectingAppearance}
         />
+        {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
+          kind: 'indeterminate', notice: { step: `Retained history metadata could not be read: ${historyCatalogue.error}`,
+            mode: 'The original Region and Session reference remain visible. Its current state is unconfirmed.',
+            restore: 'Check again to read the same Session identity; no Agent will be started.' }
+        }} actions={<button type="button" className="small-button" disabled={historyCatalogue.loading}
+          onClick={historyCatalogue.refresh}><RefreshCw size={12} /> Check again</button>} /> : null}
         {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
@@ -704,7 +745,7 @@ export function SessionPane({
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore || terminalLifetime.current.opened ? (
             <div hidden={session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore}
               ref={element => { if (element && !pendingAgentRestore && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
-              inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal'} style={{ height: '100%' }}>
+              inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore} style={{ height: '100%' }}>
             {pendingAgentRestore ? (inlineHistory ? null :
               <FullPageLoadingSurface scope="region" phase={recovering ? 'recovering' : continuityNotice || session.status.state === 'error' ? 'failed' : 'parked'} eyebrow="Session retained"
                 title={recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title : session.status.state === 'error' ? recoveryTitle : 'Ready to restore'}
@@ -740,6 +781,7 @@ export function SessionPane({
           {(historyOpen || inlineHistory || historyEverOpenedRef.current) && session.kind === 'agent' ? <SessionHistoryView
             key={JSON.stringify([session.control.hostId, session.id, session.control.run.runId])}
             control={session.control}
+            readingKey={session.control.run.runId}
             label={agentInputIdentity ?? session.label}
             {...(!inlineHistory ? { onClose: closeHistory } : {})}
             visible={visible && (historyOpen || inlineHistory)}
