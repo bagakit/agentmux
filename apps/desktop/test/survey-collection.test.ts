@@ -20,26 +20,27 @@ function catalog(): AgentMuxSpaceCatalog {
   }
 }
 
-it('automatically discovers only actual Browser membership, without collecting occupied execution or File Zones', () => {
+it('does not turn project Browser or occupied execution Zones into Survey membership', () => {
   const directory = catalog()
   expect(directory.regions.map(region => region.kind)).toEqual(['terminal', 'agent', 'launcher', 'file', 'browser'])
-  expect(surveyZoneItems(directory, {}).map(zone => zone.zoneId)).toEqual(['zone-browser'])
+  expect(surveyZoneItems(directory, {}).map(zone => zone.zoneId)).toEqual([])
 })
 
 const initial = useAppStore.getState()
 afterEach(() => useAppStore.setState(initial, true))
 
-it('joins Browser facts to exact Tab and layout membership, then deduplicates the original Zone', () => {
+it('keeps uncollected Browser locations out and deduplicates only an explicitly saved Zone', () => {
   const directory = catalog(), browser = directory.regions[4]!
   directory.regions.push({ ...browser, tabId: 'tab-file', regionId: 'not-in-file-layout' })
   directory.tabs.push({ ...directory.tabs[4]!, tabId: 'second-browser', regionIds: ['second-page'] })
   directory.regions.push({ ...browser, tabId: 'second-browser', regionId: 'second-page' })
   directory.locations.push({ ...directory.locations[4]!, displayWorkspaceId: 'foreign-display', groupId: 'foreign-group' })
-  expect(surveyZoneItems(directory, {}).map(zone => zone.zoneId)).toEqual(['zone-browser'])
+  expect(surveyZoneItems(directory, {}).map(zone => zone.zoneId)).toEqual([])
+  expect(surveyZoneItems(directory, { 'zone-browser': true }).map(zone => zone.zoneId)).toEqual(['zone-browser'])
 })
 it('retains only explicit members after the last Browser closes, without persisting discovery', () => {
   const directory = catalog(), collected = { 'zone-file': true } satisfies Record<string, true>
-  expect(surveyZoneItems(directory, collected).map(zone => zone.zoneId)).toEqual(['zone-file', 'zone-browser'])
+  expect(surveyZoneItems(directory, collected).map(zone => zone.zoneId)).toEqual(['zone-file'])
   directory.regions = directory.regions.filter(region => region.kind !== 'browser')
   expect(surveyZoneItems(directory, collected).map(zone => zone.zoneId)).toEqual(['zone-file'])
   expect(collected).toEqual({ 'zone-file': true })

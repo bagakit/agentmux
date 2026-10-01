@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { act, useState } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
@@ -7,7 +8,7 @@ vi.hoisted(() => vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true))
 // Unrelated surfaces stay outside this input slice. The three callers and shared input are real.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 vi.mock('../src/renderer/src/components/WorkspaceWorkbench', () => ({ WorkspaceWorkbench: () => null }))
-vi.mock('../src/renderer/src/components/SurveyBrowserTools', () => ({ SurveyBrowserTools: () => null }))
+vi.mock('../src/renderer/src/components/BrowserToolsPanel', () => ({ BrowserToolsPanel: () => null }))
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
 import { LauncherSecondarySurfaces } from '../src/renderer/src/components/LauncherSecondarySurfaces'
 import { GlobalSurveySurface } from '../src/renderer/src/components/GlobalSurveySurface'
@@ -95,18 +96,20 @@ it('the actual Launcher input shares resource history and right-click without wa
 })
 
 it('the actual Global Survey start form records only the human submission and preserves its original creation path', async () => {
-  const zone = { zoneId: 'zone', workspaceId: workspace.id, spaceIds: [] }, region = 'region'
-  const launcher = createWorkbenchTab('launcher', { kind: 'launcher', workspaceId: workspace.id, regionId: region })
+  const scratch = { ...workspace, id: SCRATCH_WORKSPACE_ID }
+  useAppStore.setState({ config: { ...composerConfig, workspaces: [scratch] }, layouts: { [scratch.id]: createWorkspaceLayout('group') } })
+  const zone = { zoneId: 'zone', workspaceId: scratch.id, spaceIds: [] }, region = 'region'
+  const launcher = createWorkbenchTab('launcher', { kind: 'launcher', workspaceId: scratch.id, regionId: region })
   const create = vi.fn(async () => {
-    useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { ...tab, browserId: region, regionId: region }) } })
+    useAppStore.setState({ tabs: { launcher: createWorkbenchTab('launcher', { ...tab, workspaceId: scratch.id, browserId: region, regionId: region }) } })
   })
   useAppStore.setState({ createWorkbenchZone: vi.fn(async () => ({ zone, save: { localStorageWritten: true, storageFlushRequested: true }, issues: [] })) as never,
     openLauncher: vi.fn(() => { useAppStore.setState({ tabs: { launcher } }); return launcher.id }), createBrowser: create })
   await act(async () => root.render(<GlobalSurveySurface catalog={null} projection={null} />))
-  await inspectInputContextMenu(); expect(api.browser.listInputHistory).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: workspace.id })
+  await inspectInputContextMenu(); expect(api.browser.listInputHistory).toHaveBeenCalledWith({ kind: 'workspace', workspaceId: scratch.id })
   await fill('human survey search'); expect(api.browser.recordInputHistory).not.toHaveBeenCalled(); await submit()
-  expect(create).toHaveBeenCalledExactlyOnceWith('group', { tabId: 'launcher', regionId: region }, 'human survey search')
-  expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: workspace.id }, 'human survey search')
+  expect(create).toHaveBeenCalledExactlyOnceWith('group', { tabId: 'launcher', regionId: region }, 'human survey search', undefined, scratch.id)
+  expect(api.browser.recordInputHistory).toHaveBeenCalledExactlyOnceWith({ kind: 'workspace', workspaceId: scratch.id }, 'human survey search')
 })
 
 it('the actual compact Browser header expands its original input and only its human form submission creates and records', async () => {

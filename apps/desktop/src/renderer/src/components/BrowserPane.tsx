@@ -18,7 +18,8 @@ import {
   RefreshCw,
   ScanSearch,
   SlidersHorizontal,
-  Wrench
+  Wrench,
+  X
 } from 'lucide-react'
 import { createPortal } from 'react-dom'
 import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
@@ -70,6 +71,8 @@ import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
 import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { BrowserToolsPanel } from './BrowserToolsPanel'
+import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 
 const VIEWPORT_LABELS: Record<BrowserViewport, string> = {
   responsive: 'Responsive',
@@ -125,7 +128,7 @@ export function BrowserPane({
   const applyBrowserEvent = useAppStore((state) => state.applyBrowserEvent)
   const executeControl = useAppStore((state) => state.executeControl)
   const reportError = useAppStore((state) => state.reportError)
-  const openSurveyBrowserTools = useAppStore((state) => state.openSurveyBrowserTools)
+  const resourceWorkspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === tab.workspaceId))
   const saveBrowserBookmark = useAppStore((state) => state.saveBrowserBookmark)
   const openFile = useAppStore((state) => state.openFile)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
@@ -172,6 +175,34 @@ export function BrowserPane({
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [managementOpen, setManagementOpen] = useState(false)
+  const [managementVisited, setManagementVisited] = useState(false)
+  const research = useRef<{ url: string; preparation: SurveyBrowserPreparation | null } | null>(null)
+  async function startResearch(): Promise<void> {
+    if (busy) return
+    const before = useAppStore.getState()
+    if (!research.current) research.current = { url: tab.url, preparation: null }
+    const pending = research.current
+    setBusy(true); setAddressError(null)
+    try {
+      const created = await before.createSurveyBrowser({ workspaceId: tab.workspaceId, url: pending.url,
+        preparation: pending.preparation, onPrepared(value) { pending.preparation = value } })
+      research.current = null
+      const current = useAppStore.getState()
+      // A later user navigation wins; the new research remains saved and reachable.
+      const previousLayout = before.activeWorkspaceId ? before.layouts[before.activeWorkspaceId] : undefined
+      const currentLayout = before.activeWorkspaceId ? current.layouts[before.activeWorkspaceId] : undefined
+      const previousGroup = previousLayout?.groups.find(group => group.id === previousLayout.activeGroupId)
+      const currentGroup = currentLayout?.groups.find(group => group.id === currentLayout.activeGroupId)
+      if (current.mainSurface === before.mainSurface && current.activeWorkspaceId === before.activeWorkspaceId && current.agentFocus === before.agentFocus &&
+        current.workbenchSpaceSelection === before.workbenchSpaceSelection && current.surveyZoneSelection === before.surveyZoneSelection &&
+        currentLayout?.activeGroupId === previousLayout?.activeGroupId && currentGroup?.activeTabId === previousGroup?.activeTabId) {
+        current.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
+        current.setMainSurface('survey')
+      }
+    } catch (cause) { setAddressError(`Research could not open: ${presentError(cause)}. The original page and research target are kept; retry here.`) }
+    finally { setBusy(false) }
+  }
   const [screenshot, setScreenshot] = useState<BrowserScreenshotCapture | null>(null)
   const [screenshotBusy, setScreenshotBusy] = useState(false)
   const [elementSelection, setElementSelection] = useState<BrowserElementSelection | null>(null)
@@ -1007,21 +1038,17 @@ export function BrowserPane({
                   <FileCode2 size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
                 {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
-                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools in Survey" onSelect={() => {
-                  const owner = Object.values(useAppStore.getState().tabs).find(candidate => {
-                    const surface = candidate.regions[tab.regionId]
-                    return candidate.workspaceId === tab.workspaceId && surface?.kind === 'browser' && surface.browserId === tab.browserId
-                  })
-                  if (owner) openSurveyBrowserTools({ workspaceId: tab.workspaceId, tabId: owner.id, regionId: tab.regionId })
-                  else reportError(new Error('The original Browser Region is still restoring. Retry after its owner is available.'))
-                }}>
-                  <SlidersHorizontal size={12} /><span>Browser tools in Survey…</span>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
+                  <SlidersHorizontal size={12} /><span>Browser tools…</span>
+                </DropdownMenu.Item>
+                <DropdownMenu.Item className="browser-menu__item" aria-label="Research in Survey" disabled={busy} onSelect={() => void startResearch()}>
+                  <Globe2 size={12} /><span>{research.current ? 'Resume research creation' : 'Research in Survey…'}</span>
                 </DropdownMenu.Item>
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
       </form>
-      {addressError ? <p className="browser-address-error" role="alert">{addressError}</p> : null}
+      {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
       {/* 页面与详情共享布局，正常并排，极窄 Pane 沿 SSOT 改为有限高度阅读区。
@@ -1037,6 +1064,10 @@ export function BrowserPane({
         blocked={blocked} media={media} stageRef={presentation.stageHostId === presentations[0]?.stageHostId ? stageRef : undefined}>{stageContent}</BrowserPresentationStage>
         : <div className="browser-stage" data-native-browser-stage={tab.browserId} ref={stageRef}>{stageContent}</div>}
 
+      {managementVisited ? <aside className="browser-trace-rail browser-management-rail" aria-label="Browser management controls" hidden={!managementOpen} inert={!managementOpen || !visible}>
+        <header><strong>Browser tools</strong><button type="button" className="icon-button" aria-label="Close browser tools" onClick={() => setManagementOpen(false)}><X size={14} /></button></header>
+        {resourceWorkspace ? <BrowserToolsPanel workspace={resourceWorkspace} visible={visible && managementOpen} /> : <p role="status">The browser resource is still restoring. Your page remains available.</p>}
+      </aside> : null}
       {timelineOpen ? (
         <aside className="browser-trace-rail" aria-label="Browser activity trace">
           <BrowserDemonstrationSurface

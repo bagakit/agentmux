@@ -1505,6 +1505,7 @@ export function WorkspaceWorkbench({
   onBrowserControlConfirmation,
   projectionTabId,
   onTabSelect,
+  onCreateTab,
   projection,
   leadingChrome
 }: {
@@ -1529,6 +1530,7 @@ export function WorkspaceWorkbench({
   projectionTabId?: string | undefined
   /** Explicit navigation inside this projection may retain its own selected Tab. */
   onTabSelect?: ((tabId: string) => void) | undefined
+  onCreateTab?: ((groupId: string) => void) | undefined
   /** Controlled exact Zone projection; the original workface keeps entity/content ownership. */
   projection?: WorkbenchProjection | undefined
   /** Surface chrome follows the same first-Pane path without taking content ownership. */
@@ -1674,6 +1676,7 @@ export function WorkspaceWorkbench({
   }
 
   function newTab(groupId: string): void {
+    if (onCreateTab) { onCreateTab(groupId); return }
     if (projection) {
       const zone = workbenchProjectionZone(projection)
       const state = useAppStore.getState()
