@@ -1,3 +1,4 @@
+import { DOMImplementation, XMLSerializer } from '@xmldom/xmldom'
 import { AGENTMUX_SELF_CONTEXT_VERB } from './agent-self-context.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 
@@ -51,7 +52,12 @@ const AWAIT_USER_REQUEST = 'No request yet. Wait for the user.'
  * 出站文本的唯一组装出口是那一个函数，署名不该被第二处直接拼。
  */
 function amuxEnvelope(text: string): string {
-  return `<amux from="${AMUX_FROM}">\n${text}\n</amux>`
+  const document = new DOMImplementation().createDocument(null, 'amux', null)
+  const envelope = document.documentElement!
+  envelope.setAttribute('from', AMUX_FROM)
+  // Platform text remains text even when a rule or note contains XML-looking syntax.
+  envelope.appendChild(document.createTextNode(`\n${text}\n`))
+  return new XMLSerializer().serializeToString(envelope).replace(/\r/g, '&#13;')
 }
 
 /**
