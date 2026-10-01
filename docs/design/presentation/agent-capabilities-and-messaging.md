@@ -69,6 +69,10 @@
 - 非 AgentMux 会话被识别为无关联事件时只保留低干扰诊断，不弹出阻塞对话框、不禁用 Composer，也不把健康 Agent 标成错误终局。
 - Hook 的 AgentMux 关联身份属于低频元信息，放入 tooltip、详情或诊断收据；主工作面只显示当前能力和可执行恢复入口。
 
+## AgentMux 注入上下文的阅读
+
+范围、唯一包装、用途与投递形式以及来源边界只见[《AgentMux 注入上下文》](../behavior/agent-capabilities-and-messaging.md#agentmux-注入上下文)。沿[完整前导声明的同记录阅读](../behavior/terminal-reading.md#terminal-连续向上阅读历史)保留可展开原文与真实尾文，不把声明画成认证徽章；正文密度沿[《用户消息气泡的内文密度》](conversation-input.md#用户消息气泡的内文密度)，不因规范统一新增视觉层。
+
 ## A2A 消息队列与身份信息密度
 
 - 非历史 CLI 当前回执与无关原生读取依赖边界归交互合同[《持久消息的显式消费与派发等待》](../behavior/agent-capabilities-and-messaging.md#持久消息的显式消费与派发等待)，不另造提示或输出协议。
@@ -76,9 +80,8 @@
 - 本次跨 Session 消息来源优化沿既有一行来源与正文呈现，不新增视觉层或认证徽章；统一来源头、首条及 `whoami`／启动／技能的使用要求只引用交互合同[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)。
 
 - 发送回执与收件侧信封必须能对应同一条消息：首层明确显示已入队、已投递或失败，详情能核对稳定 `messageId` 和 Core 核验的双方 Session/Run；重试不得像一条新消息，队列暂不可写时不得出现虚假的“已送达”。交互行为以[《A2A 身份信封与持久化全局消息队列》](../behavior/agent-capabilities-and-messaging.md#a2a-身份信封与持久化全局消息队列)为准。
-- 收件信封显示解析后的 Session 身份；Region、Tab 和其他视觉位置不作为 `to` 属性。sender、recipient 和 messageId 进入 XML 属性前必须安全转义，属性边界不能被消息身份或正文破坏。
+- 收件来源显示 Core 已解析的参与者身份；Region、Tab 和其他视觉位置不能冒充发送者或接收者。实际可读来源与机器消息字段的归属只见上述 A2A 交互合同，不沿用旧 XML 属性表达。
 - Message Tools 的首层只显示发送者、接收者、当前投递状态和必要的失败/重试动作；`messageId`、receipt、generation、thread/correlation 和 workspace/session/run 关联进入详情或审计入口，不占用 Composer 主输入区。
-- `<amux ...>` 署名保留为正文附近的一行可读来源提示，不能被渲染成认证徽章；Core 已验证的 sender/recipient 身份才是权威信息。正文必须保持用户原样，不把协议字段插入正文。
 - 队列重启、replay、背压或 Store 降级使用现有 Agent/Session 服务窗的一行状态提示，说明事实、当前能力和恢复动作；不清空消息列表、不覆盖 Composer，也不把健康 Agent 画成终局错误。
 - 读取和审计入口支持按 thread、recipient、session 或 receipt 收窄范围；默认列表按 durable sequence 排序，不能用当前 Region 或视觉位置替代消息身份。
 
