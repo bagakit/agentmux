@@ -8,10 +8,16 @@ export function defaultPrivateAccessConfigurationPath(storePath: string): string
   return join(dirname(storePath), 'agentmux-private-access.json')
 }
 
+/** A validated startup source, not a path guessed by the state getter. */
+export function isPrivateAccessConfigurationPath(value: unknown): value is string {
+  return typeof value === 'string' && isAbsolute(value) && Buffer.byteLength(value, 'utf8') <= 4096
+    && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(value)
+}
+
 /** One explicit Host-owned, non-secret startup manifest. Reading never creates or repairs it. */
 export async function readPrivateAccessConfiguration(path: string): Promise<PrivateAccessConfiguration> {
   const invalid = () => new AgentMuxError('Private mobile access configuration is invalid. Its original bytes are retained; correct the private IP, port and absolute certificate/build paths to restore mobile access. Unix and Agent Sessions remain available.', 'INVALID_CONTROL_REQUEST')
-  if (!isAbsolute(path)) throw invalid()
+  if (!isPrivateAccessConfigurationPath(path)) throw invalid()
   const info = await lstat(path)
   if (!info.isFile() || info.isSymbolicLink() || info.size < 1 || info.size > 4096) throw invalid()
   let value: unknown

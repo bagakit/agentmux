@@ -9,7 +9,13 @@ it('compiles the complete public Core export graph without Node ambient types or
   try {
     const consumer = join(directory, 'consumer.mts')
     await writeFile(consumer, `import * as core from '@agentmux/core'
-import { openAgentMuxRpcHttpRequest, parseRpcResponse, rpcResponseError, encodeHostedValue, decodeHostedValue } from '@agentmux/core/public-rpc-http'
+import { openAgentMuxRpcHttpRequest, parseRpcResponse, rpcResponseError, encodeHostedValue, decodeHostedValue, parseAgentMuxRpcPrivateAccessState, type AgentMuxRpcPrivateAccessState, type AgentMuxRpcCertificatePreparation } from '@agentmux/core/public-rpc-http'
+const portableState: AgentMuxRpcPrivateAccessState = parseAgentMuxRpcPrivateAccessState({ state: 'unavailable', message: 'Unconfirmed' }, 'host')
+const rootState: core.AgentMuxRpcPrivateAccessState = portableState
+declare const locator: AgentMuxRpcCertificatePreparation
+const rootLocator: core.AgentMuxRpcCertificatePreparation = locator
+void rootState
+void rootLocator
 const fetchRequest: typeof openAgentMuxRpcHttpRequest = openAgentMuxRpcHttpRequest
 const response = parseRpcResponse({ jsonrpc: '2.0', id: 'portable', result: {} })
 const failure = rpcResponseError(response)

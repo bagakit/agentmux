@@ -4,12 +4,13 @@ import { AgentMuxClient, AgentMuxControlServer, AgentMuxFileAgentSessionStore, A
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
-  type AgentProvider, type AgentMuxRpcHttpOptions } from '@agentmux/core'
+  type AgentProvider, type AgentMuxRpcHttpOptions, type AgentMuxRpcPrivateAccessState } from '@agentmux/core'
 import { DeviceAuthority } from './device-authority.js'
 import { PrivateAccess } from './private-access.js'
 import { readPrivateTls, type PrivateTlsIdentity } from './private-tls.js'
 import { loadPrivateMobileAssets } from './private-access-assets.js'
-import type { PrivateAccessConfiguration } from './private-access-configuration.js'
+import { isPrivateAccessConfigurationPath, type PrivateAccessConfiguration } from './private-access-configuration.js'
+import { readCertificatePreparation } from './certificate-preparation.js'
 import { createDeviceAdministration } from './device-administration.js'
 import type { MacDeviceConfirmation } from './mac-device-confirmation.js'
 
@@ -21,19 +22,19 @@ export type AgentMuxHostOptions = {
   privateAccess?: PrivateAccessConfiguration
   /** A startup manifest failure belongs to mobile access, never Core startup. */
   privateAccessIssue?: string
+  /** Only the original startup entry supplies its selected, validated manifest source. */
+  privateAccessConfigurationPath?: string
   /** A Host-owned OS collaborator; never accepted from public RPC params. */
   deviceConfirmation?: MacDeviceConfirmation
-}
-
-export type AgentMuxPrivateAccessState = { state: 'unconfigured' | 'unavailable'; message: string } | {
-  state: 'listening'; message: string; origin: string; issuerHostId: string;
-  certificateFingerprint: string; expiresAt: number; mobileBuildDigest?: string; assetIssue?: string
 }
 
 /** The Node Host owns the original Core. Desktop and phones only own client connections. */
 export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
+  const privateConfigured = options.privateAccess !== undefined
+  const configurationPath = isPrivateAccessConfigurationPath(options.privateAccessConfigurationPath)
+    ? options.privateAccessConfigurationPath : undefined
   let client: AgentMuxClient | undefined, hosted: AgentMuxHostedRuntimeService | undefined
   let resolveOwner!: (owner: AgentMuxClient) => void, rejectOwner!: (error: unknown) => void
   const ready = new Promise<AgentMuxClient>((resolve, reject) => { resolveOwner = resolve; rejectOwner = reject })
@@ -41,6 +42,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let authority: DeviceAuthority | undefined, access: PrivateAccess | undefined
   let assets: Awaited<ReturnType<typeof loadPrivateMobileAssets>> | undefined, assetIssue: string | undefined
   let privateIssue = options.privateAccessIssue, tls: PrivateTlsIdentity | undefined
+  let privateInitialized = false
   let resolvePrivate!: () => void
   const privateReady = new Promise<void>(resolve => { resolvePrivate = resolve })
   let resolveAuthority!: (value: DeviceAuthority) => void, rejectAuthority!: (error: unknown) => void
@@ -65,8 +67,23 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     endpoint: { transport: 'unix', path: desktopPath },
     ...(context.caller ? { credentials: context.caller } : {})
   })
+  const privateAccessState = (): AgentMuxRpcPrivateAccessState => {
+    const certificatePreparation = readCertificatePreparation()
+    const sources = { ...(configurationPath ? { configurationPath } : {}),
+      ...(certificatePreparation ? { certificatePreparation } : {}) }
+    const failure = privateIssue ?? server.httpUnavailable?.message
+    if (failure) return { state: 'unavailable', message: failure, ...sources }
+    if (!privateInitialized) return { state: 'unavailable', message: 'Private access initialization is not yet confirmed. Unix diagnostics remain available.', ...sources }
+    if (!privateConfigured) return { state: 'unconfigured',
+      message: 'Private mobile access is not configured. Prepare the explicit private IP/TLS manifest to enable it; Unix and Agent Sessions remain available.', ...sources }
+    if (!access || !tls || !authority || !server.httpAddress) return { state: 'unavailable',
+      message: 'The configured private listener is not confirmed. The original Unix Host and Agent Sessions remain available.', ...sources }
+    return { state: 'listening', message: 'Private HTTPS is listening. Device approval and phone system trust require their own confirmation.',
+      origin: access.origin, issuerHostId: authority.hostId, certificateFingerprint: tls.certificateFingerprint,
+      expiresAt: tls.expiresAt, ...(assets ? { mobileBuildDigest: assets.buildDigest } : {}), ...(assetIssue ? { assetIssue } : {}), ...sources }
+  }
   const server = new AgentMuxControlServer({ socketPath: path, ...(http ? { http } : {}),
-    deviceAdministration: createDeviceAdministration(authorityReady, options.deviceConfirmation),
+    deviceAdministration: createDeviceAdministration(authorityReady, options.deviceConfirmation, privateAccessState),
     coreClients: async () => [{ hostId: 'local', client: await ready }],
     hostedRuntime: async () => { await ready; return hosted! },
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
@@ -121,6 +138,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         privateIssue = 'Private device access could not be initialized. The original Unix Host and Agent Sessions remain available; inspect the retained private identity and TLS configuration.'
       }
     }
+    privateInitialized = true
     resolvePrivate()
   } catch (error) {
     rejectOwner(error)
@@ -130,15 +148,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     throw error
   }
   let disposed = false
-  const privateAccessState = (): AgentMuxPrivateAccessState => {
-    const failure = privateIssue ?? server.httpUnavailable?.message
-    if (failure) return { state: 'unavailable', message: failure }
-    if (!access || !tls || !authority || !server.httpAddress) return { state: 'unconfigured',
-      message: 'Private mobile access is not configured. Prepare the explicit private IP/TLS manifest to enable it; Unix and Agent Sessions remain available.' }
-    return { state: 'listening', message: 'Private HTTPS is listening. Device approval and phone system trust require their own confirmation.',
-      origin: access.origin, issuerHostId: authority.hostId, certificateFingerprint: tls.certificateFingerprint,
-      expiresAt: tls.expiresAt, ...(assets ? { mobileBuildDigest: assets.buildDigest } : {}), ...(assetIssue ? { assetIssue } : {}) }
-  }
+
   return { client, hosted, server, privateAccessState, deviceAuthority: () => authorityReady, async dispose() {
     if (disposed) return; disposed = true
     await server.stop()

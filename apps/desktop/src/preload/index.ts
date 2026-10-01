@@ -86,6 +86,13 @@ const api: AgentMuxPreloadApi = {
   hosts: {
     check: (host: HostConfig) => ipcRenderer.invoke('hosts:check', host)
   },
+  deviceManagement: {
+    ls: (params) => ipcRenderer.invoke('deviceManagement:ls', params),
+    invite: (params) => ipcRenderer.invoke('deviceManagement:invite', params),
+    approve: (params) => ipcRenderer.invoke('deviceManagement:approve', params),
+    reject: (params) => ipcRenderer.invoke('deviceManagement:reject', params),
+    revoke: (params) => ipcRenderer.invoke('deviceManagement:revoke', params)
+  },
   workspaces: {
     appearance: (id: string) => ipcRenderer.invoke('workspaces:appearance', id),
     chooseLocalFolder: () => ipcRenderer.invoke('workspaces:chooseLocalFolder'),

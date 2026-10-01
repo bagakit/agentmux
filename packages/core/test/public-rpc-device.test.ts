@@ -26,7 +26,7 @@ const inputs = {
   'device.reject': { deviceId: 'pending-original' }, 'device.revoke': { deviceId: 'device-original' }
 } satisfies { [M in AgentMuxRpcDeviceMethod]: AgentMuxRpcDeviceParams<M> }
 function result<M extends AgentMuxRpcDeviceMethod>(method: M, params: AgentMuxRpcDeviceParams<M>): AgentMuxRpcDeviceResult<M> {
-  const body = method === 'device.ls' ? { hostId: 'original-host', devices: [device], requests: [pending] }
+  const body = method === 'device.ls' ? { hostId: 'original-host', devices: [device], requests: [pending], privateAccess: { state: 'unavailable', message: 'Private access is not observed by this controlled fixture.' } }
     : method === 'device.invite' ? { hostId: 'original-host', invitation: 'private-fixture-invitation', expiresAt: 900 }
     : method === 'device.reject' ? { hostId: 'original-host', deviceId: (params as typeof inputs['device.reject']).deviceId, state: 'denied' }
     : { hostId: 'original-host', device: { ...device, ...(method === 'device.revoke' ? { revokedAt: 20 } : {}) } }
@@ -189,7 +189,7 @@ describe('source: public device administration', () => {
     ]
     expect(invalid).toHaveLength(4)
     for (const value of invalid) { response = value; await expect(client.call('device.approve', inputs['device.approve'])).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' }) }
-    response = { hostId: 'original-host', devices: [device], requests: [{ ...pending, claim: 'fixture-claim' }] }
+    response = { hostId: 'original-host', devices: [device], requests: [{ ...pending, claim: 'fixture-claim' }], privateAccess: { state: 'unavailable', message: 'Private fixture unavailable.' } }
     await expect(client.call('device.ls', {})).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
     response = invalid[0]
     const raw = await rawRequest(endpoint.path, { jsonrpc: '2.0', id: 'no-secrets', method: 'device.approve', params: inputs['device.approve'] })

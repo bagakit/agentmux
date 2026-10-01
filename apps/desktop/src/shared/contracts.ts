@@ -1,5 +1,6 @@
 import type { PastedImage } from '@agentmux/client-ui/pasted-images'
 import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@agentmux/core'
+import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
@@ -1393,6 +1394,13 @@ export type AgentMuxDesktopApi = {
   }
   hosts: {
     check(host: HostConfig): Promise<HostCheckResult>
+  }
+  deviceManagement: {
+    ls(params: AgentMuxRpcParams<'device.ls'>): Promise<AgentMuxRpcResult<'device.ls'>>
+    invite(params: AgentMuxRpcParams<'device.invite'>): Promise<AgentMuxRpcResult<'device.invite'>>
+    approve(params: AgentMuxRpcParams<'device.approve'>): Promise<AgentMuxRpcResult<'device.approve'>>
+    reject(params: AgentMuxRpcParams<'device.reject'>): Promise<AgentMuxRpcResult<'device.reject'>>
+    revoke(params: AgentMuxRpcParams<'device.revoke'>): Promise<AgentMuxRpcResult<'device.revoke'>>
   }
   workspaces: {
     appearance(id: string): Promise<{ kind: 'repository' | 'directory'; icon: string | null }>

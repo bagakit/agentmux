@@ -42,7 +42,7 @@ it('joins all five actual Unix methods to the one original Authority and fixed n
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(directory, 'control.sock') } })
   try {
     const authority = await host.deviceAuthority()
-    await expect(rpc.call('device.ls', {})).resolves.toEqual({ hostId: authority.hostId, devices: [], requests: [] })
+    await expect(rpc.call('device.ls', {})).resolves.toEqual({ hostId: authority.hostId, devices: [], requests: [], privateAccess: host.privateAccessState() })
     const invitation = await rpc.call('device.invite', {})
     expect(invitation).toEqual(expect.objectContaining({ hostId: authority.hostId, invitation: expect.any(String), expiresAt: expect.any(Number) }))
     const pending = authority.begin(invitation.hostId, invitation.invitation, 'Original approved iPhone')
@@ -113,7 +113,7 @@ it('rejects approved HTTP devices and forged caller facts before native confirma
     await expect(rpc.call('device.invite', { confirmed: true } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
     expect(confirm.mock.calls).toEqual([])
     expect(await readFile(join(directory, 'agentmux-devices.json'))).toEqual(original)
-    expect(await rpc.call('device.ls', {})).toEqual({ hostId: authority.hostId, devices: authority.devices(), requests: [] })
+    expect(await rpc.call('device.ls', {})).toEqual({ hostId: authority.hostId, devices: authority.devices(), requests: [], privateAccess: host.privateAccessState() })
     expect(await rpc.call('runtime.bootstrap', { consumerId: 'unaffected-unix-client' })).toMatchObject({ identity: host.client!.runtimeIdentity() })
     expect(host.client!.agentSessions()).toEqual([])
   } finally { await managed?.dispose(); await rpc.dispose(); await host.dispose() }

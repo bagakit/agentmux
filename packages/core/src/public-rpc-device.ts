@@ -9,6 +9,57 @@ export interface TrustedDevice {
   readonly createdAt: number
   readonly revokedAt?: number
 }
+/** Facts supplied by the original Host; the public parser never executes this locator. */
+export interface AgentMuxRpcCertificatePreparation {
+  readonly executable: string
+  readonly entry: string
+  readonly electronRunAsNode: boolean
+}
+export type AgentMuxRpcPrivateAccessState =
+  | { readonly state: 'unconfigured' | 'unavailable'; readonly message: string;
+      readonly configurationPath?: string; readonly certificatePreparation?: AgentMuxRpcCertificatePreparation }
+  | { readonly state: 'listening'; readonly message: string; readonly origin: string;
+      readonly issuerHostId: string; readonly certificateFingerprint: string; readonly expiresAt: number;
+      readonly mobileBuildDigest?: string; readonly assetIssue?: string;
+      readonly configurationPath?: string; readonly certificatePreparation?: AgentMuxRpcCertificatePreparation }
+
+/** Reject only this malformed observation; no Runtime or Authority lifecycle is changed. */
+export function parseAgentMuxRpcPrivateAccessState(value: unknown, hostId: string): AgentMuxRpcPrivateAccessState {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const fail = (): never => { throw new AgentMuxError('Private access facts are malformed or belong to another Host.', code) }
+  const text = (v: unknown): void => { if (typeof v !== 'string' || !v.trim() || v.length > 4096) fail() }
+  const path = (v: unknown): void => {
+    if (typeof v !== 'string' || !v.startsWith('/') || new TextEncoder().encode(v).byteLength > 4096 ||
+      /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/u.test(v)) fail()
+  }
+  const common = ['state', 'message', 'configurationPath', 'certificatePreparation']
+  const listening = ['origin', 'issuerHostId', 'certificateFingerprint', 'expiresAt', 'mobileBuildDigest', 'assetIssue']
+  const p = rpcRecord(value, [...common, ...listening], code)
+  if (p.state !== 'unconfigured' && p.state !== 'unavailable' && p.state !== 'listening') fail()
+  text(p.message)
+  if (p.configurationPath !== undefined) path(p.configurationPath)
+  if (p.certificatePreparation !== undefined) {
+    const locator = rpcRecord(p.certificatePreparation, ['executable', 'entry', 'electronRunAsNode'], code)
+    if (Object.keys(locator).length !== 3 || typeof locator.electronRunAsNode !== 'boolean') fail()
+    path(locator.executable); path(locator.entry)
+  }
+  if (p.state === 'listening') {
+    identifier(hostId, code)
+    if (p.issuerHostId !== hostId) fail()
+    if (typeof p.origin !== 'string') fail()
+    let origin: URL
+    try { origin = new URL(p.origin as string) } catch { return fail() }
+    if (origin.protocol !== 'https:' || origin.username || origin.password || origin.pathname !== '/' ||
+      origin.search || origin.hash || origin.origin !== p.origin) fail()
+    if (typeof p.certificateFingerprint !== 'string' || !/^[0-9a-f]{2}(?::[0-9a-f]{2}){31}$/iu.test(p.certificateFingerprint)) fail()
+    if (!Number.isSafeInteger(p.expiresAt) || (p.expiresAt as number) < 0) fail()
+    for (const key of ['mobileBuildDigest', 'assetIssue']) if (p[key] !== undefined) text(p[key])
+  } else {
+    rpcRecord(p, common, code)
+  }
+  return p as AgentMuxRpcPrivateAccessState
+}
+
 export type AgentMuxRpcDeviceParameterMap = {
   'device.ls': Record<string, never>
   'device.invite': Record<string, never>
@@ -18,7 +69,8 @@ export type AgentMuxRpcDeviceParameterMap = {
 }
 export type AgentMuxRpcDeviceResultMap = {
   'device.ls': { hostId: string; devices: readonly TrustedDevice[];
-    requests: readonly { device: TrustedDevice; confirmationCode: string; expiresAt: number }[] }
+    requests: readonly { device: TrustedDevice; confirmationCode: string; expiresAt: number }[];
+    privateAccess: AgentMuxRpcPrivateAccessState }
   'device.invite': { hostId: string; invitation: string; expiresAt: number }
   'device.approve': { hostId: string; device: TrustedDevice }
   'device.reject': { hostId: string; deviceId: string; state: 'denied' }
@@ -73,13 +125,14 @@ export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(
     if (d.revokedAt !== undefined && time(d.revokedAt) < createdAt) fail()
     return d as unknown as TrustedDevice
   }
-  const keys = method === 'device.ls' ? ['hostId', 'devices', 'requests']
+  const keys = method === 'device.ls' ? ['hostId', 'devices', 'requests', 'privateAccess']
     : method === 'device.invite' ? ['hostId', 'invitation', 'expiresAt']
     : method === 'device.reject' ? ['hostId', 'deviceId', 'state'] : ['hostId', 'device']
   const p = rpcRecord(value, keys, code)
   if (Object.keys(p).length !== keys.length) fail()
   identifier(p.hostId, code)
   if (method === 'device.ls') {
+    parseAgentMuxRpcPrivateAccessState(p.privateAccess, p.hostId as string)
     if (!Array.isArray(p.devices) || !Array.isArray(p.requests)) fail()
     for (const d of p.devices as unknown[]) device(d)
     for (const value of p.requests as unknown[]) {

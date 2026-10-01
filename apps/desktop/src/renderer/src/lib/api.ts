@@ -347,6 +347,13 @@ const mockApi: AgentMuxDesktopApi = {
   },
   hosts: { check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }) },
+  deviceManagement: {
+    ls: async () => { throw new Error('Device state requires the original Mac Host. This preview cannot read authorization.') },
+    invite: async () => { throw new Error('Device invitations require confirmation on the original Mac.') },
+    approve: async () => { throw new Error('Device approval requires confirmation on the original Mac.') },
+    reject: async () => { throw new Error('Rejecting a device requires confirmation on the original Mac.') },
+    revoke: async () => { throw new Error('Revoking a device requires confirmation on the original Mac.') }
+  },
   demands: {
     list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
     confirmAlignment: async () => { throw new Error('Goal confirmation requires the Desktop durable owner. This preview does not record acknowledgement.') },
