@@ -225,7 +225,12 @@ export class AgentMuxControlServer {
         return
       }
       let authorization: AgentMuxRpcHttpAuthorization | null
-      try { authorization = await this.authorized(web.clone()) } catch { authorization = null }
+      try { authorization = await this.authorized(web.clone()) } catch (error) {
+        const code = error instanceof Error ? (error as Error & { code?: unknown }).code : undefined
+        const denied = code === 'CONTROL_PERMISSION_DENIED' || code === 'AGENT_CAPABILITY_INVALID'
+        response.writeHead(denied ? 401 : code === 'CONTROL_OWNER_BUSY' ? 429 : 503)
+        response.end(); return
+      }
       if (!authorization) { response.writeHead(401); response.end(); return }
       channel = this.connection(async frame => {
         if (response.destroyed || response.writableEnded) return
