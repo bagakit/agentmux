@@ -585,7 +585,7 @@ export function SessionPane({
               <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Session retained"
                 title="Ready to restore"
                 detail="Existing history and your draft are kept. Send your next request or use Resume."
-                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked} /> : null}
+                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} /> : null}
                 details={{ summary: 'Retained session', content: <dl>
                   <dt>Session</dt><dd>{session.label}</dd>
                   <dt>Session ID</dt><dd>{session.id}</dd>
@@ -637,7 +637,7 @@ export function SessionPane({
             } : {})}
           /> : null}
           {(disconnected || missing || exited) && !(pendingAgentRestore && (historyOpen || inlineHistory)) ? (
-            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
+            <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} data-pending-agent-restore={pendingAgentRestore ? '' : undefined} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
                 {refreshing || recovering ? <LoaderCircle className="spin" size={16} /> : session.status.state === 'error' ? <AlertTriangle size={16} /> : disconnected || missing ? <ServerOff size={16} /> : <CircleStop size={16} />}
               </span>
