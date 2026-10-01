@@ -180,7 +180,7 @@ it('last hidden consumer releases watch and rejects a physically completed late 
   expect(h.node.querySelector('.log-turn__body p')).toBe(body)
 })
 
-it('three raw pages keep ninety IDs; source append freezes the old window and only explicit Refresh opens latest records', async () => {
+it('three native pages retain speech and continue accepting new input without freezing', async () => {
   const h = await fixture('claude', 90)
   await h.render(); await h.waitRows(Array.from({ length: 30 }, (_, i) => `row-${60 + i}`))
   await act(async () => current!.loadEarlier()); await h.waitRows(Array.from({ length: 60 }, (_, i) => `row-${30 + i}`))
@@ -189,14 +189,14 @@ it('three raw pages keep ninety IDs; source append freezes the old window and on
   await act(async () => current!.loadEarlier()); expect(h.history).toHaveBeenCalledTimes(3)
   const first = h.node.querySelector<HTMLElement>('.log-turn__body p')!
   await h.append([row('claude', 'outside-window', 'row-89')])
-  await h.wait(() => expect(current!.windowFrozen).toBe(true))
-  expect(current!.nativeHistoryPage!.items.map(item => item.id)).toEqual(Array.from({ length: 90 }, (_, i) => `row-${i}`))
+  await h.waitRows([...Array.from({ length: 90 }, (_, i) => `row-${i}`), 'outside-window'])
+  expect(current!.windowFrozen).toBe(false)
   expect(h.node.querySelector('.log-turn__body p')).toBe(first)
-  expect(h.node.textContent).toContain('Read latest records')
+  expect(h.node.querySelectorAll('[data-native-record-id="outside-window"]')).toHaveLength(1)
   const before = h.history.mock.calls.length
   await h.append([row('claude', 'also-outside', 'outside-window')])
-  await act(async () => new Promise(resolve => setTimeout(resolve, 100)))
-  expect(h.history).toHaveBeenCalledTimes(before)
+  await h.waitRows([...Array.from({ length: 90 }, (_, i) => `row-${i}`), 'outside-window', 'also-outside'])
+  expect(h.history).toHaveBeenCalledTimes(before + 1)
   await act(async () => current!.refresh())
   await h.wait(() => expect(current!.windowFrozen).toBe(false))
   expect(current!.nativeHistoryPage!.items).toHaveLength(30)
@@ -207,10 +207,11 @@ it('a source burst too large to bridge in three pages is retained honestly witho
   const h = await fixture('pi')
   await h.render(); await h.waitRows(['row-0'])
   await h.append(Array.from({ length: 91 }, (_, i) => row('pi', `burst-${i}`, i ? `burst-${i - 1}` : 'row-0')))
-  await h.wait(() => expect(current!.windowFrozen).toBe(true))
+  await h.waitRows(['row-0', ...Array.from({ length: 90 }, (_, i) => `burst-${i + 1}`)])
   expect(h.history).toHaveBeenCalledTimes(4)
-  expect(current!.nativeHistoryPage!.items.map(item => item.id)).toEqual(['row-0'])
-  expect(current!.messages.map(item => item.rawId)).toEqual(['row-0'])
+  expect(current!.windowFrozen).toBe(false)
+  expect(current!.windowIncomplete).toBe(true)
+  expect(current!.nextCursor).toBeNull()
 })
 
 it('failed automatic reread keeps the original DOM; later relevant append revalidates without polling or duplicating equal bodies', async () => {

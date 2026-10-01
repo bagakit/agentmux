@@ -611,13 +611,14 @@ type UserMessageReadState = {
   error: Error | null
   observationError?: Error | null
   windowFrozen?: boolean
+  windowIncomplete?: boolean
   hasMore: boolean
   onRetry: () => void
   onReadEarlier: (trigger: HTMLButtonElement) => void
 }
 
 function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefined }) {
-  if (!read || (!read.loading && !read.error && !read.observationError && !read.windowFrozen && !read.hasMore)) return null
+  if (!read || (!read.loading && !read.error && !read.observationError && !read.windowFrozen && !read.windowIncomplete && !read.hasMore)) return null
   return (
     <div className="activity-feed__read-notice" role="status">
       <span>
@@ -625,11 +626,12 @@ function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefine
           ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
           : read.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.'
           : read.observationError ? `Automatic native updates are unavailable: ${read.observationError.message}. The current reading window is kept; Refresh retries the source.`
+          : read.windowIncomplete ? 'This window keeps recent conversation and process records. History reads the original sequence.'
           : 'Earlier conversation records are available in History.'}
       </span>
       {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
       {!read.error && (read.windowFrozen || read.observationError) ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>{read.windowFrozen ? 'Read latest records' : 'Refresh'}</button> : null}
-      {read.hasMore ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
+      {read.hasMore || read.windowIncomplete ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
     </div>
   )
 }
