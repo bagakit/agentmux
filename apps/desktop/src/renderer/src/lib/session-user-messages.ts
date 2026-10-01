@@ -204,7 +204,30 @@ async function fetchSessionHistoryPage(
       if (!current()) return null
       let items = page.items
       let nextCursor = page.nextCursor
-      if (mode === 'earlier') {
+      let windowLimitError: Error | null = null
+      if (mode === 'initial' || mode === 'replace') {
+        if (!withinWindow(items)) throw new Error('The native page exceeds the reading window budget. Earlier records remain available in History.')
+        // Find input context only when opening a window. Process records can
+        // occupy the latest page; keep every accepted page and its real cursor.
+        for (let pages = 1; nextCursor && pages < MAX_REVALIDATION_PAGES &&
+          !items.some(item => item.kind === 'user-message'); pages++) {
+          const earlier = await read(nextCursor)
+          if (!current()) return null
+          if (!sameSource(page.source, earlier.source)) throw new Error('Native source changed while opening the reading window.')
+          const combined = [...earlier.items, ...items]
+          if (!withinWindow(combined)) {
+            const error = new Error('The native reading window reached its record or byte limit. The unread page remains available in History.')
+            if (entry.historyPage || !items.length) {
+              entry.windowFrozen = true
+              throw error
+            }
+            windowLimitError = error
+            break
+          }
+          items = combined
+          nextCursor = earlier.nextCursor
+        }
+      } else if (mode === 'earlier') {
         const existing = new Set(entry.items.map(item => item.id))
         items = [...page.items.filter(item => !existing.has(item.id)), ...entry.items]
       } else if (mode === 'revalidate' && entry.items.length) {
@@ -241,8 +264,8 @@ async function fetchSessionHistoryPage(
       entry.items = items
       entry.nextCursor = nextCursor
       entry.historyPage = { ...page, items, nextCursor }
-      entry.error = null
-      if (mode === 'replace') entry.windowFrozen = false
+      entry.error = windowLimitError
+      if (mode === 'initial' || mode === 'replace') entry.windowFrozen = windowLimitError !== null
       return entry.historyPage
     } catch (error) {
       if (current()) entry.error = error instanceof Error ? error : new Error(String(error))
