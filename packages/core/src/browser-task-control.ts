@@ -7,6 +7,9 @@ export type BrowserTaskReliabilityResult = 'passed' | 'not-met' | 'unavailable' 
 export type AgentMuxBrowserTaskRun = {
   id: string; assetId: string; version: number; browserId: string; nextStep: number
   status: BrowserTaskRunStatus; operationIds: string[]; pendingCheckpointId?: string
+  stepExecutions?: { stepId: string; operationId: string }[]
+  branchDecisions?: { stepId: string; operationId: string; navigationId: string; result: 'true' | 'false' | 'unknown'; nextStepId?: string | null }[]
+  executedMillis?: number
   startedAt: number; updatedAt: number; warning?: string; completionWarning?: string
 }
 export type AgentMuxBrowserTaskState = {
@@ -107,8 +110,25 @@ function run(value: unknown): AgentMuxBrowserTaskRun {
   if (new Set(operationIds).size !== operationIds.length) bad('Browser task operation identity is duplicated.')
   const startedAt = time(source.startedAt), updatedAt = time(source.updatedAt)
   if (updatedAt < startedAt) bad('Browser task run timestamps are inconsistent.')
+  const stepExecutions = source.stepExecutions === undefined ? undefined : bounded(source.stepExecutions, 128).map(value => {
+    const fact = record(value)
+    const operationId = identifier(fact.operationId)
+    if (!operationIds.includes(operationId)) bad('Browser task step operation is not bound to its run.')
+    return { stepId: identifier(fact.stepId), operationId }
+  })
+  if (stepExecutions && new Set(stepExecutions.map(fact => fact.operationId)).size !== stepExecutions.length) bad('Browser task executed path is duplicated.')
+  const branchDecisions = source.branchDecisions === undefined ? undefined : bounded(source.branchDecisions, 16).map(value => {
+    const fact = record(value)
+    if (!['true', 'false', 'unknown'].includes(fact.result as string) || !stepExecutions?.some(step => step.operationId === fact.operationId && step.stepId === fact.stepId)) bad('Browser task condition operation is not bound to its step.')
+    if (fact.result === 'unknown' ? fact.nextStepId !== undefined : fact.nextStepId === undefined) bad('Browser task condition path is inconsistent.')
+    return { stepId: identifier(fact.stepId), operationId: identifier(fact.operationId), navigationId: note(fact.navigationId), result: fact.result as 'true' | 'false' | 'unknown',
+      ...(fact.nextStepId === undefined ? {} : { nextStepId: fact.nextStepId === null ? null : identifier(fact.nextStepId) }) }
+  })
+  if (branchDecisions && new Set(branchDecisions.map(fact => fact.stepId)).size !== branchDecisions.length) bad('Browser task condition identity is duplicated.')
   return { id: identifier(source.id), browserId: identifier(source.browserId), assetId: identifier(source.assetId), version: integer(source.version, false, 1),
     nextStep: integer(source.nextStep), status: source.status as BrowserTaskRunStatus, operationIds, startedAt, updatedAt,
+    ...(stepExecutions === undefined ? {} : { stepExecutions }), ...(branchDecisions === undefined ? {} : { branchDecisions }),
+    ...(source.executedMillis === undefined ? {} : { executedMillis: time(source.executedMillis) }),
     ...(source.pendingCheckpointId === undefined ? {} : { pendingCheckpointId: identifier(source.pendingCheckpointId) }), ...notices(source) }
 }
 function state(value: unknown): AgentMuxBrowserTaskState {

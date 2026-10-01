@@ -66,6 +66,18 @@
       ],
       "@agentmux/core/agent-interaction-state": [
         "packages/core/src/agent-interaction-state.ts"
+      ],
+      "@agentmux/client-ui": [
+        "packages/client-ui/src/index.ts"
+      ],
+      "@agentmux/client-ui/components/*": [
+        "packages/client-ui/src/components/*.tsx"
+      ],
+      "@agentmux/client-ui/*": [
+        "packages/client-ui/src/lib/*.ts"
+      ],
+      "@agentmux/layout": [
+        "packages/layout/src/index.ts"
       ]
     }
   },
@@ -77,6 +89,9 @@
     "../../../src/preload/index.ts",
     "../../../test/browser-task-control.test.ts",
     "../../../../../packages/core/src/agentmux.ts",
-    "../../../src/renderer/src/global.d.ts"
+    "../../../src/renderer/src/global.d.ts",
+    "../../../test/browser-task-branch.test.tsx",
+    "../../../src/renderer/src/components/BrowserTaskAssetEditor.tsx",
+    "../../../test/browser-task-budget.test.ts"
   ]
 }
