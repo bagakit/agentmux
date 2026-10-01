@@ -13,6 +13,7 @@ import { projectBrowserControlEvent, projectBrowserControlOperation, projectBrow
 import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from './workbench-storage-authority.js'
 import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/client-observation.js'
 import { projectAppearance } from './project-appearance.js'
+import { executeBrowserTaskControl } from './browser-task-control.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { captureComposerScreenshot } from './composer-screenshot.js'
 import { readBookmark } from './bookmark-file.js'
@@ -1034,6 +1035,10 @@ export async function registerIpc(args: {
   handleWithEvent('browser:getTaskAssets', async (event, id: string) => {
     requireTrustedSender('browser:getTaskAssets', event)
     return await browsers.getTaskAssets(id)
+  })
+  handleWithEvent('browser:controlTask', async (event, request: unknown) => {
+    requireTrustedSender('browser:controlTask', event)
+    return await executeBrowserTaskControl(request, browsers, config.browser.agentAutomation)
   })
   handleWithEvent('browser:importTaskAsset', async (event, id: string, name?: string) => {
     requireTrustedSender('browser:importTaskAsset', event)

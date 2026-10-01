@@ -41,6 +41,7 @@ import { settingsResourceBudget } from './settings-resource-json.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { parseSpaceControlRequest, spaceControlId } from './space-control-parser.js'
 import { parseDesktopFocusRequest } from './desktop-focus-parser.js'
+import { parseBrowserTaskControlPayload } from './browser-task-control.js'
 
 // 版本号的唯一真相是 package.json 的 `version`——那是 npm 发布、也是用户 `--version` 应当与之一致的
 // 那个字段。这里用 `with { type: 'json' }` 直接引用它，而不是手抄一份常量：tsc 在 NodeNext 下把
@@ -1039,6 +1040,7 @@ async function sessionMutation(operation: 'interrupt' | 'resume' | 'stop', args:
  * 参数意味着每一层 shell 都要再转义一次，写的人和读的人都会错。stdin 是原样的字节。
  */
 async function browserCommand(args: readonly string[]): Promise<number> {
+  if (args[0] === 'task') return browserTaskCommand(args.slice(1))
   if (args[0] === 'history') {
     const flags = parseFlags(args.slice(1), { '--browser': 'value' })
     const browserId = flags.values.get('--browser')
@@ -1146,7 +1148,36 @@ async function readAllStdin(): Promise<string> {
   return Buffer.concat(chunks).toString('utf8')
 }
 
+async function browserTaskCommand(args: readonly string[]): Promise<number> {
+  const operation = args[0]
+  if (operation !== 'assets' && operation !== 'run' && operation !== 'stop' && operation !== 'reliability') throw cliError('Unknown Browser task command. Run agentmux browser task --help.')
+  const flags = parseFlags(args.slice(1), { '--browser': 'value', '--asset': 'value', '--version': 'value', '--run': 'value', '--step': 'boolean' })
+  const browserId = explicitSelectorId(flags.values.get('--browser'), 'Browser id')
+  let supplied: unknown = {}
+  if (operation === 'run') {
+    // Fresh values stay in this invocation: never argv, an asset or durable progress.
+    const chunks: Buffer[] = []
+    let bytes = 0
+    for await (const chunk of process.stdin) {
+      const part = Buffer.from(chunk)
+      bytes += part.length
+      if (bytes > 65_536) throw cliError('Task parameters exceed the 64 KiB input budget.')
+      chunks.push(part)
+    }
+    const text = Buffer.concat(chunks).toString('utf8')
+    try { supplied = text.trim() ? JSON.parse(text) : {} } catch { throw cliError('Task parameters must be a JSON object on stdin.') }
+  }
+  const request = parseBrowserTaskControlPayload({ operation: `browser.task.${operation}`, browserId,
+    ...(operation === 'run' || operation === 'reliability' ? { assetId: flags.values.get('--asset'), version: Number(flags.values.get('--version')) } : {}),
+    ...(operation === 'run' ? { parameters: supplied, ...(flags.booleans.has('--step') ? { mode: 'step' } : {}), ...(flags.values.has('--run') ? { runId: flags.values.get('--run') } : {}) } : {}),
+    ...(operation === 'stop' ? { runId: flags.values.get('--run') } : {}) })
+  const receipt = await requestAgentMuxControl({ ...requestBase(), ...request })
+  printSuccess(receipt.operation, receipt.result)
+  return 0
+}
+
 function operationPath(args: readonly string[]): string | null {
+  if (args[0] === 'browser' && args[1] === 'task') return args[2] && !args[2].startsWith('-') ? `browser.task.${args[2]}` : 'browser.task'
   if (args[0] === 'toolkit') return args[1] && !args[1].startsWith('-') ? 'toolkit.' + args[1] : 'toolkit'
   if (args[0] === 'metrics' && (args[1] === 'get' || args[1] === 'watch')) return `metrics.${args[1]}`
   if (args[0] === 'diagnostics' && args[1] === 'crash-log') return args[2] === 'reveal' ? 'diagnostics.crash-log.reveal' : 'diagnostics.crash-log.get'

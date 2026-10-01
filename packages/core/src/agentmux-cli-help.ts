@@ -728,6 +728,24 @@ An operation outlives the connection that started it. Pass your own \`--operatio
 process, or this one after a reconnect can ask \`browser operation\` how it is going,
 \`browser follow\` to watch it as it happens, and \`browser stop\` to stop it. All three address
 the operation by id alone — you do not need to know which Browser it is running in.`],
+  ['browser.task', `Read and run saved Browser task versions
+
+Usage:
+  agentmux browser task assets --browser <browser-id>
+  agentmux browser task reliability --browser <browser-id> --asset <asset-id> --version <n>
+  agentmux browser task run --browser <browser-id> --asset <asset-id> --version <n> [--step] [--run <run-id>] < parameters.json
+  agentmux browser task stop --browser <browser-id> --run <run-id>
+
+Read the exact Browser target before using it. Task parameters are a fresh JSON object
+on stdin, bounded to 64 KiB; values never enter the saved asset or durable progress.
+Only an existing immutable version runs. An Agent request cannot approve a human
+checkpoint or take control back from the person. Stop preserves the original cursor.
+Reliability is derived from retained version/run/outcome facts: a completed script is
+not proof of a successful outcome, and zero samples have no pass rate.`],
+  ['browser.task.assets', 'Read saved task assets and the original selected run.\n\nUsage: agentmux browser task assets --browser <browser-id>'],
+  ['browser.task.reliability', 'Read retained reliability for one exact immutable version.\n\nUsage: agentmux browser task reliability --browser <browser-id> --asset <asset-id> --version <n>'],
+  ['browser.task.run', 'Run an immutable task version with fresh stdin parameters. This cannot approve a human checkpoint.\n\nUsage: agentmux browser task run --browser <browser-id> --asset <asset-id> --version <n> [--step] [--run <run-id>] < parameters.json'],
+  ['browser.task.stop', 'Stop the exact task run while retaining its original progress.\n\nUsage: agentmux browser task stop --browser <browser-id> --run <run-id>'],
   ['browser.run', `Run a program in an open Browser
 
 Usage:
@@ -1229,6 +1247,15 @@ Control Browser open preserves the person's current Workbench selection. Placeme
 page driving do not request input focus; explicit focus is a separate navigation action.
 (This is about how the payload is delivered, not about driving the page afterwards.
 Use agentmux browser run to drive an already-open Browser.)
+
+## Reuse a saved Browser task
+
+Read \`browser task assets --browser <browser-id>\` to select an existing immutable version.
+Use \`browser task reliability --browser <browser-id> --asset <asset-id> --version <n>\`
+to read retained outcome evidence. A completed script does not imply a successful result.
+Run that version with \`browser task run\`, fresh JSON parameters on stdin, and optional
+\`--run <run-id>\` to continue a ready cursor. This control path cannot approve a human
+checkpoint or take Browser input back from the person. Stop addresses the original run.
 
 ## Drive an open Browser
 

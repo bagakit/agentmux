@@ -3859,6 +3859,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         runOperation: report.runOperation
       }
     }
+    if (request.operation === 'browser.task.assets' || request.operation === 'browser.task.reliability' || request.operation === 'browser.task.run' || request.operation === 'browser.task.stop') {
+      requireActive()
+      const result = await api.browser.controlTask(request)
+      requireActive()
+      return result
+    }
     if (request.operation === 'browser.history') {
       requireActive()
       const operations = await api.browser.listOperationHistory()

@@ -1,4 +1,5 @@
 import type { ToolkitDesktopApi } from './toolkit.js'
+import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
@@ -1619,6 +1620,8 @@ export type AgentMuxDesktopApi = {
     stopDemonstration(id: string): Promise<BrowserDemonstrationState>
     getDemonstration(id: string): Promise<BrowserDemonstrationState>
     getTaskAssets(id: string): Promise<BrowserTaskAssetState>
+    /** Control requests never grant a trusted human checkpoint or return input control. */
+    controlTask(request: BrowserTaskControlPayload): Promise<BrowserTaskControlResult>
     importTaskAsset(id: string, name?: string): Promise<BrowserTaskAsset>
     saveTaskAssetDraft(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>
     saveTaskAssetVersion(id: string, assetId: string, expectedRevision: number, content: BrowserTaskContent): Promise<BrowserTaskAsset>

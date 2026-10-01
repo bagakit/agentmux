@@ -7,6 +7,8 @@ import type { AgentPromptCondition } from './agent-prompt-condition.js'
 import type { AgentMuxBrowserCompletion } from './browser-completion-facts.js'
 import type { AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult } from './space-control.js'
 import type { AgentMuxDesktopFocusTarget, AgentMuxDesktopInputPolicy, AgentMuxDesktopFocusResult } from './desktop-focus-control.js'
+import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './browser-task-control.js'
+export * from './browser-task-control.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
 export * from './metrics.js'
 import type { AgentMuxToolkitPort, ToolkitRequest, ToolkitResult } from './toolkit.js'
@@ -548,6 +550,7 @@ export type AgentMuxControlCrashLogResult =
   | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
 
 export type AgentMuxControlRequest =
+  | (RequestBase & BrowserTaskControlPayload)
   | ToolkitRequest
   | AgentMuxControlMetricsRequest
   | AgentMuxSpaceControlRequest
@@ -642,6 +645,7 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | BrowserTaskControlResult
   | ToolkitResult
   | { operation: 'metrics.get'; observation: MetricsObservation }
   | { operation: 'metrics.watch' }
@@ -936,6 +940,10 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 的 timeoutMs），所以这里给长预算不等于没有上限。
   'browser.run': 'long',
   'browser.history': 'short',
+  'browser.task.assets': 'short',
+  'browser.task.reliability': 'short',
+  'browser.task.run': 'long',
+  'browser.task.stop': 'short',
   'browser.replay': 'long',
   // 取消只发一次 abort 就返回，不等被取消的那个操作真的收尾——等它等于把「停一个卡住的程序」变成
   // 「跟着那个程序一起卡住」，而卡住恰恰是最需要取消的场景。所以是短档。
