@@ -2,6 +2,7 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, History, LocateFixed, MessageSquare, Minus, Plus, SquareTerminal, X } from 'lucide-react'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { useShallow } from 'zustand/react/shallow'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentSessionControl, SessionHistoryReference } from '../../../shared/contracts'
 import type { AgentFocusHistoryEntry } from '../lib/agent-focus'
@@ -12,8 +13,11 @@ import { FOCUS_TIMELINE_NAME_WIDTH_MIN, FOCUS_TIMELINE_NAME_WIDTH_MAX } from '..
 import { useSidebarResize } from '../hooks/useSidebarResize'
 import { AgentAvatar } from './AgentAvatar'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
-import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
+import { currentConversationSenderDetails, currentConversationSpeakerMetadata, type FocusDescribeSpeaker } from '../lib/conversation-sender-details'
+import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { ProjectIcon } from './ProjectIcon'
 import * as Dialog from '@radix-ui/react-dialog'
@@ -29,7 +33,51 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { FOCUS_WINDOW_HOURS, HOUR_MS, focusTimePosition, focusTimeSegments, focusTimeWindow, focusWheelTimeDelta, focusWindowLabel, focusWorkSegment, type FocusTimeSegment, type FocusTimeWindow } from '../lib/focus-time-window'
 
-const describeMessageSpeaker = createSpeakerResolver()
+// Subscribe only to the canonical authors in this mounted input surface. Session
+// output/status and other senders cannot re-render it or start avatar reads.
+function useFocusSpeakerResolver(messages: readonly AgentSessionUserMessage[]): FocusDescribeSpeaker {
+  const ids = useMemo(() => [...new Set(messages.flatMap(message => message.author.kind === 'agent' ? [message.author.agentSessionId] : []))], [messages])
+  const selectFacts = useMemo(() => {
+    let previous: unknown[] = [], result: unknown[] = []
+    return (state: ReturnType<typeof useAppStore.getState>) => {
+      const sessions = sessionPresentationById(state.sessions)
+      const inputs = [state.config, state.scratchTopicSnapshots, state.spaceObjectIcons, ...ids.flatMap(id => {
+        const session = sessions.get(id)
+        return [session?.kind, session?.label, session?.kind === 'agent' ? session.providerId : undefined,
+          session?.hostId, session?.workspacePath, state.agentNames[id], state.timelines[id]]
+      })]
+      if (inputs.length === previous.length && inputs.every((value, index) => Object.is(value, previous[index]))) return result
+      previous = inputs
+      result = ids.flatMap(id => {
+        const metadata = currentConversationSpeakerMetadata(id, { sessions: state.sessions, config: state.config, workspaces: state.config?.workspaces ?? [], agentNames: state.agentNames, timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, spaceObjectIcons: state.spaceObjectIcons })
+        return [id, metadata?.label, metadata?.providerId, metadata?.project?.workspaceId,
+          metadata?.project?.name, metadata?.project?.path, metadata?.project?.branch,
+          metadata?.mote?.objectKey, metadata?.mote?.workspaceId,
+          metadata?.mote?.topicId, metadata?.mote?.icon]
+      })
+      return result
+    }
+  }, [ids])
+  const facts = useAppStore(useShallow(selectFacts))
+  return useMemo(() => {
+    const state = useAppStore.getState()
+    const metadataById = new Map(ids.map(id => [id, currentConversationSpeakerMetadata(id, { sessions: state.sessions, config: state.config, workspaces: state.config?.workspaces ?? [], agentNames: state.agentNames, timelines: state.timelines, scratchTopicSnapshots: state.scratchTopicSnapshots, spaceObjectIcons: state.spaceObjectIcons })]))
+    const original = createSpeakerResolver({ lookupAgent: id => {
+      const metadata = metadataById.get(id)
+      return metadata ? { ...metadata, readDetails: () => {
+        const current = useAppStore.getState()
+        return currentConversationSenderDetails(id, { sessions: current.sessions, config: current.config, workspaces: current.config?.workspaces ?? [], agentNames: current.agentNames, timelines: current.timelines, scratchTopicSnapshots: current.scratchTopicSnapshots, spaceObjectIcons: current.spaceObjectIcons, demands: current.demands })
+      } } : undefined
+    } })
+    // Shared ConversationMessage already accepts an avatar ReactNode; Space facts stay Desktop-owned.
+    return speaker => {
+      const described = original(speaker)
+      const mote = speaker.role === 'agent' ? metadataById.get(speaker.id)?.mote : undefined
+      return mote ? { ...described, mote, avatar: <ConversationMessageAvatar speaker={speaker} name={described.name} mote={mote}
+        providerId={described.providerId} project={described.project} /> } : described
+    }
+  }, [ids, facts])
+}
 
 const MAX_NATIVE_RECORDS = 90
 const MAX_BATCH_PAGES = 3
@@ -212,11 +260,18 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const { clock, dateClock } = time
   const { current: context, segments, identity, sessionId } = track
   const gutter = useRef<HTMLSpanElement>(null)
-  const name = context?.name ?? identity?.name ?? sessionId
+  const session = useAppStore(state => sessionPresentationById(state.sessions).get(sessionId))
+  const userName = useAppStore(state => state.agentNames[sessionId])
   // A track observes only its own canonical timeline; unrelated output never scans its messages.
-  const timeline = useAppStore(state => context ? state.timelines[sessionId] : undefined)
-  const captured = useMemo(() => timeline ? projectSessionUserMessages({ agentSessionId: sessionId, timeline }) : EMPTY_LATEST_INPUTS.messages, [sessionId, timeline])
+  const timeline = useAppStore(state => state.timelines[sessionId])
+  const name = agentDisplayName({ userName,
+    firstPrompt: session?.kind === 'agent' ? firstPromptFromTimeline(timeline) : undefined,
+    fallbackLabel: session?.kind === 'agent' ? session.label : context?.name ?? identity?.name ?? sessionId,
+    providerLabel: agentProviderLabel(context?.providerId ?? identity?.providerId ?? '') })
+  const observedName = !context && identity?.name && identity.name !== name ? identity.name : undefined
+  const captured = useMemo(() => context && timeline ? projectSessionUserMessages({ agentSessionId: sessionId, timeline }) : EMPTY_LATEST_INPUTS.messages, [sessionId, !!context, timeline])
   const messages = useMemo(() => { const seen = new Set<string>(); return [...(nativeMessages ?? []), ...captured].filter(item => { if (seen.has(item.id)) return false; seen.add(item.id); return true }).filter(item => item.recordedAt !== undefined && Number.isFinite(item.recordedAt) && item.recordedAt >= window.start && item.recordedAt <= window.end && item.recordedAt <= now) }, [captured, nativeMessages, window, now])
+  const describeMessageSpeaker = useFocusSpeakerResolver(messages)
   const position = focusTimePosition(now, window)
   const liveNow = context?.processState === 'running' && position >= 0 && position <= 100
   const working = context?.kind === 'agent' && context.processState === 'running' && context.state === 'working'
@@ -239,7 +294,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
       } }
     },
     ...(context?.kind === 'terminal' || identity?.kind === 'terminal' ? { mark: <SquareTerminal size={12} /> } : !context && !identity?.providerId ? { mark: <History size={12} /> } : {}),
-    content: <><header><strong>{name}</strong><span>{context ? context.stateLabel : 'Retained history'}</span></header>
+    content: <><header><strong>{context ? name : identity?.name ?? sessionId}</strong><span>{context ? context.stateLabel : 'Retained history'}</span></header>
       <p className="recent-focus__context-location">{project ?? 'Project not recorded'}{(context ? currentPath : path) ? <small>{context ? currentPath : path}</small> : null}</p>
       {context?.detail ? <p className="recent-focus__context-task">{context.detail}</p> : null}
       {context && lane?.summary && lane.summary !== context.detail ? <p className="recent-focus__context-topic"><span>Topic summary</span>{lane.summary}</p> : null}
@@ -253,21 +308,21 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
           const anchor = gutter.current?.querySelector<HTMLElement>('.agent-avatar')
           if (anchor) onInspect(segments[0]!, anchor)
         } : undefined} />
-      <span>{name}{path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}</span>
+      <span>{name}{observedName ? <small>Observed as {observedName}</small> : path ? <small>{path}</small> : null}</span>{!context ? <History size={10} aria-label={segments.length ? 'Retained focus observation' : 'Retained input records'} /> : null}</span>
     <div className="recent-focus__lane">
       {position >= 0 && position <= 100 ? <span className="recent-focus__playhead" data-now={now} style={{ left: `${position}%` }} aria-hidden="true" /> : null}
       {work && context ? <button type="button" className="recent-focus__working" data-working-entered-at={work.enteredAt} data-working-through={Math.min(now, window.end)} data-run-id={context.runId}
         style={{ left: `${work.left}%`, width: `${work.width}%` }}
-        aria-label={`Return to ${context.name}, working since ${dateClock(work.enteredAt)}, Run start unknown`}
-        title={`${context.name} · Working since ${dateClock(work.enteredAt)} · Work state, not Run duration`}
+        aria-label={`Return to ${name}, working since ${dateClock(work.enteredAt)}, Run start unknown`}
+        title={`${name} · Working since ${dateClock(work.enteredAt)} · Work state, not Run duration`}
         onClick={() => onSelect(context.id)} /> : null}
       {liveNow && context ? <button type="button" className={`recent-focus__live${working ? ' is-working' : ''}`} data-run-state="running" data-run-id={context.runId}
-        style={{ left: `${position}%` }} aria-label={`Return to ${context.name}, ${currentFact}, current time ${clock(now)}`}
+        style={{ left: `${position}%` }} aria-label={`Return to ${name}, ${currentFact}, current time ${clock(now)}`}
         title={`${currentFact} · Current time ${dateClock(now)}`} onClick={() => onSelect(context.id)} /> : null}
       {segments.map((item, index) => <button key={`${item.focusedAt}:${index}`} type="button" className={`recent-focus__segment${selected ? ' is-current' : ''}${item.end === undefined ? ' is-open' : ''}`}
         style={{ left: `${item.left}%`, width: item.width === undefined ? undefined : `${item.width}%` }}
         data-focused-at={item.focusedAt} data-known-end={item.end} aria-current={selected ? 'true' : undefined}
-        aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
+        aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${context ? name : item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
         title={`${item.identity?.name ?? 'Historical name not recorded'} · ${item.identity?.project?.name ?? 'Project not recorded'} · Focused ${dateClock(item.focusedAt)}${item.end === undefined ? ' · Next focus not recorded' : ''}`}
         onClick={event => context ? onSelect(sessionId) : onInspect(item, event.currentTarget)}><span>{clock(item.focusedAt)}</span></button>)}
       {messages.map(message => {
@@ -279,7 +334,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
           title={`${name} · Record time ${dateClock(message.recordedAt!)} · ${authorLabel}\n${message.content.slice(0, 160)}`}
           onMouseEnter={event => onPreview(message, event.currentTarget, false)} onMouseLeave={() => onDismiss(message.id)}
           onFocus={event => { if (!(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false, true) }} onBlur={() => onDismiss(message.id)}
-          onClick={event => onPreview(message, event.currentTarget, true)}><ConversationSpeakerAvatar speaker={speaker} name={described.name} size={10} /></button>
+          onClick={event => onPreview(message, event.currentTarget, true)}><ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={10} /></button>
       })}
     </div>
   </div>
@@ -677,24 +732,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const senderId = previewSpeaker?.role === 'agent' ? previewSpeaker.id : undefined
   const sender = senderId ? contexts.find(context => context.id === senderId && context.kind === 'agent') : undefined
   const senderLane = sender ? lanes?.find(lane => lane.contextIds.includes(sender.id)) : undefined
-  const describePreviewSpeaker = useMemo(() => createSpeakerResolver({ lookupAgent: id => {
-    const state = useAppStore.getState()
-    const metadata = currentConversationSpeakerMetadata(id, {
-      sessions: state.sessions, workspaces: state.config?.workspaces ?? [],
-      agentNames: state.agentNames, timelines: state.timelines
-    })
-    return metadata ? {
-      label: metadata.label, providerId: metadata.providerId,
-      ...(metadata.project ? { project: metadata.project } : {}),
-      readDetails: () => {
-        const current = useAppStore.getState()
-        return currentConversationSenderDetails(id, {
-          sessions: current.sessions, workspaces: current.config?.workspaces ?? [],
-          agentNames: current.agentNames, timelines: current.timelines, demands: current.demands
-        })
-      }
-    } : undefined
-  } }), [contexts, config])
+  const previewMessages = useMemo(() => preview?.message ? [...inputMessages, preview.message] : inputMessages, [inputMessages, preview?.message])
+  const describePreviewSpeaker = useFocusSpeakerResolver(previewMessages)
   const inspectWindow = (next: number | null) => { setAnchor(next); setObservation(null); setDateDraft(null); setDateError(null); setDateChoice(null) }
   const inspectDate = (value: string) => {
     setDateDraft(value); setDateChoice(null)

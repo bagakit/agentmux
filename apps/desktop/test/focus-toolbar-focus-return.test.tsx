@@ -8,8 +8,8 @@ import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 
 // The actual Toolbar and Radix focus scopes are mounted. Only the external
 // action owners are mocked; this suite does not assert Core/Run authority.
-const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {} }))
-vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ activeWorkspaceId: null, layouts: {}, tabs: {} }) }) }))
+const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), selectWorkspace: vi.fn(async () => {}), focusRegion: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {} }))
+vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ ...owners, activeWorkspaceId: null, layouts: { 'original-workspace': { groups: [{ id: 'original-group', tabOrder: ['original-tab'] }] } }, tabs: { [tab.id]: tab } }) }) }))
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 
 const selected: FocusContext = {
@@ -29,9 +29,10 @@ beforeEach(async () => {
   destination.textContent = 'Selected action destination'; document.body.append(container, destination)
   review = vi.fn(() => destination.focus())
   owners.setMainSurface.mockImplementation(() => destination.focus())
+  owners.focusRegion.mockImplementation(() => destination.focus())
   owners.focusExecutionSession.mockImplementation(() => destination.focus())
   root = createRoot(container)
-  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab, onReview: review, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
+  await act(async () => root.render(createElement(FocusToolbar, { children: createElement('input', { 'aria-label': 'Search contexts' }), selectedId: selected.id, selected, tab, reference: { displayWorkspaceId: selected.workspaceId, groupId: 'original-group', tabId: tab.id, regionId: 'original-region' }, onReview: review, onCloseWorkspace: () => owners.focusExecutionSession(null) })))
 })
 afterEach(async () => {
   await act(async () => root.unmount()); await settle()
@@ -80,11 +81,17 @@ it('Rename keeps input focus after menu cleanup, then Escape returns to the curr
   expect(identity().textContent).toContain(tab.name)
   expect(document.activeElement).toBe(identity())
 })
-it.each(['Continue in Space', 'Close Focus workspace', 'Review request'])('%s leaves focus with the selected action owner after menu cleanup', async label => {
+it.each(['Close Focus workspace', 'Review request'])('%s leaves focus with the selected action owner after menu cleanup', async label => {
   await open('dropdown'); await pick(label)
-  if (label === 'Continue in Space') expect(owners.setMainSurface).toHaveBeenCalledExactlyOnceWith('workbench')
-  else if (label === 'Close Focus workspace') expect(owners.focusExecutionSession).toHaveBeenCalledExactlyOnceWith(null)
+  if (label === 'Close Focus workspace') expect(owners.focusExecutionSession).toHaveBeenCalledExactlyOnceWith(null)
   else expect(review).toHaveBeenCalledTimes(1)
+  expect(document.activeElement).toBe(destination)
+})
+it('the promoted Space button leaves focus with the existing action owner', async () => {
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="View in Space"]')!.click())
+  expect(owners.selectWorkspace).toHaveBeenCalledExactlyOnceWith(selected.workspaceId)
+  expect(owners.setMainSurface).not.toHaveBeenCalled()
+  expect(owners.focusRegion).toHaveBeenCalledExactlyOnceWith(selected.workspaceId, tab.id, 'original-region', 'keyboard', 'original-group')
   expect(document.activeElement).toBe(destination)
 })
 it('Outside interaction after a previous Escape keeps the newly chosen target', async () => {

@@ -6,7 +6,8 @@ import type { FocusContext } from '../lib/focus-context'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
-import { speakerOfUserMessage, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
+import { speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
+import type { FocusDescribeSpeaker } from '../lib/conversation-sender-details'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { api } from '../lib/api'
 import { createFocusTimeFormatters, type FocusTimeFormatters } from '../lib/focus-timeline-ruler'
@@ -23,7 +24,7 @@ const readPastedImage = (path: string) => api.ui.readPastedImage(path)
 
 /** One inspected Core input. Current Context facts never become its historical author or Run. */
 export function FocusMessagePreview({ message, sender, recipient, recipientName, workspaceRoot, lane, hierarchy, interactive, anchor, reader, describeSpeaker, timeFormatters, onSelect, onClose, onMouseEnter, onMouseLeave }: {
-  describeSpeaker: DescribeSpeaker
+  describeSpeaker: FocusDescribeSpeaker
   message: AgentSessionUserMessage | undefined; sender: FocusContext | undefined; recipient: FocusContext | undefined
   lane: FocusProjectLane | undefined; hierarchy: FocusHierarchyFacts | undefined
   interactive: boolean; anchor: HTMLElement; reader?: FocusMessageReader; onSelect(id: string): void; onClose(): void
@@ -111,7 +112,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
   return <WindowOverlayPortal layer={interactive ? 'popover' : 'tooltip'}><div ref={element} id={previewId} tabIndex={interactive ? -1 : undefined} className="recent-focus__message-preview" data-interactive={interactive} data-state="open"
     data-preview-message-id={message?.id} data-message-author={speaker?.role}
     onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave} onPointerDownCapture={event => { insidePointer.current = event.nativeEvent }} role={interactive ? 'dialog' : 'tooltip'} aria-label="Message">
-    <header>{!interactive && speaker ? <ConversationSpeakerAvatar speaker={speaker} name={described!.name} {...(described?.providerId ? { providerId: described.providerId } : {})} size={20} /> : <MessageSquare size={14} aria-hidden="true" />}<strong>{interactive ? reader ? 'Input records' : targetName : described?.name ?? 'Input'}</strong>
+    <header>{!interactive && speaker ? <ConversationSpeakerAvatar speaker={speaker} name={described!.name} mote={described?.mote} {...(described?.providerId ? { providerId: described.providerId } : {})} size={20} /> : <MessageSquare size={14} aria-hidden="true" />}<strong>{interactive ? reader ? 'Input records' : targetName : described?.name ?? 'Input'}</strong>
       {!interactive ? <span className="recent-focus__author-kind">{roleName}</span> : null}
       {interactive ? <button type="button" className="icon-button" aria-label="Close message" onClick={onClose}><X size={12} /></button> : null}</header>
     {reader ? <div className="recent-focus__input-reader">
@@ -129,7 +130,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
         const itemIdentity = describeSpeaker(itemSpeaker)
         const authorLabel = itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `Agent message from ${itemIdentity.name}` : 'Input, sender not recorded'
         return <button type="button" key={item.id} data-input-message-id={item.id} data-input-source={item.source.kind} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${item.content || 'Input with resources'}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
-          <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{item.content || 'Input with resources'}</span><small>{item.source.kind === 'native' ? 'Native' : 'Submission'} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
+          <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{item.content || 'Input with resources'}</span><small>{item.source.kind === 'native' ? 'Native' : 'Submission'} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
         </button>
       })}</div>
       {!reader.loading && reader.messages.length === 0 ? <p>No input records read in this view. Coverage may be incomplete.</p> : null}

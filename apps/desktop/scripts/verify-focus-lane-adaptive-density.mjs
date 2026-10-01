@@ -6,7 +6,11 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join, resolve, relative } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..'), args = process.argv.slice(2)
-assert.ok(args.length === 2 && args[0] === '--slice' && ['source', 'source-visual'].includes(args[1]), 'Use --slice source|source-visual')
+assert.ok(args.length === 2 && args[0] === '--slice' && ['source', 'source-visual', 'height-source', 'height-scene'].includes(args[1]), 'Use --slice source|source-visual|height-source|height-scene')
+if (args[1].startsWith('height-')) {
+  const { qualifyHeight } = await import('./fixtures/focus-lane-adaptive-density/height-qualification.mjs')
+  await qualifyHeight(args[1])
+} else {
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const product = ['GlobalFocusSurface', 'FocusDisconnectedGroup', 'FocusDisconnectedProjects'].map(name => `apps/desktop/src/renderer/src/components/${name}.tsx`)
 const css = 'apps/desktop/src/renderer/src/styles/focus.css'
@@ -78,3 +82,4 @@ try {
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; process.exitCode = 1 }
 finally { await writeFile(join(out, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n'); console.log(JSON.stringify({ passed: receipt.passed, sourcePassed: receipt.sourcePassed, evidence: out, failure: receipt.failure?.message, wholeFocusDone: false })) }
+}

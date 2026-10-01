@@ -85,7 +85,7 @@ function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | und
     && latest.kind === (recap.source === 'Last assistant message' ? 'assistant_message' : 'user_message'))
   return { id: session.id, name, detail, state, stateLabel, processState: session.processState, bucket, kind: session.kind, providerId: session.providerId,
     hostId: session.hostId, topicId, workspace, workspaceId: workspace?.id ?? `${session.hostId}:${session.workspacePath}`, workspaceName: workspace?.name ?? session.workspacePath.split('/').filter(Boolean).at(-1) ?? 'Unassigned', workspacePath: session.workspacePath,
-    liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state), lastActivityAt,
+    liveAgent: session.kind === 'agent' && session.processState === 'running', actionable: pending || isNeedsYouState(state) || session.kind === 'agent' && state === 'error', lastActivityAt,
     runId: session.control.run.runId, workingEnteredAt: workingEntryTime(session), recap, detailIsRecap }
 }
 function sameSessionPresentation(a: SessionSnapshot, b: SessionSnapshot): boolean {

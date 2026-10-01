@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict'), fs = require('node:fs/promises'), path = require('node:path')
 const { app, BrowserWindow } = require('electron')
 const [html, privateRoot, evidence] = process.argv.slice(2)
+const heightPhase = process.argv[5]
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { schema: 'agentmux.focus-lane-adaptive-actual.v1', passed: false, pid: process.pid, frames: [], scenes: [], rendererConsole: [], boundary: 'Actual App/Focus/Workbench/Store. Typed preview Session/Run references, PTY and unused Monaco paint isolated. No true Run/PID/Writer/restart/installation.' }
 let win
@@ -9,12 +10,13 @@ app.whenReady().then(async () => { try {
   win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) result.rendererConsole.push(String(message).slice(0, 2000)) })
   const read = async code => { try { return await win.webContents.executeJavaScript(code) } catch (error) { result.failedEvaluation = code; throw error } }, pause = ms => new Promise(done => setTimeout(done, ms))
   const until = async (label, predicate) => { const end = Date.now() + 10000; do { if (await predicate()) return; await pause(30) } while (Date.now() < end); throw new Error('Lane scene did not settle: ' + label) }
-  await win.loadFile(html); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+  await win.loadFile(html, heightPhase ? { query: { height: '1' } } : undefined); win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   const settle = () => read('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))')
   const rect = selector => read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)throw new Error('Missing actual control: '+${JSON.stringify(selector)});const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2,width:r.width,height:r.height,hit:e.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2))}})()`)
   const move = async selector => { const r = await rect(selector); assert.equal(r.hit, true, 'Actual pointer hit ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: r.x, y: r.y }) }
   const click = async selector => { const r = await rect(selector); assert.equal(r.hit, true, 'Actual click hit ' + selector); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: r.x, y: r.y, button: 'left', clickCount: 1 }) }
   const key = async value => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value }) }
+  if (heightPhase) { Object.assign(result, await require('./height-scene.cjs')({ win, evidence, phase: heightPhase === 'height-first' ? 'first' : 'second', read, until, settle, click, move, key })); return }
   await until('original retained leaf', () => read('window.laneProof?.ready&&document.querySelectorAll("[data-fixture-session]").length===1'))
   await read('window.laneProof.enter()'); await click('button.surface-navigation__focus')
   await until('original Focus projection', () => read('document.querySelector(".focused-tab-workspace")?.dataset.focusTabId==="original"'))
@@ -85,4 +87,4 @@ app.whenReady().then(async () => { try {
   assert.equal(result.after.draft, 'Original unsent draft'); assert.deepEqual(result.after.range, [7, 15]); assert.equal(result.after.originalRun, result.before.originalRun); assert.deepEqual(result.after.mounts, result.before.mounts); assert.deepEqual(result.after.unmounts, []); assert.deepEqual(result.after.calls, result.before.calls)
   result.passed = true
 } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack }; if (win && !win.isDestroyed()) await fs.writeFile(path.join(evidence, 'failure.png'), (await win.webContents.capturePage()).toPNG()) }
-finally { await fs.writeFile(path.join(evidence, 'actual.json'), JSON.stringify(result, null, 2) + '\n'); if (win && !win.isDestroyed()) win.destroy(); app.exit(result.passed ? 0 : 1) } })
+finally { await fs.writeFile(path.join(evidence, heightPhase ? 'actual-' + heightPhase + '.json' : 'actual.json'), JSON.stringify(result, null, 2) + '\n'); if (win && !win.isDestroyed()) win.destroy(); app.exit(result.passed ? 0 : 1) } })

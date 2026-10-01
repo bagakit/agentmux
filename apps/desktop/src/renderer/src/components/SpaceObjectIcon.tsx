@@ -1,7 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { NotebookText } from 'lucide-react'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconTarget } from '../lib/space-object-appearance'
-import { isMoteFace, type MoteAvatarRef } from '../../../shared/mote-avatars'
+import { isMoteFace, type MoteAvatarImage, type MoteAvatarRef } from '../../../shared/mote-avatars'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -14,21 +14,39 @@ import { MoteFace, type MoteExpression } from './MoteFace'
 import { MoteIdentityMotion, type MoteIdentityMotionProps } from './MoteIdentityMotion'
 import { moteExpression } from '../lib/mote-expression'
 
+// Share only live consumers of the same immutable content, not saved identities.
+type ActiveAvatarRead = { consumers: number; promise: Promise<MoteAvatarImage>; reported: boolean }
+const activeMoteAvatarReads = new Map<string, ActiveAvatarRead>()
+function retainMoteAvatarRead(workspaceId: string, topicId: string, fileName: string, objectKey: string) {
+  const key = JSON.stringify([workspaceId, topicId, objectKey, fileName])
+  const existing = activeMoteAvatarReads.get(key)
+  const entry = existing ?? { consumers: 0, reported: false,
+    promise: api.scratch.readMoteAvatar(workspaceId, topicId, { kind: 'image', fileName }, objectKey) }
+  if (!existing) activeMoteAvatarReads.set(key, entry)
+  entry.consumers++
+  return { entry, release() {
+    entry.consumers--
+    if (entry.consumers === 0 && activeMoteAvatarReads.get(key) === entry) activeMoteAvatarReads.delete(key)
+  } }
+}
+
 function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: SpaceIconTarget['kind']; workspaceId: string; topicId: string; choice: MoteAvatarRef; objectKey: string }) {
   const [image, setImage] = useState<{ identity: string; url: string } | null>(null)
   const [issue, setIssue] = useState<string | null>(null)
-  const identity = objectKey, fileName = choice.fileName
+  const fileName = choice.fileName, identity = JSON.stringify([workspaceId, topicId, objectKey])
   useEffect(() => {
     let current = true
     setIssue(null)
-    void api.scratch.readMoteAvatar(workspaceId, topicId, { kind: 'image', fileName }, objectKey).then(value => {
+    const read = retainMoteAvatarRead(workspaceId, topicId, fileName, objectKey)
+    void read.entry.promise.then(value => {
       if (current) setImage({ identity, url: value.dataUrl })
     }).catch(cause => {
       if (!current) return
       const message = 'This Mote avatar could not be read. Its saved choice is retained; choose Change avatar, then Save avatar to retry. ' + presentError(cause)
-      setIssue(message); useAppStore.getState().reportError(new Error(message))
+      setIssue(message)
+      if (!read.entry.reported) { read.entry.reported = true; useAppStore.getState().reportError(new Error(message)) }
     })
-    return () => { current = false }
+    return () => { current = false; read.release() }
   }, [workspaceId, topicId, choice, fileName, identity, objectKey])
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image"
     data-space-avatar={fileName} title={issue ?? 'Mote avatar'} aria-hidden="true">

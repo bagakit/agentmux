@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement, useEffect } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import { type Root } from 'react-dom/client'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -47,9 +48,9 @@ it('moves existing DOM between Space and selected Focus tabs without touching sp
 it('retains the healthy mounted work surface during a missing owner/layout handshake and recovers', async () => {
   await render('a'); const view = target.querySelector('[data-session]'), layout = useAppStore.getState().layouts['workspace-demo']!
   await act(async () => useAppStore.setState({ layouts: {} }))
-  expect(target.querySelector('[data-session]')).toBe(view); expect(target.textContent).toContain('still restoring')
+  expect(target.querySelector('[data-session]')).toBe(view); expect(home.querySelector('[role="status"].workbench-restore-notice')!.textContent).toContain('still restoring')
   await act(async () => useAppStore.setState({ layouts: { 'workspace-demo': { ...layout, groups: layout.groups.map(group => ({ ...group, tabOrder: [] })) } } }))
   expect(target.querySelector('[data-session]')).toBe(view)
   await act(async () => useAppStore.setState({ layouts: { 'workspace-demo': layout } }))
-  expect(target.querySelector('[data-session]')).toBe(view); expect(target.textContent).not.toContain('still restoring'); expect(lifetime.unmounts).toEqual({})
+  expect(target.querySelector('[data-session]')).toBe(view); expect(home.querySelector('[role="status"].workbench-restore-notice')).toBeNull(); expect(lifetime.unmounts).toEqual({})
 })
