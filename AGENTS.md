@@ -50,10 +50,11 @@ Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、
 
 ## 需求与验收
 
-动手改实现前完成两件事：
+需求以 idea 为原点，按以下顺序推进：
 
-1. 从 `docs/design/agentmux-desktop-interaction.md` 定位 owning 行为专题并原位合入用户确认约束；视觉、密度与控件语言从 `docs/design/agentmux-surface-density.md` 定位 owning 呈现专题。两入口只维护范围和导航；同一约束只定义一次，相邻文档引用，不把聊天过程或实现步骤追加成设计合同。
-2. 通过 `feature-tracker.sh` 建或更新同 Closure 的 Feature。新计划使用 `bagakit.feature-task-plan.v1` 与 approved review artifact；每项 Task 有可证伪 acceptance 和 verification command。脚本从已安装的 feature-tracker skill 定位，走 `.sh`；路径失效时重新查找，排除 `node_modules/`、`.tmp/` 和 `-adopt-worktree` 副本。
+1. 有价值的需求、思路或体验反馈先在 `docs/ideas/` 记录，并整合到同一主题；具体写法见[以 idea 为原点记录和整合](docs/guides/document-truth-and-maintenance.md#以-idea-为原点记录和整合)。尚未安排执行也要保留，记录 idea 不自动创建执行任务。
+2. 从 `docs/design/agentmux-desktop-interaction.md` 定位 owning 行为专题并原位合入用户确认约束；视觉、密度与控件语言从 `docs/design/agentmux-surface-density.md` 定位 owning 呈现专题。两入口只维护范围和导航；同一约束只定义一次，相邻文档引用，不把聊天过程或实现步骤追加成设计合同。
+3. 决定推进执行后、动手改实现前，通过 `feature-tracker.sh` 建或更新同 Closure 的 Feature。新计划使用 `bagakit.feature-task-plan.v1` 与 approved review artifact；每项 Task 有可证伪 acceptance 和 verification command。脚本从已安装的 feature-tracker skill 定位，走 `.sh`；路径失效时重新查找，排除 `node_modules/`、`.tmp/` 和 `-adopt-worktree` 副本。
 
 验收随改动类型成立，不能用一种证据代替另一种：
 
@@ -64,7 +65,7 @@ Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、
 
 ## 并行协作与交付
 
-- 协作消息默认中文，代码、命令、标识符与原始证据保留原文。用户反馈由下属完成调研、设计 SSOT 和 Tracker 登记；Root 在交付节点安排实现、评审和验收。
+- 协作消息默认中文，代码、命令、标识符与原始证据保留原文。用户反馈由下属先记录整合 idea、调研并更新设计 SSOT；决定执行后再登记 Tracker，Root 在交付节点安排实现、评审和验收。
 - 协调者管理目标、优先级、依赖、交付节点、冲突和集成；同事保有实现自主权。下属主要承担稳定切片的独立 review、关键行为、回归与性能检查，必要时做明确小切片。方向一致时不逐步催报或重复指挥；只在失配、跑偏、长期不响应或交付节点介入，不以冻结同事强制串行。
 - 过程性文档不提交；调研、计划、评审与任务证据留本机，已有暂存或跟踪内容先保全再移出 Git，边界见[过程资料规则](docs/process-directories.md)。
 - 并发可带上他人的提交，先确认影响，完整保全工作。小修改在当前树闭环；大改动用 worktree，频繁将已验收完整切片合入 main。不得用 stash、切分支或破坏性清场处理冲突。
