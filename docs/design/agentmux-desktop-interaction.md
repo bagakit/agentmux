@@ -7,7 +7,7 @@
 - **Mote** 是固定协调对象的快捷入口：打开或收起同一快捷面，保留当前主工作面的选中状态和执行焦点。Mote 排第一不意味着启动默认进入 Mote；启动仍恢复用户上一次工作面。PMO 是其初始化默认角色之一，产品身份见《Space、Folder 与 Topic》。
 - **Space** 是实际工作现场，承载既有 Agent、Terminal、文件、Browser、Tab 与 Region；顶级入口、说明和可访问名称使用 Space。Space 作为更外层产品对象及其 Folder/Topic 两类定义见《Space、Folder 与 Topic》；Workspace 继续表达底层工作区对象。
 - **Focus** 查看执行状态、最近上下文与需要用户处理的事项；进入已有 Session 时继续复用原 Tab/Region。
-- **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；显式创建后记录真实 Goal 草稿，待澄清的想法由 Mote 整理目标与完成标准，具体闭环见《Goals 的 Grill 与 Grounding》。Demand 仍是持久化实体与控制协议身份，Goal 状态与执行 Session 状态独立。
+- **Goals** 是全局目标集合，单项显示为 Goal。标题、创建、搜索、详情、清单和统计使用同一名称；显式创建后记录真实 Goal 草稿，待澄清的想法由 Mote 整理目标与完成标准，具体闭环见《Goals 的 Grill 与 Grounding》。Goal 沿用原 Demand 的持久身份；原内部类型与存储名称不改变公开 Goal 词汇，Goal 状态与执行 Session 状态独立。
 - **Survey** 是浏览调查的临时 Zone 工作面，以 Browser 为默认起点并复用原 Tab / Region 内容；多个 Topic 关系、网页输入与既有 Browser 管理在同一处可达，后续搜索和知识库方向见《Survey、临时 Zone 工作面与知识入口》。
 
 PMO 作为独立协调入口，和 Space、Focus、Goals、Survey 的工作/功能导航分开；Settings 打开既有设置面，不改变当前工作面选中状态和执行焦点。Settings 的入口归属，以及 Toolkit、快捷键帮助与状态提醒的右侧工具排列，统一见《Toolkit 与官方 Performance 工具》。窄窗口保留全部入口与需要用户处理的状态，长摘要可以收紧，控件不能重叠或被裁掉；这些规则不依赖 Project Rail 是否可见。底栏高度与局部尺寸约束只定义在密度 SSOT《左下角导航与右下角工具组》。
@@ -2677,6 +2677,43 @@ Core 的语义文本供 Provider/readiness 等文本观察使用，与 ordered b
 ### Topic 默认终端与可发现关闭
 
 用户反馈：「Topic 里 Terminal 默认渲染两个且找不到关闭入口」。普通 Topic 的首次打开应形成一个可用 Terminal；重复点击、创建完成后的打开、恢复或不同投影的挂载不能凭流程增加第二个 Terminal Session 或 Region。用户主动分割、打开的多个终端仍按真实布局呈现，不能靠隐藏第二个终端、清空持久布局或删除健康 Run 解决默认重复。终端的关闭动作在当前 Tab/Region 附近可发现，并复用已有关闭/停止合同；取消或关闭其他 Region 不影响未选中的健康工作。重启先恢复既有分割与引用，不重新运行首次创建路径。
+
+### 对象优先 CLI 与统一公共业务服务
+
+用户确认对象优先的统一 CLI，保留 `agent open` 和 `space mv`。PMO 仍是协调工作方法／角色，不把原 PMO 查询改名为 Mote 查询；跨对象观察归 `app snapshot`，各对象的 inspect 归其对象，原 PMO activity 来自 Goal 的活动事实，归 `goal activity`。本节定义新的统一目标；旧顶层动词与原公开 Demand 词汇在对应能力落地时直接替换，不留兼容别名。已有能力的当前来源不等于本目标已经实现。
+
+- **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI、HTTP 与 SSH 共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
+- **原权威 owner 不变。** Core 保持无 Electron／React 依赖；Provider、AgentSession、权限、Hook 与语义恢复仍归 AgentMux 公共能力；ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Desktop 展示、配置、文件／Topic 与空间 handlers 由 Client 持有，通过同一服务接入；不新增一套 Runtime、Topic／Project／Space／Session registry、持久状态镜像或 CLI 专用业务判断。
+- **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配请求与响应，不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation。丢回执时按原 owner 的精确业务身份对账；未知不当从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
+- **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。
+
+统一命令树目标如下；表中每个动作仍须服从其原业务 owner 的权限、只读／副作用和恢复边界，是用户已授权实施的公开目标，不是当前已验收能力清单。
+
+| 对象入口 | 统一动作 |
+| --- | --- |
+| `whoami` | 自身身份、空间位置与实际可用能力 |
+| `agent` | `ls`、`inspect`、`open`、`rename`、`view`、`output`、`send`、`discuss`、`handoff`、`interrupt`、`resume`、`stop`；`role ls/register/resolve` |
+| `space` | `ls`、`inspect`、`rename`、`mv`、`swap`、`bind`、`unbind`、`focus`、`promote`、`arrange` |
+| `file` | `open`、`view` |
+| `terminal` | `open` |
+| `browser` | `open`、`run`、`history`、`inspect`、`stop`、`follow`、`replay` |
+| `goal` | `ls`、`inspect`、`create`、`update`、`delete`、`assign`、`start`、`handoff`、`focus`、`link-session`、`link-project`、`decisions`、`activity` |
+| `message` | `inbox check/ack`；`dispatch open/report/inspect` |
+| `app` | `inspect`、`snapshot`、`focus` |
+| `mote` | `playbook pmo` |
+| `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
+| `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
+| `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
+
+- **PMO 全局发现完整保留。** `app snapshot` 聚合原 PMO 跨对象观察：真实 Project 资源、Workspace、Topic／Mote／Space／Zone、配置 Executor、活动 Agent、Core Session、Goal、决策与活动事实；按各自来源保留已知、不可用和 unknown，不把不可用伪装成空列表。对象发现必须覆盖原 `list projects/active-agents/sessions` 与 PMO 全局观察的事实，不能只剩调用者的当前 Space／Workspace。配置 Executor 由 `settings executors` 发现，Agent 与 Session 由 `agent` 发现，空间与其资源绑定由 `space` 发现，各项 inspect 按对象提供；Project／Workspace 资源发现由原权威来源供给聚合及关联观察，不能从 Space 名称或单条 Workspace ID 伪造 Project。`goal activity` 只取原 Goal 活动来源，不把 Runtime 日志或跨域 snapshot 当成 Goal 已发生的活动。
+- **Topic 与资料来自真实文件系统。** 全局 Topic／Mote 及其资料的发现复用原目录／文件 owner，身份和修订来源明确；宿主或范围不可用时显式 unknown／不可用，不补一个全局 registry，不借当前项目、默认 Mote 或另一份 Session 列表补齐事实。部分来源失败保留其他已经观察到的结果与原工作面，不宣称全局资料已经完整。
+- **PMO 从别处也能执行真实工作流。** 人或 PMO 位于其他 Workspace，显式指定真实项目资源及目标 Space 位置，通过同一 RPC 业务编排选择或创建 Git／目录 Zone、建立首张 Tab、打开指定 Executor 的 Agent 并交付首任务，取得精确 AgentSession／Run 与空间地址，随后可发送、观察和操作。Project 的资源身份／Host／目录与显示 Space／Zone 地址分别指定、校验和返回，不能从 Space、调用者 cwd 或焦点猜资源；目标没有现成 Tab 仍可开始，不要求锚点。资源创建、Workspace 登记、展示放置、Core 创建与首句投递分别保留真实事实；部分失败保留已建资源与健康 Agent，投递 confirmed 不抬升为 Agent 接受／开始／完成任务。新 Zone 的资源 input 须携带显式 Project 身份，沿原配置的 Host 与仓库／目录事实解析；展示 Space 可为 Folder、Topic 或 Mote，不限为资源目录 Space。已有 Zone 使用本 Zone 的真实资源，不要求重选 Project。回执分别给出 Project、资源来源 Workspace、Host／目录与展示地址；同一业务操作不能更换资源后复做。具体 carrier 沿下述已评审派生合同，不把尚未实施语法当成已可用。
+- **`mote playbook pmo` 只读。** 它是说明 PMO 方法、分工、目标与完成标准确认、发现资源、编排已有能力、回读事实及未知恢复方式的工作手册，引用实际公开 CLI 及其真实边界，不启动 Agent、不自动执行步骤、不投递任务、不改变角色注册；已存在的 SOUL／Wiki 与用户资料保持原样，不机械改写。能力尚未落地时明确说明，不把目标命令写成已经可用的操作承诺。
+- **展示导航沿原合同。** `app focus` 表达主 Surface 的选择，`space focus` 与 `goal focus` 表达精确对象导航；选择、真实呈现和输入 caret 仍分开报告，默认保原 Mote 对话输入、草稿和组字，不改执行 cwd、不关闭健康 Session。原展示 owner 及对象间职责唯一见《Agent 操作桌面主画面与保留对话输入》，不因命令归域再造 router 或 caret owner。
+
+**当前实现与未实现范围。** 来源核对：`packages/core/src/control.ts` 的 `AGENTMUX_CONTROL_SCHEMA_VERSION = 5`，`control-host.ts` 使用 Node Unix socket、按换行读取 JSON 及自定义 `schemaVersion/requestId/operation` 信封；这是现有 NDJSON Control，不是已完成的 JSON-RPC。`agentmux.ts` 仍有顶层 `pmo/list/demand/focus`、本地 Session Store 解析及角色文件读写；原 `pmo activity` 聚合 Goal 活动，Topic 全局发现已有明确不可用边界。新的对象分域、公共服务统一、CLI 去本地业务判断、完整发现及手册尚未由本次登记实现；HTTP／SSH 是目标传输边界，不能宣称已可用。用户现已批准 `f-2j28fqcvt` 按同一 Closure 实现以上目标，覆盖初次 proposal 登记的仅设计阶段；不得据旧阶段说明搁置已授权工作，也不重开原已归档 CLI Feature。本次文档修订登记实施授权及派生合同，实际产品完成仍须由真实公共服务、CLI／Client 调用和恢复证据证明。
+
+**已评审的派生合同与实施边界。** 新 Zone 以 `--project`／typed `projectId` 显式选择资源，既有 Zone 不需要该项；Project 由原 Workspace 配置的 Host 与仓库根／目录同一性派生，不添加第二 registry。新 Zone 可用 `--source-workspace` 明确选择该 Project 内的执行来源；未指定时仅接受唯一根目录来源或唯一已登记来源，多工作区且没有根目录时明确要求消歧，不从第一个工作区或当前 HEAD 猜分支起点。一个 `--endpoint` descriptor 只定位同一公共服务，不承担资源或空间身份；HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保原自定义 wire 或兼容别名。`--operation-id` 是沿原 owner 对账的业务操作身份，JSON-RPC `id` 只关联一次 wire 请求；订阅只有一次响应，先响应再通知，取消／断线只释放相应 reader，不停健康 Agent 或原业务 operation。完整命令树、原业务保留和第一方指引须一起落地，Toolkit 原 add／remove 能力改为 create／delete，update／action 保留；具体过滤与载体实现仍受上述真实来源和 typed 合同约束。少量独立端到端切片可并行推进，最终验收消费同一候选的公共 RPC、完整对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付。
 
 ### Agent-first 的 Space 工作入口
 
