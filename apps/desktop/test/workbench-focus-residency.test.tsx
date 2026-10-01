@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 import { act, createElement, useEffect } from 'react'
-import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import type { WorkbenchViewTargets } from '../src/renderer/src/lib/workbench-presentation'
 import { useAppStore } from '../src/renderer/src/store'
 const lifetime = vi.hoisted(() => ({ mounts: {} as Record<string, number>, unmounts: {} as Record<string, number> }))
 vi.mock('../src/renderer/src/components/SessionPane', () => ({ SessionPane: ({ sessionId, linkOrigin }: { sessionId: string; linkOrigin: { tabGroupId: string } }) => {
@@ -29,7 +29,10 @@ beforeEach(async () => {
   useAppStore.setState({ config, sessions: [...snapshot.sessions, { ...snapshot.sessions[0]!, id: 'session-parked' }], providerCatalog: [], tabs, layouts: { 'workspace-demo': { root: { type: 'split', direction: 'horizontal', ratio: .45, first: { type: 'leaf', groupId: 'left' }, second: { type: 'leaf', groupId: 'right' } }, groups: [{ id: 'left', tabOrder: ['a', 'parked'], activeTabId: 'a', recentTabIds: ['a', 'parked'] }, { id: 'right', tabOrder: ['b'], activeTabId: 'b', recentTabIds: ['b'] }], activeGroupId: 'left' } } })
 })
 afterEach(async () => { await act(async () => root.unmount()); home.remove(); target.remove(); useAppStore.setState(baseline, true); vi.restoreAllMocks() })
-const render = (focusTabId: string | null) => act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: 'workspace-demo', visible: true, viewTargets: focusTabId ? { [focusTabId]: { hostId: 'focus-fixture', active: true, visible: true, surface: 'focus' } } : {} })))
+const render = (focusTabId: string | null) => {
+  const viewTargets: WorkbenchViewTargets = focusTabId ? { [focusTabId]: [{ hostId: 'focus-fixture', active: true, visible: true, surface: 'focus' }] } : {}
+  return act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: 'workspace-demo', visible: true, viewTargets })))
+}
 it('moves existing DOM between Space and selected Focus tabs without touching split identity or lifetime', async () => {
   const layout = useAppStore.getState().layouts['workspace-demo']
   await render(null)

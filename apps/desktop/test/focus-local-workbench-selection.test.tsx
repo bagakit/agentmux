@@ -2,7 +2,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { createRequire } from 'node:module'
 import { act, createElement, useEffect } from 'react'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, splitWorkbenchRegion, type WorkspaceLayout } from '@agentmux/layout'
 vi.mock('react-resizable-panels', () => createRequire(import.meta.url)(
@@ -25,11 +25,14 @@ import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
+import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { restoreAgentFocus, sanitizeAgentFocus } from '../src/renderer/src/lib/agent-focus'
 import { installNativePopover } from './fixtures/mote-workface'
 const initial = useAppStore.getState()
+const initialLauncher = useLauncherState.getState()
 async function fixture() {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); window.localStorage.clear()
+  useLauncherState.setState({ persistenceIssue: null, sections: {}, drafts: {}, executors: {} })
   leaves.mounts = []; leaves.unmounts = []
   const restorePopover = installNativePopover(), config = await api.config.get(), snapshot = await api.sessions.snapshot()
   const resource = { ...config.workspaces.find(item => item.id === 'workspace-demo')!, path: _hygiene_fixturePath("private/resource-a") }
@@ -72,7 +75,7 @@ async function fixture() {
       await act(async () => node!.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0 })))
     },
     async close() { await act(async () => root.unmount()); container.remove(); restorePopover()
-      useAppStore.setState(initial, true); window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() }
+      useAppStore.setState(initial, true); useLauncherState.setState(initialLauncher, true); window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals() }
   }
 }
 it('actual File pointer selects its original occurrence without changing Agent/history/Space or original DOM/Range', async () => {
@@ -125,6 +128,9 @@ it('Tab-level Focus has no parent Group chrome and keeps the original mixed Tab 
 it('the original Launcher submit keeps its resource Workspace and exact display Group at the real API boundary', async () => {
   const f = await fixture()
   try {
+    // Exercise the explicit collapsed preference, independently of the default
+    // expanded Agents section and any other Launcher's persisted preferences.
+    expect(useLauncherState.getState().setSection(f.resource.id, 'agents', 'collapsed')).toBe(true)
     const before = useAppStore.getState(), held = before.agentFocus.execution
     // Create through the existing original Store owner, then explicitly select
     // that Tab occurrence. A Tab-level presentation does not mint parent chrome.
