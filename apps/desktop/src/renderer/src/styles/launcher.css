@@ -1,5 +1,5 @@
 /* A compact work origin; all Runtime and draft facts keep their existing owners. */
-.launch-surface { height: 100%; min-width: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; justify-content: safe center; padding: clamp(var(--sp-6), 4vw, var(--sp-8)); background: radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--green) 3%, transparent), transparent 58%), var(--surface-0); container-name: launcher; container-type: inline-size; }
+.launch-surface { height: 100%; min-width: 0; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; justify-content: safe center; padding: clamp(var(--sp-6), 4vw, var(--sp-8)); background: radial-gradient(ellipse at 50% 0, color-mix(in srgb, var(--green) 3%, transparent), transparent 58%), var(--surface-0); container-name: launcher; container-type: size; }
 .launch-surface > * { flex: 0 0 auto; width: min(720px, 100%); margin-inline: auto; }
 .launcher-environment { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-6); padding-bottom: var(--sp-6); margin-bottom: var(--sp-7); border-bottom: 1px solid var(--line-soft); }
 .launcher-environment__project { min-width: 0; display: flex; align-items: center; gap: var(--sp-5); }
@@ -95,7 +95,7 @@
 .launcher-utility__head > span:first-child { display: inline-flex; align-items: center; gap: var(--sp-3); min-width: 0; color: var(--text-3); }
 .launcher-utility__head strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
 .launcher-utility__head small { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); }
-.launch-terminal__body { height: clamp(156px, 24vh, 220px); min-height: 0; margin-top: var(--sp-2); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--terminal-bg); }
+.launch-terminal__body { height: clamp(200px, 50cqh, 420px); min-height: 0; margin-top: var(--sp-2); overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius); background: var(--terminal-bg); }
 .launcher-terminal-pending { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) 0; color: var(--text-3); font-size: var(--fs-meta); }
 .launch-surface-quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3) var(--sp-6); }
 .launch-surface-quick-grid > [data-mode='expanded'], .launch-surface-quick-grid > [data-closing='true'] { grid-column: 1 / -1; }

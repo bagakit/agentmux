@@ -4,6 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import ts from 'typescript'
+import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
 
 // Source qualification only. Actual Renderer captures/restart and independent visual review
 // remain with verify-launcher-launchpad.mjs; this command never packages or installs the app.
@@ -17,12 +18,19 @@ for (let index = 2; index < process.argv.length; index++) {
   flags[flag.slice(2)] = value
 }
 assert.equal(flags.slice ?? 'source', 'source', 'This verifier owns only the source slice')
-const evidence = resolve(root, flags.output ?? "docs/reviews/evidence/launcher-entry-polish")
+const evidence = resolve(root, flags.output ?? '.tmp/launcher-current-closure/source')
 mkdirSync(evidence, { recursive: true })
+const compilerConfig = 'apps/desktop/.tmp/launcher-current-closure/tsconfig.owning.json'
+const compilerProjection = { extends: '../../tsconfig.json', compilerOptions: { baseUrl: '../../../..',
+  paths: Object.fromEntries(sourceAliases.map(item => [item.find, [item.replacement.replace(root + '/', '')]])) } }
+mkdirSync(resolve(root, compilerConfig, '..'), { recursive: true })
+writeFileSync(resolve(root, compilerConfig), `${JSON.stringify(compilerProjection, null, 2)}\n`)
 const component = name => `apps/desktop/src/renderer/src/components/${name}.tsx`
 const sourcePaths = [
   component('NewTabSurface'), component('LauncherEnvironment'), component('LauncherSecondarySurfaces'),
   component('LaunchOptionControls'), component('LauncherMoteAction'), component('LauncherResumePicker'),
+  component('StableWorkbenchView'), component('WorkspaceWorkbench'), component('MoteWorkface'),
+  'apps/desktop/src/renderer/src/lib/workbench-presentation.ts', 'apps/desktop/src/renderer/src/lib/mote-workface.ts',
   'apps/desktop/src/renderer/src/lib/launcher-state.ts',
   'apps/desktop/src/renderer/src/lib/copy-path-display.ts',
   'apps/desktop/src/renderer/src/styles/launcher.css', 'apps/desktop/src/renderer/src/styles/resume.css'
@@ -31,16 +39,22 @@ const testPaths = [
   'apps/desktop/test/launcher-entry-polish.test.tsx', 'apps/desktop/test/launcher-launchpad.test.tsx',
   'apps/desktop/test/launcher-secondary-surfaces.test.tsx', 'apps/desktop/test/launcher-mote-create.test.tsx',
   'apps/desktop/test/launch-option-controls.test.tsx', 'apps/desktop/test/launcher-composer-layout.test.tsx',
-  'apps/desktop/test/launcher-draft-binding.test.ts'
+  'apps/desktop/test/launcher-draft-binding.test.ts', 'apps/desktop/test/launcher-host-terminal.test.tsx',
+  'apps/desktop/test/launcher-interaction-motion.test.tsx', 'apps/desktop/test/launcher-resume-picker.test.tsx',
+  'apps/desktop/test/mote-launcher-identity.test.tsx', 'apps/desktop/test/warm-terminal-ownership.test.ts'
 ]
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const bind = path => ({ path, sha256: sha(readFileSync(resolve(root, path))) })
 const sourceBindings = sourcePaths.map(bind)
-const testBindings = [...testPaths, 'apps/desktop/test/helpers/composer-dom-fixture.tsx'].map(bind)
+const testBindings = [...testPaths, 'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/fixtures/mote-workface.ts',
+  'apps/desktop/scripts/fixtures/launcher-launchpad/vitest.owning.config.mts', 'apps/desktop/scripts/fixtures/bookmark-local-link/vitest.owning.config.mts',
+  'vitest.setup.ts', 'apps/desktop/tsconfig.json', 'tsconfig.base.json', 'packages/core/package.json', 'packages/demand/package.json',
+  'packages/layout/package.json', 'packages/core/vendor/ctxmux/darwin-arm64/manifest.json',
+  'packages/core/node_modules/@ctxmux/sdk/package.json', compilerConfig].map(bind)
 
 function runTests(label, paths = testPaths, name) {
   const report = resolve(evidence, `${label}.vitest.json`)
-  const args = ['run', ...paths, '--maxWorkers=1', '--reporter=json', `--outputFile=${report}`]
+  const args = ['run', '--config', 'apps/desktop/scripts/fixtures/launcher-launchpad/vitest.owning.config.mts', ...paths, '--maxWorkers=1', '--reporter=json', `--outputFile=${report}`]
   if (name) args.push('-t', name)
   const result = spawnSync(resolve(root, 'node_modules/.bin/vitest'), args, { cwd: root, encoding: 'utf8', timeout: 120_000 })
   writeFileSync(resolve(evidence, `${label}.log`), `${result.stdout ?? ''}${result.stderr ?? ''}${result.error ? `\n${result.error}` : ''}`)
@@ -61,8 +75,20 @@ function replaceOnce(source, from, to) {
 }
 const mutants = [
   { id: 'fresh-agent-expanded', path: 'apps/desktop/src/renderer/src/lib/launcher-state.ts',
-    from: "agents: 'collapsed', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'",
-    to: "agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'", test: 'a fresh Space' },
+    from: "agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'",
+    to: "agents: 'collapsed', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'", test: 'a fresh Space' },
+  { id: 'ignore-actual-host-default', path: component('NewTabSurface'),
+    from: ": presentation.survey || Boolean(moteWorkface)) ? 'collapsed' : 'expanded'",
+    to: ": presentation.survey || Boolean(moteWorkface)) ? 'expanded' : 'expanded'", test: 'original real Mote|actual .*portal', testPath: 'apps/desktop/test/launcher-host-terminal.test.tsx' },
+  { id: 'ignore-original-mote-owner', path: component('NewTabSurface'),
+    from: ': presentation.survey || Boolean(moteWorkface)', to: ': presentation.survey || false', test: 'original real Mote', testPath: 'apps/desktop/test/launcher-host-terminal.test.tsx' },
+  { id: 'overwrite-explicit-terminal-preference', path: component('NewTabSurface'),
+    from: '{ ...DEFAULT_LAUNCHER_SECTIONS, terminal: terminalDefault, ...savedSections }',
+    to: '{ ...DEFAULT_LAUNCHER_SECTIONS, ...savedSections, terminal: terminalDefault }', test: 'explicit durable', testPath: 'apps/desktop/test/launcher-host-terminal.test.tsx' },
+  { id: 'drop-actual-portal-surface', path: component('StableWorkbenchView'),
+    from: 'tabHostId: targetId ?? homeId, surface, survey,', to: 'tabHostId: targetId ?? homeId, survey,', test: 'actual .*portal|actual .*Tab portal|projected to actual', testPath: 'apps/desktop/test/launcher-host-terminal.test.tsx' },
+  { id: 'drop-region-destination-surface', path: component('WorkspaceWorkbench'),
+    from: 'surface={target ? target.surface : parent.surface}', to: 'surface={parent.surface}', test: 'actual Region portal', testPath: 'apps/desktop/test/launcher-host-terminal.test.tsx' },
   { id: 'ignore-absolute-path-setting', path: component('NewTabSurface'),
     from: 'copyPathsAsAbsolute: config?.copyPathsAsAbsolute', to: 'copyPathsAsAbsolute: false', test: 'path representation' },
   { id: 'abbreviate-remote-or-unknown-host', path: component('NewTabSurface'),
@@ -73,9 +99,9 @@ const mutants = [
     from: "{host ? 'Configured host shell' : 'Host not configured'}", to: "{'Configured host shell'}", test: 'absent Host' },
   { id: 'launch-footer-without-agent-input', path: component('NewTabSurface'),
     from: "{sections.agents === 'expanded' ? <div className=\"launch-surface__footer\">",
-    to: "{sections.agents !== 'hidden' ? <div className=\"launch-surface__footer\">", test: 'a fresh Space|expanding the real editing context' },
+    to: "{sections.agents !== 'hidden' ? <div className=\"launch-surface__footer\">", test: 'default editing context' },
   { id: 'options-outside-input-toolbar', path: component('NewTabSurface'),
-    from: '</div><LaunchRefine options={launchOptions}', to: '</div></div><div><LaunchRefine options={launchOptions}', test: 'expanding the real editing context' },
+    from: '</div><LaunchRefine options={launchOptions}', to: '</div></div><div><LaunchRefine options={launchOptions}', test: 'default editing context' },
   { id: 'duplicate-browser-heading', path: component('LauncherSecondarySurfaces'),
     from: '<Globe2 size={15} aria-label="Browser" />', to: '<header className="launcher-utility__head">Browser</header><Globe2 size={15} aria-label="Browser" />', test: 'Browser expands into one working row' },
   { id: 'browser-collapse-not-durable', path: component('LauncherSecondarySurfaces'),
@@ -118,14 +144,16 @@ for (const mutant of mutants) {
 }
 
 // Actual AST use is required. Import names, definitions, comments and tests cannot close a slice.
-const callerPaths = [...sourcePaths.filter(path => /\.tsx?$/.test(path)), component('WorkspaceWorkbench')]
+const callerPaths = [...sourcePaths.filter(path => /\.tsx?$/.test(path))]
 const products = callerPaths.map(path => ({ path, text: readFileSync(resolve(root, path), 'utf8') }))
 const owners = [
   ['NewTabSurface', component('NewTabSurface')], ['LauncherEnvironment', component('LauncherEnvironment')],
   ['LauncherSecondarySurfaces', component('LauncherSecondarySurfaces')], ['LaunchRefine', component('LaunchOptionControls')],
   ['LauncherMoteAction', component('LauncherMoteAction')], ['LauncherResumePicker', component('LauncherResumePicker')],
   ['applyCopyPathStyle', 'apps/desktop/src/renderer/src/lib/copy-path-display.ts'],
-  ['DEFAULT_LAUNCHER_SECTIONS', 'apps/desktop/src/renderer/src/lib/launcher-state.ts']
+  ['DEFAULT_LAUNCHER_SECTIONS', 'apps/desktop/src/renderer/src/lib/launcher-state.ts'],
+  ['StableWorkbenchView', component('StableWorkbenchView')],
+  ['useWorkbenchBrowserPresentation', 'apps/desktop/src/renderer/src/lib/workbench-presentation.ts']
 ]
 const callers = owners.map(([symbol, definition]) => {
   const uses = []
@@ -148,12 +176,12 @@ const callers = owners.map(([symbol, definition]) => {
 const restored = runTests('source-final-restored')
 assert.equal(restored.exitCode, 0)
 for (const binding of [...sourceBindings, ...testBindings]) assert.equal(bind(binding.path).sha256, binding.sha256, `Candidate drifted: ${binding.path}`)
-const typecheck = spawnSync(resolve(root, 'node_modules/.bin/tsc'), ['--noEmit', '-p', 'apps/desktop/tsconfig.json'], { cwd: root, encoding: 'utf8', timeout: 120_000 })
+const typecheck = spawnSync(resolve(root, 'node_modules/.bin/tsc'), ['--noEmit', '-p', compilerConfig], { cwd: root, encoding: 'utf8', timeout: 120_000 })
 writeFileSync(resolve(evidence, 'source-typecheck.log'), `${typecheck.stdout ?? ''}${typecheck.stderr ?? ''}`)
 assert.equal(typecheck.status, 0, 'The actual product typecheck must pass')
 const receipt = { schema: 'agentmux.launcher-entry-polish-source.v1', status: 'passed', recordedAt: new Date().toISOString(),
   feature: 'f-2hm8f4ca7', slice: 'source', sourceBindings, testBindings, sourceDigest: sha(JSON.stringify(sourceBindings)),
-  baseline, mutations, callers, restored, verificationBinding: bind('apps/desktop/scripts/verify-launcher-entry-polish.mjs'), typecheck: { command: 'node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json', exitCode: typecheck.status },
+  baseline, mutations, callers, restored, verificationBinding: bind('apps/desktop/scripts/verify-launcher-entry-polish.mjs'), typecheck: { command: `node_modules/.bin/tsc --noEmit -p ${compilerConfig}`, exitCode: typecheck.status, compilerProjection },
   packaging: 'not-requested-not-run', installation: 'not-requested-not-run',
   boundary: 'Mounted production components and Store are real; native desktop API boundaries are controlled. Actual Renderer visuals/restart and healthy native Run evidence are separate qualification.' }
 const receiptPath = resolve(evidence, 'source-receipt.json')

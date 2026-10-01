@@ -7,6 +7,7 @@ import { join, resolve, dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 import { validateLauncherMotionCssReceipt } from './verify-launcher-interaction-motion-css.mjs'
+import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
 const require=createRequire(import.meta.url),{build}=await import('vite'),ts=require('typescript')
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), sourceRoot=join(desktop,'src/renderer/src'),fixture=join(desktop,'scripts/fixtures/launcher-launchpad')
 const arg=name=>process.argv.find(value=>value.startsWith(name+'='))?.slice(name.length+1)
@@ -15,17 +16,18 @@ const evidence=arg('--output')?resolve(repository,arg('--output')):receiptPath?d
 const designRoot=arg('--design-root')?resolve(arg('--design-root')):repository
 const scenes=arg('--scenes')??'full'
 const sha=value=>createHash('sha256').update(value).digest('hex')
-const modules=['components/NewTabSurface.tsx','components/LauncherEnvironment.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','components/settings/LiquidSelectionSurface.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','lib/copy-path-display.ts','styles/launcher.css','styles/resume.css','styles/settings-materials.css','styles/tokens.css','styles/surfaces.css','styles/base.css']
+const modules=['components/NewTabSurface.tsx','components/LauncherEnvironment.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','components/StableWorkbenchView.tsx','components/WorkspaceWorkbench.tsx','components/MoteWorkface.tsx','components/GlobalSurveySurface.tsx','components/PmoTeamsTopicFloatingPanel.tsx','lib/pmo-teams-topic-floating.ts','store.ts','lib/workbench-presentation.ts','lib/mote-workface.ts','components/settings/LiquidSelectionSurface.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','lib/copy-path-display.ts','styles/launcher.css','styles/resume.css','styles/settings-materials.css','styles/tokens.css','styles/surfaces.css','styles/base.css','styles/survey.css','styles/pmo-teams-topic.css','styles/mote-workface.css']
 const section=(bytes,start,end)=>{const a=bytes.indexOf(start),b=end?bytes.indexOf(end,a+start.length):bytes.length;assert.ok(a>=0&&b>a,'Source binding has a nonempty exact scope: '+start);return bytes.slice(a,b)}
 async function bindings(){
  const facts={}
  for(const file of modules)facts[file]=sha(await readFile(join(sourceRoot,file)))
  const store=await readFile(join(sourceRoot,'store.ts'),'utf8')
- for(const [name,start,end] of [['note-content','  async createNote(','  async openHttpLink('],['resume-owner','  async recoverSession(','  async deleteSession(']]){
+ for(const [name,start,end] of [['note-content','  async createNote(','  async openHttpLink('],['resume-owner','  async recoverSession(','  async deleteSession('],['warm-owner','  prewarmTerminal(workspaceId, ownerLauncherId) {','  async promoteWarmTerminal(']]){
   const a=store.indexOf(start);assert.ok(a>=0);let b=store.indexOf('\n  },',a);assert.ok(b>a);facts['store:'+name]=sha(store.slice(a,b+5))
  }
  const index=await readFile(join(sourceRoot,'styles/index.css'),'utf8');facts['style-entry']=sha(index.split('\n').filter(line=>/launcher\.css|resume\.css/.test(line)).join('\n'));assert.ok(index.includes("@import './launcher.css';")&&index.includes("@import './resume.css';"))
- for(const name of ['entry.tsx','main.cjs','motion.cjs','preload.cjs','index.html'])facts['fixture:'+name]=sha(await readFile(join(fixture,name)))
+ for(const name of ['entry.tsx','main.cjs','motion.cjs','terminal-host.cjs','preload.cjs','index.html','vitest.owning.config.mts'])facts['fixture:'+name]=sha(await readFile(join(fixture,name)))
+ facts['fixture:source-alias-owner']=sha(await readFile(join(desktop,'scripts/fixtures/bookmark-local-link/vitest.owning.config.mts')))
  facts['oracle']=sha(await readFile(import.meta.filename))
  facts['css-qualification-producer']=sha(await readFile(join(desktop,'scripts/verify-launcher-interaction-motion-css.mjs')))
  for(const [name,anchor] of [['agentmux-desktop-interaction.md','初始 Launcher'],['agentmux-surface-density.md','初始 Launcher']]){
@@ -62,6 +64,7 @@ await mkdir(evidence,{recursive:true});const identity=await bindings(),realCalle
 if(receiptPath){
  const capture=JSON.parse(await readFile(join(evidence,'capture-receipt.json'),'utf8'))
  assert.equal(capture.passed,true);assert.equal(capture.sourceDigest,identity.digest,'Capture must match the current Launcher source/SSOT')
+ assert.ok(capture.frames.length>0,'Current native capture contains actual workfaces')
  for(const frame of capture.frames)assert.equal(sha(await readFile(join(evidence,frame.file))),frame.sha256,'PNG bytes have not changed')
  const review=await consume(arg('--review')?resolve(repository,arg('--review')):join(evidence,'independent-visual-review.json'),'Independent visual review',identity,capture)
  const runtime=await consume(arg('--runtime-proof')?resolve(repository,arg('--runtime-proof')):join(evidence,'runtime-restart.json'),'Native restart proof',identity,capture)
@@ -79,32 +82,72 @@ if(receiptPath){
   const css=await validateLauncherMotionCssReceipt(join(evidence,'css-mutations.json'),capture)
   interactionMotion={source:{path:sourcePath,sha256:sha(sourceBytes),proof:source},css,sourceConsumer:checked.stdout.trim()}
  }
+ let terminalHost
+ if(capture.scenes==='terminal-host'){
+  const mote=capture.moteSameHost
+  assert.equal(mote?.outcome.exitCode,0);assert.equal(mote?.render.passed,true)
+  assert.equal(mote.render.scenarios.length,1,'Independent same-cwd Mote has its finite production scenario')
+  const scenario=mote.render.scenarios[0]
+  assert.equal(scenario.passed,true);assert.equal(scenario.after.warmRun,scenario.before.warmRun)
+  assert.equal(scenario.before.calls.stops.length,0);assert.equal(scenario.after.calls.stops.length,0)
+  assert.deepEqual(scenario.after.agentDrafts,scenario.before.agentDrafts)
+  assert.equal(capture.frames.filter(frame=>frame.file.startsWith('mote-same-host/')).length,4,'Independent Mote has exact default, expanded wide/narrow and short action workfaces')
+  assert.ok(capture.processes.every(process=>process.render.pid!==mote.render.pid),'Independent Mote has a separate actual process')
+  const sourcePath=arg('--source-proof')?resolve(repository,arg('--source-proof')):join(repository,'.tmp/launcher-current-closure/source/source-receipt.json')
+  const sourceBytes=await readFile(sourcePath),source=JSON.parse(sourceBytes)
+  const checked=spawnSync(process.execPath,[join(desktop,'scripts/verify-launcher-entry-polish-receipt.mjs'),'--receipt='+sourcePath],{cwd:repository,encoding:'utf8',timeout:10000})
+  assert.equal(checked.status,0,'Consume exact current host Source qualification: '+checked.stdout+checked.stderr)
+  assert.equal(source.status,'passed');assert.ok(source.sourceBindings.length>0&&source.mutations.length>0&&source.callers.length>0)
+  for(const input of source.sourceBindings){
+   const prefix='apps/desktop/src/renderer/src/';assert.ok(input.path.startsWith(prefix))
+   const key=input.path.slice(prefix.length),compiled=input.path.endsWith('.css')?capture.compiled.importedStyles:capture.compiled.loadedSources
+   assert.equal(compiled[key],input.sha256,'Qualified host Source actually compiled into these native frames: '+key)
+  }
+  const css=await validateLauncherMotionCssReceipt(join(evidence,'css-mutations.json'),capture)
+  assert.equal(css.proof.scenes,'terminal-host')
+  terminalHost={source:{path:sourcePath,sha256:sha(sourceBytes),proof:source},css,sourceConsumer:checked.stdout.trim()}
+ }
  const receipt={schema:'agentmux.launcher-launchpad-acceptance.v1',passed:true,sourceDigest:identity.digest,identity,callers:realCallers,capture,independentVisualReview:review,nativeRuntimeRestart:runtime,
-  ...(interactionMotion?{interactionMotion}:{}),boundary:'Actual production Workbench/Region Renderer behavior and two-process private-profile restore; independent aesthetics review of these exact PNGs; separate native Core/ctxmux original healthy Run proof. No installed user App or Renderer update claim.'}
+  ...(interactionMotion?{interactionMotion}:{}),...(terminalHost?{terminalHost}:{}),boundary:'Actual production Workbench/Region Renderer behavior and two-process private-profile restore; independent aesthetics review of these exact PNGs; separate native Core/ctxmux original healthy Run proof. No installed user App or Renderer update claim.'}
  await writeFile(receiptPath,JSON.stringify(receipt,null,2));console.log(JSON.stringify({passed:true,receipt:receiptPath,sourceDigest:identity.digest}));process.exit(0)
 }
 const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-launchpad-")),profile=join(privateRoot,'profile'),outDir=join(privateRoot,'out')
 const result={schema:'agentmux.launcher-launchpad-capture.v1',passed:false,scenes,sourceDigest:identity.digest,identity,callers:realCallers,frames:[],processes:[],
  aestheticReview:'Not performed by capture. Independent review is required by the final receipt gate.',userRunTouched:false,
- boundary:'Actual isolated production Workbench/Region, CSS, rich editors and xterm. Controlled preview API facts. Two separate Electron processes reuse one private profile; no native daemon or vendor CLI continuity claim.'}
+ boundary:scenes==='terminal-host-mote'
+  ? 'Actual confirmed MoteWorkface and its original same-Scratch-cwd warm owner. Controlled preview API facts; one independent capture-only software-rendered Electron process. No cold-discovery, restart, native daemon, vendor CLI or installed user-App claim.'
+  : 'Actual isolated production Workbench/Region, CSS, rich editors and xterm. Controlled preview API facts. Two separate Electron processes reuse one private profile; terminal-host additionally captures a confirmed Mote with its own same-cwd warm owner in an independent process. No native daemon or vendor CLI continuity claim.'}
 try{
  const loaded={},styles={}
  const wrapper=join(privateRoot,'xterm.mjs');await writeFile(wrapper,`import xterm from ${JSON.stringify(require.resolve('@xterm/xterm'))};export class Terminal extends xterm.Terminal {constructor(...args){super(...args);(globalThis.launchpadTerminals??=[]).push(this)}dispose(){this.disposed=true;return super.dispose()}}`);
- await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},plugins:[{name:'launcher-owned-source-identity',enforce:'pre',transform(bytes,id){if(id.startsWith(sourceRoot+'/')&&!id.includes('?'))loaded[id.slice(sourceRoot.length+1)]=sha(bytes)},async generateBundle(){for(const file of this.getWatchFiles())if(file.startsWith(sourceRoot+'/')&&file.endsWith('.css'))styles[file.slice(sourceRoot.length+1)]=sha(await readFile(file))}}],
+ await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper},...sourceAliases]},plugins:[{name:'launcher-owned-source-identity',enforce:'pre',transform(bytes,id){if(id.startsWith(sourceRoot+'/')&&!id.includes('?'))loaded[id.slice(sourceRoot.length+1)]=sha(bytes)},async generateBundle(){for(const file of this.getWatchFiles())if(file.startsWith(sourceRoot+'/')&&file.endsWith('.css'))styles[file.slice(sourceRoot.length+1)]=sha(await readFile(file))}}],
   define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},build:{outDir,emptyOutDir:true}})
  for(const file of modules.filter(name=>!name.endsWith('.css')))assert.equal(loaded[file],identity.sources[file],'Actual production module compiled: '+file)
  for(const file of modules.filter(name=>name.endsWith('.css')))assert.equal(styles[file],identity.sources[file],'Actual stylesheet imported: '+file)
  const compiled={};for(const entry of await readdir(outDir,{recursive:true,withFileTypes:true}))if(entry.isFile())compiled[join(entry.parentPath,entry.name).slice(outDir.length+1)]=sha(await readFile(join(entry.parentPath,entry.name)))
  assert.ok(Object.keys(compiled).length>0);result.compiled={files:compiled,loadedSources:loaded,importedStyles:styles}
- const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')));await writeFile(join(privateRoot,'motion.cjs'),await readFile(join(fixture,'motion.cjs')))
+ const main=join(privateRoot,'main.cjs');await writeFile(main,await readFile(join(fixture,'main.cjs')));await writeFile(join(privateRoot,'preload.cjs'),await readFile(join(fixture,'preload.cjs')));await writeFile(join(privateRoot,'motion.cjs'),await readFile(join(fixture,'motion.cjs')));await writeFile(join(privateRoot,'terminal-host.cjs'),await readFile(join(fixture,'terminal-host.cjs')))
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
- for(const phase of ['capture','restart']){
+ for(const phase of scenes==='terminal-host-mote'?['capture']:['capture','restart']){
   const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),profile,evidence,phase,scenes],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})
   await writeFile(join(evidence,phase+'-process.log'),lines.join('\n'));const render=JSON.parse(await readFile(join(evidence,phase+'-render.json'),'utf8'));result.processes.push({phase,outcome,render});assert.equal(outcome.exitCode,0,render.failure?.message);assert.equal(render.passed,true)
   for(const frame of render.frames)result.frames.push({...frame,sha256:sha(await readFile(join(evidence,frame.file)))})
  }
- assert.notEqual(result.processes[0].render.pid,result.processes[1].render.pid,'Durable read uses a separate actual Electron process')
- assert.equal(result.processes[1].render.durable.passed,true);assert.deepEqual(await bindings(),identity,'Relevant production source did not change during capture');result.passed=true
+ if(scenes!=='terminal-host-mote'){
+  assert.notEqual(result.processes[0].render.pid,result.processes[1].render.pid,'Durable read uses a separate actual Electron process')
+  assert.equal(result.processes[1].render.durable.passed,true)
+ }
+ if(scenes==='terminal-host'){
+  const moteEvidence=join(evidence,'mote-same-host'),moteProfile=join(privateRoot,'mote-profile');await mkdir(moteEvidence,{recursive:true})
+  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),moteProfile,moteEvidence,'capture','terminal-host-mote'],{temporaryRoot:privateRoot,cwd:repository,env,timeoutMs:120000,onLine:line=>lines.push(line)})
+  await writeFile(join(moteEvidence,'capture-process.log'),lines.join('\n'))
+  const render=JSON.parse(await readFile(join(moteEvidence,'capture-render.json'),'utf8'))
+  result.moteSameHost={outcome,render,boundary:'Independent capture-only private process, real MoteWorkface and same Scratch cwd warm owner; no borrowing of main Project Run or two-process restoration claims.'}
+  assert.equal(outcome.exitCode,0,render.failure?.message);assert.equal(render.passed,true);assert.ok(render.frames.length>0)
+  assert.ok(result.processes.every(process=>process.render.pid!==render.pid),'Same-host Mote capture has an independent process')
+  for(const frame of render.frames)result.frames.push({...frame,file:'mote-same-host/'+frame.file,sha256:sha(await readFile(join(moteEvidence,frame.file)))})
+ }
+ assert.deepEqual(await bindings(),identity,'Relevant production source did not change during capture');result.passed=true
 }catch(error){result.failure={name:error.name,message:error.message,stack:error.stack}}
 finally{
  const remaining=await listProbeProcesses(-1,privateRoot);for(const pid of remaining)await signalOwnedProbeProcess(pid,privateRoot,'SIGKILL');result.cleanup={remaining:await listProbeProcesses(-1,privateRoot)}

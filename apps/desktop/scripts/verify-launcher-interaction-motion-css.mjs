@@ -10,7 +10,7 @@ const cssPath = 'apps/desktop/src/renderer/src/styles/launcher.css'
 const producer = 'apps/desktop/scripts/verify-launcher-interaction-motion-css.mjs'
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const relative = path => path.replace(repository + '/', '')
-const specs = [
+const motionSpecs = [
   { id: 'remove-native-keyboard-focus',
     from: ".launch-surface button:focus-visible, .launcher-environment__panel button:focus-visible, .launch-refine__panel button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }",
     to: ".launch-surface button:focus-visible, .launcher-environment__panel button:focus-visible, .launch-refine__panel button:focus-visible { outline: none; outline-offset: 2px; }",
@@ -20,15 +20,29 @@ const specs = [
     to: ".launcher-environment__panel[data-state='open'], .launch-refine__panel[data-state='open'] { animation: none; }",
     assertion: 'motion-host-enter: actual finite motion has an intermediate time' }
 ]
+const hostSpecs = [
+  { id: 'cap-terminal-at-old-thumbnail-height',
+    from: '.launch-terminal__body { height: clamp(200px, 50cqh, 420px);',
+    to: '.launch-terminal__body { height: clamp(156px, 24vh, 220px);',
+    assertion: 'Region 720px Terminal body is at least 280px without shrinking text' },
+  { id: 'lose-region-block-size-container',
+    from: 'container-name: launcher; container-type: size;',
+    to: 'container-name: launcher; container-type: inline-size;',
+    assertion: 'Terminal height uses its own Region container' }
+]
+function specsFor(scenes) {
+  assert.ok(['interaction-motion', 'terminal-host'].includes(scenes), 'Known finite native CSS scene')
+  return scenes === 'terminal-host' ? hostSpecs : motionSpecs
+}
 async function readProof(file) {
   const bytes = await readFile(resolve(repository, file))
   return { path: relative(resolve(repository, file)), sha256: sha(bytes), proof: JSON.parse(bytes) }
 }
-async function validateCapture(reference, cssSha, green, assertion) {
+async function validateCapture(reference, cssSha, green, assertion, scenes) {
   const actual = await readProof(reference.path)
   assert.equal(actual.sha256, reference.sha256, 'Exact original native capture report')
   const capture = actual.proof
-  assert.equal(capture.scenes, 'interaction-motion')
+  assert.equal(capture.scenes, scenes)
   assert.equal(capture.identity.sources['styles/launcher.css'], cssSha)
   assert.equal(capture.compiled.importedStyles['styles/launcher.css'], cssSha, 'Mutated CSS was actually compiled and imported by production Workbench')
   assert.equal(capture.passed, green)
@@ -52,19 +66,20 @@ export async function validateLauncherMotionCssReceipt(file, currentCapture) {
   const actual = await readProof(file), receipt = actual.proof
   assert.equal(receipt.schema, 'agentmux.launcher-interaction-motion-css.v1')
   assert.equal(receipt.passed, true)
+  const specs = specsFor(receipt.scenes)
   const original = sha(await readFile(resolve(repository, cssPath)))
   assert.equal(receipt.source.path, cssPath)
   assert.equal(receipt.source.sha256, original)
   assert.equal(receipt.producer.path, producer)
   assert.equal(receipt.producer.sha256, sha(await readFile(resolve(repository, producer))))
   assert.deepEqual(receipt.mutations.map(item => item.id), specs.map(item => item.id))
-  await validateCapture(receipt.baseline, original, true)
+  await validateCapture(receipt.baseline, original, true, undefined, receipt.scenes)
   for (const [index, mutation] of receipt.mutations.entries()) {
     assert.equal(mutation.status, 'assertion-red-exact-restore-green')
     assert.equal(mutation.originalSha256, original)
     assert.notEqual(mutation.mutatedSha256, original)
-    await validateCapture(mutation.red, mutation.mutatedSha256, false, specs[index].assertion)
-    const restored = await validateCapture(mutation.restored, original, true)
+    await validateCapture(mutation.red, mutation.mutatedSha256, false, specs[index].assertion, receipt.scenes)
+    const restored = await validateCapture(mutation.restored, original, true, undefined, receipt.scenes)
     if (currentCapture) assert.equal(restored.proof.sourceDigest, currentCapture.sourceDigest, 'Actual restored motion capture binds the final candidate')
   }
   return actual
@@ -77,15 +92,16 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
     const result = await validateLauncherMotionCssReceipt(resolve(repository, arg('--receipt')))
     console.log(JSON.stringify({ passed: true, receipt: result.path, mutations: result.proof.mutations.length, mode: 'read-only-current-proof' }))
   } else {
+    const scenes = arg('--scenes') ?? 'interaction-motion', specs = specsFor(scenes)
     assert.ok(arg('--baseline'), 'A completed actual baseline capture is required')
     await mkdir(output, { recursive: true })
     const path = resolve(repository, cssPath), original = await readFile(path), originalSha256 = sha(original)
     const baseline = await readProof(resolve(repository, arg('--baseline')))
-    await validateCapture(baseline, originalSha256, true)
+    await validateCapture(baseline, originalSha256, true, undefined, scenes)
     const mutations = []
     async function capture(label) {
       const directory = resolve(output, 'css-mutations', label)
-      const args = ['apps/desktop/scripts/verify-launcher-launchpad.mjs', '--scenes=interaction-motion', '--output=' + relative(directory)]
+      const args = ['apps/desktop/scripts/verify-launcher-launchpad.mjs', '--scenes=' + scenes, '--output=' + relative(directory)]
       const run = spawnSync(process.execPath, args, { cwd: repository, encoding: 'utf8', timeout: 180000 })
       await mkdir(directory, { recursive: true })
       await writeFile(resolve(directory, 'qualification.log'), `${run.stdout ?? ''}${run.stderr ?? ''}${run.error ? '\n' + run.error : ''}`)
@@ -100,19 +116,19 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       await writeFile(path, mutated)
       try {
         red = await capture(spec.id + '-red')
-        await validateCapture(red, mutatedSha256, false, spec.assertion)
+        await validateCapture(red, mutatedSha256, false, spec.assertion, scenes)
       } finally {
         assert.equal(sha(await readFile(path)), mutatedSha256, 'Concurrent mutation-period edit; never overwrite it')
         await writeFile(path, original)
         assert.equal(sha(await readFile(path)), originalSha256, 'Exact original CSS restored')
       }
       const restored = await capture(spec.id + '-restored')
-      await validateCapture(restored, originalSha256, true)
+      await validateCapture(restored, originalSha256, true, undefined, scenes)
       mutations.push({ id: spec.id, status: 'assertion-red-exact-restore-green', originalSha256, mutatedSha256,
         red: { path: red.path, sha256: red.sha256 }, restored: { path: restored.path, sha256: restored.sha256 } })
       console.log(spec.id + ': actual native Assertion RED / exact restore GREEN')
     }
-    const receipt = { schema: 'agentmux.launcher-interaction-motion-css.v1', passed: true,
+    const receipt = { schema: 'agentmux.launcher-interaction-motion-css.v1', passed: true, scenes,
       source: { path: cssPath, sha256: originalSha256 }, producer: { path: producer, sha256: sha(await readFile(resolve(repository, producer))) },
       baseline: { path: baseline.path, sha256: baseline.sha256 }, mutations,
       boundary: 'Two real production CSS mutations compile into isolated Electron Workbench. Native keyboard/RAF assertions turn RED; original bytes restore and full native scenes plus two-process durable restore turn GREEN. No user App or Run touched.' }

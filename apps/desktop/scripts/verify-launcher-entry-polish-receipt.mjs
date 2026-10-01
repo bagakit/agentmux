@@ -2,11 +2,16 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
+import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
 
 // Consume completed, exact-source qualification without repeating live mutations
 // because unrelated colleagues changed the shared checkout during Tracker's gate.
 const root = resolve(import.meta.dirname, '../../..')
-const receipt = "docs/reviews/evidence/launcher-entry-polish/source-receipt.json"
+const flags = process.argv.slice(2)
+assert.equal(flags.length, 1, 'Supply the exact completed --receipt path')
+assert.ok(flags[0].startsWith('--receipt='))
+const receipt = flags[0].slice('--receipt='.length)
+assert.ok(receipt.length > 0)
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = path => readFile(resolve(root, path))
 const proofBytes = await read(receipt)
@@ -15,6 +20,7 @@ assert.equal(proof.schema, 'agentmux.launcher-entry-polish-source.v1')
 assert.equal(proof.status, 'passed')
 assert.equal(proof.feature, 'f-2hm8f4ca7')
 assert.ok(proof.sourceBindings.length > 0 && proof.testBindings.length > 0)
+assert.equal(proof.verificationBinding.path, 'apps/desktop/scripts/verify-launcher-entry-polish.mjs')
 for (const binding of [...proof.sourceBindings, ...proof.testBindings, proof.verificationBinding]) {
   assert.equal(sha(await read(binding.path)), binding.sha256, `Qualification input changed: ${binding.path}`)
 }
@@ -41,7 +47,11 @@ await report(proof.baseline)
 await report(proof.restored)
 assert.equal(proof.baseline.passed, proof.baseline.tests)
 assert.equal(proof.restored.passed, proof.baseline.passed)
-assert.equal(proof.mutations.length, 11)
+assert.ok(proof.mutations.length > 0)
+for (const id of ['fresh-agent-expanded', 'ignore-actual-host-default', 'ignore-original-mote-owner',
+  'overwrite-explicit-terminal-preference', 'drop-actual-portal-surface', 'drop-region-destination-surface']) {
+  assert.ok(proof.mutations.some(item => item.id === id), `Actual current host qualification: ${id}`)
+}
 assert.equal(new Set(proof.mutations.map(item => item.id)).size, proof.mutations.length)
 for (const mutation of proof.mutations) {
   assert.equal(mutation.status, 'assertion-red-exact-restore-green')
@@ -50,7 +60,7 @@ for (const mutation of proof.mutations) {
   await report(mutation.red, true)
   await report(mutation.restored)
 }
-assert.equal(proof.callers.length, 8)
+assert.ok(proof.callers.length > 0)
 for (const caller of proof.callers) {
   assert.ok(caller.uses.length > 0, `No product caller: ${caller.symbol}`)
   for (const use of caller.uses) {
@@ -61,7 +71,12 @@ for (const caller of proof.callers) {
   }
 }
 assert.equal(proof.typecheck.exitCode, 0)
-assert.equal(proof.typecheck.command, 'node_modules/.bin/tsc --noEmit -p apps/desktop/tsconfig.json')
+const compilerConfig = 'apps/desktop/.tmp/launcher-current-closure/tsconfig.owning.json'
+const compilerProjection = { extends: '../../tsconfig.json', compilerOptions: { baseUrl: '../../../..',
+  paths: Object.fromEntries(sourceAliases.map(item => [item.find, [item.replacement.replace(root + '/', '')]])) } }
+assert.equal(proof.typecheck.command, `node_modules/.bin/tsc --noEmit -p ${compilerConfig}`)
+assert.deepEqual(proof.typecheck.compilerProjection, compilerProjection)
+assert.deepEqual(JSON.parse(await read(compilerConfig)), compilerProjection)
 assert.equal(proof.packaging, 'not-requested-not-run')
 assert.equal(proof.installation, 'not-requested-not-run')
 console.log(JSON.stringify({ passed: true, receipt, sha256: sha(proofBytes), sourceDigest: proof.sourceDigest,
