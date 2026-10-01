@@ -78,6 +78,48 @@ describe('markdown file references', () => {
   })
 
   describe('link href routing', () => {
+    it.each([
+      ['images/photo%20one.png', 'images/photo one.png'],
+      ['./图片.png', '图片.png'],
+      ['./%F0%9F%96%BC%EF%B8%8F.png', '🖼️.png'],
+      ['./Research%20%26%20Notes.webloc', 'Research & Notes.webloc'],
+      ['./notes%23draft%3F%25.md', 'notes#draft?%.md'],
+      ['./literal%252F.png', 'literal%2F.png'],
+      ['./literal%252e%252e.png', 'literal%2e%2e.png'],
+      ['@asset.png', '@asset.png'],
+      ['./@asset.png', '@asset.png']
+    ])('decodes an explicit href once: %s', (href, path) => {
+      expect(classifyMarkdownLinkHref(href, ROOT)).toEqual({ index: 0, length: href.length, path })
+    })
+
+    it('normalizes decoded dot segments against the source document without escaping the workspace', () => {
+      expect(classifyMarkdownLinkHref('%2e%2e/overview.md', ROOT, '', 'docs/readme.md')).toMatchObject({ path: 'overview.md' })
+      expect(classifyMarkdownLinkHref('./images/%2e%2e/图片.png', ROOT, '', 'docs/readme.md')).toMatchObject({ path: 'docs/图片.png' })
+      expect(classifyMarkdownLinkHref('%2e%2e/escape.png', ROOT)).toBeNull()
+      expect(classifyMarkdownLinkHref('%2e%2e/%2e%2e/escape.png', ROOT, '', 'docs/readme.md')).toBeNull()
+      expect(classifyMarkdownLinkHref(_hygiene_fixturePath("work/repo/../outside.png"), ROOT)).toBeNull()
+    })
+
+    it('keeps absolute and known-home paths inside the original workspace and carries line locations', () => {
+      expect(classifyMarkdownLinkHref(_hygiene_fixturePath("work/repo/图片%20one.png"), ROOT, '', 'docs/readme.md')).toMatchObject({ path: '图片 one.png' })
+      expect(classifyMarkdownLinkHref('~/repo/docs/%E5%9B%BE%E7%89%87.png', ROOT, _hygiene_fixturePath("work"))).toMatchObject({ path: 'docs/图片.png' })
+      const href = './src/解析.ts:42:7'
+      expect(classifyMarkdownLinkHref(href, ROOT, '', 'docs/readme.md')).toEqual({ index: 0, length: href.length, path: 'docs/src/解析.ts', line: 42, column: 7 })
+      expect(classifyMarkdownLinkHref('~/repo/图片.png', ROOT)).toBeNull()
+      expect(classifyMarkdownLinkHref(_hygiene_fixturePath("outside/图片.png"), ROOT)).toBeNull()
+      expect(classifyMarkdownLinkHref('~/outside/图片.png', ROOT, _hygiene_fixturePath("work"))).toBeNull()
+    })
+
+    it.each([
+      './bad%.png', './bad%GG.png', './bad%C0%AF.png', './bad%ED%A0%80.png',
+      './images%2Fphoto.png', './images%5cphoto.png', './images\\photo.png',
+      './photo%00.png', './photo%0a.png', './photo%7f.png', './photo%85.png',
+      './photo.png?download=1', './photo.png#section', './photo one.png',
+      'see src/photo.png', 'file%3A12', 'fi%6ce%3A12', '%68ttps%3A//example.test/a.png'
+    ])('refuses an ambiguous, malformed or non-file explicit target: %s', href => {
+      expect(classifyMarkdownLinkHref(href, ROOT)).toBeNull()
+    })
+
     it('recognizes an explicit bare image filename without promoting ordinary dotted prose', () => {
       expect(classifyMarkdownLinkHref('diagram.png', ROOT)).toMatchObject({ path: 'diagram.png' })
       expect(splitMarkdownFileReferences('diagram.png e.g. 1.2.3', ROOT)).toEqual([{ kind: 'text', text: 'diagram.png e.g. 1.2.3' }])
@@ -180,7 +222,7 @@ describe('markdown file references', () => {
       const content = 'I updated src/upload.ts.'
       const markup = renderToStaticMarkup(createElement(AgentMarkdown, { content, className: 'body' }))
 
-      expect(markup).toBe(`<p class="body">${content}</p>`)
+      expect(markup).toBe(`<p class="body md-paragraph">${content}</p>`)
     })
 
     it('escapes a hostile path rather than emitting markup for it', () => {

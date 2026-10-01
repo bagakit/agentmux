@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { PastedImage } from '../../../shared/contracts'
 import { resolveOverlayContainer } from './WindowOverlayHost'
@@ -14,6 +14,8 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
  * `splitPastedImageReferences`, before this is ever called.
  */
 export type ReadPastedImage = (path: string) => Promise<PastedImage | null>
+
+type LoadedImage = { path: string; reader: ReadPastedImage; image: PastedImage }
 
 /**
  * A pasted image (`<home>/.agentmux/pasted/…`) shown as a clickable thumbnail that enlarges in a
@@ -41,37 +43,44 @@ export function ConversationImage({
   path: string
   readPastedImage: ReadPastedImage
 }) {
-  const [image, setImage] = useState<PastedImage | null>(null)
-  const [failed, setFailed] = useState(false)
-  const [open, setOpen] = useState(false)
+  const [loaded, setLoaded] = useState<LoadedImage | null>(null)
+  const [failed, setFailed] = useState<LoadedImage | null>(null)
+  const [open, setOpen] = useState<LoadedImage | null>(null)
+  const currentImage = useRef<LoadedImage | null>(null)
 
   useEffect(() => {
     let alive = true
-    setImage(null)
-    setFailed(false)
+    setLoaded(null)
+    setFailed(null)
+    setOpen(null)
     readPastedImage(path)
       .then((result) => {
         if (!alive) return
-        if (result) setImage(result)
-        else setFailed(true)
+        if (result) setLoaded({ path, reader: readPastedImage, image: result })
       })
       .catch(() => {
-        if (alive) setFailed(true)
+        if (alive) setLoaded(null)
       })
     return () => {
       alive = false
     }
   }, [path, readPastedImage])
 
-  // Loading or unreadable → the verbatim token as plain text. This is the required fallback: the path
-  // representation stays visible and the Agent's reference is never lost behind a broken image frame.
-  if (failed || !image) return <>{text}</>
+  // Bind both the bytes and decode/open state to this exact read. A changed source cannot render
+  // the previous image during the commit before effect cleanup, or inherit a late decode error.
+  const image = loaded?.path === path && loaded.reader === readPastedImage && failed !== loaded
+    ? loaded.image : null
+  currentImage.current = image ? loaded : null
+  if (!image) return <>{text}</>
+  const decodeFailed = () => { if (currentImage.current === loaded) setFailed(loaded) }
 
   return (
-    <Dialog.Root open={open} onOpenChange={setOpen}>
+    <Dialog.Root open={open === loaded} onOpenChange={next => {
+      if (currentImage.current === loaded) setOpen(next ? loaded : null)
+    }}>
       <Dialog.Trigger asChild>
         <button type="button" className="md-conversation-image" title={path}>
-          <img className="md-conversation-image__thumb" src={image.dataUrl} alt={path} />
+          <img className="md-conversation-image__thumb" src={image.dataUrl} alt={path} onError={decodeFailed} />
         </button>
       </Dialog.Trigger>
       <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
@@ -81,7 +90,7 @@ export function ConversationImage({
               There is no description — the enlarged image is the whole content — so describedby is
               explicitly cleared rather than left to warn about a missing Description. */}
           <Dialog.Title className="md-conversation-image__a11y">{path}</Dialog.Title>
-          <img className="md-conversation-image__full" src={image.dataUrl} alt={path} />
+          <img className="md-conversation-image__full" src={image.dataUrl} alt={path} onError={decodeFailed} />
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
