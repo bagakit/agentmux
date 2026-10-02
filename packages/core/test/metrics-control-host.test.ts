@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, parseAgentMuxControlRequest } from '../src/control-host.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxControlTimeoutMs } from '../src/control.js'
 import { parseMetricsObservation, type AgentMuxMetricsPort, type MetricsObservation } from '../src/metrics.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from '../src/public-rpc-frame.js'
 
 const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'metrics-proof' } as const
 const pending = { state: 'pending', data: null, observedAt: null, lastSuccessAt: null, reason: null } as const
@@ -204,7 +205,10 @@ describe('public metrics Control owner', () => {
   })
   it('bounds a complete oversized source without truncating into success', async () => {
     const tooLarge = observation()
-    tooLarge.process.data = Array.from({ length: 4096 }, (_, i) => ({ ...observation().process.data![0]!, runId: `run-${i}-${'x'.repeat(3000)}` }))
+    tooLarge.process.data = Array.from({ length: 4096 }, (_, i) => ({ ...observation().process.data![0]!,
+      runId: `run-${i}-${'界'.repeat(4000)}`, hostId: `host-${'界'.repeat(2000)}` }))
+    expect(parseMetricsObservation(tooLarge)).toBe(tooLarge)
+    expect(Buffer.byteLength(JSON.stringify(tooLarge))).toBeGreaterThan(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
     const dispose = vi.fn()
     const { path } = await server({ async subscribe(push) { push(tooLarge); return { dispose } } })
     await expect(metricsGet(path)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })

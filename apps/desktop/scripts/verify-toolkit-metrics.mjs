@@ -17,7 +17,9 @@ const mode = process.argv[2]
 assert.ok(['--unit','--cli','--lifecycle','--mutations','--callers'].includes(mode), 'Choose one owning verification mode')
 const config = 'apps/desktop/scripts/fixtures/toolkit-metrics/vitest.config.mts'
 const ownSources = ['packages/core/src/metrics.ts','packages/core/src/control.ts','packages/core/src/control-host.ts',
-  'packages/core/src/agentmux.ts','packages/core/src/agentmux-cli-help.ts','apps/desktop/src/main/resource-usage-control.ts',
+  'packages/core/src/agentmux.ts','packages/core/src/agentmux-cli-commands.ts','packages/core/src/agentmux-cli-help.ts',
+  'packages/core/src/public-rpc-client.ts','packages/core/src/public-rpc-service.ts','packages/core/src/public-rpc-wire.ts',
+  'packages/core/src/public-rpc-server.ts','apps/desktop/src/main/resource-usage-control.ts',
   'apps/desktop/src/main/process-resource-sampler.ts','apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/ipc.ts',
   'apps/desktop/src/main/control-ipc-bridge.ts','apps/desktop/src/shared/process-usage.ts','apps/desktop/src/shared/contracts.ts',
   'apps/desktop/src/renderer/src/lib/control-api.ts','apps/desktop/src/renderer/src/lib/resource-owner-counts.ts',
@@ -35,27 +37,34 @@ const identity = sha(JSON.stringify(Object.fromEntries(ownSources.map(path => [p
 const results = []
 if (mode === '--callers') {
   const read = async path => { const text = await readFile(resolve(root,path),'utf8'); assert.ok(text.length > 0); return text }
-  const cli = await read('packages/core/src/agentmux.ts')
-  const start = cli.indexOf('async function metricsCommand('), end = cli.indexOf('async function main()',start)
-  assert.ok(start >= 0 && end > start, 'Metrics CLI slice must be the real nonempty function')
-  const body = cli.slice(start,end); assert.ok(body.length > 0 && body.includes("'metrics.get'") && body.includes("'metrics.watch'"))
-  const exports = (await read('packages/core/src/control-host.ts')).matchAll(/export (?:async )?function (\w+)\(/gu)
-  const used = [...exports].map(match => match[1]).filter(name => new RegExp(`\\b${name}\\(`,'u').test(body))
-  assert.equal(used.length,2,'Both actual exported Core request/stream capabilities must have external CLI callers')
-  const core = await read('packages/core/src/control-host.ts'), main = await read('apps/desktop/src/main/ipc.ts')
-  const helper = await read('apps/desktop/src/main/resource-usage-control.ts'), store = await read('apps/desktop/src/renderer/src/store.ts')
-  const edges = [{ edge:'CLI→Core', caller:'packages/core/src/agentmux.ts', definition:'packages/core/src/control-host.ts', matches:used },
-    { edge:'Core port→registered Main', caller:'apps/desktop/src/main/ipc.ts', definition:'packages/core/src/control.ts',
-      matches:main.match(/new AgentMuxControlServer\(\{\s*execute: executeControl,\s*metrics,/gu) ?? [] },
-    { edge:'Main owner→same sampler', caller:'apps/desktop/src/main/resource-usage-control.ts', definition:'apps/desktop/src/main/process-resource-sampler.ts',
-      matches:helper.match(/args\.sampler\.subscribe\(/gu) ?? [] },
-    { edge:'Main→Renderer bridge', caller:'apps/desktop/src/main/ipc.ts', definition:'apps/desktop/src/main/resource-usage-control.ts',
-      matches:main.match(/observeRendererResources\(controlBridge, currentMetricsWindow, signal\)/gu) ?? [] },
-    { edge:'Renderer request→shared reader', caller:'apps/desktop/src/renderer/src/store.ts', definition:'apps/desktop/src/renderer/src/lib/resource-owner-counts.ts',
-      matches:store.match(/request\.operation === 'metrics\.renderer'[\s\S]{0,220}counts: readRendererResourceOwnerCounts\(\)/gu) ?? [] }]
-  assert.ok(core.includes('this.control.metrics.subscribe('))
+  const cli = await read('packages/core/src/agentmux.ts'), registry = await read('packages/core/src/agentmux-cli-commands.ts')
+  const client = await read('packages/core/src/public-rpc-client.ts'), service = await read('packages/core/src/public-rpc-service.ts')
+  const wire = await read('packages/core/src/public-rpc-wire.ts'), server = await read('packages/core/src/public-rpc-server.ts')
+  const main = await read('apps/desktop/src/main/ipc.ts'), helper = await read('apps/desktop/src/main/resource-usage-control.ts')
+  const store = await read('apps/desktop/src/renderer/src/store.ts')
+  const methods = [...registry.matchAll(/empty\('(system\.metrics\.(?:get|watch))'/gu)].map(match => match[1])
+  assert.deepEqual(methods,['system.metrics.get','system.metrics.watch'],'Both metrics commands must belong to the actual CLI registry')
+  assert.equal(registry.match(/\{ \.\.\.empty\('system\.metrics\.watch'[^\n]+stream: true \}/gu)?.length,1,'The actual metrics watch entry must declare its reader behavior')
+  const edge = (name, caller, definition, text, pattern) => ({ edge:name, caller, definition, matches:[...text.matchAll(pattern)].map(match=>match[0]) })
+  const edges = [
+    edge('CLI registry→executable CLI','packages/core/src/agentmux.ts','packages/core/src/agentmux-cli-commands.ts',cli,/parseAgentMuxCliInvocation\(process\.argv\.slice\(2\)\)/gu),
+    edge('CLI→public client','packages/core/src/agentmux.ts','packages/core/src/public-rpc-client.ts',cli,/connectAgentMuxRpc\(\{|client\.call\(method,|client\.subscribe\(method,/gu),
+    edge('Public server→sole dispatcher','packages/core/src/public-rpc-server.ts','packages/core/src/public-rpc-wire.ts',server,/new AgentMuxRpcDispatcher\(this\.service\)/gu),
+    edge('Dispatcher→sole service','packages/core/src/public-rpc-wire.ts','packages/core/src/public-rpc-service.ts',wire,/this\.service\.(?:call|subscribe)\(method,/gu),
+    edge('Service→registered Metrics port','packages/core/src/public-rpc-service.ts','packages/core/src/metrics.ts',service,/this\.ports\.metrics\.subscribe\(/gu),
+    edge('Main→same sampler port','apps/desktop/src/main/ipc.ts','apps/desktop/src/main/resource-usage-control.ts',main,/createResourceMetricsPort\(\{ sampler: args\.runtime\.resourceSampler, currentWindow: currentMetricsWindow \}\)/gu),
+    edge('Main port→same sampler','apps/desktop/src/main/resource-usage-control.ts','apps/desktop/src/main/process-resource-sampler.ts',helper,/args\.sampler\.subscribe\(/gu),
+    edge('Main→Renderer bridge','apps/desktop/src/main/ipc.ts','apps/desktop/src/main/resource-usage-control.ts',main,/observeRendererResources\(controlBridge, currentMetricsWindow, signal\)/gu),
+    edge('Renderer request→shared reader','apps/desktop/src/renderer/src/store.ts','apps/desktop/src/renderer/src/lib/resource-owner-counts.ts',store,/request\.operation === 'metrics\.renderer'[\s\S]{0,220}counts: readRendererResourceOwnerCounts\(\)/gu)
+  ]
+  assert.equal(edges[1].matches.length,3,'Actual executable CLI must connect, call and subscribe through the public client')
+  assert.equal(edges[3].matches.length,2,'Both public request and reader paths must consume the sole service')
+  assert.equal(edges[4].matches.length,2,'Metrics get and watch must consume the registered original owner')
+  assert.ok(client.includes('export async function connectAgentMuxRpc('))
+  assert.ok(server.includes('new AgentMuxRpcService({ ...options'))
+  assert.equal(main.match(/\n    metrics,/gu)?.length,1,'Main must register its one original Metrics port')
   assert.ok(edges.length > 0)
-  for (const edge of edges) { assert.notEqual(edge.caller,edge.definition); assert.ok(!/test|fixture/u.test(edge.caller)); assert.ok(edge.matches.length > 0,`Nonempty external product edge: ${edge.edge}`) }
+  for (const entry of edges) { assert.notEqual(entry.caller,entry.definition); assert.ok(!/test|fixture/u.test(entry.caller)); assert.ok(entry.matches.length > 0,`Nonempty external product edge: ${entry.edge}`) }
   await writeFile(resolve(evidence,'callers.json'),JSON.stringify(edges,null,2)+'\n')
   results.push({ mode, edges })
 } else {
@@ -85,9 +94,9 @@ if (mode === '--callers') {
         compiledInputs[path] = sha(bytes)
         let contents = bytes.toString()
         if (mutant === 'help' && path === 'packages/core/src/agentmux-cli-help.ts') {
-          const anchor = "  ['metrics.get', METRICS_HELP],\n  ['metrics.watch', METRICS_HELP],\n"
-          assert.equal(contents.split(anchor).length-1,1,'Actual built CLI help mutant requires one nonempty Source anchor')
-          contents = contents.replace(anchor,'')
+          const anchor = '  const selected = entries(path)\n'
+          assert.equal(contents.split(anchor).length-1,1,'Actual built CLI help entries must have one nonempty Source anchor')
+          contents = contents.replace(anchor, "  const selected = entries(path).filter(entry => !['system.metrics.get','system.metrics.watch'].includes(entry.method))\n")
         }
         loaded.push({path,originalSHA256:sha(bytes),consumedSHA256:sha(contents),mutant,bytes:Buffer.byteLength(contents)})
         return {contents,loader:args.path.endsWith('.json') ? 'json' : 'ts'}
@@ -109,7 +118,7 @@ if (mode === '--callers') {
       : mode === '--lifecycle' ? ['packages/core/test/metrics-control-host.test.ts','apps/desktop/test/metrics-main-control.test.ts'] : allFiles
     let exitCode=0,stdout='',stderr=''
     try { const value=await exec('pnpm',['exec','vitest','run','--config',config,...files,'--reporter=json','--outputFile',resolve(output,'vitest.json')],
-      {cwd:root,env:{...process.env,pnpm_config_verify_deps_before_run:'false',AGENTMUX_METRICS_CLI:built.cli,
+      {cwd:root,env:{...process.env,pnpm_config_verify_deps_before_run:'false',AGENTMUX_METRICS_CLI:built.cli,AGENTMUX_TEST_OBJECT_CLI:built.cli,
         AGENTMUX_METRICS_EVIDENCE:output,AGENTMUX_METRICS_MUTANT:mutant},timeout:180_000,maxBuffer:20*1024*1024}); stdout=value.stdout;stderr=value.stderr }
     catch(error) { exitCode=typeof error.code==='number'?error.code:-1;stdout=error.stdout??'';stderr=error.stderr??'' }
     await writeFile(resolve(output,'run.log'),stdout+stderr)
@@ -145,12 +154,12 @@ if (mode === '--callers') {
     await run('shared','shared',/shares one nonempty sampler/u)
     await run('get-finally','get-finally',/get finally releases/u)
     await run('establish','establish',/disposes delayed establishment/u)
-    await run('identity','identity',/opening whose request identity/u)
+    await run('identity','identity',/opening whose response identity/u)
     await run('callback-cancel','callback-cancel',/ended consumer receives no same-chunk snapshots/u)
     await run('age','age',/retains real success ages/u)
     await run('nullable','nullable',/missing Monaco getters unknown/u)
     await run('panel','panel',/unknown Monaco as neutral marks/u)
-    await run('help','help',/supports actual metrics .* subcommand help/u)
+    await run('help','help',/supports actual system metrics (?:get|watch) help/u)
     await run('restored')
   }
   results.push({cliSHA256:sha(await readFile(candidate.cli)),cliSourceInputs:candidate.compiledInputs})
