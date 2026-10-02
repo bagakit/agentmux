@@ -228,12 +228,23 @@ export function Ruler({
    * 递出去，调用方把身份补上——两边各给自己知道的那一半，谁都不必知道对方的。
    */
   axes?: (peek: {
+    width: number
     onPeek: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
     onPeekEnd: () => boolean
   }) => JSX.Element | null
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const [readout, setReadout] = useState<Readout | null>(null)
+  const [trackWidth, setTrackWidth] = useState(0)
+  useLayoutEffect(() => {
+    const track = trackRef.current
+    if (!track) return
+    const measure = (): void => setTrackWidth(track.getBoundingClientRect().width)
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(track)
+    return () => observer.disconnect()
+  }, [])
   const axisLabel = describeRulerAxis(scale)
   const span = describeSpan(scale)
 
@@ -348,13 +359,9 @@ export function Ruler({
 
   return (
     <div className="activity-ruler">
-      {/* 轴与 track 必须在**同一个盒**里，否则两处的 `left: N%` 参照不同的宽度。这一行的其余两件
-          （span 读数、info note）与 track 同排且占掉右侧近百像素，所以 track 自己不能当那个共享盒
-          ——`__stack` 才是：它是这一行的 flex 子项，内部纵向摆「说话人轴 / 自我 Agent 轴 / track」。
-          `axes` 由调用方传入而不是在这里组装，是因为轴需要身份解析（`describeSpeaker`），而 Ruler
-          对身份一无所知；它只提供那个共享坐标盒。 */}
+      {/* Summary sits above one full-width coordinate box shared by axes and ticks. */}
       <div className="activity-ruler__stack">
-        {axes?.({ onPeek: showQuote, onPeekEnd: closeReadout })}
+        {axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })}
         <div
           ref={trackRef}
           className="activity-ruler__track"
@@ -397,15 +404,13 @@ export function Ruler({
         })}
         </div>
       </div>
-      {/* 用户：「时间只显示分钟太不友好了, 应该显示从什么时间点到什么时间点, 消耗的时分秒」。
-          原先这里只有一个 `+184m03s` 式的偏移量——既没有真正的时刻，小时也被压进分钟位。现在三个
-          事实一次给全：起、止、耗时。ordinal 轴给 null（那条轴上没有流逝的时间），此时不渲染。 */}
-      {span ? (
-        <span className="activity-ruler__span" title={`${span.from} → ${span.to} · ${span.elapsed} elapsed`}>
-          <span className="activity-ruler__span-range">{span.from}<span className="activity-ruler__span-arrow" aria-hidden="true">→</span>{span.to}</span>
+      <div className="activity-ruler__summary">
+        {span ? <span className="activity-ruler__span" title={`${span.from} → ${span.to} · ${span.elapsed} elapsed`}>
+          <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true">→</span><span>{span.to}</span></span>
           <span className="activity-ruler__span-elapsed">{span.elapsed}</span>
-        </span>
-      ) : null}
+        </span> : <span className="activity-ruler__span">Record order</span>}
+        <span className="activity-ruler__count">{scale.count} records</span>
+      </div>
       <span
         className="activity-ruler__note"
         title="Structured Session activity only · never Terminal output or private chain-of-thought"
@@ -947,12 +952,13 @@ export function ActivityView({
         selectedIndex={selectedIndex}
         band={band}
         onSelect={selectEvent}
-        axes={({ onPeek, onPeekEnd }) =>
+        axes={({ width, onPeek, onPeekEnd }) =>
           describeSpeaker ? (
             <Fragment>
               <ConversationAxis
                 items={unifiedItems}
                 belongs={(speaker) => speaker.id !== sessionId || !speaksAsAgent(speaker)}
+                width={width}
                 label="Speakers"
                 size={16}
                 describe={describeSpeaker}
@@ -964,6 +970,7 @@ export function ActivityView({
               <ConversationAxis
                 items={unifiedItems}
                 belongs={(speaker) => speaksAsAgent(speaker) && speaker.id === sessionId}
+                width={width}
                 label="This agent"
                 size={16}
                 describe={describeSpeaker}
