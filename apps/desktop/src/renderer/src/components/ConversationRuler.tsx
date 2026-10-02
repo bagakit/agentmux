@@ -242,14 +242,6 @@ export function Ruler({
         onBlur={closeReadout}
       >
         <span className="activity-ruler__rail" />
-        {band ? (
-          <span
-            className="activity-ruler__band"
-            data-axis={scale.axis}
-            style={{ left: `${band.startFraction * 100}%`, right: `${(1 - band.endFraction) * 100}%` }}
-            aria-hidden="true"
-          />
-        ) : null}
         {scale.axis === 'temporal' ? <>
           {recentFraction > 0 ? <span className="conversation-ruler__cutoff" style={{ left: `${recentFraction * 100}%` }} title="Latest recorded hour starts here" /> : null}
           <span className="conversation-ruler__recent" style={{ left: `${recentFraction * 100}%` }} aria-hidden="true" />
@@ -266,6 +258,14 @@ export function Ruler({
               title={`Recorded ${segment.state}${segment.detail ? ` · ${segment.detail}` : ''}${segment.startKnown ? '' : ' · Start not recorded'}`} />
           })}
         </> : null}
+        {band ? (
+          <span
+            className="activity-ruler__band"
+            data-axis={scale.axis}
+            style={{ left: `${band.startFraction * 100}%`, right: `${(1 - band.endFraction) * 100}%` }}
+            aria-hidden="true"
+          />
+        ) : null}
         {items.map((item, index) => {
           const raw = 'kind' in item && item.kind === 'ruler-record' ? item.record : item
           const status = 'status' in raw ? raw.status : 'deliveryStatus' in raw ? raw.deliveryStatus : undefined

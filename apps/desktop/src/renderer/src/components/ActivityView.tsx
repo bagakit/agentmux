@@ -562,35 +562,63 @@ export function ActivityView({
     const mapping = new Map<Element, readonly string[]>()
     const onscreen = new Set<Element>()
     const recompute = (): void => setVisible(new Set([...onscreen].flatMap(el => mapping.get(el) ?? [])))
-    const observer = new IntersectionObserver(entries => {
-      for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
+    const ruler = feedEl.querySelector<HTMLElement>('.activity-ruler')
+    let headerHeight = -1
+    let observer: IntersectionObserver
+    function observeViewport(): void {
+      const height = Math.ceil(ruler?.getBoundingClientRect().height ?? 0)
+      if (height === headerHeight) return
+      headerHeight = height
+      observer?.disconnect()
+      onscreen.clear()
+      const current = new IntersectionObserver(entries => {
+        if (observer !== current) return
+        for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
+        recompute()
+      }, { root: feedEl, rootMargin: `-${height}px 0px 0px 0px`, threshold: 0 })
+      observer = current
+      for (const node of mapping.keys()) observer.observe(node)
       recompute()
-    }, { root: feedEl, rootMargin: '-64px 0px 0px 0px', threshold: 0 })
+    }
+    observeViewport()
+    const resize = new ResizeObserver(observeViewport)
+    if (ruler) resize.observe(ruler)
+    function unregister(node: Element): void {
+      observer.unobserve(node)
+      mapping.delete(node)
+      onscreen.delete(node)
+    }
     function register(node: HTMLElement): void {
       const id = node.dataset.nativeRecordId ?? node.dataset.nativeStepId
       const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource
       const key = id && source ? JSON.stringify([source, id]) : node.dataset.segmentKey
-      const records = key ? expected.get(key) : undefined
-      if (records && !mapping.has(node)) { mapping.set(node, records); observer.observe(node) }
+      // Only a folded header represents the group's records. Expanded steps keep their own visibility.
+      const group = node.matches('.wf-head[aria-expanded="false"]') ? node.closest<HTMLElement>('[data-native-record-ids]') : null
+      const records = group && source
+        ? (JSON.parse(group.dataset.nativeRecordIds ?? '[]') as string[]).flatMap(recordId => expected.get(JSON.stringify([source, recordId])) ?? [])
+        : key ? expected.get(key) : undefined
+      if (!records?.length) { unregister(node); return }
+      mapping.set(node, records)
+      observer.observe(node)
     }
-    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key]'
+    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key], [data-native-record-ids] .wf-head'
     feedEl.querySelectorAll<HTMLElement>(selector).forEach(register)
     const mutations = new MutationObserver(entries => {
       for (const entry of entries) {
+        if (entry.type === 'attributes' && entry.target instanceof HTMLElement && entry.target.matches('[data-native-record-ids] .wf-head')) register(entry.target)
         for (const added of entry.addedNodes) if (added instanceof HTMLElement) {
           if (added.matches(selector)) register(added)
           added.querySelectorAll<HTMLElement>(selector).forEach(register)
         }
         for (const removed of entry.removedNodes) if (removed instanceof HTMLElement) {
-          const unregister = (node: Element): void => { observer.unobserve(node); mapping.delete(node); onscreen.delete(node) }
           if (removed.matches(selector)) unregister(removed)
           removed.querySelectorAll(selector).forEach(unregister)
         }
       }
       recompute()
     })
-    mutations.observe(feedEl, { childList: true, subtree: true })
-    return () => { mutations.disconnect(); observer.disconnect() }
+    mutations.observe(feedEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] })
+    return () => { mutations.disconnect(); resize.disconnect(); observer.disconnect() }
   }, [rulerRecords, placed, feedEl])
 
   const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
