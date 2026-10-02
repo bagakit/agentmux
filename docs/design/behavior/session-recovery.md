@@ -273,6 +273,7 @@
 
 ## Connecting 与 Terminal 恢复页的全页状态舞台
 
+- **连接与恢复时能够认出原来的工作。** 已有 Session 的 Connect 与 Restore 面沿同一准确目标提供已知的上次活动时间、历史规模和真实 recap，并区分它们与本次初始 Prompt、当前阶段及恢复结果。活动时间对应原 Session 已有活动记录，不以本次连接、观察刷新或元数据保存时间冒充；历史规模注明实际可得的单位和覆盖范围，不把保留终端输出、原生记录大小或消息数量混说成完整会话历史。没有取得、尚未读取和读取失败分别如实表达，不猜零历史或最近活跃。上下文复用原事实 owner，不因补充信息改变 Session／Run、原工作面、草稿、权限或已有连接／恢复动作；读取失败不阻健康能力。recap 的真实来源、有界读取与恢复独立性沿[《Terminal resume 画面中的 recap》](terminal-reading.md#terminal-resume-画面中的-recap)，不增加全量 transcript 读取、无关 Session 扫描或新的恢复动作。
 - **Connecting 是当前 Region 的全页状态舞台，不是一个挤在中间的小卡片**。它占满当前 Agent/Terminal Region 的内容面，保留窗口级 Titlebar、Tab、分屏边界与可导航的工作面；不覆盖整个应用窗口，也不把用户带到脱离原 Tab 的独立欢迎页。布局、Session 身份与用户已经输入的启动意图在舞台切换期间保持不变。
 - Connecting 舞台用一个稳定的“意图锚点”承载 Executor、阶段标题和初始 Prompt；文字、Executor 图标和 Prompt 不抖动、不逐字跳动、不被动效遮挡，也不显示虚构的百分比或倒计时。当前大屏图像与动态语言只见密度 SSOT[《Terminal 信息与恢复画面的视觉品质》](../presentation/terminal-reading.md#terminal-信息与恢复画面的视觉品质)。
 - Terminal 恢复页与 Connecting 共用同一套视觉语法，但占用规则不同：**没有可显示的当前终端画面时**，恢复舞台可以占满 Region；**已有可显示画面或 Run 仍健康时**，终端画面必须先交还给用户，恢复状态降为不遮挡的边缘层或服务窗。一次没有等到的握手、尺寸确认或输出泵重建不得永久把健康终端藏在全页 loading 后面。

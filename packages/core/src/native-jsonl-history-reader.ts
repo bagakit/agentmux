@@ -106,6 +106,9 @@ export class NativeJsonlHistoryReader {
     this.tail = cursor?.tail ?? ''
   }
 
+  /** Physical byte extent of this snapshot, excluding any unfinished append encountered at EOF. */
+  get sourceSizeBytes(): number { return this.cut }
+
   static async open(
     context: AgentProviderSessionHistoryContext,
     budget?: NativeHistoryReadBudget

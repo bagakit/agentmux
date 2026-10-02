@@ -1,3 +1,4 @@
+import { fixtureIso as _hygiene_fixtureIso, fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -7,6 +8,7 @@ import { SessionRecap } from '../src/renderer/src/components/SessionRecap'
 import { api } from '../src/renderer/src/lib/api'
 import * as recapFacts from '../src/renderer/src/lib/launcher-resume'
 import { useAppStore } from '../src/renderer/src/store'
+import { composerSession } from './helpers/composer-dom-fixture'
 
 const originalState = useAppStore.getState()
 let root: Root
@@ -159,4 +161,84 @@ it('states an unconfirmed binding without guessing a Host or requesting records'
   await render({ ...identity, hostId: '' })
   expect(container.textContent).toBe('Recap source is unconfirmed.')
   expect(api.sessions.historyPage).not.toHaveBeenCalled()
+})
+
+it('shares one bounded native page for recap, snapshot size, original recorded activity and truthful coverage', async () => {
+  const timestamp = Date.parse(_hygiene_fixtureIso(23590923000, "second"))
+  vi.mocked(api.sessions.historyPage).mockResolvedValue({ ...page(), sourceSizeBytes: 2 * 1024 * 1024,
+    items: [{ ...page().items[0]!, startedAt: timestamp, completedAt: timestamp + 1000 }] })
+  await act(async () => root.render(<SessionRecap session={identity} visible context />))
+  expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(identity, { limit: 6 })
+  expect(container.textContent).toContain('Original native reply')
+  expect(container.querySelector('.session-recap__metadata')?.textContent).toContain('2 MiB · 1+ saved records')
+  expect(container.querySelector('time')?.dateTime).toBe(new Date(timestamp + 1000).toISOString())
+  expect(container.querySelector('.session-recap__details')?.textContent).toContain('earlier history remains')
+  expect(container.querySelector('.session-recap__details')?.textContent).toContain('provider metadata')
+  await act(async () => root.render(<SessionRecap session={identity} visible={false} context />))
+  expect(container.textContent).toBe('')
+  await act(async () => root.render(<SessionRecap session={identity} visible context />))
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+})
+
+it('keeps captured recap on metadata failure without misusing capture, session refresh or Run byte timestamps', async () => {
+  const live = composerSession(identity.agentSessionId)
+  live.control.hostId = identity.hostId
+  live.updatedAt = Date.now(); live.latestOutputBytes = 999999
+  useAppStore.setState({ sessions: [live], timelines: { [identity.agentSessionId]: timeline() } })
+  vi.mocked(api.sessions.historyPage).mockRejectedValue(new Error('Reader failed'))
+  await act(async () => root.render(<SessionRecap session={identity} visible context />))
+  expect(container.textContent).toContain('Original captured reply')
+  expect(container.textContent).toContain('Saved history could not be read. Captured conversation remains available.')
+  expect(container.querySelector('.session-recap__metadata')?.textContent).toBe('HistoryUnconfirmedLast recorded activityUnconfirmed')
+  expect(container.querySelector('time')).toBeNull()
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+  await act(async () => useAppStore.setState({ timelines: { [identity.agentSessionId]: timeline(identity.agentSessionId, 'Updated capture') } }))
+  expect(container.textContent).toContain('Updated capture')
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(1)
+})
+
+it('does not use an old Host capture for context and fences its late native statistics', async () => {
+  const live = composerSession(identity.agentSessionId)
+  live.control.hostId = identity.hostId
+  useAppStore.setState({ sessions: [live], timelines: { [identity.agentSessionId]: timeline() } })
+  let oldReply!: (value: AgentSessionHistoryPage) => void
+  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(done => { oldReply = done }))
+    .mockResolvedValueOnce({ ...page(identity.agentSessionId, 'NEW HOST recap'), nextCursor: null })
+  await act(async () => root.render(<SessionRecap session={identity} visible context />))
+  expect(container.textContent).toContain('Original captured reply')
+  await act(async () => root.render(<SessionRecap session={{ ...identity, hostId: 'different-host' }} visible context />))
+  expect(container.textContent).toContain('NEW HOST recap')
+  expect(container.textContent).toContain('1 saved record')
+  expect(container.textContent).not.toContain('Original captured reply')
+  await act(async () => oldReply({ ...page(identity.agentSessionId, 'OLD HOST recap'), sourceSizeBytes: 9999999 }))
+  expect(container.textContent).not.toContain('OLD HOST')
+  expect(container.textContent).not.toContain('9.5 MiB')
+  expect(container.querySelector('time')).toBeNull()
+  expect(api.sessions.historyPage).toHaveBeenCalledTimes(2)
+})
+
+it('does not invent total counts, bytes, or activity time for an empty indexed page with earlier history', async () => {
+  vi.mocked(api.sessions.historyPage).mockResolvedValue({ ...page(), items: [] })
+  await act(async () => root.render(<SessionRecap session={identity} visible context />))
+  expect(container.textContent).toContain('No saved recap available.')
+  expect(container.querySelector('.session-recap__metadata')?.textContent).toContain('Earlier records available')
+  expect(container.querySelector('.session-recap__metadata')?.textContent).not.toContain('0')
+  expect(container.textContent).not.toContain('0 B')
+  expect(container.querySelector('time')).toBeNull()
+  expect(container.querySelector('.session-recap__source summary')?.textContent).toBe('Saved history')
+  expect(container.querySelector('.session-recap__details')?.textContent).toContain('earlier history remains')
+})
+
+it('keeps history source and coverage accessible when saved activity has no recap text', async () => {
+  vi.mocked(api.sessions.historyPage).mockResolvedValue({ ...page(), sourceSizeBytes: 1024, nextCursor: null,
+    items: [{ id: 'tool', kind: 'activity', startedAt: _hygiene_fixtureTime(-67225600000), contentParts: [] }] })
+  await act(async () => root.render(<SessionRecap session={identity} visible context />))
+  expect(container.querySelector('.session-recap__excerpt')).toBeNull()
+  const source = container.querySelector<HTMLDetailsElement>('.session-recap__source')!
+  expect(source.querySelector('summary')?.getAttribute('aria-label')).toBe('Saved history source')
+  await act(async () => source.querySelector('summary')!.click())
+  expect(source.open).toBe(true)
+  expect(source.textContent).toContain('All available saved records were read.')
+  expect(source.textContent).toContain('1,024 bytes in the native transcript snapshot')
+  expect(source.textContent).toContain('Most recent dated record')
 })

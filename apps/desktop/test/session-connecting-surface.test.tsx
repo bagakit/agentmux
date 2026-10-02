@@ -1,4 +1,4 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -135,7 +135,8 @@ it('does not invent an Executor or initial prompt for legacy pending and persist
   await dom.render(pane())
   expect(dom.container.textContent).toContain('Connecting to this session')
   expect(dom.container.querySelector('.full-page-loading__detail')?.textContent).toBe('Waiting for this session to reconnect.')
-  expect(dom.container.textContent).toContain('not available while reconnecting')
+  expect(dom.container.textContent).toContain('Recap source is unconfirmed.')
+  expect(dom.container.querySelector('[aria-label="Initial prompt"]')).toBeNull()
   expect(useAppStore.getState().tabs.view).toEqual(tab)
   expect(useAppStore.getState().layouts.workspace).toEqual(createWorkspaceLayout('pane', ['view']))
 })
@@ -155,6 +156,29 @@ it('uses only the matching recovery candidate identity, never a neighbor or edit
   await dom.render(pane('other-unknown'))
   expect(dom.container.textContent).toContain('Executor not yet known')
   expect(dom.container.textContent).not.toContain('Code reviewer')
+})
+
+it('passes the actual recovery Host and SID through the production Pane into one shared context read', async () => {
+  const tab = pendingFixture('pending')
+  const saved = composerSession('pending')
+  useAppStore.setState({ pendingAgentLaunches: {}, recoveryCandidates: [{
+    agentSessionId: 'pending', executorId: 'reviewer', providerId: 'codex', hostId: 'remote-original',
+    workspacePath: _hygiene_fixturePath("original"), label: 'Saved agent', createdAt: 1, updatedAt: Date.now(),
+    capabilities: saved.capabilities, run: saved.control.run
+  }], agentComposerDrafts: { pending: 'Preserve my unsent draft' }, timelines: {} })
+  const read = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: 'pending',
+    source: { providerId: 'codex', nativeSessionId: 'original-native' }, nextCursor: null,
+    items: [{ id: 'reply', kind: 'assistant-message', startedAt: _hygiene_fixtureTime(-67225600000),
+      contentParts: [{ kind: 'text', text: 'The original work is ready to continue.' }] }] })
+  await dom.render(pane())
+  expect(read).toHaveBeenCalledExactlyOnceWith({ hostId: 'remote-original', agentSessionId: 'pending' }, { limit: 6 })
+  expect(dom.container.textContent).toContain('The original work is ready to continue.')
+  expect(dom.container.textContent).toContain('1 saved record')
+  expect(dom.container.querySelector('time')?.dateTime).toBe(_hygiene_fixtureIso(-67225600000))
+  expect(dom.container.querySelector('[aria-label="Initial prompt"]')).toBeNull()
+  expect(dom.draft('pending')).toBe('Preserve my unsent draft')
+  expect(useAppStore.getState().tabs.view).toEqual(tab)
+  expect(useAppStore.getState().layouts.workspace).toEqual(createWorkspaceLayout('pane', ['view']))
 })
 
 it('distinguishes an intentionally empty prompt and keeps terminal loading free of Agent claims', async () => {

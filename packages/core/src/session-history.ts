@@ -80,7 +80,9 @@ export function normalizeSessionHistoryPage(
   }
   if (!Array.isArray(page.items) || page.items.length > limit ||
     (page.nextCursor !== null && (typeof page.nextCursor !== 'string' || !page.nextCursor))) return invalid()
-  if (Buffer.byteLength(JSON.stringify(value)) > SESSION_HISTORY_MAX_PAGE_BYTES) {
+  // Invalid optional size metadata must not prevent an otherwise valid history page from being read.
+  const { sourceSizeBytes: _sourceSizeBytes, ...pageBody } = page
+  if (Buffer.byteLength(JSON.stringify(pageBody)) > SESSION_HISTORY_MAX_PAGE_BYTES) {
     throw new AgentMuxError('Native history page exceeds its byte budget.', 'AGENT_SESSION_HISTORY_TOO_LARGE')
   }
   const ids = new Set<string>()
@@ -133,7 +135,9 @@ export function normalizeSessionHistoryPage(
       ...(startedAt === undefined ? {} : { startedAt }),
       ...(completedAt === undefined ? {} : { completedAt }) }
   })
-  return { source: { ...source }, items, nextCursor: page.nextCursor as string | null }
+  return { source: { ...source }, items, nextCursor: page.nextCursor as string | null,
+    ...(Number.isSafeInteger(page.sourceSizeBytes) && (page.sourceSizeBytes as number) >= 0
+      ? { sourceSizeBytes: page.sourceSizeBytes as number } : {}) }
 }
 
 export * from './session-user-messages.js'
