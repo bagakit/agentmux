@@ -335,6 +335,14 @@ function normalizeMockBrowserUrl(value: string): string {
 let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState|null=null
 const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
 const mockApi: AgentMuxDesktopApi = {
+  git: {
+    projectIdentity: async (workspaceId) => {
+      const workspace = mockConfig.workspaces.find(item => item.id === workspaceId)
+      if (!workspace) throw new Error(`Unknown workspace: ${workspaceId}`)
+      return { kind: 'unavailable', hostId: workspace.hostId, workspacePath: workspace.path,
+        reason: 'Git repository sources cannot be observed in the web preview.' }
+    }
+  },
   spatial:{read:async()=>structuredClone(mockSpatialState),commit:async input=>{
     if((mockSpatialState?.revision??0)!==input.expectedRevision) throw new Error('Spatial state changed.')
     mockSpatialState={schemaVersion:1,revision:input.expectedRevision+1,graph:structuredClone(input.graph)}

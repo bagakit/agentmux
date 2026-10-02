@@ -17,11 +17,13 @@ import type {
   GitFileDiff,
   GitPullStrategy,
   GitPushOptions,
+  GitProjectIdentityResult,
   GitRemoteOptions,
   GitRemoteResult,
   GitStatusResult
 } from '../shared/git-contracts.js'
 import type { GitHistoryCommit, GitHistoryInput, GitHistoryRef, GitHistoryResult, GitHistorySnapshot } from '../shared/git-contracts.js'
+import { normalizeGitProjectRemote } from '../shared/git-project-identity.js'
 
 /**
  * The one place git's own error text is trusted enough to show a person. Git can echo a remote URL
@@ -617,6 +619,38 @@ export class GitService {
     private readonly hostFor: (id: string) => ExecutionHost,
     private readonly readWorktreeFile: WorktreeReader = defaultWorktreeReader
   ) {}
+
+  async projectIdentity(workspaceId: string, config: AppConfig): Promise<GitProjectIdentityResult> {
+    const workspace = this.workspace(config, workspaceId)
+    const unavailable = (reason: string): GitProjectIdentityResult => ({ kind: 'unavailable',
+      hostId: workspace.hostId, workspacePath: workspace.path, reason })
+    try {
+      const host = this.hostFor(workspace.hostId)
+      const repoPath = await this.resolveRepoPath(host, workspace.path)
+      if (repoPath === null) return { kind: 'not-a-git-repository', hostId: workspace.hostId, workspacePath: workspace.path }
+      const remotes = await host.run('git', ['-C', repoPath, 'remote'], GIT_RUN_OPTIONS)
+      this.assertGit(remotes, 'Could not read repository sources')
+      const names = remotes.stdout.trim() ? remotes.stdout.trim().split('\n') : []
+      if (names.length === 0) return { kind: 'no-remote', hostId: workspace.hostId, repoPath }
+      const source = names.includes('origin') ? 'origin' : names.length === 1 ? names[0]! : null
+      if (source === null) return unavailable('Repository source is ambiguous; choose projects manually.')
+      // get-url reads configuration and expands insteadOf without contacting the
+      // remote. Push URLs and a fork's unrelated upstream do not establish identity.
+      const urls = await host.run('git', ['-C', repoPath, 'remote', 'get-url', '--all', '--', source], GIT_RUN_OPTIONS)
+      this.assertGit(urls, 'Could not read the configured repository source')
+      const values = urls.stdout.replace(/\n$/u, '').split('\n')
+      const normalized: string[] = []
+      for (const value of values) {
+        const identity = normalizeGitProjectRemote(value)
+        if (identity === null) return unavailable('Repository source is not a supported network repository address; choose projects manually.')
+        normalized.push(identity)
+      }
+      const identities = [...new Set(normalized)].sort()
+      return { kind: 'known', hostId: workspace.hostId, repoPath, identities }
+    } catch (error) {
+      return unavailable(scrubGitCredentials(error instanceof Error ? error.message : 'Repository source observation failed.'))
+    }
+  }
 
   async history(workspaceId: string, input: GitHistoryInput = {}, config: AppConfig): Promise<GitHistoryResult> {
     const limit = input.limit ?? 50

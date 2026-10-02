@@ -1,5 +1,5 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, ExternalLink, GitBranch, PanelLeftClose, Shapes, SquareTerminal } from 'lucide-react'
+import { Copy, ExternalLink, GitBranch, Link2, PanelLeftClose, Shapes, SquareTerminal } from 'lucide-react'
 import type { ReactNode } from 'react'
 import { api } from '../lib/api'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
@@ -116,7 +116,8 @@ export function WorkspaceRowContextMenu({
   isLocal,
   workspaceId,
   onRemove,
-  onChangeIcon
+  onChangeIcon,
+  onGroupProjects
 }: {
   children: ReactNode
   path: string
@@ -126,6 +127,7 @@ export function WorkspaceRowContextMenu({
   /** 缺省表示这一行不可移除（Scratch）。 */
   onRemove?: () => void
   onChangeIcon?: () => void
+  onGroupProjects?: () => void
 }) {
   const menu = useSpaceObjectMenu()
   const reportError = useAppStore((state) => state.reportError)
@@ -171,6 +173,9 @@ export function WorkspaceRowContextMenu({
         >
           {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(onChangeIcon)}>
             <Shapes size={14} /><span>Change icon…</span>
+          </ContextMenu.Item> : null}
+          {onGroupProjects ? <ContextMenu.Item className="tab-context-menu__item" onSelect={onGroupProjects}>
+            <Link2 size={14} /><span>Group across devices...</span>
           </ContextMenu.Item> : null}
           {model.entries.map((entry, index) => {
             if (entry.kind === 'separator') {

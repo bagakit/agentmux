@@ -119,11 +119,22 @@ export class AgentMuxSpatialStateStore {
   async commit(input: AgentMuxSpatialCommit): Promise<AgentMuxSpatialState> {
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)
       invalid('An exact nonnegative expected revision is required.');
+    if (input.removedProjectGroupIds !== undefined && (!Array.isArray(input.removedProjectGroupIds) ||
+      input.removedProjectGroupIds.some(id => typeof id !== 'string' || !id || id.includes('\0')) ||
+      new Set(input.removedProjectGroupIds).size !== input.removedProjectGroupIds.length))
+      // Malformed deletion intent rejects this request, preserving original groups and Runs.
+      invalid('Exact project group removal IDs must be a unique array of stable IDs.');
     const graph = parseAgentMuxSpatialGraph(input.graph);
     return this.locked(async () => {
       const current = await this.read();
       if ((current?.revision ?? 0) !== input.expectedRevision)
         throw new AgentMuxError('Spatial state changed. Read the current revision and preserve both edits before retrying.', 'SPATIAL_STATE_CONFLICT');
+      const groupIds = new Set(graph.projectGroups?.map(group => group.groupId));
+      const removedGroupIds = new Set(input.removedProjectGroupIds ?? []);
+      if (current?.graph.projectGroups?.some(group => !groupIds.has(group.groupId) && !removedGroupIds.has(group.groupId))) {
+          // Reject only this write; an omitted group is not an explicit user dissolution.
+          throw new AgentMuxError('An original project group is missing. Explicit dissolution is required; all original work is retained.', 'SPATIAL_ENTITY_REMOVAL_UNCONFIRMED');
+      }
       if (input.allowEntityRemoval !== true && current) {
         for (const [kind, key] of [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId']] as const) {
           const nextIds = new Set(graph[kind].map(entry => (entry as unknown as Record<string, string>)[key]));

@@ -1,3 +1,5 @@
+import { validateProjectGroup, projectGroupFor } from './lib/cross-device-project-groups'
+import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
@@ -414,6 +416,9 @@ type AppState = {
    */
   displacedAgentSessionIds: string[]
   restoredWorkbench: PersistedWorkbench | null
+  projectGroups: AgentMuxProjectGroupFact[]
+  saveProjectGroup(group: AgentMuxProjectGroupFact): Promise<AgentMuxSpatialSave>
+  dissolveProjectGroup(groupId: string): Promise<AgentMuxSpatialSave>
   spaceZoneBindings: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   /** Exact logical focus retained when a background move removes the active leaf. */
@@ -1984,6 +1989,7 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
 
 type PersistedAppState = {
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
+  projectGroups?: AgentMuxProjectGroupFact[]
   spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   /** Exact logical focus retained when a background move removes the active leaf. */
@@ -2172,6 +2178,7 @@ export function restorePersistedUiState(
 function selectPersistedInputs(state: AppState) {
   return {
     workbenchSpaceSelection: state.workbenchSpaceSelection,
+    projectGroups: state.projectGroups,
     spaceZoneBindings: state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
     retainedSpatialFocus: state.retainedSpatialFocus,
@@ -2251,7 +2258,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
   }
-  if(coreSpatialPersistence?.ready) { delete projection.restoredWorkbench;delete projection.spaceZoneBindings }
+  if(coreSpatialPersistence?.ready) { delete projection.restoredWorkbench;delete projection.spaceZoneBindings;delete projection.projectGroups }
   previousCoreSpatialReady=Boolean(coreSpatialPersistence?.ready)
   previousPersistedInputs = inputs
   previousPersistedProjection = projection
@@ -2582,6 +2589,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   workbenchSpaceSelection: null,
   workbenchNavigationInputPolicy: null,
   desktopNavigationNotice: null,
+  projectGroups: [],
   spaceZoneBindings: {},
   spatialRequests: {},
   retainedSpatialFocus: null,
@@ -2810,7 +2818,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         coreSpatialPersistence=new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
         try {
           const spatial=await coreSpatialPersistence.read()
-          if(spatial) set({restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph)})
+          if(spatial) set({projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph)})
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
       // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
@@ -3089,9 +3097,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // itself cannot serialize the empty fallback over the user's last good record.
       if(coreSpatialPersistence) {
         const spatial=coreSpatialPersistence
-        const capture=()=>desktopSpatialGraph(get(),Object.values(get().scratchTopicSnapshots).flatMap(snapshot=>snapshot.topics??[]),spatial.current?.graph??null,spatial.removedEntities)
+        const capture=()=> !get().config && spatial.current
+          ? {...spatial.current.graph,projectGroups:get().projectGroups}
+          : desktopSpatialGraph(get(),Object.values(get().scratchTopicSnapshots).flatMap(snapshot=>snapshot.topics??[]),spatial.current?.graph??null,spatial.removedEntities)
         const apply=(saved:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>{
-          const current=get();if(!current.config) return
+          const current=get()
+          // Organization facts do not require available Host resource configuration.
+          if(!current.config) { set({projectGroups:saved.graph.projectGroups ?? []}); return }
           const unavailable=new Set<string>()
           const persisted=desktopWorkbenchFromSpatial(saved.graph,id=>unavailable.add(id))
           if(unavailable.size) current.reportWorkbenchSaveFailure(new Error('Host resources are unavailable for '+unavailable.size+' saved tab(s). Original identities and current content are retained. Restore their Host connection.'))
@@ -3105,13 +3117,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               live.regions[regionId] && sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
             return [id,{...tab,regions}]
           }))}
-          set({tabs,layouts:saved.graph.layouts,spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
+          set({tabs,layouts:saved.graph.layouts,projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
         }
         // Keep observation and local edit capture available even when the first storage read
         // or bootstrap fails. The existing save Retry re-reads Core before admitting a write.
         const offRemote=spatial.connect(apply)
         const offLocal=useAppStore.subscribe((state,previous)=>{
-          if(state.loading || (state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
+          if(state.loading || (state.projectGroups===previous.projectGroups && state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
           spatial.stage(capture())
         })
         disposeCoreSpatial=()=>{offLocal();offRemote()}
@@ -3229,7 +3241,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return () => {}
     }
   },
+  async saveProjectGroup(input) {
+    const group = validateProjectGroup(input, get().projectGroups, get().config?.workspaces ?? [])
+    set(state => ({ projectGroups: [...state.projectGroups.filter(value => value.groupId !== group.groupId), group] }))
+    return saveWorkbenchSelection(true)
+  },
+  async dissolveProjectGroup(groupId) {
+    if (!get().projectGroups.some(group => group.groupId === groupId)) return saveWorkbenchSelection(false)
+    coreSpatialPersistence?.removeProjectGroup(groupId)
+    set(state => ({ projectGroups: state.projectGroups.filter(group => group.groupId !== groupId) }))
+    return saveWorkbenchSelection(true)
+  },
   async selectWorkspace(id) {
+    const workspace = get().config?.workspaces.find(workspace => workspace.id === id)
+    const group = workspace && projectGroupFor(get().projectGroups, workspaceProjectId(workspace))
+    if (group && get().collapsedProjectGroups[`project-group:${group.groupId}`]) {
+      set(state => { const collapsedProjectGroups = { ...state.collapsedProjectGroups }; delete collapsedProjectGroups[`project-group:${group.groupId}`]; return { collapsedProjectGroups } })
+    }
     set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })
