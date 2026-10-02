@@ -79,10 +79,12 @@ it('discovers the exact open main independently of Hook and uses registered Read
   const discoveredCalls = os.mock.calls.length; expect(discoveredCalls).toBeGreaterThan(0)
   const changes: unknown[] = []
   const observer = await f.client.observeSessionHistory(SID, event => changes.push(event), f.options)
+  const acquiredCalls = os.mock.calls.length
+  expect(acquiredCalls).toBeGreaterThan(discoveredCalls)
   await appendFile(f.files[0]!, JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'newly recorded' } }) + '\n')
   await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0))
   expect(changes[0]).toMatchObject({ kind: 'invalidated', source: page.source })
-  await f.read(); expect(os.mock.calls).toHaveLength(discoveredCalls); observer.dispose()
+  await f.read(); expect(os.mock.calls).toHaveLength(acquiredCalls); observer.dispose()
   const proof = process.env.AMX_NATIVE_DISCOVERY_PROOF
   if (proof) { await mkdir(proof, { recursive: true }); await writeFile(join(proof, 'public-page.json'), JSON.stringify(page, null, 2)+'\n');
     await writeFile(join(proof, 'producer-input.json'), JSON.stringify(f.nativeInput, null, 2)+'\n'); await writeFile(join(proof, 'events.json'), JSON.stringify(f.events, null, 2)+'\n') }

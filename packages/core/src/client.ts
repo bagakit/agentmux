@@ -161,6 +161,21 @@ import { normalizeSessionHistoryPage, SESSION_HISTORY_TIMEOUT_MS } from './sessi
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/
 const TERMINAL_HANDSHAKE_TIMEOUT_MS = 10_000
+function sameNativeHandle(a: AgentNativeSessionHandle | undefined, b: AgentNativeSessionHandle | undefined): boolean {
+  return a === b || a?.kind === 'provider' && b?.kind === 'provider' && a.providerId === b.providerId &&
+    a.sessionId === b.sessionId && a.transcriptPath === b.transcriptPath
+}
+
+type NativeHistoryBinding = {
+  session: AgentSessionHistoryMetadata
+  provider: AgentProvider
+  handle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  readonly transient: boolean
+  matches(current: AgentSessionHistoryMetadata, hostId: string, run?: AgentMuxRunRef): boolean
+  assertCurrent(): Promise<void>
+}
+type NativeHistoryObservationResource = { controller: AbortController; binding: NativeHistoryBinding | null }
+
 const PROVIDER_READ_MAX_CONCURRENT = 4
 const AGENTMUX_CLI_PATH = resolveCoreBinPath('agentmux')
 
@@ -592,7 +607,7 @@ export class AgentMuxClient {
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
   private readonly providerReads = new Set<AbortController>()
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
-  private readonly historyObservationControllers = new Set<AbortController>()
+  private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
   private providerReadsDisposed = false
   // 「用户为这个 runId 发起过停止」这条**意图**事实的台账。与内核报的退出**结果**分居两处：控制面在
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
@@ -1283,8 +1298,9 @@ export class AgentMuxClient {
     this.reopensDisposed = true
     this.providerReadsDisposed = true
     this.cancelProviderReads()
-    for (const controller of this.historyObservationControllers) {
-      controller.abort(new AgentMuxError('History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
+    for (const resources of this.historyObservationControllers.values()) {
+      for (const resource of resources) resource.controller.abort(new AgentMuxError(
+        'History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
     await Promise.allSettled([...this.reopenSettlements.values()])
     await this.hookServer.stop()
@@ -1415,13 +1431,38 @@ export class AgentMuxClient {
     return descriptor
   }
 
-  /** Resolve a missing locator once; confirmed durable history never needs Runtime. */
+  /** Resolve current-source intent once; ordinary durable history remains independent of Runtime. */
   private async nativeHistoryBinding(
     agentSessionId: string,
     options: AgentSessionHistoryPageOptions,
     signal: AbortSignal,
     purpose: 'read' | 'observe'
-  ) {
+  ): Promise<NativeHistoryBinding> {
+    // A failed save is not permission to make observation and Page read different sources.
+    // The witness belongs to the existing Consumer resource, never a Session source cache.
+    if (purpose === 'read' && !options.refreshNativeSource) {
+      const resources = [...(this.historyObservationControllers.get(agentSessionId) ?? [])]
+        .filter(resource => !resource.controller.signal.aborted && resource.binding?.transient)
+      if (resources.length) {
+        const first = resources[0]!
+        const binding = first.binding!
+        if (resources.some(resource => !sameNativeHandle(resource.binding!.handle, binding.handle))) {
+          throw new AgentMuxError('Current history observations disagree. The existing window is retained; refresh its source.',
+            'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        }
+        const assertCurrent = async (): Promise<void> => {
+          signal.throwIfAborted()
+          if (first.controller.signal.aborted || first.binding !== binding) {
+            throw new AgentMuxError('The temporary history observation was released. Refresh its source.',
+              'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+          }
+          await binding.assertCurrent()
+          signal.throwIfAborted()
+        }
+        await assertCurrent()
+        return { ...binding, assertCurrent }
+      }
+    }
     const descriptor = await this.historyDescriptor(agentSessionId)
     const session = descriptor.history
     if (!session) throw new AgentMuxError('No native history locator was retained for this Session.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
@@ -1430,118 +1471,159 @@ export class AgentMuxClient {
       throw new AgentMuxError('This Provider does not support this native history operation. Explicit reading remains available when supported.',
         purpose === 'read' ? 'AGENT_SESSION_HISTORY_UNSUPPORTED' : 'AGENT_SESSION_HISTORY_OBSERVATION_UNSUPPORTED')
     }
-    let handle = session.nativeHandle
+    const retained = session.nativeHandle
+    if (retained !== undefined && (retained.kind !== 'provider' || retained.providerId !== session.providerId)) {
+      throw new AgentMuxError('The retained locator does not belong to this Provider history.',
+        'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+    }
+    let handle = retained
     let transient = false
     let original: AgentMuxStoredAgentSession | undefined
     let assertWitness: (() => Promise<void>) | undefined
-    const matchesHandle = (value: AgentNativeSessionHandle | undefined): boolean =>
-      value?.kind === 'provider' && handle?.kind === 'provider' && value.providerId === handle.providerId &&
-      value.sessionId === handle.sessionId && value.transcriptPath === handle.transcriptPath
-    if (handle === undefined) {
-      if (descriptor.state !== 'active' || descriptor.hostId !== 'local' || !this.connected ||
-        !this.kernel.isConnected() || !provider.discoverNativeSession) {
-        throw new AgentMuxError('The native identity is not yet confirmed. Refresh can retry; the original Run is kept.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
-      }
+    const retainedAvailable = retained?.kind === 'provider' && retained.providerId === session.providerId
+    const wantsCurrent = handle === undefined || purpose === 'observe' || options.refreshNativeSource === true
+    const canDiscover = descriptor.state === 'active' && descriptor.hostId === 'local' && this.connected &&
+      this.kernel.isConnected() && provider.discoverNativeSession !== undefined
+    if (wantsCurrent && !canDiscover && handle === undefined) {
+      throw new AgentMuxError('The native identity is not yet confirmed. Refresh can retry; the original Run is kept.',
+        'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+    }
+    if (wantsCurrent && canDiscover) {
       const epoch = this.connectionEpoch
       original = (await loadAgentSessions(this.store)).find(value => value.agentSessionId === agentSessionId)
-      if (!original || original.hostId !== 'local' || original.providerId !== session.providerId ||
-        original.workspacePath !== session.workspacePath || original.nativeHandle !== undefined) {
+      if (!original || original.hostId !== descriptor.hostId || original.providerId !== session.providerId ||
+        original.workspacePath !== session.workspacePath || !sameNativeHandle(original.nativeHandle, retained)) {
         throw new AgentMuxError('The native Session binding changed before discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       }
       const expected = original
-      const firstRun = await this.kernel.status(expected.run.runId)
-      if (firstRun.runId !== expected.run.runId || firstRun.workspacePath !== expected.workspacePath || firstRun.state.type !== 'running' || !Number.isSafeInteger(firstRun.pid) || !firstRun.pid || firstRun.pid <= 0) {
-        throw new AgentMuxError('The original running process could not be confirmed for native discovery.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
-      }
-      const checkRun = async (): Promise<AgentMuxStoredAgentSession> => {
+      const checkStored = async (): Promise<AgentMuxStoredAgentSession> => {
         signal.throwIfAborted()
-        if (!this.connected || !this.kernel.isConnected() || this.connectionEpoch !== epoch) {
-          throw new AgentMuxError('The Runtime observation changed during native discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-        }
         const current = (await loadAgentSessions(this.store)).find(value => value.agentSessionId === agentSessionId)
         if (!current || current.hostId !== expected.hostId || !sameRun(current.run, expected.run) ||
           current.providerId !== expected.providerId || current.workspacePath !== expected.workspacePath ||
-          (current.nativeHandle !== undefined && !matchesHandle(current.nativeHandle))) {
+          (!sameNativeHandle(current.nativeHandle, retained) && !sameNativeHandle(current.nativeHandle, handle))) {
           throw new AgentMuxError('The original Session or native identity changed during discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-        }
-        const run = await this.kernel.status(expected.run.runId)
-        signal.throwIfAborted()
-        if (run.runId !== expected.run.runId || run.workspacePath !== expected.workspacePath || run.state.type !== 'running' || run.pid !== firstRun.pid ||
-          this.connectionEpoch !== epoch || !this.kernel.isConnected()) {
-          throw new AgentMuxError('The original Run process changed during native discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
         }
         return current
       }
-      const discovered = await provider.discoverNativeSession({ processId: firstRun.pid,
-        command: resolveAgentExecutable(options.commandOverride, provider.executable),
-        args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath, signal })
-      signal.throwIfAborted()
-      if (!discovered || discovered.handle.kind !== 'provider' || discovered.handle.providerId !== session.providerId ||
-        normalizeNativeSessionId(discovered.handle.sessionId) !== discovered.handle.sessionId ||
-        (discovered.handle.transcriptPath !== undefined &&
-          normalizeNativeTranscriptPath(discovered.handle.transcriptPath) !== discovered.handle.transcriptPath)) {
-        throw new AgentMuxError('No unique main native Session was confirmed. The original Run is kept.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
-      }
-      handle = { ...discovered.handle }
-      assertWitness = async () => { await checkRun(); await discovered.assertCurrent(); await checkRun() }
-      await assertWitness()
-      const current = await checkRun()
-      if (current.nativeHandle === undefined) {
-        await this.registry.refresh(agentSessionId, expected.run)
-        await assertWitness()
-        try {
-          const next = await this.registry.update(agentSessionId, expected.run, value => {
-            if (value.hostId !== expected.hostId || value.providerId !== expected.providerId ||
-              value.workspacePath !== expected.workspacePath ||
-              (value.nativeHandle !== undefined && !matchesHandle(value.nativeHandle))) {
-              throw new AgentMuxError('Native discovery cannot replace a different confirmed identity.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-            }
-            return { ...value, nativeHandle: handle!, updatedAt: Date.now() }
-          }, signal)
-          this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
-        } catch (error) {
-          // Stale/invalid identities are not failed bookkeeping and must never be bypassed.
-          const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
-          const latest = await checkRun()
-          if (code === 'STALE_AGENT_SESSION' && matchesHandle(latest.nativeHandle)) {
-            // A concurrent owner durably confirmed the exact same source.
-          } else if (['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EMFILE', 'ENFILE',
-            'AGENT_SESSION_STORE_LIMIT', 'AGENT_SESSION_STORE_BUSY'].includes(code)) {
-            await assertWitness()
-            transient = latest.nativeHandle === undefined
-            this.publisher.publish({ type: 'agent-error', agentSessionId,
-              code: 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED',
-              message: 'Saving the native locator reported a failure. Reading the confirmed original records continues; Refresh retries saving. Agent input remains available.',
-              evidence: { source: 'agentmux', run: { ...expected.run }, observedAt: Date.now() } })
-          } else throw error
+      const diagnose = (message: string): void => this.publisher.publish({ type: 'agent-error', agentSessionId,
+        code: 'AGENT_NATIVE_SOURCE_UNCONFIRMED',
+        message: `The current native source could not be confirmed. The retained records and Agent input remain available; Refresh retries confirmation. ${message}`,
+        evidence: { source: 'agentmux', run: { ...expected.run }, observedAt: Date.now() } })
+      try {
+        const firstRun = await this.kernel.status(expected.run.runId)
+        if (firstRun.runId !== expected.run.runId || firstRun.workspacePath !== expected.workspacePath ||
+          firstRun.state.type !== 'running' || !Number.isSafeInteger(firstRun.pid) || !firstRun.pid || firstRun.pid <= 0) {
+          throw new AgentMuxError('The original running process could not be confirmed for native discovery.',
+            'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
         }
+        const checkRun = async (): Promise<AgentMuxStoredAgentSession> => {
+          signal.throwIfAborted()
+          if (!this.connected || !this.kernel.isConnected() || this.connectionEpoch !== epoch) {
+            throw new AgentMuxError('The Runtime observation changed during native discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+          }
+          const current = await checkStored()
+          const run = await this.kernel.status(expected.run.runId)
+          signal.throwIfAborted()
+          if (run.runId !== expected.run.runId || run.workspacePath !== expected.workspacePath ||
+            run.state.type !== 'running' || run.pid !== firstRun.pid || this.connectionEpoch !== epoch || !this.kernel.isConnected()) {
+            throw new AgentMuxError('The original Run process changed during native discovery.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+          }
+          return current
+        }
+        const discovered = await provider.discoverNativeSession!({ processId: firstRun.pid,
+          command: resolveAgentExecutable(options.commandOverride, provider.executable),
+          args: options.args ?? [], env: options.env ?? {}, workspacePath: session.workspacePath, signal })
+        signal.throwIfAborted()
+        if (!discovered || discovered.handle.kind !== 'provider' || discovered.handle.providerId !== session.providerId ||
+          normalizeNativeSessionId(discovered.handle.sessionId) !== discovered.handle.sessionId ||
+          (discovered.handle.transcriptPath !== undefined &&
+            normalizeNativeTranscriptPath(discovered.handle.transcriptPath) !== discovered.handle.transcriptPath)) {
+          throw new AgentMuxError('No unique main native Session was confirmed. The original Run is kept.',
+            'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
+        }
+        handle = { ...discovered.handle }
+        assertWitness = async () => { await checkRun(); await discovered.assertCurrent(); await checkRun() }
+        await assertWitness()
+        const current = await checkRun()
+        if (!sameNativeHandle(current.nativeHandle, handle)) {
+          await this.registry.refresh(agentSessionId, expected.run)
+          await assertWitness()
+          try {
+            const next = await this.registry.update(agentSessionId, expected.run, value => {
+              if (value.hostId !== expected.hostId || value.providerId !== expected.providerId ||
+                value.workspacePath !== expected.workspacePath ||
+                (!sameNativeHandle(value.nativeHandle, retained) && !sameNativeHandle(value.nativeHandle, handle))) {
+                throw new AgentMuxError('Native discovery cannot replace a concurrent confirmed identity.',
+                  'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+              }
+              return { ...value, nativeHandle: handle!, updatedAt: Date.now() }
+            }, signal)
+            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+          } catch (error) {
+            const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+            // A durable commit can report an error after writing; confirm it without reintroducing Runtime.
+            const saved = await checkStored()
+            if (sameNativeHandle(saved.nativeHandle, handle)) {
+              // The same source was durably confirmed by this or another operation.
+            } else if (['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EMFILE', 'ENFILE',
+              'AGENT_SESSION_STORE_LIMIT', 'AGENT_SESSION_STORE_BUSY'].includes(code)) {
+              await assertWitness()
+              transient = true
+              this.publisher.publish({ type: 'agent-error', agentSessionId,
+                code: 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED',
+                message: 'Saving the current native locator failed. Reading its confirmed records continues while this read or observation is active; Refresh retries saving. Agent input remains available.',
+                evidence: { source: 'agentmux', run: { ...expected.run }, observedAt: Date.now() } })
+            } else throw error
+          }
+        }
+        if (!transient) assertWitness = undefined
+        else await assertWitness()
+      } catch (error) {
+        signal.throwIfAborted()
+        const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+        // Only a failed observation can fall back to an unchanged retained source. Identity conflicts cannot.
+        if (!retainedAvailable || code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' || code === 'STALE_AGENT_SESSION' || transient) throw error
+        await checkStored()
+        handle = retained
+        assertWitness = undefined
+        diagnose(error instanceof Error ? error.message : 'Provider source observation failed.')
       }
-      // Once durably confirmed, native reading depends on its retained source, not a live Run.
-      if (!transient) assertWitness = undefined
-      else await assertWitness()
     }
     if (handle?.kind !== 'provider' || handle.providerId !== session.providerId) {
       throw new AgentMuxError('The exact native Session identity is not available.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
     }
     const acceptedHandle = handle
-    const matches = (current: AgentSessionHistoryMetadata, hostId: string, run?: AgentMuxRunRef): boolean =>
-      hostId === descriptor.hostId && current.providerId === session.providerId && current.workspacePath === session.workspacePath &&
-      (transient && current.nativeHandle === undefined
-        ? original !== undefined && run !== undefined && sameRun(run, original.run)
-        : matchesHandle(current.nativeHandle))
+    const matches = (current: AgentSessionHistoryMetadata, hostId: string, run?: AgentMuxRunRef): boolean => {
+      if (hostId !== descriptor.hostId || current.providerId !== session.providerId || current.workspacePath !== session.workspacePath) return false
+      if (sameNativeHandle(current.nativeHandle, acceptedHandle)) {
+        // A real durable publication ends the temporary fence, including an A→B→A transition.
+        transient = false
+        assertWitness = undefined
+        return true
+      }
+      return transient && original !== undefined && run !== undefined &&
+        sameRun(run, original.run) && sameNativeHandle(current.nativeHandle, retained)
+    }
     const assertCurrent = async (): Promise<void> => {
       signal.throwIfAborted()
-      if (assertWitness) await assertWitness()
       const current = await this.historyDescriptor(agentSessionId)
-      if (!current.history || !(transient && current.history.nativeHandle === undefined
-        ? current.hostId === descriptor.hostId && current.state === 'active'
-        : matches(current.history, current.hostId))) {
-        throw new AgentMuxError('Native history identity changed while reading; reopen its newest page.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      const sameMetadata = current.history && current.hostId === descriptor.hostId &&
+        current.history.providerId === session.providerId && current.history.workspacePath === session.workspacePath
+      if (sameMetadata && sameNativeHandle(current.history!.nativeHandle, acceptedHandle)) {
+        transient = false
+        assertWitness = undefined
+      } else if (transient && original && current.state === 'active' && sameMetadata &&
+        sameNativeHandle(current.history!.nativeHandle, retained)) {
+        await assertWitness!()
+      } else {
+        throw new AgentMuxError('Native history identity changed while reading; reopen its newest page.',
+          'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       }
       signal.throwIfAborted()
     }
     await assertCurrent()
-    return { session, provider, handle: acceptedHandle, matches, assertCurrent }
+    return { session, provider, handle: acceptedHandle, get transient() { return transient }, matches, assertCurrent }
   }
 
   /** Read existing Provider conversation history without controlling the Session's Run. */
@@ -1554,7 +1636,9 @@ export class AgentMuxClient {
     }
     const limit = options.limit ?? 30
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
-      (options.cursor !== undefined && (typeof options.cursor !== 'string' || !options.cursor || options.cursor.length > 16_384))) {
+      (options.cursor !== undefined && (typeof options.cursor !== 'string' || !options.cursor || options.cursor.length > 16_384)) ||
+      (options.refreshNativeSource !== undefined && typeof options.refreshNativeSource !== 'boolean') ||
+      (options.refreshNativeSource === true && options.cursor !== undefined)) {
       throw new AgentMuxError('History page requires a finite limit from 1 to 100 and an opaque cursor.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
     }
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) {
@@ -1593,7 +1677,10 @@ export class AgentMuxClient {
     if (this.providerReadsDisposed) throw new AgentMuxError('History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED')
     options.signal?.throwIfAborted()
     const controller = new AbortController()
-    this.historyObservationControllers.add(controller)
+    const resources = this.historyObservationControllers.get(agentSessionId) ?? new Set<NativeHistoryObservationResource>()
+    this.historyObservationControllers.set(agentSessionId, resources)
+    const resource: NativeHistoryObservationResource = { controller, binding: null }
+    resources.add(resource)
     let observer: AgentSessionHistoryObservationHandle | undefined
     let unsubscribe = (): void => {}
     const cancel = (): void => controller.abort(options.signal?.reason ??
@@ -1613,7 +1700,9 @@ export class AgentMuxClient {
       observer?.dispose()
       unsubscribe()
       options.signal?.removeEventListener('abort', cancel)
-      this.historyObservationControllers.delete(controller)
+      resource.binding = null
+      resources.delete(resource)
+      if (!resources.size) this.historyObservationControllers.delete(agentSessionId)
     }
     controller.signal.addEventListener('abort', () => {
       release()
@@ -1669,6 +1758,7 @@ export class AgentMuxClient {
         throw new AgentMuxError('Provider observed a different native history source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       }
       await Promise.race([binding.assertCurrent(), cancelled])
+      resource.binding = binding
       clearTimeout(timer)
       return { source, dispose: () => controller.abort(new AgentMuxError(
         'The history observation Consumer released its handle.', 'AGENT_SESSION_HISTORY_CANCELLED'
