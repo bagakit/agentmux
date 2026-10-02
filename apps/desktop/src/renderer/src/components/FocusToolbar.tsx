@@ -133,7 +133,6 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: Square, run: onToggleRegion }] : []),
     ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: Inbox, run: onReview }] : []),
     ...(selected?.kind === 'agent' ? [{ key: 'stop', label: 'Stop Agent', icon: Square, run: () => stop.requestStop(selectedId, selected.name, menuOriginRef.current) }] : []),
-    { key: 'close', label: 'Close Focus workspace', icon: PanelRightClose, run: onCloseWorkspace }
   ]
   return <div className="focus-toolbar__context">
     {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; setDraft(null) } }} /> : <ContextMenu.Root modal={false}>
