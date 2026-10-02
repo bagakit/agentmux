@@ -197,17 +197,30 @@ app.whenReady().then(async () => {
   try {
     await stage('prepare-original-production-hosts')
     result.spatialBefore = await spatial.read()
-    runtime.commit(await runtime.prepare(runtimeConfig))
-    for (const { client } of runtime.rpcClients()) await client.connect()
+    await stage('runtime-prepare-start')
+    const prepared = await runtime.prepare(runtimeConfig)
+    await stage('runtime-prepare-complete')
+    runtime.commit(prepared)
+    await stage('runtime-commit-complete')
+    for (const { hostId, client } of runtime.rpcClients()) {
+      await stage(`connect-${hostId}-start`)
+      await client.connect()
+      await stage(`connect-${hostId}-complete`)
+    }
+    await stage('create-window-start')
     win = new BrowserWindow({ width: 1560, height: 1120, show: false,
       webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload } })
     runtime.attach(win.webContents)
     unsubscribeSpatial = spatial.onChange(value => { if (!win.isDestroyed()) win.webContents.send('host-ui:spatial-change', value) })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer:${message.slice(0, 1800)}\n`) })
+    await stage('load-window-start')
     await win.loadFile(html)
+    await stage('load-window-complete')
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
+    await stage('initialize-renderer-start')
     await until('window.hostUiReady && !window.hostUiState().loading')
+    await stage('initialize-renderer-complete')
     result.originalProtectedBefore = await observeProtected(remoteClient())
     const localIdentity = JSON.parse(await fs.readFile(path.join(privateRoot, 'local-identity.json'), 'utf8'))
     result.originalLocal = localIdentity
