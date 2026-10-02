@@ -95,7 +95,7 @@ it('uses one keyboard-readable preview and the same exact-SID menu without selec
   await act(async () => card(second).focus()); expect(document.querySelectorAll('.focus-context-hover')).toHaveLength(1)
   const before = useAppStore.getState(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await menu(second, 'shift-f10'); expect(preview()).toBeNull()
-  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Rename Agent', 'Copy Session Address'])
+  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Rename Agent', 'Copy Session Address', 'Stop Agent'])
   const identity = document.querySelector('.focus-context-menu__identity')!
   expect(identity.textContent).toBe(useAppStore.getState().agentNames[second])
   expect(identity.querySelector('strong')?.getAttribute('title')).toBe(identity.textContent)

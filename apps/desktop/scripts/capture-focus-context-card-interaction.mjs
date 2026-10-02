@@ -41,7 +41,7 @@ try{
   receipt.process=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),html,privateRoot,evidence],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:90000,onLine:line=>logs.push(line)})
   receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'));assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true)
   receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})))
-  assert.equal(receipt.frames.length,19,'Three window widths; hover, pointer selection/internal scroll, exact SID menus, rename transitions and explicit Focus selection')
+  assert.equal(receipt.frames.length,23,'Three window widths; hover, pointer selection/internal scroll, exact SID menus, rename transitions and explicit Focus selection')
   receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])));assert.deepEqual(receipt.sourceAfter,receipt.inputs,'Exact nonempty Source stable before/after')
   receipt.owningSourceScope=['GlobalFocusSurface.tsx','FocusContextRow.tsx','FocusContextMenu.tsx','FocusContextHover.tsx','focus-context.ts','store.ts','styles/focus.css'];receipt.captureOnly=true;receipt.capturedPass=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};process.exitCode=1}
