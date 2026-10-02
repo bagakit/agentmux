@@ -32,6 +32,7 @@ import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 
@@ -65,6 +66,7 @@ export function AgentSessionComposer({
   resultReview,
   reading,
   onRevealMessage,
+  mailboxOrigin,
   visible = true
 }: {
   sessionId: string
@@ -74,6 +76,7 @@ export function AgentSessionComposer({
   tabName?: string
   reading?: ConversationReadingProps | undefined
   onRevealMessage?: RevealMailboxMessage | undefined
+  mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
   visible?: boolean
 }) {
@@ -263,7 +266,7 @@ export function AgentSessionComposer({
     <AgentComposer key={sessionId}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
-      mailbox={<SessionMailbox reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+      mailbox={<SessionMailbox mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({

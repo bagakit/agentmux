@@ -48,7 +48,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import { AgentRegionHeader } from './AgentRegionHeader'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
-import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
@@ -109,6 +109,9 @@ export function SessionPane({
   linkOrigin: OpenHttpLinkOrigin
 }) {
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
+  const { reference: primaryReference } = useWorkbenchBrowserPresentation()
+  const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
+    tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
@@ -812,7 +815,7 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { composer: <AgentSessionComposer reading={mailboxReading} onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
+      {...(hasAgentComposer ? { composer: <AgentSessionComposer reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <section
@@ -975,7 +978,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer reading={mailboxReading} onRevealMessage={revealMailboxMessage} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>

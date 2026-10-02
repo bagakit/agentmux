@@ -1,3 +1,5 @@
+import { MailboxLocationContext } from './MailboxLocationContext'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
 import type { AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import { CircleHelp, Inbox, Send, Bell, ChevronLeft, RefreshCw, Mail, Pause, Repeat2, X } from 'lucide-react'
@@ -59,7 +61,8 @@ function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
 
 function messageKey(item: MailboxDisplayItem) { return `${isUserMessage(item) ? item.source.kind : 'timeline'}:${item.id}` }
 
-function MessageHistory({ items, incoming, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation }: {
+function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation }: {
+  mailboxOrigin?: OpenHttpLinkOrigin | undefined
   items: readonly MailboxDisplayItem[]; incoming: boolean; selectedKey: string | null
   onOpen: (key: string, event: MouseEvent<HTMLButtonElement>) => void
   onCopy?: ((text: string) => Promise<boolean>) | undefined
@@ -79,7 +82,8 @@ function MessageHistory({ items, incoming, selectedKey, onOpen, onCopy, reading,
   const time = (item: MailboxDisplayItem) => isUserMessage(item) ? item.recordedAt : item.createdAt
   const state = (item: MailboxDisplayItem) => isUserMessage(item) ? item.deliveryStatus : item.status
   const selected = selectedKey ? recent.find(item => messageKey(item) === selectedKey) : undefined
-  if (selected) return <article className="composer-mailbox__detail" data-record-key={messageKey(selected)}>
+  if (selected) return <MailboxLocationContext origin={mailboxOrigin} sessionId={sessionId}>{(locationSummary, locationDetails) => <article className="composer-mailbox__detail" data-record-key={messageKey(selected)}>
+    {locationSummary}
     <ConversationMessage {...reading} compact recordedIdentity {...(sessionId ? { conversationSessionId: sessionId } : {})}
       messageId={messageKey(selected)} speaker={speakerOf(selected) as ConversationSpeaker} name={authorLabel(selected)}
       content={isUserMessage(selected) && selected.contentParts.length > 0 ? selected.contentParts : selected.content ?? ''}
@@ -88,15 +92,15 @@ function MessageHistory({ items, incoming, selectedKey, onOpen, onCopy, reading,
       {...(isUserMessage(selected) ? { inputSource: selected.source } : {})}
       {...(onCopy ? { onCopy } : {})}
       messageActions={renderNavigation(selected)}
-      messageDetails={<dl className="composer-mailbox__record-facts">
+      messageDetails={<><dl className="composer-mailbox__record-facts">
         {!isUserMessage(selected) ? <><dt>Source</dt><dd>Captured input</dd><dt>Recorded author</dt><dd>{authorLabel(selected)}</dd></> : null}
         <dt>Time</dt><dd><MailboxTime value={time(selected)} complete /></dd>
         <dt>Delivery</dt><dd>{isUserMessage(selected) && selected.source.kind === 'native' ? 'Recorded · not a delivery receipt' : state(selected) === 'complete' ? incoming ? 'Delivered' : 'Sent' : 'Delivery not confirmed'}</dd>
-      </dl>} />
+      </dl>{locationDetails}</>} />
     {!selected.content && !(isUserMessage(selected) && selected.contentParts.length) ? <MailboxEmpty title="No text recorded" /> : null}
     {state(selected) !== 'complete' && !(isUserMessage(selected) && selected.source.kind === 'native')
       ? <p className="composer-mailbox__risk">Delivery not confirmed. Check the Agent’s response before sending again.</p> : null}
-  </article>
+  </article>}</MailboxLocationContext>
   return recent.length ? <ol className="composer-mailbox__messages" aria-label={incoming ? 'Recent Agent messages' : 'Recent outgoing messages'}>
     {recent.map(item => <li key={messageKey(item)}><MailboxRecordRow recordKey={messageKey(item)} label={authorLabel(item)} text={item.content}
       avatar={<ConversationSpeakerAvatar speaker={speakerOf(item) as ConversationSpeaker} name={authorLabel(item)} size={18}
@@ -113,8 +117,9 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, reading, onRevealMessage }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, reading, onRevealMessage, mailboxOrigin }: {
   onRevealMessage?: RevealMailboxMessage | undefined
+  mailboxOrigin?: OpenHttpLinkOrigin | undefined
   reading?: ConversationReadingProps | undefined
   system: ReturnType<typeof useServiceNotices>
   queued: readonly ComposerQueuedMessage[]
@@ -385,11 +390,11 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       {detail ? <div className="composer-mailbox__back"><button ref={back} type="button" className="composer-tool" onClick={leaveRecord}><ChevronLeft size={14} aria-hidden="true" />Back to {folderLabels[folder]}</button></div> : null}
       <div ref={body} className="composer-mailbox__content" onFocusCapture={event => { lastReadingFocus.current = event.target }}>
       <div id={`${id}-inbox`} role="tabpanel" aria-labelledby={`${id}-inbox-tab`} hidden={folder !== 'inbox'}>
-        {open && folder === 'inbox' ? timeline ? <MessageHistory items={incoming} incoming selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} /> : <MailboxEmpty title="Waiting for message history" /> : null}
+        {open && folder === 'inbox' ? timeline ? <MessageHistory mailboxOrigin={mailboxOrigin} items={incoming} incoming selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} /> : <MailboxEmpty title="Waiting for message history" /> : null}
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
         {open && folder === 'outbox' ? <>
-          {!selectedMessage && pending.length ? <ComposerOutbox queued={pending} selectedId={selectedQueue?.id ?? null}
+          {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} selectedId={selectedQueue?.id ?? null}
             onSelect={(key, event) => selectRecord(`queue:${key}`, event)} reading={reading}
             {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
             {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
@@ -398,7 +403,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This bounded reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
-            <MessageHistory items={sent} incoming={false} selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} />
+            <MessageHistory mailboxOrigin={mailboxOrigin} items={sent} incoming={false} selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} />
             {!selectedMessage && hasMore ? <div className="composer-mailbox__boundary"><span>Earlier native messages available.</span>
               <button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
           </section> : null}
