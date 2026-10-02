@@ -404,6 +404,9 @@ it('uses the shared message owner for ordered native parts, exact copy and host 
   const openWorkspaceFile = vi.fn(), openHttpLink = vi.fn()
   await act(async () => root.render(<SessionHistoryView control={control} label="Reader" visible themeId="graphite" fontSize={17}
     workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink} />))
+  const activityStep = container.querySelector<HTMLButtonElement>('[data-history-item-id="native-activity"] .wf-tool-row--observation')!
+  expect(activityStep).not.toBeNull()
+  await act(async () => activityStep.click())
   const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'))
   expect(rows.map(row => row.dataset.historyItemId)).toEqual(['native-user', 'native-assistant', 'native-activity'])
   // The recorded native author remains unknown; the current shared display default is You.
@@ -522,6 +525,9 @@ it('does not duplicate an overlapping canonical item while retaining the complet
   await wheelUp()
   expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'), row => row.dataset.historyItemId)).toEqual(['older', 'latest'])
   expect(container.textContent).toContain('Unrecognized native activity')
+  const earlierStep = container.querySelector<HTMLButtonElement>('[data-history-item-id="older"] .wf-tool-row--observation')!
+  expect(earlierStep).not.toBeNull()
+  await act(async () => earlierStep.click())
   expect(container.querySelector('[data-history-item-id="older"]')?.textContent).toContain('original activity  \n')
 })
 
