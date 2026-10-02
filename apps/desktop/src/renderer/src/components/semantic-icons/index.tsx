@@ -83,7 +83,12 @@ export function SemanticIcon({ name, size = 14, className, ...props }: { name: S
   // （Activity vs Radio），动势是第二条轴而非唯一区分。动势与它在别处驱动工作点的是同一条 opacity 节奏
   // （activity.css 的 activity-working-pulse），reduced-motion 下退化为静态而字形差异仍在。
   const classes = ['semantic-icon', name === 'working' ? 'semantic-icon--working' : null, className].filter(Boolean).join(' ')
-  return <Icon size={size} className={classes} aria-hidden="true" {...props} />
+  const glyph = <Icon size={size} className={classes} aria-hidden="true" {...props} />
+  // An HTML opacity carrier can be composited without repainting the SVG and
+  // its retained document every frame. The glyph keeps all Lucide props.
+  return name === 'working'
+    ? <span className="semantic-icon-motion semantic-icon-motion--working">{glyph}</span>
+    : glyph
 }
 
 export function WorkflowSemanticIcon({ status, size = 12, className }: { status: WorkflowAgentStatus; size?: number; className?: string }) {

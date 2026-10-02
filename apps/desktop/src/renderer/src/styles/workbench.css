@@ -361,6 +361,21 @@
 .workbench-reference-body[data-workbench-layout-state="parked"],
 .retained-workbench-parking { clip-path: inset(50%); }
 
+/* Parking preserves measurable geometry and mounted readers, but has no visible
+   motion consumer. Descendants resume on their original timeline when their
+   retained host leaves this owner; decorative aria-hidden/inert is unrelated. */
+:is(.workspace-workbench-registry--parked, .workspace-workbench-slot--parked,
+    .workspace-workbench-slot--focus-source, .pane-body__region[data-active="false"],
+    .workbench-layout-body[data-workbench-layout-state="parked"],
+    .workbench-reference-body[data-workbench-layout-state="parked"], .retained-workbench-parking),
+:is(.workspace-workbench-registry--parked, .workspace-workbench-slot--parked,
+    .workspace-workbench-slot--focus-source, .pane-body__region[data-active="false"],
+    .workbench-layout-body[data-workbench-layout-state="parked"],
+    .workbench-reference-body[data-workbench-layout-state="parked"], .retained-workbench-parking) * {
+  animation-play-state: paused !important;
+}
+
+
 .workbench-zone { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .workbench-layout-body, .workbench-reference-body { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; }
 .workspace-workbench:has(> .workbench-layout-body) { position: relative; }
