@@ -56,7 +56,7 @@ import {
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
-import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts } from './lib/launcher-option-draft'
+import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts, type LauncherProviderOptions } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { primaryMoteExecutorId } from './lib/primary-mote-executor'
@@ -691,7 +691,10 @@ type AppState = {
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
   setZoneSpaceRelation(zoneId: string, spaceId: string, linked: boolean): Promise<AgentMuxSpaceBindingReport>
   setTabDisplayPlacement(tabId: string, displayWorkspaceId: string, groupId: string, present: boolean): Promise<AgentMuxSpaceBindingReport>
-  openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean }): string | undefined
+  openLauncher(target: { workspaceId: string; displayWorkspaceId?: string; tabGroupId?: string; topicId?: string; zoneId?: string; reveal: boolean;
+    /** Claim an empty Group's original input in its new real Region, without navigating another surface. */
+    initialInputs?: { prompt: string; names: LauncherNames; optionsByProvider: LauncherProviderOptions }
+  }): string | undefined
   closeTab(
     workspaceId: string,
     tabGroupId: string,
@@ -4273,7 +4276,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (result.operation !== 'space.bind' && result.operation !== 'space.unbind') throw new Error('The binding owner returned a different operation.')
     return result
   },
-  openLauncher({ workspaceId, displayWorkspaceId, tabGroupId, topicId: requestedTopicId, zoneId, reveal }) {
+  openLauncher({ workspaceId, displayWorkspaceId, tabGroupId, topicId: requestedTopicId, zoneId, reveal, initialInputs }) {
     const state = get()
     const displayId = displayWorkspaceId ?? workspaceId
     const layout = state.layouts[displayId]
@@ -4316,12 +4319,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(new Error('The Tab Group is no longer available'))
       return
     }
+    if (initialInputs) useLauncherState.getState().copyUtilityDraft(
+      warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }),
+      warmLauncherId({ tabGroupId: targetTabGroupId, regionId: tab.layout.activeRegionId }))
     set((state) => ({
       // Only a successful explicit main-surface navigation changes global selection.
       ...(reveal ? { activeWorkspaceId: displayId, mainSurface: 'workbench' as const, regionCaretFocus: null,
         workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}),
       tabs: { ...state.tabs, [tab.id]: tab },
-      layouts: { ...state.layouts, [displayId]: reveal ? nextLayout : {
+      ...(initialInputs ? {
+        agentComposerDrafts: { ...state.agentComposerDrafts, [tab.layout.activeRegionId]: initialInputs.prompt },
+        launcherNameDrafts: { ...state.launcherNameDrafts, [tab.layout.activeRegionId]: initialInputs.names },
+        launcherOptionDrafts: { ...state.launcherOptionDrafts, [tab.layout.activeRegionId]: initialInputs.optionsByProvider }
+      } : {}),
+      layouts: { ...state.layouts, [displayId]: reveal || initialInputs ? nextLayout : {
         ...nextLayout,
         activeGroupId: layout.activeGroupId,
         groups: nextLayout.groups.map(group => {
@@ -4330,6 +4341,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
       } }
     }))
+    // Publish the durable Region owner before releasing only its unchanged Group inputs.
+    // Utility drafts and Note receipts retain the original Group record.
+    if (initialInputs) useLauncherState.getState().clearAgentInputsIfUnchanged(
+      warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }), initialInputs)
     return tab.id
   },
   closeTab(workspaceId, tabGroupId, tabId, options) {

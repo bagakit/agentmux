@@ -81,7 +81,9 @@ export function NewTabSurface({
   const [executorId, setExecutorId] = useState('codex')
   const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
-  const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId)
+  // Every Launcher has an input owner, including a Workspace's first empty Tab Group.
+  const launcherId = warmLauncherId({ tabGroupId, regionId })
+  const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
@@ -127,10 +129,6 @@ export function NewTabSurface({
   // Only show a warm shell created for this exact host and working directory.
   // It remains outside the ordinary Session list until the user claims it.
   const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
-  // 这个 launcher 挂载点的归属身份。取值规则在 warmLauncherId 里判一次——**不能**直接用 regionId：
-  // 空分组占位没有 region，而那恰是新建 workspace 的第一眼，用可缺席的字段当归属键会把最主要那条
-  // 路径永久降级成冷卡片。
-  const launcherId = warmLauncherId({ tabGroupId, regionId })
   // 「这次启动来自哪个 launcher Region」——五个动作共用的同一个实参，只在这里算一次。
   // 手抄五遍时任何一处写成 `regionId ? …`（漏掉 tabId）都会让那一个动作静默丢掉 launcher 上下文，
   // 于是它按活动 Workspace 解析——正是 createNote 已经犯过的那个缺陷的另一种入口。
@@ -253,15 +251,25 @@ export function NewTabSurface({
   // launchOptionSelection 或那两个名字，就变成「用鼠标点带着精调启动、用键盘发就丢掉精调」。
   function launchFromLauncher(): void {
     if (!launcherCanLaunch(readiness)) return
-    void run('agent', () => launchAgent(
-      executorId,
-      expandSemanticReferences(prompt),
-      tabGroupId,
-      launcherRef,
-      launchOptionSelection,
-      // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
-      { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
-    ))
+    void run('agent', () => {
+      let target = launcherRef
+      if (!target && workspace) {
+        const createdId = useAppStore.getState().openLauncher({ workspaceId: workspace.id, tabGroupId, reveal: false,
+          initialInputs: { prompt, names, optionsByProvider } })
+        const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
+        if (!created) return Promise.resolve()
+        target = { tabId: created.id, regionId: created.layout.activeRegionId }
+      }
+      return launchAgent(
+        executorId,
+        expandSemanticReferences(prompt),
+        tabGroupId,
+        target,
+        launchOptionSelection,
+        // trim 后为空即不传：空白不该变成一个 "launch" 档的名字，也绝不阻塞启动。
+        { agentName: names.agentName.trim() || undefined, tabName: names.tabName.trim() || undefined }
+      )
+    })
   }
 
   function appendReference(path: string): void {
