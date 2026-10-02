@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -36,7 +36,7 @@ async function fixture(loadRegistry = false) {
   const registry = new AgentMuxAgentSessionRegistry(store)
   if (loadRegistry) await registry.load('local')
   let stopped = false
-  const run = { runId: retained.run.runId, lifecycleOperationId: null, program: upstreamFixturePath("private-controlled-agent"), args: [],
+  const run = { runId: retained.run.runId, lifecycleOperationId: null, program: fixturePath("private-controlled-agent"), args: [],
     workspacePath: directory, pid: 421, cols: 80, rows: 24, latestOutputBytes: 0,
     firstAvailableByte: 0, acceptedInputBytes: 0 }
   // Core's Store, registry, authorization, stop methods and event publisher stay real.
@@ -79,7 +79,8 @@ describe('Hosted durable Session authority', () => {
       const connectCalls = f.connect.mock.calls.length
       expect(connectCalls).toBe(1)
       const original = cloneSession(f.retained)
-      await expect(f.client.readAgentSessions()).resolves.toEqual([original])
+      const initialRead = await f.client.readAgentSessions().then(value => ({ value }), error => ({ error }))
+      expect(initialRead, 'offline durable SDK reads remain available without Native reconnect').toEqual({ value: [original] })
       const changed = { ...f.retained, updatedAt: 2, workspacePath: join(f.retained.workspacePath, 'new-directory') }
       await f.store.compareAndSwap(f.retained, changed)
       await expect(f.client.readAgentSessions()).resolves.toEqual([cloneSession(changed)])
