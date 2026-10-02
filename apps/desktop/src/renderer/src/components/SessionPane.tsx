@@ -742,6 +742,8 @@ export function SessionPane({
           request={pendingLaunch?.request}
           executor={connectingExecutor}
           appearance={connectingAppearance}
+          session={{ hostId: session?.kind === 'agent' ? session.control.hostId : recoveryCandidate?.hostId ?? retainedHistory?.hostId ?? '', agentSessionId: sessionId }}
+          visible={visible && !parked}
         />
         {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
           kind: 'indeterminate', notice: { step: `Retained history metadata could not be read: ${historyCatalogue.error}`,
@@ -872,7 +874,7 @@ export function SessionPane({
                   ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
                   : pendingRestoreDetail ?? 'The saved Session is retained. Its process state is not yet confirmed.')}
                 actions={!historyOpen ? agentRecoveryAction : null}
-                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} /> : null}
+                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}
                 details={{ summary: 'Retained session', content: <dl>
                   <dt>Session</dt><dd>{session.label}</dd>
                   <dt>Session ID</dt><dd>{session.id}</dd>

@@ -1,19 +1,22 @@
 import { Check, Copy, SquareDashed, TerminalSquare } from 'lucide-react'
 import { useState } from 'react'
-import type { AgentAvatarAppearance, AgentExecutorConfig } from '../../../shared/contracts'
+import type { AgentAvatarAppearance, AgentExecutorConfig, SessionHistoryReference } from '../../../shared/contracts'
 import type { PendingAgentLaunch } from '../lib/session-state'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentAvatar } from './AgentAvatar'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { SessionRecap } from './SessionRecap'
 
 /** Launch intent stays readable while Runtime facts are still on their way. No guessed progress. */
-export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance }: {
+export function SessionConnectingSurface({ phase, surfaceKind, request, executor, appearance, session, visible = true }: {
   phase: 'launch' | 'restore' | 'connect'
   surfaceKind: 'agent' | 'terminal'
   request?: PendingAgentLaunch['request']
   executor?: AgentExecutorConfig | undefined
   appearance?: AgentAvatarAppearance | undefined
+  session?: SessionHistoryReference | undefined
+  visible?: boolean
 }) {
   const [copying, setCopying] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -49,7 +52,7 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
           : <SquareDashed size={18} aria-label="Unknown executor" />}
         <strong>{executorLabel}</strong>
       </div> : <div className="session-connecting__executor"><TerminalSquare size={18} /><strong>Terminal</strong></div>}
-      {surfaceKind === 'agent' ? <section className="session-connecting__prompt" aria-label="Initial prompt">
+      {surfaceKind === 'agent' && phase === 'launch' ? <section className="session-connecting__prompt" aria-label="Initial prompt">
         <div className="session-connecting__prompt-heading">
           <span className="session-connecting__eyebrow">Initial prompt</span>
           {prompt ? <button type="button" className="session-connecting__copy" disabled={copying}
@@ -64,6 +67,8 @@ export function SessionConnectingSurface({ phase, surfaceKind, request, executor
             : 'The initial prompt is not available while reconnecting.'}</p>}
         {copyError ? <div className="session-connecting__feedback" role="alert">Copy failed: {copyError}</div> : null}
       </section> : null}
+      {surfaceKind === 'agent' && phase !== 'launch' ? <SessionRecap
+        session={session ?? { hostId: '', agentSessionId: '' }} visible={visible} context /> : null}
     </div>}
   />
 }

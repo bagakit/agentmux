@@ -122,6 +122,6 @@ export async function readClaudeSessionHistoryPage(context: AgentProviderSession
       items.push(convert(entry.value, entry.start))
     }
     const nextCursor = await reader.nextCursor()
-    return { source: context.source, items: items.reverse(), nextCursor }
+    return { source: context.source, items: items.reverse(), nextCursor, sourceSizeBytes: reader.sourceSizeBytes }
   } finally { await reader.close() }
 }
