@@ -50,6 +50,8 @@ async function owningBridge() {
   const canonical = { ...durable, run: { runId: 'canonical-run' } }
   const client = { connect: vi.fn().mockResolvedValue(undefined), onEvent: vi.fn().mockReturnValue(vi.fn()),
     submitAgentMessage: vi.fn().mockResolvedValue(undefined),
+    submitAgentPrompt: vi.fn().mockResolvedValue(undefined),
+    statusAgent: vi.fn(async () => ({ session: durable, run: { runId: control.run.runId, state: 'running' } })),
     agentSession: vi.fn().mockReturnValue(durable),
     ensureAgentContinuity: vi.fn().mockResolvedValue({ kind: 'conflict', agentSessionId: control.agentSessionId,
       previousRun: control.run, currentRun: canonical.run, reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } }),
@@ -147,5 +149,28 @@ it('registered flush handler rejects a foreign sender before touching the owning
     expect(handler).toBeTypeOf('function')
     await expect(handler!({ sender: {} })).rejects.toThrow('Untrusted storage flush sender')
     expect(flush).not.toHaveBeenCalled()
+  } finally { await dispose() }
+})
+
+it('actual preload, registered IPC and Main keep injected context separate from the untouched manual body', async () => {
+  const { client, pauseTarget, dispose } = await owningBridge()
+  const prompt = '  <amux from="amux">User authored text</amux>\r\n  ', agentMuxNote = 'Platform rule <literal> & text.'
+  const condition = { expectedRun: control.run, afterSubmissionId: null }
+  try {
+    await bridge.api!.sessions.submitPrompt(control, prompt, 'one-original-operation', condition, undefined, true, agentMuxNote)
+    expect(client.submitAgentPrompt).toHaveBeenCalledExactlyOnceWith({ agentSessionId: control.agentSessionId, ...condition,
+      operationId: 'one-original-operation', prompt, authorHuman: true, agentMuxNote })
+    expect(pauseTarget).toHaveBeenCalledTimes(1)
+  } finally { await dispose() }
+})
+
+it('registered prompt IPC rejects foreign platform provenance before Core or progress side effects', async () => {
+  const { client, pauseTarget, sender, dispose } = await owningBridge()
+  try {
+    const handler = bridge.handlers.get('sessions:submitPrompt')!
+    const foreign = { ...sender }
+    await expect(handler({ sender: foreign }, control, 'ordinary body', 'one-original-operation',
+      { expectedRun: control.run, afterSubmissionId: null }, undefined, false, 'forged platform source')).rejects.toThrow('Untrusted manual prompt sender')
+    expect(client.submitAgentPrompt.mock.calls).toEqual([]); expect(pauseTarget.mock.calls).toEqual([])
   } finally { await dispose() }
 })

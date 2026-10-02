@@ -17,6 +17,7 @@ import type {
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentPromptInputPlan,
+  AgentPromptMessageContent,
   AgentTerminalPromptDeliveryState,
   AgentTerminalPromptReadinessState
 } from './types.js'
@@ -25,6 +26,11 @@ const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 
 /** Bound the optional initial-composer observation; expiry never disables prompt input. */
 const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
+
+function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
+  return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
+    message.authorAgentSessionId, message.authorHuman === true])
+}
 
 /**
  * Details attached to readiness refusals are deliberately a small, machine-readable set of
@@ -108,10 +114,11 @@ export class AgentPromptSubmissionCoordinator {
     signal?: AbortSignal,
     allowUncertainTurn = false,
     renderSignal?: AbortSignal,
-    expectedInputByte?: number
-  ): Promise<void> {
+    expectedInputByte?: number,
+    message?: AgentPromptMessageContent
+  ): Promise<AgentPromptMessageContent | undefined> {
     try {
-      await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
+      return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
         let current = await this.deps.registry.refresh(session.agentSessionId, session.run)
         let currentRun = await this.deps.kernel.status(run.runId)
         this.deps.assertAgentRun(current, currentRun)
@@ -132,7 +139,11 @@ export class AgentPromptSubmissionCoordinator {
             if (!previous?.intent || !previous.submissionId || !sameRun(previous.intent.run, current.run)) {
               throw new AgentMuxError('The original prompt Input request cannot be confirmed. Its message and Run are kept; use the terminal while delivery is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
             }
-            if (previous.submissionId === submissionId && previous.intent.prompt !== prompt) {
+            if (previous.submissionId === submissionId && previous.intent.message === undefined && message !== undefined) {
+              throw new AgentMuxError('Original message source facts are unconfirmed. The original Input and healthy Agent are kept; use the terminal while its source is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+            }
+            if (previous.submissionId === submissionId && (previous.intent.prompt !== prompt ||
+                promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message))) {
               throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
             }
             if (unfinished) await this.publishDeliveryDegrade(current, {
@@ -143,7 +154,7 @@ export class AgentPromptSubmissionCoordinator {
             // request; a fresh cursor or a changed Provider plan cannot replace it.
             try {
               await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
-                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal)
+                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message)
             } catch (error) {
               const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
               if (previous.submissionId === submissionId ||
@@ -153,13 +164,14 @@ export class AgentPromptSubmissionCoordinator {
               // Actual Native rejected the remaining phase of the old intent. Its
               // accepted payload is kept as accepted; only a different message may proceed.
             }
-            if (previous.submissionId === submissionId) return
+            if (previous.submissionId === submissionId) return structuredClone(previous.intent.message)
             current = await this.deps.registry.refresh(session.agentSessionId, session.run)
             currentRun = await this.deps.kernel.status(run.runId)
             this.deps.assertAgentRun(current, currentRun)
           }
           await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte)
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message)
+          return structuredClone(message)
         } catch (error) {
           if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
             (previous?.submissionId === submissionId || previous &&
@@ -194,7 +206,8 @@ export class AgentPromptSubmissionCoordinator {
     signal?: AbortSignal,
     allowUncertainTurn = false,
     renderSignal?: AbortSignal,
-    expectedInputByte?: number
+    expectedInputByte?: number,
+    message?: AgentPromptMessageContent
   ): Promise<void> {
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       if (current.pendingInteraction) throw new AgentMuxError(
@@ -269,7 +282,8 @@ export class AgentPromptSubmissionCoordinator {
       const observedAt = Date.now()
       const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
         submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte,
-        intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan) },
+        intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan),
+          ...(message === undefined ? {} : { message: structuredClone(message) }) },
         acknowledged: false,
         ...(uncertainTurn ? { uncertainTurn: true } : {})
       }, ...(ended ? { terminalPromptReadiness: { ...current.terminalPromptReadiness!, consumedBySubmissionId: submissionId } } : {}),

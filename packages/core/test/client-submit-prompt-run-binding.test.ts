@@ -42,6 +42,7 @@ async function fixture(singlePhase = false) {
   const generic = defineAgentProvider({
     catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
     hook: template.hook,
+    planManagedHooks: template.planManagedHooks,
     buildArgs: (_prompt, args) => [...args]
   })
   const providerId = singlePhase ? generic.id : 'codex'
@@ -186,9 +187,10 @@ describe('conditional exact Run prompt admission', () => {
     const originalSubmit = h.inner.promptSubmission.submitInputPlan.bind(h.inner.promptSubmission)
     let acceptedSubmission: AgentMuxStoredAgentSession | undefined
     vi.spyOn(h.inner.promptSubmission, 'submitInputPlan').mockImplementation(async (...args) => {
-      await originalSubmit(...args)
+      const delivered = await originalSubmit(...args)
       acceptedSubmission = (await loadAgentSessions(h.store))[0]!
       await h.replace()
+      return delivered
     })
     await expect(h.client.submitAgentPrompt(h.input)).resolves.toBeUndefined()
     if (singlePhase) expect(acceptedSubmission?.promptCompletionAdmission?.submissionId).toBe('bound-operation')

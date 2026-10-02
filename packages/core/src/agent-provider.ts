@@ -314,7 +314,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
           })
         )
       }
-      const resumePrompt = context.prompt?.trim() || undefined
+      const resumePrompt = context.prompt?.trim() ? context.prompt : undefined
       // 恢复路径同理：`post-launch-only` 的 CLI 在续跑时也没有随启动带 prompt 的入口。
       // 这里必须与 buildLaunch 判得一样——两条路对同一个「送得到吗」的问题给不同答案，
       // 就是下一个只在其中一条路上出现的静默丢失。
