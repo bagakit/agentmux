@@ -757,7 +757,7 @@ export class BrowserViewManager {
     return [...pids]
   }
 
-  async create(id: string, rawUrl: string, workspaceId: string | null = null): Promise<BrowserSnapshot> {
+  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
     // A repeated recovery handshake addresses this owner, not a new navigation/profile choice.
     const existing = this.entries.get(id)
@@ -767,7 +767,7 @@ export class BrowserViewManager {
     }
     if (this.releasedEntries.has(id)) return await this.restore(id, { workspaceId })
     const url = normalizeBrowserUrl(rawUrl)
-    const profileId = this.profiles.defaultProfileId()
+    const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
     return await this.createEntry(id, url, profileId, 'responsive', workspaceId)
   }
 

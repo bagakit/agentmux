@@ -27,9 +27,9 @@ import {
 import { assertUnreachableSurface, isSessionSurface } from './workbench-surface-kinds'
 
 /**
- * 一个 browser 面**存到盘上的**最小可再实例化子集：browserId + url（+ title 供加载完成前
+ * 一个 browser 面**存到盘上的**最小可再实例化子集：browserId + Profile 资源身份 + url（+ title 供加载完成前
  * 先画个标签），以及可选的稳定书签来源 path/binary。整个活体 `BrowserSnapshot` 的其余字段（navigationId/loading/canGoBack/canGoForward/
- * driving/appLinkPrompt/profileId/viewport/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
+ * driving/appLinkPrompt/viewport/error/id）都是**每次运行**的瞬时事实，不进盘——它们由冷启动
  * 重建 WebContentsView 那一刻的真快照补回（见 store 启动路径的 browser 复活循环 + `reduceBrowserEvent`）。
  *
  * 为什么是这个形状而不是整面剥离：旧决定「browser 面整面剥离」的顾虑本身是对的——硬存整个活体结构
@@ -43,6 +43,7 @@ export type PersistedBrowserSurface = {
   kind: 'browser'
   workspaceId: string
   browserId: string
+  profileId?: string
   url: string
   title: string
   bookmarkOrigin?: BrowserWorkbenchSurface['bookmarkOrigin']
@@ -89,7 +90,7 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {}),
     // 瞬时位：由 store 启动路径 create 出真 WebContentsView 后的快照经 applyBrowserEvent 覆盖。
     navigationId: '',
-    profileId: '',
+    profileId: surface.profileId ?? '',
     loading: false,
     canGoBack: false,
     canGoForward: false,
@@ -107,6 +108,7 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     kind: 'browser',
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
+    ...(surface.profileId ? { profileId: surface.profileId } : {}),
     url: surface.url,
     title: surface.title,
     ...(surface.bookmarkOrigin ? { bookmarkOrigin: surface.bookmarkOrigin } : {})
@@ -474,7 +476,7 @@ function persistedSurfaceSurvives(
       // 瞬时运行时位）会 ship 一个没有后端 WebContentsView 的死面板。被推翻的不是那个顾虑，而是它的
       // **前提**「冷启动没有一条能把持久 browser 复活成可用页的生命周期」：现在 store 启动路径补上了
       // `api.browser.create` 接缝（见其 browser 复活循环），前提不再成立。故这里放行 browser 面，但
-      // 存盘只留最小可再实例化子集（`reduceBrowserSurfaceForPersistence`：browserId+url+title），瞬时/
+      // 存盘只留最小可再实例化子集（`reduceBrowserSurfaceForPersistence`：browserId+profileId+url+title），瞬时/
       // 敏感位一律不进盘。浏览历史这一档敏感度按用户决定接受，与逐字持久化的 file path 同一档。
       // create 失败不留死壳：那条由 store 复活循环删 Region + 报错兜住（旧顾虑在那里被真正回答）。
       return true

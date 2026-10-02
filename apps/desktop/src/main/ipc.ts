@@ -963,8 +963,8 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
-  handle('browser:create', async (id: string, url: string, workspaceId: unknown) =>
-    await browsers.create(id, url, verifiedBrowserWorkspace(config.workspaces, workspaceId)))
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string) =>
+    await browsers.create(id, url, verifiedBrowserWorkspace(config.workspaces, workspaceId), rememberedProfileId))
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))

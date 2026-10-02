@@ -44,7 +44,7 @@ import { create } from 'zustand'
 import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
-import { restoredSurveyCollection, restoredSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection } from './lib/survey-workface'
+import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
@@ -1945,7 +1945,7 @@ type PersistedAppState = {
   viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
-  surveyZoneSelection?: SurveyZoneSelection | null
+  surveyZoneSelection?: PersistedSurveyZoneSelection | null
   surveyCollectedZones?: Record<string, true>
   surveyExplorationNames?: Record<string, string>
   noteBlockSelections?: Record<string, NoteBlockTarget>
@@ -2187,6 +2187,7 @@ function partializeAppState(state: AppState): PersistedAppState {
   const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
   const projection: PersistedAppState = {
     ...presentation,
+    surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
     documents: Object.fromEntries(Object.entries(documents).filter(([key]) => dirtyDocuments[key])),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
@@ -2605,7 +2606,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void saveWorkbenchSelection(false)
   },
   surveyToolsOpen: false,
-  setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection }) },
+  setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection: persistedSurveyZoneSelection(surveyZoneSelection) }) },
   setSurveyZoneCollected(zoneId, collected) {
     const state = get()
     if ((state.surveyCollectedZones[zoneId] === true) === collected) return true
@@ -3089,7 +3090,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           browserIndex += 1
           set({ startupProgress: { step: 'browsers', current: browserIndex, total: browserSurfaces.length } })
           try {
-            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId)
+            const browser = await api.browser.create(surface.browserId, surface.url, surface.workspaceId, surface.profileId || undefined)
             get().applyBrowserEvent({ type: 'updated', browser })
           } catch (error) {
             // Failure to acquire a native owner is not a user close. Keep the current durable Region
@@ -7866,6 +7867,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   skipHydration: true,
   onRehydrateStorage: () => (_state, error) => {
     if (error) persistHydrationError = error
+  },
+  merge: (persisted, current) => {
+    const state = { ...current, ...persisted as Partial<AppState> }
+    return { ...state, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
   },
   partialize: partializeAppState
 }))
