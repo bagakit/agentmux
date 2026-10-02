@@ -1,11 +1,15 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+// @vitest-environment happy-dom
+import { webcrypto } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { access, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 import { parseAgentMuxControlRequest, type ExecutionHost } from '@agentmux/core'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
 import { directoryIdentity, homeZoneId, projectResourceWorkspace, spatialSources, workspaceZoneId } from '../src/shared/space-addresses'
@@ -14,6 +18,10 @@ import { executeSpatialControl, spatialCatalog, type SpatialControlPorts, type S
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { WorktreeService } from '../src/main/worktree-service'
+import { api } from '../src/renderer/src/lib/api'
+import { useAppStore, prepareRendererUpdate } from '../src/renderer/src/store'
+import { createWorkbenchTab, addWorkbenchRegion } from '../src/renderer/src/lib/workbench-tabs'
+import { DesktopSpatialPersistence, desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 
 const exec = promisify(execFile)
 const roots: string[] = []
@@ -169,4 +177,91 @@ describe('Topic and Mote placement retain the explicit execution resource', () =
       displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'display-group' })
     expect(result.agent).toMatchObject({ cwd: resource.path, initialPrompt: 'confirmed', createOperationId: originalRequestId })
   })
+})
+
+describe('durable last-region spatial moves', () => {
+  it.each([[false, false], [false, true], [true, false], [true, true]] as const)(
+    'records only the completed empty-source Tab removal (source siblings=%s, destination split=%s)', async (siblings, split) => {
+      vi.stubGlobal('crypto', webcrypto)
+      const original = useAppStore.getState()
+      let dispose: (() => void) | undefined
+      const root = await mkdtemp(join(tmpdir(), 'amux-spatial-move-')); roots.push(root)
+      const owner = new AgentMuxSpatialStateStore(join(root, 'spatial.json'))
+      const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: 'original-agent', kind: 'agent',
+        providerId: 'codex', executorId: 'fixture', hostId: 'execution', workspacePath: _hygiene_fixturePath("resource"), label: 'Original',
+        capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+        createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, latestOutputBytes: 0, processState: 'running',
+        status: { state: 'running', source: 'run-process', observedAt: 1 },
+        control: { kind: 'agent', agentSessionId: 'original-agent', hostId: 'execution', run: { runId: 'original-run' } } }
+      let source = createWorkbenchTab('source', { regionId: 'moving', kind: 'agent', phase: 'attached', workspaceId: repo.id, sessionId: session.id })
+      if (siblings) source = addWorkbenchRegion(source, 'moving', 'right', { regionId: 'sibling', kind: 'file', workspaceId: repo.id, path: 'kept.md' })
+      const target = createWorkbenchTab('target', { regionId: 'target-anchor', kind: 'launcher', workspaceId: display.id })
+      const duplicate = createWorkbenchTab('duplicate', { regionId: 'duplicate-region', kind: 'agent', phase: 'attached', workspaceId: display.id, sessionId: session.id })
+      const unknown = createWorkbenchTab('unknown', { regionId: 'unknown-file', kind: 'file', workspaceId: display.id, path: 'unknown-observation.md' })
+      const tabs = { source, target, duplicate, unknown }, layouts = {
+        [repo.id]: createWorkspaceLayout('source-group', ['source']),
+        [display.id]: createWorkspaceLayout('target-group', ['target', 'duplicate', 'unknown']) }
+      const initialGraph = desktopSpatialGraph({ config: config(), sessions: [session], tabs, layouts, spaceZoneBindings: {}, spatialRequests: {} }, [])
+      await owner.commit({ expectedRevision: 0, graph: initialGraph })
+      try {
+        localStorage.clear()
+        useAppStore.setState({ ...original, config: null, tabs: {}, layouts: {}, spaceZoneBindings: {}, spatialRequests: {} }, true)
+        vi.spyOn(api.config, 'get').mockResolvedValue(config())
+        vi.spyOn(api.providers, 'list').mockResolvedValue([])
+        vi.spyOn(api.demands, 'list').mockResolvedValue([])
+        vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+        vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+        vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.read())
+        vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
+        vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
+        const start = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop')
+        const removed = vi.spyOn(DesktopSpatialPersistence.prototype, 'removeEntity')
+        dispose = await useAppStore.getState().initialize()
+        // Loss of one client observation is unknown, rather than an explicit entity removal.
+        useAppStore.setState({ tabs: { source, target, duplicate }, layouts })
+        await prepareRendererUpdate()
+        const before = await owner.read()
+        expect(before!.graph.tabs.some(tab => tab.tabId === 'unknown')).toBe(true)
+        const failed = await useAppStore.getState().executeControl(parseAgentMuxControlRequest({ schemaVersion: 5,
+          requestId: 'move:failed', operation: 'space.mv', fromRegionId: 'moving', expectedAgentSessionId: session.id,
+          destination: { regionId: 'duplicate-region' }, focus: false }))
+        expect(failed).toMatchObject({ outcome: 'unknown', issues: [{ code: 'SPACE_REGION_OCCUPIED' }] })
+        expect(await owner.read()).toEqual(before)
+        expect(removed).not.toHaveBeenCalled()
+        const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'move:completed', operation: 'space.mv',
+          fromRegionId: 'moving', expectedAgentSessionId: session.id,
+          destination: { regionId: 'target-anchor', ...(split ? { split: 'right' } : {}) }, focus: false })
+        const moved = await useAppStore.getState().executeControl(request)
+        expect(moved).toMatchObject({ outcome: 'moved', from: { tabId: 'source', regionId: 'moving' },
+          to: { tabId: 'target', regionId: 'moving' }, agent: { agentSessionId: session.id, runId: 'original-run', cwd: _hygiene_fixturePath("resource") },
+          save: { diskDurability: 'confirmed' } })
+        await prepareRendererUpdate()
+        const saved = await owner.read()
+        expect(() => desktopWorkbenchFromSpatial(saved!.graph, id => { throw new Error(`Original descriptor is unavailable for ${id}`) })).not.toThrow()
+        const durable = desktopWorkbenchFromSpatial(saved!.graph, id => { throw new Error(`Original descriptor is unavailable for ${id}`) })
+        expect(removed.mock.calls).toEqual(siblings ? [] : [['source']])
+        expect(Object.hasOwn(durable.tabs, 'source')).toBe(siblings)
+        expect(saved!.graph.tabs.some(tab => tab.tabId === 'source')).toBe(siblings)
+        expect(Object.hasOwn(saved!.graph.resources, 'tab:source')).toBe(siblings)
+        expect(Object.hasOwn(saved!.graph.tabLayouts, 'source')).toBe(siblings)
+        expect(durable.tabs.unknown).toEqual(unknown)
+        expect(durable.tabs.duplicate).toEqual(duplicate)
+        if (siblings) expect(durable.tabs.source!.regions).toEqual({ sibling: source.regions.sibling })
+        expect(saved!.graph.regions.find(region => region.regionId === 'moving')).toMatchObject({ tabId: 'target',
+          agentSessionId: session.id, runId: 'original-run', execution: { hostId: 'execution', cwd: _hygiene_fixturePath("resource") } })
+        expect(durable.tabs.target!.regions.moving).toMatchObject({ kind: 'agent', sessionId: session.id })
+        const replay = await useAppStore.getState().executeControl(request)
+        expect(replay).toMatchObject({ outcome: 'unknown', to: { tabId: 'target', regionId: 'moving' },
+          issues: [{ code: 'SPACE_PLACEMENT_UNKNOWN' }] })
+        expect(await owner.read()).toEqual(saved)
+        expect(removed.mock.calls).toEqual(siblings ? [] : [['source']])
+        expect(useAppStore.getState().sessions).toEqual([session])
+        expect(start).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+      } finally {
+        dispose?.()
+        vi.restoreAllMocks()
+        useAppStore.setState(original, true)
+        vi.unstubAllGlobals()
+      }
+    })
 })
