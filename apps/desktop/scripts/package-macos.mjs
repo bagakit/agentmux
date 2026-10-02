@@ -32,6 +32,7 @@ import {
   packageIdentityPath,
   readPackageIdentity
 } from './package-identity.mjs'
+import { preflightMacosSigning, signMacosApplication, verifyMacosSigning } from './macos-signing.mjs'
 
 const PRODUCT_NAME = 'AgentMux'
 const BUNDLE_ID = 'dev.agentmux.desktop'
@@ -1030,6 +1031,8 @@ async function main() {
   assert(!process.argv.includes('--ui-only') || installRequested, '--ui-only requires --install.')
   assert(process.platform === 'darwin', 'macOS packaging must run on macOS.')
   assert(process.arch === 'arm64', `AgentMux currently packages only darwin-arm64, not darwin-${process.arch}.`)
+  const signingPlan = await preflightMacosSigning()
+  if (signingPlan.kind === 'ad-hoc') process.stderr.write('Development ad hoc candidate: permission continuity across updates is unconfirmed. The existing App and Runs remain unchanged during packaging.\n')
   const initialSource = await sourceIdentity()
   assert(
     initialSource.status === '',
@@ -1056,8 +1059,8 @@ async function main() {
     await verifyThirdPartyNotices(stagedApp)
     await auditBundleSymlinks(stagedApp)
     await auditRuntimeReferences(stagedApp, temporaryRoot)
-    await run('codesign', ['--force', '--deep', '--sign', '-', stagedApp], { capture: true })
-    await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', stagedApp], { capture: true })
+    await signMacosApplication(stagedApp, signingPlan)
+    const signature = await verifyMacosSigning(stagedApp, signingPlan)
 
     await createDmg(stagedApp, stagedDmg, temporaryRoot)
     await verifyDmg(stagedDmg, temporaryRoot, initialSource)
@@ -1084,7 +1087,9 @@ async function main() {
     process.stdout.write([
       `app=${outputApp}`,
       `dmg=${outputDmg}`,
-      'signature=adhoc-local-candidate',
+      `signature=${signature.kind === 'certificate' ? 'certificate-local-candidate' : 'adhoc-development-candidate'}`,
+      `signature_team=${signature.teamId ?? 'none'}`,
+      'authorization_continuity=unverified',
       `source_commit=${initialSource.commit}`,
       `source_tree=${initialSource.tree}`,
       'source_status=clean',

@@ -64,6 +64,7 @@
     "ws": "8.21.3"
   },
   "devDependencies": {
+    "@electron/osx-sign": "2.7.1",
     "@types/luxon": "3.7.6",
     "@types/mdast": "^4.0.4",
     "@types/node": "^24.0.0",
