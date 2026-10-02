@@ -1,0 +1,8 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client", "vitest/globals"] },
+  "include": ["../../../src/**/*.ts", "../../../src/**/*.tsx", "../../../*.ts",
+    "../../../test/focus-activity-certainty.test.tsx", "../../../test/helpers/client-ui-render.tsx",
+    "../../../../../packages/core/test/activity-certainty.test.ts",
+    "../../../../../packages/core/test/fixtures/activity-certainty-client.ts"]
+}

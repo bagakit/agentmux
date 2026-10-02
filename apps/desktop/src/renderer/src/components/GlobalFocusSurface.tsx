@@ -2,7 +2,7 @@ import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusProjectionSelector, type FocusBucket, type FocusContext } from '../lib/focus-context'
+import { createFocusProjectionSelector, focusNeutralGroupSummary, type FocusBucket, type FocusContext } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
@@ -153,7 +153,8 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     observer.observe(rows)
     return () => observer.disconnect()
   }, [visible, hasBoardLanes, disconnectedExpanded])
-  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: 'Idle / Recovery', icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
+  const neutralSummary = focusNeutralGroupSummary(matching.filter(row => columnFor(row) === 'idle'))
+  const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: neutralSummary.label, icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
   const buckets = Object.keys(bucketMeta) as FocusColumn[]
   const projectOptions = [...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()]
   const filterSummary = `${projectOptions.find(option => option.id === project)?.name ?? 'All projects'} · ${bucketFilter === 'all' ? 'All states' : bucketMeta[bucketFilter].label}`
@@ -165,9 +166,12 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     return <>{heading}<FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
       buckets.map((bucket, index) => {
         const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[index]!
-        return <section className="focus-context-group global-agents-group" aria-label={meta.label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} style={{ '--focus-card-columns': layout.columns[index] ?? 1, '--focus-group-width': `${layout.widths[index] ?? 32}px` } as CSSProperties} key={bucket}>
+        const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
+        const label = neutral?.label ?? meta.label
+        const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
+        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} style={{ '--focus-card-columns': layout.columns[index] ?? 1, '--focus-group-width': `${layout.widths[index] ?? 32}px` } as CSSProperties} key={bucket}>
           {bucket === 'disconnected' ? <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><FocusDisconnectedGroup contexts={grouped} laneId={lane.id} onReveal={openDisconnected} /></header> : <>
-            <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{meta.label}</strong><span>{grouped.length}</span></span></header>
+            <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{label}</strong><span>{grouped.length}</span></span></header>
             <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
           </>}
         </section>

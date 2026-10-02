@@ -45,7 +45,7 @@ function agentSession(overrides: Partial<Extract<SessionSnapshot, { kind: 'agent
 }
 
 describe('桌面消费者读同一份观察合同：三轴不折叠', () => {
-  it('进程 alive + semantic idle + readiness pending 从 SessionSnapshot 端到端各自可判', () => {
+  it('进程 alive + semantic unknown + readiness pending 从 SessionSnapshot 端到端各自可判', () => {
     const pending = observeAgentSession(
       agentSession({
         processState: 'running',
@@ -62,7 +62,7 @@ describe('桌面消费者读同一份观察合同：三轴不折叠', () => {
       NOW
     )
     expect(pending.process).toBe('running')
-    expect(pending.semantic).toBe('idle')
+    expect(pending.semantic).toBe('unknown')
     expect(pending.readiness).toBe('pending')
   })
 
@@ -75,12 +75,12 @@ describe('桌面消费者读同一份观察合同：三轴不折叠', () => {
     expect(active.readiness).toBe('ready')
   })
 
-  it('迟到活动声明过窗口后落回 idle 且标 stale——迟到事件不把它冒充成还在干活', () => {
+  it('迟到活动声明过窗口后落回 unknown 且标 stale——迟到事件不把它冒充成还在干活', () => {
     const stale = observeAgentSession(
       agentSession({ status: { state: 'working', source: 'native-hook', observedAt: NOW } }),
       NOW + 16 * 60_000
     )
-    expect(stale.semantic).toBe('idle')
+    expect(stale.semantic).toBe('unknown')
     expect(stale.stale).toBe(true)
   })
 
