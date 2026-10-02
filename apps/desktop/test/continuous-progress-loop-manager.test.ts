@@ -1,5 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { observeAgent } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, observeAgent } from '@agentmux/core'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -18,7 +18,9 @@ describe('ContinuousProgressLoopManager', () => {
       tickId, now
     })
     const send = async () => {
-      expect((await store.load())[0]?.pendingCompletion?.id).toBe(JSON.stringify(['r', completedAt]))
+      expect((await store.load())[0]?.pendingCompletion).toMatchObject({
+        id: JSON.stringify(['r', completedAt]), prompt: 'next', agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE
+      })
       calls++
       return 'sent' as const
     }

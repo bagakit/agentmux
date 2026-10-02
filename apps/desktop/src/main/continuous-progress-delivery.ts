@@ -10,12 +10,19 @@ export async function deliverContinuousProgress(
   const decision = decideContinuousProgress(observation)
   if (!isCurrent() || !loop.pendingCompletion) return 'skipped'
   if (loop.lastOutcome !== 'unknown' && (decision.kind !== 'send' || decision.completionId !== loop.pendingCompletion.id)) return 'skipped'
-  const condition = validateAgentPromptCondition(loop.pendingCompletion.condition)
+  const pending = loop.pendingCompletion
+  if (typeof pending.prompt !== 'string' || !pending.prompt.trim() ||
+      typeof pending.agentMuxNote !== 'string' || !pending.agentMuxNote.trim()) {
+    throw new AgentMuxError('The original automatic message content is unconfirmed. Its operation and Agent are kept; manual input remains available.',
+      'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
+  }
+  const condition = validateAgentPromptCondition(pending.condition)
   try {
     await runtime.submitPrompt({ kind: 'agent', agentSessionId: observation.session.agentSessionId,
-      hostId: observation.session.hostId, run: condition.expectedRun }, loop.prompt, operationId, condition,
-    { completionId: loop.pendingCompletion.id,
-      ...(loop.pendingCompletion.inputByte !== undefined ? { inputByte: loop.pendingCompletion.inputByte } : {}), isCurrent, signal })
+      hostId: observation.session.hostId, run: condition.expectedRun }, pending.prompt, operationId, condition,
+    { completionId: pending.id,
+      ...(pending.inputByte !== undefined ? { inputByte: pending.inputByte } : {}), isCurrent, signal },
+    undefined, undefined, pending.agentMuxNote)
     return 'sent'
   } catch (error) {
     if (error instanceof AgentMuxError && (error.code === 'AGENT_COMPLETION_CHANGED' || error.code === 'AGENT_PROMPT_CANCELLED')) return 'skipped'

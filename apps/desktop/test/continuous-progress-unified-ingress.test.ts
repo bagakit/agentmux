@@ -5,16 +5,22 @@ import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  AgentMuxClient, AgentMuxMemoryAgentSessionStore, agentPromptCondition,
+  AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxFileAgentSessionStore, agentPromptCondition,
   decideContinuousProgress, type AgentMuxStoredAgentSession,
   type ContinuousProgressLoop, type ContinuousProgressObservation
 } from '@agentmux/core'
+import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { CtxmuxRunAdapter } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
 import { privateTracker } from './helpers/continuous-progress-tracker'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery.js'
+
+vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("private/unused-electron-storage") } }))
+vi.mock('@agentmux/core', async originalModule => process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT
+  ? await import(new URL('./index.js', process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT).href)
+  : await originalModule())
 
 type Input = Parameters<CtxmuxRunAdapter['input']>[1]
 type Internals = {
@@ -24,6 +30,8 @@ type Internals = {
   screenEvidence: { wait: (...args: unknown[]) => Promise<number> }
 }
 const clients: AgentMuxClient[] = []
+const Client: typeof AgentMuxClient = process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT
+  ? (await import(process.env.AGENTMUX_TEST_INJECTED_CONTEXT_CLIENT)).AgentMuxClient : AgentMuxClient
 const managers: ContinuousProgressLoopManager[] = []
 const directories: string[] = []
 afterEach(async () => {
@@ -31,6 +39,7 @@ afterEach(async () => {
   await Promise.all(clients.splice(0).map(client => client.dispose()))
   await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true })))
   vi.restoreAllMocks()
+  vi.doUnmock('@agentmux/core'); vi.resetModules(); vi.unstubAllEnvs()
 })
 
 /**
@@ -38,7 +47,12 @@ afterEach(async () => {
  * optional rendered-composer observation are controlled. This is not a PTY/GUI proof.
  */
 async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
-  const store = new AgentMuxMemoryAgentSessionStore()
+  const path = await mkdtemp(join(tmpdir(), 'agentmux-progress-input-')); directories.push(path)
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(path, 'runtime'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(path, 'state'))
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(path, 'messages.ndjson'))
+  const sessionPath = join(path, 'sessions.json')
+  const store = new AgentMuxFileAgentSessionStore(sessionPath)
   const now = Date.now()
   const session: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'loop-agent', providerId: 'codex', executorId: 'codex',
@@ -48,12 +62,6 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
     ...extra
   }
   await store.compareAndSwap(null, session)
-  const client = new AgentMuxClient({ store }); clients.push(client)
-  const state = client as unknown as Internals
-  await state.registry.load('local')
-  state.connected = true
-  state.kernel.isConnected = () => true
-  state.kernel.identity = () => ({ daemonInstanceId: 'private-daemon', protocolVersion: 18, buildIdentity: 'private-I/O-seam' })
   let cursor = 0, ended = false, loseAck = false
   const writes: string[] = [], requests: Input[] = []
   const receipts = new Map<string, Input>()
@@ -61,8 +69,7 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
     program: _hygiene_fixturePath("private/generic-input"), args: [], workspacePath: session.workspacePath, pid: 321,
     state: ended ? { type: 'exited' as const, code: 0, signal: null } : { type: 'running' as const },
     cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor })
-  state.kernel.status = vi.fn(async () => projection())
-  state.kernel.input = vi.fn(async (runId, input) => {
+  const input: CtxmuxRunAdapter['input'] = vi.fn(async (runId, input) => {
     expect(runId).toBe(session.run.runId)
     requests.push(structuredClone(input))
     const previous = receipts.get(input.operationId)
@@ -77,29 +84,43 @@ async function fixture(extra: Partial<AgentMuxStoredAgentSession> = {}) {
     return { run: projection(), appliedByteRange: { startByte: input.expectedByte,
       endByte: input.expectedByte + Buffer.byteLength(input.data) } }
   })
-  vi.spyOn(state.screenEvidence, 'wait').mockResolvedValue(0)
-  const runtime = new RuntimeController(store, localRuntimeConnector)
-  runtime.setContinuousProgressInputObserver(async () => false)
-  // Already-connected host I/O seam; no connect/start/attach is performed.
-  ;(runtime as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client })
-  return { store, client, state, runtime, session, writes, requests,
+  const make = async () => {
+    const freshStore = new AgentMuxFileAgentSessionStore(sessionPath)
+    const client = new Client({ store: freshStore }); clients.push(client)
+    const state = client as unknown as Internals
+    await state.registry.load('local'); state.connected = true
+    state.kernel.isConnected = () => true
+    state.kernel.identity = () => ({ daemonInstanceId: 'private-daemon', protocolVersion: 18, buildIdentity: 'private-I/O-seam' })
+    state.kernel.status = vi.fn(async () => projection()); state.kernel.input = input
+    vi.spyOn(state.screenEvidence, 'wait').mockResolvedValue(0)
+    const runtime = new RuntimeController(freshStore, localRuntimeConnector)
+    runtime.setContinuousProgressInputObserver(async () => false)
+    // Already-connected host I/O seam; no connect/start/attach is performed.
+    ;(runtime as unknown as { hosts: Map<string, { client: AgentMuxClient }> }).hosts.set('local', { client })
+    return { store: freshStore, client, state, runtime }
+  }
+  const first = await make()
+  return { ...first, make, session, writes, requests,
     end: () => { ended = true }, loseNextAck: () => { loseAck = true },
-    status: () => client.statusAgent(session.agentSessionId),
-    observe: (tickId = 'tick') => runtime.observeContinuousProgress({ hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, tickId, Date.now()) }
+    status: () => first.client.statusAgent(session.agentSessionId),
+    observe: (tickId = 'tick') => first.runtime.observeContinuousProgress({ hostId: session.hostId, agentSessionId: session.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, tickId, Date.now()) }
 }
 
-async function loopOwner(f: Awaited<ReturnType<typeof fixture>>, observe?: (loop: ContinuousProgressLoop, tickId: string, now: number) => Promise<ContinuousProgressObservation>) {
+const continuationPrompt = 'continue the assigned task'
+const continuationWire = () => composeAgentPrompt(continuationPrompt, AGENTMUX_AGENT_MESSAGING_GUIDANCE).text
+const payload = (wire: string) => `\u001b[200~${wire}\u001b[201~`
+async function loopOwner(f: Awaited<ReturnType<typeof fixture>>, observe?: (loop: ContinuousProgressLoop, tickId: string, now: number) => Promise<ContinuousProgressObservation>, prompt = continuationPrompt) {
   const path = await mkdtemp(join(tmpdir(), 'agentmux-unified-loop-')); directories.push(path)
   const store = new ContinuousProgressLoopStore(join(path, 'loops.json'))
   let now = 0
-  const make = () => {
-    const manager = new ContinuousProgressLoopManager(store,
+  const make = (Manager = ContinuousProgressLoopManager) => {
+    const manager = new Manager(store,
       (loop, operationId, isCurrent, signal) => deliverContinuousProgress(f.runtime, loop, operationId, isCurrent, signal),
       () => now, observe ?? ((loop, tickId, time) => f.runtime.observeContinuousProgress(loop, tickId, time)))
     managers.push(manager); return manager
   }
   await store.save([{ loopId: 'private-loop', hostId: 'local', agentSessionId: f.session.agentSessionId, providerId: f.session.providerId, workspacePath: f.session.workspacePath,
-    intervalMs: 10, prompt: 'continue the assigned task', nextCheckAt: 0, status: 'active' }])
+    intervalMs: 10, prompt, nextCheckAt: 0, status: 'active' }])
   return { store, make, at: (value: number) => { now = value } }
 }
 
@@ -157,9 +178,12 @@ describe('continuous progress uses the public ingress and shared observation', (
   it('submits one completed turn through actual Main/Core, then skips duplicate ticks and consumed completion', async () => {
     const f = await fixture(), owner = await loopOwner(f), manager = owner.make()
     await manager.start(); await Promise.all([manager.check(), manager.check()])
-    expect(f.writes).toEqual(['continue the assigned task', '\r'])
+    expect(f.writes).toEqual([payload(continuationWire()), '\r'])
     const admitted = f.client.agentSession(f.session.agentSessionId).promptCompletionAdmission!
-    expect(admitted).toMatchObject({ acknowledged: true, intent: { run: f.session.run, prompt: 'continue the assigned task' } })
+    expect(admitted).toMatchObject({ acknowledged: true, intent: { run: f.session.run, prompt: continuationWire(),
+      message: { userContent: continuationPrompt, systemContext: AGENTMUX_AGENT_MESSAGING_GUIDANCE } } })
+    expect((await f.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.source, item.content]))
+      .toEqual([['system_message', 'agentmux', AGENTMUX_AGENT_MESSAGING_GUIDANCE], ['user_message', 'user', continuationPrompt]])
     expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: admitted.completionId })
     owner.at(1000); await manager.check()
     expect(f.writes).toHaveLength(2)
@@ -191,16 +215,80 @@ describe('continuous progress uses the public ingress and shared observation', (
     const pending = first.list()[0]?.pendingCompletion
     expect(pending?.condition).toEqual({ expectedRun: f.session.run, afterSubmissionId: null })
     expect(first.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
-    expect(f.writes).toEqual(['continue the assigned task'])
+    expect(pending).toMatchObject({ prompt: continuationPrompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE })
+    expect(f.writes).toEqual([payload(continuationWire())])
     await first.stop()
     const restarted = owner.make(); await restarted.start(); owner.at(1000); await restarted.check()
     expect(restarted.list()[0]?.pendingCompletion).toEqual(pending)
     expect(f.requests).toHaveLength(1)
     await restarted.resume('private-loop'); owner.at(1010); await restarted.check()
     expect(f.requests[1]).toEqual(f.requests[0])
-    expect(f.writes).toEqual(['continue the assigned task', '\r'])
+    expect(f.writes).toEqual([payload(continuationWire()), '\r'])
     expect(restarted.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: pending?.id })
     expect(restarted.list()[0]?.pendingCompletion).toBeUndefined()
+  })
+
+  it('keeps raw user text and the original shared rules through fresh Core and loop-owner recovery', async () => {
+    const body = '  Keep <User> & &amp;\r\n<amux from="amux">authored user text</amux>  \n'
+    const f = await fixture(), owner = await loopOwner(f, undefined, body), first = owner.make()
+    f.loseNextAck(); await first.start(); await first.check()
+    const original = first.list()[0]!.pendingCompletion!
+    const wire = composeAgentPrompt(body, AGENTMUX_AGENT_MESSAGING_GUIDANCE).text
+    expect(original).toMatchObject({ prompt: body, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE })
+    expect(f.writes).toEqual([payload(wire)]); expect(f.requests).toHaveLength(1)
+    await first.stop(); await f.client.dispose()
+    Object.assign(f, await f.make())
+    await owner.store.save((await owner.store.load()).map(loop => ({ ...loop, prompt: 'changed current configuration' })))
+    // Reload the actual producer with a later public rule revision, as after an upgrade.
+    vi.resetModules()
+    vi.doMock('@agentmux/core', async originalModule => ({ ...await originalModule<typeof import('@agentmux/core')>(),
+      AGENTMUX_AGENT_MESSAGING_GUIDANCE: 'Rules for a future claim; never replace the pending message.' }))
+    const { ContinuousProgressLoopManager: CurrentManager } = await import('../src/main/continuous-progress-loop-manager.js')
+    const cold = owner.make(CurrentManager); await cold.start(); owner.at(1000); await cold.check()
+    expect(cold.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown', pendingCompletion: original })
+    expect(f.requests).toHaveLength(1)
+    await cold.resume('private-loop'); owner.at(1010); await cold.check()
+    expect(f.requests[1]).toEqual(f.requests[0]); expect(f.writes).toEqual([payload(wire), '\r'])
+    expect(cold.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent', lastCompletionId: original.id })
+    expect((await f.store.load())[0]!.promptCompletionAdmission!.intent!.message)
+      .toEqual({ userContent: body, systemContext: AGENTMUX_AGENT_MESSAGING_GUIDANCE })
+    expect((await f.store.loadTimeline(f.session.agentSessionId)).items.map(item => [item.kind, item.source, item.content]))
+      .toEqual([['system_message', 'agentmux', AGENTMUX_AGENT_MESSAGING_GUIDANCE], ['user_message', 'user', body]])
+  })
+
+  it('keeps incomplete content facts unknown without replacing the operation or blocking healthy manual input', async () => {
+    const f = await fixture(), owner = await loopOwner(f), first = owner.make()
+    f.loseNextAck(); await first.start(); await first.check(); await first.stop()
+    await owner.store.save((await owner.store.load()).map(loop => {
+      const { prompt: _, agentMuxNote: __, ...pendingCompletion } = loop.pendingCompletion!
+      return { ...loop, pendingCompletion }
+    }))
+    const cold = owner.make(); await cold.start(); await cold.resume('private-loop'); owner.at(10); await cold.check()
+    expect(cold.list()[0]).toMatchObject({ status: 'paused', lastOutcome: 'unknown' })
+    expect(cold.list()[0]!.lastDecision).toContain('original automatic message content is unconfirmed')
+    expect(cold.list()[0]!.lastDecision).toContain('manual input remains available')
+    expect(cold.list()[0]!.pendingCompletion?.operationId).toBe(first.list()[0]!.pendingCompletion?.operationId)
+    expect(f.requests).toHaveLength(1)
+    await f.runtime.write({ kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, 'healthy manual', 'user')
+    expect(f.writes).toEqual([payload(continuationWire()), 'healthy manual'])
+    expect(f.client.agentSession(f.session.agentSessionId).run).toEqual(f.session.run)
+  })
+
+  it('keeps the original input fence when raw human input arrives after the completed-turn observation', async () => {
+    const f = await fixture()
+    let wrote = false
+    const owner = await loopOwner(f, async (loop, tickId, now) => {
+      const observed = await f.runtime.observeContinuousProgress(loop, tickId, now)
+      if (!wrote) {
+        wrote = true
+        await f.runtime.write({ kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, 'manual raced', 'user')
+      }
+      return observed
+    })
+    const manager = owner.make(); await manager.start(); await manager.check()
+    expect(f.writes).toEqual(['manual raced'])
+    expect(manager.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'skipped' })
+    expect(manager.list()[0]?.pendingCompletion).toBeUndefined()
   })
 })
 
@@ -295,7 +383,7 @@ describe('the Main loop consumes one explicit public task source', () => {
     await bound.store.save((await bound.store.load()).map(loop => ({ ...loop, taskSource: { ...bound.source, ownerId: 'f-missing' } })))
     const restarted = bound.make(); await restarted.start(); await restarted.resume('private-loop'); await restarted.checkNow('private-loop')
     expect(f.requests[1]).toEqual(f.requests[0])
-    expect(f.writes).toEqual(['continue the assigned task', '\r'])
+    expect(f.writes).toEqual([payload(continuationWire()), '\r'])
     expect(restarted.list()[0]).toMatchObject({ status: 'active', lastOutcome: 'sent' })
     expect(restarted.list()[0]?.pendingCompletion).toBeUndefined()
   }, 30_000)

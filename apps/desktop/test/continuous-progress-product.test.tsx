@@ -9,7 +9,8 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, AgentMuxClient, AgentMuxMemoryAgentSessionStore, type AgentMuxStoredAgentSession } from '@agentmux/core'
+import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
@@ -31,7 +32,7 @@ vi.mock('electron', () => ({
     removeHandler: (channel: string) => bridge.handlers.delete(channel),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => bridge.storagePath, isPackaged: false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
@@ -43,6 +44,8 @@ vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOUR
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
+// Install the actual mocked Electron bridge before transitive renderer consumers load api.
+await vi.hoisted(async () => { await import('../src/preload/index') })
 import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
@@ -191,7 +194,7 @@ it('mounts the existing Composer leaf and real create/pause/resume/check/stop ro
   await click('Resume continuous progress'); expect(manager.list()[0]!.status).toBe('active')
   await vi.waitFor(() => expect(container.querySelector('[aria-label="Pause continuous progress"]')).not.toBeNull())
   await click('Check continuous progress now')
-  await vi.waitFor(() => expect(writes).toEqual(['continue the assigned work', '\r']))
+  await vi.waitFor(() => expect(writes).toEqual([`\u001b[200~${composeAgentPrompt('continue the assigned work', AGENTMUX_AGENT_MESSAGING_GUIDANCE).text}\u001b[201~`, '\r']))
   await vi.waitFor(() => expect(container.textContent).toContain('Host accepted the request'))
   expect(observations.length).toBeGreaterThan(0); expect(new Set(observations)).toEqual(new Set([session.agentSessionId]))
   await click('Stop continuous progress'); expect(manager.list()[0]!.status).toBe('stopped')
