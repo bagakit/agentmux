@@ -28,6 +28,7 @@ import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
+import { createRendererHistoryObservation } from './history-observation'
 import {
   DEFAULT_TOPIC_WIKI,
   MOTE_SOUL_PATH,
@@ -1304,6 +1305,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     control: createRendererControlApi(preload.control),
     sessions: {
       ...preload.sessions,
+      observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
   }
