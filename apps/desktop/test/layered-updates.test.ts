@@ -32,5 +32,8 @@ it('a runtime bump is installable only by producing the review it demands', () =
   expect(body).toMatch(/review !== null/)
   expect(body).toMatch(/review\.trim\(\)\.length > 0/)
   // 缺席不是默许：没给记录就必须停下。
-  expect(body).toMatch(/assert\(runtimeReviewArgument,/)
+  // Full installs still require the record. Explicit UI-only intent retains
+  // the existing Native service and must not be mistaken for a Native upgrade.
+  expect(body).toMatch(/assert\(intent === 'ui-only' \|\| runtimeReviewArgument,/)
+  expect(body).toContain("if (intent === 'full') {")
 })
