@@ -216,7 +216,16 @@ function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
 
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
-  const source = fields(value, ['spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations'], code)
+  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations'], code)
+  const projectGroups = Object.hasOwn(source, 'projectGroups') ? unique(list(source.projectGroups, value => {
+    const item = fields(value, ['groupId', 'name', 'projectIds'], code)
+    const name = string(item.name, 'Project group name', code)
+    if (!name.trim()) fail('A project group needs a name.', code)
+    const projectIds = unique(list(item.projectIds, value => spaceControlId(value, 'Project', code, true), 'Project IDs', code), value => value, 'Project IDs', code)
+    if (projectIds.length < 2) fail('A project group needs at least two Projects.', code)
+    return { groupId: spaceControlId(item.groupId, 'Project group', code), name, projectIds }
+  }, 'Project groups', code), item => item.groupId, 'Project groups', code) : undefined
+  if (projectGroups) unique(projectGroups.flatMap(group => group.projectIds), value => value, 'Grouped Project IDs', code)
   const spaces = unique(list(source.spaces, value => {
     const item = fields(value, ['spaceId', 'kind', 'name', 'hostId', 'directoryPath', 'projectId', 'topicId', 'issue'], code)
     return { spaceId: spaceControlId(item.spaceId, 'Space', code, true), kind: member(item.kind, ['folder', 'topic', 'mote', 'container'], 'Space kind', code),
@@ -244,7 +253,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), spaceId: spaceControlId(item.spaceId, 'Space', code, true) }
   }, 'Bindings', code), item => JSON.stringify([item.zoneId, item.spaceId]), 'Bindings', code)
   const locations = unique(list(source.locations, value => address(value, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
-  return { spaces, zones, tabs, regions, bindings, locations }
+  return { ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
 }
 function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
   return list(value, value => {
