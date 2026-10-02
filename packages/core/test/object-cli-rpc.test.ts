@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS } from '../src/public-rpc.js'
 import { ObjectCliProbe, objectCliSeed } from './helpers/object-cli-rpc.js'
+import { parseAgentMuxSpatialGraph } from '../src/spatial-graph.js'
 
 const fixtures: ObjectCliProbe[] = []
 afterEach(async () => { for (const fixture of fixtures.splice(0)) await fixture.stop() })
@@ -27,8 +28,14 @@ describe('compiled object CLI through a private RPC transport probe', () => {
     expect([...methods].sort()).toEqual(publicMethods.sort())
     const ordinary = AGENTMUX_CLI_COMMANDS.filter(entry => !entry.local && !entry.stream)
     expect(ordinary.length).toBeGreaterThan(0)
+    const graph = parseAgentMuxSpatialGraph({ spaces: [], zones: [], tabs: [], regions: [], bindings: [], layouts: {}, tabLayouts: {}, resources: {} })
+    const stdinByMethod: Record<string, string> = {
+      'space.commit': JSON.stringify(graph),
+      'browser.task.batch': JSON.stringify({ parameters: { fresh: 'input' }, items: [{ id: 'ITEM', parameters: { fresh: 'item' } }] }),
+      'browser.task.run': JSON.stringify({ fresh: 'input' })
+    }
     for (const entry of ordinary) {
-      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], entry.method === 'browser.task.batch' ? '{"parameters":{"fresh":"input"},"items":[{"id":"ITEM","parameters":{"fresh":"item"}}]}' : entry.method === 'browser.task.run' ? '{"fresh":"input"}' : 'return await snapshot()')
+      const result = await fixture.run([...entry.method.split('.'), ...objectCliSeed(entry.method, fixture.inputPath)], stdinByMethod[entry.method] ?? 'return await snapshot()')
       expect(result.code, entry.method + ': ' + result.stderr).toBe(1)
       expect(JSON.parse(result.stderr)).toMatchObject({ ok: false, operation: entry.method, error: { code: 'CLI_ROUTE_PROBE' } })
     }
@@ -40,6 +47,11 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       expect(request.params).not.toHaveProperty('requestId')
       if (request.params.operationId !== undefined) expect(request.id).not.toBe(request.params.operationId)
     }
+    for (const method of ['agent.reopen', 'agent.reopen.check']) {
+      expect(fixture.requests.find(request => request.method === method)?.params).toEqual({ agentSessionId: 'SID', expectedRetiredAt: 12, operationId: 'REOPEN' })
+    }
+    expect(fixture.requests.find(request => request.method === 'space.commit')?.params).toEqual({ expectedRevision: 0, graph })
+    expect(fixture.requests.find(request => request.method === 'space.resolve')?.params).toEqual({ tabId: 'TAB', regionId: 'R', direction: 'left' })
     expect(fixture.requests.find(request => request.method === 'browser.run')?.params).toMatchObject({ operationId: 'BOP', code: 'return await snapshot()' })
     expect(fixture.requests.find(request => request.method === 'browser.task.run')?.params).toEqual({ browserId: 'B', assetId: 'A', version: 1, parameters: { fresh: 'input' } })
   }, 120_000)
