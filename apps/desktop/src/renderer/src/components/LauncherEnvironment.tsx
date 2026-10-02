@@ -55,7 +55,7 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
       {active ? <Dialog.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <Dialog.Content ref={setPanel} className="launcher-environment__panel" inert={!open} style={{ visibility: 'hidden' }}
           onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
-          <header><div className="launcher-environment__identity"><Icon size={18} /><div><Dialog.Title>{label}</Dialog.Title><Dialog.Description>{kind}</Dialog.Description></div></div>
+          <header><div className="launcher-environment__identity"><Icon size={18} /><div><Dialog.Title>Choose where to start</Dialog.Title><Dialog.Description>Current target · {label}</Dialog.Description></div></div>
             <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><X size={14} /></Dialog.Close></header>
           {open ? <LauncherExecutionPicker hosts={hosts} workspaces={workspaces} selected={workspace} disabled={selectionDisabled}
             onSelect={workspaceId => { onSelectWorkspace(workspaceId); setOpen(false); trigger.current?.focus() }}

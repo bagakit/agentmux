@@ -24,7 +24,7 @@ function displayMembership(layout: WorkspaceLayout) {
 }
 
 /** Confirmation is constant work after one pass over a changed display layout. */
-export function workbenchDisplayReferenceMatches(layout: WorkspaceLayout | undefined, reference: WorkbenchProjectionSelection): boolean {
+export function workbenchDisplayReferenceMatches(layout: WorkspaceLayout | undefined, reference: Pick<WorkbenchProjectionSelection, 'groupId' | 'tabId'>): boolean {
   if (!layout) return false
   const index = displayMembership(layout)
   return index.visible.has(reference.groupId) && index.groups.get(reference.groupId)?.has(reference.tabId) === true

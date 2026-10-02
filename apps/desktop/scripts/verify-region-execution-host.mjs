@@ -201,7 +201,12 @@ async function artifacts() {
   assert.ok(restored.headerObservations.length > 0, 'Actual remote Agent and ordinary Terminal headers must be observed')
   for (const item of restored.headerObservations) for (const control of [item.host, item.more, item.close])
     assert.ok(control.width > 0 && control.height > 0 && control.hitBelongs)
-  assert.ok(proof.cleanup.owned.length > 0); assert.deepEqual(proof.cleanup.stopped, proof.cleanup.owned)
+  assert.ok(proof.cleanup.owned.length > 0)
+  assert.deepEqual(proof.cleanup.stopped.map(({ beforeState, action, ...identity }) => {
+    assert.ok(typeof beforeState === 'string' && beforeState.length > 0)
+    assert.equal(action, 'public-stop')
+    return identity
+  }), proof.cleanup.owned, 'Every owned Session/Host/Run is stopped through its actual public owner')
   assert.deepEqual(proof.cleanup.errors, []); assert.deepEqual(proof.cleanup.remaining, []); assert.equal(proof.cleanup.privateRootRemoved, true)
   assert.equal(proof.cleanup.originalBusinessSessionStopped, false); assert.equal(proof.cleanup.sharedRemoteHostStopped, false)
   assert.equal(review.conclusion, 'accepted'); assert.ok(typeof review.reviewer === 'string' && review.reviewer.trim())
