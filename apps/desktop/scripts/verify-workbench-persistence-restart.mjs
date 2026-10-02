@@ -4,12 +4,14 @@ import { spawn, execFile } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { AgentMuxSpatialStateStore } from '../../../packages/core/dist/spatial-state.js'
+import { regionIds } from '../../../packages/core/dist/spatial-layout.js'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
 import { connectAgentMuxRpc } from '../../../packages/core/dist/public-rpc-client.js'
-import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace } from './goals-alignment-restart-proof.mjs'
+import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace, readRecoverySpatialState } from './goals-alignment-restart-proof.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
 import { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns, proveOriginalRunOutput } from './goals-entry-restart-proof.mjs'
@@ -42,8 +44,9 @@ const goalsCtaProof = goalsEntryProof || goalsDirectPmoProof
 const ordinaryRecoveryProof = messageContextProof || goalsDirectPmoProof
 const inheritedCallerNames = (goalsCtaProof || messageContextProof) ? Object.keys(process.env).filter(name =>
   /^AGENTMUX_(?:ENV|CLI|AGENT_SESSION(?:_.*)?|AGENT_CAPABILITY|HOOK(?:_.*)?|PROVIDER_ID|EXECUTOR_ID|LIFECYCLE_OPERATION_ID|USAGE_TRANSCRIPT_FORMAT)$/.test(name)) : []
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME', ...inheritedCallerNames].map(name => [name, process.env[name]]))
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_SPATIAL_STATE_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME', ...inheritedCallerNames].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
+  AGENTMUX_SPATIAL_STATE_STORE: join(runtimeDirectory, 'state', 'spatial-state.json'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
 const children = new Set()
 const deadline = Date.now() + (goalsDirectPmoProof ? 240_000 : 110_000)
@@ -151,7 +154,26 @@ async function launch(label) {
   const origin = await cdp.evaluate('({url:location.href,origin:location.origin})'); return { child, cdp, origin }
 }
 
-async function seedWorkbench(seed) {
+/** @returns {Promise<typeof import('../src/renderer/src/lib/desktop-spatial-state.js').desktopSpatialGraph>} */
+async function loadSeedSpatialAdapter() {
+  const modulePath = join(root, 'desktop-spatial-seed.mjs')
+  const buildRequire = createRequire(require.resolve('vite/package.json'))
+  const built = await buildRequire('esbuild').build({
+    entryPoints: [join(desktopRoot, 'src/renderer/src/lib/desktop-spatial-state.ts')],
+    outfile: modulePath, bundle: true, platform: 'node', format: 'esm', metafile: true,
+    alias: { '@agentmux/layout': join(repositoryRoot, 'packages/layout/src/index.ts') },
+    logLevel: 'silent'
+  })
+  const inputs = Object.keys(built.metafile.inputs)
+  assert.ok(inputs.length > 0, 'The actual production adapter input closure must be nonempty')
+  assert.ok(inputs.every(path => !path.includes('runtime-controller') && !path.includes('public-rpc-service') && !path.includes('electron')), 'The seed adapter is pure; it must not open another host or Runtime')
+  return (await import(pathToFileURL(modulePath).href)).desktopSpatialGraph
+}
+
+/** @param {import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialGraph} graph */
+async function seedWorkbench(seed, graph) {
+  const spatial = await new AgentMuxSpatialStateStore().commit({ expectedRevision: 0, graph })
+
   const reportPath = join(root, 'seed-report.json')
   const child = spawn(require('electron'), [join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'], env: { ...process.env, ...fixtureEnvironment,
@@ -202,17 +224,18 @@ async function seedWorkbench(seed) {
   assert.equal(child.exitCode, 0)
   const report = JSON.parse(await readFile(reportPath, 'utf8'))
   seedReport = report
+  assert.deepEqual(report.spatialState, spatial, 'The first document report must read the exact Core seed revision and graph'); assert.equal(report.spatialUnavailable, null)
   assert.deepEqual(report.workbench.tabIds, [tabId]); assert.equal(report.workbench.drafts[session.agentSessionId], oldDraft)
   children.delete(child)
 }
 
 async function surface(cdp) {
-  return cdp.evaluate(`(() => {
+  const observed = await cdp.evaluate(`(() => {
     const state = JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state
     const visible = selector => Array.from(document.querySelectorAll(selector)).filter(el => el.getClientRects().length > 0 && getComputedStyle(el).visibility === 'visible')
     const editor = document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')
     const panel = document.querySelector('.workbench-region-split > [data-panel]')
-    return { workbench: state.restoredWorkbench, focus: state.agentFocus, draft: state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
+    return { focus: state.agentFocus, draft: state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
       queued: state.agentSteerQueues[${JSON.stringify(session.agentSessionId)}],
       outbox: visible('.composer-outbox li').map(row => ({ text: row.querySelector('.composer-mailbox__preview')?.textContent,
         datetime: row.querySelector('time')?.getAttribute('datetime') ?? null,
@@ -231,6 +254,7 @@ async function surface(cdp) {
         stored:state.agentNames[${JSON.stringify(session.agentSessionId)}],more:visible('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more').length},` : ''}
     }
   })()`)
+  return { ...observed, workbench: await readRecoverySpatialState(cdp) }
 }
 
 async function readMessageContext(cdp) {
@@ -313,6 +337,7 @@ try {
   // Provider Hook installation occurs even for a synthetic command. Parent Core setup and every
   // Electron child must share this private home rather than touching the user's native CLI config.
   Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
+    AGENTMUX_SPATIAL_STATE_STORE: fixtureEnvironment.AGENTMUX_SPATIAL_STATE_STORE,
     AGENTMUX_MESSAGE_QUEUE_PATH: fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH, CODEX_HOME: codexHome })
   await mkdir(userData, { recursive: true }); await mkdir(workspacePath, { recursive: true })
   await mkdir(topicsPath, { recursive: true })
@@ -354,23 +379,27 @@ try {
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }))
   const seed = { version: 1, state: { activeWorkspaceId: workspaceId, mainSurface: 'workbench',
     ...(identityMenuProof ? { agentNames: { [session.agentSessionId]: identityName } } : {}),
-    agentFocus: { execution: { sessionId: session.agentSessionId, history: [{ sessionId: session.agentSessionId, focusedAt: 1 }] }, pmo: { sessionId: null } },
+    agentFocus: { execution: { sessionId: session.agentSessionId, reference: { displayWorkspaceId: workspaceId, groupId, tabId, regionId: agentRegionId }, history: [{ sessionId: session.agentSessionId, focusedAt: 1 }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { [session.agentSessionId]: oldDraft },
     agentSteerQueues: { [session.agentSessionId]: [
       { operationId: 'private-queue-first', runId: session.run.runId, text: 'Private first pending intent', status: 'queued', enqueuedAt: _hygiene_fixtureTime(23606400000) },
       { operationId: 'private-queue-unknown', runId: session.run.runId, text: 'Private unknown-time pending intent', status: 'queued' },
       { operationId: 'private-queue-last', runId: session.run.runId, text: 'Private last pending intent', status: 'queued', enqueuedAt: _hygiene_fixtureTime(23606490000) }
-    ] }, restoredWorkbench: {
+    ] } } }
+  /** @type {Pick<import('../src/renderer/src/lib/space-agent-control.js').SpatialWorkbench, 'tabs' | 'layouts'>} */
+  const seedWorkbenchData = {
       tabs: { [tabId]: { id: tabId, workspaceId, titleRegionId: agentRegionId,
         layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.7, first: { type: 'leaf', regionId: agentRegionId }, second: { type: 'leaf', regionId: fileRegionId } }, activeRegionId: agentRegionId },
         regions: { [agentRegionId]: { regionId: agentRegionId, kind: 'agent', phase: 'attached', workspaceId, sessionId: session.agentSessionId },
           [fileRegionId]: { regionId: fileRegionId, kind: 'file', workspaceId, path: 'split.txt' } } } },
       layouts: { [workspaceId]: { root: { type: 'leaf', groupId }, groups: [{ id: groupId, tabOrder: [tabId], activeTabId: tabId, recentTabIds: [tabId] }], activeGroupId: groupId },
         __scratch__: { root: { type: 'leaf', groupId: scratchGroupId }, groups: [{ id: scratchGroupId, tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: scratchGroupId } }
-    } } }
-  if (swapNameProof) swapFixture = seedSwapRegions(seed, { session, peers: swapPeers, tabId, agentRegionId, fileRegionId, workspaceId, identityName })
+    }
+  if (swapNameProof) swapFixture = seedSwapRegions(seed, { session, peers: swapPeers, tabId, agentRegionId, fileRegionId, workspaceId, identityName, tabs: seedWorkbenchData.tabs })
   if (goalsAlignmentProof) goalsFixture = await createGoalsRestartFixture({ root, userData, workspaceId, session })
-  await seedWorkbench(seed)
+  const adapter = await loadSeedSpatialAdapter()
+  const graph = adapter({ config: JSON.parse(await readFile(join(userData, 'agentmux.config.json'), 'utf8')), sessions: [], ...seedWorkbenchData, spaceZoneBindings: {}, spatialRequests: {} }, [])
+  await seedWorkbench(seed, graph)
   const first = await launch('first')
   await delay(600) // Establish the pre-edit hydrated baseline, never flush a post-edit value.
   const before = await surface(first.cdp)
@@ -478,14 +507,15 @@ setInterval(tick,100);
   await waitFor('actual file Region focus changed', async () => { const s = await surface(first.cdp); return s.activeRegions.length === 1 && s.activeRegions[0] === fileRegionId })
   let lastEditAt = Date.now()
   let expectedWorkbench = structuredClone(before.workbench)
-  expectedWorkbench.tabs[tabId].layout.root.ratio = 0.6
-  expectedWorkbench.tabs[tabId].layout.activeRegionId = fileRegionId
+  expectedWorkbench.graph.tabLayouts[tabId].root.ratio = 0.6
+  expectedWorkbench.graph.tabLayouts[tabId].activeRegionId = fileRegionId
   if (swapNameProof) {
     const focusNeighbor = focusOriginal
     swapSelection = await selectSwapTarget({ cdp: first.cdp, key, activateButton, waitFor, focusNeighbor, agentRegionId, fileRegionId, identityName, tabId })
-    const split = expectedWorkbench.tabs[tabId].layout.root
+    const split = expectedWorkbench.graph.tabLayouts[tabId].root
     split.first.regionId = 'crash-third'; split.second.second.regionId = agentRegionId
-    await waitFor('exact original three-Agent Swap projection', async () => JSON.stringify((await surface(first.cdp)).workbench) === JSON.stringify(expectedWorkbench))
+    expectedWorkbench.graph.tabs.find(tab => tab.tabId === tabId).regionIds = regionIds(split)
+    await waitFor('exact original three-Agent Swap projection', async () => JSON.stringify((await surface(first.cdp)).workbench.graph) === JSON.stringify(expectedWorkbench.graph))
     lastEditAt = Date.now()
   }
   if (regionCloseProof) {
@@ -500,11 +530,19 @@ setInterval(tick,100);
     })()`)
     for (const type of ['mousePressed','mouseReleased']) await first.cdp.call('Input.dispatchMouseEvent', { type, ...closePoint, button:'left', clickCount:1 })
     await waitFor('only exact file Region closed', async () => JSON.stringify((await surface(first.cdp)).regions) === JSON.stringify([agentRegionId]))
-    const expectedTab=expectedWorkbench.tabs[tabId]
-    expectedTab.layout={root:{type:'leaf',regionId:agentRegionId},activeRegionId:agentRegionId}
-    delete expectedTab.regions[fileRegionId]
+    expectedWorkbench.graph.tabLayouts[tabId]={root:{type:'leaf',regionId:agentRegionId},activeRegionId:agentRegionId}
+    expectedWorkbench.graph.tabs.find(tab=>tab.tabId===tabId).regionIds=[agentRegionId]
+    expectedWorkbench.graph.regions=expectedWorkbench.graph.regions.filter(region=>region.regionId!==fileRegionId)
+    delete expectedWorkbench.graph.resources['region:'+fileRegionId]
     lastEditAt=Date.now()
   }
+  const editedSpatial = await waitFor('Core confirms the exact original edited topology and resources', async () => {
+    const value = await readRecoverySpatialState(first.cdp)
+    return JSON.stringify(value.graph) === JSON.stringify(expectedWorkbench.graph) ? value : null
+  })
+  assert.deepEqual(editedSpatial.graph, expectedWorkbench.graph)
+  assert.ok(editedSpatial.revision >= before.workbench.revision, 'The actual owner records the verified UI edit revision')
+  expectedWorkbench = editedSpatial
   if (goalsAlignmentProof) {
     goalsAccepted = await approveGoalsInActualUI({ cdp: first.cdp, fixture: goalsFixture, activateButton, waitFor })
     const goalsBeforeCrash = await waitFor('production durable Goals selection', async () => {

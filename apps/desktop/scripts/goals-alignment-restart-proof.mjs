@@ -45,12 +45,40 @@ export async function approveGoalsInActualUI({ cdp, fixture, activateButton, wai
   return accepted
 }
 
+/**
+ * @param {{evaluate(expression: string): Promise<import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState | null>}} cdp
+ * @returns {Promise<import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState>}
+ */
+export async function readRecoverySpatialState(cdp) {
+  const spatial = await cdp.evaluate('window.agentmux.spatial.read()')
+  assert.ok(spatial, 'The original Core durable spatial document must be available')
+  return spatial
+}
+
+/**
+ * Preserve every original entity, resource and topology; new Topic facts may only be added.
+ * @param {import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState} current
+ * @param {import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState} original
+ */
+export function assertOriginalRecoveryGraph(current, original) {
+  for (const fact of original.graph.spaces) assert.deepEqual(current.graph.spaces.find(next => next.spaceId === fact.spaceId), fact)
+  for (const fact of original.graph.zones) assert.deepEqual(current.graph.zones.find(next => next.zoneId === fact.zoneId), fact)
+  for (const fact of original.graph.tabs) assert.deepEqual(current.graph.tabs.find(next => next.tabId === fact.tabId), fact)
+  for (const fact of original.graph.regions) assert.deepEqual(current.graph.regions.find(next => next.regionId === fact.regionId), fact)
+  for (const binding of original.graph.bindings) assert.ok(current.graph.bindings.some(next => next.zoneId === binding.zoneId && next.spaceId === binding.spaceId))
+  for (const [id, layout] of Object.entries(original.graph.layouts)) if (id !== '__scratch__') assert.deepEqual(current.graph.layouts[id], layout)
+  for (const [id, layout] of Object.entries(original.graph.tabLayouts)) assert.deepEqual(current.graph.tabLayouts[id], layout)
+  for (const [id, resource] of Object.entries(original.graph.resources)) assert.deepEqual(current.graph.resources[id], resource)
+  assert.ok(current.revision >= original.revision, 'The original owner revision cannot move backwards')
+}
+
 export async function readGoalsSurface(cdp) {
-  return cdp.evaluate(`(()=>{const state=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;
-    return {surface:state.mainSurface,selectedDemandId:state.selectedDemandId,workbench:state.restoredWorkbench,
+  const observed = await cdp.evaluate(`(()=>{const state=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;
+    return {surface:state.mainSurface,selectedDemandId:state.selectedDemandId,
       focus:state.agentFocus,text:document.querySelector('.goals-detail')?.innerText,
       goal:document.querySelector('[data-goal-alignment-revision]')?.dataset,
       result:document.querySelector('[data-goal-grounding-submission]')?.dataset}})()`)
+  return { ...observed, workbench: await readRecoverySpatialState(cdp) }
 }
 
 export async function restoreGoalsBeforeSpace({ cdp, fixture, accepted, expectedWorkbench, expectedFocus, waitFor, focusOriginal }) {
