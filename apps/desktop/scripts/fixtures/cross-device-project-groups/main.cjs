@@ -109,7 +109,11 @@ app.whenReady().then(async () => {
       await dispatch('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
       await read('new Promise(resolve => requestAnimationFrame(resolve))')
       const painted = `(() => { const node=(${expression}); return node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}) && node.contains(document.elementFromPoint(${point.x},${point.y})) })()`
-      await until(painted)
+      try { await until(painted) }
+      catch (error) {
+        result.failedHit = await read(`(() => { const node=(${expression}), parent=node.closest('.project-group__heading'), at=document.elementFromPoint(${point.x},${point.y}); return {expression:${JSON.stringify(expression)},point:${JSON.stringify(point)},box:node.getBoundingClientRect().toJSON(),visible:node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}),style:{opacity:getComputedStyle(node.parentElement).opacity,pointerEvents:getComputedStyle(node.parentElement).pointerEvents},headingHover:parent?.matches(':hover'),headingBox:parent?.getBoundingClientRect().toJSON(),hit:at?.outerHTML,hover:[...document.querySelectorAll(':hover')].map(x=>x.className)} })()`)
+        throw error
+      }
       assert.equal(await read(painted), true, 'Native target is actually painted and hit-testable after pointer hover')
       for (const type of ['mousePressed', 'mouseReleased']) await dispatch('Input.dispatchMouseEvent', { type, button: 'left', clickCount: 1, ...point })
       result.operations.push({ input: 'native-pointer', expression, point })

@@ -15,7 +15,7 @@ const graph = 'packages/core/src/spatial-graph.ts', parser = 'packages/core/src/
 const tests = ['apps/desktop/test/cross-device-project-groups.test.ts', 'apps/desktop/test/cross-device-project-groups.test.tsx', 'packages/core/test/space-project-groups-codec.test.ts']
 const testHelper = 'apps/desktop/test/helpers/cross-device-project-groups.ts'
 const desktopGlobals = renderer + 'global.d.ts'
-const sources = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, parser, 'packages/core/src/rpc-business-codec.ts', 'packages/core/src/space-control.ts',
+const sources = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, parser, 'packages/core/src/control-codec.ts', 'packages/core/src/rpc-business-codec.ts', 'packages/core/src/space-control.ts',
   renderer + 'components/WorkspaceRowContextMenu.tsx', renderer + 'hooks/useGitProjectAssociations.ts', renderer + 'lib/api.ts',
   renderer + 'lib/workspace-projects.ts', renderer + 'lib/workbench-persistence.ts', renderer + 'lib/workbench-tabs.ts',
   renderer + 'components/SpaceCreateMenu.tsx', renderer + 'components/SpaceSectionHeader.tsx', renderer + 'components/HostFolderDialog.tsx', renderer + 'styles/project-groups.css', renderer + 'styles/index.css', 'apps/desktop/src/shared/space-addresses.ts',
@@ -49,7 +49,7 @@ async function execute(args, logPath) {
 async function consumers() {
   const ts = createRequire(import.meta.url)('typescript')
   const required = [
-    { definition: parser, file: 'packages/core/src/rpc-business-codec.ts', expression: 'parseSpaceControlSuccessReceipt' },
+    { definition: parser, file: 'packages/core/src/control-codec.ts', expression: 'parseSpaceControlSuccessReceipt' },
     { definition: helper, file: store, expression: 'validateProjectGroup' },
     { definition: catalog, file: adapter, expression: 'spatialCatalog' },
     { definition: adapter, file: store, expression: 'desktopSpatialGraph' },
