@@ -248,6 +248,11 @@
 .recent-focus__segment.is-open { width: 8px; border-right: 1px dashed var(--text-3); }
 .recent-focus__segment.is-current { background: var(--text); }
 .recent-focus__working { position: absolute; top: 4px; height: 11px; min-width: 2px; padding: 0; border: 0; border-radius: 2px; background: color-mix(in srgb, var(--green) 30%, var(--surface-3)); cursor: pointer; }
+.recent-focus__working--history { background: color-mix(in srgb, var(--green) 22%, var(--surface-3)); }
+.recent-focus__working--history.is-current { background: color-mix(in srgb, var(--green) 36%, var(--surface-3)); }
+.recent-focus__working.has-unknown-start { border-left: 2px dotted var(--text-2); }
+.recent-focus__working.has-unknown-end { border-right: 2px dotted var(--text-2); min-width: 5px; }
+.recent-focus__work-gap { position: absolute; top: 3px; height: 13px; min-width: 12px; padding: 0 2px; border: 1px dashed var(--text-3); border-radius: 2px; color: var(--text-2); background: var(--surface-2); font-size: 9px; line-height: 11px; }
 .recent-focus__live { position: absolute; top: 4px; z-index: 3; width: 8px; height: 8px; padding: 0; transform: translateX(-50%); border: 1px solid var(--text-3); border-radius: 50%; background: var(--surface-1); cursor: pointer; }
 .recent-focus__live.is-working { border-color: var(--green); }
 .recent-focus__working:hover, .recent-focus__working:focus-visible, .recent-focus__live:hover, .recent-focus__live:focus-visible { z-index: 4; outline: 1px solid var(--green); outline-offset: 1px; }

@@ -10,6 +10,7 @@ export type FocusTimelineTrack = {
   current: FocusContext | undefined
   segments: FocusTimeSegment[]
   inputProjectObserved?: boolean
+  inputReference?: { hostId: string; agentSessionId: string } | undefined
 }
 export type FocusTimelineProject = {
   key: string
@@ -21,9 +22,10 @@ const UNKNOWN_PROJECT = 'unknown-project'
 function projectKey(identity: AgentFocusHistoryIdentity | undefined): string {
   return identity?.project ? JSON.stringify([identity.hostId, identity.project.id]) : UNKNOWN_PROJECT
 }
-function trackKey(sessionId: string, identity: AgentFocusHistoryIdentity | undefined): string {
+export function focusTimelineTrackKey(sessionId: string, identity: AgentFocusHistoryIdentity | undefined): string {
   return JSON.stringify([projectKey(identity), sessionId])
 }
+const trackKey = focusTimelineTrackKey
 function currentIdentity(context: FocusContext, lane: FocusProjectLane | undefined): AgentFocusHistoryIdentity {
   return {
     name: context.name, kind: context.kind, providerId: context.providerId, hostId: context.hostId, workspacePath: context.workspacePath,
@@ -32,7 +34,7 @@ function currentIdentity(context: FocusContext, lane: FocusProjectLane | undefin
     ...(context.topicId ? { topicId: context.topicId } : {})
   }
 }
-export type FocusInputTrack = Pick<FocusTimelineTrack, 'sessionId' | 'key' | 'identity'>
+export type FocusInputTrack = Pick<FocusTimelineTrack, 'sessionId' | 'key' | 'identity'> & { reference?: { hostId: string; agentSessionId: string } }
 
 function referenceKey(reference: { hostId: string; agentSessionId: string }): string {
   return JSON.stringify([reference.hostId, reference.agentSessionId])
@@ -92,6 +94,7 @@ export function groupFocusTimeline(contexts: readonly FocusContext[], lanes: rea
   for (const readonlyInputTrack of readonlyInputTracks) {
     const track = ensure(readonlyInputTrack.sessionId, readonlyInputTrack.identity)
     track.inputProjectObserved = !!readonlyInputTrack.identity?.project
+    track.inputReference = readonlyInputTrack.reference
   }
   return [...groups.values()]
 }
