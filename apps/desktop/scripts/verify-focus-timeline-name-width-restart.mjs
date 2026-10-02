@@ -14,6 +14,7 @@ import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json')), ts = require('typescript')
 const core = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 const output = resolve(repositoryRoot, process.env.AGENTMUX_FOCUS_NAME_WIDTH_RESTART_OUTPUT ?? (".tmp/focus-timeline-name-width-restart-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(output, { recursive: true })
 const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-name-width-")), userData = join(privateRoot, 'user-data')
@@ -70,8 +71,12 @@ async function run() {
   return value
 }
 async function inspectRegion() {
-  const reply = await core.requestAgentMuxControl({ schemaVersion: core.AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'inspect.region', target: { kind: 'region', regionId: agentRegionId } }, join(runtimeDirectory, 'control.sock'))
-  assert.equal(reply.ok, true, JSON.stringify(reply)); return reply.result.region
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try {
+    const reply = await rpc.call('space.inspect', { target: { regionId: agentRegionId } })
+    assert.ok(reply.presentation?.region, JSON.stringify(reply.presentation)); return reply.presentation.region
+  } finally { await rpc.dispose() }
 }
 async function launch(label, seed) {
   for (const name of ['AGENTMUX_DESKTOP_RECOVERY_SEED', 'AGENTMUX_DESKTOP_RECOVERY_REPORT', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY', 'ELECTRON_RUN_AS_NODE', 'ELECTRON_RENDERER_URL']) assert.equal(process.env[name], undefined, `Private launch inherited ${name}`)
