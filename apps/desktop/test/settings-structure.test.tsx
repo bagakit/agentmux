@@ -23,12 +23,12 @@ async function section(title: string) {
   await act(async () => button!.click())
 }
 
-it('renders the daily-preference/resource entries, with Overview before the unchanged Appearance pane', async () => {
+it('renders preference, resource and connection entries, with Overview before the unchanged Appearance pane', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] p')].map(node => node.textContent))
-    .toEqual(['Preferences', 'Resources'])
+    .toEqual(['Preferences', 'Resources', 'Connections'])
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')].map(node => node.textContent))
-    .toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Keyboard shortcuts', 'Toolkit', 'Agents', 'Prompts', 'Workspaces', 'Hosts'])
+    .toEqual(['Appearance', 'Notifications', 'Browser', 'General', 'Keyboard shortcuts', 'Toolkit', 'Agents', 'Prompts', 'Workspaces', 'Environments', 'Phones & devices'])
   expect(dom.container.querySelector('.settings-content__header h2')?.textContent).toBe('Overview')
   expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
   await section('Appearance')

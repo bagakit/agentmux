@@ -5,7 +5,8 @@ import type { SettingsNavigationRequest } from '../SettingsNavigation'
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences' },
-  { id: 'resources', title: 'Resources' }
+  { id: 'resources', title: 'Resources' },
+  { id: 'connections', title: 'Connections' }
 ] as const
 
 export type SettingsPaneProps = {

@@ -33,6 +33,7 @@ vi.mock('../src/renderer/src/components/settings/settings-modules', async (impor
 })
 
 import { SettingsPanel, visibleSettingsSections } from '../src/renderer/src/components/SettingsPanel'
+import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -69,17 +70,20 @@ const mountedPanes = () => [...dom.container.querySelectorAll<HTMLElement>('[dat
   .map(node => node.dataset.settingsPane)
 const overviewRow = () => connected('[data-settings-overview] [data-settings-section="fixture-module"]')
 
-it('a contributed ninth module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
+it('a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(registration.originalIds).toEqual([
-    'appearance', 'notifications', 'browser', 'general', 'agents', 'prompts', 'workspaces', 'hosts'
+    'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'toolkit', 'agents', 'prompts', 'workspaces', 'hosts', 'devices'
   ])
   const catalog = visibleSettingsSections('')
   expect(catalog.map(module => module.id)).toEqual([...registration.originalIds, 'fixture-module'])
+  const navigation = settingsNavGroups('').flatMap(group => group.items)
+  expect(new Set(navigation.map(module => module.id))).toEqual(new Set(catalog.map(module => module.id)))
+  expect(navigation).toHaveLength(catalog.length)
   expect([...dom.container.querySelectorAll('[data-settings-overview] [data-settings-section]')]
-    .map(node => node.getAttribute('data-settings-section'))).toEqual(catalog.map(module => module.id))
+    .map(node => node.getAttribute('data-settings-section'))).toEqual(navigation.map(module => module.id))
   expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button:not([data-settings-overview-nav])')]
-    .map(node => node.textContent)).toEqual(catalog.map(module => module.title))
+    .map(node => node.textContent)).toEqual(navigation.map(module => module.title))
   expect(overviewRow().textContent).toContain('Saved abbreviated paths')
   expect(mountedPanes()).toEqual([])
   const search = connected<HTMLInputElement>('[aria-label="Search settings"]')
@@ -90,7 +94,7 @@ it('a contributed ninth module reaches Overview, sidebar, compact menu, search a
   })))
   const menu = connected('[role="menu"]', document)
   const choices = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
-  expect(choices.map(node => node.textContent)).toEqual(['Overview', ...catalog.map(module => module.title)])
+  expect(choices.map(node => node.textContent)).toEqual(['Overview', ...navigation.map(module => module.title)])
   expect(document.activeElement).toBe(search)
   const contributedChoice = choices.find(node => node.textContent === 'Fixture module')
   expect(contributedChoice).toBeDefined()

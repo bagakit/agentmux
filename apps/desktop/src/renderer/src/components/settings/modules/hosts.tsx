@@ -13,12 +13,12 @@ async function saveHosts(hosts: HostConfig[], workspaces: WorkspaceRecord[], exp
 
 export const hostsSettingsModule = {
   id: 'hosts',
-  group: 'resources',
-  title: 'Hosts',
+  group: 'connections',
+  title: 'Environments',
   description: 'Local and SSH connections for your workspace.',
   icon: Server,
-  keywords: 'ssh remote hostname user port key test connection',
-  savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'host' : 'hosts'}`,
+  keywords: 'host hosts ssh remote hostname user port key test connection environment project',
+  savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'environment' : 'environments'}`,
   Pane({ config, active }) {
     return <HostSettingsPane config={config} onSave={saveHosts} active={active} />
   }
