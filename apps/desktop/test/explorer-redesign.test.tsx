@@ -106,10 +106,10 @@ describe('actual Explorer shared header and interactions', () => {
     expect(element('[data-tree-path="one.ts"] .tree-row__label').title).toBe('~/project/one.ts\nDouble-click to rename (F2)')
     // With the name anchored to its text width, the remaining grid area targets the row itself.
     await event(element('[data-tree-path="one.ts"]'), 'click')
-    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, 'one')
+    expect(open).toHaveBeenCalledWith('one.ts')
     open.mockClear()
     await event(element('[data-tree-path="one.ts"] .tree-row__icon'), 'click')
-    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, 'one')
+    expect(open).toHaveBeenCalledWith('one.ts')
     open.mockClear()
     await key(element('[data-tree-path="one.ts"]'), 'Enter')
     expect(open).toHaveBeenCalledTimes(1)
@@ -160,7 +160,7 @@ describe('actual Explorer shared header and interactions', () => {
   })
 
   it('preserves the failed name for retry and never retargets an outstanding transaction to another workspace', async () => {
-    rename.mockRejectedValueOnce(new Error('Destination already exists'))
+    rename.mockRejectedValueOnce(new Error("Error invoking remote method 'files:move': Error: Destination already exists"))
     await dom.render(<FileExplorer />)
     let input = await begin(); await value(input, 'retry.ts'); await key(input, 'Enter')
     expect(element<HTMLInputElement>('.tree-inline-input').value).toBe('retry.ts')
@@ -192,16 +192,17 @@ describe('actual Explorer shared header and interactions', () => {
     expect(useAppStore.getState().config!.workspaces[0]).toBe(workspace)
   })
 
-  it('discards an old edit failure after the same workspace changes file-tree root', async () => {
+  it('discards an old edit failure after the same workspace rebinds its physical path', async () => {
     let fail!: (error: Error) => void
     rename.mockImplementationOnce(() => new Promise((_, reject) => { fail = reject }))
-    await dom.render(<FileExplorer rootPath="" />)
-    await value(await begin(), 'old-root.ts')
+    await dom.render(<FileExplorer />)
+    await value(await begin(), 'old-directory.ts')
     await key(element('.tree-inline-input'), 'Enter')
-    expect(rename.mock.calls).toEqual([['one.ts', 'old-root.ts', 'one']])
-    await dom.render(<FileExplorer rootPath="src" />)
-    await act(async () => fail(new Error('Old root failure')))
-    expect(element('.file-explorer').dataset.fileRoot).toBe('src')
+    expect(rename.mock.calls).toEqual([['one.ts', 'old-directory.ts', 'one']])
+    const current = useAppStore.getState().config!
+    await act(async () => useAppStore.setState({ config: { ...current, workspaces: [{ ...workspace, path: _hygiene_fixturePath("Users/reader/rebound") }, second] } }))
+    await act(async () => fail(new Error('Old directory failure')))
+    expect(element('[data-tree-path="one.ts"]').title).toBe('~/rebound/one.ts')
     expect(dom.container.querySelector('.tree-inline-input')).toBeNull()
     expect(dom.container.querySelector('[role="alert"]')).toBeNull()
   })
