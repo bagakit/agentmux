@@ -1,0 +1,17 @@
+.inline-rename-field { position: relative; display: inline-flex; flex-wrap: wrap; align-items: center; min-width: 0; width: 100%; }
+.inline-rename-field__input {
+  box-sizing: border-box; width: 100%; min-width: 0; height: 22px; padding: 0 5px;
+  border: 1px solid var(--focus-line); border-radius: var(--radius-sm, 5px); outline: none;
+  color: var(--text); background: var(--surface-1); font: inherit; line-height: 20px; cursor: text;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--focus-line) 12%, transparent);
+}
+.inline-rename-field__input[aria-invalid='true'] { border-color: var(--red-line); box-shadow: none; }
+.inline-rename-field[data-pending] .inline-rename-field__input { padding-right: 22px; }
+.inline-rename-field__pending { position: absolute; right: 5px; color: var(--text-3); pointer-events: none; animation: inline-rename-pending 1s linear infinite; }
+.inline-rename-field__error {
+  box-sizing: border-box; width: 100%; margin-top: 3px; padding: 2px 0; color: var(--red-text);
+  font-size: var(--fs-micro, 11px); line-height: 1.4; white-space: normal; overflow-wrap: anywhere;
+}
+@keyframes inline-rename-pending { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .inline-rename-field__pending { animation: none; } }
+@media (forced-colors: active) { .inline-rename-field__input { border-color: Highlight; box-shadow: none; } .inline-rename-field__error { border: 1px solid CanvasText; } }

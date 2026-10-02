@@ -345,6 +345,10 @@ export function clampTerminalFontSize(value: number): number {
   return rounded
 }
 
+// Editor overrides are optional; the inherited size remains the App CSS token, never a stored default.
+export const EDITOR_FONT_SIZE_MIN = 8
+export const EDITOR_FONT_SIZE_MAX = 32
+
 export const APP_APPEARANCE_IDS = ['dark', 'light', 'system'] as const
 export type AppAppearanceId = (typeof APP_APPEARANCE_IDS)[number]
 export const APP_APPEARANCE_DEFAULT: AppAppearanceId = 'dark'
@@ -419,6 +423,8 @@ export type AppearanceConfig = {
    * "zero". Persisted values are guaranteed in range because the schema clamps every write.
    */
   terminalFontSize?: number
+  /** Optional whole CSS pixels in the Editor range; absence inherits the App body size. */
+  editorFontSize?: number
 }
 
 export type BrowserToolbarConfig = {

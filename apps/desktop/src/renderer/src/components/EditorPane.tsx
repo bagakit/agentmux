@@ -19,6 +19,7 @@ import {
 import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
 import { useMonacoTheme } from '../hooks/useMonacoTheme'
+import { useEditorTypography } from '../hooks/useEditorTypography'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
 import { regionCaretFocusTargets } from '../lib/region-focus'
 import { desktopElementVisible } from '../lib/desktop-presentation'
@@ -139,6 +140,7 @@ export function EditorPane({
   const setRegionMode = useAppStore((state) => state.setEditorRegionMode)
   const reloadDiff = useAppStore((state) => state.reloadRegionDiff)
   const monacoTheme = useMonacoTheme()
+  const typography = useEditorTypography()
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
   // Models are disposable projections of the Store's one TextDoc. A File-only URI would share
@@ -368,11 +370,13 @@ export function EditorPane({
             : conflict ? <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
               : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>
                 : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">Retry</span></button>
-                : <button className="small-button" disabled={!dirty || saving} title={saving ? 'Saving file' : dirty ? 'Save file' : 'File saved'} aria-label={saving ? 'Saving file' : dirty ? 'Save file' : 'File saved'} onClick={() => void save(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}</span></button>}
+                : saving ? <span className="editor-header__status" role="status" aria-label="Saving file">Saving…</span>
+                  : dirty ? <button className="small-button" title="Save file" aria-label="Save file" onClick={() => void save(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">Save</span></button>
+                    : <span className="editor-header__status" role="status" aria-label="File saved">Saved</span>}
           <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
-            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8}>
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} />Word wrap <span className="editor-menu-shortcut">Alt+Z</span><DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} />Diff against HEAD<DropdownMenu.ItemIndicator><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu editor-options-menu" align="end" sideOffset={6} collisionPadding={8}>
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="editor-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="editor-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
               {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} />Reload from disk</DropdownMenu.Item> : null}
               {extraActions ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{extraActions}</> : null}
             </DropdownMenu.Content></DropdownMenu.Portal>
@@ -427,9 +431,9 @@ export function EditorPane({
             options={{
               minimap: { enabled: false },
               fontFamily: '"SFMono-Regular", "Cascadia Code", monospace',
-              fontSize: 14,
-              lineHeight: 21,
-              padding: { top: 14 },
+              fontSize: typography.fontSize,
+              lineHeight: typography.lineHeight,
+              padding: { top: 8 },
               scrollBeyondLastLine: false,
               automaticLayout: true,
               renderLineHighlight: 'gutter',

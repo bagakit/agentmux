@@ -1,5 +1,6 @@
 import { Link2 } from 'lucide-react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { InlineRenameField } from '@agentmux/client-ui/components/InlineRenameField'
 import {
   DndContext,
   DragOverlay,
@@ -30,7 +31,7 @@ import {
   TriangleAlert,
   X
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
@@ -47,7 +48,6 @@ import {
 import { getRevealAncestorPaths } from '../lib/workspace-paths'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { copyTextToClipboard, formatPathsForCopy } from '../lib/clipboard-copy'
-import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import {
   FILE_TREE_GIT_STATUS_CLASS,
   FILE_TREE_GIT_STATUS_LABEL,
@@ -90,7 +90,7 @@ import {
   type FileExplorerMoveTarget
 } from '../lib/file-explorer-move'
 
-type InlineEdit = { workspaceId: string; workspacePath: string; rootPath: string } & (
+type InlineEdit = { id: number; workspaceId: string; workspacePath: string; rootPath: string } & (
   | { kind: 'create-file' | 'create-directory'; parentPath: string }
   | { kind: 'rename'; node: TreeNode }
 )
@@ -155,6 +155,7 @@ function FileTreeRow({
   dirty,
   gitStatus,
   editing,
+  editId,
   editPending,
   editError,
   pathTitle,
@@ -194,12 +195,13 @@ function FileTreeRow({
   /** 该节点的源码状态，来自 git:status 的纯投影；干净或未知时为 null。 */
   gitStatus: FileTreeGitStatus | null
   editing: boolean
+  editId: number | undefined
   editPending: boolean
   editError: string | null
   pathTitle: string
   editValue: string
   onEditValue: (value: string) => void
-  onCommitEdit: () => void
+  onCommitEdit: (value: string) => Promise<void>
   onCancelEdit: () => void
   onClick: (event: React.MouseEvent) => void
   onSelect: (event: React.MouseEvent) => void
@@ -224,14 +226,6 @@ function FileTreeRow({
   selectionSize: number
 }) {
   const FileIcon = getFileTypeIcon(node.path)
-  const renameInputRef = useRef<HTMLInputElement>(null)
-  useLayoutEffect(() => {
-    const input = renameInputRef.current
-    if (!editing || !input) return
-    const extension = node.isDirectory ? -1 : node.name.lastIndexOf('.')
-    input.setSelectionRange(0, extension > 0 ? extension : node.name.length)
-    input.scrollLeft = 0
-  }, [editing, node.isDirectory, node.name])
   const {
     attributes,
     listeners,
@@ -323,30 +317,15 @@ function FileTreeRow({
               : <FileIcon size={13} />}
         </span>
         {editing ? (
-          <input
-            autoFocus
-            className="tree-inline-input"
-            aria-label={`Rename ${node.name}`}
-            ref={renameInputRef}
-            aria-invalid={Boolean(editError)}
-            title={editError ?? undefined}
-            readOnly={editPending}
-            onFocus={(event) => {
-              const extension = node.isDirectory ? -1 : node.name.lastIndexOf('.')
-              event.currentTarget.setSelectionRange(0, extension > 0 ? extension : node.name.length)
-              event.currentTarget.scrollLeft = 0
-            }}
+          <InlineRenameField inputClassName="tree-inline-input" key={editId}
+            label={`Rename ${node.name}`}
+            error={editError}
+            pending={editPending}
+            selectionEnd={!node.isDirectory && node.name.lastIndexOf('.') > 0 ? node.name.lastIndexOf('.') : node.name.length}
             value={editValue}
-            onChange={(event) => onEditValue(event.target.value)}
-            onBlur={onCommitEdit}
-            onKeyDown={(event) => {
-              // 组字确认用的 Enter（CJK 输入法）不能触发提交，否则会以半转换的取值重命名。
-              if (isImeCompositionKeyDown(event)) return
-              if (editPending) return
-              if (event.key === 'Enter') { event.preventDefault(); onCommitEdit() }
-              if (event.key === 'Escape') { event.preventDefault(); onCancelEdit() }
-            }}
-            onClick={(event) => event.stopPropagation()}
+            onValueChange={onEditValue}
+            onCommit={onCommitEdit}
+            onCancel={onCancelEdit}
           />
         ) : (
           <button
@@ -459,6 +438,7 @@ export function FileExplorer({
   const updateExplorerState = useAppStore((state) => state.updateFileExplorerState)
   const [query, setQuery] = useState('')
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null)
+  const editIntent = useRef(0)
   const [editValue, setEditValue] = useState('')
   const [editError, setEditError] = useState<string | null>(null)
   const [editPending, setEditPending] = useState(false)
@@ -716,7 +696,7 @@ export function FileExplorer({
   function beginCreate(kind: 'create-file' | 'create-directory', targetParent = createParent): void {
     if (!workspaceId || editSubmissionRef.current) return
     setExpanded((current) => new Set(current).add(targetParent))
-    setInlineEdit({ kind, parentPath: targetParent, workspaceId, workspacePath, rootPath })
+    setInlineEdit({ id: ++editIntent.current, kind, parentPath: targetParent, workspaceId, workspacePath, rootPath })
     setEditValue('')
     setEditError(null)
   }
@@ -825,14 +805,14 @@ export function FileExplorer({
   function beginRename(node: TreeNode): void {
     if (!workspaceId || editSubmissionRef.current || !canRenameFileExplorerNode(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
-    setInlineEdit({ kind: 'rename', node, workspaceId, workspacePath, rootPath })
+    setInlineEdit({ id: ++editIntent.current, kind: 'rename', node, workspaceId, workspacePath, rootPath })
     setEditValue(node.name)
     setEditError(null)
   }
 
-  async function commitEdit(): Promise<void> {
+  async function commitEdit(value = editValue): Promise<void> {
     const edit = inlineEdit
-    const name = editValue.trim()
+    const name = value.trim()
     if (!edit || editSubmissionRef.current || edit.workspaceId !== workspaceId || edit.workspacePath !== workspacePath || edit.rootPath !== rootPath) return
     if (!validName(name)) { setEditError('Enter a name without / or \\; . and .. are not file names.'); return }
     editSubmissionRef.current = edit
@@ -971,24 +951,15 @@ export function FileExplorer({
   const createRow = createEdit ? (
     <div className="tree-create-row" style={{ '--tree-depth': (createEdit.parentPath ? createEdit.parentPath.split('/').length : 0) - (rootPath ? rootPath.split('/').length : 0) } as React.CSSProperties}>
       {createEdit.kind === 'create-directory' ? <Folder size={14} /> : <FilePlus2 size={13} />}
-      <input
-        autoFocus
-        className="tree-inline-input"
-        aria-label={createEdit.kind === 'create-directory' ? 'New folder name' : 'New file name'}
-        aria-invalid={Boolean(editError)}
-        title={editError ?? undefined}
-        readOnly={editPending}
+      <InlineRenameField inputClassName="tree-inline-input" key={createEdit.id}
+        label={createEdit.kind === 'create-directory' ? 'New folder name' : 'New file name'}
+        error={editError}
+        pending={editPending}
         value={editValue}
         placeholder={createEdit.kind === 'create-directory' ? 'folder name' : 'file name'}
-        onChange={(event) => { setEditValue(event.target.value); setEditError(null) }}
-        onBlur={() => void commitEdit()}
-        onKeyDown={(event) => {
-          // 组字确认用的 Enter（CJK 输入法）不能触发提交，否则会以半转换的取值创建文件/目录。
-          if (isImeCompositionKeyDown(event)) return
-          if (editPending) return
-          if (event.key === 'Enter') { event.preventDefault(); void commitEdit() }
-          if (event.key === 'Escape') { event.preventDefault(); setInlineEdit(null); setEditError(null) }
-        }}
+        onValueChange={value => { setEditValue(value); setEditError(null) }}
+        onCommit={commitEdit}
+        onCancel={() => { setInlineEdit(null); setEditError(null) }}
       />
     </div>
   ) : null
@@ -1029,7 +1000,6 @@ export function FileExplorer({
           onKeyDown={handleTreeKeyDown}
         >
           <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
-          {editError ? <p className="tree-edit-error" role="alert">{editError}</p> : null}
           {createEdit?.parentPath === rootPath ? createRow : null}
           {visibleRows.map((node, rowIndex) => (
             <Fragment key={node.path}>
@@ -1050,12 +1020,13 @@ export function FileExplorer({
             dirty={Boolean(workspaceId && dirtyDocuments[documentKey(workspaceId, node.path)])}
             gitStatus={gitStatusIndex.get(node.path, node.isDirectory)}
             editing={inlineEdit?.kind === 'rename' && inlineEdit.node.path === node.path}
+            editId={inlineEdit?.id}
             editPending={editPending}
             editError={editError}
             pathTitle={filePathTitle(node)}
             editValue={editValue}
             onEditValue={(value) => { setEditValue(value); setEditError(null) }}
-            onCommitEdit={() => void commitEdit()}
+            onCommitEdit={commitEdit}
             onCancelEdit={() => { setInlineEdit(null); setEditError(null) }}
             onContextMenuOpen={() => {
               if (!selection.selectedPaths.has(node.path)) {
