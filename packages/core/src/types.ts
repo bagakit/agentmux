@@ -1118,6 +1118,16 @@ export type AgentMuxAcpEvent =
 export type AgentMuxObservationOrigin = { kind: 'attachment-refresh'; operationId: string; run: AgentMuxRunRef }
 
 export type AgentMuxClientEvent = (
+  | ({
+      /** This consumer's exact Run observation; never a child lifecycle or endpoint verdict. */
+      type: 'attachment-state'
+      agentSessionId?: string
+      run: AgentMuxRunRef
+      /** Last confirmed output cursor. Recovery never retries Input or a Prompt. */
+      afterByte: number
+      evidence: AgentMuxEvidence
+    } & ({ state: 'unavailable'; diagnostic: { code: string; message: string } } |
+      { state: 'restored'; diagnostic?: never }))
   | {
       type: 'run-service'
       agentSessionId?: string
