@@ -1406,3 +1406,68 @@ it('keeps the same Note creation intent when a Browser status snapshot refreshes
   expect(dom.container.querySelector('.survey-relation-notice')?.textContent ?? '').not.toContain('original Note target')
   healthy()
 })
+
+it('opens the saved Note when the same Survey selection is refreshed during its write', async () => {
+  let release!: () => void, notePath = '', content = ''
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => {
+    notePath = input.path; content = input.content; await waiting; return { status: 'written', revision: 'new' }
+  })
+  vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path: notePath, content, revision: 'new' } }))
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  const held = useAppStore.getState().surveyZoneSelection!, originalPage = address()
+  await dom.click('[aria-label="Add note to this exploration"]'); await typeReadingNote('Keep this observation'); await saveReadingNote()
+  await selectRegion(pageA.regionId)
+  await act(async () => useAppStore.getState().setSurveyZoneSelection(structuredClone(held)))
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(held)
+  await act(async () => { release(); await waiting })
+  await vi.waitFor(() => expect(useLauncherState.getState().drafts[`region:${pageA.regionId}`]?.noteCreation).toMatchObject({ status: 'written', revealed: true }))
+  expect(dom.container.textContent).not.toContain('The Note is saved. Open this same note when ready; later navigation was kept.')
+  await vi.waitFor(() => {
+    const current = useAppStore.getState(), reference = current.surveyZoneSelection!.active!
+    expect(current.tabs[reference.tabId]!.regions[reference.regionId]).toMatchObject({ kind: 'file', path: notePath })
+  })
+  const receipt = useLauncherState.getState().drafts[`region:${pageA.regionId}`]?.noteCreation
+  expect(receipt).toMatchObject({ status: 'written', revealed: true, draft: 'Keep this observation' })
+  expect(useAppStore.getState().surveyZoneSelection!.zoneId).toBe(held.zoneId)
+  expect(useAppStore.getState().tabs[mixed.id]!.regions[pageA.regionId]).toMatchObject({ browserId: pageA.browserId })
+  expect(originalPage.isConnected).toBe(true)
+  expect(api.files.write).toHaveBeenCalledTimes(1); expect(api.files.read).toHaveBeenCalledTimes(1)
+  expect(dom.container.textContent).not.toContain('Note could not open')
+  healthy()
+})
+
+it('keeps real later Survey navigation even when it returns, then opens the same saved Note on recovery', async () => {
+  let release!: () => void, notePath = '', content = ''
+  const waiting = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => {
+    notePath = input.path; content = input.content; await waiting; return { status: 'written', revision: 'new' }
+  })
+  vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path: notePath, content, revision: 'new' } }))
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  const held = useAppStore.getState().surveyZoneSelection!
+  await dom.click('[aria-label="Add note to this exploration"]'); await typeReadingNote('Saved observation'); await saveReadingNote()
+  await typeReadingNote('A newer unsaved observation')
+  await selectRegion(pageB.regionId)
+  expect(useAppStore.getState().surveyZoneSelection!.active!.regionId).toBe(pageB.regionId)
+  await selectRegion(pageA.regionId)
+  expect(useAppStore.getState().surveyZoneSelection).toEqual(held)
+  await act(async () => { release(); await waiting })
+  const launcherId = `region:${pageA.regionId}`
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-relation-notice')?.textContent).toContain('original Note target'))
+  const saved = useLauncherState.getState().drafts[launcherId]!.noteCreation!
+  expect(saved.status).toBe('written')
+  expect(useAppStore.getState().surveyZoneSelection!.active).toEqual(held.active)
+  expect(JSON.parse(content).noteId).toBe(saved.noteId)
+  const recover = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Recover same note')!
+  expect(recover).toBeDefined(); await act(async () => recover.click())
+  await vi.waitFor(() => {
+    const current = useAppStore.getState(), reference = current.surveyZoneSelection!.active!
+    expect(current.tabs[reference.tabId]!.regions[reference.regionId]).toMatchObject({ kind: 'file', path: saved.path })
+  })
+  expect(useLauncherState.getState().drafts[launcherId]!.noteCreation).toMatchObject({ status: 'written', revealed: true, noteId: saved.noteId, path: saved.path })
+  expect(useLauncherState.getState().drafts[launcherId]!.note).toBe('A newer unsaved observation')
+  expect(api.files.write).toHaveBeenCalledTimes(1); expect(api.files.read).toHaveBeenCalledTimes(1)
+  expect(Object.keys(useAppStore.getState().tabs)).toHaveLength(2)
+  expect(dom.container.textContent).not.toContain('Note could not open'); healthy()
+})
