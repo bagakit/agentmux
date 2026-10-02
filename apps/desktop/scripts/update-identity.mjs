@@ -19,6 +19,11 @@ export async function hashTree(root, paths) {
   return hash.digest('hex')
 }
 
+/** Native compatibility concerns only the artifact this host can load. */
+export async function hashRuntimeArtifact(root, runtimeRelative) {
+  return await hashTree(root, [join(runtimeRelative, `${process.platform}-${process.arch}`)])
+}
+
 export async function sourceUpdateIdentity(root) {
   return {
     shell: await hashTree(root, [
@@ -27,6 +32,6 @@ export async function sourceUpdateIdentity(root) {
       'packages/core/src', 'packages/core/package.json', 'packages/core/scripts', 'packages/core/bin',
       'pnpm-lock.yaml'
     ]),
-    ctxmux: await hashTree(root, ['packages/core/vendor/ctxmux'])
+    ctxmux: await hashRuntimeArtifact(root, 'packages/core/vendor/ctxmux')
   }
 }

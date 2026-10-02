@@ -1,5 +1,5 @@
 import { updateRoute } from '../src/shared/update-policy.ts'
-import { hashTree } from './update-identity.mjs'
+import { hashRuntimeArtifact } from './update-identity.mjs'
 import { spawn } from 'node:child_process'
 import {
   chmod,
@@ -835,7 +835,7 @@ export async function installApplication(appPath, { intent = installIntent, home
   if (await pathExists(currentPath)) {
     const runtimeRelative = 'Contents/Resources/app/node_modules/@agentmux/core/vendor/ctxmux'
     const [currentRuntime, candidateRuntime] = await Promise.all([
-      hashTree(currentPath, [runtimeRelative]), hashTree(appPath, [runtimeRelative])
+      hashRuntimeArtifact(currentPath, runtimeRelative), hashRuntimeArtifact(appPath, runtimeRelative)
     ])
     if (updateRoute({ shell: '', ctxmux: currentRuntime }, { shell: '', ctxmux: candidateRuntime }) === 'runtime-review') {
       runtimeChanged = true

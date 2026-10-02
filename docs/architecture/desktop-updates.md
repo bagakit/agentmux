@@ -25,7 +25,9 @@ The frontend uses the existing workbench persistence owner for composer drafts, 
 
 ## Restart boundary
 
-The installer compares the actual installed and candidate ctxmux trees before requesting quit. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
+Source releases and the installer fingerprint the actual ctxmux artifact directory for the current `platform-arch`. Adding or changing another platform's artifact does not request a Native upgrade on this host. Changes to the current artifact, including its manifest, binaries or SDK archive, still change the Native fingerprint; an absent artifact remains an error rather than a guessed match. Main and Core changes still require full application installation and semantic Host reload even when this fingerprint is unchanged.
+
+The installer compares the actual installed and candidate host artifacts before requesting quit. For an existing workbench, an unchanged Native fingerprint does not replace the public SDK's positive confirmation of the serving Runtime and original Runs. A graceful-quit timeout stops installation; it never escalates to force-killing the user's application or Runs. Activation, preserved workbench, Session/Run/PID continuity and Native upgrade are separate outcomes; an unavailable observation cannot stand in for confirmation.
 
 Full installation with changed runtime trees requires a nonempty review artifact passed as `--runtime-reviewed=<path>` to the packaging script. The artifact does not prove continuity by itself: the installer also uses the public same-Runtime planned-exec path and confirms the handoff before starting the new GUI. UI-only intent defers that Native transaction and retains the compatible service. Neither route may treat missing startup provenance as proof that healthy Runs must be replaced.
 
