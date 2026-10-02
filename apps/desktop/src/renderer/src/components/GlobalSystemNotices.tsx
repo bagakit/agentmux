@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react'
+import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { Bell, X } from 'lucide-react'
 import { useAppStore } from '../store'
 import { useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
@@ -8,6 +9,7 @@ import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
+import { desktopElementVisible } from '../lib/desktop-presentation'
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
@@ -29,6 +31,39 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const desktopNavigationNotice = useAppStore(state => state.desktopNavigationNotice)
   const id = useId()
   const [open, setOpen] = useState(false)
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const detailsRef = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const trigger = triggerRef.current, details = detailsRef.current
+    if (!open || !trigger || !details) return
+    // Read actual visible input surfaces only while details are open. Their original
+    // editor, draft and terminal grid stay in place; the floating inbox moves instead.
+    const inputs = [...document.querySelectorAll<HTMLElement>('.agent-input-stack')].filter(desktopElementVisible)
+    let disposed = false
+    const reference: VirtualElement = { contextElement: trigger, getBoundingClientRect() {
+      const anchor = trigger.getBoundingClientRect()
+      const top = inputs.filter(desktopElementVisible).reduce((top, input) => Math.min(top, input.getBoundingClientRect().top), anchor.top)
+      return new DOMRect(anchor.left, top, anchor.width, 0)
+    } }
+    const update = async () => {
+      const { x, y } = await computePosition(reference, details, {
+        strategy: 'fixed', placement: 'top-end', middleware: [offset(8), shift({ padding: 8 }), size({ padding: 8,
+          apply({ availableHeight }) {
+            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(window.innerHeight * .7, availableHeight))}px`
+          }
+        })]
+      })
+      if (!disposed) Object.assign(details.style, { left: `${x}px`, top: `${y}px`, visibility: 'visible' })
+    }
+    const stopPosition = autoUpdate(reference, details, () => { void update() })
+    const resize = new ResizeObserver(() => { void update() })
+    for (const input of inputs) resize.observe(input)
+    return () => {
+      disposed = true
+      stopPosition(); resize.disconnect()
+      for (const property of ['left', 'top', 'max-height', 'visibility']) details.style.removeProperty(property)
+    }
+  }, [open])
   const environment: ServiceNoticeItem[] = warning ? [{ id: 'shell', notice: {
     kind: 'process-degraded', notice: {
       step: 'Local shell environment is incomplete', mode: warning,
@@ -109,7 +144,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
   }, [open, environmentInbox, ownershipInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox])
   return <div className="global-system-notices">
-    <button type="button" className="global-system-notices__trigger" data-unread={unread > 0}
+    <button ref={triggerRef} type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}
       aria-expanded={open} aria-controls={id} title="System notifications"
       popoverTarget={id} popoverTargetAction="toggle">
@@ -117,7 +152,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       {notices.length ? <span aria-hidden="true">{notices.length}</span> : null}
       {unread ? <span className="global-system-notices__dot" aria-hidden="true" /> : null}
     </button>
-    <div id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
+    <div ref={detailsRef} id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
       data-state={open ? 'open' : 'closed'}
       onToggle={(event) => setOpen(event.newState === 'open')}>
       <div className="global-system-notices__heading">
