@@ -313,10 +313,10 @@
 .recent-focus__message-body .log-turn { padding: 0; border: 0; background: transparent; }
 .recent-focus__message-body .log-turn__body { font-size: var(--fs-micro); }
 
-.focus-pmo-attention { flex: none; display: flex; justify-content: space-between; padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
-.focus-pmo-attention__identity { min-width: 0; display: inline-flex; align-items: center; gap: var(--sp-1); }
-.focus-pmo-attention__identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
-.focus-pmo-attention__identity > span:last-child, .focus-pmo-attention > span:last-child { flex: none; }
+.focus-pmo-attention { flex: none; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-1) var(--sp-3); padding: var(--sp-1) var(--sp-2); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); text-align: left; cursor: pointer; }
+.focus-pmo-attention__identity { flex: 1 1 18ch; min-width: 0; max-width: 100%; display: inline-flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1); }
+.focus-pmo-attention__identity strong { flex: 1 1 4ch; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.focus-pmo-attention__identity > span:last-child, .focus-pmo-attention > span:last-child { flex: none; white-space: nowrap; }
 
 .focus-filters--mac { padding-left: 80px; min-height: 36px; -webkit-app-region: drag; }
 .focus-filters .global-board-toolbar__controls { -webkit-app-region: no-drag; }
