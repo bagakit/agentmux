@@ -8,12 +8,13 @@ import { deferred, session } from './conversation-fixture'
 const encode = (text: string) => new TextEncoder().encode(text)
 function snapshot(bytes = new Uint8Array(), options: { start?: number; checkpoint?: number; restore?: string; resizes?: Array<{ throughByte: number; resizeRevision: number; size: { cols: number; rows: number } }> } = {}): AgentMuxRunAttachment {
   const start = options.start ?? options.checkpoint ?? 0, resizes = options.resizes ?? []
-  return { run: { runId: 'run-original', kind: 'agent', providerId: 'codex', executorId: 'local', agentSessionId: 'session-original',
+  return { run: { runId: 'run-original', nativeService: null, kind: 'agent', providerId: 'codex', executorId: 'local', agentSessionId: 'session-original',
     workspacePath: fixturePath("workspace"), pid: 10, state: 'running', cols: 80, rows: 24, observedAt: 1, latestOutputBytes: start + bytes.length, acceptedInputBytes: 0 },
     replay: bytes.length ? [{ runId: 'run-original', type: 'data', startByte: start, endByte: start + bytes.length, dataBytes: bytes, data: '' }] : [],
     gap: null, resizeRevision: resizes.at(-1)?.resizeRevision ?? 0,
     terminal: options.checkpoint === undefined ? { type: 'not-requested' } : { type: 'basic-vt',
-      checkpoint: { runId: 'run-original', throughByte: options.checkpoint, resizeRevision: 0, size: { cols: 80, rows: 24 } },
+      checkpoint: { runId: 'run-original', throughByte: options.checkpoint, resizeRevision: 0, size: { cols: 80, rows: 24 },
+        restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: encode(options.restore ?? '\x1b[0m'), resizes } }
 }
 function harness(initial: AgentMuxRunAttachment = snapshot()) {
@@ -21,7 +22,7 @@ function harness(initial: AgentMuxRunAttachment = snapshot()) {
   const sizes: Array<[number, number]> = [], bytes: number[] = [], pendingWrites: Array<() => void> = [], reports: MobileTerminalReading[] = []
   let delayWrites = false
   let sessionFact = session()
-  const canvas: MobileTerminalCanvas = { rows: 24, buffer: { active: { type: 'normal', length: 24, baseY: 0, viewportY: 0 } },
+  const canvas: MobileTerminalCanvas = { options: { scrollback: 10_000 }, rows: 24, buffer: { active: { type: 'normal', length: 24, baseY: 0, viewportY: 0 } },
     write(data, callback) { for (const byte of data) bytes.push(byte); if (delayWrites) pendingWrites.push(callback); else callback() },
     resize(cols, rows) { sizes.push([cols, rows]) }, reset: vi.fn(), scrollToLine: vi.fn() }
   const attach = vi.fn<AgentMuxHostedClient['reattachAgent']>().mockResolvedValue({ session: session(), attachment: initial })
