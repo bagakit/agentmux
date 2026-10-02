@@ -11,6 +11,7 @@ const json = (value: unknown): SpatialJson => JSON.parse(JSON.stringify(value)) 
 export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], previous: AgentMuxSpatialGraph | null = null, removed: ReadonlySet<string> = new Set()): AgentMuxSpatialGraph {
   const catalog = spatialCatalog(state, topics);
   const { locations: _, ...facts } = catalog;
+  if (state.projectGroups === undefined && previous?.projectGroups) facts.projectGroups = previous.projectGroups;
   const persisted = { tabs: Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: state.layouts };
   const resources: AgentMuxSpatialGraph['resources'] = {}, tabLayouts: AgentMuxSpatialGraph['tabLayouts'] = {};
   for (const tab of Object.values(persisted.tabs)) {
@@ -122,14 +123,15 @@ export function sameSpatialValue(a: unknown, b: unknown): boolean {
 /** Rebase only disjoint document edits. Overlapping edits stay visible and unsaved. */
 export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentMuxSpatialGraph, remote: AgentMuxSpatialGraph): AgentMuxSpatialGraph {
   const result = structuredClone(remote), same = sameSpatialValue;
-  const arrays = [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId'], ['bindings', null]] as const;
+  const arrays = [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId'], ['bindings', null], ['projectGroups', 'groupId']] as const;
   for (const [field, key] of arrays) {
+    if (field === 'projectGroups' && !base.projectGroups && !local.projectGroups && !remote.projectGroups) continue;
     const identity = (value: unknown) => key ? String((value as Record<string, unknown>)[key]) : JSON.stringify([(value as {
         zoneId: string;
       }).zoneId, (value as {
         spaceId: string;
       }).spaceId]);
-    const original = new Map(base[field].map(v => [identity(v), v])), changed = new Map(local[field].map(v => [identity(v), v])), current = new Map(remote[field].map(v => [identity(v), v]));
+    const original = new Map((base[field] ?? []).map(v => [identity(v), v])), changed = new Map((local[field] ?? []).map(v => [identity(v), v])), current = new Map((remote[field] ?? []).map(v => [identity(v), v]));
     for (const id of new Set([...original.keys(), ...changed.keys()])) {
       const before = original.get(id), after = changed.get(id);
       if (same(before, after))
@@ -170,6 +172,8 @@ export class DesktopSpatialPersistence {
   } | null = null;
   private saving: Promise<void> | null = null;
   private readonly removed = new Set<string>();
+  private readonly removedProjectGroups = new Set<string>();
+  removeProjectGroup(id: string): void { this.removedProjectGroups.add(id); }
   removeEntity(id: string): void { this.removed.add(id); }
   get removedEntities(): ReadonlySet<string> { return this.removed; }
   private apply: ((state: AgentMuxSpatialState) => void) | null = null;
@@ -248,14 +252,17 @@ export class DesktopSpatialPersistence {
       if (!this.pending) return;
       const pending = this.pending, local = pending.graph, baseline = pending.baseline;
       const removals = new Set(this.removed);
+      const groupRemovals = new Set(this.removedProjectGroups);
       const remote = await this.port.read();
       if (!remote)
         throw new Error('The durable spatial document is unavailable. Pending work is retained.');
       const graph = remote.revision === baseline.revision ? local : reconcileSpatialGraphs(baseline.graph, local, remote.graph);
-      const next = await this.port.commit({ expectedRevision: remote.revision, graph, allowEntityRemoval: removals.size > 0 });
+      const next = await this.port.commit({ expectedRevision: remote.revision, graph, allowEntityRemoval: removals.size > 0,
+        ...(groupRemovals.size ? { removedProjectGroupIds: [...groupRemovals] } : {}) });
       this.state = next;
       for (const id of removals)
         this.removed.delete(id);
+      for (const id of groupRemovals) this.removedProjectGroups.delete(id);
       if (this.pending === pending) {
         this.pending = null;
         this.apply?.(next);

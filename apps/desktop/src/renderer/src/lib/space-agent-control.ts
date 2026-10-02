@@ -17,6 +17,7 @@ import { resolveSpatialCommit } from './control-spatial-commit'
 import { isSessionSurface } from './workbench-surface-kinds'
 
 export type SpatialWorkbench = {
+  projectGroups?: import('@agentmux/core/control').AgentMuxProjectGroupFact[]
   config: AppConfig | null
   sessions: SessionSnapshot[]
   tabs: Record<string, WorkbenchTab>
@@ -61,7 +62,7 @@ const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied
 export function spatialCatalog(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[]): AgentMuxSpaceCatalog {
   const sources = spatialSources(state.config, topics, state.spaceZoneBindings,
     Object.values(state.tabs).flatMap(tab => tab.space ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []))
-  const catalog: AgentMuxSpaceCatalog = { ...sources, tabs: [], regions: [], locations: [] }
+  const catalog: AgentMuxSpaceCatalog = { ...sources, ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}), tabs: [], regions: [], locations: [] }
   const sessions = new Map(state.sessions.map(session => [session.id, session]))
   const tabs = new Map<string, AgentMuxSpaceCatalog['tabs'][number]>()
   const spacesByZone = new Map<string, string[]>()

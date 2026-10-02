@@ -1,5 +1,6 @@
 import { AgentMuxError } from './errors.js';
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceSelector } from './space-control.js';
+export type { AgentMuxProjectGroupFact } from './space-control.js';
 import { regionIds, groupIds, regionInDirection, workbenchRegionBounds, leafIdsMatchRecords, type WorkspaceLayout, type WorkbenchViewLayout, type SplitDirection } from './spatial-layout.js';
 /** Resource metadata is JSON supplied and interpreted by its original host. */
 export type SpatialJson = null | boolean | number | string | SpatialJson[] | {
@@ -19,6 +20,8 @@ export type AgentMuxSpatialCommit = {
   expectedRevision: number;
   graph: AgentMuxSpatialGraph;
   allowEntityRemoval?: boolean;
+  /** Exact organization removals, distinct from spatial entity deletion. */
+  removedProjectGroupIds?: string[];
 };
 export type AgentMuxSpatialResolve = {
   tabId: string;
@@ -95,6 +98,18 @@ function facts(value: unknown, key: string, check: (entry: Record<string, unknow
 /** Validation preserves unknown references; observation gaps never delete facts. */
 export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph {
   const g = record(value);
+  if (g.projectGroups !== undefined) {
+    const members = new Set<string>();
+    facts(g.projectGroups, 'groupId', group => {
+      if (typeof group.name !== 'string' || !group.name.trim()) invalid('A project group needs a name.');
+      strings(group.projectIds);
+      if (group.projectIds.length < 2) invalid('A project group needs at least two Projects.');
+      for (const projectId of group.projectIds) {
+        if (members.has(projectId)) invalid('A Project already belongs to another group.');
+        members.add(projectId);
+      }
+    });
+  }
   facts(g.spaces, 'spaceId', s => {
     id(s.hostId);
     id(s.directoryPath);
@@ -199,7 +214,7 @@ export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpac
       }
   const selected = locations.filter(location => Object.entries(target).every(([key, value]) => location[key as keyof typeof location] === value));
   if (!Object.keys(target).length)
-    return { spaces: graph.spaces, zones: graph.zones, tabs: graph.tabs, regions: graph.regions, bindings: graph.bindings, locations };
+    return { ...(graph.projectGroups ? { projectGroups: graph.projectGroups } : {}), spaces: graph.spaces, zones: graph.zones, tabs: graph.tabs, regions: graph.regions, bindings: graph.bindings, locations };
   const selectedTabs = graph.tabs.filter(t => (!target.tabId || t.tabId === target.tabId) &&
     (!target.regionId || t.regionIds.includes(target.regionId)) &&
     (!target.zoneId || t.zoneId === target.zoneId) &&
@@ -211,7 +226,7 @@ export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpac
   if (target.spaceId && !target.tabId && !target.regionId && !target.zoneId)
     graph.bindings.filter(b => b.spaceId === target.spaceId).forEach(b => zoneIds.add(b.zoneId));
   const selectedRegions = graph.regions.filter(r => (!target.regionId || r.regionId === target.regionId) && selectedTabs.some(t => t.tabId === r.tabId));
-  return { spaces: graph.spaces.filter(s => (!target.spaceId || s.spaceId === target.spaceId) && (s.spaceId === target.spaceId || graph.bindings.some(b => b.spaceId === s.spaceId && zoneIds.has(b.zoneId)))),
+  return { ...(graph.projectGroups ? { projectGroups: graph.projectGroups } : {}), spaces: graph.spaces.filter(s => (!target.spaceId || s.spaceId === target.spaceId) && (s.spaceId === target.spaceId || graph.bindings.some(b => b.spaceId === s.spaceId && zoneIds.has(b.zoneId)))),
     zones: graph.zones.filter(z => zoneIds.has(z.zoneId)), tabs: selectedTabs, regions: selectedRegions,
     bindings: graph.bindings.filter(b => zoneIds.has(b.zoneId) && (!target.spaceId || b.spaceId === target.spaceId)), locations: selected };
 }

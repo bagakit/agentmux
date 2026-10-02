@@ -59,6 +59,18 @@ export type GitStatusResult =
       workspacePath: string
     }
 
+/** Read-only association evidence. Unavailable observation is never "no remote". */
+export type GitProjectIdentityResult =
+  | { kind: 'known'; hostId: string; repoPath: string; identities: string[] }
+  | { kind: 'no-remote'; hostId: string; repoPath: string }
+  | { kind: 'not-a-git-repository'; hostId: string; workspacePath: string }
+  | { kind: 'unavailable'; hostId: string; workspacePath: string; reason: string }
+
+export interface GitProjectIdentityApi {
+  /** Inspect the original Workspace's ExecutionHost and configured fetch source; never fetch. */
+  projectIdentity(workspaceId: string): Promise<GitProjectIdentityResult>
+}
+
 /**
  * One side of a single-file diff: HEAD/worktree or pinned comparison commits. Absent is a first-class
  * state, not empty text: a missing old side is how an added file is drawn, a missing new side a

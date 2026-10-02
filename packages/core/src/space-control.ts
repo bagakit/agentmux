@@ -62,7 +62,14 @@ export type AgentMuxSpaceRegionFact = {
 export type AgentMuxSpaceBindingFact = { zoneId: string; spaceId: string }
 /** Navigable references, not a claim that a Native surface is mounted. */
 export type AgentMuxSpaceLocation = AgentMuxSpaceAddress
+/** Manual organization of original Projects; the group has no execution resource. */
+export type AgentMuxProjectGroupFact = {
+  groupId: string
+  name: string
+  projectIds: string[]
+}
 export type AgentMuxSpaceCatalog = {
+  projectGroups?: AgentMuxProjectGroupFact[]
   spaces: AgentMuxSpaceFact[]
   zones: AgentMuxZoneFact[]
   tabs: AgentMuxSpaceTabFact[]

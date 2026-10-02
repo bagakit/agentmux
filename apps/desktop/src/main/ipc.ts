@@ -568,6 +568,7 @@ export async function registerIpc(args: {
     const result = await worktrees.keepOneOfFanOut(input, config)
     return { keptWorkspaceId: result.keptWorkspaceId, outcomes: result.outcomes }
   })
+  handle('git:projectIdentity', async (workspaceId: string) => await git.projectIdentity(workspaceId, config))
   handle('git:history', async (workspaceId: string, input: import('../shared/git-contracts').GitHistoryInput) =>
     await git.history(workspaceId, input, config))
   handle('git:compareBranches', async (workspaceId: string, input: GitBranchCompareInput) =>

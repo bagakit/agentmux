@@ -1,8 +1,13 @@
+import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
+import { projectGroupFor } from '../lib/cross-device-project-groups'
+import { useGitProjectAssociations } from '../hooks/useGitProjectAssociations'
+import { ProjectGroupDialog } from './ProjectGroupDialog'
+import { ProjectGroupsTree } from './ProjectGroupsTree'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { ProjectActivity } from './ProjectActivity'
-import { Folders, Layers, Pin, Plus, RadioTower, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
+import { Folders, Layers, Link2, Pin, Plus, RadioTower, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -49,6 +54,12 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const toggleProjectGroup = useAppStore((state) => state.toggleProjectGroup)
   const pinnedItems = useAppStore((state) => state.pinnedItems)
   const icons = useAppStore((state) => state.spaceObjectIcons)
+  const projectGroups = useAppStore(state => state.projectGroups)
+  const dissolveProjectGroup = useAppStore(state => state.dissolveProjectGroup)
+  const [groupDialog, setGroupDialog] = useState<{ seed?: string; editing?: AgentMuxProjectGroupFact } | null>(null)
+  const [dissolveRequest, setDissolveRequest] = useState<AgentMuxProjectGroupFact | null>(null)
+  const [dissolving, setDissolving] = useState(false)
+  const [dissolveIssue, setDissolveIssue] = useState<string | null>(null)
   const reportError = useAppStore((state) => state.reportError)
   const [removeRequest, setRemoveRequest] = useState<ReturnType<typeof projectRailNavigation>['projects'][number] | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -75,6 +86,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     [config?.workspaces]
   )
   const { scratch, projects } = navigation
+  const associations = useGitProjectAssociations(projects, config?.hosts, visible)
   const groups = useMemo(() => projectRailTree(projects), [projects])
   const projectNodes = useMemo(() => groups.flatMap((group) => group.nodes), [groups])
   const shownGroups = useMemo(() => groups.map((group) => {
@@ -237,8 +249,10 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       `${sessionCount} ${sessionCount === 1 ? 'session' : 'sessions'}`,
       ...(rowStateLabel ? [rowStateLabel] : [])
     ].join(' · ')
-    const active = project.id === activeProjectId
-    const preferred = active
+    const group = projectGroupFor(projectGroups, project.id)
+    const related = associations.related.get(project.id) ?? []
+    const active = !group && project.id === activeProjectId
+    const preferred = project.id === activeProjectId
       ? activeWorkspaceId
       : project.preferredWorkspaceId
     // 复制分支名只对 git worktree 有意义：一个聚合了多个 worktree 的 folder 项目本身没有单一分支。
@@ -251,9 +265,10 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         expanded={!collapsed} label={`${collapsed ? 'Expand' : 'Collapse'} ${project.name}`} disabled={filtering}
         onToggle={() => toggleProjectGroup(projectCollapseKey(project.id))} /> : null}
       <button
-        className={`project-rail-row ${hasChildren ? 'project-rail-row--disclosure ' : ''}${active ? 'project-rail-row--active' : ''}`}
-        title={`${displayPath(project.repoPath, project.hostId)} · ${countTitle}`}
-        aria-label={rowStateLabel ? `${project.name} · ${rowStateLabel}` : project.name}
+        className={`project-rail-row ${hasChildren ? 'project-rail-row--disclosure ' : ''}${active ? 'project-rail-row--active' : ''}${group ? ' project-rail-row--group-reference' : ''}`}
+        data-project-group-reference={group?.groupId}
+        title={`${group ? `In ${group.name} - select this project in its group\n` : ''}${displayPath(project.repoPath, project.hostId)} · ${countTitle}`}
+        aria-label={[project.name, group ? `In ${group.name}` : null, rowStateLabel].filter(Boolean).join(' · ')}
         aria-current={active ? 'page' : undefined}
         data-space-nav={project.id}
         data-space-parent={parentKey}
@@ -266,6 +281,19 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {...(workingAgentCount(projectSessions) > 0 ? { 'data-running': 'true' } : {})}
         onClick={() => {
           if (!preferred) return
+          if (group) {
+            changeQuery('')
+            if (collapsedProjectGroups['space:project-groups']) toggleProjectGroup('space:project-groups')
+            void selectWorkspace(preferred).then(() => {
+              requestAnimationFrame(() => {
+                const selected = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === useAppStore.getState().activeWorkspaceId)
+                if (!selected || workspaceProjectId(selected) !== project.id) return
+                const exact = [...treeRef.current?.querySelectorAll<HTMLElement>('[data-project-group-member]') ?? []].find(element => element.dataset.projectGroupMember === project.id)
+                exact?.scrollIntoView({ block: 'nearest' }); exact?.focus({ preventScroll: true })
+              })
+            })
+            return
+          }
           const keepBoardOpen = mainSurface === 'board'
           void selectWorkspace(preferred).then(() => {
             if (keepBoardOpen) setMainSurface('board')
@@ -275,6 +303,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {hasChildren ? null : identity}
         <span className="project-rail-row__identity">
           <strong>{project.name}</strong>
+          {group ? <small><Link2 size={10} /> {group.name}</small> : null}
           {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
               column of identical metadata — it distinguishes nothing and costs the title its
               width (same rule as the identical leading icons, 控件语言). */}
@@ -283,6 +312,12 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           ) : null}
         </span>
       </button>
+      {!group && related.length > 0 ? <button type="button" className="icon-button project-association"
+        aria-label={`Related projects for ${project.name}`} title={`Related Git projects on other devices\n${related.map(id => {
+          const candidate = projects.find(candidate => candidate.id === id)!
+          return `${candidate.name} · ${config?.hosts.find(host => host.id === candidate.hostId)?.label ?? candidate.hostId} · ${displayPath(candidate.repoPath, candidate.hostId)}`
+        }).join('\n')}\nChoose projects to group across devices`}
+        onClick={() => setGroupDialog({ seed: project.id })}><Link2 size={13} /></button> : null}
       </div>
     )
     return (
@@ -295,6 +330,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           workspaceId={preferred ?? project.preferredWorkspaceId}
           onRemove={() => setRemoveRequest(project)}
           onChangeIcon={() => setIconTarget(target)}
+          onGroupProjects={() => setGroupDialog(group ? { editing: group } : { seed: project.id })}
         >
           <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={projectSessions} contexts={activityContextsForWorkspaces(visibleProjectIds.flatMap((id) => projectRelations.nodes.get(id)!.workspaces))} /> : null}</div>
         </WorkspaceRowContextMenu>
@@ -351,6 +387,8 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
         {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={setIconTarget} /> : null}
+        <ProjectGroupsTree projects={projects} query={query} activeProjectId={activeProjectId}
+          onCreate={() => setGroupDialog({})} onEdit={editing => setGroupDialog({ editing })} onDissolve={group => { setDissolveIssue(null); setDissolveRequest(group) }} />
         <nav className="project-list" aria-label="Folders">
           <SpaceSectionHeader label="Folders" count={projects.length} icon={<Folders size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup('space:folders')}
@@ -385,6 +423,19 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           ) : null}
         </nav>
       </div>
+      {groupDialog ? <ProjectGroupDialog projects={projects} {...groupDialog} related={associations.related}
+        observations={associations.observations} onClose={() => setGroupDialog(null)} /> : null}
+      <ConfirmationDialog open={dissolveRequest !== null} title="Dissolve project group?" intent="neutral"
+        description={dissolveIssue ?? 'Projects return to their original directory entries. Files and sessions stay on their devices.'}
+        {...(dissolveRequest ? { subject: dissolveRequest.name } : {})} confirmLabel={dissolveIssue ? 'Retry saving dissolution' : 'Dissolve group'} busy={dissolving}
+        onCancel={() => { if (!dissolving) setDissolveRequest(null) }} onConfirm={() => {
+          if (!dissolveRequest) return
+          setDissolving(true)
+          void dissolveProjectGroup(dissolveRequest.groupId).then(result => {
+            if (result.diskDurability === 'confirmed') setDissolveRequest(null)
+            else setDissolveIssue(`Dissolution is applied here. Saving is unconfirmed: ${result.reason ?? 'The Core save acknowledgement is unavailable.'} Retry saving to confirm it.`)
+          }, error => { reportError(error); setDissolveIssue('The group could not be dissolved. Retry saving; original work is retained.') }).finally(() => setDissolving(false))
+        }} />
       <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} />
       <ConfirmationDialog
         open={removeRequest !== null}

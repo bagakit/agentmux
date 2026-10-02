@@ -120,6 +120,7 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('workspaces:keepOneOfFanOut', input)
   },
   git: {
+    projectIdentity: (workspaceId: string) => ipcRenderer.invoke('git:projectIdentity', workspaceId),
     history: (workspaceId: string, input?: GitHistoryInput) =>
       ipcRenderer.invoke('git:history', workspaceId, input),
     compareBranches: (workspaceId: string, input: GitBranchCompareInput) =>

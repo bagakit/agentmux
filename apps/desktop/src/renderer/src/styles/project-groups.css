@@ -1,0 +1,23 @@
+.project-group__heading { position: relative; }
+.project-group__count { flex: none; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.project-group__actions { display: flex; flex: none; gap: 2px; opacity: 0; }
+.project-group__heading:hover .project-group__actions,
+.project-group__heading:focus-within .project-group__actions { opacity: 1; }
+.project-group__actions .icon-button { width: 24px; height: 24px; }
+.project-group__member[aria-disabled="true"] { color: var(--text-3); }
+.project-rail-row--group-reference .project-rail-row__identity > strong { color: var(--text-3); }
+.project-rail-row--group-reference .project-rail-row__identity > small { display: flex; gap: 4px; align-items: center; }
+.project-association { flex: none; width: 24px; height: 24px; color: var(--text-3); }
+.project-group-dialog { width: min(480px, calc(100vw - 32px)); }
+.project-group-dialog__name { display: grid; gap: 6px; font-size: 12px; }
+.project-group-dialog__name input { width: 100%; }
+.project-group-dialog__members { max-height: min(360px, 48vh); overflow-y: auto; margin: 12px 0; }
+.project-group-dialog__member { display: flex; align-items: flex-start; gap: 10px; padding: 8px 6px; border-radius: var(--radius-sm, 4px); cursor: pointer; }
+.project-group-dialog__member:hover { background: var(--surface-2); }
+.project-group-dialog__member:focus-within { outline: 1px solid var(--focus-line); outline-offset: -1px; }
+.project-group-dialog__member input { flex: none; margin-top: 3px; accent-color: var(--green); }
+.project-group-dialog__member > span { min-width: 0; display: grid; gap: 3px; }
+.project-group-dialog__member strong { font-size: 12px; font-weight: 500; }
+.project-group-dialog__member small { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.project-group-dialog__note { opacity: .8; }
+.project-group-dialog__issue { font-size: 12px; color: var(--text); line-height: 1.5; }

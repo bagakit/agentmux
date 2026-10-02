@@ -1415,6 +1415,7 @@ export type WindowResizeEvent = {
 }
 
 export type AgentMuxDesktopApi = {
+  git: import('./git-contracts').GitProjectIdentityApi
   spatial: {
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
@@ -1754,9 +1755,9 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
     respond(response: DesktopControlResponse): void
   }
   /**
-   * Local Git source control. Lives on the preload API only, not the shared `AgentMuxDesktopApi`,
-   * because it is a Desktop-main capability with no meaningful web-preview mock — the renderer reaches
-   * it through `window.agentmux.git`, never through the shared mock `api`.
+   * Git source control stays on the preload API; its read-only Project association
+   * method also crosses the shared Desktop API. The web preview reports observation
+   * unavailable and does not simulate Git writes or repository discovery.
    *
    * **This surface speaks two path coordinate systems, and the parameter names say which.** They differ
    * whenever a workspace is a subfolder of its repository, and confusing them is silent — both are
@@ -1773,7 +1774,7 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
    * before calling it — `workspaceRelativeGitPath` in the renderer does that, and returns null for the
    * changes a subfolder workspace cannot show at all.
    */
-  git: GitBranchComparisonApi & GitHistoryApi & {
+  git: import('./git-contracts').GitProjectIdentityApi & GitBranchComparisonApi & GitHistoryApi & {
     status(workspaceId: string): Promise<GitStatusResult>
     stage(workspaceId: string, repoPath: string): Promise<void>
     commit(workspaceId: string, message: string): Promise<void>
