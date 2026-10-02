@@ -32,7 +32,51 @@ async function artifact(app) {
   // Read the address from the actual App, not the packaging checkout's artifact.
   const paths = await import(pathToFileURL(join(core, 'dist/runtime-paths.js')).href)
   return { root, manifest, manifestSha256: hash(bytes), daemonPath, daemonSha256: daemon.sha256, daemonVersion: daemon.version,
-    archivePath, corePath: join(core, 'dist/index.js'), socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
+    daemonCdHash: await artifactCodeIdentity(daemonPath, daemon.sha256), archivePath, corePath: join(core, 'dist/index.js'), socketPath: paths.defaultCtxmuxSocketPath(), stateDirectory: paths.defaultCtxmuxStateDirectory() }
+}
+
+// The full artifact digest binds its static CodeDirectory. The kernel retains
+// this code identity after unlink; it is not a hash of a missing mapped file.
+async function artifactCodeIdentity(path, expectedSHA) {
+  const before = await lstat(path, { bigint: true })
+  const result = await exec('/usr/bin/codesign', ['--display', '--verbose=4', '--arch',
+    process.arch === 'x64' ? 'x86_64' : process.arch, path], { timeout: 5_000, maxBuffer: 16384 })
+  const cdHash = /^CDHash=([a-f0-9]{40})$/m.exec(result.stderr)?.[1]
+  const image = await open(path, 'r')
+  try {
+    const metadata = await image.stat({ bigint: true })
+    const after = await lstat(path, { bigint: true })
+    fail(before.isFile() && metadata.dev === before.dev && metadata.ino === before.ino &&
+      after.dev === before.dev && after.ino === before.ino && hash(await image.readFile()) === expectedSHA && cdHash,
+      'The Runtime artifact changed while its code identity was being read.')
+  } finally { await image.close() }
+  return cdHash
+}
+
+// Reuse the installer's bounded Python/libSystem bridge. csops STATUS and
+// CDHASH are read-only kernel queries; no process memory, argv or env leaves.
+const CODE_IDENTITY_SOURCE = String.raw`
+import ctypes,json,sys
+lib=ctypes.CDLL('/usr/lib/libSystem.B.dylib',use_errno=True)
+lib.csops.argtypes=[ctypes.c_int,ctypes.c_uint,ctypes.c_void_p,ctypes.c_size_t]
+lib.csops.restype=ctypes.c_int
+pid=int(sys.argv[1]); status=ctypes.c_uint32(); digest=ctypes.create_string_buffer(20)
+def read(op,value):
+ if lib.csops(pid,op,ctypes.byref(value),ctypes.sizeof(value))!=0:raise OSError(ctypes.get_errno(),'kernel code identity unavailable')
+read(0,status)
+if not status.value&1:raise RuntimeError('Runtime code signature is invalid')
+read(5,digest)
+read(0,status)
+if not status.value&1:raise RuntimeError('Runtime code signature became invalid')
+print(json.dumps({'cdHash':digest.raw.hex(),'valid':True}))
+`
+async function kernelCodeIdentity(pid, selected) {
+  const result = await exec('/usr/bin/python3', ['-c', CODE_IDENTITY_SOURCE, String(pid)],
+    { timeout: 5_000, maxBuffer: 4096 })
+  const identity = JSON.parse(result.stdout)
+  fail(identity.valid === true && /^[a-f0-9]{40}$/.test(identity.cdHash) && identity.cdHash === selected.daemonCdHash,
+    'The socket owner executing code is not the selected Runtime artifact.')
+  return { kind: 'kernel-code-directory', cdHash: identity.cdHash, artifactSha256: selected.daemonSha256 }
 }
 
 async function daemonDeclaration(selected) {
@@ -124,16 +168,21 @@ function processFiles(output, expectedPid) {
   return files.filter(entry => entry.pid === expectedPid)
 }
 
-async function fileIdentity(file) {
+function mappedIdentity(file) {
   fail(file.t === 'REG' && /^0x[0-9a-f]+$/i.test(file.D ?? '') && /^\d+$/.test(file.i ?? '') && file.n?.startsWith('/'),
     'The Runtime file has no regular OS device/inode identity.')
+  return { device: BigInt(file.D).toString(), inode: BigInt(file.i).toString() }
+}
+
+async function fileIdentity(file) {
+  mappedIdentity(file)
   const metadata = await lstat(file.n, { bigint: true })
   fail(metadata.isFile() && metadata.dev === BigInt(file.D) && metadata.ino === BigInt(file.i),
     'The Runtime OS mapping and its path do not identify the same regular file.')
   return { device: metadata.dev.toString(), inode: metadata.ino.toString() }
 }
 
-async function processOwner(socket, executableSHA) {
+async function processOwner(socket, selected) {
   // lsof's file operands must come last. Field output avoids truncating names or
   // interpreting a socket name embedded in some other process's argv.
   const sockets = await exec('/usr/sbin/lsof', ['-n', '-P', '-a', '-U', '-Fpuftn', socket],
@@ -150,15 +199,8 @@ async function processOwner(socket, executableSHA) {
   const executables = files.filter(file => file.fd === 'txt' && basename(file.n ?? '') === 'ctxmuxd')
   fail(executables.length === 1, 'The Runtime process has no unique ctxmuxd executable mapping.')
   const executable = executables[0].n
-  const executableIdentity = await fileIdentity(executables[0])
-  const image = await open(executable, 'r')
-  try {
-    const metadata = await image.stat({ bigint: true })
-    fail(metadata.dev.toString() === executableIdentity.device && metadata.ino.toString() === executableIdentity.inode,
-      'The Runtime executable changed while its mapped image was being read.')
-    fail(hash(await image.readFile()) === executableSHA, 'The socket owner executable is not the selected Runtime artifact.')
-    await fileIdentity(executables[0])
-  } finally { await image.close() }
+  const executableIdentity = mappedIdentity(executables[0])
+  const imageIdentity = await kernelCodeIdentity(pid, selected)
   const locks = files.filter(file => /^\d+[a-z]*$/i.test(file.fd) && basename(file.n ?? '') === 'state.lock')
   fail(locks.length === 1, 'The Runtime process has no unique state.lock descriptor.')
   const stateIdentity = await fileIdentity(locks[0])
@@ -174,7 +216,9 @@ async function processOwner(socket, executableSHA) {
   const finalLocks = finalFiles.filter(file => /^\d+[a-z]*$/i.test(file.fd) && basename(file.n ?? '') === 'state.lock')
   fail(finalImages.length === 1 && finalLocks.length === 1 && finalImages[0].n === executable && finalLocks[0].n === state.path,
     'The Runtime files changed while its serving authority was being observed.')
-  const finalImageIdentity = await fileIdentity(finalImages[0]), finalStateIdentity = await fileIdentity(finalLocks[0])
+  const finalImageIdentity = mappedIdentity(finalImages[0]), finalStateIdentity = await fileIdentity(finalLocks[0])
+  const finalCodeIdentity = await kernelCodeIdentity(pid, selected)
+  fail(finalCodeIdentity.cdHash === imageIdentity.cdHash, 'The Runtime executing code changed during owner observation.')
   fail(finalImageIdentity.device === executableIdentity.device && finalImageIdentity.inode === executableIdentity.inode &&
     finalStateIdentity.device === state.device && finalStateIdentity.inode === state.inode,
     'The Runtime file identities changed while its serving authority was being observed.')
@@ -184,7 +228,7 @@ async function processOwner(socket, executableSHA) {
   const finalOwners = socketOwners(finalSockets.stdout, socket)
   fail(finalBirth === birth && finalOwners.length === 1 && finalOwners[0].pid === pid && finalOwners[0].uid === uid,
     'The Runtime process changed while its serving authority was being observed.')
-  return { pid, uid, birth, executable, executableIdentity, state }
+  return { pid, uid, birth, executable, executableIdentity, imageIdentity, state }
 }
 
 function assertServingOwner(original, current) {
@@ -239,7 +283,7 @@ async function assertRunsKept(plan, inspection, sdk) {
 /** Bind a serving socket to the installed artifact's actual mapped image and state lock. */
 export async function observeInstalledRuntimeOwner(appPath) {
   const selected = await artifact(appPath)
-  const owner = await processOwner(selected.socketPath, selected.daemonSha256)
+  const owner = await processOwner(selected.socketPath, selected)
   return { ...owner, socketPath: selected.socketPath, stateDirectory: selected.stateDirectory, sourceCommit: selected.manifest.source.commit,
     sourceTree: selected.manifest.source.tree, manifestSha256: selected.manifestSha256 }
 }
@@ -345,7 +389,7 @@ export async function prepareRuntimeUpgrade(currentApp, candidateApp) {
     fail(before.protocol === old.manifest.product.protocol && before.runtime.protocolGeneration === before.protocol &&
       before.runtime.runtimeIdPersistence === 'state_dir' && before.runtime.capabilities[capability] >= 1,
     'The existing Runtime does not declare persistent planned-exec continuity.')
-    const owner = await processOwner(old.socketPath, old.daemonSha256)
+    const owner = await processOwner(old.socketPath, old)
     const receiptPath = join(dirname(old.socketPath), 'owner.json')
     const ownerReceipt = await ownerReceiptDiagnostic(receiptPath, old, before, owner)
     return { old, candidate, oldSdk, newSdk, before, owner, ownerReceipt, receiptPath, temporary }
@@ -373,7 +417,7 @@ async function writeUpgradedReceipt(plan, owner, runtime) {
 export async function finishRuntimeUpgrade(plan, currentApp) {
   let sent = false, lastError, candidateVersion
   try {
-    const owner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
+    const owner = await processOwner(plan.old.socketPath, plan.old)
     assertServingOwner(plan.owner, owner)
     const before = await inspect(plan.oldSdk, plan.old.socketPath)
     await assertRunsKept(plan, before, plan.oldSdk)
@@ -383,7 +427,7 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
     const declared = await daemonDeclaration(current)
     const candidateImage = declared.image
     candidateVersion = declared.declaration
-    const signalOwner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
+    const signalOwner = await processOwner(plan.old.socketPath, plan.old)
     assertServingOwner(plan.owner, signalOwner)
     process.kill(signalOwner.pid, 'SIGHUP')
     sent = true
@@ -393,7 +437,7 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
         const after = await inspect(plan.newSdk, plan.old.socketPath)
         fail(after.protocol === plan.candidate.manifest.product.protocol && after.runtime.protocolGeneration === after.protocol,
           'The Runtime did not adopt the candidate protocol.')
-        const upgradedOwner = await processOwner(plan.old.socketPath, plan.candidate.daemonSha256)
+        const upgradedOwner = await processOwner(plan.old.socketPath, plan.candidate)
         assertServingOwner(plan.owner, upgradedOwner)
         fail(upgradedOwner.executableIdentity.device === candidateImage.dev.toString() &&
           upgradedOwner.executableIdentity.inode === candidateImage.ino.toString(),
@@ -417,7 +461,7 @@ export async function finishRuntimeUpgrade(plan, currentApp) {
     // Old SDK success, old executable and exact process/Run facts are an
     // independent positive proof. Timeout alone is never a rollback oracle.
     try {
-      const oldOwner = await processOwner(plan.old.socketPath, plan.old.daemonSha256)
+      const oldOwner = await processOwner(plan.old.socketPath, plan.old)
       assertServingOwner(plan.owner, oldOwner)
       const old = await inspect(plan.oldSdk, plan.old.socketPath)
       await assertRunsKept(plan, old, plan.oldSdk)
