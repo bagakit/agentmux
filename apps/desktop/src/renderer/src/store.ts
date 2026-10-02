@@ -1675,13 +1675,25 @@ function runtimeEndpointWarningsAfterEvent(
   return event.endpointWarning === null ? retained : [...retained, event.endpointWarning]
 }
 
-function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: readonly string[]): boolean {
-  if (sessionIds.length === 0) return false
-  const canonicalById = new Map(snapshot.sessions.map((session) => [session.id, session]))
+function startupSnapshotConfirmsSessions(
+  snapshot: RuntimeSnapshot, sessionIds: readonly string[], tabs: PersistedWorkbench['tabs'], config: AppConfig | null
+): boolean {
+  const originalRegions = coreSpatialPersistence?.current?.graph.regions
+  if (sessionIds.length === 0 || !config || !originalRegions) return false
+  const canonicalByIdentity = new Map(snapshot.sessions.map(session => [JSON.stringify([session.hostId, session.id]), session]))
   return sessionIds.every((id) => {
-    const session = canonicalById.get(id)
-    return session !== undefined && !runtimeSnapshotHostUnavailable(snapshot, session.hostId) &&
-      !(snapshot.runtimeOwnershipWarnings ?? []).includes(session.hostId)
+    const references = Object.values(tabs).flatMap(tab => workbenchSurfaces(tab).flatMap(surface =>
+      (surface.kind === 'agent' || surface.kind === 'terminal') && surface.sessionId === id ? [{ tab, surface }] : []))
+    return references.length > 0 && references.every(({ tab, surface }) => {
+      const original = originalRegions.find(region => region.tabId === tab.id && region.regionId === surface.regionId &&
+        region.kind === surface.kind && (surface.kind === 'agent' ? region.agentSessionId === id : region.runId === id))
+      // Display moves may change Workspace/Host. Only the original Core Region's
+      // execution fact identifies this Session; Native launch ownership is separate.
+      const hostId = original?.execution?.hostId
+      if (!hostId || !config.hosts.some(host => host.id === hostId)) return false
+      const session = canonicalByIdentity.get(JSON.stringify([hostId, id]))
+      return session?.kind === surface.kind && !runtimeSnapshotHostUnavailable(snapshot, hostId)
+    })
   })
 }
 
@@ -1795,7 +1807,7 @@ function startSessionMembershipResync(
             const currentReferences = persistedSessionSurfaceIds(projectPersistedWorkbench(projected))
             const retiredReferences = retiredHistoryReferenceIds(historySources, projected.tabs, state.config)
             const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id)
-              && !startupSnapshotConfirmsSessions(snapshot, [id]))
+              && !startupSnapshotConfirmsSessions(snapshot, [id], state.tabs, state.config))
             if (unresolved.length === 0) {
               resolvedStartupNotice = {
                 error: source.remainingMessage,
@@ -2969,7 +2981,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       // A canonical read already adopted during startup can finish this producer before publication.
       // An incomplete read keeps the original scope for the existing membership resync below.
-      if (emptySessionSnapshotWarning && snapshotVerified && startupSnapshotConfirmsSessions(snapshot, [...persistedSessionIds])) {
+      const persistedState = get()
+      // Main may publish while get or Session recovery is awaiting. An older read must not roll back
+      // that committed fact; use the existing Store identity, with no second configuration cache.
+      const config = persistedState.config !== configBeforeRead && persistedState.config !== null
+        ? persistedState.config : configResult.value
+      if (emptySessionSnapshotWarning && snapshotVerified && startupSnapshotConfirmsSessions(
+        snapshot, [...persistedSessionIds], persistedState.restoredWorkbench?.tabs ?? {}, config
+      )) {
         emptySessionSnapshotWarning = null
       }
       set({ startupProgress: { step: 'layout' } })
@@ -2979,11 +2998,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           current.id === pending.id && (current.processState === 'running' || !sessionOwnsControl(current, pending.control))
         )))
       ].filter((session) => !retiredAgentIds.has(session.id)).map((session) => [session.id, session])).values()]
-      const persistedState = get()
-      // Main may publish while get or Session recovery is awaiting. An older read must not roll back
-      // that committed fact; use the existing Store identity, with no second configuration cache.
-      const config = persistedState.config !== configBeforeRead && persistedState.config !== null
-        ? persistedState.config : configResult.value
       const restoredUi = restorePersistedUiState(config, persistedState)
       const workbench = restorePersistedWorkbench({
         config,

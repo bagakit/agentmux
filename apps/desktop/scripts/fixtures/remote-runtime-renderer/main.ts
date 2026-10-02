@@ -46,7 +46,7 @@ const result: Record<string, any> = { passed: false, phase, pid: process.pid, co
 const stage = async (step: string) => fs.writeFile(path.join(evidence, `${phase}-progress.json`), JSON.stringify({ step, pid: process.pid, snapshotCalls, at: Date.now() }))
 if (recoveryInput) { delete result.controlledRemoteObservation; result.remoteTransport = recoveryInput.remoteEndpoint.transport }
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
-async function requestOwner(operation: 'stop' | 'restart') {
+async function requestOwner(operation: 'stop' | 'restart' | 'terminal-noise-start' | 'terminal-noise-stop') {
   const id = `${process.pid}:${operation}:${Date.now()}`
   await fs.writeFile(path.join(privateRoot, 'owner-request.json'), JSON.stringify({ id, operation }))
   const deadline = Date.now() + 30000
@@ -79,6 +79,8 @@ ipcMain.handle('remote-proof:request', async (_event, operation, ...args) => {
     case 'submitPrompt': return runtime.submitPrompt(args[0], args[1], args[2], args[3], undefined, args[4], args[5], args[6])
     case 'owner-stop': return requestOwner('stop')
     case 'owner-restart': return requestOwner('restart')
+    case 'terminal-noise-start': return requestOwner('terminal-noise-start')
+    case 'terminal-noise-stop': return requestOwner('terminal-noise-stop')
     case 'remote-status': {
       const client = runtime.rpcClients().find(item => item.hostId === recoveryInput.identity.hostId)!.client
       return { owner: 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : null,
@@ -285,6 +287,8 @@ app.whenReady().then(async () => {
         assert.ok(run.latestOutputBytes > result.offlineTerminalBefore.latestOutputBytes)
         result.offlineTerminalAfter = { run, observed: await win.webContents.executeJavaScript('window.remoteReadingState()') }
       }
+      await until('window.remoteLiveReady() && window.remoteWritersSettled()', 20000)
+      result.restoredWriterObservation = await win.webContents.executeJavaScript('({ agent: window.remoteTerminalObservation(), writers: window.terminals.map(item => ({ ...item.remoteProofMetrics })) })')
       await capture(`${phase}-owner-restored.png`)
       await win.webContents.executeJavaScript('window.remoteRemoveUnconfirmed(); true')
     }

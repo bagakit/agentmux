@@ -125,7 +125,8 @@ window.remoteState = () => {
   const selection = getSelection()
   return { loading: state.loading, tabs: workbench.tabs, layouts: workbench.layouts, drafts: state.agentComposerDrafts,
     activeWorkspaceId: state.activeWorkspaceId, focus: state.agentFocus, warnings: state.runtimeEndpointWarnings,
-    error: state.error, lastError: state.lastError,
+    ownershipWarnings: state.runtimeOwnershipWarnings,
+    error: state.error, lastError: state.lastError, errorNoticeContext: state.errorNoticeContext,
     session: state.sessions.find(item => item.id === identity.sessionId),
     queue: state.agentSteerQueues[identity.sessionId] ?? [],
     terminalCount: window.terminals.filter(item => item.element?.isConnected).length,
@@ -171,6 +172,11 @@ window.remoteOpenAttachmentNotice = regionId => {
   notice.querySelector('.service-disclosure__trigger').click()
 }
 window.remoteLiveReady = () => window.remoteTerminalObservation()?.liveReady === true
+window.remoteWritersSettled = () => {
+  const visible = window.terminals.filter(item => item.element?.getClientRects().length)
+  return visible.length > 0 && visible.every(item => item.remoteProofMetrics.writeCalls > 0 &&
+    item.remoteProofMetrics.completedWrites === item.remoteProofMetrics.writeCalls)
+}
 window.remoteFocusAgentTerminal = () => {
   const candidates = window.terminals.filter(item => item.element?.getClientRects().length &&
     item.element.closest(`[data-workbench-region-id="${identity.regionId}"]`))

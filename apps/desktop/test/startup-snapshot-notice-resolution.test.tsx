@@ -1,20 +1,27 @@
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import type { AppConfig, RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { hydratePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
 
 const initial = useAppStore.getState()
 const ids = ['original-a', 'original-b']
 const empty = (): RuntimeSnapshot => ({ sessions: [], recoveryCandidates: [], timelines: {} })
-const complete = (): RuntimeSnapshot => ({
+const complete = (): Omit<RuntimeSnapshot, 'sessions'> & { sessions: ReturnType<typeof composerSession>[] } => ({
   ...empty(), sessions: ids.map(id => composerSession(id)),
   timelines: Object.fromEntries(ids.map(id => [id, { agentSessionId: id, revision: 1, items: [] }]))
 })
@@ -28,7 +35,8 @@ function Notices() {
     onDismiss={state.dismissError} onReopen={state.reopenError} kind={state.errorNoticeContext?.kind ?? 'indeterminate'} />
 }
 let root: Root, element: HTMLDivElement, dispose: (() => void) | undefined, releasePending: (() => void) | undefined
-beforeEach(() => {
+let spatialDirectory: string, spatial: AgentMuxSpatialStateStore
+beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   useAppStore.setState(initial, true)
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
@@ -36,14 +44,30 @@ beforeEach(() => {
   vi.spyOn(api.providers, 'list').mockResolvedValue([])
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  spatialDirectory = await mkdtemp(join(tmpdir(), 'agentmux-startup-session-facts-'))
+  spatial = new AgentMuxSpatialStateStore(join(spatialDirectory, 'spatial-state.json'))
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => spatial.read())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => spatial.commit(input))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => spatial.subscribe(listener))
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
 })
+async function saveOriginalWorkbench(config = composerConfig, execution = true) {
+  const state = useAppStore.getState(), original = state.restoredWorkbench!
+  const graph = desktopSpatialGraph({ ...state, config,
+    tabs: Object.fromEntries(Object.values(original.tabs).map(tab => [tab.id, hydratePersistedTab(tab)])), layouts: original.layouts,
+    sessions: execution ? ids.map(id => composerSession(id)) : [] }, [])
+  const saved = await spatial.commit({ expectedRevision: 0, graph })
+  expect((await spatial.read())?.graph).toEqual(saved.graph)
+  expect(saved.graph.regions.map(region => region.agentSessionId)).toEqual(ids)
+  expect(saved.graph.regions.map(region => region.execution?.hostId ?? null)).toEqual(execution ? ['local', 'local'] : [null, null])
+}
 async function missingReferencesFixture(catalogue: AgentSessionHistoryDescriptor[]) {
   const tabs = Object.fromEntries(ids.map(id => [`tab-${id}`, createWorkbenchTab(`tab-${id}`, {
     kind: 'agent', regionId: `region-${id}`, workspaceId: 'workspace', sessionId: id, phase: 'attached'
   })]))
   useAppStore.setState({ restoredWorkbench: { tabs, layouts: { workspace: createWorkspaceLayout('original-group', Object.keys(tabs)) } },
     loading: true, activeWorkspaceId: 'workspace' })
+  await saveOriginalWorkbench()
   vi.mocked(api.sessions.historySources).mockResolvedValue(catalogue)
   const unrelated = { ...empty(), sessions: [composerSession('healthy-neighbor')],
     timelines: { 'healthy-neighbor': { agentSessionId: 'healthy-neighbor', revision: 1, items: [] } } }
@@ -101,16 +125,28 @@ afterEach(async () => {
     dispose?.(); dispose = undefined; root.unmount()
   })
   element.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  await rm(spatialDirectory, { recursive: true, force: true })
 })
-async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial') {
+async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial', options: {
+  foreignHost?: boolean; movedDisplay?: boolean; spatial?: 'absent' | 'missing-execution'
+} = {}) {
+  const config: AppConfig = options.foreignHost || options.movedDisplay ? { ...composerConfig,
+    hosts: [...composerConfig.hosts, { id: 'foreign-host', kind: 'ssh', label: 'Other Host', hostname: 'private.invalid', user: 'fixture' }],
+    workspaces: [...composerConfig.workspaces, { id: 'foreign-display', name: 'Other display', hostId: 'foreign-host', path: _hygiene_fixturePath("display"), kind: 'folder' }]
+  } : composerConfig
+  vi.mocked(api.config.get).mockResolvedValue(config)
+  const workspaceId = options.movedDisplay ? 'foreign-display' : 'workspace'
   const tabs = Object.fromEntries(ids.map(id => [`tab-${id}`, createWorkbenchTab(`tab-${id}`, {
-    kind: 'agent', regionId: `region-${id}`, workspaceId: 'workspace', sessionId: id, phase: 'attached'
+    kind: 'agent', regionId: `region-${id}`, workspaceId, sessionId: id, phase: 'attached'
   })]))
-  const original = { tabs, layouts: { workspace: createWorkspaceLayout('original-group', Object.keys(tabs)) },
+  const original = { tabs, layouts: Object.fromEntries(config.workspaces.map(workspace => [workspace.id,
+    createWorkspaceLayout(workspace.id === workspaceId ? 'original-group' : `original-empty-${workspace.id}`,
+      workspace.id === workspaceId ? Object.keys(tabs) : [])])),
     agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: 1 }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { 'original-a': '原来的未发送草稿', 'original-b': 'Original neighbor draft' } }
   useAppStore.setState({ restoredWorkbench: { tabs, layouts: original.layouts }, loading: true,
-    agentFocus: original.agentFocus, agentComposerDrafts: original.agentComposerDrafts, activeWorkspaceId: 'workspace' })
+    agentFocus: original.agentFocus, agentComposerDrafts: original.agentComposerDrafts, activeWorkspaceId: workspaceId })
+  if (options.spatial !== 'absent') await saveOriginalWorkbench(config, options.spatial !== 'missing-execution')
   let listener: (event: RuntimeEvent) => void = () => {}
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(callback => { listener = callback; return () => {} })
   let resolve!: (snapshot: RuntimeSnapshot) => void, reject!: (error: Error) => void
@@ -178,7 +214,7 @@ it.each([false, true])('settles only the adopted complete original facts (buffer
   expect(element.querySelector('.error-notice__reopen')).toBeNull()
   f.retained()
 })
-it.each(['empty', 'partial', 'candidate', 'related-host', 'rejected', 'invalid-timeline'] as const)('keeps unresolved %s facts visible', async mode => {
+it.each(['empty', 'partial', 'candidate', 'unavailable-host', 'rejected', 'invalid-timeline'] as const)('keeps unresolved %s facts visible', async mode => {
   const f = await fixture()
   let snapshot: RuntimeSnapshot | Error = complete()
   if (mode === 'empty') snapshot = empty()
@@ -186,7 +222,11 @@ it.each(['empty', 'partial', 'candidate', 'related-host', 'rejected', 'invalid-t
   if (mode === 'candidate') snapshot = { ...empty(), recoveryCandidates: complete().sessions.map(session => ({
     ...session, agentSessionId: session.id, providerId: 'codex', executorId: 'codex', run: session.control.run
   })) }
-  if (mode === 'related-host') snapshot = { ...complete(), runtimeOwnershipWarnings: ['local'] }
+  if (mode === 'unavailable-host') snapshot = { ...complete(), runtimeEndpointWarnings: [{
+    hostId: 'local', step: 'Reading Runtime sessions', code: 'CONTROL_UNAVAILABLE',
+    message: 'The original endpoint has not confirmed its current Session facts.',
+    recovery: 'Restore the original endpoint and refresh its observation.', availability: 'unverified'
+  }] }
   if (mode === 'rejected') snapshot = new Error('Canonical read refused')
   if (mode === 'invalid-timeline') snapshot = { ...complete(), timelines: {} }
   await f.settle(snapshot)
@@ -194,6 +234,43 @@ it.each(['empty', 'partial', 'candidate', 'related-host', 'rejected', 'invalid-t
   expect(useAppStore.getState().lastError).toBe(f.warning)
   expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
   expect(element.querySelector('.error-notice')!.textContent).toContain(f.warning)
+  f.retained()
+})
+it('settles observed original Session facts while keeping unverified Native ownership as its separate notice', async () => {
+  const f = await fixture()
+  await f.settle({ ...complete(), runtimeOwnershipWarnings: ['local'] })
+  expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
+  expect(useAppStore.getState().runtimeOwnershipWarnings).toEqual(['local'])
+  expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
+  expect(element.querySelector('.error-notice')).toBeNull()
+  f.retained()
+})
+it('keeps same-ID facts from a foreign Host from settling the original saved Session notice', async () => {
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture(false, undefined, { foreignHost: true })
+  await f.settle({ ...complete(), sessions: complete().sessions.map(session => ({ ...session, hostId: 'foreign-host',
+    control: { ...session.control, hostId: 'foreign-host' } })) })
+  expect(useAppStore.getState().error, 'Another Host cannot confirm the original same-ID Session facts').toBe(f.warning)
+  expect(useAppStore.getState().lastError).toBe(f.warning)
+  expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it('settles the original execution Host facts after a cross-Host display move', async () => {
+  const recover = vi.spyOn(api.sessions, 'recover')
+  const f = await fixture(false, undefined, { movedDisplay: true })
+  await f.settle(complete())
+  expect(useAppStore.getState().sessions.map(session => session.hostId)).toEqual(['local', 'local'])
+  expect(useAppStore.getState(), 'Display placement cannot replace the original execution Host').toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
+  expect(element.querySelector('.error-notice')).toBeNull()
+  expect(recover).not.toHaveBeenCalled()
+  f.retained()
+})
+it.each(['absent', 'missing-execution'] as const)('keeps original execution Host unknown when Core spatial facts are %s', async mode => {
+  const f = await fixture(false, undefined, { spatial: mode })
+  await f.settle(complete())
+  expect(useAppStore.getState().error).toBe(f.warning)
+  expect(element.querySelectorAll('.error-notice')).toHaveLength(1)
   f.retained()
 })
 it('does not let an unrelated Host warning hold this resolved notice', async () => {
