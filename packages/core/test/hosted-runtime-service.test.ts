@@ -141,7 +141,10 @@ describe('semantic Host observation consumers', () => {
       else await events.dispose()
       finish()
       if (interruption === 'cancelled') await expect(pending).rejects.toThrow('Original private request cancelled')
-      else await expect(pending).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+      else {
+        const outcome = await pending.then(value => ({ value }), error => ({ error }))
+        expect(outcome, 'a closed consumer cannot admit a late SDK prompt').toMatchObject({ error: { code: 'CONTROL_UNAVAILABLE' } })
+      }
       expect(f.core.submitAgentPrompt.mock.calls).toEqual([])
       expect(f.core.stopTerminal.mock.calls).toEqual([])
       await events.dispose(); await f.service.dispose()
@@ -154,6 +157,14 @@ describe('semantic Host observation consumers', () => {
     await f.invoke('consumer-b', 'attachTerminal', ['original-run', 0, 'raw'])
     expect(f.core.refreshRunAttachment).toHaveBeenCalledTimes(1)
     expect(f.core.readRunReplay).toHaveBeenCalledTimes(1)
+    const state: AgentMuxClientEvent = { type: 'process-state', run: { runId: 'original-run' }, state: 'running', pid: 421,
+      evidence: { source: 'run-process', observedAt: 2, run: { runId: 'original-run' } } }
+    f.emit(state)
+    await new Promise(resolve => setImmediate(resolve))
+    const fact = encodeHostedValue({ type: 'snapshot', data: { event: state } })
+    expect(f.eventsA, 'one consumer receives each related semantic state once').toEqual([fact])
+    expect(f.eventsB, 'one consumer receives each related semantic state once').toEqual([fact])
+    f.eventsA.length = 0; f.eventsB.length = 0
     f.output('unrelated-run')
     expect(f.eventsA).toEqual([]); expect(f.eventsB).toEqual([])
     await first.dispose()
@@ -449,6 +460,10 @@ describe('semantic Host observation consumers', () => {
       [{ runId: 'original-run' }, 11, 'raw'],
       [{ runId: 'original-run' }, 22, 'terminal', 'refresh-operation-original']
     ])
+    await client.releaseRunAttachment({ runId: 'original-run' })
+    await client.refreshRunAttachment({ runId: 'original-run' }, 33, 'terminal', 'refresh-first-lease-original')
+    expect(f.core.refreshRunAttachment, 'a first refresh lease preserves its original operation identity').toHaveBeenLastCalledWith(
+      { runId: 'original-run' }, 33, 'terminal', 'refresh-first-lease-original')
     await client.dispose(); await f.service.dispose()
   })
 

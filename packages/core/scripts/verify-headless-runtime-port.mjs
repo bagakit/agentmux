@@ -28,7 +28,7 @@ const testFiles = [
 ]
 const args = ['node_modules/vitest/vitest.mjs', 'run']
 const baselineCases = new Map()
-const sourceFiles = ['hosted-client.ts', 'hosted-client-contract.ts', 'hosted-value.ts', 'hosted-output-observer.ts',
+const sourceFiles = ['types.ts', 'ctxmux-run-adapter.ts', 'agent-session-registry.ts', 'hosted-client.ts', 'hosted-client-contract.ts', 'hosted-value.ts', 'hosted-output-observer.ts',
   'hosted-runtime-service.ts', 'client-event-publisher.ts', 'runtime-paths.ts', 'durable-write.ts',
   'agent-session-identity.ts', 'agent-prompt-condition.ts', 'headless-runtime.ts', 'headless-runtime-cli.ts', 'runtime-client.ts', 'client.ts',
   'public-rpc.ts', 'public-rpc-service.ts', 'public-rpc-client.ts', 'public-rpc-wire.ts', 'public-rpc-frame.ts', 'public-rpc-server.ts', 'rpc-data.ts',
@@ -87,15 +87,15 @@ const mutants = [
     original: 'if (!handlers)\n                return;', changed: "if (!handlers) { deadline = setTimeout(() => end(new AgentMuxError('Finite intent was cut by a transport stopwatch.', 'CONTROL_TIMEOUT')), 2_000); return; }",
     assertion: 'SSH response transit cannot masquerade as a failed short business intent', test: testFiles[4] },
   { name: 'ephemeral-store-claims-durable-runtime-identity', file: 'headless-runtime.js',
-    original: 'if (storePath !== null)\n            try {', changed: 'if (true)\n            try {', assertion: 'promise resolved', test: testFiles[0] },
+    original: 'if (storePath !== null)\n            try {', changed: 'if (true)\n            try {', assertion: 'an ephemeral Store must not claim durable Runtime identity', test: testFiles[0] },
   { name: 'offline-sdk-read-demands-native-reconnect', file: 'hosted-runtime-service.js',
-    original: 'if (!OFFLINE_METHODS.has(invocation.method))', changed: 'if (true)', assertion: 'promise rejected', test: testFiles[7] },
+    original: 'if (!OFFLINE_METHODS.has(invocation.method))', changed: 'if (true)', assertion: 'offline durable SDK reads remain available without Native reconnect', test: testFiles[7] },
   { name: 'marker-shaped-ordinary-record-loses-identity', file: 'hosted-value.js',
     original: "if (Object.hasOwn(value, '$agentmuxValue'))", changed: 'if (false)', assertion: 'expected', test: testFiles[9] },
   { name: 'same-consumer-receives-duplicated-semantic-events', file: 'hosted-runtime-service.js',
-    original: 'reader.eventDestination ?? reader', changed: 'reader', assertion: 'expected', test: testFiles[5] },
+    original: 'reader.eventDestination ?? reader', changed: 'reader', assertion: 'one consumer receives each related semantic state once', test: testFiles[5] },
   { name: 'closed-consumer-admits-late-sdk-prompt', file: 'hosted-runtime-service.js',
-    original: 'if (this.consumer(id) !== original)', changed: 'if (false)', assertion: 'promise resolved', test: testFiles[5] },
+    original: 'if (this.consumer(id) !== original)', changed: 'if (false)', assertion: 'a closed consumer cannot admit a late SDK prompt', test: testFiles[5] },
   { name: 'typed-prompt-cancellation-field-is-not-forwarded', file: 'hosted-client.js',
     original: 'if (isAbortSignal(input.signal))', changed: 'if (false)', assertion: 'expected', test: testFiles[5] },
   { name: 'foreign-native-source-replaces-history-window', file: 'hosted-client.js',
@@ -103,7 +103,7 @@ const mutants = [
     changed: 'if (false)', assertion: 'a foreign native source cannot replace the original history window', test: testFiles[5] },
   { name: 'explicit-sdk-refresh-operation-identity-is-lost', file: 'hosted-runtime-service.js',
     original: '...(refresh && operationId !== undefined ? [operationId] : [])', changed: '...(refresh && operationId !== undefined ? [undefined] : [])',
-    assertion: 'expected', test: testFiles[5] }
+    assertion: 'a first refresh lease preserves its original operation identity', test: testFiles[5] }
 ,
   { name: 'endpoint-retry-diagnostic-contaminates-agent-errors', file: 'hosted-client.js',
     original: "connectionState(reconnectAttempts >= 8 ? 'unrecoverable' : 'lost', error)",
@@ -201,8 +201,9 @@ try {
   const callers = []
   for (const [symbol, definition] of callerSpecs) {
     const output = await execute('rg', ['-n', symbol, 'packages/core/src', 'apps/desktop/src/main', 'apps/host/src'], { cwd: workspace })
+    const invocation = new RegExp(`\\b${symbol}\\s*\\(`)
     const lines = output.stdout.trim().split('\n').filter(line => !line.startsWith(`${definition}:`) &&
-      !line.startsWith('packages/core/src/index.ts:') && !line.includes('import ') && !line.includes('export '))
+      !line.startsWith('packages/core/src/index.ts:') && !line.includes('import ') && !line.includes('export ') && invocation.test(line))
     assert(lines.length > 0, `${symbol}: there must be a production consumer beyond definition/export/import.`)
     callers.push({ symbol, callsites: lines })
   }

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './fixture-values.js'
+import { fixturePath } from './fixture-values.js'
 import { spawn, type ChildProcess } from 'node:child_process'
 import { mkdtemp, mkdir, rm, writeFile, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
@@ -33,7 +33,7 @@ async function receipt(child: ChildProcess): Promise<{ owner: AgentMuxRuntimeOwn
   })
 }
 export async function headlessFixture(options: { cli?: boolean; memoryStore?: boolean } = {}) {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amrr-"))
+  const root = await mkdtemp(fixturePath("tmp/amrr-"))
   const runtimeDirectory = join(root, 'r'), stateDirectory = join(root, 's')
   await Promise.all([mkdir(runtimeDirectory, { mode: 0o700 }), mkdir(join(stateDirectory, 'ctxmux'), { recursive: true, mode: 0o700 }), mkdir(join(root, 'home'), { mode: 0o700 })])
   const env: NodeJS.ProcessEnv = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
@@ -71,7 +71,10 @@ export async function headlessFixture(options: { cli?: boolean; memoryStore?: bo
     const connectHosted = process.env.AGENTMUX_TEST_CLIENT_ENTRY
       ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_CLIENT_ENTRY).href) as typeof import('../../src/hosted-client.js')).connectHostedAgentMux
       : connectHostedAgentMux
-    const rpc = providedRpc ?? await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: current.socketPath } })
+    const connectRpc = process.env.AGENTMUX_TEST_RPC_CLIENT_ENTRY
+      ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_CLIENT_ENTRY).href) as typeof import('../../src/public-rpc-client.js')).connectAgentMuxRpc
+      : connectAgentMuxRpc
+    const rpc = providedRpc ?? await connectRpc({ endpoint: { transport: 'unix', path: current.socketPath } })
     if (!providedRpc) ownedRpc.push(rpc)
     const client = await connectHosted({ rpc, expectedRuntimeId: current.owner.runtimeId,
       forwardRpc: async (method, params, context = {}) => await rpc.call(method, params, {

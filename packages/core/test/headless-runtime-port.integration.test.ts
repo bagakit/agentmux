@@ -147,12 +147,14 @@ describe('Headless public Core Runtime port over real private Unix owner', () =>
     try {
       const initial = await rpc.call('runtime.bootstrap', { consumerId: 'memory-observer', fence: { runtimeId: first.runtimeId, ownerInstanceId: first.ownerInstanceId } })
       expect(initial.storePath, 'ephemeral memory Store cannot claim a durable file').toBeNull()
-      await expect(readFile(join(scope.root, 's', 'semantic-runtime.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+      const initialIdentityFile = await readFile(join(scope.root, 's', 'semantic-runtime.json')).then(value => ({ value }), error => ({ error }))
+      expect(initialIdentityFile, 'an ephemeral Store must not claim durable Runtime identity').toMatchObject({ error: { code: 'ENOENT' } })
       const run = await client.createTerminal({ createOperationId: 'ephemeral-owner-terminal', workspacePath: scope.root,
         command: process.execPath, args: ['-e', 'setInterval(()=>{},1000)'] })
       await client.dispose(); await scope.restart()
       expect(scope.owner.runtimeId, 'each non-file owner has an explicit new ephemeral identity').not.toBe(first.runtimeId)
-      await expect(readFile(join(scope.root, 's', 'semantic-runtime.json'))).rejects.toMatchObject({ code: 'ENOENT' })
+      const restartedIdentityFile = await readFile(join(scope.root, 's', 'semantic-runtime.json')).then(value => ({ value }), error => ({ error }))
+      expect(restartedIdentityFile, 'an ephemeral Store must not claim durable Runtime identity').toMatchObject({ error: { code: 'ENOENT' } })
       const next = await scope.client()
       expect((await next.listRuns()).find(value => value.runId === run.runId)).toMatchObject({ state: 'running', pid: run.pid })
       await next.stopTerminal({ runId: run.runId })
