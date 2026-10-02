@@ -29,7 +29,10 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (prompt, context) => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r',
       ...(context?.execution === 'immediate' ? { prepare: { interrupt, endEvent } } : {}) }),
-    verifyPromptExecutionTransport: async () => transport,
+    verifyPromptExecutionTransport: async () => {
+      if (sourceDrift) native = { ...native!, sourceId: 'replaced-native-source' }
+      return transport
+    },
     readPromptExecutionEvidence: async () => native,
     inspectPromptExecution: snapshot => {
       const line = snapshot.lines[snapshot.cursor.row]
@@ -38,7 +41,7 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
     } })
   const providers = new AgentProviderRegistry([provider]), events: AgentMuxClientEvent[] = [], publisher = new AgentMuxClientEventPublisher()
   publisher.onEvent(event => events.push(event))
-  let cursor = 0, transport = true, loseInterruptAck = false, wrongEnd = false, race = false
+  let cursor = 0, transport = true, loseInterruptAck = false, wrongEnd = false, race = false, sourceDrift = false
   const receipt = new Map<string, { startByte: number; endByte: number }>(), writes: string[] = []
   const run = () => ({ runId: 'private-run', nativeService: null, lifecycleOperationId: null, program: 'fixture', args: [], workspacePath: upstreamFixturePath("private/workspace"), pid: 123,
     state: { type: 'running' as const }, cols: 100, rows: 30, latestOutputBytes: screen.throughByte, firstAvailableByte: 0, acceptedInputBytes: cursor })
@@ -74,10 +77,17 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
   }
   return { registry, store, screen, writes, kernel, submit, run, events, draw, coordinator,
     restart: () => { owner = coordinator() }, native: (evidence: AgentPromptExecutionEvidence | null) => { native = evidence },
-    fault: (kind: string) => { if (kind === 'ack') loseInterruptAck = true; if (kind === 'turn') wrongEnd = true; if (kind === 'race') race = true; if (kind === 'transport') transport = false } }
+    fault: (kind: string) => { if (kind === 'ack') loseInterruptAck = true; if (kind === 'turn') wrongEnd = true; if (kind === 'race') race = true; if (kind === 'transport') transport = false; if (kind === 'source') sourceDrift = true } }
 }
 
 describe('single authorized native immediate preparation', () => {
+  it('refuses a source replacement between native transport proof and preparation before any input', async () => {
+    const f = await fixture();try {
+      f.fault('source');await expect(f.submit()).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED'})
+      expect(f.writes).toEqual([])
+      await f.submit('default','healthy-ordinary');expect(f.writes).toEqual(['ONLY_AUTHORIZED_MESSAGE','\r'])
+    }finally{f.screen.dispose()}
+  })
   it.each([['\x1b', 'Interrupt'], ['\x04', 'native_halted']])('interrupts before payload through generic protocol %s', async (interrupt, event) => {
     const f = await fixture(interrupt, event)
     try {

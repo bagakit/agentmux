@@ -1,29 +1,55 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open, lstat } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { open } from 'node:fs/promises'
+import { isAbsolute } from 'node:path'
+import { nativeProcessFiles, nativeProcessBirth } from '../agent-native-process.js'
 import type { AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence } from '../types.js'
 
 const TAIL_BYTES = 512 * 1024
 const HEADER_BYTES = 512 * 1024
+const sourceIdentity = (sessionId: string, source: { dev: bigint; ino: bigint }): string =>
+  createHash('sha256').update(`[${JSON.stringify(sessionId)},${source.dev},${source.ino}]`).digest('base64url')
 
-/** A default TUI only auto-connects an already-listening control socket at startup.
- * Explicit embedded launch, or the absence of that socket in this native Session's
- * own home, excludes out-of-band pending additions. Never connect/create a daemon.
+/** Only a local, exact native writer can prove an old default TUI is embedded.
+ * Native writer ownership survives removal of the control socket path.
+ * The pinned native TUI either connects remotely or owns the in-process writer;
+ * anonymous runtime socketpairs do not imply a remote connection.
+ * Never infer past startup mode from today's missing control pathname.
  */
 export async function verifyCodexPromptExecutionTransport(context: AgentProviderPromptExecutionContext): Promise<boolean> {
   if (context.args.some(arg => arg === '--remote' || arg.startsWith('--remote=')) || context.args.includes('agents')) return false
-  if (context.args.includes('--no-daemon')) return true
-  const path = context.nativeHandle?.kind === 'provider' ? context.nativeHandle.transcriptPath : undefined
-  const home = path && /^(.*)\/(?:sessions|archived_sessions)\/\d{4}\/\d{2}\/\d{2}\/rollout-[^/]+\.jsonl$/u.exec(path)?.[1]
-  if (!home || !isAbsolute(home)) return false
+  if (!context.processId || !Number.isSafeInteger(context.processId) || context.processId <= 0) return false
+  const handle = context.nativeHandle
+  if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return false
+  const signal = AbortSignal.timeout(8_000)
+  const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+  let source
   try {
-    await lstat(join(home, 'app-server-control', 'app-server-control.sock'))
-    return false
-  } catch (error) {
-    return (error as NodeJS.ErrnoException).code === 'ENOENT'
-  }
+    source = await file.stat({ bigint: true })
+    if (!source.isFile()) return false
+    if (!context.nativeSourceId || sourceIdentity(handle.sessionId, source) !== context.nativeSourceId) return false
+    const header = Buffer.alloc(Number(source.size < BigInt(HEADER_BYTES) ? source.size : BigInt(HEADER_BYTES)))
+    await file.read(header, 0, header.length, 0)
+    const end = header.indexOf(10)
+    if (end < 0) return false
+    const meta = JSON.parse(header.subarray(0, end).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown; cli_version?: unknown } }
+    if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId ||
+      meta.payload?.cli_version !== '0.160.1') return false
+  } finally { await file.close() }
+  const rootBirth = await nativeProcessBirth(context.processId, signal)
+  const matches = (await nativeProcessFiles(context.processId, signal)).filter(file => file.path === handle.transcriptPath &&
+    file.device === source.dev && file.inode === source.ino && (file.access === 'w' || file.access === 'u'))
+  const owners = [...new Set(matches.map(file => file.processId))]
+  if (owners.length !== 1) return false
+  const nativePid = owners[0]!
+  const nativeBirth = await nativeProcessBirth(nativePid, signal)
+  const after = (await nativeProcessFiles(context.processId, signal)).filter(file =>
+    file.path === handle.transcriptPath && file.device === source.dev && file.inode === source.ino && (file.access === 'w' || file.access === 'u'))
+  const afterOwners = [...new Set(after.map(file => file.processId))]
+  return afterOwners.length === 1 && afterOwners[0] === nativePid &&
+    after.some(file => matches.some(old => old.processId === file.processId && old.descriptor === file.descriptor)) &&
+    await nativeProcessBirth(context.processId, signal) === rootBirth && await nativeProcessBirth(nativePid, signal) === nativeBirth
 }
 
 /** Decode only the Provider's native turn records, with bounded work per operation.
@@ -35,17 +61,19 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
   if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return null
   const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
   try {
-    const stat = await file.stat()
+    const stat = await file.stat({ bigint: true })
     if (!stat.isFile()) return null
-    const header = Buffer.alloc(Math.min(stat.size, HEADER_BYTES))
+    const size = Number(stat.size)
+    if (!Number.isSafeInteger(size)) return null
+    const header = Buffer.alloc(Math.min(size, HEADER_BYTES))
     await file.read(header, 0, header.length, 0)
     const headerEnd = header.indexOf(10)
     if (headerEnd < 0) return null
     const meta = JSON.parse(header.subarray(0, headerEnd).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown } }
     if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null
-    const sourceId = createHash('sha256').update(JSON.stringify([handle.sessionId, stat.dev, stat.ino])).digest('base64url')
-    const start = Math.max(0, stat.size - TAIL_BYTES)
-    const tail = Buffer.alloc(stat.size - start)
+    const sourceId = sourceIdentity(handle.sessionId, stat)
+    const start = Math.max(0, size - TAIL_BYTES)
+    const tail = Buffer.alloc(size - start)
     await file.read(tail, 0, tail.length, start)
     const completeEnd = tail.lastIndexOf(10)
     if (completeEnd < 0) return null

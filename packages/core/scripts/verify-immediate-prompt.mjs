@@ -22,28 +22,34 @@ try{
  assert(report.callers.length>=3)
  const typeConfig=join(evidence,'typecheck.json');await writeFile(typeConfig,JSON.stringify({extends:join(core,'tsconfig.json'),compilerOptions:{noEmit:true,composite:false,rootDir:root},include:[join(core,'test/immediate-prompt.test.ts'),join(core,'test/immediate-provider.test.ts'),join(core,'test/immediate-screen-recovery.test.ts')],exclude:[]},null,2))
  await run([join(root,'node_modules/typescript/bin/tsc'),'--project',typeConfig]);report.owningTypes=true
- const green=await tests();await writeFile(join(evidence,'tests.log'),green.stdout+green.stderr);assert(/20 passed/.test(green.stdout));report.tests=20
+ const green=await tests();await writeFile(join(evidence,'tests.log'),green.stdout+green.stderr);assert(/21 passed/.test(green.stdout));report.tests=21
  if(!args.includes('--no-mutations')){
  const mutations=[
   ['skip-prepare','packages/core/src/prompt-submission.ts','if (plan.prepare && submission.prepare &&','if (false && plan.prepare && submission.prepare &&'],
   ['execution-conflict','packages/core/src/prompt-submission.ts',"(previous.intent.execution ?? 'default') !== execution","false"],
   ['native-turn-binding','packages/core/src/prompt-submission.ts','evidence.sourceId !== prepared.nativeSourceId || evidence.nativeTurnId !== prepared.nativeTurnId','false'],
   ['full-draft','packages/core/src/providers/codex-prompt-execution.ts',"if (composer.cells.slice(markerColumn + 2).some(cell => cell.chars.trim() && !cell.dim)) return 'unavailable'","if (false) return 'unavailable'"],
-  ['native-session-binding','packages/core/src/providers/codex-prompt-execution-evidence.ts',"(meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId","false"],
+  ['native-session-binding','packages/core/src/providers/codex-prompt-execution-evidence.ts',"if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null","if (meta.type !== 'session_meta') return null"],
   ['original-screen-attributes','packages/core/src/screen-evidence.ts',"originalAttributes ? 'raw' : 'terminal'","'terminal'"],
-  ['transport-boundary','packages/core/src/prompt-submission.ts','provider.verifyPromptExecutionTransport && !await provider.verifyPromptExecutionTransport(nativeContext)','false']
+  ['transport-source-binding','packages/core/src/prompt-submission.ts','provider.verifyPromptExecutionTransport && transportEvidence?.sourceId !== nativeEvidence?.sourceId','false'],
+  ['transport-boundary','packages/core/src/prompt-submission.ts','provider.verifyPromptExecutionTransport && !await provider.verifyPromptExecutionTransport({ ...nativeContext,','false && !await provider.verifyPromptExecutionTransport({ ...nativeContext,']
  ]
- assert(mutations.length>=6)
+ assert(mutations.length>=7)
  for(const [name,file,before,after]of mutations){const path=join(root,file),source=await readFile(path,'utf8');assert.equal(source.split(before).length-1,1,`Mutation must have one exact production target: ${name}`)
   let red
   try{await writeFile(path,source.replace(before,after));red=await tests().then(result=>({...result,code:0}),error=>error);assert.notEqual(red.code,0,`Survived production mutation ${name}`);assert(/\d+ failed|FAIL\s+packages\/core\/test\/immediate/u.test(red.stdout+red.stderr),`Mutation did not reach an owning assertion ${name}`)}finally{await writeFile(path,source)}
-  const restored=await tests();assert(/20 passed/.test(restored.stdout));report.mutations.push({name,result:'RED/restore GREEN'});await writeFile(join(evidence,name+'.log'),(red.stdout??'')+(red.stderr??''))
+  const restored=await tests();assert(/21 passed/.test(restored.stdout));report.mutations.push({name,result:'RED/restore GREEN'});await writeFile(join(evidence,name+'.log'),(red.stdout??'')+(red.stderr??''))
  }
  }
  // Restore source build identity after mutations; compilation is also the production
  // package consumed by the isolated native fixture.
  await run([join(core,'scripts/build.mjs')])
- if(args.includes('--native')){const native=await run([join(core,'test/fixtures/immediate-native-worker.mjs'),evidence],{timeout:90_000});await writeFile(join(evidence,'native.log'),native.stdout+native.stderr);const proof=JSON.parse(await readFile(join(evidence,'native-proof.json'),'utf8'));assert(proof.passed&&proof.cleanup.privateRunStopped&&proof.cleanup.privateDaemonStopped);report.native=proof}
+ if(args.includes('--native')){
+  const native=await run([join(core,'test/fixtures/immediate-native-worker.mjs'),evidence],{timeout:90_000});await writeFile(join(evidence,'native.log'),native.stdout+native.stderr);const proof=JSON.parse(await readFile(join(evidence,'native-proof.json'),'utf8'));assert(proof.passed&&proof.cleanup.privateRunStopped&&proof.cleanup.privateDaemonStopped);report.native=proof
+  const remoteEvidence=join(evidence,'native-remote-daemon');await mkdir(remoteEvidence,{recursive:true})
+  const remote=await run([join(core,'test/fixtures/immediate-native-worker.mjs'),remoteEvidence],{timeout:90_000,env:{...process.env,AGENTMUX_PROBE_PRIVATE_DAEMON:'1'}});await writeFile(join(remoteEvidence,'native.log'),remote.stdout+remote.stderr)
+  const remoteProof=JSON.parse(await readFile(join(remoteEvidence,'native-proof.json'),'utf8'));assert(remoteProof.passed&&remoteProof.cleanup.privateRunStopped&&remoteProof.cleanup.privateDaemonStopped&&remoteProof.cleanup.privateCodexDaemonStopped);report.remoteNative=remoteProof
+ }
  report.passed=true
 }catch(error){report.failure={message:error.message,...(error.stdout?{output:error.stdout}:{}),...(error.stderr?{stderr:error.stderr}:{})};throw error}
 finally{await writeFile(join(evidence,'verification.json'),JSON.stringify(report,null,2)+'\n')}

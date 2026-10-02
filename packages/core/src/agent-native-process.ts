@@ -9,6 +9,7 @@ export type NativeProcessFile = {
   path: string
   device: bigint
   inode: bigint
+  access?: 'r' | 'w' | 'u'
 }
 
 function unavailable(message: string): AgentMuxError {
@@ -32,7 +33,7 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal)
   if (group.exitCode !== 0 || group.stderr || group.stdout.trim() !== String(processId)) {
     throw unavailable('The original Run process group could not be confirmed. Its input remains available.')
   }
-  const output = await observe('lsof', ['-nP', '-a', '-g', String(processId), '-F0pgftnDi'])
+  const output = await observe('lsof', ['-nP', '-a', '-g', String(processId), '-F0pgftnDia'])
   if (output.exitCode !== 0 || output.stderr || !output.stdout.endsWith('\0\n')) {
     throw unavailable('Open native records could not be fully observed. Refresh can retry; the Run is kept.')
   }
@@ -48,7 +49,8 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal)
         throw unavailable('Open-file observation was incomplete; no native identity was inferred.')
       }
       files.push({ processId: pid, processGroup: pgid, descriptor: file.f!, path,
-        device: BigInt('0x' + file.D!.replace(/^0x/iu, '')), inode: BigInt(file.i!) })
+        device: BigInt('0x' + file.D!.replace(/^0x/iu, '')), inode: BigInt(file.i!),
+        ...(['r', 'w', 'u'].includes(file.a ?? '') ? { access: file.a as 'r' | 'w' | 'u' } : {}) })
     }
     file = {}
   }
@@ -59,10 +61,19 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal)
     if (key === 'p') { finish(); pid = Number(value); pgid = 0 }
     else if (key === 'g') pgid = Number(value)
     else if (key === 'f') { finish(); file.f = value }
-    else if (['t', 'n', 'D', 'i'].includes(key)) file[key] = value
+    else if (['t', 'n', 'D', 'i', 'a'].includes(key)) file[key] = value
     else throw unavailable('Open-file observation contained an unsupported field.')
   }
   finish()
   signal.throwIfAborted()
   return files
+}
+
+/** Read one OS-reported birth without interpreting an executable or arguments. */
+export async function nativeProcessBirth(processId: number, signal: AbortSignal): Promise<string> {
+  const result = await runProcess('ps', ['-p', String(processId), '-o', 'lstart='],
+    { signal, timeoutMs: 2_000, maxOutputBytes: 4096, env: { LC_ALL: 'C' } })
+  const birth = result.stdout.trim()
+  if (result.exitCode !== 0 || result.stderr || !birth || birth.includes('\n')) throw unavailable('The original process birth is unconfirmed.')
+  return birth
 }
