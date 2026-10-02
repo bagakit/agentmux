@@ -18,12 +18,12 @@ export async function installUmd(distribution: string): Promise<void> {
 }
 export const Terminal = function (options?: ITerminalOptions) {
   const terminal = new constructor(options)
-  const metrics = { writeCalls: 0, inputBytes: 0 }
+  const metrics = { writeCalls: 0, completedWrites: 0, inputBytes: 0 }
   const write = terminal.write.bind(terminal)
   terminal.write = (data, callback) => {
     metrics.writeCalls++
     metrics.inputBytes += typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength
-    write(data, callback)
+    write(data, () => { metrics.completedWrites++; callback?.() })
   }
   Object.defineProperty(terminal, 'remoteProofMetrics', { value: metrics })
   ;(window as unknown as { terminals: import('@xterm/xterm').Terminal[] }).terminals.push(terminal)
