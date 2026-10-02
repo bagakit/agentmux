@@ -53,6 +53,22 @@ describe('cross-device Project organization through the real spatial owner', () 
     expect(useAppStore.getState().projectGroups).toEqual([second])
     expect(useAppStore.getState().tabs).toEqual(tabs)
   })
+  it('saves same-device folders as a purpose group without requiring Git identity', async () => {
+    const owner = await fixture()
+    const extra = { ...groupConfig.workspaces[0]!, id: 'other-local', path: _hygiene_fixturePath("local/other"), name: 'Other purpose' }
+    const localGroup = { ...group, projectIds: [ids[0]!, directoryIdentity('local', extra.path)] }
+    useAppStore.setState({ config: { ...groupConfig, workspaces: [...groupConfig.workspaces, extra] } })
+    const tabs = useAppStore.getState().tabs
+    await expect(useAppStore.getState().saveProjectGroup(localGroup)).resolves.toMatchObject({ diskDurability: 'confirmed' })
+    expect((await owner.read())!.graph.projectGroups).toEqual([localGroup])
+    expect(useAppStore.getState().tabs).toEqual(tabs)
+  })
+  it('retains existing unknown members when another registered member is added', () => {
+    const retained = { ...group, projectIds: [ids[0]!, 'unknown-original-project'] }
+    const edited = { ...retained, projectIds: [...retained.projectIds, ids[1]!] }
+    expect(validateProjectGroup(edited, [retained], groupConfig.workspaces)).toEqual(edited)
+    expect(() => validateProjectGroup({ ...edited, projectIds: [...edited.projectIds, 'invented-target'] }, [retained], groupConfig.workspaces)).toThrow('registration changed')
+  })
   it('applies a group watch without resource config and does not overwrite the new name when config returns', async () => {
     const owner = await fixture()
     await useAppStore.getState().saveProjectGroup(group)

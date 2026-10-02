@@ -7,9 +7,9 @@
 .project-group .project-activity { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 .project-group__heading { position: relative; }
 .project-group__count { flex: none; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.project-group__actions { display: flex; flex: none; gap: 2px; opacity: 0; }
+.project-group__actions { position: absolute; z-index: 2; right: var(--sp-1); display: flex; gap: 2px; opacity: 0; pointer-events: none; border-radius: var(--radius-sm); background: var(--surface-2); }
 .project-group__heading:hover .project-group__actions,
-.project-group__heading:focus-within .project-group__actions { opacity: 1; }
+.project-group__heading:focus-within .project-group__actions { opacity: 1; pointer-events: auto; }
 .project-group__actions .icon-button { width: 24px; height: 24px; }
 .project-group__member[aria-disabled="true"] { color: var(--text-3); }
 .project-association { flex: none; width: 24px; height: 24px; color: var(--text-3); }

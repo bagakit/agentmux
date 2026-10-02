@@ -54,7 +54,8 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
         <div className="project-rail-row-shell project-group__heading" style={depth} data-space-entry>
           <SpaceDisclosure icon={<Link2 size={13} />} expanded={!folded} label={`${folded ? 'Expand' : 'Collapse'} ${group.name}`}
             disabled={filtering} onToggle={() => toggle(key)} />
-          <button type="button" className="project-rail-row project-rail-row--disclosure" title={`${group.name} · ${members.length} projects`}
+          <button type="button" className="project-rail-row project-rail-row--disclosure" title={`${group.name} · ${members.length} projects · Double-click to edit`}
+            onDoubleClick={() => onEdit(group)}
             data-space-nav={key} data-space-parent="space:project groups" data-space-expanded={!folded}
             onClick={() => {
               const preferred = members.find(member => member.id === activeProjectId && member.project) ?? members.find(member => member.project)

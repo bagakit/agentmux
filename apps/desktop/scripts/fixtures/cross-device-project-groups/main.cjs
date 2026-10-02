@@ -108,7 +108,9 @@ app.whenReady().then(async () => {
       const point = await read(`(() => { const node=(${expression}); if(!node)throw new Error('Missing UI target'); node.scrollIntoView({block:'nearest'}); const r=node.getBoundingClientRect();if(!r.width||!r.height)throw new Error('Empty UI target');return {x:r.x+r.width/2,y:r.y+r.height/2} })()`)
       await dispatch('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
       await read('new Promise(resolve => requestAnimationFrame(resolve))')
-      assert.equal(await read(`(() => { const node=(${expression}); return node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}) && node.contains(document.elementFromPoint(${point.x},${point.y})) })()`), true, 'Native target is actually painted and hit-testable after pointer hover')
+      const painted = `(() => { const node=(${expression}); return node.checkVisibility({checkOpacity:true,checkVisibilityCSS:true}) && node.contains(document.elementFromPoint(${point.x},${point.y})) })()`
+      await until(painted)
+      assert.equal(await read(painted), true, 'Native target is actually painted and hit-testable after pointer hover')
       for (const type of ['mousePressed', 'mouseReleased']) await dispatch('Input.dispatchMouseEvent', { type, button: 'left', clickCount: 1, ...point })
       result.operations.push({ input: 'native-pointer', expression, point })
     }

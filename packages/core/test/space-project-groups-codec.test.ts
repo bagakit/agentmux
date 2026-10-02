@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtemp, rm, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,10 +15,11 @@ import type { AppConfig } from '../../../apps/desktop/src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 const groups: AgentMuxProjectGroupFact[] = [{ groupId: 'original-project-group', name: 'Original projects',
-  projectIds: [directoryIdentity('host-a', upstreamFixturePath("original/a")), directoryIdentity('host-b', upstreamFixturePath("original/b"))] }]
+  projectIds: [directoryIdentity('host-a', fixturePath("original/a")), directoryIdentity('host-b', fixturePath("original/b"))] },
+  { groupId: 'review-purpose-group', name: 'Review purpose', projectIds: [directoryIdentity('host-a', fixturePath("original/a")), directoryIdentity('host-b', fixturePath("original/b"))] }]
 function fixture(projectGroups?: AgentMuxProjectGroupFact[]): SpatialWorkbench {
-  const config: AppConfig = { version: 9, hosts: [{ id: 'host-a', label: 'First', kind: 'local' }, { id: 'host-b', label: 'Second', kind: 'local' }], executors: {},
-    workspaces: [{ id: 'a', name: 'First', hostId: 'host-a', path: upstreamFixturePath("original/a"), kind: 'folder' }, { id: 'b', name: 'Second', hostId: 'host-b', path: upstreamFixturePath("original/b"), kind: 'folder' }],
+  const config: AppConfig = { version: 9, hosts: [{ id: 'host-a', label: 'First', kind: 'ssh', hostname: 'first.invalid' }, { id: 'host-b', label: 'Second', kind: 'ssh', hostname: 'second.invalid' }], executors: {},
+    workspaces: [{ id: 'a', name: 'First', hostId: 'host-a', path: fixturePath("original/a"), kind: 'folder' }, { id: 'b', name: 'Second', hostId: 'host-b', path: fixturePath("original/b"), kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   const tab = createWorkbenchTab('original-tab', { regionId: 'original-region', kind: 'launcher', workspaceId: 'a' })
   return { config, ...(projectGroups === undefined ? {} : { projectGroups }), sessions: [], tabs: { [tab.id]: tab },
@@ -46,6 +47,15 @@ describe('existing project groups use the original public spatial catalog codec'
       expect(read(catalog, operation).regions).toEqual(catalog.regions)
     }
   })
+  it('preserves overlapping project groups through actual Desktop and Core public catalogs', () => {
+    const state = fixture(groups)
+    for (const catalog of [desktopCatalog(state, []), coreCatalog(graph(state))]) {
+      for (const operation of ['space.ls', 'space.inspect', 'space.bind', 'space.unbind'] as const) {
+        expect(() => read(catalog, operation)).not.toThrow()
+        expect(read(catalog, operation).projectGroups).toEqual(groups)
+      }
+    }
+  })
   it('keeps absent optional facts distinct and preserves exact unknown Project references', () => {
     const absent = read(desktopCatalog(fixture(), [])); expect(Object.hasOwn(absent, 'projectGroups')).toBe(false)
     const retained = [{ ...groups[0]!, projectIds: ['unknown-project-a', 'unknown-project-b'] }]
@@ -54,9 +64,9 @@ describe('existing project groups use the original public spatial catalog codec'
   it.each([
     [{ ...groups[0]!, extra: true }], [{ ...groups[0]!, groupId: 'self' }], [{ ...groups[0]!, name: ' ' }],
     [{ ...groups[0]!, projectIds: ['only-one'] }], [{ ...groups[0]!, projectIds: ['repeat', 'repeat'] }],
-    [groups[0]!, { ...groups[0]! }], [groups[0]!, { ...groups[0]!, groupId: 'other-group' }],
+    [groups[0]!, { ...groups[0]! }],
     [{ ...groups[0]!, projectIds: ['valid', 'bad\nproject'] }]
-  ].map(projectGroups => ({ projectGroups })))('rejects malformed or multiply owned identities without pruning facts (%j)', ({ projectGroups }) => {
+  ].map(projectGroups => ({ projectGroups })))('rejects malformed or duplicate record identities without pruning facts (%j)', ({ projectGroups }) => {
     const catalog = desktopCatalog(fixture(groups), []), original = structuredClone(catalog)
     expect(() => read({ ...catalog, projectGroups } as AgentMuxSpaceCatalog)).toThrow(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
     expect(catalog).toEqual(original)

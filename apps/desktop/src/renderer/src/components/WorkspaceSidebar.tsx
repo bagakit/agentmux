@@ -8,7 +8,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { ProjectActivity } from './ProjectActivity'
-import { Folders, Layers, Link2, Pin, Plus, RadioTower, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
+import { Folders, Layers, Link2, Pin, Plus, Rows2, Rows3, Rows4, Search, X } from 'lucide-react'
 import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { PROJECT_RAIL_DENSITY_DEFAULT, type ProjectRailDensity } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -301,12 +301,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {hasChildren ? null : identity}
         <span className="project-rail-row__identity">
           <strong>{project.name}</strong>
-          {/* Host only earns a slot when it is NOT this machine. `This Mac` on every row is a
-              column of identical metadata — it distinguishes nothing and costs the title its
-              width (same rule as the identical leading icons, 控件语言). */}
-          {project.hostId !== 'local' ? (
-            <small><RadioTower size={9} /> {project.hostId}</small>
-          ) : null}
+
         </span>
       </button>
       {related.length > 0 ? <button type="button" className="icon-button project-association"
