@@ -425,7 +425,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       {groupDialog ? <ProjectGroupDialog projects={projects} {...groupDialog} related={associations.related}
         observations={associations.observations} onClose={() => setGroupDialog(null)} /> : null}
       <ConfirmationDialog open={dissolveRequest !== null} title="Dissolve project group?" intent="neutral"
-        description={dissolveIssue ?? 'Projects return to their original directory entries. Files and sessions stay on their devices.'}
+        description={dissolveIssue ?? 'Only this group is dissolved. Folders remain in their other groups and original directory entries. Files and sessions stay on their devices.'}
         {...(dissolveRequest ? { subject: dissolveRequest.name } : {})} confirmLabel={dissolveIssue ? 'Retry saving dissolution' : 'Dissolve group'} busy={dissolving}
         onCancel={() => { if (!dissolving) setDissolveRequest(null) }} onConfirm={() => {
           if (!dissolveRequest) return

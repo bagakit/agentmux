@@ -32,3 +32,8 @@ dimensions, phase, PID and original DOM/state facts. The actual Vite module
 inputs and PostCSS imported stylesheet inputs are sealed against source bytes.
 Both generations consume one preserved compiled candidate. Independent visual
 review remains required: successful capture never declares aesthetic acceptance.
+
+The final visual scenes also use three explicit raster project images, transient
+controlled 12 working / 3 idle and 2 Needs you / 1 error projections, actual
+pointer-hover group actions, and one controlled save transport failure with the
+same editor and retry. These previews do not establish live Agent or SSH health.

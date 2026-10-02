@@ -31,3 +31,6 @@
 .project-group-dialog__issue { font-size: 12px; color: var(--text); line-height: 1.5; }
 
 .project-group .project-activity__metric > strong { font-weight: 500; }
+
+.project-group__member .project-rail-row__identity > strong { flex: 1; }
+.project-group__member .project-rail-row__identity > small { display: block; flex: none; max-width: 40%; text-overflow: ellipsis; overflow: hidden; white-space: nowrap; }
