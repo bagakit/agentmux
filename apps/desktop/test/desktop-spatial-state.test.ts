@@ -184,4 +184,26 @@ describe('Desktop consumes the Core spatial owner', () => {
       expect(restored.layouts).toEqual(graph.layouts);
     }
   });
+  it('retains an edit made during the retry read and an edit made during the bootstrap write', async () => {
+    const store = await owner(), graph = desktopSpatialGraph(workbench(), []);
+    let release!: () => void, entered!: () => void;
+    const gate = new Promise<void>(resolve => {release = resolve}), started = new Promise<void>(resolve => {entered = resolve});
+    const client = new DesktopSpatialPersistence({read: async () => {entered(); await gate; return store.read()}, commit: input => store.commit(input), onChange: listener => store.subscribe(listener)}, () => {});
+    await expect(client.bootstrap(graph)).rejects.toThrow('has not been read');
+    const saving = client.flush();
+    await started;
+    const edit = structuredClone(graph); edit.tabs[0]!.name = 'During read'; client.stage(edit);
+    release(); await saving;
+    expect((await store.read())!.graph.tabs[0]!.name).toBe('During read');
+    // A different cold client sees an absent document, and then edits while its write is in flight.
+    const other = await owner();
+    const writeGate = new Promise<void>(resolve => {release = resolve}), writing = new Promise<void>(resolve => {entered = resolve});
+    const second = new DesktopSpatialPersistence({read: () => other.read(), commit: async input => {entered(); await writeGate; return other.commit(input)}, onChange: listener => other.subscribe(listener)}, () => {});
+    await second.read();
+    const bootstrap = second.bootstrap(graph); await writing;
+    const latest = structuredClone(graph); latest.tabs[0]!.name = 'During write'; second.stage(latest);
+    release(); await bootstrap; await second.flush();
+    expect((await other.read())!.graph.tabs[0]!.name).toBe('During write');
+  });
+
 });

@@ -58,4 +58,68 @@ describe('actual Desktop Store spatial cutover', () => {
     await vi.waitFor(async () => expect((await store.read())!.graph.tabs[0]!.name).toBe('Saved edit'));
     expect((await store.read())!.graph.tabLayouts.file!.root).toEqual(work.tabs.file.layout.root);
   });
+  it('retries a failed cold read through the actual Store, preserves edits and consumes remote facts without replacing live content', async () => {
+    const store = await fixture(), graph = desktopSpatialGraph(workbench('Core title'), []);
+    await store.commit({expectedRevision: 0, graph});
+    const read = vi.spyOn(api.spatial, 'read').mockRejectedValue(new Error('Storage offline'));
+    const work = workbench('Stale UI');
+    useAppStore.setState({...work, restoredWorkbench: {tabs: work.tabs, layouts: work.layouts}});
+    disposers.push(await useAppStore.getState().initialize());
+    expect(useAppStore.getState().workbenchSaveWarning).toContain('has not been read');
+    const live = useAppStore.getState().tabs.file!.regions['file-region'];
+    const draft = {content: 'thought retained during read failure', dirty: true};
+    useAppStore.setState({documents: {'resource\0research.md': draft as never}});
+    // New entities are a disjoint local edit; the unchanged stale title must not overwrite Core.
+    const note = createWorkbenchTab('local-note', {regionId: 'local-note-region', kind: 'file', workspaceId: 'resource', path: 'new-note.md'});
+    useAppStore.setState(state => ({tabs: {...state.tabs, [note.id]: note}}));
+    await useAppStore.getState().retryWorkbenchSave();
+    expect(useAppStore.getState().workbenchSaveWarning).not.toBeNull();
+    expect((await store.read())!.revision).toBe(1);
+    read.mockImplementation(() => store.read());
+    await useAppStore.getState().retryWorkbenchSave();
+    const saved = (await store.read())!;
+    expect(saved.graph.tabs.find(tab => tab.tabId === 'file')!.name).toBe('Core title');
+    expect(saved.graph.tabs.map(tab => tab.tabId)).toContain('local-note');
+    expect(useAppStore.getState().tabs.file!.regions['file-region']).toBe(live);
+    expect(useAppStore.getState().documents['resource\0research.md']).toBe(draft);
+    expect(useAppStore.getState().workbenchSaveWarning).toBeNull();
+    expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState())).not.toHaveProperty('restoredWorkbench');
+    const remote = structuredClone(saved.graph);
+    remote.tabs.find(tab => tab.tabId === 'file')!.name = 'Later CLI title';
+    await store.commit({expectedRevision: saved.revision, graph: remote});
+    await vi.waitFor(() => expect(useAppStore.getState().tabs.file!.name).toBe('Later CLI title'));
+  });
+  it('keeps conflicting local work and the durable graph when a cold-read retry cannot rebase', async () => {
+    const store = await fixture(), graph = desktopSpatialGraph(workbench('Core title'), []);
+    await store.commit({expectedRevision: 0, graph});
+    const read = vi.spyOn(api.spatial, 'read').mockRejectedValue(new Error('Storage offline'));
+    const work = workbench('Stale UI');
+    useAppStore.setState({...work, restoredWorkbench: {tabs: work.tabs, layouts: work.layouts}});
+    disposers.push(await useAppStore.getState().initialize());
+    useAppStore.getState().renameTab('file', 'Unsaved local title');
+    read.mockImplementation(() => store.read());
+    await useAppStore.getState().retryWorkbenchSave();
+    expect(useAppStore.getState().workbenchSaveWarning).toContain('edited elsewhere');
+    expect(useAppStore.getState().tabs.file!.name).toBe('Unsaved local title');
+    expect((await store.read())!.graph).toEqual(graph);
+    // The user can resolve the edit in place and retry; no reload or Run operation is needed.
+    useAppStore.getState().renameTab('file', 'Core title');
+    await useAppStore.getState().retryWorkbenchSave();
+    expect(useAppStore.getState().workbenchSaveWarning).toBeNull();
+  });
+  it('retries a failed first document write and saves the edits made while storage was unavailable', async () => {
+    const store = await fixture(), work = workbench('Original');
+    const commit = vi.spyOn(api.spatial, 'commit').mockRejectedValue(new Error('Disk write unavailable'));
+    useAppStore.setState({...work, restoredWorkbench: {tabs: work.tabs, layouts: work.layouts}});
+    disposers.push(await useAppStore.getState().initialize());
+    expect(useAppStore.getState().workbenchSaveWarning).not.toBeNull();
+    useAppStore.getState().renameTab('file', 'Edited while offline');
+    await useAppStore.getState().retryWorkbenchSave();
+    expect(await store.read()).toBeNull();
+    commit.mockImplementation(input => store.commit(input));
+    await useAppStore.getState().retryWorkbenchSave();
+    expect((await store.read())!.graph.tabs[0]!.name).toBe('Edited while offline');
+    expect(useAppStore.getState().workbenchSaveWarning).toBeNull();
+  });
+
 });

@@ -107,9 +107,19 @@ export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph): SpaceZo
   return result;
 }
 export type DesktopSpatialPort = import('../../../shared/contracts').AgentMuxDesktopApi['spatial'];
+/** Compare persisted facts without treating JSON property order as a content change. */
+export function sameSpatialValue(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (!a || !b || typeof a !== 'object' || typeof b !== 'object' || Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && a.length !== (b as unknown[]).length) return false;
+  const left = a as Record<string, unknown>, right = b as Record<string, unknown>;
+  const keys = Object.keys(left).filter(key => left[key] !== undefined);
+  return keys.length === Object.keys(right).filter(key => right[key] !== undefined).length &&
+    keys.every(key => Object.hasOwn(right, key) && sameSpatialValue(left[key], right[key]));
+}
 /** Rebase only disjoint document edits. Overlapping edits stay visible and unsaved. */
 export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentMuxSpatialGraph, remote: AgentMuxSpatialGraph): AgentMuxSpatialGraph {
-  const result = structuredClone(remote), same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+  const result = structuredClone(remote), same = sameSpatialValue;
   const arrays = [['spaces', 'spaceId'], ['zones', 'zoneId'], ['tabs', 'tabId'], ['regions', 'regionId'], ['bindings', null]] as const;
   for (const [field, key] of arrays) {
     const identity = (value: unknown) => key ? String((value as Record<string, unknown>)[key]) : JSON.stringify([(value as {
@@ -151,6 +161,7 @@ export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentM
 export class DesktopSpatialPersistence {
   private state: AgentMuxSpatialState | null = null;
   private readConfirmed = false;
+  private startup: { baseline: AgentMuxSpatialGraph; graph: AgentMuxSpatialGraph } | null = null;
   private pending: {
     graph: AgentMuxSpatialGraph;
     baseline: AgentMuxSpatialState;
@@ -170,17 +181,41 @@ export class DesktopSpatialPersistence {
     return this.state;
   }
   async bootstrap(graph: AgentMuxSpatialGraph): Promise<void> {
+    if (this.ready) return;
+    this.startup ??= { baseline: graph, graph };
     if (!this.readConfirmed)
       throw new Error('The Core spatial document has not been read. Original work is retained.');
-    if (!this.state)
-      this.state = await this.port.commit({ expectedRevision: 0, graph });
+    await this.flush();
+  }
+  private async restoreStorage(): Promise<void> {
+    const startup = this.startup;
+    if (!startup)
+      throw new Error('The original workbench is still loading. Retry saving when it is ready.');
+    // A failed read is unknown, never an absent document. Read again before any write.
+    const remote = await this.port.read();
+    if (remote) {
+      const graph = reconcileSpatialGraphs(startup.baseline, startup.graph, remote.graph);
+      this.state = remote;
+      this.readConfirmed = true;
+      this.startup = null;
+      if (sameSpatialValue(graph, remote.graph)) this.apply?.(remote);
+      else this.pending = { baseline: remote, graph };
+    } else {
+      const graph = startup.graph;
+      const next = await this.port.commit({ expectedRevision: 0, graph });
+      this.state = next;
+      this.readConfirmed = true;
+      this.startup = null;
+      if (startup.graph === graph) this.apply?.(next);
+      else this.pending = { baseline: next, graph: reconcileSpatialGraphs(graph, startup.graph, next.graph) };
+    }
   }
   connect(apply: (state: AgentMuxSpatialState) => void): () => void {
     this.apply = apply;
     this.unsubscribe = this.port.onChange(state => {
       if (this.state && state.revision <= this.state.revision)
         return;
-      if (this.pending || this.saving)
+      if (this.startup || this.pending || this.saving)
         return; // flush reconciles from the original revision.
       this.state = state;
       apply(state);
@@ -189,10 +224,11 @@ export class DesktopSpatialPersistence {
   }
   stage(graph: AgentMuxSpatialGraph): void {
     if (!this.ready) {
+      if (this.startup) this.startup.graph = graph;
       this.warn(new Error('Core spatial state has not been confirmed. Original work is retained; restore storage and retry.'));
       return;
     }
-    if (JSON.stringify(graph) === JSON.stringify(this.state!.graph))
+    if (sameSpatialValue(graph, this.state!.graph))
       return;
     this.pending = { graph, baseline: this.state! };
     // Coalesce synchronous structural changes; this never opens a resource or Run.
@@ -205,15 +241,11 @@ export class DesktopSpatialPersistence {
         await this.flush();
       return;
     }
-    if (!this.ready)
-      throw new Error('Core spatial state has not been confirmed. Original work is retained; restore storage and reload its positions before saving.');
-    if (!this.pending)
-      return;
-    if (!this.state)
-      throw new Error('Core spatial state is unavailable. Original work and pending edits are retained.');
-    const pending = this.pending, local = pending.graph, baseline = pending.baseline;
-    const removals = new Set(this.removed);
     this.saving = (async () => {
+      if (!this.ready) await this.restoreStorage();
+      if (!this.pending) return;
+      const pending = this.pending, local = pending.graph, baseline = pending.baseline;
+      const removals = new Set(this.removed);
       const remote = await this.port.read();
       if (!remote)
         throw new Error('The durable spatial document is unavailable. Pending work is retained.');
