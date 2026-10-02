@@ -14,28 +14,36 @@ const paths = {
   store: 'apps/desktop/src/renderer/src/store.ts',
   notices: 'apps/desktop/src/renderer/src/components/GlobalSystemNotices.tsx',
   hosts: 'apps/desktop/src/renderer/src/components/settings/HostSettingsPane.tsx',
-  ...(diagnostics ? { controller: 'apps/desktop/src/main/runtime-controller.ts', client: 'packages/core/dist/public-runtime-client.js' } : {})
+  ...(diagnostics ? { controller: 'apps/desktop/src/main/runtime-controller.ts', client: 'packages/core/dist/hosted-client.js' } : {})
 }
 const test = resolve(root, recovery ? 'apps/desktop/test/remote-runtime-recovery.integration.test.tsx' : 'apps/desktop/test/runtime-endpoint-binding.integration.test.tsx')
 const digest = value => createHash('sha256').update(value).digest('hex')
 const sources = Object.fromEntries(await Promise.all(Object.entries(paths).map(async ([key, path]) => [key, await readFile(resolve(root, path), 'utf8')])))
 const inputs = Object.fromEntries(Object.entries(paths).map(([key, path]) => [path, digest(sources[key])]))
 inputs[relative(root, test)] = digest(await readFile(test))
-if (diagnostics) for (const path of ['packages/core/src/public-runtime-client.ts', 'packages/core/src/types.ts']) inputs[path] = digest(await readFile(resolve(root, path)))
+if (diagnostics) for (const path of ['packages/core/src/hosted-client.ts', 'packages/core/src/types.ts']) inputs[path] = digest(await readFile(resolve(root, path)))
 await mkdir(output, { recursive: true })
 let lostBlock
+let lostPrefix
+let duplicatedAgentError
 if (diagnostics) {
-  const start = sources.client.indexOf('    lost(epoch, error) {')
-  const end = sources.client.indexOf('        this.reconnecting = true;', start)
+  const start = sources.client.indexOf('    const connectionState = (state, error) => {')
+  const end = sources.client.indexOf('    const connectionFailure = ', start)
   assert.ok(start >= 0 && end > start, 'Actual compiled endpoint-loss block is nonempty')
   lostBlock = sources.client.slice(start, end)
   assert.ok(lostBlock.includes('diagnostic:') && lostBlock.includes("type: 'connection-state'"))
-}
-const lostPrefix = `    lost(epoch, error) {
-        if (epoch !== this.epoch || this.closed || this.reconnecting) return;
-        this.connected = false;
-        this.publisher.publish({ type: 'connection-state', state: 'lost', evidence: { source: 'run-process', observedAt: Date.now() } });
+  const diagnostic = `            ...(error instanceof Error ? { diagnostic: { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE',
+                    message: \`\${error.message} Existing Session references are retained; reconnect this endpoint to restore observation.\` } } : {}),
 `
+  assert.equal(lostBlock.split(diagnostic).length - 1, 1, 'Exactly one typed transport diagnostic')
+  lostPrefix = lostBlock.replace(diagnostic, '')
+  const endOfState = '    };\n'
+  assert.equal(lostBlock.split(endOfState).length - 1, 1, 'Exactly one connection-state publisher boundary')
+  duplicatedAgentError = lostBlock.replace(endOfState, `        if (error instanceof Error) emit({ type: 'agent-error',
+            code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE', message: error.message,
+            evidence: { source: 'run-process', observedAt: Date.now() } });
+${endOfState}`)
+}
 const variants = [
   ...(diagnostics ? [{ name: 'baseline-green' }] : []),
   { name: 'unavailable-owner-guard-removed', key: 'state',
@@ -70,9 +78,7 @@ const variants = [
   ...(diagnostics ? [
     { name: 'transport-cause-not-attributed', key: 'client', before: lostBlock, after: lostPrefix },
     { name: 'transport-error-duplicates-agent-error', key: 'client', before: lostBlock,
-      after: lostBlock + `        if (error instanceof Error) this.publisher.publish({ type: 'agent-error',
-          code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE', message: error.message,
-          evidence: { source: 'run-process', observedAt: Date.now() } });\n` },
+      after: duplicatedAgentError },
     { name: 'main-discards-typed-transport-cause', key: 'controller',
       before: `          event.diagnostic ? new AgentMuxError(event.diagnostic.message, event.diagnostic.code) :\n`, after: `` },
     { name: 'native-agent-diagnostic-removed', key: 'state',
