@@ -5,7 +5,8 @@ import path from 'node:path'
 import { execFile as execFileCallback } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { AgentMuxControlServer, AgentMuxFileAgentSessionStore, parseAgentMuxControlReceipt } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { agentMuxCliMatch } from '../../../../../packages/core/src/agentmux-cli-commands'
 import { openDemandStore } from '@agentmux/demand'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { DesktopControlIpcBridge } from '../../../src/main/control-ipc-bridge'
@@ -153,7 +154,7 @@ async function cli(args: string[], expectedExit = 0) {
   const startedAt = Date.now()
   coldPoint('main-cli-start')
   let stdout = '', stderr = '', exitCode = 0
-  try { const output = await execFile(nodeExecutable, [cliPath, ...args], { env, timeout: 25000, maxBuffer: 1024 * 1024 }); stdout = output.stdout; stderr = output.stderr }
+  try { const output = await execFile(nodeExecutable, [cliPath, '--endpoint', `unix:${server.path}`, ...args], { env, timeout: 25000, maxBuffer: 1024 * 1024 }); stdout = output.stdout; stderr = output.stderr }
   catch (error: any) { stdout = error.stdout ?? ''; stderr = error.stderr ?? ''; exitCode = typeof error.code === 'number' ? error.code : -1 }
   const lines = stdout.trim().split('\n')
   const entry: Record<string, any> = { args, stdout, stderr, exitCode, startedAt, finishedAt: Date.now() }
@@ -161,7 +162,12 @@ async function cli(args: string[], expectedExit = 0) {
   result.cli.push(entry)
   assert.equal(lines.length, 1, 'The public CLI returns one JSON receipt')
   assert.equal(exitCode, expectedExit, `${args.join(' ')}: ${stdout}\n${stderr}`)
-  const receipt = parseAgentMuxControlReceipt(JSON.parse(lines[0]))
+  const receipt = JSON.parse(lines[0])
+  const match = agentMuxCliMatch(args)
+  assert.ok(match, 'The invocation must belong to the original unique command registry')
+  assert.ok(receipt && typeof receipt === 'object' && !Array.isArray(receipt))
+  assert.deepEqual(Object.keys(receipt).sort(), ['ok', 'operation', 'result', ...(Object.hasOwn(receipt, 'operationId') ? ['operationId'] : [])].sort())
+  assert.equal(receipt.operation, match.command.method)
   entry.receipt = receipt
   assert.equal(receipt.ok, true, stdout)
   return receipt.result as any
@@ -170,7 +176,7 @@ const lifecycle = (entries: typeof calls) => entries.filter(one => ['launch-agen
 async function preservation(name: string, args: string[], presentation = 'main-visible') {
   return recordStep(name, async () => {
     const beforeCalls = calls.length, before = durable(await state())
-    const receipt = await cli(['focus', ...args])
+    const receipt = await cli(args, presentation === 'main-visible' ? 0 : 1)
     const input = await evaluate('window.focusProofPreservedInput()')
     assert.ok(input.sameElement && input.sameView && input.sameAnchor && input.sameFocus && input.sameOffsets && input.sameValue,
       `Original Mote caret/View changed: ${JSON.stringify(input)}`)
@@ -225,7 +231,7 @@ async function freshTerminalInput(name: string, address: any, character: string,
   return recordStep(name, async () => {
     const beforeDom = await evaluate(`({ liveReady: window.focusProofReadyTerminal(${JSON.stringify(address.to.regionId)}, ${JSON.stringify(address.agent.agentSessionId)}, ${JSON.stringify(address.agent.runId)}),
       regionPresent: Boolean(document.querySelector('[data-workbench-region-id=' + CSS.escape(${JSON.stringify(address.to.regionId)}) + ']')) })`)
-    const receipt = precedingReceipt ?? await cli(['focus', '--region', address.to.regionId, '--input', 'target'])
+    const receipt = precedingReceipt ?? await cli(['space', 'focus', '--region', address.to.regionId, '--input', 'target'])
     assert.equal(receipt.input.outcome, 'transferred')
     assert.equal(receipt.input.after.regionId, address.to.regionId)
     assert.equal(receipt.input.after.sessionId, address.agent.agentSessionId)
@@ -310,23 +316,23 @@ app.whenReady().then(async () => {
         const emptyTopicSpace = catalog.spaces.find((one: any) => one.kind === 'topic' && one.topicId === 'view:focus-proof-empty')
         assert.ok(zone('source') && zone('target') && zone('empty') && moteSpace && topicSpace && emptyTopicSpace)
         const open = async (key: string, flags: string[]) => {
-          const opened = await cli(['agent', 'open', '--executor', 'fixture', ...flags, '--prompt', `Private ${key} setup`, '--request-id', `private:focus:${key}`])
+          const opened = await cli(['agent', 'open', '--executor', 'fixture', ...flags, '--prompt', `Private ${key} setup`, '--operation-id', `private:focus:${key}`])
           assert.equal(opened.outcome, 'opened'); assert.equal(opened.agent.initialPrompt, 'confirmed')
           return opened
         }
-        const source = await open('source', ['--zone', zone('source').zoneId, '--focus'])
-        const target = await open('target', ['--zone', zone('target').zoneId])
-        const mote = await open('mote', ['--space', moteSpace.spaceId])
+        const source = await open('source', ['--zone', zone('source').zoneId, '--new-tab', '--focus'])
+        const target = await open('target', ['--zone', zone('target').zoneId, '--new-tab'])
+        const mote = await open('mote', ['--space', moteSpace.spaceId, '--new-tab'])
         const moteSecond = await cli(['agent', 'open', '--session', mote.agent.agentSessionId,
-          '--region', mote.to.regionId, '--split', 'right', '--request-id', 'private:focus:mote-second-projection'])
+          '--region', mote.to.regionId, '--split', 'right', '--operation-id', 'private:focus:mote-second-projection'])
         assert.equal(moteSecond.outcome, 'opened')
         assert.equal(moteSecond.agent.agentSessionId, mote.agent.agentSessionId)
         assert.equal(moteSecond.agent.runId, mote.agent.runId)
         assert.equal(moteSecond.to.tabId, mote.to.tabId)
         assert.notEqual(moteSecond.to.regionId, mote.to.regionId)
-        await cli(['focus', '--region', mote.to.regionId])
-        await cli(['focus', '--region', source.to.regionId])
-        const topic = await open('topic', ['--space', topicSpace.spaceId])
+        await cli(['space', 'focus', '--region', mote.to.regionId], 1)
+        await cli(['space', 'focus', '--region', source.to.regionId], 1)
+        const topic = await open('topic', ['--space', topicSpace.spaceId, '--new-tab'])
         await demands.linkSession('private-goal-linked', source.agent.agentSessionId)
         await evaluate('window.focusProofRefreshDemands()')
         await recordStep('actual-hover-preview-readonly', async () => {
@@ -343,14 +349,26 @@ app.whenReady().then(async () => {
           assert.deepEqual(current.tabs, before.tabs)
           assert.equal(current.caret.regionId, before.caret.regionId)
           assert.deepEqual(lifecycle(calls.slice(cursor)), [], 'Hover preview grants no lifecycle/input/preparation authority')
-          const observed = parseDesktopClientObservation((await cli(['inspect', '--client'])).observation)
+          const observed = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation)
+          result.hoverPreviewObservation = { observed, dom: await evaluate(`(() => {
+            const panel = document.querySelector('[data-pmo-teams-topic-floating]')
+            const id = ${JSON.stringify(observed.workbench.desktop.floating.regionId)}
+            const nodes = [...document.querySelectorAll('[data-workbench-region-id]')].filter(node => node.dataset.workbenchRegionId === id)
+            const facts = node => { const rect = node.getBoundingClientRect(), css = getComputedStyle(node); return {
+              tag: node.tagName, className: node.className, connected: node.isConnected,
+              rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+              hidden: Boolean(node.closest('[hidden], [aria-hidden="true"]')), inert: Boolean(node.closest('[inert]')),
+              display: css.display, visibility: css.visibility, panelContains: Boolean(panel?.contains(node)) } }
+            return { panel: panel ? { ...facts(panel), popoverOpen: panel.matches(':popover-open'), topic: panel.dataset.moteTargetTopic, tab: panel.dataset.moteTargetTab, region: panel.dataset.moteTargetRegion } : null,
+              observedRegion: id, sameIdentityCount: nodes.length, candidates: nodes.map(facts) }
+          })()`) }
           assert.equal(observed.workbench.desktop.floating.state, 'preview')
           assert.equal(observed.workbench.desktop.floating.tabId, mote.to.tabId)
           assert.equal(observed.workbench.desktop.floating.presentation, 'visible')
           await screenshot('actual-hover-preview')
           await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 10, y: 10 })
           await until('window.focusProofState().floating?.preview === false && window.focusProofState().floating?.open === false')
-          const closed = parseDesktopClientObservation((await cli(['inspect', '--client'])).observation)
+          const closed = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation)
           assert.equal(closed.workbench.desktop.floating.state, 'closed')
           assert.deepEqual(lifecycle(calls.slice(cursor)), [])
           return { before: { caret: before.caret, floating: before.floating }, box, current: { caret: current.caret, floating: current.floating }, observed, closed }
@@ -372,16 +390,16 @@ app.whenReady().then(async () => {
         await until("window.focusProofEvents.some(one => one.type === 'compositionstart')")
         return evaluate('window.focusProofCaptureInput()')
       })
-      await preservation('space-zone-preserve', ['--zone', ids.source.to.zoneId])
+      await preservation('space-zone-preserve', ['space', 'focus', '--zone', ids.source.to.zoneId])
       await screenshot('source-space-with-mote')
-      await preservation('exact-tab-preserve', ['--tab', ids.target.to.tabId])
-      await preservation('exact-region-preserve', ['--region', ids.source.to.regionId])
-      const goal = await preservation('exact-goal-preserve', ['--goal', 'private-goal-exact'])
+      await preservation('exact-tab-preserve', ['space', 'focus', '--tab', ids.target.to.tabId])
+      await preservation('exact-region-preserve', ['space', 'focus', '--region', ids.source.to.regionId])
+      const goal = await preservation('exact-goal-preserve', ['goal', 'focus', '--goal', 'private-goal-exact'])
       assert.equal(goal.receipt.navigation.selection.goalId, 'private-goal-exact')
       await screenshot('exact-goal-with-mote')
-      for (const surface of ['search', 'focus', 'goals', 'space']) await preservation(`surface-${surface}-preserve`, ['--surface', surface])
+      for (const surface of ['space', 'focus', 'goals', 'survey']) await preservation(`surface-${surface}-preserve`, ['app', 'focus', '--surface', surface])
       assert.equal((await state()).selectedDemandId, 'private-goal-exact')
-      const borrowed = await preservation('borrowed-view-partial', ['--region', ids.mote.to.regionId], 'floating')
+      const borrowed = await preservation('borrowed-view-partial', ['space', 'focus', '--region', ids.mote.to.regionId], 'floating')
       await recordStep('borrowed-home-service-window-visible', async () => {
         const before = durable(await state()), cursor = calls.length
         const notice = await observeBorrowedHomeNotice(ids.mote.to.tabId, ids.mote.to.regionId)
@@ -395,7 +413,7 @@ app.whenReady().then(async () => {
       })
       await recordStep('zero-tab-no-lifecycle', async () => {
         const cursor = calls.length, before = await state(), runs = await client().listRuns()
-        const receipt = await cli(['focus', '--zone', ids.empty.zoneId])
+        const receipt = await cli(['space', 'focus', '--zone', ids.empty.zoneId])
         assert.equal(receipt.navigation.selection.space.tabId, null)
         assert.equal(receipt.navigation.selection.space.zoneId, ids.empty.zoneId)
         assert.equal(receipt.presentation.state, 'main-visible')
@@ -408,12 +426,12 @@ app.whenReady().then(async () => {
       })
       await recordStep('strict-native-targets', async () => {
         const before = durable(await state()), cursor = calls.length
-        const ambiguous = await cli(['focus', '--space', ids.sourceSpace])
+        const ambiguous = await cli(['space', 'focus', '--space', ids.sourceSpace], 1)
         assert.equal(ambiguous.navigation.state, 'rejected')
         assert.ok(ambiguous.issues[0].candidates.length >= 2)
-        const mismatch = await cli(['focus', '--space', ids.sourceSpace, '--region', ids.target.to.regionId])
+        const mismatch = await cli(['space', 'focus', '--space', ids.sourceSpace, '--region', ids.target.to.regionId], 1)
         assert.equal(mismatch.navigation.state, 'rejected')
-        const unknown = await cli(['focus', '--zone', 'private:unknown-zone'])
+        const unknown = await cli(['space', 'focus', '--zone', 'private:unknown-zone'], 1)
         assert.equal(unknown.navigation.state, 'rejected')
         assert.deepEqual(durable(await state()), before)
         assert.deepEqual(lifecycle(calls.slice(cursor)), [])
@@ -445,7 +463,7 @@ app.whenReady().then(async () => {
         await evaluate(`window.focusProofBeginColdDiagnostics(${JSON.stringify(ids.target.to.regionId)}); true`)
         try {
           await evaluate(`window.focusProofHoldTargetInput(${JSON.stringify(ids.target.to.regionId)}); true`)
-          const pending = cli(['focus', '--region', ids.target.to.regionId, '--input', 'target'])
+          const pending = cli(['space', 'focus', '--region', ids.target.to.regionId, '--input', 'target'])
           await until(`window.focusProofState().regionCaretFocus?.regionId === ${JSON.stringify(ids.target.to.regionId)}`)
           coldPoint('main-nonce-observed')
           await evaluate("window.focusProofColdPoint('fixture-nonce-observed'); true")
@@ -481,18 +499,20 @@ app.whenReady().then(async () => {
         const cursor = calls.length, before = await state()
         const moteDom = await evaluate(`window.focusProofCaptureMoteRegions(${JSON.stringify(ids.mote.to.regionId)}, ${JSON.stringify(ids.moteSecond.to.regionId)})`)
         await evaluate(`window.focusProofHoldTargetInput(${JSON.stringify(ids.target.to.regionId)}); true`)
-        const pending = cli(['focus', '--region', ids.target.to.regionId, '--input', 'target'])
+        const pending = cli(['space', 'focus', '--region', ids.target.to.regionId, '--input', 'target'], 1)
         await until(`window.focusProofState().regionCaretFocus?.regionId === ${JSON.stringify(ids.target.to.regionId)}`)
         const held = await state()
         const humanNavigationRequestedAt = Date.now()
-        await evaluate("window.focusProofHumanNavigate('search'); true")
+        await evaluate("window.focusProofHumanNavigate(); true")
+        await until(`window.focusProofState().mainSurface === "agents" && document.querySelector('[aria-label="Search contexts"]')?.getBoundingClientRect().width > 0`)
+        await evaluate(`document.querySelector('[aria-label="Search contexts"]').focus(); true`)
         const humanNavigationReturnedAt = Date.now()
         const receipt = await pending
         assert.equal(receipt.navigation.state, 'unconfirmed')
-        assert.equal(receipt.navigation.selection.surface, 'search')
+        assert.equal(receipt.navigation.selection.surface, 'focus')
         assert.notEqual(receipt.input.outcome, 'transferred')
         assert.equal((await state()).regionCaretFocus, null)
-        assert.equal(await evaluate('document.activeElement === document.querySelector(".global-search-input input")'), true, 'The later human Search action owns its actual input')
+        assert.equal(await evaluate(`document.activeElement === document.querySelector('[aria-label="Search contexts"]')`), true, 'The later human Focus input action owns its actual input')
         const humanInput = await evaluate('window.focusProofCaptureInput()')
         assert.equal(humanInput.caret.tag, 'INPUT')
         assert.ok(humanInput.caret.connected && humanInput.caret.visible && !humanInput.caret.inert)
@@ -509,15 +529,15 @@ app.whenReady().then(async () => {
         assert.ok(moteNodes.leftSame && moteNodes.rightSame && moteNodes.leftValueSame && moteNodes.rightValueSame, 'The original Mote DOM and values survive independently of the human input move')
         assert.deepEqual(afterHuman.agentComposerDrafts, before.agentComposerDrafts)
         assert.equal(afterHuman.regionCaretFocus, null)
-        await screenshot('later-navigation-keeps-human-search-input')
-        const returned = await cli(['focus', '--region', ids.target.to.regionId])
-        // Main Search is now hidden/inert. Its input cannot be claimed as visible/preserved;
+        await screenshot('later-navigation-keeps-human-focus-input')
+        const returned = await cli(['space', 'focus', '--region', ids.target.to.regionId], 1)
+        // Main Focus is now hidden/inert. Its input cannot be claimed as visible/preserved;
         // default display navigation still never authorizes the cancelled target caret.
         assert.equal(returned.input.outcome, 'unavailable')
-        const hiddenSearch = await evaluate('window.focusProofCapturedInputState()')
-        assert.ok(hiddenSearch.capturedExists && hiddenSearch.capturedIsSearch && hiddenSearch.capturedConnected &&
-          hiddenSearch.capturedHidden && hiddenSearch.capturedInert, 'The same original Search input is now actually hidden and inert')
-        // The receipt captures its own instant. Chromium may leave the hidden Search active
+        const hiddenFocus = await evaluate('window.focusProofCapturedInputState()')
+        assert.ok(hiddenFocus.capturedExists && hiddenFocus.capturedIsFocusInput && hiddenFocus.capturedConnected &&
+          hiddenFocus.capturedHidden && hiddenFocus.capturedInert, 'The same original Focus input is now actually hidden and inert')
+        // The receipt captures its own instant. Chromium may leave the hidden Focus active
         // then move to body before this live read; both observations must tell their real facts.
         if (returned.input.after.scope === 'main') {
           assert.deepEqual(returned.input.after, { provenance: 'observed', scope: 'main', ownerKind: 'other',
@@ -527,9 +547,9 @@ app.whenReady().then(async () => {
             tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
         }
         const afterReturn = await state()
-        assert.equal(hiddenSearch.activeConnected, true)
-        assert.ok(hiddenSearch.activeSameCaptured || hiddenSearch.activeBody || !hiddenSearch.activeEditable,
-          'The live owner is the original hidden Search or a real non-input control, never a different editable owner')
+        assert.equal(hiddenFocus.activeConnected, true)
+        assert.ok(hiddenFocus.activeSameCaptured || hiddenFocus.activeBody || !hiddenFocus.activeEditable,
+          'The live owner is the original hidden Focus or a real non-input control, never a different editable owner')
         assert.equal(afterReturn.regionCaretFocus, null)
         assert.ok(humanInput.eventCursor > 0, 'The actual focus event stream was populated before cancellation')
         assert.deepEqual(afterReturn.events.slice(humanInput.eventCursor).filter((one: any) => one.type === 'focusin' && one.editableTarget), [])
@@ -537,7 +557,7 @@ app.whenReady().then(async () => {
         assert.deepEqual(lifecycle(calls.slice(cursor)), [])
         await screenshot('default-target-does-not-replay-cancelled-input')
         return { boundaryFault: 'Exact target temporarily inert while a later human navigation wins.', held, receipt,
-          humanNavigationRequestedAt, humanNavigationReturnedAt, humanInput, preserved, moteDom, moteNodes, before, afterHuman, returned, hiddenSearch, afterReturn }
+          humanNavigationRequestedAt, humanNavigationReturnedAt, humanInput, preserved, moteDom, moteNodes, before, afterHuman, returned, hiddenFocus, afterReturn }
       })
       await recordStep('readonly-inspect-client', async () => {
         await delay(160)
@@ -547,7 +567,7 @@ app.whenReady().then(async () => {
         assert.equal(inputPresence.connected, true, 'The current active DOM element actually exists')
         await evaluate('window.focusProofBeginInspect(); true')
         // Observe the same cold request through the original shared Main schema.
-        const observed = parseDesktopClientObservation((await cli(['inspect', '--client'])).observation)
+        const observed = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation)
         assert.equal(observed.main.pid, process.pid)
         assert.equal(observed.workbench.desktop.floating.tabId, ids.mote.to.tabId)
         if (!inputPresence.editable) {
@@ -587,7 +607,7 @@ app.whenReady().then(async () => {
       })
       await recordStep('empty-topic-original-mote-pointer', async () => {
         const cursor = calls.length
-        const receipt = await cli(['focus', '--space', ids.emptyTopicSpace.spaceId])
+        const receipt = await cli(['space', 'focus', '--space', ids.emptyTopicSpace.spaceId])
         assert.equal(receipt.navigation.selection.space.tabId, null)
         assert.equal(receipt.navigation.selection.space.topicId, 'view:focus-proof-empty')
         const before = durable(await state())
@@ -647,7 +667,7 @@ app.whenReady().then(async () => {
         assert.equal(actual.caret.regionId, ids.moteSecond.to.regionId)
         assert.equal(actual.caret.floating, true)
         assert.ok(actual.caret.connected && actual.caret.visible && !actual.caret.inert)
-        const observed = parseDesktopClientObservation((await cli(['inspect', '--client'])).observation)
+        const observed = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation)
         assert.deepEqual(observed.workbench.desktop.selection.space, before.workbenchSpaceSelection)
         assert.equal(observed.workbench.desktop.floating.regionId, ids.moteSecond.to.regionId)
         assert.equal(observed.workbench.desktop.input.regionId, ids.moteSecond.to.regionId)
@@ -665,12 +685,12 @@ app.whenReady().then(async () => {
         await evaluate("document.querySelector('[aria-label=\"Search settings\"]').focus(); true")
         await win.webContents.debugger.sendCommand('Input.insertText', { text: 'Private settings query' })
         const before = await evaluate('window.focusProofCaptureInput()'), cursor = calls.length
-        const receipt = await cli(['focus', '--goal', 'private-goal-exact'])
+        const receipt = await cli(['goal', 'focus', '--goal', 'private-goal-exact'], 1)
         assert.equal(receipt.presentation.state, 'covered'); assert.equal(receipt.partial, true)
         assert.deepEqual(receipt.presentation.blockers, ['settings'])
         const input = await evaluate('window.focusProofPreservedInput()')
         assert.ok(input.sameElement && input.sameValue)
-        const observed = parseDesktopClientObservation((await cli(['inspect', '--client'])).observation)
+        const observed = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation)
         assert.equal(observed.workbench.desktop.overlays.settings, true)
         assert.equal(observed.workbench.desktop.input.scope, 'overlay')
         assert.deepEqual(lifecycle(calls.slice(cursor)), [])
@@ -684,7 +704,7 @@ app.whenReady().then(async () => {
         await until("document.querySelector('[aria-label=\"Search sessions and tabs\"]')")
         await win.webContents.debugger.sendCommand('Input.insertText', { text: 'Private quick query' })
         const before = await evaluate('window.focusProofCaptureInput()'), cursor = calls.length
-        const receipt = await cli(['focus', '--zone', ids.empty.zoneId])
+        const receipt = await cli(['space', 'focus', '--zone', ids.empty.zoneId], 1)
         assert.equal(receipt.presentation.state, 'covered'); assert.deepEqual(receipt.presentation.blockers, ['quick-switcher'])
         const input = await evaluate('window.focusProofPreservedInput()')
         assert.ok(input.sameElement && input.sameValue)
@@ -698,7 +718,7 @@ app.whenReady().then(async () => {
         await evaluate('window.focusProofOpenShortcuts(); true')
         await until("document.querySelector('[data-settings-page=\"keyboard-shortcuts\"]')")
         const cursor = calls.length
-        const receipt = await cli(['focus', '--goal', 'private-goal-exact'])
+        const receipt = await cli(['goal', 'focus', '--goal', 'private-goal-exact'], 1)
         assert.equal(receipt.presentation.state, 'covered'); assert.deepEqual(receipt.presentation.blockers, ['settings'])
         assert.deepEqual(lifecycle(calls.slice(cursor)), [])
         await screenshot('shortcuts-covered')
@@ -709,12 +729,12 @@ app.whenReady().then(async () => {
         const cursor = calls.length
         const beforeRuns = (await client().listRuns()).filter((one: any) => one.state === 'running').map((one: any) => ({ runId: one.runId, pid: one.pid }))
         const opened = await cli(['agent', 'open', '--session', ids.target.agent.agentSessionId,
-          '--zone', ids.target.to.zoneId, '--new-tab', '--request-id', 'private:focus:extra-presentation'])
+          '--zone', ids.target.to.zoneId, '--new-tab', '--operation-id', 'private:focus:extra-presentation'])
         assert.equal(opened.outcome, 'opened')
         assert.equal(opened.agent.agentSessionId, ids.target.agent.agentSessionId)
         assert.equal(opened.agent.runId, ids.target.agent.runId)
         assert.notEqual(opened.to.tabId, ids.target.to.tabId)
-        const selected = await cli(['focus', '--tab', opened.to.tabId])
+        const selected = await cli(['space', 'focus', '--tab', opened.to.tabId])
         assert.equal(selected.navigation.selection.space.tabId, opened.to.tabId)
         await until(`document.querySelector('[data-workbench-tab-id=' + CSS.escape(${JSON.stringify(opened.to.tabId)}) + '] .workbench-tab__close')`)
         // Activate the actual observed Tab button and its original close/confirmation owner.
@@ -725,7 +745,7 @@ app.whenReady().then(async () => {
           button.click(); return observed })()`)
         await until(`!window.focusProofState().tabs[${JSON.stringify(opened.to.tabId)}]`)
         const after = await state()
-        const observed = parseDesktopClientObservation((await cli(['inspect', '--client'])).observation)
+        const observed = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation)
         assert.ok(after.tabs[ids.target.to.tabId]?.regions[ids.target.to.regionId], 'Original projection remains')
         assert.equal(after.workbenchSpaceSelection.spaceId, opened.to.spaceId)
         assert.equal(after.workbenchSpaceSelection.zoneId, opened.to.zoneId)
@@ -743,7 +763,7 @@ app.whenReady().then(async () => {
       await recordStep('durable-before-exit', async () => {
         await until('window.focusProofMoteInput()')
         await evaluate('window.focusProofFocusMoteInput(); window.focusProofCaptureInput()')
-        const receipt = await cli(['focus', '--zone', ids.empty.zoneId])
+        const receipt = await cli(['space', 'focus', '--zone', ids.empty.zoneId])
         assert.equal(receipt.navigation.selection.space.tabId, null)
         assert.equal(receipt.save.diskDurability, 'unconfirmed')
         await evaluate('window.focusProofFlush()')
@@ -754,7 +774,7 @@ app.whenReady().then(async () => {
         const narrowCursor = calls.length, narrowInputBefore = await evaluate('window.focusProofCaptureInput()')
         assert.equal(beforeNarrow.tabs[ids.mote.to.tabId]?.regions[narrowInputBefore.caret.regionId]?.sessionId, ids.mote.agent.agentSessionId)
         assert.ok(narrowInputBefore.caret.floating && narrowInputBefore.caret.connected && narrowInputBefore.caret.visible && !narrowInputBefore.caret.inert)
-        const narrowBorrowed = await cli(['focus', '--tab', ids.mote.to.tabId])
+        const narrowBorrowed = await cli(['space', 'focus', '--tab', ids.mote.to.tabId], 1)
         assert.equal(narrowBorrowed.navigation.selection.space.tabId, ids.mote.to.tabId)
         assert.equal(narrowBorrowed.presentation.state, 'floating'); assert.equal(narrowBorrowed.partial, true)
         const narrowNotice = await observeBorrowedHomeNotice(ids.mote.to.tabId, narrowInputBefore.caret.regionId)
@@ -762,7 +782,7 @@ app.whenReady().then(async () => {
         assert.ok(narrowInput.sameElement && narrowInput.sameView && narrowInput.sameAnchor && narrowInput.sameFocus && narrowInput.sameOffsets && narrowInput.sameValue)
         assert.deepEqual(narrowInput.events.filter((one: any) => ['focusin', 'focusout', 'compositionend'].includes(one.type)), [])
         await screenshot('narrow-borrowed-inline-service-window')
-        const narrowReturned = await cli(['focus', '--zone', ids.empty.zoneId])
+        const narrowReturned = await cli(['space', 'focus', '--zone', ids.empty.zoneId])
         assert.equal(narrowReturned.navigation.selection.space.tabId, null)
         assert.equal(narrowReturned.navigation.selection.space.zoneId, ids.empty.zoneId)
         assert.deepEqual(lifecycle(calls.slice(narrowCursor)), [])
@@ -814,7 +834,7 @@ app.whenReady().then(async () => {
           assert.equal(savedRegion?.kind, 'agent')
           assert.equal(savedRegion.sessionId, ids.target.agent.agentSessionId)
           assert.ok(!before.sessions.some((one: any) => one.id === ids.target.agent.agentSessionId))
-          const preservedReceipt = await cli(['focus', '--region', ids.target.to.regionId])
+          const preservedReceipt = await cli(['space', 'focus', '--region', ids.target.to.regionId])
           assert.equal(preservedReceipt.navigation.state, 'applied')
           assert.equal(preservedReceipt.input.policy, 'preserve')
           assert.notEqual(preservedReceipt.input.outcome, 'transferred')
@@ -828,7 +848,7 @@ app.whenReady().then(async () => {
           coldPoint('main-first-mount-input-begin')
           await evaluate(`window.focusProofBeginColdDiagnostics(${JSON.stringify(ids.target.to.regionId)}); true`)
           try {
-            const pending = cli(['focus', '--region', ids.target.to.regionId, '--input', 'target'])
+            const pending = cli(['space', 'focus', '--region', ids.target.to.regionId, '--input', 'target'])
             void pending.catch(() => {}) // Still awaited below; preserve the phase receipt if a pre-release assertion fails.
             await until(`window.focusProofState().regionCaretFocus?.regionId === ${JSON.stringify(ids.target.to.regionId)}`)
             coldPoint('main-first-mount-nonce-observed')
@@ -923,14 +943,14 @@ app.whenReady().then(async () => {
         }
       })
       const cursor = calls.length
-      await preservation('restored-goal-preserve', ['--goal', 'private-goal-exact'])
+      await preservation('restored-goal-preserve', ['goal', 'focus', '--goal', 'private-goal-exact'])
       await screenshot('restored-goal-with-mote')
       await freshTerminalInput('restored-target-native-input', ids.target, phase === 'restore' ? 'r' : 's')
       assert.deepEqual(lifecycle(calls.slice(cursor)).filter(one => one.operation !== 'write'), [], 'Restored navigation keeps exact healthy Runs')
       await evaluate(`window.focusProofHumanViewMode(${JSON.stringify(ids.mote.agent.agentSessionId)}, 'activity'); true`)
       await until('window.focusProofMoteInput()')
       await evaluate('window.focusProofFocusMoteInput(); window.focusProofCaptureInput()')
-      await cli(['focus', '--zone', ids.empty.zoneId])
+      await cli(['space', 'focus', '--zone', ids.empty.zoneId])
       await evaluate('window.focusProofFlush()')
     }
     await finish(true)
