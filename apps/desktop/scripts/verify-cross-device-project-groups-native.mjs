@@ -55,7 +55,7 @@ export async function verifyCrossDeviceProjectGroupsNative() {
     const { assertWorkspaceDistBuiltFromCurrentSource } = await import(pathToFileURL(path.join(root, 'vitest.dist-freshness.ts')).href)
     await assertWorkspaceDistBuiltFromCurrentSource(root)
     const coreSpatialPath = path.join(root, 'packages/core/dist/spatial-state.js')
-    const sdkFiles = (await Promise.all(['core', 'layout', 'client-ui'].map(name => files(path.join(root, `packages/${name}/dist`))))).flat()
+    const sdkFiles = (await Promise.all(['core', 'demand'].map(name => files(path.join(root, `packages/${name}/dist`))))).flat()
     const sdkIdentity = async () => Object.fromEntries(await Promise.all(sdkFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
     proof.sdkBefore = await sdkIdentity()
     proof.publicCore = { absolutePath: coreSpatialPath, sha256: hash(await fs.readFile(coreSpatialPath)) }
