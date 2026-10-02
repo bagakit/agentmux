@@ -21,7 +21,8 @@ await verifyRendererSourceMutations({ name, tests: [test], sources: [row, menu, 
   { label: 'stale-hover-intent', file: hover, before: 'const close = useCallback((): void => {\n    clearTimeout(intent.current); clearTimeout(departure.current)', after: 'const close = useCallback((): void => {\n    clearTimeout(departure.current)' },
   { label: 'missing-keyboard-preview', file: hover, before: 'onFocus: () => { if (!restoringFocus.current) show() }', after: 'onFocus: () => {}' },
   { label: 'wrong-Agent-rename', file: row, before: 'renameAgent(context.id, draft.trim() || null)', after: "renameAgent('card-first', draft.trim() || null)" },
-  { label: 'wrong-menu-Open-target', file: menu, before: 'onSelect(sessionId)', after: "onSelect('card-first')" },
+  { label: 'wrong-card-Open-target', file: row, before: 'onSelect(context.id)', after: "onSelect('card-first')" },
+  { label: 'duplicate-menu-navigation', file: menu, before: '<ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}>', after: '<ContextMenu.Item className="tab-context-menu__item"><span>Open in Focus</span></ContextMenu.Item><ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}>' },
   { label: 'lost-later-menu-focus', file: menu, before: 'if (actionOwnsFocus.current || laterFocus) {', after: 'if (actionOwnsFocus.current) {' }
 ] })
 const mutation = JSON.parse(await readFile(receiptPath, 'utf8'))

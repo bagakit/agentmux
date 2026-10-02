@@ -55,7 +55,7 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), snapshot = await api.sessions.snapshot(), base = snapshot.sessions.find(session => session.kind === 'agent')
   expect(base).toBeDefined()
-  agent = { ...base!, id: firstId, hostId: 'local', workspacePath: _hygiene_fixturePath("recap/repo"), status: { state: 'working', source: base!.status.source, observedAt: 1 }, control: { ...base!.control, agentSessionId: firstId } } as typeof agent
+  agent = { ...base!, id: firstId, hostId: 'local', workspacePath: _hygiene_fixturePath("recap/repo"), status: { state: 'working', source: 'native-hook', observedAt: Date.now() }, control: { ...base!.control, agentSessionId: firstId } } as typeof agent
   useAppStore.setState({ config: { ...config, workspaces: [{ id: 'recap-repo', name: 'Recap Project', kind: 'folder', hostId: 'local', path: _hygiene_fixturePath("recap/repo") }] }, sessions: [agent, { ...agent, id: secondId, control: { ...agent.control, agentSessionId: secondId } }], timelines: { [firstId]: timeline() }, agentNames: { [firstId]: '同名 Agent', [secondId]: '同名 Agent' }, scratchTopicSnapshots: {}, tabs: {}, layouts: {}, providerCatalog: [], mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { [secondId]: '原草稿仍可继续' } })
 })
 afterEach(async () => {
@@ -122,7 +122,7 @@ it.each([
 it('copies the exact second same-name Session with no guessed Region or lifecycle action', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), source = useAppStore.getState()
   await mount(); await open()
-  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Open in Focus', 'Rename Agent', 'Copy Session Address'])
+  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Session Address'])
   await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId, resolveAgentSharingMetadata(secondId, source)))
   expect(copy.mock.calls[0]![0]).not.toContain('region:'); expect(useAppStore.getState().agentFocus).toBe(source.agentFocus)
   expect(useAppStore.getState().sessions).toBe(source.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(source.agentComposerDrafts)
@@ -191,7 +191,7 @@ it('keeps retained Row nodes and controls through 200 irrelevant byte and observ
   await mount(); const before = { ...commits.rows }, nodes = [row(), row(secondId)], controls = useAppStore.getState().sessions.map(session => session.control)
   expect(Object.keys(before).sort()).toEqual([firstId, secondId])
   const native = vi.spyOn(api.sessions, 'historyPage'), reread = vi.spyOn(api.sessions, 'timeline'), appearances = vi.spyOn(api.workspaces, 'appearance')
-  for (let index = 0; index < 200; index += 1) await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, status: { ...session.status, observedAt: index + 10 } })) })))
+  for (let index = 0; index < 200; index += 1) await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => ({ ...session, latestOutputBytes: session.latestOutputBytes + 1, status: { ...session.status, observedAt: Date.now() } })) })))
   expect(commits.rows).toEqual(before); expect([row(), row(secondId)]).toEqual(nodes); expect(useAppStore.getState().sessions.map(session => session.control)).toEqual(controls)
   expect(native.mock.calls).toEqual([]); expect(reread.mock.calls).toEqual([]); expect(appearances.mock.calls).toEqual([])
 })

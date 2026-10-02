@@ -25,13 +25,14 @@ app.whenReady().then(async () => { try {
   const dispatchMouse = (type, x, y, extra = {}) => win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x, y, ...extra })
   const move = (x, y, extra) => dispatchMouse('mouseMoved', x, y, extra)
   const mouse = async (selector, button = 'left') => { const r = await rect(selector); assert.equal(r.hit, true, 'Center hit ' + selector); await move(r.x, r.y); for (const type of ['mousePressed', 'mouseReleased']) await dispatchMouse(type, r.x, r.y, { button, clickCount: 1 }); result.operations.push({ type: button === 'right' ? 'contextmenu' : 'click', selector }); return r }
-  const key = async (value, modifiers = 0, code = value) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code, modifiers, ...(value === 'F10' ? { windowsVirtualKeyCode: 121, nativeVirtualKeyCode: 109 } : {}) }); result.operations.push({ type: 'key', value, modifiers }) }
-  const menuSettled = async () => { await until('actual three-action menu', () => read(`document.querySelector('.focus-context-menu')?.querySelectorAll('[role=menuitem]').length===3`)); await stable() }
+  const key = async (value, modifiers = 0, code = value) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code, modifiers, ...(type === 'keyDown' && (value === 'Enter' || value === ' ') ? { text: value === 'Enter' ? '\r' : ' ', unmodifiedText: value === 'Enter' ? '\r' : ' ' } : {}), ...(value === 'F10' ? { windowsVirtualKeyCode: 121, nativeVirtualKeyCode: 109 } : value === 'Enter' ? { windowsVirtualKeyCode: 13, nativeVirtualKeyCode: 36 } : value === ' ' ? { windowsVirtualKeyCode: 32, nativeVirtualKeyCode: 49 } : {}) }); result.operations.push({ type: 'key', value, modifiers }) }
+  const menuSettled = async () => { await until('actual two-action menu', () => read(`document.querySelector('.focus-context-menu')?.querySelectorAll('[role=menuitem]').length===2`)); await stable() }
   const facts = () => read('window.cardInteractionScene.facts()')
   const noSelection = async () => { const f = await facts(); assert.equal(f.selectedId, null); assert.equal(f.focusOwnerPreserved, true); assert.equal(await read(`!!document.querySelector(${JSON.stringify(row('recap-b'))}+'.is-selected')`), false) }
   const shot = async (file, label) => { await stable(); const paint = await read(`({width:innerWidth,height:innerHeight,focus:document.activeElement?.getAttribute('aria-label'),menuSID:document.querySelector('.focus-context-menu')?.dataset.agentSessionId??null,hover:document.querySelector('.focus-context-hover')?.innerText??null})`); await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label, ...paint }) }
   const resize = async width => { win.setContentSize(width, 820); await frames(); await move(width - 4, 8); await key('Escape'); await until('resize preview cleanup', () => read('!document.querySelector(".focus-context-hover,.focus-context-menu")')); await stable() }
-  const pointerMenu = async () => { await mouse(row('recap-b'), 'right'); await menuSettled(); await noSelection(); assert.equal(await read('document.querySelector(".focus-context-menu").dataset.agentSessionId'), 'recap-b'); assert.deepEqual(await read(`[...document.querySelectorAll('.focus-context-menu [role=menuitem]')].map(e=>e.innerText.trim())`), ['Open in Focus', 'Rename Agent', 'Copy Session Address']) }
+  const pointerMenu = async () => { await mouse(row('recap-b'), 'right'); await menuSettled(); await noSelection(); assert.equal(await read('document.querySelector(".focus-context-menu").dataset.agentSessionId'), 'recap-b'); assert.deepEqual(await read(`[...document.querySelectorAll('.focus-context-menu [role=menuitem]')].map(e=>e.innerText.trim())`), ['Rename Agent', 'Copy Session Address']) }
+  const menuGeometry = async () => { const g = await read(`(()=>{const m=document.querySelector('.focus-context-menu'),n=m.querySelector('.focus-context-menu__identity strong'),r=n.getBoundingClientRect(),s=getComputedStyle(n);return{height:r.height,lineHeight:parseFloat(s.lineHeight),whiteSpace:s.whiteSpace,overflow:s.overflow,textOverflow:s.textOverflow,title:n.title,text:n.textContent,clipped:n.scrollWidth>n.clientWidth,menuHeight:m.getBoundingClientRect().height,metadata:m.querySelector('.focus-context-menu__identity span,.focus-context-menu__identity code')!==null}})()`);assert.equal(g.title,g.text);assert.equal(g.whiteSpace,'nowrap');assert.equal(g.textOverflow,'ellipsis');assert.equal(g.clipped,true);assert.ok(g.height<=g.lineHeight+1);assert.equal(g.metadata,false);assert.ok(g.menuHeight<130);result.operations.push({type:'menuGeometry',...g});return g }
   const rename = async () => { await pointerMenu(); await mouse('menu:Rename Agent'); await until('actual rename input owns focus', () => read('document.activeElement===document.querySelector(".global-focus-main .focus-context__rename")')); await stable() }
   const replaceDraft = async text => { await key('a', 4, 'KeyA'); await win.webContents.debugger.sendCommand('Input.insertText', { text }); await until('real input draft', () => read(`document.querySelector('.global-focus-main .focus-context__rename')?.value===${JSON.stringify(text)}`)); result.operations.push({ type: 'insertText', text }) }
   const closedRename = () => until('rename returns to exact card', () => read(`!document.querySelector('.global-focus-main .focus-context__rename')&&!!document.querySelector(${JSON.stringify(row('recap-b'))})`))
@@ -69,7 +70,9 @@ app.whenReady().then(async () => { try {
     }
     await key('Escape'); await until('preview Escape cleanup', () => read('!document.querySelector(".focus-context-hover")'))
   }
-  await pointerMenu(); await shot('pointer-menu-360.png', 'Same-name second SID pointer menu; open state stays distinct from selection')
+  await resize(1200); await pointerMenu(); await menuGeometry(); await shot('pointer-menu-1200.png', 'Compact two-action menu and single-line long name at wide window'); await key('Escape')
+  await resize(640); await pointerMenu(); await menuGeometry(); await shot('pointer-menu-640.png', 'Compact two-action menu and single-line long name at medium window'); await key('Escape')
+  await resize(360); await pointerMenu(); await menuGeometry(); await shot('pointer-menu-360.png', 'Same-name second SID pointer menu; open state stays distinct from selection')
   await mouse('.focus-context-menu [role=menuitem]:last-child'); await until('copy closes menu', () => read('!document.querySelector(".focus-context-menu")'))
   result.afterCopy = await facts(); assert.equal(result.afterCopy.clipboard[0], await read('window.cardInteractionScene.expectedSecondAddress')); await noSelection()
   await read(`document.querySelector(${JSON.stringify('[aria-label="Search contexts"]')}).focus()`)
@@ -111,10 +114,16 @@ app.whenReady().then(async () => { try {
   assert.deepEqual(afterChurn.reads, beforeChurn.reads); assert.deepEqual(afterChurn.controls, beforeChurn.controls); assert.deepEqual(afterChurn.identityFacts, result.before.identityFacts)
   assert.equal(afterChurn.originalControls, true); assert.equal(afterChurn.draftOwnerPreserved, true); assert.equal(afterChurn.timelineRefsPreserved, true)
   result.cost = { updates: 200, before: beforeChurn, after: afterChurn }
-  await resize(1200); await pointerMenu(); await mouse('menu:Open in Focus')
+  await resize(1200); await pointerMenu(); await key('Escape'); await until('menu dismissed before card navigation', () => read('!document.querySelector(".focus-context-menu")')); await mouse(row('recap-b'))
   await until('actual exact Session focus action', async () => (await facts()).selectedId === 'recap-b')
   await until('actual selected surface', () => read(`document.querySelector(${JSON.stringify(row('recap-b'))}).classList.contains('is-selected')`))
-  await move(1196, 8); await key('Escape'); await shot('open-focus-selected-1200.png', 'Explicit Open in Focus selects exact second SID and whole card surface; typed observation paint only')
+  await move(1196, 8); await key('Escape'); await shot('card-focus-selected-1200.png', 'Ordinary card click selects exact second SID and whole card surface; typed observation paint only')
+  for (const [id, value, code] of [['recap-a', 'Enter', 'Enter'], ['recap-b', ' ', 'Space']]) {
+    await read(`document.querySelector(${JSON.stringify(row(id))}).focus()`); await key(value, 0, code)
+    result.keyboardCardTrace ??= []; result.keyboardCardTrace.push(await read(`({active:document.activeElement?.outerHTML,events:window.cardKeyboardEvents.slice(-6),selected:window.cardInteractionScene.facts().selectedId})`));
+    await until('native button keyboard selection ' + value, async () => (await facts()).selectedId === id)
+  }
+  result.keyboardCardNavigation = ['Enter', 'Space']
   result.after = await facts(); assert.deepEqual(result.after.identityFacts, result.before.identityFacts); assert.equal(result.after.originalControls, true)
   assert.deepEqual(result.after.controls, { stop: 0, resume: 0, launchAgent: 0, write: 0, interrupt: 0 })
   assert.equal(result.rendererConsole.filter(message => !message.includes('Electron Security Warning')).length, 0, 'No renderer errors (private unpackaged Electron policy warning retained)')

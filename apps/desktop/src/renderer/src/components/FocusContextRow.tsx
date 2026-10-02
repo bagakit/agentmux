@@ -46,5 +46,5 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
     </span>}</span>
     {directory ? null : <ArrowUpRight className="focus-context__open" size={13} aria-hidden="true" />}
   </button>
-  return <>{context.kind === 'agent' ? <FocusContextMenu context={context} onOpenChange={setMenuOpen} onSelect={onSelect} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); setDraft(context.name) }}>{card}</FocusContextMenu> : card}{hover.preview}</>
+  return <>{context.kind === 'agent' ? <FocusContextMenu context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); setDraft(context.name) }}>{card}</FocusContextMenu> : card}{hover.preview}</>
 })

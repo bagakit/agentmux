@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useRef, type ReactNode } from 'react'
-import { ArrowUpRight, Pencil } from 'lucide-react'
+import { Pencil } from 'lucide-react'
 import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
@@ -10,8 +10,8 @@ import { RegionMenuEntryView } from './RegionContextMenu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** A Context card knows its semantic SID, not which of its Regions to address. */
-export function FocusContextMenu({ context, children, onOpenChange, onSelect, onRename, onRestoreFocus }: {
-  context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onSelect(id: string): void; onRename(): void; onRestoreFocus(): void
+export function FocusContextMenu({ context, children, onOpenChange, onRename, onRestoreFocus }: {
+  context: FocusContext; children: ReactNode; onOpenChange(open: boolean): void; onRename(): void; onRestoreFocus(): void
 }) {
   const sessionId = context.id
   const actionOwnsFocus = useRef(false)
@@ -35,8 +35,7 @@ export function FocusContextMenu({ context, children, onOpenChange, onSelect, on
           if (actionOwnsFocus.current || laterFocus) { event.preventDefault(); actionOwnsFocus.current = false }
           else onRestoreFocus()
         }}>
-        <ContextMenu.Label className="focus-context-menu__identity"><strong>{context.name}</strong><span>{context.stateLabel}</span><code title={sessionId}>{sessionId}</code></ContextMenu.Label>
-        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onSelect(sessionId) }}><ArrowUpRight size={14} /><span>Open in Focus</span></ContextMenu.Item>
+        <ContextMenu.Label className="focus-context-menu__identity"><strong title={context.name}>{context.name}</strong></ContextMenu.Label>
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><Pencil size={14} /><span>Rename Agent</span></ContextMenu.Item>
         <ContextMenu.Separator className="tab-context-menu__separator" />
         {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
