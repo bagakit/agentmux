@@ -26,6 +26,7 @@ import {
   replaceWorkbenchRegion,
   updateWorkbenchRegion,
   workbenchSurfaces,
+  type LauncherWorkbenchSurface,
   type WorkbenchSurface,
   type WorkbenchTab
 } from './workbench-tabs'
@@ -581,8 +582,10 @@ export function reduceSessionLaunchFailed(
   state: SessionProjectionState,
   regionId: string,
   kind: 'agent' | 'terminal',
-  sessionId: string
+  sessionId: string,
+  launcher?: LauncherWorkbenchSurface
 ): SessionProjectionState {
+  const executorId = kind === 'agent' ? state.pendingAgentLaunches[sessionId]?.request?.executorId : undefined
   const cleaned = kind === 'agent' ? discardPendingAgentLaunch(state, sessionId) : state
   const owner = findWorkbenchRegion(cleaned.tabs, regionId)
   if (!owner || !ownsSessionLaunch(owner.surface, kind, sessionId)) return cleaned
@@ -591,9 +594,11 @@ export function reduceSessionLaunchFailed(
     tabs: {
       ...cleaned.tabs,
       [owner.tab.id]: replaceWorkbenchRegion(owner.tab, regionId, {
+        ...launcher,
         regionId,
         kind: 'launcher',
-        workspaceId: owner.surface.workspaceId
+        workspaceId: owner.surface.workspaceId,
+        ...(executorId ? { executorId } : {})
       })
     }
   }

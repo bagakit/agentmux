@@ -121,6 +121,7 @@ import { gitBridge, ghBridge, type GitBridge } from './lib/git-bridge'
 import type { BrowserAnnotation } from './lib/browser-annotations'
 import { EMPTY_LAUNCHER_NAMES, type LauncherNameField, type LauncherNames } from './lib/launcher-name-draft'
 import { resolveLauncherWorkspaceId } from './lib/launcher-workspace'
+import { workbenchTabDisplayWorkspaceId } from './lib/workbench-resource-display'
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
 import { resolveSessionPlacement } from './lib/session-placement'
 import { regionFocusClaimsCaret, type RegionFocusCause } from './lib/region-focus'
@@ -929,6 +930,7 @@ type AppState = {
    * 写启动对话框的一格名字。`field` 只有 'agentName' | 'tabName' 两种，两格共用一条 action：
    * 一格一个 setter 会让"启动成功要清掉这个 region 的名字草稿"变成两处要记得改的地方。
    */
+  setLauncherExecutionWorkspace(launcher: { tabId: string; regionId: string }, workspaceId: string, executorId?: string): void
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
   setLauncherOptionDraft(regionId: string, providerId: string, optionId: string, choiceId: string | null): void
   appendAgentComposerDraft(sessionId: string, text: string): void
@@ -4189,7 +4191,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         regionId: plan.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id, sessionId: pendingId
       }
       plan.tabs[plan.tabId] = replaceWorkbenchRegion(plan.tabs[plan.tabId]!, plan.regionId, pending)
-      set({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
+      set({ ...(plan.kind === 'launcher' ? {} : { activeWorkspaceId: workspace.id }),
+        mainSurface: 'workbench', tabs: plan.tabs, layouts: plan.layouts })
       const cancel = (): void => rollback(pending)
       signal?.addEventListener('abort', cancel, { once: true })
       let session: SessionSnapshot | null = null
@@ -6134,7 +6137,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId) {
     const captured = get(), openingIntent = fileOpenIntentVersion
     const tab = launcher ? captured.tabs[launcher.tabId] : undefined
-    const workspaceId = resolveLauncherWorkspaceId({ launcherTabWorkspaceId: tab?.workspaceId, activeWorkspaceId: captured.activeWorkspaceId })
+    const launcherSurface = launcher ? tab?.regions[launcher.regionId] : undefined
+    if (launcher && launcherSurface?.kind !== 'launcher') throw new Error('Launcher Region is no longer available')
+    const workspaceId = resolveLauncherWorkspaceId({ launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined, launcherTabWorkspaceId: tab?.workspaceId, activeWorkspaceId: captured.activeWorkspaceId })
     if (!workspaceId) throw new Error('Select a resource Workspace first')
     const groupId = tabGroupId ?? captured.layouts[workspaceId]?.activeGroupId
     if (!groupId) throw new Error('Select an exact Note display Group first')
@@ -6418,12 +6423,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Launcher Region is no longer available')
     }
     const workspaceId = resolveLauncherWorkspaceId({
+      launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined,
       launcherTabWorkspaceId: launcherTab?.workspaceId,
       activeWorkspaceId: state.activeWorkspaceId
     })
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
-    const layout = state.layouts[workspace.id]
+    const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
+    const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
     if (!layout) throw new Error('Workspace layout is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
@@ -6474,7 +6481,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
         ...current.layouts,
-        [workspace.id]: nextLayout
+        [displayWorkspaceId!]: nextLayout
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
@@ -6619,7 +6626,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         return
       }
-      set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId))
+      set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId,
+        launcherSurface?.kind === 'launcher' ? launcherSurface : undefined))
       get().reportError(error, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
       throw error
     }
@@ -6634,12 +6642,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Launcher Region is no longer available')
     }
     const workspaceId = resolveLauncherWorkspaceId({
+      launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined,
       launcherTabWorkspaceId: launcherTab?.workspaceId,
       activeWorkspaceId: state.activeWorkspaceId
     })
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace) throw new Error('Select a workspace first')
-    const layout = state.layouts[workspace.id]
+    const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspace.id
+    const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
     if (!layout) throw new Error('Workspace layout is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
@@ -6663,7 +6673,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       tabs: { ...current.tabs, [tabId]: pendingTab },
       layouts: {
         ...current.layouts,
-        [workspace.id]: nextLayout
+        [displayWorkspaceId!]: nextLayout
       }
     }))
     try {
@@ -6702,7 +6712,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
     } catch (error) {
       if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'terminal', sessionId)) return
-      set((current) => reduceSessionLaunchFailed(current, regionId, 'terminal', sessionId))
+      set((current) => reduceSessionLaunchFailed(current, regionId, 'terminal', sessionId,
+        launcherSurface?.kind === 'launcher' ? launcherSurface : undefined))
       get().reportError(error)
       throw error
     }
@@ -6778,6 +6789,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('The View is closing')
     }
     const workspaceId = resolveLauncherWorkspaceId({
+      launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined,
       launcherTabWorkspaceId: launcherTab?.workspaceId,
       activeWorkspaceId: state.activeWorkspaceId
     })
@@ -6814,7 +6826,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await get().launchTerminal(tabGroupId, launcher)
       return
     }
-    if (!get().layouts[workspace.id]) {
+    if (!launcherTab && !get().layouts[workspace.id]) {
       if (await stopTerminalSession(session)) {
         set((current) => ({
           unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
@@ -6912,11 +6924,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Launcher Region is no longer available')
     }
     const workspaceId = requestedWorkspaceId ?? resolveLauncherWorkspaceId({
+      launcherWorkspaceId: launcherSurface?.kind === 'launcher' ? launcherSurface.workspaceId : undefined,
       launcherTabWorkspaceId: launcherTab?.workspaceId,
       activeWorkspaceId: state.activeWorkspaceId
     })
     if (!workspaceId) throw new Error('Select a workspace first')
-    const layout = state.layouts[workspaceId]
+    const displayWorkspaceId = launcherTab ? workbenchTabDisplayWorkspaceId(state.layouts, launcherTab.id, tabGroupId) : workspaceId
+    const layout = displayWorkspaceId ? state.layouts[displayWorkspaceId] : undefined
     if (!layout) throw new Error('Workspace layout is unavailable')
     const inheritedTopicId = launcherTab
       ? undefined
@@ -6933,7 +6947,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const nextLayout = addTabOrThrow(layout, tabGroupId, tabId)
       set((current) => ({
         tabs: { ...current.tabs, [tabId]: targetTab },
-        layouts: { ...current.layouts, [workspaceId]: nextLayout }
+        layouts: { ...current.layouts, [displayWorkspaceId!]: nextLayout }
       }))
     }
     try {
@@ -7190,6 +7204,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     set((state) => ({
       agentComposerDrafts: { ...state.agentComposerDrafts, [sessionId]: text }
     }))
+  },
+  setLauncherExecutionWorkspace(launcher, workspaceId, executorId) {
+    const state = get()
+    const tab = state.tabs[launcher.tabId]
+    const surface = tab?.regions[launcher.regionId]
+    if (!tab || surface?.kind !== 'launcher') throw new Error('Only an unstarted Launcher can change its execution target')
+    const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
+    if (!workspace || !state.config?.hosts.some(host => host.id === workspace.hostId)) {
+      throw new Error('Select a registered project on a configured host')
+    }
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, tab.id)) throw new Error('The View is closing')
+    if (surface.workspaceId === workspaceId && (executorId === undefined || surface.executorId === executorId)) return
+    // Only this resource changes. Display, other Regions and all unsent inputs retain their owners.
+    set({ tabs: { ...state.tabs, [tab.id]: updateWorkbenchRegion(tab, launcher.regionId, current => ({ ...current, workspaceId, ...(executorId ? { executorId } : {}) })) } })
   },
   setLauncherNameDraft(regionId, field, value) {
     set((state) => {

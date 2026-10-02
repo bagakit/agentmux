@@ -47,6 +47,7 @@ import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import { AgentRegionHeader } from './AgentRegionHeader'
+import { regionExecutionHost } from '../lib/region-execution-host'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
 import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
@@ -113,6 +114,8 @@ export function SessionPane({
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
     tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
+  const executionHostId = session?.kind === 'agent' ? session.control.hostId : session?.hostId
+  const configuredExecutionHost = useAppStore(state => state.config?.hosts.find(host => host.id === executionHostId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
@@ -811,6 +814,7 @@ export function SessionPane({
       key={JSON.stringify([activitySourceKey, target.hostId, target.reference!.displayWorkspaceId, target.reference!.groupId, target.reference!.tabId, linkOrigin.regionId])}
       target={target} regionId={linkOrigin.regionId!} sourceKey={activitySourceKey}
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
+      executionHost={regionExecutionHost(session, configuredExecutionHost)}
       activity={{ ...activityProps, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={viewMode !== 'terminal' && !pendingAgentRestore}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
@@ -823,15 +827,17 @@ export function SessionPane({
       className="agent-surface"
       data-agent-surface-mode={session.kind === 'agent' ? viewMode : 'terminal'}
     >
-      {session.kind === 'agent' ? <AgentRegionHeader
-        name={agentInputIdentity!} executorLabel={agentInputExecutor!} sessionId={session.id}
+      <AgentRegionHeader
+        name={session.kind === 'agent' ? agentInputIdentity! : session.label}
+        executorLabel={session.kind === 'agent' ? agentInputExecutor! : 'Shell'} sessionId={session.id}
+        sessionKind={session.kind} executionHost={regionExecutionHost(session, configuredExecutionHost)}
         regionId={linkOrigin.regionId} readOnly={readOnly}
         portalTargetId={headerPortalTargetId}
-        onHistory={!historyOpen && !inlineHistory ? () => openHistory() : undefined}
-        onRefreshObservation={observationMounted ? () => void refresh(true) : undefined}
+        onHistory={session.kind === 'agent' && !historyOpen && !inlineHistory ? () => openHistory() : undefined}
+        onRefreshObservation={session.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined}
         refreshing={refreshing}
-        resultReview={hasAgentComposer ? null : resultReview}
-      /> : null}
+        resultReview={session.kind === 'agent' && !hasAgentComposer ? resultReview : null}
+      />
       {launchNotice}
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }} visible={visible}
         busy={recovering || refreshing} retry={() => void recover()}

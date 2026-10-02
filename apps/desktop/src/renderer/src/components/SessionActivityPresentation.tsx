@@ -8,6 +8,7 @@ import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-ges
 import { isMacPlatform } from '../lib/host-platform'
 import { ActivityView } from './ActivityView'
 import { AgentRegionHeader } from './AgentRegionHeader'
+import type { RegionExecutionHost } from '../lib/region-execution-host'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { SessionRegionHost } from './SessionRegionHost'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
@@ -16,7 +17,7 @@ import type { ConversationAnnotation } from '@agentmux/client-ui/components/Conv
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
-export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel,
+export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel, executionHost,
   activity, eligible, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion }: {
   target: WorkbenchViewTarget
   regionId: string
@@ -24,6 +25,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   sessionId: string
   name: string
   executorLabel: string
+  executionHost: RegionExecutionHost
   activity: ComponentProps<typeof ActivityView>
   eligible: boolean
   readOnly: boolean
@@ -101,7 +103,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
     {renderFrame(<SessionRegionHost arrangement="columns" className="workbench-session-region-host">
       <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="activity"
         data-session-presentation={hostId} aria-hidden={!visible} inert={!visible}>
-        <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId}
+        <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId} sessionKind="agent" executionHost={executionHost}
           regionId={regionId} readOnly={readOnly} onHistory={undefined} {...(target.headerPortalTargetId ? { portalTargetId: target.headerPortalTargetId } : {})} />
         <div className="agent-body" data-observation-surface="workflow">
           {!eligible ? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}

@@ -23,7 +23,7 @@ beforeAll(async () => {
   worker = resolve('.tmp/durable-spatial-index/desktop-restore-worker.mjs');
   await build({ stdin: { contents: `import {AgentMuxSpatialStateStore} from './packages/core/src/spatial-state.ts'; import {DesktopSpatialPersistence,desktopWorkbenchFromSpatial} from './apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts'; import {restorePersistedWorkbench} from './apps/desktop/src/renderer/src/lib/workbench-persistence.ts'; const owner=new AgentMuxSpatialStateStore(process.argv[2]);const client=new DesktopSpatialPersistence({read:()=>owner.read(),commit:i=>owner.commit(i),onChange:f=>owner.subscribe(f)},e=>{throw e});const state=await client.read(); if(process.argv[3]==='edit'){state.graph.tabs[0].name='CLI process edit';console.log(JSON.stringify(await owner.commit({expectedRevision:state.revision,graph:state.graph})));}else{const config=JSON.parse(process.argv[3]);const restored=restorePersistedWorkbench({config,sessions:[],persisted:desktopWorkbenchFromSpatial(state.graph),createTabGroupId:()=> 'unused',preserveEntityIds:new Set(state.graph.tabs.map(t=>t.tabId))});console.log(JSON.stringify(restored));}`, resolveDir: process.cwd() }, outfile: worker, bundle: true, platform: 'node', format: 'esm', packages: 'external', alias: { '@agentmux/core/agent-session-id': resolve('packages/core/src/agent-session-id.ts'), '@agentmux/core/spatial-graph': resolve('packages/core/src/spatial-graph.ts'), '@agentmux/core/space-control': resolve('packages/core/src/space-control.ts'), '@agentmux/core/public-rpc': resolve('packages/core/src/public-rpc.ts'), '@agentmux/core/errors': resolve('packages/core/src/errors.ts'), '@agentmux/layout': resolve('packages/core/src/spatial-layout.ts'), '@agentmux/client-ui/ime-keyboard-event': resolve('packages/client-ui/src/lib/ime-keyboard-event.ts') }, logLevel: 'silent' });
 });
-function processWorker(args: string[]): Promise<any> { return new Promise((yes, no) => { const child = spawn(process.execPath, [worker, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }); let out = '', err = ''; child.stdout.on('data', value => out += value); child.stderr.on('data', value => err += value); child.once('error', no); child.once('close', code => { try {
+function processWorker(args: string[]): Promise<any> { return new Promise((yes, no) => { const child = spawn(process.execPath, [worker, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, NODE_PATH: resolve('packages/core/node_modules') } }); let out = '', err = ''; child.stdout.on('data', value => out += value); child.stderr.on('data', value => err += value); child.once('error', no); child.once('close', code => { try {
   if (code !== 0)
     throw new Error(err);
   yes(JSON.parse(out));
@@ -102,7 +102,7 @@ describe('Desktop consumes the Core spatial owner', () => {
     const state = { ...workbench(), tabs: { temporary: launcher }, layouts: { resource: createWorkspaceLayout('g', ['temporary']) } };
     const graph = desktopSpatialGraph(state, []);
     expect(graph.tabs.map(t => t.tabId)).toEqual(['temporary']);
-    expect(graph.resources['region:new']).toEqual({});
+    expect(graph.resources['region:new']).toEqual({ workspaceId: 'resource' });
     const restored = restorePersistedWorkbench({ config: { ...config, workspaces: [] }, sessions: [], persisted: desktopWorkbenchFromSpatial(graph), createTabGroupId: () => 'new-g', preserveEntityIds: new Set(['temporary']) });
     expect(restored.tabs.temporary!.regions.new!.kind).toBe('launcher');
     expect(restored.layouts.resource).toEqual(state.layouts.resource);
@@ -183,6 +183,48 @@ describe('Desktop consumes the Core spatial owner', () => {
       expect(restored.tabs.tab.regions.file.path).toBe('research.md');
       expect(restored.layouts).toEqual(graph.layouts);
     }
+  });
+  it('keeps a Launcher execution resource separate from its Tab after save ACK and two fresh processes', async () => {
+    const original = workbench();
+    const launcher = addWorkbenchRegion(original.tabs.tab, 'file', 'down', {
+      regionId: 'launcher', kind: 'launcher', workspaceId: 'resource', executorId: 'review'
+    });
+    launcher.regions.launcher = { regionId: 'launcher', kind: 'launcher', workspaceId: 'remote-project', executorId: 'review' };
+    const remoteConfig: AppConfig = { ...config, hosts: [...config.hosts, { id: 'remote-host', kind: 'ssh', label: 'Server', hostname: 'server.example' }],
+      workspaces: [...config.workspaces, { id: 'remote-project', hostId: 'remote-host', name: 'Remote project', path: _hygiene_fixturePath("srv/project"), kind: 'folder' }] };
+    const source = { ...original, config: remoteConfig, tabs: { tab: launcher }, layouts: {
+      resource: createWorkspaceLayout('original'), foreign: createWorkspaceLayout('visible', ['tab'])
+    } };
+    const graph = desktopSpatialGraph(source, []), store = await owner();
+    const client = new DesktopSpatialPersistence({ read: () => store.read(), commit: input => store.commit(input), onChange: listener => store.subscribe(listener) }, error => { throw error });
+    await client.read(); await client.bootstrap(graph);
+    const applied: ReturnType<typeof desktopWorkbenchFromSpatial>[] = [];
+    const dispose = client.connect(state => applied.push(desktopWorkbenchFromSpatial(state.graph)));
+    try {
+      const edited = structuredClone(graph); edited.tabs[0]!.name = 'Saved title';
+      client.stage(edited); await client.flush();
+      expect(applied).toHaveLength(1);
+      expect(applied[0]!.tabs.tab!.workspaceId).toBe('resource');
+      expect(applied[0]!.tabs.tab!.regions.launcher).toEqual(source.tabs.tab.regions.launcher);
+      expect((await store.read())!.graph.resources['region:launcher']).toEqual({ workspaceId: 'remote-project', executorId: 'review' });
+      for (let restart = 0; restart < 2; restart++) {
+        const restored = await processWorker([store.path, JSON.stringify(remoteConfig)]);
+        expect(restored.tabs.tab.workspaceId).toBe('resource');
+        expect(restored.tabs.tab.regions.launcher).toEqual(source.tabs.tab.regions.launcher);
+        expect(restored.tabs.tab.regions.agent.sessionId).toBe('original-session');
+        expect(restored.tabs.tab.layout).toEqual(source.tabs.tab.layout);
+        expect(restored.layouts.resource).toEqual(source.layouts.resource);
+        expect(restored.layouts.foreign).toEqual(source.layouts.foreign);
+        expect(restored.layouts['remote-project'].groups.every((group: { tabOrder: string[] }) => group.tabOrder.length === 0)).toBe(true);
+      }
+    } finally { dispose(); }
+  });
+  it('retains the recorded Tab binding of earlier Region descriptors without an explicit resource', () => {
+    const original = workbench(), graph = desktopSpatialGraph(original, []);
+    for (const data of Object.values(graph.resources)) {
+      if (data && typeof data === 'object' && !Array.isArray(data)) delete data.workspaceId;
+    }
+    expect(desktopWorkbenchFromSpatial(graph)).toEqual(projectPersistedWorkbench(original));
   });
   it('retains an edit made during the retry read and an edit made during the bootstrap write', async () => {
     const store = await owner(), graph = desktopSpatialGraph(workbench(), []);

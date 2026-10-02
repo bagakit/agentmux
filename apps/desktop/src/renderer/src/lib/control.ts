@@ -254,7 +254,7 @@ export function planControlOpen(
       throw error('CONTROL_OWNER_LOST', 'Launcher Region owner changed while planning Control open.')
     }
     return {
-      workspaceId: tab.workspaceId,
+      workspaceId: launcher.workspaceId,
       tabId: tab.id,
       regionId: launcher.regionId,
       kind: 'launcher',

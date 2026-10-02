@@ -53,7 +53,8 @@ export function noteCreationDisplayWorkspace(state: Parameters<typeof spatialCat
   workspaceId: string; groupId: string; displayWorkspaceId?: string; launcher?: { tabId: string; regionId: string }
 }): string | null {
   const tab = input.launcher ? state.tabs[input.launcher.tabId] : undefined
-  if (input.launcher && (tab?.workspaceId !== input.workspaceId || !tab.regions[input.launcher.regionId])) return null
+  const surface = input.launcher ? tab?.regions[input.launcher.regionId] : undefined
+  if (input.launcher && (surface?.kind !== 'launcher' || surface.workspaceId !== input.workspaceId)) return null
   const candidates = Object.entries(state.layouts).filter(([workspaceId, layout]) =>
     (input.displayWorkspaceId ? workspaceId === input.displayWorkspaceId : input.launcher || workspaceId === input.workspaceId) && groupIds(layout.root).includes(input.groupId) &&
     layout.groups.some(group => group.id === input.groupId && (!input.launcher || group.tabOrder.includes(input.launcher.tabId))))
@@ -68,13 +69,16 @@ export function noteCreationTarget(state: Parameters<typeof spatialCatalog>[0], 
   if (!workspace) throw new Error('The Note resource Workspace is unavailable.')
   const catalog = spatialCatalog(state, topics)
   const tab = input.launcher ? catalog.tabs.find(item => item.tabId === input.launcher!.tabId && item.regionIds.includes(input.launcher!.regionId)) : undefined
-  if (input.launcher && (!tab || tab.workspaceId !== workspace.id)) throw new Error('The exact Note Launcher resource cannot be confirmed.')
+  const surface = input.launcher ? state.tabs[input.launcher.tabId]?.regions[input.launcher.regionId] : undefined
+  if (input.launcher && (!tab || surface?.kind !== 'launcher' || surface.workspaceId !== workspace.id)) throw new Error('The exact Note Launcher resource cannot be confirmed.')
   const displayWorkspaceId = noteCreationDisplayWorkspace(state, input)
   if (!displayWorkspaceId) throw new Error('The Note Launcher display location is missing or ambiguous; choose the exact location.')
   const layout = state.layouts[displayWorkspaceId]
   if (!layout || !groupIds(layout.root).includes(input.groupId) || !layout.groups.some(group => group.id === input.groupId)) throw new Error('The Note display Group is unavailable.')
   const defaultZoneId = workspace.id === SCRATCH_WORKSPACE_ID ? homeZoneId(directoryIdentity(workspace.hostId, workspace.path)) : workspaceZoneId(directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path), workspace.id)
-  const zone = catalog.zones.find(item => item.zoneId === (tab?.zoneId ?? defaultZoneId))
+  // An explicit different resource does not inherit the original display Tab's Zone.
+  const zoneId = tab?.workspaceId === workspace.id ? tab.zoneId : undefined
+  const zone = catalog.zones.find(item => item.zoneId === (zoneId ?? defaultZoneId))
   if (!zone || zone.kind === 'unknown' || zone.workspaceId !== workspace.id || zone.hostId !== workspace.hostId || !zone.directoryPath) throw new Error('The Note Zone birth directory is unknown. Its draft and original target are retained.')
   const sourceSpaceId = zoneContext(state, topics, zone)
   const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone)

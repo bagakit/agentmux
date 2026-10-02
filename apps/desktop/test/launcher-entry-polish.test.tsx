@@ -45,6 +45,7 @@ async function openEnvironment() {
   await dom.click('[aria-label="Runtime environment"]')
   const panel = document.querySelector<HTMLElement>('.launcher-environment__panel')
   expect(panel).not.toBeNull()
+  await act(async () => panel!.querySelector<HTMLElement>('.launcher-environment__details summary')!.click())
   expect(vi.mocked(useAppStore.getState().prewarmTerminal).mock.calls).toHaveLength(warmCalls)
   return panel!
 }
@@ -128,10 +129,11 @@ describe('the mounted Launcher entry polish', () => {
     await mount(input)
     const summary = dom.container.querySelector('.launcher-environment__path')!
     expect(summary.textContent).toBe(expected)
-    expect(summary.getAttribute('title')).toBe(input.path)
+    expect(summary.getAttribute('title')).toBe(expected)
     const panel = await openEnvironment()
     expect(panel.querySelector('.launcher-environment__directory')?.textContent).toBe(expected)
-    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe(input.path)
+    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe(expected)
+    if (expected !== input.path) expect(panel.textContent).toContain(input.path)
     expect(panel.textContent).toContain('Not tested')
     expect(panel.textContent).not.toContain('Ready')
     expect(dom.container.querySelector('.launcher-environment details')).toBeNull()
@@ -148,7 +150,7 @@ describe('the mounted Launcher entry polish', () => {
     const panel = await openEnvironment()
     expect(panel.textContent).toContain('Check failed')
     expect(panel.textContent).toContain('Diagnostic unavailable')
-    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe(_hygiene_fixturePath("Users/alice/project"))
+    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe('~/project')
     await closeEnvironment()
     expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
   })

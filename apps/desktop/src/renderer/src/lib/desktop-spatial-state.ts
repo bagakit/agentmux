@@ -18,7 +18,7 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
     resources[tabKey(tab.id)] = json(metadata);
     tabLayouts[tab.id] = layout;
     for (const surface of Object.values(regions)) {
-      const { regionId: _, kind, workspaceId: __, ...metadata } = surface;
+      const { regionId: _, kind, ...metadata } = surface;
       if (kind === 'agent')
         delete (metadata as {
           sessionId?: string;
@@ -79,7 +79,9 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
       const region = graph.regions.find(r => r.regionId === id && r.tabId === fact.tabId), data = graph.resources[regionKey(id)];
       if (!region || !data || typeof data !== 'object' || Array.isArray(data))
         continue;
-      regions[id] = { ...data, regionId: id, kind: region.kind, workspaceId: fact.workspaceId,
+      // Earlier descriptors used the Tab resource for every Region. An explicit Region
+      // resource now survives both save ACK hydration and a fresh client process.
+      regions[id] = { workspaceId: fact.workspaceId, ...data, regionId: id, kind: region.kind,
         ...(region.kind === 'agent' ? { sessionId: region.agentSessionId } : {}) } as PersistedWorkbench['tabs'][string]['regions'][string];
     }
     if (Object.keys(regions).length !== fact.regionIds.length) {

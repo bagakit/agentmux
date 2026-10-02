@@ -32,6 +32,7 @@ import { LauncherSecondarySurfaces } from './LauncherSecondarySurfaces'
 import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
+import { LauncherFileReferences } from './LauncherFileReferences'
 import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
@@ -78,13 +79,17 @@ export function NewTabSurface({
     document.addEventListener('visibilitychange', changed)
     return () => document.removeEventListener('visibilitychange', changed)
   }, [visible, presentationActive])
-  const [executorId, setExecutorId] = useState('codex')
+  const [executorId, setExecutorId] = useState(() => {
+    const surface = tabId && regionId ? useAppStore.getState().tabs[tabId]?.regions[regionId] : undefined
+    return surface?.kind === 'launcher' ? surface.executorId ?? 'codex' : 'codex'
+  })
   const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
   // Every Launcher has an input owner, including a Workspace's first empty Tab Group.
   const launcherId = warmLauncherId({ tabGroupId, regionId })
   const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId, launcherId)
   const [optionsExpanded, setOptionsExpanded] = useState(false)
+  const [fileReferencesOpen, setFileReferencesOpen] = useState(false)
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -93,6 +98,10 @@ export function NewTabSurface({
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const tabWorkspaceId = useAppStore((state) => tabId ? state.tabs[tabId]?.workspaceId : undefined)
+  const launcherWorkspaceId = useAppStore(state => {
+    const surface = tabId && regionId ? state.tabs[tabId]?.regions[regionId] : undefined
+    return surface?.kind === 'launcher' ? surface.workspaceId : undefined
+  })
   const topicPreparation = useAppStore(state => tabId ? state.tabs[tabId]?.topicPreparation : undefined)
   const primaryBotUnconfirmed = useAppStore(state => Boolean(tabId && prompt && state.tabs[tabId]?.topicId === PMO_TEAMS_TOPIC_ID &&
     primaryMoteHasBot(state) && !primaryMoteExecutorId(state)))
@@ -116,6 +125,7 @@ export function NewTabSurface({
   // 卡片上写「Start in ⟨谁⟩」的那个 Workspace，与五个启动动作真正落进去的那个，必须是**同一次**
   // 判定（resolveLauncherWorkspaceId）。分开算的症状不是报错：标题写着 A、点下去建到 B。
   const workspace = config?.workspaces.find((item) => item.id === resolveLauncherWorkspaceId({
+    launcherWorkspaceId,
     launcherTabWorkspaceId: tabWorkspaceId,
     activeWorkspaceId
   }))
@@ -174,17 +184,26 @@ export function NewTabSurface({
     surfaceRef.current.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)?.focus({ preventScroll: true })
   }, [sections.agents, motionActive])
   function chooseExecutor(id: string) {
+    if (launcherRef && workspace) useAppStore.getState().setLauncherExecutionWorkspace(launcherRef, workspace.id, id)
     setManualChoice({ regionId, executorId: id })
     setExecutorId(id)
     if (workspace) saveExecutor(workspace.id, id)
   }
-  useEffect(() => { if (savedExecutor) setExecutorId(savedExecutor) }, [workspace?.id, savedExecutor])
+  const explicitSavedExecutor = useAppStore(state => {
+    const surface = tabId && regionId ? state.tabs[tabId]?.regions[regionId] : undefined
+    return surface?.kind === 'launcher' ? surface.executorId : undefined
+  })
+  useEffect(() => {
+    if (explicitSavedExecutor) setExecutorId(explicitSavedExecutor)
+    else if (savedExecutor && (!manualChoice || manualChoice.regionId !== regionId)) setExecutorId(savedExecutor)
+  }, [workspace?.id, savedExecutor, explicitSavedExecutor])
 
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
   // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
   const selectedProviderId = selectedExecutor?.providerId
   const launchOptionSelection = selectedProviderId ? optionsByProvider[selectedProviderId] ?? EMPTY_LAUNCH_OPTION_SELECTION : EMPTY_LAUNCH_OPTION_SELECTION
-  const toolsScope = JSON.stringify([regionId, workspace?.id, selectedProviderId])
+  const toolsScope = JSON.stringify([regionId, workspace?.id, workspace?.hostId, workspace?.path, selectedProviderId])
+  useEffect(() => { setFileReferencesOpen(false) }, [toolsScope, motionActive])
   const feedback = useComposerFeedback(toolsScope)
   const launchOptions = useMemo(
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
@@ -210,12 +229,14 @@ export function NewTabSurface({
     // A failed speculative warm clears its slot. That is not a new request to
     // launch again; retain the ordinary cold launch and the current input.
     if (warmSlotHeld && warmTerminal?.session) automaticWarmAttempt.current = null
-    if (workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
+    // A target choice must not stop another project's healthy reusable shell.
+    // The ordinary explicit Terminal action remains available for this exact target.
+    if (workspace && (!warmTerminal || warmTerminal.key === warmKey) && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
       (warmSlotHeld || automaticWarmAttempt.current !== warmKey)) {
       if (!warmSlotHeld) automaticWarmAttempt.current = warmKey
       prewarmTerminal(workspace.id, launcherId)
     }
-  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmKey, sections.terminal])
+  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmTerminal?.key, warmKey, sections.terminal])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
@@ -280,6 +301,23 @@ export function NewTabSurface({
     })
   }
 
+  function chooseExecutionWorkspace(workspaceId: string): void {
+    if (busy) return
+    try {
+      const state = useAppStore.getState()
+      let target = launcherRef
+      if (!target) {
+        if (!workspace) throw new Error('The original display Group is unavailable; restore its project before creating a new Launcher')
+        const createdId = state.openLauncher({ workspaceId: workspace.id, tabGroupId, reveal: false,
+          initialInputs: { prompt, names, optionsByProvider } })
+        const created = createdId ? useAppStore.getState().tabs[createdId] : undefined
+        if (!created) return
+        target = { tabId: created.id, regionId: created.layout.activeRegionId }
+      }
+      state.setLauncherExecutionWorkspace(target, workspaceId, executorId)
+    } catch (cause) { setError(presentError(cause)) }
+  }
+
   function appendReference(path: string): void {
     void feedback.run(() => insertionRef.current?.insert(() => appendFileReferences('', [path]), { separate: true }))
   }
@@ -293,6 +331,7 @@ export function NewTabSurface({
   }
 
   async function chooseComposerFiles(): Promise<void> {
+    if (host?.kind !== 'local') { setFileReferencesOpen(true); return }
     await insertionRef.current?.insert(async () => {
       const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
       if (!feedback.isCurrent()) return null
@@ -304,7 +343,9 @@ export function NewTabSurface({
     <section ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
       data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
       style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties}>
-      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive} />
+      <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
+        hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
+        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('workspaces')} />
 
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Primary Mote Agent is unconfirmed',
@@ -349,7 +390,9 @@ export function NewTabSurface({
           {showUnavailable ? <div className="launcher-unavailable-agents">{unavailableExecutors.map(executor => <span key={executor.id} title={executor.detection?.detail}><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={14} /><strong>{executor.label}</strong><small>{executorDetectionLabel(executor.detection)}</small></span>)}</div> : null}
         </div>
         <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}
-          onPasteImage={(file, insert) => { void feedback.run(() => insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return appendFileReferences('', [path]) }, { separate: true })) }}
+          onPasteImage={(file, insert) => { void feedback.run(async () => {
+            if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing this Mac.')
+            await insert(async () => { const path = await api.ui.savePastedImage({ bytes: new Uint8Array(await file.arrayBuffer()), extension: file.type.slice(6).split('+')[0] ?? 'png' }); return feedback.isCurrent() ? appendFileReferences('', [path]) : null }, { separate: true }) }) }}
           autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation} value={prompt} onValueChange={setPrompt}
           onKeyDown={event => { if (!launcherKeydownLaunches(event, isMacPlatform(), readiness)) return; event.preventDefault(); launchFromLauncher() }}
           placeholder="What would you like to work on?" /></div>
@@ -358,7 +401,7 @@ export function NewTabSurface({
             commands={providerCatalog.find(entry => entry.id === selectedProviderId)?.composer?.commands ?? []}
             loadSkills={() => workspace && selectedProviderId ? api.ui.listWorkspaceSkills(workspace.id, selectedProviderId) : Promise.resolve([])}
             onChooseSkill={skill => appendReference(skill.path)} onCommand={command => setPrompt(`${command}${prompt ? ` ${prompt}` : ' '}`)}
-            {...(workspace?.hostId === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
+            {...(host?.kind === 'local' ? { onCapture: captureComposerScreenshot } : {})} runAction={feedback.run} />
           <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
         </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
           onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
@@ -373,6 +416,8 @@ export function NewTabSurface({
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
       </div> : null}
       {selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
+      {fileReferencesOpen && workspace && motionActive ? <LauncherFileReferences key={toolsScope} workspace={workspace}
+        onSelect={appendReference} onClose={() => setFileReferencesOpen(false)} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
