@@ -590,6 +590,8 @@ export type WorkspaceDirectoryEntry = {
   path: string
   isDirectory: boolean
   isSymlink: boolean
+  /** Confirmed regular-file modification time, in epoch milliseconds. Absent when unknown. */
+  mtimeMs?: number
   ignored?: boolean
   linkTarget?: string
   linkIssue?: 'unavailable'

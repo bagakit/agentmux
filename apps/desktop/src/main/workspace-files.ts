@@ -107,7 +107,7 @@ export function workspaceFileObserverCount(): number {
 export const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
-import { constants, link, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
+import { constants, link, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
 import { join, sep } from 'node:path'
 
@@ -236,6 +236,11 @@ try {
         result.linkTarget = await readlink(entry.name)
         try { result.isDirectory = (await stat(entry.name)).isDirectory() }
         catch { result.linkIssue = 'unavailable' }
+      } else if (entry.isFile()) {
+        try {
+          const metadata = await lstat(entry.name)
+          if (metadata.isFile() && Number.isFinite(metadata.mtimeMs)) result.mtimeMs = metadata.mtimeMs
+        } catch { /* Unconfirmed metadata does not remove a listed file. */ }
       }
       return result
     }))))
@@ -830,7 +835,11 @@ const REMOTE_DIRECTORY_ENTRY_SCRIPT = [
   'elif [ -f "$path" ]; then kind=f',
   'else continue',
   'fi',
-  "printf '%s\\0%s\\0' \"$name\" \"$kind\"",
+  'mtime=',
+  'if [ "$kind" = f ]; then',
+  'mtime=$(stat -c %Y -- "$path" 2>/dev/null) || mtime=$(stat -f %m "$path" 2>/dev/null) || mtime=',
+  'fi',
+  "printf '%s\\0%s\\0%s\\0' \"$name\" \"$kind\" \"$mtime\"",
   'done'
 ].join('\n')
 const REMOTE_DIRECTORY_READ_SCRIPT = [
@@ -1193,19 +1202,22 @@ export class WorkspaceFiles {
     }
     const fields = result.stdout.split('\0')
     const directory = fields.shift()!
-    if (!directory.startsWith('/') || !result.stdout.endsWith('\0') || fields.length % 2 !== 1) {
+    if (!directory.startsWith('/') || !result.stdout.endsWith('\0') || fields.length % 3 !== 1) {
       throw new Error(`Could not confirm the directory response for ${lexical} on ${host.label}. Retry this directory.`)
     }
     const entries: WorkspaceDirectoryEntry[] = []
-    for (let index = 0; index + 1 < fields.length; index += 2) {
+    for (let index = 0; index + 2 < fields.length; index += 3) {
       const name = fields[index]
       const kind = fields[index + 1]
       if (!name || !kind) continue
+      const timestamp = fields[index + 2] ?? ''
+      const mtimeMs = /^-?\d+(?:\.\d+)?$/.test(timestamp) ? Number(timestamp) * 1000 : NaN
       entries.push({
         name,
         path: relativeEntryPath(requestedPath, name),
         isDirectory: kind === 'd' || kind === 'ld',
         isSymlink: kind.startsWith('l'),
+        ...(kind === 'f' && Number.isFinite(mtimeMs) ? { mtimeMs } : {}),
         ...(kind === 'lb' ? { linkIssue: 'unavailable' as const } : {})
       })
     }
