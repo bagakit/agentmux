@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { relative } from 'node:path'
@@ -30,7 +30,7 @@ const changes = {
     "  if (plan.kind === 'launcher' && expectedSurface === plan.launcher) return null", '  // Mutation: reselect the unchanged original Launcher.'],
   'unknown-run-deletes-original': ['apps/desktop/src/renderer/src/store.ts',
     "    if (request.operation === 'browser.run') {", "    if (request.operation === 'browser.run') {\n      set({ tabs: {}, layouts: {} })"],
-  'guide-allows-gui-fallback': ['packages/core/src/agentmux-cli-help.ts',
+  'guide-allows-gui-fallback': ['packages/core/src/agentmux-cli-browser-guide.ts',
     'or use GUI input to get around that result.', 'and use GUI input to get around that result.'],
   'pending-launcher-steals-input': ['apps/desktop/src/renderer/src/components/NewTabSurface.tsx',
     'autoFocus={visible && presentationActive && inputRegionActive && !controlNavigation}',
@@ -42,13 +42,15 @@ const changes = {
     'if (!visible || !presentationActive || !inputRegionActive || controlNavigation) return',
     'if (!visible || !presentationActive || controlNavigation) return'],
   'cli-browser-op-misdirected': ['packages/core/src/agentmux.ts',
-    ": await requestAgentMuxControl({ ...requestBase(), operation: 'open.browser',",
-    ": await requestAgentMuxControl({ ...requestBase(), operation: 'open.terminal',"]
+    'const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)',
+    "const result = await client.call(method === 'browser.open' ? 'terminal.open' : method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)"]
 } as const
 
 export default defineConfig({
   root,
-  resolve: { alias: [{ find: /^@agentmux\/core$/, replacement: fileURLToPath(new URL('packages/core/src/index.ts', rootUrl)) }] },
+  resolve: { alias: Object.entries(JSON.parse(readFileSync(new URL('packages/core/package.json', rootUrl), 'utf8')).exports)
+    .map(([subpath, entry]) => ({ find: new RegExp(`^${subpath === '.' ? '@agentmux/core' : `@agentmux/core/${subpath.slice(2)}`}$`),
+      replacement: fileURLToPath(new URL(`packages/core/${(entry as { import: string }).import.replace('./dist/', 'src/').replace(/\.js$/, '.ts')}`, rootUrl)) })) },
   define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
   plugins: [{ name: 'browser-nonactivating-actual-source', enforce: 'pre', transform(source, id) {
     const path = id.split('?')[0]!

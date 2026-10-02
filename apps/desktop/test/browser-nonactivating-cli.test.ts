@@ -4,7 +4,7 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { build } from 'vite'
 import { spawn } from 'node:child_process'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { webcrypto } from 'node:crypto'
 import { createHash } from 'node:crypto'
@@ -14,8 +14,10 @@ import { act, createElement } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
 import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt, parseAgentMuxControlRequest } from '../../../packages/core/src/control-host'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/src/control'
+import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
+import { rpcControlRequest } from '../../../packages/core/src/rpc-business-codec'
+import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
+import type { AgentMuxRpcResult } from '../../../packages/core/src/public-rpc'
 import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../../../packages/core/src/agentmux-cli-help'
 import type { AppConfig, BrowserSnapshot, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
@@ -59,23 +61,22 @@ function existingSelection() {
   return { ...picked, regions: Object.fromEntries(Object.entries(picked.regions).filter(([id]) => !id.startsWith('view:'))) }
 }
 function open(destination: unknown) {
-  return parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
-    operation: 'open.browser', url: 'https://generic.invalid/page', destination })
+  return rpcControlRequest('browser.open', { url: 'https://generic.invalid/page', destination })
 }
 let userInput: HTMLTextAreaElement
 let root: string, cli: string
 beforeAll(async () => {
-  await mkdir(resolve('.tmp'), { recursive: true })
-  root = await mkdtemp(resolve('.tmp/browser-nonactivating-source-'))
+  // Keep Unix socket paths below the OS address limit in long worktree paths.
+  root = await mkdtemp(_hygiene_fixturePath("tmp/amx-browser-source-"))
   cli = join(root, 'source-cli.mjs')
   await build({ configFile: false, logLevel: 'silent', plugins: [{ name: 'actual-public-cli-source', enforce: 'pre', transform(source, id) {
     const path = id.split('?')[0]!
     if (!path.startsWith(resolve('packages/core/src') + '/')) return
     let code = source
     if (process.env.AGENTMUX_BROWSER_NONACTIVATING_MUTATION === 'cli-browser-op-misdirected' && path === resolve('packages/core/src/agentmux.ts')) {
-      const block = ": await requestAgentMuxControl({ ...requestBase(), operation: 'open.browser',"
-      assert.equal(source.split(block).length - 1, 1, 'Unique actual CLI Browser request construction')
-      code = source.replace(block, ": await requestAgentMuxControl({ ...requestBase(), operation: 'open.terminal',")
+      const block = 'const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)'
+      assert.equal(source.split(block).length - 1, 1, 'Unique actual public client call')
+      code = source.replace(block, "const result = await client.call(method === 'browser.open' ? 'terminal.open' : method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)")
     }
     if (process.env.AGENTMUX_BROWSER_NONACTIVATING_LOADED) appendFileSync(process.env.AGENTMUX_BROWSER_NONACTIVATING_LOADED,
       JSON.stringify({ path: path.slice(resolve('.').length + 1), consumer: 'public-source-cli-ssr',
@@ -134,9 +135,8 @@ describe('actual Control Browser open preserves the existing selection', () => {
   })
   it('uses the same preserving path for a managed self selector', async () => {
     const before = existingSelection()
-    const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'managed-self', operation: 'open.browser',
-      url: 'https://generic.invalid/page', caller: { agentSessionId: session.id },
-      destination: { kind: 'split', direction: 'down', region: { kind: 'self' } } })
+    const request = rpcControlRequest('browser.open', { url: 'https://generic.invalid/page',
+      destination: { kind: 'split', direction: 'down', region: { kind: 'self' } } }, { agentSessionId: session.id })
     expect(await useAppStore.getState().executeControl(request)).toMatchObject({ operation: 'open.browser' })
     retained(before)
   })
@@ -302,8 +302,8 @@ describe('the real pending Launcher consumes Region input selection', () => {
 describe('public Source CLI consumes the existing Browser owner', () => {
   async function run(args: string[], input = '') {
     return await new Promise<{ code: number; stdout: string; stderr: string }>((resolveResult, reject) => {
-      const child = spawn(process.execPath, [cli, ...args], { env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root,
-        AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined },
+      const child = spawn(process.execPath, [cli, '--endpoint', `unix:${join(root, 'control.sock')}`, ...args], { env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: root,
+        AGENTMUX_STATE_DIRECTORY: join(root, 'state'), AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined },
         stdio: ['pipe', 'pipe', 'pipe'] })
       let stdout = '', stderr = ''
       const timer = setTimeout(() => { child.kill(); reject(new Error('Private Source CLI timed out')) }, 10_000)
@@ -316,30 +316,32 @@ describe('public Source CLI consumes the existing Browser owner', () => {
   }
   it('actual argv → private socket → Store opens, inspects and runs without selecting the Browser', async () => {
     const before = existingSelection(), seen: string[] = []
-    const server = new AgentMuxControlServer({ async execute(request) {
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request) {
       seen.push(request.operation)
       return await useAppStore.getState().executeControl(request)
-    } }, join(root, 'control.sock'))
+    } })
     const runScript = vi.spyOn(api.browser, 'runScript').mockResolvedValue({ result: { websiteChanged: true }, logs: ['Source result'],
       outcome: { kind: 'completed' }, runOperation: { id: 'source-operation', browserId: 'source-browser',
         operator: { id: 'source-agent', name: 'Source agent' }, startedAt: 1, phase: 'completed', summary: 'Source only',
         url: 'https://generic.invalid/page', steps: [] } })
     await server.start()
     try {
-      const opened = await run(['open', 'browser', '--url', 'https://generic.invalid/page', '--tab', 'background-anchor', '--new-tab'])
+      const argv = ['browser', 'open', '--url', 'https://generic.invalid/page', '--tab', 'background-anchor', '--new-tab']
+      const command = await parseAgentMuxCliInvocation(argv)
+      const opened = await run(argv)
       expect(opened.code, opened.stderr).toBe(0)
-      const receipt = parseAgentMuxControlReceipt(JSON.parse(opened.stdout))
-      expect(receipt).toMatchObject({ ok: true, operation: 'open.browser' })
-      if (!receipt.ok || receipt.operation !== 'open.browser') throw new Error('Expected typed Browser open')
-      const found = await run(['inspect', '--region', receipt.result.region.regionId])
+      const receipt = JSON.parse(opened.stdout) as { ok: boolean; operation: string; result: AgentMuxRpcResult<'browser.open'> }
+      expect(receipt).toMatchObject({ ok: true, operation: command.command.method })
+      if (!receipt.ok || receipt.operation !== command.command.method) throw new Error('Expected typed Browser open')
+      const found = await run(['space', 'inspect', '--region', receipt.result.region.regionId])
       expect(found.code, found.stderr).toBe(0)
-      expect(JSON.parse(found.stdout)).toMatchObject({ result: { region: { browserId: receipt.result.region.browserId } } })
+      expect(JSON.parse(found.stdout)).toMatchObject({ result: { presentation: { region: { browserId: receipt.result.region.browserId } } } })
       const code = 'await gotoUrl("https://generic.invalid/next"); return await snapshot()'
-      const driven = await run(['browser', 'run', '--browser', receipt.result.region.browserId], code)
+      const driven = await run(['browser', 'run', '--browser', receipt.result.region.browserId, '--operation-id', 'source-operation'], code)
       expect(driven.code, driven.stderr).toBe(0)
       expect(JSON.parse(driven.stdout)).toMatchObject({ result: { result: { websiteChanged: true }, outcome: { kind: 'completed' } } })
-      expect(runScript).toHaveBeenCalledWith(receipt.result.region.browserId, code, undefined, undefined)
-      expect(seen).toEqual(['open.browser', 'inspect.region', 'browser.run'])
+      expect(runScript).toHaveBeenCalledWith(receipt.result.region.browserId, code, undefined, 'source-operation')
+      expect(seen).toEqual(['open.browser', 'inspect.region', 'space.inspect', 'browser.run'])
       retained(before)
     } finally { await server.stop() }
   })
@@ -350,7 +352,7 @@ describe('public Source CLI consumes the existing Browser owner', () => {
     const before = selection()
     const runScript = vi.spyOn(api.browser, 'runScript').mockRejectedValue(new Error('Unknown browser'))
     const close = vi.spyOn(api.browser, 'close').mockResolvedValue()
-    const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'unknown-original', operation: 'browser.run', browserId: browser.id, code: 'return await snapshot()' })
+    const request = rpcControlRequest('browser.run', { browserId: browser.id, code: 'return await snapshot()' })
     await expect(useAppStore.getState().executeControl(request)).rejects.toThrow('Unknown browser')
     expect(selection()).toEqual(before); expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
     expect(useAppStore.getState().sessions).toEqual([session]); expect(runScript).toHaveBeenCalledTimes(1)
@@ -374,6 +376,6 @@ describe('public Source CLI consumes the existing Browser owner', () => {
     expect(skill).toContain('First inspect the exact Tab/Region and read its typed Browser id')
     expect(skill).toContain('or use GUI input to get around that result.')
     expect(skill).toContain('explicit focus is a separate navigation action.')
-    expect(agentMuxCommandHelp('open.browser')).toContain('preserves the current Workbench selection')
+    expect(agentMuxCommandHelp('browser.open')).toContain('preserves the current Workbench selection')
   })
 })
