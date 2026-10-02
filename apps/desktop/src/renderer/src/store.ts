@@ -1,4 +1,4 @@
-import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial} from './lib/desktop-spatial-state'
+import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
@@ -3026,23 +3026,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const old=projectPersistedWorkbench({tabs:current.tabs,layouts:current.layouts})
           const tabs={...Object.fromEntries([...unavailable].flatMap(id=>current.tabs[id]?[[id,current.tabs[id]]]:[])),...Object.fromEntries(Object.entries(restored.tabs).map(([id,tab])=>{
             const live=current.tabs[id]
-            if(live && JSON.stringify(old.tabs[id])===JSON.stringify(persisted.tabs[id])) return [id,live]
+            if(live && sameSpatialValue(old.tabs[id],persisted.tabs[id])) return [id,live]
             if(!live) return [id,tab]
             const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>[regionId,
-              live.regions[regionId] && JSON.stringify(old.tabs[id]?.regions[regionId])===JSON.stringify(persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
+              live.regions[regionId] && sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
             return [id,{...tab,regions}]
           }))}
           set({tabs,layouts:saved.graph.layouts,spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
         }
+        // Keep observation and local edit capture available even when the first storage read
+        // or bootstrap fails. The existing save Retry re-reads Core before admitting a write.
+        const offRemote=spatial.connect(apply)
+        const offLocal=useAppStore.subscribe((state,previous)=>{
+          if(state.loading || (state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
+          spatial.stage(capture())
+        })
+        disposeCoreSpatial=()=>{offLocal();offRemote()}
         try {
           await spatial.bootstrap(capture())
           set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.
-          const offRemote=spatial.connect(apply)
-          const offLocal=useAppStore.subscribe((state,previous)=>{
-            if(state.loading || (state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
-            spatial.stage(capture())
-          })
-          disposeCoreSpatial=()=>{offLocal();offRemote()}
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       }
       if (!persistWarning) openPersistWrites()
