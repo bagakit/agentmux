@@ -51,6 +51,8 @@ async function openDetails() {
 async function close() {
   await key(details()?.closest<HTMLElement>('[role="menu"]') ?? menu()!, 'Escape')
   if (menu()) await key(menu()!, 'Escape')
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+  expect(menu()).toBeNull()
 }
 
 it('offers explicit research and current-panel capture without changing location bindings or navigating', async () => {
