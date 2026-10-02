@@ -47,7 +47,7 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
         <form onSubmit={event => { event.preventDefault(); void save() }}>
           <label className="mote-rename__field">Name<input ref={input} value={name} disabled={busy} autoComplete="off" maxLength={SCRATCH_TOPIC_TITLE_MAX_LENGTH}
             onChange={event => setName(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault() }} /></label>
-          {error ? <p role="alert" className="new-tab-error">{error}</p> : null}
+          {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button>
             <button type="submit" className="primary-button" disabled={busy}>{busy ? 'Saving…' : 'Save name'}</button></footer>
         </form>

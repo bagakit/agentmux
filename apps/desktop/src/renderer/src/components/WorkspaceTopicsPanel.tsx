@@ -506,7 +506,7 @@ export function WorkspaceTopicsPanel({
                     <Crosshair size={13} />
                   </button>
                 </span>
-                {topic.readError ? <div className="new-tab-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div> : null}
+                {topic.readError ? <div className="surface-inline-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div> : null}
               </SortableTopicItem>
             )
           })}
@@ -514,8 +514,8 @@ export function WorkspaceTopicsPanel({
         </SortableContext>
         </DndContext>
       ) : null}
-      {readError ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
-      {error ? <div className="new-tab-error" role="alert">{error}</div> : null}
+      {readError ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
+      {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() =>
         [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
           .find(node => node.dataset.spaceIconTarget === iconReturnKey.current) ?? null} />

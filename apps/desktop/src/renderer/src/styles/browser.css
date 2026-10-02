@@ -37,7 +37,7 @@
 .browser-profiles__catalog article > svg { color: var(--text-3); }
 .browser-profiles__catalog article > span:not(.browser-profiles__delete-confirm) { min-width: 0; display: grid; gap:var(--sp-1); }
 .browser-profiles__catalog article strong { min-width: 0; display: flex; align-items: center; gap:var(--sp-2); overflow: hidden; color: var(--text-2); font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; }
-.browser-profiles__catalog article strong em { padding:1px var(--sp-2); border-radius: 999px; color: var(--green-2); background: rgba(102, 187, 125, .12); font-size: var(--fs-micro); font-style: normal; font-weight: 700; text-transform: uppercase; }
+.browser-profiles__catalog article strong em { padding:1px var(--sp-2); border-radius: 999px; color: var(--green-text); background: var(--green-bg); font-size: var(--fs-micro); font-style: normal; font-weight: 700; text-transform: uppercase; }
 .browser-profiles__catalog article small { overflow: hidden; color: var(--text-3); font-size: var(--fs-micro); white-space: nowrap; text-overflow: ellipsis; }
 .browser-profiles__catalog article > button { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-profiles__catalog article > button:hover:not(:disabled) { color: var(--red); background: var(--surface-3); }
@@ -45,7 +45,7 @@
 .browser-profiles__delete-confirm { display: flex; gap:var(--sp-1); }
 .browser-profiles__catalog article small.browser-profiles__delete-impact { white-space: normal; color: var(--red-text); }
 .browser-profiles__delete-confirm button { min-height: 22px; padding:0 var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-3); font-size: var(--fs-micro); cursor: pointer; }
-.browser-profiles__delete-confirm button:last-child { color: var(--red-text); border-color: rgba(255, 106, 106, .35); background: rgba(255, 106, 106, .13); }
+.browser-profiles__delete-confirm button:last-child { color: var(--red-text); border-color: var(--red-line); background: var(--red-bg); }
 .browser-profiles__create { display: grid; grid-template-columns: minmax(0, 1fr) 28px; gap:var(--sp-2); }
 .browser-profiles__create input,
 .browser-profiles__import input,
@@ -96,7 +96,7 @@
 .browser-toolbar > button:disabled { opacity: .3; cursor: default; }
 .browser-toolbar label { min-width: 96px; height: 28px; flex: 1; display: flex; align-items: center; gap:var(--sp-3); padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-3); background: var(--bg); }
 .browser-toolbar label:focus-within { border-color: var(--focus-line); color: var(--green); }
-.browser-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: 11px "SFMono-Regular", monospace; }
+.browser-toolbar input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-2); background: transparent; font: var(--fs-meta) "SFMono-Regular", monospace; }
 .browser-address-history { position: fixed; z-index: var(--layer-popover); overflow: auto; padding: var(--sp-2); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: var(--fs-micro)/1.5 var(--font-sans); pointer-events: auto; box-shadow: var(--elev-2); }
 .browser-address-history > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding: var(--sp-1) var(--sp-2); color: var(--text-3); }
 .browser-address-history ul { margin: 0; padding: 0; list-style: none; }
@@ -147,7 +147,7 @@
 .browser-selection-result dl { display: grid; gap:1px; margin:0; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
 .browser-selection-result dl > div { min-width: 0; display: grid; grid-template-columns: 72px minmax(0, 1fr); gap:var(--sp-4); padding:var(--sp-4) var(--sp-4); background: var(--surface-1); }
 .browser-selection-result dt { color: var(--text-3); font-size: var(--fs-micro); text-transform: uppercase; }
-.browser-selection-result dd { margin:0; overflow: hidden; font: 10px/1.45 "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.browser-selection-result dd { margin:0; overflow: hidden; font: var(--fs-micro)/1.45 "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
 .browser-selection-result > label { display: grid; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .browser-selection-result textarea { min-height: 76px; resize: vertical; padding:var(--sp-4) var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); outline: none; color: var(--text); background: var(--bg); font-family: inherit; font-size: var(--fs-meta); line-height: 1.5; }
 .browser-selection-result textarea:focus { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
@@ -172,7 +172,7 @@
 .browser-screenshot-toolbar button:disabled { opacity: .38; cursor: default; }
 .browser-screenshot-toolbar__colors button { min-width: 16px; width: 16px; height: 16px; padding:0; border: 1px solid var(--wash-3); border-radius: 50%; box-shadow: 0 0 0 1px var(--scrim-2); }
 .browser-screenshot-toolbar__colors button.selected { box-shadow: 0 0 0 2px var(--surface-0), 0 0 0 3px var(--green); }
-.browser-screenshot-toolbar select { height: 25px; flex: none; padding:0 var(--sp-6) 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--bg); font: 10px "SFMono-Regular", monospace; }
+.browser-screenshot-toolbar select { height: 25px; flex: none; padding:0 var(--sp-6) 0 var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--bg); font: var(--fs-micro) "SFMono-Regular", monospace; }
 .browser-screenshot-toolbar__divider { width: 1px; height: 18px; flex: none; margin:0 var(--sp-1); background: var(--line); }
 .browser-screenshot-toolbar__actions { flex: none; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
 .browser-screenshot-toolbar__actions .primary-button { width: auto; color: var(--bg); background: var(--green); font-weight: 700; }
@@ -180,8 +180,8 @@
 /* 应用链接的那一问。骨架用既有的 .pane-state（居中列 + gap），这里只补它没有的三样：
    URL 的等宽省略、勾选行、以及一行两个按钮。 */
 .browser-app-link-prompt svg { color: var(--text-3); }
-.browser-app-link-prompt code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: 10px/1.45 "SFMono-Regular", monospace; }
-.browser-app-link-prompt__url { max-width: min(420px, 100%); overflow: hidden; color: var(--text-3); font: 10px/1.45 "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
+.browser-app-link-prompt code { padding:0 var(--sp-1); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-2); font: var(--fs-micro)/1.45 "SFMono-Regular", monospace; }
+.browser-app-link-prompt__url { max-width: min(420px, 100%); overflow: hidden; color: var(--text-3); font: var(--fs-micro)/1.45 "SFMono-Regular", monospace; text-overflow: ellipsis; white-space: nowrap; }
 .browser-app-link-prompt__remember { display: flex; align-items: center; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .browser-app-link-prompt__actions { display: flex; gap:var(--sp-3); margin-top:var(--sp-1); }
 

@@ -51,6 +51,7 @@
 @import './activity.css';
 @import '@agentmux/client-ui/styles/conversation-message.css';
 @import '@agentmux/client-ui/styles/markdown.css';
+@import '@agentmux/client-ui/styles/conversation-image.css';
 @import '@agentmux/client-ui/styles/conversation-input-details.css';
 @import '@agentmux/client-ui/styles/conversation-tool-trace.css';
 @import '@agentmux/client-ui/styles/conversation-native-thread.css';

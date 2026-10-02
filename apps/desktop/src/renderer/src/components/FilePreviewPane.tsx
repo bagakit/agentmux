@@ -17,7 +17,8 @@ export function formatFileBytes(bytes: number): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits: 1 })} ${units[unit]}`
 }
 
-/** Image viewing only: native decoding, one view's geometry and no file/content ownership. */
+/** Image viewing only. Decode, zoom and failure state belong to one content mount;
+ * both file routes key it by source URL. Native load can finish before passive effects. */
 export function ImageContent({ src, name, byteLength, onDecodeError }: {
   src: string; name: string; byteLength?: number; onDecodeError?: () => void
 }) {
@@ -27,7 +28,6 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
   const [zoom, setZoom] = useState<number | 'fit'>('fit')
   const [failed, setFailed] = useState(false)
   const drag = useRef<{ x: number; y: number; left: number; top: number } | null>(null)
-  useEffect(() => { setNatural(null); setZoom('fit'); setFailed(false) }, [src])
   useEffect(() => {
     const element = viewport.current
     if (!element) return
@@ -96,9 +96,9 @@ export function ImageContent({ src, name, byteLength, onDecodeError }: {
         <div className="file-preview__controls" role="group" aria-label="Image zoom">
           <button className="small-button" aria-pressed={zoom === 'fit'} disabled={!natural} title="Fit image (F or 0)" onClick={() => changeZoom('fit')}>Fit</button>
           <button className="small-button" aria-pressed={zoom === 1} disabled={!natural} title="Original size (1)" onClick={() => changeZoom(1)}>1:1</button>
-          <button className="icon-button" aria-label="Zoom out" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><Minus size={13} /></button>
+          <button className="icon-button" aria-label="Zoom out" title="Zoom out (-)" disabled={!natural || scale <= 0.1} onClick={() => changeZoom(scale / 1.25)}><Minus size={13} /></button>
           <output aria-label="Image zoom level">{natural ? `${Math.round(scale * 100)}%` : '—'}</output>
-          <button className="icon-button" aria-label="Zoom in" disabled={!natural || scale >= 20} onClick={() => changeZoom(scale * 1.25)}><Plus size={13} /></button>
+          <button className="icon-button" aria-label="Zoom in" title="Zoom in (+)" disabled={!natural || scale >= 20} onClick={() => changeZoom(scale * 1.25)}><Plus size={13} /></button>
         </div>
         <span className="file-preview__metadata">{natural ? `${natural.width.toLocaleString()} × ${natural.height.toLocaleString()}` : 'Dimensions unconfirmed'}{byteLength !== undefined ? ` · ${formatFileBytes(byteLength)}` : ''}</span>
       </footer>

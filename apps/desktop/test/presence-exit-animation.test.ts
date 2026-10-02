@@ -1,5 +1,6 @@
 import { readdirSync, readFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { relative } from 'node:path'
+import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 
@@ -18,45 +19,63 @@ import { allStyles } from './helpers/styles.js'
 // static property of the CSS: no jsdom assertion would have caught it (jsdom does not run
 // animations), and the packaged-Electron probe caught it only as an unexplained timeout.
 
-const rendererDir = new URL('../src/renderer/src/', import.meta.url)
-// Comments are stripped before parsing: they sit between rules, so a naive brace walk would fold a
-// comment into the following rule's selector text — enough for prose that merely mentions a class to
-// fabricate a match, or to make a real offender's message unreadable.
+const sourceRoots = [
+  new URL('../src/renderer/src/', import.meta.url),
+  new URL('../../../packages/client-ui/src/', import.meta.url)
+]
+const repositoryDir = new URL('../../../', import.meta.url)
 const styles = allStyles().replace(/\/\*[\s\S]*?\*\//g, '')
 
-// Radix parts whose rendered node is wrapped in `Presence` — verified against the installed
-// @radix-ui/react-menu and @radix-ui/react-dialog, which both mount Content/SubContent/Overlay
-// through it. Dropdown and context menus are thin wrappers over react-menu, so they inherit it.
-const PRESENCE_PARTS = /\b(?:Dialog|DropdownMenu|ContextMenu|Menu|Popover|Tooltip|HoverCard|Select|AlertDialog)\.(?:Content|SubContent|Overlay)\b/g
+// Read the actual opening tag; a 600-character window could borrow a child's className.
+const PRESENCE_PART = /^(?:Dialog|DropdownMenu|ContextMenu|Menu|Popover|Tooltip|HoverCard|Select|AlertDialog)\.(?:Content|SubContent|Overlay)$/
+function classesInSource(source: string): Set<string> {
+  const found = new Set<string>()
+  const file = ts.createSourceFile('surface.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const readClass = (node: ts.Node): void => {
+    if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
+      for (const name of node.text.trim().split(/\s+/)) if (name) found.add(name)
+    } else if (ts.isTemplateExpression(node)) {
+      // Static words bounded by whitespace remain exact classes when an expression changes.
+      const fragments = [node.head.text, ...node.templateSpans.map(span => span.literal.text)]
+      fragments.forEach((fragment, index) => {
+        for (const match of fragment.matchAll(/[\w-]+/g)) {
+          const start = match.index!, end = start + match[0].length
+          const startBounded = (index === 0 && start === 0) || /\s/.test(fragment[start - 1] ?? '')
+          const endBounded = (index === fragments.length - 1 && end === fragment.length) || /\s/.test(fragment[end] ?? '')
+          if (startBounded && endBounded) found.add(match[0])
+        }
+      })
+      for (const span of node.templateSpans) readClass(span.expression)
+    } else if (ts.isConditionalExpression(node)) {
+      readClass(node.whenTrue); readClass(node.whenFalse)
+    } else if (ts.isJsxExpression(node) && node.expression) readClass(node.expression)
+  }
+  const walk = (node: ts.Node): void => {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && PRESENCE_PART.test(node.tagName.getText(file))) {
+      const attribute = node.attributes.properties.find(property => ts.isJsxAttribute(property) && property.name.getText(file) === 'className')
+      if (attribute && ts.isJsxAttribute(attribute) && attribute.initializer) readClass(attribute.initializer)
+    }
+    ts.forEachChild(node, walk)
+  }
+  walk(file)
+  return found
+}
 
-// Collect every class name the codebase hangs on a Presence-managed node. Deriving this from source
-// is the point: a menu added next month is covered without anyone remembering this test exists.
 function presenceClassNames(): Map<string, string[]> {
   const found = new Map<string, string[]>()
   const walk = (dir: URL): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        walk(new URL(`${entry.name}/`, dir))
-        continue
-      }
+      if (entry.isDirectory()) { walk(new URL(`${entry.name}/`, dir)); continue }
       if (!entry.name.endsWith('.tsx')) continue
       const file = new URL(entry.name, dir)
-      const source = readFileSync(file, 'utf8')
-      // A JSX element's attributes can wrap across lines, so scan a window forward from the part name
-      // to the tag's own close rather than line by line.
-      for (const match of source.matchAll(PRESENCE_PARTS)) {
-        const window = source.slice(match.index, match.index + 600)
-        const className = /className="([^"]+)"/.exec(window)
-        if (!className) continue
-        for (const name of className[1]!.trim().split(/\s+/)) {
-          const sites = found.get(name) ?? []
-          sites.push(join(dir.pathname.split('/renderer/src/')[1] ?? '', entry.name))
-          found.set(name, sites)
-        }
+      for (const name of classesInSource(readFileSync(file, 'utf8'))) {
+        const sites = found.get(name) ?? []
+        sites.push(relative(repositoryDir.pathname, file.pathname))
+        found.set(name, sites)
       }
     }
   }
-  walk(rendererDir)
+  for (const dir of sourceRoots) walk(dir)
   return found
 }
 
@@ -86,6 +105,14 @@ describe('Radix Presence exit animation', () => {
     // The menu base and the dialog are the two Presence surfaces this app actually has today.
     expect([...classNames.keys()]).toContain('tab-context-menu')
     expect([...classNames.keys()]).toContain('confirmation-dialog')
+    expect(classNames.get('md-conversation-image__lightbox')).toContain('packages/client-ui/src/components/ConversationImage.tsx')
+  })
+
+  it('reads only the Presence opening tag and includes its conditional static class branches', () => {
+    expect([...classesInSource('<Dialog.Content aria-label="details"><span className="child-only" /></Dialog.Content>')]).toEqual([])
+    expect([...classesInSource('<Dialog.Content className={open ? "first" : "second"}><span className="child-only" /></Dialog.Content>')]).toEqual(['first', 'second'])
+    expect([...classesInSource('<Dialog.Content className={`panel ${open ? "ready" : "closed"}`} />')]).toEqual(['panel', 'ready', 'closed'])
+    expect([...classesInSource('<Dialog.Content className={`panel-${size}`} />')]).toEqual([])
   })
 
   it('scopes Presence animations to open entry or an explicit distinct finite closed exit', () => {

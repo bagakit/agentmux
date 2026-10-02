@@ -397,7 +397,7 @@ describe('搜索面板把三个开关露出来', () => {
   })
 
   it('开启态是实心填充，不是描边', () => {
-    // 控件语言：选中只用一个几何信号（docs/design/agentmux-surface-density.md）。
+    // 控件语言：选中只用一个几何信号（docs/design/presentation/shared-rules.md）。
     const css = allStyles()
     const active = css.slice(css.indexOf('.terminal-search__toggle[data-active]'))
     const rule = active.slice(0, active.indexOf('}'))
