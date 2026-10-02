@@ -7,7 +7,7 @@ app.setPath('userData', path.join(directory, 'electron-userdata'))
 app.disableHardwareAcceleration()
 const observations = [], leases = new Set()
 let mode = 'delayed', serial = 0
-const snapshot = { schema:'agentmux.toolkit.v1',toolId:'performance',executionId:null,run:null,state:'idle',reason:null,
+const snapshot = { schema:'agentmux.toolkit.v1',kind:'metrics',toolId:'performance',executionId:null,run:null,state:'idle',reason:null,
   startedAt:null,observedAt:null,observation:null,manual:false,consumerCount:1,sequence:0,trend:[] }
 const port = {
   async execute() { throw new Error('Bridge proof only exercises observation.') },
@@ -52,7 +52,7 @@ async function run() {
     'Actual sandboxed product preload must publish its public bridge')
   const early=await window.webContents.executeJavaScript(`(() => {
     window.framesSeen=0;window.endSeen=[];
-    const lease=window.agentmux.toolkit.observe(()=>window.framesSeen++,reason=>window.endSeen.push(reason));
+    const lease=window.agentmux.toolkit.observe("performance",()=>window.framesSeen++,reason=>window.endSeen.push(reason));
     const result={disposeType:typeof lease.dispose,thenType:typeof lease.then};
     if(typeof lease.dispose==='function'){lease.dispose();lease.dispose()}
     return result;
@@ -67,7 +67,7 @@ async function run() {
   const earlyEvents=observations.splice(0)
   collected++
   mode='delayed'
-  await window.webContents.executeJavaScript('(() => {window.lease=window.agentmux.toolkit.observe(()=>window.framesSeen++,reason=>window.endSeen.push(reason));return true})()')
+  await window.webContents.executeJavaScript('(() => {window.lease=window.agentmux.toolkit.observe("performance",()=>window.framesSeen++,reason=>window.endSeen.push(reason));return true})()')
   await until(()=>assert.equal(leases.size,1,'Positive actual bridge consumer must be nonempty'))
   for(let n=0;n<200;n++) { if(await window.webContents.executeJavaScript('window.framesSeen')===1)break;await new Promise(resolve=>setTimeout(resolve,10)) }
   assert.equal(await window.webContents.executeJavaScript('window.framesSeen'),1,'Healthy actual Source callback crosses isolated bridge')
@@ -76,7 +76,7 @@ async function run() {
   passedCases++
   collected++
   mode='failure'
-  await window.webContents.executeJavaScript('(() => {window.agentmux.toolkit.observe(()=>window.framesSeen++,reason=>window.endSeen.push(reason));return true})()')
+  await window.webContents.executeJavaScript('(() => {window.agentmux.toolkit.observe("performance",()=>window.framesSeen++,reason=>window.endSeen.push(reason));return true})()')
   let ends=[]
   for(let n=0;n<200;n++) {ends=await window.webContents.executeJavaScript('window.endSeen');if(ends.length)break;await new Promise(resolve=>setTimeout(resolve,10))}
   assert.equal(ends.length,1,'Establishment failure must reach typed API onEnd exactly once')

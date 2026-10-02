@@ -1,8 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { requestAgentMuxControl } from '@agentmux/core'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, type ToolkitActionInput, type ToolkitScriptSnapshot, type ToolkitToolFields } from '@agentmux/core/control'
+import { type ToolkitActionInput, type ToolkitScriptSnapshot, type ToolkitToolFields } from '@agentmux/core/control'
 import { nativeMain, oneCli, record, until } from './toolkit-main.fixture.js'
 import { ToolkitReceiptStore } from '../src/main/toolkit-receipt-store.js'
 
@@ -15,7 +14,7 @@ async function count(directory: string) {
   try { return Number(await readFile(join(directory, 'action-count.txt'), 'utf8')) }
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0; throw error }
 }
-async function get(): Promise<ToolkitScriptSnapshot> { return (await oneCli('toolkit', 'get', 'quota')).result.snapshot }
+async function get(): Promise<ToolkitScriptSnapshot> { return (await oneCli('toolkit', 'inspect', 'quota')).result.snapshot }
 async function settled(): Promise<ToolkitScriptSnapshot> {
   let value!: ToolkitScriptSnapshot
   await until(async () => { value = await get(); expect(value.admission).toBeNull(); expect(value.latestConfirmed).not.toBeNull() })
@@ -28,7 +27,7 @@ async function setup(m: Awaited<ReturnType<typeof nativeMain>>, options: Pick<To
   const fields: ToolkitToolFields = { name: 'Quota', icon: 'terminal', enabled: true, statusBar: 'icon',
     workspacePath: join(m.directory, 'work'), script: "process.stdout.write('source_ACK')", args: [], ...options }
   const path = join(m.directory, 'fields.json'); await writeFile(path, JSON.stringify(fields))
-  await oneCli('toolkit', 'add', 'quota', '--input', path)
+  await oneCli('toolkit', 'create', 'quota', '--input', path)
   await oneCli('toolkit', 'run', 'quota')
   const source = await settled()
   return { fields, source }
@@ -39,19 +38,40 @@ async function invoke(m: Awaited<ReturnType<typeof nativeMain>>, actionId: strin
 }
 async function rejected(m: Awaited<ReturnType<typeof nativeMain>>, actionId: string, input: ToolkitActionInput) {
   try {
-    await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
-      operation: 'toolkit.action', toolId: 'quota', actionId, input }, m.controlPath)
+    await m.rpc.call('toolkit.action', { toolId: 'quota', actionId, input })
     return null
   } catch (error) { return error }
 }
 
 describe('registered Main saved Toolkit action actual CLI', () => {
+  it('concurrent public operation ID uses the original captured invocation and executes its saved script once', async () => {
+    const m=await nativeMain(),operationId=crypto.randomUUID()
+    const fields:ToolkitToolFields={name:'Quota',icon:'terminal',enabled:true,statusBar:'icon',
+      workspacePath:join(m.directory,'work'),script:countScript,args:['action-count.txt'],actions:[]}
+    await m.rpc.call('toolkit.create',{toolId:'quota',value:fields})
+    const replies=await Promise.allSettled([m.rpc.call('toolkit.run',{toolId:'quota',operationId}),
+      m.rpc.call('toolkit.run',{toolId:'quota',operationId})])
+    expect(replies.filter(reply=>reply.status==='fulfilled').length).toBeGreaterThanOrEqual(1)
+    for(const reply of replies)if(reply.status==='rejected')expect(reply.reason).toMatchObject({code:'CONFIG_CONFLICT'})
+    const finished=await settled(),fact=finished.latestConfirmed!
+    expect(fact.invocationId).toBe(operationId);expect(fact.text).toBe('action_ACK:1')
+    expect(await count(join(m.directory,'work'))).toBe(1)
+    const input={invocationId:fact.invocationId,expectedRevision:fact.definition.revision,
+      expectedLatestExecutionId:fact.expectedLatestExecutionId}
+    const replay=await m.rpc.call('toolkit.run',{toolId:'quota',operationId,input})
+    expect(replay.snapshot.kind).toBe('script')
+    if(replay.snapshot.kind!=='script')throw new Error('Custom tool must return its own script snapshot')
+    expect(replay.snapshot.latestConfirmed).toEqual(fact)
+    await expect(m.rpc.call('toolkit.run',{toolId:'quota',operationId})).rejects.toMatchObject({code:'CONFIG_CONFLICT'})
+    expect(await count(join(m.directory,'work'))).toBe(1);expect(await m.core.listRuns()).toEqual([])
+    await record('action-operation-id-once',{operationId,replies:replies.map(reply=>reply.status),fact,input,
+      count:await count(join(m.directory,'work'))})
+  })
   it('actual literal action ID --help executes once and ordinary Main restart never replays its captured side effect', async () => {
     const m = await nativeMain()
     const fields: ToolkitToolFields = { name: 'Quota', icon: 'terminal', enabled: true, statusBar: 'icon',
       workspacePath: join(m.directory, 'work'), script: "process.stdout.write('source_ACK')", args: [] }
-    await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
-      operation: 'toolkit.add', toolId: 'quota', value: fields }, m.controlPath)
+    await m.rpc.call('toolkit.create', { toolId: 'quota', value: fields })
     await oneCli('toolkit', 'run', 'quota')
     const original = await settled()
     expect(original.definition.actions).toBeUndefined()
@@ -65,8 +85,7 @@ describe('registered Main saved Toolkit action actual CLI', () => {
     expect(configured.revision).not.toBe(original.definition.revision)
     expect((await get()).latestConfirmed!.definition).toEqual(original.definition)
     let conflict: unknown
-    try { await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
-      operation: 'toolkit.update', toolId: 'quota', changes: { actions: [action('another')] }, expected: { actions: [] } }, m.controlPath) }
+    try { await m.rpc.call('toolkit.update', { toolId: 'quota', input: { changes: { actions: [action('another')] }, expected: { actions: [] } } }) }
     catch (error) { conflict = error }
     expect(conflict).toMatchObject({ code: 'CONFIG_CONFLICT' })
     expect((await get()).definition).toEqual(configured)
@@ -130,7 +149,7 @@ describe('registered Main saved Toolkit action actual CLI', () => {
     const m = await nativeMain(), { source, fields } = await setup(m)
     const input = capture(source), save = ToolkitReceiptStore.prototype.save
     let failed = false
-    vi.spyOn(ToolkitReceiptStore.prototype, 'save').mockImplementation(function(id, value: any) {
+    vi.spyOn(ToolkitReceiptStore.prototype, 'save').mockImplementation(function(this:ToolkitReceiptStore,id, value: any) {
       if (!failed && value.latestConfirmed?.action?.id === 'refresh') {
         failed = true
         return Promise.reject(new Error('owned-action-confirmation-unconfirmed'))

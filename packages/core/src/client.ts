@@ -571,6 +571,8 @@ export class AgentMuxClient {
   /** 连接最近一次变健康的时刻（首次 connect 成功或 restored）。缓刑期满即清 {@link reconnectFlaps}。 */
   private connectionHealthySince = 0
   private readonly runPids = new Map<string, number | null>()
+  // Only pending snapshot readers retain removals. No durable terminal registry or completed-Run set.
+  private readonly pendingRunSnapshots = new Map<string | null, Set<Set<string>>>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
   private readonly pendingReopenBindings = new Map<string, AgentHookBinding>()
   private readonly executingReopens = new Set<string>()
@@ -740,11 +742,14 @@ export class AgentMuxClient {
       this.assertConnectionEpoch(epoch)
       await this.recoverStaleLifecycles()
       await this.registry.load('local')
-      const runs = await this.kernel.list()
+      const runs = await this.withRunSnapshot(null, () => this.kernel.list(), (snapshot, wasRemoved) => {
+        const current = snapshot.filter(run => !wasRemoved(run.runId))
+        this.backfillEndedRuns(current)
+        for (const run of current) this.runPids.set(run.runId, run.pid)
+        return current
+      })
       // 这次 list() 是「App 没在跑的时候谁退出了」的唯一到达路径——冷启动时事件流压根还没订阅（下面几行
       // 才装）。不补台账的话，那些 run 迟到的 hook 会被收下，Agent 永久转圈（见 backfillEndedRuns）。
-      this.backfillEndedRuns(runs)
-      for (const run of runs) this.runPids.set(run.runId, run.pid)
       this.synchronizeAgentRuns(runs)
       this.unsubscribeKernel?.()
       this.unsubscribeKernelErrors?.()
@@ -968,64 +973,65 @@ export class AgentMuxClient {
    * 永远停在「已断开」——重连等于没连。
    */
   private async republishLiveRunState(): Promise<void> {
-    const runs = await this.kernel.list()
-    this.backfillEndedRuns(runs)
-    for (const run of runs) {
-      this.runPids.set(run.runId, run.pid)
-      const agentSession = this.registry.findByRun(runRef(run.runId))
-      // 掉线时 markConnectionLost 拆掉了每个 run 的字节泵（attachment.close + attachments.clear）；open()
-      // 只重挂了 kernel 事件订阅，没重建泵。少了这一步，重连后一屏 Agent 拿到的是「进程活着、状态又被
-      // republish 成 running、恢复横幅消失，可屏幕永远沉默」的终端——本任务的核心缺陷。这里为每个仍在跑、
-      // 且有 Agent Session 的 run 重建 attachment，从这个进程已发布的精确 Run 边界续上。
-      if (run.state.type === 'running' && agentSession && !this.kernel.hasAttachment(run.runId)) {
-        // 重建失败时**不再** republish 成 running。上面那条 agent-error 刚把这个 Session 标成 error，
-        // 紧跟一条 running 会把它洗回去：两条事件的 observedAt 都来自同一次 Date.now()，而渲染端
-        // reducer 的新鲜度判据是 `>=`（同刻也算新），`run-process` 又不在它的豁免来源里（只豁免
-        // native-hook / acp）。于是用户看到的是恢复横幅消失、状态正常、输入框可写，而屏幕永远沉默——
-        // 正是这段代码要修的那个缺陷，在它自己的失败分支上原样复活。进程确实还活着，但这一屏的
-        // 「running」说的是「你能看到它的输出」，那一点此刻不成立，报 error 才是诚实的。
-        const resumed = await this.resumeLiveAttachment(agentSession.agentSessionId)
-        if (resumed === 'dead') {
-          // 放行是对的（进程还活着，输入照常送达 Agent——第 2 类），但放行必须配告知：上面那条 agent-error
-          // 会被后续会话快照的 `>=` 洗白，且它只在 Activity 视图里短暂存在。落一条**可持久**的降级事实，
-          // 说清「输出通道没了、进程没死」，渲染端据此长出一条「输出可能没在显示，把这块 pane 在
-          // Activity/Terminal 之间切一下即可重新附着」的服务窗——它挺过视图切换与快照刷新，直到一次
-          // 成功的 reattach 就地撤下它（见 attachAgentRun）。
-          //
-          // 那句文案刻意不点名 Resume：这条降级只在进程还在跑时产生，而 Resume 对 running 的 Run 判出
-          // `reattachable` 直接返回投影，不碰 attach（实跑验证过 attach 调用数为 0）。详见
-          // clearOutputChannel 的注释与 service-window-notice.ts。
-          await this.publishOutputChannelSevered(agentSession)
-          continue
+    await this.withRunSnapshot(null, () => this.kernel.list(), async (runs, wasRemoved) => {
+      this.backfillEndedRuns(runs.filter(run => !wasRemoved(run.runId)))
+      for (const run of runs) {
+        if (wasRemoved(run.runId)) continue
+        this.runPids.set(run.runId, run.pid)
+        const agentSession = this.registry.findByRun(runRef(run.runId))
+        // 掉线时 markConnectionLost 拆掉了每个 run 的字节泵（attachment.close + attachments.clear）；open()
+        // 只重挂了 kernel 事件订阅，没重建泵。少了这一步，重连后一屏 Agent 拿到的是「进程活着、状态又被
+        // republish 成 running、恢复横幅消失，可屏幕永远沉默」的终端——本任务的核心缺陷。这里为每个仍在跑、
+        // 且有 Agent Session 的 run 重建 attachment，从这个进程已发布的精确 Run 边界续上。
+        if (run.state.type === 'running' && agentSession && !this.kernel.hasAttachment(run.runId)) {
+          // 重建失败时**不再** republish 成 running。上面那条 agent-error 刚把这个 Session 标成 error，
+          // 紧跟一条 running 会把它洗回去：两条事件的 observedAt 都来自同一次 Date.now()，而渲染端
+          // reducer 的新鲜度判据是 `>=`（同刻也算新），`run-process` 又不在它的豁免来源里（只豁免
+          // native-hook / acp）。于是用户看到的是恢复横幅消失、状态正常、输入框可写，而屏幕永远沉默——
+          // 正是这段代码要修的那个缺陷，在它自己的失败分支上原样复活。进程确实还活着，但这一屏的
+          // 「running」说的是「你能看到它的输出」，那一点此刻不成立，报 error 才是诚实的。
+          const resumed = await this.resumeLiveAttachment(agentSession.agentSessionId)
+          if (resumed === 'dead') {
+            // 放行是对的（进程还活着，输入照常送达 Agent——第 2 类），但放行必须配告知：上面那条 agent-error
+            // 会被后续会话快照的 `>=` 洗白，且它只在 Activity 视图里短暂存在。落一条**可持久**的降级事实，
+            // 说清「输出通道没了、进程没死」，渲染端据此长出一条「输出可能没在显示，把这块 pane 在
+            // Activity/Terminal 之间切一下即可重新附着」的服务窗——它挺过视图切换与快照刷新，直到一次
+            // 成功的 reattach 就地撤下它（见 attachAgentRun）。
+            //
+            // 那句文案刻意不点名 Resume：这条降级只在进程还在跑时产生，而 Resume 对 running 的 Run 判出
+            // `reattachable` 直接返回投影，不碰 attach（实跑验证过 attach 调用数为 0）。详见
+            // clearOutputChannel 的注释与 service-window-notice.ts。
+            await this.publishOutputChannelSevered(agentSession)
+            continue
+          }
+          // 截断这一档不能靠跳过 republish：流是活的，这个 run 确实该是 running。于是反过来排——先
+          // republish，再披露。同一条 `>=` 规则，谁最后发谁赢：披露走在后面就洗不掉了。早先它排在
+          // republish 前面，于是「daemon 把你的历史输出丢了」这句话从未到过屏幕上，用户只看到输出里
+          // 一段无法解释的断裂。与失败分支是同一个缺陷的两种形态，这里是另一种解法。
+          if (typeof resumed === 'object') {
+            this.publisher.publishRunState(this.projectRun(run, agentSession), agentSession.agentSessionId)
+            this.publisher.publish({
+              type: 'agent-error',
+              agentSessionId: agentSession.agentSessionId,
+              code: 'OUTPUT_GAP',
+              message: 'This Attachment could not replay all output from its requested cursor.',
+              evidence: {
+                source: 'terminal-output',
+                observedAt: Date.now(),
+                run: runRef(run.runId),
+                outputGap: { kind: 'replay', latestOutputBytes: resumed.latestOutputBytes, ...resumed.gap }
+              }
+            })
+            continue
+          }
         }
-        // 截断这一档不能靠跳过 republish：流是活的，这个 run 确实该是 running。于是反过来排——先
-        // republish，再披露。同一条 `>=` 规则，谁最后发谁赢：披露走在后面就洗不掉了。早先它排在
-        // republish 前面，于是「daemon 把你的历史输出丢了」这句话从未到过屏幕上，用户只看到输出里
-        // 一段无法解释的断裂。与失败分支是同一个缺陷的两种形态，这里是另一种解法。
-        if (typeof resumed === 'object') {
-          this.publisher.publishRunState(this.projectRun(run, agentSession), agentSession.agentSessionId)
-          this.publisher.publish({
-            type: 'agent-error',
-            agentSessionId: agentSession.agentSessionId,
-            code: 'OUTPUT_GAP',
-            message: 'This Attachment could not replay all output from its requested cursor.',
-            evidence: {
-              source: 'terminal-output',
-              observedAt: Date.now(),
-              run: runRef(run.runId),
-              outputGap: { kind: 'replay', latestOutputBytes: resumed.latestOutputBytes, ...resumed.gap }
-            }
-          })
-          continue
-        }
+        this.publisher.publishRunState(
+          this.projectRun(run, agentSession),
+          agentSession?.agentSessionId
+        )
       }
-      this.publisher.publishRunState(
-        this.projectRun(run, agentSession),
-        agentSession?.agentSessionId
-      )
-    }
+    })
   }
-
   /**
    * 重连后为一个 Agent Run 重建实时字节泵，并把掉线期间的输出补齐。走的是 {@link reattachAgent} 的
    * 同一个共享核心 {@link attachAgentRun}（身份校验、回滚、pid/输入游标记账），从 Session 自己的
@@ -1694,14 +1700,28 @@ export class AgentMuxClient {
     return await classifyExecutable(resolvedCommand)
   }
 
+  private async withRunSnapshot<T, R>(target: string | null, read: () => Promise<T>,
+    consume: (snapshot: T, wasRemoved: (runId: string) => boolean) => R | Promise<R>): Promise<R> {
+    const removed = new Set<string>()
+    const readers = this.pendingRunSnapshots.get(target) ?? new Set<Set<string>>()
+    readers.add(removed)
+    this.pendingRunSnapshots.set(target, readers)
+    try {
+      return await consume(await read(), runId => removed.has(runId))
+    } finally {
+      readers.delete(removed)
+      if (!readers.size) this.pendingRunSnapshots.delete(target)
+    }
+  }
+
   async listRuns(): Promise<AgentMuxRun[]> {
     this.requireConnected()
-    return (await this.kernel.list()).flatMap((run) => {
-      this.runPids.set(run.runId, run.pid)
+    return await this.withRunSnapshot(null, () => this.kernel.list(), (runs, wasRemoved) => runs.flatMap((run) => {
       const ref = runRef(run.runId)
-      if (this.registry.isRetiredRun(ref)) return []
+      if (wasRemoved(run.runId) || this.registry.isRetiredRun(ref)) return []
+      this.runPids.set(run.runId, run.pid)
       return [this.projectRun(run, this.registry.findByRun(ref))]
-    })
+    }))
   }
 
   async runtimeProjection(): Promise<AgentMuxRuntimeProjection> {
@@ -1807,19 +1827,24 @@ export class AgentMuxClient {
   private async attachTerminalRun(runId: string, afterByte: number, view: AgentMuxRunAttachmentView,
     observationOrigin?: AgentMuxObservationOrigin): Promise<AgentMuxRunAttachment> {
     this.requireConnected()
-    const attached = await this.kernel.attach(runId, afterByte, observationOrigin ? snapshot => {
+    return await this.withRunSnapshot(runId, () => this.kernel.attach(runId, afterByte, observationOrigin ? snapshot => {
       if (snapshot.run.runId !== runId || this.registry.findByRun(runRef(runId))) {
         throw new AgentMuxError('Terminal refresh returned another Run or Session.', 'STALE_AGENT_SESSION_BINDING')
       }
-    } : undefined, view, Boolean(observationOrigin))
-    if (this.registry.findByRun(runRef(runId))) {
-      await this.kernel.detach(runId)
-      throw new AgentMuxError('Requested Run belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
-    }
-    this.runPids.set(runId, attached.run.pid)
-    const run = this.projectRun(attached.run)
-    this.publisher.publishRunState(run, undefined, observationOrigin)
-    return { ...attached, run }
+    } : undefined, view, Boolean(observationOrigin)), async (attached, wasRemoved) => {
+      if (wasRemoved(runId)) {
+        await this.kernel.detach(runId)
+        throw new AgentMuxError('Terminal Run was removed while its Attachment was being read.', 'CTXMUX_run_not_found')
+      }
+      if (this.registry.findByRun(runRef(runId))) {
+        await this.kernel.detach(runId)
+        throw new AgentMuxError('Requested Run belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
+      }
+      this.runPids.set(runId, attached.run.pid)
+      const run = this.projectRun(attached.run)
+      this.publisher.publishRunState(run, undefined, observationOrigin)
+      return { ...attached, run }
+    })
   }
 
   /** Replace this client's live observation of an exact Run, keeping its process and Input untouched. */
@@ -1842,15 +1867,19 @@ export class AgentMuxClient {
     if (this.registry.isRetiredRun(ref)) {
       throw new AgentMuxError('Retired Agent Run replay is unavailable.', 'STALE_AGENT_SESSION_BINDING')
     }
-    const replay = await this.kernel.replay(ref.runId, afterByte, view)
-    if (this.registry.isRetiredRun(ref)) {
-      throw new AgentMuxError('Agent Run retired while its replay was being read.', 'STALE_AGENT_SESSION_BINDING')
-    }
-    this.runPids.set(ref.runId, replay.run.pid)
-    return {
-      ...replay,
-      run: this.projectRun(replay.run, this.registry.findByRun(ref)),
-    }
+    return await this.withRunSnapshot(ref.runId, () => this.kernel.replay(ref.runId, afterByte, view), (replay, wasRemoved) => {
+      if (wasRemoved(ref.runId)) {
+        throw new AgentMuxError('Run was removed while its replay was being read.', 'CTXMUX_run_not_found')
+      }
+      if (this.registry.isRetiredRun(ref)) {
+        throw new AgentMuxError('Agent Run retired while its replay was being read.', 'STALE_AGENT_SESSION_BINDING')
+      }
+      this.runPids.set(ref.runId, replay.run.pid)
+      return {
+        ...replay,
+        run: this.projectRun(replay.run, this.registry.findByRun(ref)),
+      }
+    })
   }
 
   /** Reclaim only an ended, unpinned terminal record; never force process or Attachment teardown. */
@@ -1860,6 +1889,10 @@ export class AgentMuxClient {
       throw new AgentMuxError('Agent Session Run cannot be removed through the terminal API.', 'RUN_KIND_MISMATCH')
     }
     await this.kernel.remove(ref.runId)
+    // A successful owner receipt invalidates only reads already in flight for this exact Run.
+    for (const readers of [this.pendingRunSnapshots.get(null), this.pendingRunSnapshots.get(ref.runId)]) {
+      for (const removed of readers ?? []) removed.add(ref.runId)
+    }
     this.runPids.delete(ref.runId)
     this.endedRuns.delete(ref.runId)
     this.stopRequestedRuns.delete(ref.runId)

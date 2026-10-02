@@ -1,24 +1,44 @@
 import { describe, expect, it, vi } from 'vitest'
 import { writeFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { requestAgentMuxControl } from '@agentmux/core'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, type ToolkitToolFields, type ToolkitScriptSnapshot } from '@agentmux/core/control'
+import { type ToolkitToolFields, type ToolkitScriptSnapshot } from '@agentmux/core/control'
 import { nativeMain, until, oneCli, record, terminalMetadata } from './toolkit-main.fixture.js'
 import { CustomToolkitOwner } from '../src/main/toolkit-custom-owner.js'
+import { ToolkitOwner } from '../src/main/toolkit-owner.js'
 import { ToolkitReceiptStore } from '../src/main/toolkit-receipt-store.js'
-import { TOOLKIT_ENDED_CHANNEL } from '../src/shared/contracts.js'
+import { TOOLKIT_ENDED_CHANNEL, type AppConfig } from '../src/shared/contracts.js'
 
 async function add(m: Awaited<ReturnType<typeof nativeMain>>, id = 'quota', script = "console.log('真实工具_ACK')") {
   const fields: ToolkitToolFields = { name: 'Quota', icon: 'terminal', enabled: true, statusBar: 'icon',
     workspacePath: join(m.directory, 'work'), script, args: [], actions: [] }
   const path = join(m.directory, id + '-fields.json'); await writeFile(path, JSON.stringify(fields))
-  return { fields, definition: (await oneCli('toolkit', 'add', id, '--input', path)).result.definition }
+  return { fields, definition: (await oneCli('toolkit', 'create', id, '--input', path)).result.definition }
 }
 async function get(id = 'quota'): Promise<ToolkitScriptSnapshot> {
-  return (await oneCli('toolkit', 'get', id)).result.snapshot
+  return (await oneCli('toolkit', 'inspect', id)).result.snapshot
 }
 
 describe('registered Main custom Toolkit actual CLI vertical', () => {
+  it('public custom run and stop reject invalid parameters before any original owner read or execution', async () => {
+    const m=await nativeMain();await add(m)
+    const before=await readFile(join(m.directory,'config.json')),runs=await m.core.listRuns()
+    const execute=vi.spyOn(ToolkitOwner.prototype,'execute')
+    const invalid=[{toolId:'quota',extra:true},{toolId:'quota',requestId:'forged'},
+      {toolId:'quota',operation:'toolkit.run'},{toolId:'quota',schemaVersion:1},
+      {toolId:'quota',caller:{agentSessionId:'forged',capability:'forged'}},
+      {toolId:' '},{toolId:'quota',operationId:'x'.repeat(129)},
+      {toolId:'quota',input:null},{toolId:'quota',input:{}}]
+    for(const method of ['toolkit.run','toolkit.stop'] as const)for(const params of invalid) {
+      await expect(m.rpc.call(method,params)).rejects.toMatchObject({code:'INVALID_CONTROL_REQUEST'})
+    }
+    expect(execute).not.toHaveBeenCalled()
+    expect(await readFile(join(m.directory,'config.json'))).toEqual(before)
+    expect(await m.core.listRuns()).toEqual(runs)
+    await record('custom-invalid-public-params',{cases:invalid.length*2,ownerReadsOrExecutions:execute.mock.calls.length,runs})
+    await expect(m.rpc.call('toolkit.run',{toolId:'absent'})).rejects.toMatchObject({code:'SETTING_RESOURCE_NOT_FOUND'})
+    expect(execute.mock.calls.map(([request])=>request.operation)).toEqual(['toolkit.get'])
+    expect(await m.core.listRuns()).toEqual(runs)
+  })
   it('actual compiled CLI creates a configured local script and receives fast exit0 complete UTF8 without LF', async () => {
     const m = await nativeMain(), { definition } = await add(m, 'quota', "process.stdout.write('真实工具_ACK')")
     const before = await m.core.listRuns()
@@ -41,17 +61,16 @@ describe('registered Main custom Toolkit actual CLI vertical', () => {
   })
   it('actual CLI expected conflict preserves the durable configuration through the same Main owner', async () => {
     const m = await nativeMain(), beforeAdd = await m.store.get(), { fields, definition } = await add(m)
-    const prefs = await m.invoke('config:save', { ...beforeAdd, toolkit: { performance: { enabled: false } } }, beforeAdd)
-    expect(prefs.toolkit.tools).toEqual([definition])
-    expect(prefs.toolkit.performance.enabled).toBe(false)
+    const prefs = await m.invoke('config:save', { ...beforeAdd, toolkit: { performance: { enabled: false } } }, beforeAdd) as AppConfig
+    expect(prefs.toolkit?.tools).toEqual([definition])
+    expect(prefs.toolkit?.performance?.enabled).toBe(false)
     const update = join(m.directory, 'update.json'); await writeFile(update, JSON.stringify({ changes: { name: 'Changed' }, expected: { name: fields.name } }))
     const after = (await oneCli('toolkit', 'update', 'quota', '--input', update)).result.definition
     expect(after).toMatchObject({ name: 'Changed' }); expect(after.revision).not.toBe(definition.revision)
     const bytes = await import('node:fs/promises').then(fs => fs.readFile(join(m.directory, 'config.json')))
     let rejected: unknown
     try {
-      await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
-        operation: 'toolkit.update', toolId: 'quota', changes: { name: 'Wrong' }, expected: { name: fields.name } }, m.controlPath)
+      await m.rpc.call('toolkit.update', { toolId: 'quota', input: { changes: { name: 'Wrong' }, expected: { name: fields.name } } })
     } catch (error) { rejected = error }
     expect(rejected).toMatchObject({ code: 'CONFIG_CONFLICT' })
     expect((await m.store.get()).toolkit!.tools![0]!.name).toBe('Changed')
@@ -90,16 +109,15 @@ describe('registered Main custom Toolkit actual CLI vertical', () => {
     expect(await readFile(join(m.directory, 'config.json'))).toEqual(bytes)
     await m.invoke('toolkit:release', 'reader')
     const captured = { invocationId: crypto.randomUUID(), expectedRevision: definition.revision, expectedLatestExecutionId: null }
-    await expect(requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
-      operation: 'toolkit.run', toolId: 'quota', input: captured }, m.controlPath)).rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
+    await expect(m.rpc.call('toolkit.run', { toolId: 'quota', input: captured })).rejects.toMatchObject({ code: 'SETTING_RESOURCE_IN_USE' })
     const changed = await m.invoke('config:save', { ...before, copyPathsAsAbsolute: !before.copyPathsAsAbsolute,
-      toolkit: { ...before.toolkit, tools: [{ ...definition, enabled: false }] } }, before)
+      toolkit: { ...before.toolkit, tools: [{ ...definition, enabled: false }] } }, before) as AppConfig
     expect(changed.copyPathsAsAbsolute).toBe(!before.copyPathsAsAbsolute)
     const running = await get()
     expect(running).toMatchObject({ definition: { enabled: false }, admission: { executionId: started.admission!.executionId, definition: { enabled: true } } })
     expect((await m.core.listRuns()).find(run => run.runId === started.admission!.run!.runId)?.state).toBe('running')
     expect(running.consumerCount).toBe(0)
-    const stopping = await m.invoke('toolkit:stop', 'quota', started.admission!.executionId)
+    const stopping = await m.invoke('toolkit:stop', 'quota', started.admission!.executionId) as {snapshot:ToolkitScriptSnapshot}
     expect(stopping.snapshot.toolId).toBe('quota')
     let stopped!: ToolkitScriptSnapshot
     await until(async () => { stopped = await get(); expect(stopped.admission).toBeNull() })
@@ -156,7 +174,7 @@ describe('registered Main custom Toolkit actual CLI vertical', () => {
     await oneCli('toolkit', 'update', 'quota', '--input', update)
     const save = ToolkitReceiptStore.prototype.save
     let rejectedConfirmation = false
-    vi.spyOn(ToolkitReceiptStore.prototype, 'save').mockImplementation(function(id, receipt: any) {
+    vi.spyOn(ToolkitReceiptStore.prototype, 'save').mockImplementation(function(this:ToolkitReceiptStore,id, receipt: any) {
       if (id === 'quota' && receipt.latestConfirmed && receipt.latestConfirmed.executionId !== first.latestConfirmed!.executionId && !rejectedConfirmation) {
         rejectedConfirmation = true
         return Promise.reject(new Error('owned-confirmation-save-failed'))
@@ -219,13 +237,13 @@ describe('registered Main custom Toolkit actual CLI vertical', () => {
     await m.invoke('toolkit:observe', 'quota', 'one')
     await m.invoke('toolkit:observe', 'quota', 'two')
     const send = m.sender.send
-    vi.spyOn(m.sender, 'send').mockImplementation(function(channel, value) {
+    vi.spyOn(m.sender, 'send').mockImplementation(function(this:typeof m.sender,channel, value) {
       if (channel === TOOLKIT_ENDED_CHANNEL && value.id === 'one') throw new Error('owned-renderer-went-away')
       return send.call(this, channel, value)
     })
     const before = await m.store.get()
-    const saved = await m.invoke('config:save', { ...before, toolkit: { ...before.toolkit, tools: [] } }, before)
-    expect(saved.toolkit.tools).toEqual([])
+    const saved = await m.invoke('config:save', { ...before, toolkit: { ...before.toolkit, tools: [] } }, before) as AppConfig
+    expect(saved.toolkit?.tools).toEqual([])
     expect((await m.store.get()).toolkit!.tools).toEqual([])
     expect(JSON.parse(await readFile(join(m.directory, 'config.json'), 'utf8')).toolkit.tools).toEqual([])
     expect(m.sender.events.some(event => event.channel === TOOLKIT_ENDED_CHANNEL && event.value.id === 'two')).toBe(true)

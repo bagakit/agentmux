@@ -6,7 +6,7 @@ import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
 import { mkdir, mkdtemp, readFile, writeFile, symlink, rm } from 'node:fs/promises'
 import { dirname, relative, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '../../..')
 const base = resolve(root, ".bagakit/design/toolkit-performance-fixture/evidence")
@@ -16,14 +16,17 @@ const sha = value => createHash('sha256').update(value).digest('hex')
 const mode = process.argv[2]
 assert.ok(['--backend','--mutations','--callers'].includes(mode), 'Choose one owning verification mode')
 const config = 'apps/desktop/scripts/fixtures/performance-toolkit/vitest.config.mts'
-const ownSources = ['packages/core/src/toolkit.ts','packages/core/src/toolkit-control.ts','packages/core/src/control.ts','packages/core/src/control-host.ts',
+const ownSources = ['packages/core/src/toolkit.ts','packages/core/src/control.ts','packages/core/src/control-host.ts',
   'packages/core/src/client.ts','packages/core/src/ctxmux-run-adapter.ts','packages/core/src/agentmux.ts','packages/core/src/agentmux-cli-help.ts',
+  'packages/core/src/agentmux-cli-commands.ts','packages/core/src/public-rpc-client.ts','packages/core/src/public-rpc-frame.ts','packages/core/src/public-rpc-wire.ts',
+  'packages/core/src/public-rpc-service.ts','packages/core/src/public-rpc.ts','packages/core/src/public-rpc-http.ts','packages/core/src/rpc-business-codec.ts',
   'apps/desktop/src/main/toolkit-owner.ts','apps/desktop/src/main/toolkit-asset.ts','apps/desktop/src/main/toolkit-run-port.ts','apps/desktop/src/main/toolkit-ipc.ts',
   'apps/desktop/src/main/runtime-controller.ts','apps/desktop/src/main/ipc.ts','apps/desktop/src/shared/toolkit.ts','apps/desktop/src/shared/contracts.ts',
   'apps/desktop/src/shared/toolkit-preferences.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/renderer/src/lib/api.ts','apps/desktop/src/renderer/src/store.ts',
   'apps/desktop/resources/toolkit/performance.mjs','apps/desktop/scripts/package-macos.mjs']
 const proofPaths = [config,'apps/desktop/scripts/verify-performance-toolkit.mjs','apps/desktop/test/toolkit-owner.test.ts',
-  'apps/desktop/test/performance-toolkit-main.test.ts','packages/core/test/toolkit-control.test.ts','packages/core/test/client-terminal-remove.test.ts',
+  'apps/desktop/test/performance-toolkit-main.test.ts','apps/desktop/test/toolkit-actions-main.test.ts','apps/desktop/test/toolkit-custom-main.test.ts',
+  'apps/desktop/test/toolkit-main.fixture.ts','packages/core/test/toolkit-control.test.ts','packages/core/test/client-terminal-remove.test.ts',
   'apps/desktop/test/toolkit-renderer-routing.test.ts',
   'apps/desktop/scripts/fixtures/performance-toolkit/verify-context-bridge.mjs','apps/desktop/scripts/fixtures/performance-toolkit/context-bridge.cjs','vitest.setup.ts']
 const inputs = {}
@@ -36,14 +39,17 @@ const identity = sha(JSON.stringify(Object.fromEntries(ownSources.map(path => [p
 const results = []
 if (mode === '--callers') {
   const edges = [
-    ['packages/core/src/agentmux.ts','packages/core/src/toolkit-control.ts','subscribeAgentMuxToolkit('],
-    ['packages/core/src/control-host.ts','packages/core/src/toolkit-control.ts','serveToolkitControl('],
+    ['packages/core/src/agentmux.ts','packages/core/src/public-rpc-client.ts','connectAgentMuxRpc('],
+    ['packages/core/src/public-rpc-wire.ts','packages/core/src/public-rpc-service.ts','this.service.call('],
+    ['packages/core/src/public-rpc-service.ts','apps/desktop/src/main/toolkit-owner.ts','this.ports.toolkit.subscribe('],
     ['apps/desktop/src/main/ipc.ts','apps/desktop/src/main/toolkit-owner.ts','new ToolkitOwner('],
     ['apps/desktop/src/main/ipc.ts','packages/core/src/control.ts','    toolkit,'],
     ['apps/desktop/src/main/runtime-controller.ts','packages/core/src/client.ts','client.createTerminal('],
     ['apps/desktop/src/main/runtime-controller.ts','packages/core/src/client.ts','client.removeTerminal('],
     ['apps/desktop/src/preload/index.ts','apps/desktop/src/main/toolkit-ipc.ts',"invoke('toolkit:observe'"],
-    ['apps/desktop/resources/toolkit/performance.mjs','packages/core/src/agentmux.ts',"[cli, 'metrics', 'watch']"]
+    ['apps/desktop/resources/toolkit/performance.mjs','packages/core/src/agentmux.ts',"[cli, 'system', 'metrics', 'watch']"],
+    ['apps/desktop/resources/toolkit/performance.mjs','packages/core/src/public-rpc-http.ts','parseRpcResponse(value)'],
+    ['apps/desktop/src/main/toolkit-owner.ts','apps/desktop/src/main/toolkit-asset.ts','this.args.launch()']
   ]
   assert.ok(edges.length > 0)
   for (const [caller,definition,anchor] of edges) {
@@ -105,6 +111,46 @@ if (mode === '--callers') {
     results.push({name,mutant,collected:receipt.collected,passedCases:receipt.passedCases,receiptSHA256:sha(await readFile(resolve(output,'receipt.json'))),exitCode:receipt.exitCode})
     console.log(child.stdout.trim())
   }
+  async function verificationConfig(output, files) {
+    const path=resolve(output,'vitest.config.mts')
+    const source=`import { readFileSync, appendFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { createHash } from 'node:crypto'
+import { relative } from 'node:path'
+import assert from 'node:assert/strict'
+import { mergeConfig } from 'vitest/config'
+const actualMutant=process.env.AGENTMUX_TOOLKIT_MUTANT??'baseline'
+if(actualMutant==='renderer-owner')process.env.AGENTMUX_TOOLKIT_MUTANT='baseline'
+const original=(await import(${JSON.stringify(pathToFileURL(resolve(root,config)).href)})).default
+process.env.AGENTMUX_TOOLKIT_MUTANT=actualMutant
+const root=${JSON.stringify(root)},output=${JSON.stringify(output)}
+const uiRoot=new URL(${JSON.stringify(pathToFileURL(resolve(root,'packages/client-ui')+'/').href)})
+const exports=JSON.parse(readFileSync(new URL('package.json',uiRoot),'utf8')).exports
+const aliases=Object.entries(exports).sort(([a],[b])=>b.length-a.length).map(([key,value])=>{
+ const target=typeof value==='string'?value:value.browser??value.import
+ const spelling='@agentmux/client-ui'+(key==='.'?'':key.slice(1))
+ return {find:new RegExp('^'+spelling.replaceAll('*','(.*)')+'$'),replacement:fileURLToPath(new URL(target.replaceAll('*','$1'),uiRoot))}
+})
+const config=mergeConfig(original,{resolve:{alias:aliases},plugins:[{name:'public-toolkit-utf8-proof',enforce:'pre',transform(input,id){
+ const path=relative(root,id.split('?')[0])
+ const mutant=process.env.AGENTMUX_TOOLKIT_MUTANT
+ const change=mutant==='utf8'?['packages/core/src/public-rpc-frame.ts',"new TextDecoder('utf-8', { fatal: true }).decode","new TextDecoder('utf-8', { fatal: false }).decode"]
+  :mutant==='renderer-owner'?['apps/desktop/src/renderer/src/store.ts','if (isToolkitRequest(request)) {','if (false) {']
+  :mutant==='baseline-order'?['packages/core/src/public-rpc-service.ts',"body.input === undefined)","false)"]
+  :mutant==='baseline-params'?['packages/core/src/public-rpc-service.ts',"const baselineParams = rpcRecord(body, ['toolId', 'input', 'operationId'])","const baselineParams = body"]:undefined
+ if(!change||path!==change[0])return
+ assert.equal(input.split(change[1]).length-1,1,'Actual public guard must be nonempty')
+ const code=input.replace(change[1],change[2])
+ const sha=value=>createHash('sha256').update(value).digest('hex')
+ appendFileSync(output+'/loaded-source.jsonl',JSON.stringify({path,originalSHA256:sha(input),consumedSHA256:sha(code),mutant,bytes:Buffer.byteLength(code)})+'\\n')
+ return {code,map:null}
+}}]})
+config.test.include=${JSON.stringify(files)}
+export default config
+`
+    await writeFile(path,source)
+    return path
+  }
   async function run(name,mutant='baseline',expected) {
     const output = resolve(evidence,name); await mkdir(output,{recursive:true})
     const built = candidate
@@ -115,21 +161,26 @@ if (mode === '--callers') {
       : ['terminal-kind','terminal-metadata'].includes(mutant) ? allFiles.filter(path=>path.endsWith('client-terminal-remove.test.ts'))
       : mutant==='renderer-owner' ? allFiles.filter(path=>path.endsWith('toolkit-renderer-routing.test.ts'))
       : mutant==='utf8' ? allFiles.filter(path=>path.endsWith('toolkit-control.test.ts'))
+      : mutant==='baseline-order' ? allFiles.filter(path=>path.endsWith('toolkit-actions-main.test.ts'))
+      : mutant==='baseline-params' ? allFiles.filter(path=>path.endsWith('toolkit-custom-main.test.ts'))
       : nativeOnly ? allFiles.filter(path=>path.endsWith('performance-toolkit-main.test.ts')) : allFiles
     let asset=resolve(root,'apps/desktop/resources/toolkit/performance.mjs'),assetLoaded=[]
     if(mutant==='asset'){
-      const original=await readFile(asset,'utf8'),anchor="[cli, 'metrics', 'watch']"
+      const original=await readFile(asset,'utf8'),anchor="[cli, 'system', 'metrics', 'watch']"
       assert.equal(original.split(anchor).length-1,1,'Official asset actual CLI invocation must be nonempty')
-      const transformed=original.replace(anchor,"[cli, 'metrics', 'get']")
+      const transformed=original.replace(anchor,"[cli, 'system', 'metrics', 'get']")
       asset=resolve(output,'performance-mutant.mjs');await writeFile(asset,transformed)
+      await symlink(resolve(root,'apps/desktop/node_modules'),resolve(output,'node_modules'),'dir')
       assetLoaded=[{path:'apps/desktop/resources/toolkit/performance.mjs',originalSHA256:sha(original),consumedSHA256:sha(transformed),mutant,bytes:Buffer.byteLength(transformed)}]
       await writeFile(resolve(output,'loaded-asset.jsonl'),assetLoaded.map(value=>JSON.stringify(value)+'\n').join(''))
     }
+    const runConfig=await verificationConfig(output,files)
     let exitCode=0,stdout='',stderr=''
     const filters=mutant==='packaged-path'?['-t','actual production asset helper']
       : nativeOnly?['-t','actual CLI/help/asset']:[]
-    try { const value=await exec(process.execPath,[resolve(root,'node_modules/vitest/vitest.mjs'),'run','--config',config,...files,...filters,'--reporter=json','--outputFile',resolve(output,'vitest.json')],
-      {cwd:root,env:{...process.env,pnpm_config_verify_deps_before_run:'false',AGENTMUX_TOOLKIT_CLI:built.cli,
+    try { const value=await exec(process.execPath,[resolve(root,'node_modules/vitest/vitest.mjs'),'run','--config',runConfig,...files,...filters,'--reporter=json','--outputFile',resolve(output,'vitest.json')],
+      {cwd:root,env:{...process.env,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_RPC_ENDPOINT:undefined,
+        pnpm_config_verify_deps_before_run:'false',AGENTMUX_TOOLKIT_CLI:built.cli,
         AGENTMUX_TOOLKIT_EVIDENCE:output,AGENTMUX_TOOLKIT_MUTANT:mutant,AGENTMUX_TOOLKIT_ASSET:asset},timeout:180_000,maxBuffer:20*1024*1024}); stdout=value.stdout;stderr=value.stderr }
     catch(error) { exitCode=typeof error.code==='number'?error.code:-1;stdout=error.stdout??'';stderr=error.stderr??'' }
     await writeFile(resolve(output,'run.log'),stdout+stderr)
@@ -155,7 +206,7 @@ if (mode === '--callers') {
       oracle=failures.map(value=>value.fullName)
     } else { assert.equal(exitCode,0,("" + (name) + ": GREEN required; inspect " + (output) + _hygiene_fixturePath("run.log")));assert.equal(report.numFailedTests,0) }
     results.push({name,mutant,exitCode,collected:report.numTotalTests,oracle,reportSHA256:sha(await readFile(resolve(output,'vitest.json'))),loadedSHA256:sha(await readFile(resolve(output,'loaded-source.jsonl'))),
-      cliSHA256:sha(await readFile(built.cli)),cliLoadedSHA256:sha(await readFile(resolve(dirname(built.cli),'loaded-source.jsonl')))})
+      configSHA256:sha(await readFile(runConfig)),cliSHA256:sha(await readFile(built.cli)),cliLoadedSHA256:sha(await readFile(resolve(dirname(built.cli),'loaded-source.jsonl')))})
     await rm(resolve(output,'cache'),{recursive:true,force:true})
     console.log(`${name}: ${expected?'AssertionRED':'GREEN'} (${report.numTotalTests} collected)`)
   }
@@ -175,6 +226,8 @@ if (mode === '--callers') {
     await run('renderer-owner','renderer-owner',/actual Renderer control consumer rejects all/u)
     await run('packaged-path','packaged-path',/actual production asset helper/u)
     await run('utf8','utf8',/rejects malformed UTF8 watch bytes/u)
+    await run('baseline-order','baseline-order',/concurrent public operation ID/u)
+    await run('baseline-params','baseline-params',/reject invalid parameters before any original owner/u)
     await bridge('bridge-early-release','early-release')
     await bridge('bridge-node-crypto','node-crypto')
     await run('restored')
