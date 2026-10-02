@@ -149,6 +149,8 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 
 实现 task 判 done 须同时有变异测试和产品调用者证明。变异是改坏实际实现，确认对应测试变红；不能只改测试制造红灯。调用者检查从实际源码范围检索 symbol，排除测试、生成物和定义文件本身；命中都在定义文件即竖切未闭合，如实标 blocked。可用 `rg -n "<symbol>" packages apps` 定位，再核对生产调用路径。纯函数的测试覆盖、同文件内部调用或接口声明都不能代替接到产品的证据。
 
+新增或修改公共能力时，接口影响判断、原业务 owner 到 RPC／CLI 的真实接线及完成边界按[公共能力贡献约定](../guides/public-capability-contributions.md#同一任务交付和验收)核对；本节继续持有变异与调用者证明的方法，不另维护方法或命令全集。
+
 扫描式契约测试必须先证明扫描有收获（如 `expect(found.size).toBeGreaterThan(0)`），再从来源反推约束，不维护与来源一起漂移的手写清单。豁免按具体选择器点名，不能全局放行某个数值。
 
 切片扫描还须证明起止锚点都存在（各自 `expect(index).toBeGreaterThan(-1)`），并断言切出来的内容确实是目标片段。`indexOf` 返回 `-1` 时，`slice` 可能产出空串，让每条 `not.toContain` 恒真。守护来源：[sliced-scan-surface-not-empty.test.ts](../../apps/desktop/test/sliced-scan-surface-not-empty.test.ts)。

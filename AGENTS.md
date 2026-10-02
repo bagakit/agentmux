@@ -56,6 +56,8 @@ Browser、Runtime 与编辑器公共机制按协议和行为泛化；在 Core、
 2. 从 `docs/design/agentmux-desktop-interaction.md` 定位 owning 行为专题并原位合入用户确认约束；视觉、密度与控件语言从 `docs/design/agentmux-surface-density.md` 定位 owning 呈现专题。两入口只维护范围和导航；同一约束只定义一次，相邻文档引用，不把聊天过程或实现步骤追加成设计合同。
 3. 决定推进执行后、动手改实现前，通过 `feature-tracker.sh` 建或更新同 Closure 的 Feature。新计划使用 `bagakit.feature-task-plan.v1` 与 approved review artifact；每项 Task 有可证伪 acceptance 和 verification command。脚本从已安装的 feature-tracker skill 定位，走 `.sh`；路径失效时重新查找，排除 `node_modules/`、`.tmp/` 和 `-adopt-worktree` 副本。
 
+新增功能或修改行为时，作者必须按[公共能力贡献约定](docs/guides/public-capability-contributions.md)在同一计划中判断 JSON-RPC／CLI 的复用、修改或新增，以及受影响的发现、回执与真实消费；无需变更也须说明理由。交付和 review 核对该判断已兑现，不能只完成 GUI 或 help 就将受影响的公共能力标 done。
+
 验收随改动类型成立，不能用一种证据代替另一种：
 
 - 实现任务同时通过变异测试与定义文件外的生产调用者检查；缺调用者是竖切未闭合，标 blocked。具体方法及源码扫描、空集合假绿守护归 [测试策略](docs/testing/strategy.md#任务验收与假绿防护)。

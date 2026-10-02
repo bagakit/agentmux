@@ -2,6 +2,8 @@
 
 本文按当前已提交源码帮助包消费者、CLI 维护者与客户端开发者定位公共入口、类型定义和消费链。它是一张来源地图；准确签名、参数、错误和导出范围由源码与 package exports 持有，不在这里维护第二份 API 或命令词典。源码合同、工作树、安装与运行事实分别核对；系统分工先读 [系统分层与事实归属](../architecture/system-ownership.md)。
 
+新增功能的作者先按[公共能力贡献约定](../guides/public-capability-contributions.md)判断 RPC／CLI 影响，再用本页找到原定义与实际消费入口。
+
 ## 选择接入入口
 
 | 读者要做什么 | 从这里开始 | 继续核对 |
@@ -31,7 +33,7 @@
 | Prompt、权限／问题与 Agent 状态 | `submitAgentPrompt`、`respondAgentInteraction`、`statusAgent`；[结构化交互判断](../../packages/core/src/agent-interaction-state.ts)、[Prompt condition](../../packages/core/src/agent-prompt-condition.ts) | RuntimeController 与 Desktop IPC 的 Session 操作；client 读取 typed facts，不拼厂商按键 |
 | Session 身份、历史与事件 | [Session Registry](../../packages/core/src/agent-session-registry.ts)、[Session Store](../../packages/core/src/agent-session-store.ts)；`onEvent`、`sessionTimeline`、`sessionHistoryPage`、`observeSessionHistory` | [历史观察接线](../../apps/desktop/src/main/session-history-observation.ts)、[Session snapshot](../../apps/desktop/src/main/session-snapshot-payload.ts) |
 | 共享 Conversation、结构化请求与 Composer 呈现 | [client-ui index](../../packages/client-ui/src/index.ts) 与 [platform.tsx](../../packages/client-ui/src/platform.tsx)；组件 typed props 注入文件、导航、消息和回答操作 | [DesktopClientUiProvider](../../apps/desktop/src/renderer/src/components/DesktopClientUiProvider.tsx) → [Renderer main](../../apps/desktop/src/renderer/src/main.tsx)；宿主保有平台 IO、身份和工作面焦点 |
-| 空间地址、展示导航与工作面回执 | [space-control.ts](../../packages/core/src/space-control.ts)、[desktop-focus-control.ts](../../packages/core/src/desktop-focus-control.ts)，由 [control.ts](../../packages/core/src/control.ts) 公开 | Main 的 [Control bridge](../../apps/desktop/src/main/control-ipc-bridge.ts) → Renderer [control-api.ts](../../apps/desktop/src/renderer/src/lib/control-api.ts) → [Store 的 `executeControl`](../../apps/desktop/src/renderer/src/store.ts)；布局记录仍归 client |
+| 持久空间事实、展示导航与工作面回执 | Core 的 [spatial-state.ts](../../packages/core/src/spatial-state.ts)、[space-control.ts](../../packages/core/src/space-control.ts)与 [desktop-focus-control.ts](../../packages/core/src/desktop-focus-control.ts) | 公共服务读取／提交同一 Core 空间图；Desktop 经 Main [Control bridge](../../apps/desktop/src/main/control-ipc-bridge.ts) → Renderer [control-api.ts](../../apps/desktop/src/renderer/src/lib/control-api.ts) → [Store](../../apps/desktop/src/renderer/src/store.ts)消费原事实并操作呈现／输入，持久归属见[空间状态](../architecture/spatial-state.md) |
 | 宿主配置、Browser、Toolkit 与诊断 | [公共 RPC](../../packages/core/src/public-rpc.ts) 的 typed params / result / stream；[业务服务](../../packages/core/src/public-rpc-service.ts) 委托原 owner | [Main IPC handlers](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 及各宿主 owner |
 | Goal／Demand 内容、确认与接受 | [`openDemandStore`](../../packages/demand/src/demand-store.ts)、[Goal 类型与 readiness helpers](../../packages/demand/src/goals.ts) | Main IPC 的 Demand handlers 与 Renderer Goal 操作；Agent proposal 不代替人类确认／接受 |
 
