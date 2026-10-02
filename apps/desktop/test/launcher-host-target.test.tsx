@@ -292,7 +292,11 @@ describe('the real Launcher execution target consumer', () => {
     const request = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `task-${operation}`, operation,
       destination: { kind: 'launcher' as const, regionId: 'input' }, ...(operation === 'open.browser' ? { url: 'https://example.com' } : {}) }
     let opened!: Awaited<ReturnType<typeof before.executeControl>>
-    await act(async () => { opened = await useAppStore.getState().executeControl(request as Parameters<typeof before.executeControl>[0]) })
+    await act(async () => {
+      const opening = useAppStore.getState().executeControl(request as Parameters<typeof before.executeControl>[0])
+      await expect(opening).resolves.toBeDefined()
+      opened = await opening
+    })
     if (operation === 'open.terminal') expect(terminal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'farm', workspacePath: remoteProject.path }))
     else expect(browser).toHaveBeenCalledWith(expect.any(String), 'https://example.com', 'flowlens')
     expect(opened).toMatchObject({ operation, region: { workspaceId: 'flowlens', regionId: 'input' } })
