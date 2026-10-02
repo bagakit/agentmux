@@ -294,8 +294,8 @@ window.focusProofEndMoteInputDiagnostics = () => {
 window.focusProofCapturedInputState = () => {
   const captured = window.focusProofOriginalInput?.element
   const active = document.activeElement
-  const search = document.querySelector('.global-search-input input')
-  return { capturedExists: Boolean(captured), capturedIsSearch: Boolean(captured && search && captured === search),
+  const focusInput = document.querySelector('[aria-label="Search contexts"]')
+  return { capturedExists: Boolean(captured), capturedIsFocusInput: Boolean(captured && focusInput && captured === focusInput),
     capturedConnected: Boolean(captured?.isConnected), capturedHidden: Boolean(captured?.closest('[hidden], [aria-hidden="true"]')),
     capturedInert: Boolean(captured?.closest('[inert]')), activeSameCaptured: Boolean(captured && active === captured),
     activeConnected: Boolean(active?.isConnected), activeBody: active === document.body,
@@ -313,7 +313,11 @@ window.focusProofFocusMoteInput = () => {
   selection.removeAllRanges()
   selection.addRange(range)
 }
-window.focusProofHumanNavigate = surface => useAppStore.getState().setMainSurface(surface)
+window.focusProofHumanNavigate = () => {
+  const button = document.querySelector('[aria-label="Focus: show execution contexts"]')
+  if (!button) throw new Error('The original human Focus navigation control is absent')
+  button.click()
+}
 window.focusProofHoldTargetInput = regionId => {
   const region = document.querySelector(`[data-workbench-region-id=${CSS.escape(regionId)}]`)
   if (!region) throw new Error('The exact existing target Region host is absent')
