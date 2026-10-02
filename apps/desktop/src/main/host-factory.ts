@@ -11,6 +11,7 @@ export function createExecutionHost(config: HostConfig): ExecutionHost {
     id: config.id,
     label: config.label,
     hostname: config.hostname,
+    connectTimeoutSeconds: 20,
     ...(config.user ? { user: config.user } : {}),
     ...(config.port ? { port: config.port } : {}),
     ...(config.identityFile ? { identityFile: config.identityFile } : {})

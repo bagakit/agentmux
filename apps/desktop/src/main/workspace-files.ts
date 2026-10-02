@@ -820,6 +820,37 @@ async function remoteRealPath(host: ExecutionHost, path: string): Promise<string
   return result.stdout.trim()
 }
 
+// One connection plus a bounded directory observation, rather than one connection per ancestor.
+const REMOTE_DIRECTORY_READ_TIMEOUT_MS = 30_000
+const REMOTE_DIRECTORY_ENTRY_SCRIPT = [
+  'for path do',
+  'name=${path##*/}',
+  'if [ -L "$path" ]; then if [ -d "$path" ]; then kind=ld; elif [ -f "$path" ]; then kind=lf; else kind=lb; fi',
+  'elif [ -d "$path" ]; then kind=d',
+  'elif [ -f "$path" ]; then kind=f',
+  'else continue',
+  'fi',
+  "printf '%s\\0%s\\0' \"$name\" \"$kind\"",
+  'done'
+].join('\n')
+const REMOTE_DIRECTORY_READ_SCRIPT = [
+  'list_script=$1; shift',
+  'first=yes',
+  // The outer loop captures the original argv; positional args then hold only resolved ancestors.
+  'for cursor do',
+  'if [ "$first" = yes ]; then set --; first=no; fi',
+  // Keep a realpath containing trailing newlines: remove only our sentinel and its one record LF.
+  "canonical=$(realpath -- \"$cursor\" && printf '.') || exit $?",
+  'canonical=${canonical%.}; canonical=${canonical%?}',
+  'for ancestor do',
+  'if [ "$canonical" = "$ancestor" ]; then printf "%s\\n" "Directory link cycle: this folder is already an ancestor" >&2; exit 1; fi',
+  'done',
+  'set -- "$@" "$canonical"',
+  'done',
+  "printf '%s\\0' \"$canonical\"",
+  'exec find "$canonical/." ! -name . -prune -exec sh -c "$list_script" agentmux-list {} +'
+].join('\n')
+
 async function remoteExistingPathWithin(
   host: ExecutionHost,
   root: string,
@@ -904,6 +935,7 @@ export class WorkspaceFiles {
   private readonly observerDisposals = new Map<LocalObserverEntry, Promise<void>>()
   private disposed = false
   private disposal: Promise<void> | undefined
+  private readonly remoteDirectoryReads = new WeakMap<ExecutionHost, Map<string, Promise<WorkspaceDirectoryEntry[]>>>()
 
   constructor(
     private readonly hostFor: (id: string) => ExecutionHost,
@@ -1124,29 +1156,46 @@ export class WorkspaceFiles {
       )
     }
 
-    const directory = await remoteReadablePath(host, workspace.path, requestedPath || '.')
-    // Directory-scoped reads keep system-SSH under the same Workspace boundary.
-    // Script 是固定源码，目录由 argv 传入；NUL framing 可正确承载空格和换行文件名。
-    const script = [
-      'for path do',
-      'name=${path##*/}',
-      'if [ -L "$path" ]; then if [ -d "$path" ]; then kind=ld; elif [ -f "$path" ]; then kind=lf; else kind=lb; fi',
-      'elif [ -d "$path" ]; then kind=d',
-      'elif [ -f "$path" ]; then kind=f',
-      'else continue',
-      'fi',
-      "printf '%s\\0%s\\0' \"$name\" \"$kind\"",
-      'done'
-    ].join('\n')
-    const result = await host.run(
-      'find',
-      [directory, '!', '-path', directory, '-prune', '-exec', 'sh', '-c', script, 'agentmux-list', '{}', '+'],
-      { timeoutMs: 15_000, maxOutputBytes: 2 * 1024 * 1024 }
-    )
-    if (result.exitCode !== 0) {
-      throw new Error(result.stderr.trim() || 'Remote directory listing failed')
+    // Key the original execution object as well as the complete resource. A replaced Host cannot
+    // borrow an old observation, and settled work is never a directory cache or a retry policy.
+    const resource = { ...workspace }
+    const key = JSON.stringify([resource.id, resource.path, requestedPath])
+    let reads = this.remoteDirectoryReads.get(host)
+    if (!reads) { reads = new Map(); this.remoteDirectoryReads.set(host, reads) }
+    const pending = reads.get(key)
+    if (pending) return await pending
+    const reading = this.readRemoteDirectory(host, resource, requestedPath)
+    reads.set(key, reading)
+    try { return await reading }
+    finally { if (reads.get(key) === reading) reads.delete(key) }
+  }
+
+  private async readRemoteDirectory(host: ExecutionHost, workspace: WorkspaceRecord, requestedPath: string): Promise<WorkspaceDirectoryEntry[]> {
+    const lexical = remotePathWithin(workspace.path, requestedPath || '.')
+    let cursor = posix.resolve(workspace.path)
+    const ancestors = [cursor]
+    for (const part of posix.relative(cursor, lexical).split('/').filter(Boolean)) {
+      cursor = posix.join(cursor, part)
+      ancestors.push(cursor)
+    }
+    let result
+    try {
+      result = await host.run('sh', ['-c', REMOTE_DIRECTORY_READ_SCRIPT, 'agentmux-directory',
+        REMOTE_DIRECTORY_ENTRY_SCRIPT, ...ancestors], {
+        timeoutMs: REMOTE_DIRECTORY_READ_TIMEOUT_MS, maxOutputBytes: 2 * 1024 * 1024
+      })
+      if (result.exitCode !== 0) throw new Error(result.stderr.trim() || 'Remote directory listing failed')
+    } catch (error) {
+      const code = (error as { code?: unknown })?.code
+      const reason = error instanceof Error ? error.message : String(error)
+      throw Object.assign(new Error(`Could not read ${lexical} on ${host.label}: ${reason} Retry this directory; its current contents remain unconfirmed.`),
+        typeof code === 'string' ? { code } : {})
     }
     const fields = result.stdout.split('\0')
+    const directory = fields.shift()!
+    if (!directory.startsWith('/') || !result.stdout.endsWith('\0') || fields.length % 2 !== 1) {
+      throw new Error(`Could not confirm the directory response for ${lexical} on ${host.label}. Retry this directory.`)
+    }
     const entries: WorkspaceDirectoryEntry[] = []
     for (let index = 0; index + 1 < fields.length; index += 2) {
       const name = fields[index]
