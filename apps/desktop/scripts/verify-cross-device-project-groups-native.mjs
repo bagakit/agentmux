@@ -43,7 +43,7 @@ export async function verifyCrossDeviceProjectGroupsNative() {
         'two ordinary Electron processes sharing one private profile', 'native pointer/text/keyboard input', 'actual Vite/PostCSS compilation'],
       controlled: ['three registered Projects and Host configuration', 'initial file Regions built by the product spatial adapter',
         'file contents and file directory metadata', 'explicit Git identity suggestions; real Git discovery is qualified separately',
-        'empty Runtime/Provider/Topic/Demand catalogs'],
+        'empty Runtime/Provider/Topic/Demand catalogs', 'explicit transient status projections without a Runtime', 'one controlled spatial-save transport failure'],
       notClaimed: ['SSH availability', 'Agent/Run lifecycle', 'remote file or Git discovery', 'installed application qualification']
     } }
   const cleanupErrors = []
@@ -82,7 +82,7 @@ export async function verifyCrossDeviceProjectGroupsNative() {
       const file = id.split('?')[0]
       if (!path.isAbsolute(file) || !file.startsWith(root + path.sep) || file.includes('/node_modules/')) return
       const relative = path.relative(root, file)
-      if (!/\.(?:[cm]?[jt]sx?|css)$/.test(file)) return
+      if (!/\.(?:[cm]?[jt]sx?|css|png)$/.test(file)) return
       const sourceSHA256 = hash(await fs.readFile(file)), consumedCodeSHA256 = hash(code)
       const key = `${relative}:${consumedBy}`
       const previous = modules.get(key)

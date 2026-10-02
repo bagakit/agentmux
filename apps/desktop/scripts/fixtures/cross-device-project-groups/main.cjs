@@ -39,6 +39,7 @@ app.whenReady().then(async () => {
       result.spatialEvents.push(json(state))
       if (win && !win.isDestroyed()) win.webContents.send('project-groups:spatial-change', state)
     })
+    let failNextCommit = false
     ipcMain.handle('project-groups:request', async (_event, operation, ...args) => {
       const call = { operation, args: json(args) }; result.calls.push(call)
       switch (operation) {
@@ -49,7 +50,9 @@ app.whenReady().then(async () => {
           result.seeded = json(saved); call.result = json(saved); return saved
         }
         case 'spatial-read': return spatial.read()
+        case 'preview-fail-next-commit': failNextCommit = true; return
         case 'spatial-commit': {
+          if (failNextCommit) { failNextCommit = false; throw new Error('Controlled preview: spatial save acknowledgement unavailable. Retry the same group.') }
           const saved = await spatial.commit(args[0]); call.result = json(saved); return saved
         }
         case 'flush': await win.webContents.session.flushStorageData(); return
@@ -167,6 +170,12 @@ app.whenReady().then(async () => {
       await resize(900); await capture('grouped-narrow', 'Narrow full workface with the same original split and both device labels'); await resize(1280)
       await click(`[aria-label=${JSON.stringify(`Edit ${input.createdName}`)}]`)
       await typeName(input.renamedName); await capture('rename', 'Editing the same stable group identity; rename does not replace members or layouts')
+      await read("window.projectGroupsBoundary.request('preview-fail-next-commit')")
+      await click('.project-group-dialog button[type="submit"]')
+      await until('!!document.querySelector(".project-group-dialog__issue")')
+      assert.equal(await read('document.querySelector(".project-group-dialog__name input").value'), input.renamedName)
+      result.unconfirmedSave = await state()
+      await capture('save-unconfirmed', 'Controlled save ACK failure keeps the exact group editor, selected members, draft name and retry action')
       await click('.project-group-dialog button[type="submit"]'); await until('!document.querySelector(".project-group-dialog")')
       result.renamedAck = await checkPreserved('actual UI rename + Core ACK')
       assert.deepEqual(result.renamedAck.current.projectGroups.find(one => one.groupId === result.created.groupId), { ...result.created, name: input.renamedName })
@@ -180,6 +189,18 @@ app.whenReady().then(async () => {
       assert.ok(await read('document.querySelectorAll("[data-space-folder] .project-association").length >= 2'), 'Original folders keep Git hints after multiple memberships')
       assert.equal(await read('document.querySelectorAll("[data-folder-host]").length'), 3, 'Local and two remote folder sections are peers')
       await capture('overlapping-groups', 'Same original local and remote folders in two purpose groups; original icons and host-specific folder sections remain visible')
+      for (const mode of ['work', 'attention']) {
+        await read(`window.projectGroupsPreviewStatus(${JSON.stringify(mode)})`)
+        await until('!!document.querySelector(".project-group .project-activity__metric")')
+        await capture(`status-${mode}-wide`, 'Controlled status projection: shared exact icon/count presentation with two-digit working and idle, or Needs you plus error; no Runtime is invented')
+        await resize(900); await capture(`status-${mode}-narrow`, 'Narrow shared status and original raster project identities with exact Host labels and full workface'); await resize(1280)
+      }
+      await read("window.projectGroupsPreviewStatus('clear')")
+      const hoverPoint = await read(`(() => { const row=document.querySelector('[data-project-group] .project-group__heading'); const r=row.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()`)
+      await dispatch('Input.dispatchMouseEvent', { type: 'mouseMoved', ...hoverPoint })
+      await until("getComputedStyle(document.querySelector('[data-project-group] .project-group__actions')).opacity==='1'")
+      await capture('group-actions-hover', 'Native pointer hover reveals actual Edit and Dissolve actions without reserving title width')
+
       await click(`[data-space-folder] [data-workspace-id="${local.id}"][data-project-group-reference]`)
       await until(`window.projectGroupsState().activeWorkspaceId===${JSON.stringify(local.id)} && window.projectGroupsState().focusedNavigation===${JSON.stringify(localId)}`)
       result.aliasFocus = await state()

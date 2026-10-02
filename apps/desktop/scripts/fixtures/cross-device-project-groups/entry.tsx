@@ -2,7 +2,7 @@ import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mj
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
-import type { AppConfig, AgentMuxDesktopApi } from '../../../src/shared/contracts'
+import type { AppConfig, AgentMuxDesktopApi, SessionSnapshot } from '../../../src/shared/contracts'
 import { App } from '../../../src/renderer/src/App'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { api } from '../../../src/renderer/src/lib/api'
@@ -11,6 +11,9 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { workspaceProjectId } from '../../../src/renderer/src/lib/workspace-projects'
+import localProjectImage from '../../../resources/icon-128.png'
+import remoteProjectImage from '../../../src/renderer/src/assets/agent-icons/gemini.png'
+import archiveProjectImage from '../../../src/renderer/src/assets/agent-icons/hermes.png'
 import '../../../src/renderer/src/styles/index.css'
 
 type Boundary = {
@@ -23,6 +26,7 @@ declare global {
     projectGroupsReady: boolean
     projectGroupsState(): unknown
     projectGroupsFlush(): Promise<AgentMuxSpatialState>
+    projectGroupsPreviewStatus(mode: 'work' | 'attention' | 'clear'): void
   }
 }
 const request = window.projectGroupsBoundary.request
@@ -39,7 +43,7 @@ api.demands.list = async () => []
 api.scratch.listTopics = async () => []
 api.sessions.snapshot = async () => ({ sessions: [], recoveryCandidates: [], timelines: {}, localHome: _hygiene_fixturePath("Users/private-proof") })
 api.sessions.onEvent = () => () => {}
-api.workspaces.appearance = async workspaceId => ({ kind: 'repository', icon: `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="${workspaceId === 'groups-local' ? '#718fa6' : workspaceId === 'groups-remote' ? '#88a27f' : '#a99178'}"/><text x="16" y="23" text-anchor="middle" font-family="sans-serif" font-size="22" fill="white">${workspaceId === 'groups-local' ? 'A' : workspaceId === 'groups-remote' ? 'R' : 'D'}</text></svg>`)}` })
+api.workspaces.appearance = async workspaceId => ({ kind: 'repository', icon: workspaceId === 'groups-local' ? localProjectImage : workspaceId === 'groups-remote' ? remoteProjectImage : archiveProjectImage })
 api.git.projectIdentity = workspaceId => request('git-project-identity', workspaceId)
 api.files.read = (workspaceId, file) => request('file-read', workspaceId, file)
 api.files.readDirectory = (workspaceId, directory) => request('file-directory', workspaceId, directory)
@@ -113,6 +117,23 @@ window.projectGroupsState = () => {
       box: element.getBoundingClientRect().toJSON()
     }))
   }))
+}
+// These controlled status projections exercise the shared presentation, never a Runtime.
+window.projectGroupsPreviewStatus = mode => {
+  const count = mode === 'work' ? 15 : mode === 'attention' ? 3 : 0
+  const now = Date.now()
+  const sessions: SessionSnapshot[] = Array.from({ length: count }, (_, index) => {
+    const workspace = setup.config.workspaces[index < (mode === 'work' ? 12 : 2) ? 0 : 1]!
+    const state = mode === 'work' ? index < 12 ? 'working' : 'running' : index < 2 ? 'waiting' : 'error'
+    const id = `controlled-status-${index}`
+    return { id, kind: 'agent', hostId: workspace.hostId, workspacePath: workspace.path, label: `Preview status ${index + 1}`,
+      providerId: 'codex', executorId: 'codex', agentSessionUpdatedAt: now,
+      capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+      control: { kind: 'agent', hostId: workspace.hostId, agentSessionId: id, run: { runId: id } },
+      createdAt: now, updatedAt: now, processState: 'running', latestOutputBytes: 0,
+      status: { state, source: 'run-process', observedAt: now } }
+  })
+  useAppStore.setState({ sessions })
 }
 window.projectGroupsFlush = async () => {
   await prepareRendererUpdate()
