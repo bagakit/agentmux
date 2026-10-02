@@ -27,6 +27,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   const [faceDraft, setFaceDraft] = useState(DEFAULT_MOTE_FACE)
   const [alternativeDraft, setAlternativeDraft] = useState<SpaceIconChoice | null>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
+  const content = useRef<HTMLDivElement>(null)
   const returnKey = useRef<string | null>(null)
   const editor = useRef<object>({}), inputRequest = useRef<object>({})
   const currentTarget = useRef(target); currentTarget.current = target
@@ -89,13 +90,14 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
   return <Dialog.Root open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
-      <Dialog.Content className={`space-icon-picker dialog-surface${target?.avatarTarget ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
+      <Dialog.Content ref={content} className={`space-icon-picker dialog-surface${target?.avatarTarget ? ' space-icon-picker--avatar' : ''}`} onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}
         onCloseAutoFocus={event => {
           event.preventDefault()
-          const row = returnFocus?.() ?? [...document.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
+          const row = returnFocus ? returnFocus() : [...document.querySelectorAll<HTMLElement>('[data-space-icon-target]')]
             .find(node => node.dataset.spaceIconTarget === returnKey.current)
-          row?.focus()
+          const active = document.activeElement
+          if (row?.isConnected && (active === document.body || active === row || !active?.isConnected || content.current?.contains(active))) row.focus({ preventScroll: true })
         }}>
         <header className="space-icon-picker__header">
           <Dialog.Title className="space-icon-picker__title">{target?.avatarTarget ? 'Change avatar' : 'Change icon'}</Dialog.Title>

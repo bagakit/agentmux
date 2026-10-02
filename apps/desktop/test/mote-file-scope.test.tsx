@@ -9,8 +9,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { fileExplorerContains, fileExplorerRelativeRoot } from '../src/renderer/src/lib/file-explorer-scope'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { createMoteApp, moteClick, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
-import { defaultTab, neighborTab, defaultAgent, customMoteId } from './fixtures/mote-workface'
-import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
+import { defaultTab, neighborTab, defaultAgent, customMoteId, customTab } from './fixtures/mote-workface'
 import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
 import { addTab } from '@agentmux/layout'
 
@@ -21,7 +20,7 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 let app: MoteAppFixture
 const home = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), other = scratchTopicDirectoryName(customMoteId)
 function entry(path: string) { return { path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false } }
-beforeEach(() => { app = createMoteApp(); useAppStore.setState({ explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } }) })
+beforeEach(() => { app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } }) })
 afterEach(async () => { await app.dispose() })
 
 describe('original scoped Mote files consumer', () => {
@@ -36,12 +35,9 @@ describe('original scoped Mote files consumer', () => {
       tabs: { ...state.tabs, [id]: { ...createWorkbenchTab(id, { kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'region:' + id, path }), topicId: PMO_TEAMS_TOPIC_ID } },
       layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: addTab(state.layouts[SCRATCH_WORKSPACE_ID]!, 'mote-group', id) }
     }))
-    useAppStore.setState({ activeWorkspaceId: 'project', mainSurface: 'board' })
+    await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id }))
     await app.mount()
-    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
-    await settleMoteApp()
-    await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Mote files"]')!)
-    await moteClick(app.panel().querySelector<HTMLElement>('[data-tree-path="' + path + '"]')!)
+    await moteClick(app.container.querySelector<HTMLElement>('.surface-tool-dock [data-tree-path="' + path + '"]')!)
     expect(read.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, path]])
     return { id, path, finish: async () => {
       await act(async () => finish({ status: 'read', document: { path, content: '# Original persona', revision: 'read-original' } }))
@@ -51,25 +47,24 @@ describe('original scoped Mote files consumer', () => {
 
   it.each(['same-Mote discussion', 'A→B→A', 'later input', 'later Region'] as const)('keeps %s after a real Explorer file read finishes late', async intent => {
     const file = await delayedFile()
-    if (intent === 'same-Mote discussion') await moteClick(app.panel().querySelector<HTMLButtonElement>('[data-workbench-tab-id="' + neighborTab.id + '"]')!)
+    if (intent === 'same-Mote discussion') await moteClick(app.container.querySelector<HTMLButtonElement>('.workspace-workbench button[data-workbench-tab-id="' + neighborTab.id + '"]')!)
     if (intent === 'A→B→A') {
-      await moteClick(app.panel().querySelector<HTMLButtonElement>('[data-mote-topic-id="' + customMoteId + '"]')!)
-      await moteClick(app.panel().querySelector<HTMLButtonElement>('[data-mote-topic-id="' + PMO_TEAMS_TOPIC_ID + '"]')!)
-      await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Mote files"]')!)
+      await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id })); await settleMoteApp()
+      await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id })); await settleMoteApp()
     }
-    if (intent === 'later input') await moteType(app.panel().querySelector<HTMLElement>('[aria-label="Message Agent"]')!, 'My newer unsent intent')
+    if (intent === 'later input') await moteType(app.container.querySelector<HTMLElement>('[aria-label="Message Agent"]')!, 'My newer unsent intent')
     if (intent === 'later Region') await act(async () => useAppStore.getState().focusRegion(SCRATCH_WORKSPACE_ID, neighborTab.id, neighborTab.layout.activeRegionId, 'pointer', 'mote-group'))
-    const afterIntent = useAppStore.getState(), target = app.panel().dataset.moteTargetTab, active = document.activeElement
-    expect(app.panel().querySelector('.mote-workface__files')).not.toBeNull()
+    const afterIntent = useAppStore.getState(), selection = afterIntent.workbenchSpaceSelection, active = document.activeElement
+    expect(app.container.querySelector('.surface-tool-dock .file-explorer')).not.toBeNull()
     await file.finish()
     const state = useAppStore.getState()
     expect(state.documents[documentKey(SCRATCH_WORKSPACE_ID, file.path)]?.content).toBe('# Original persona')
     expect(state.tabs[file.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
-    expect(app.panel().dataset.moteTargetTab).toBe(target)
-    expect(app.panel().querySelector('.mote-workface__files')).not.toBeNull()
+    expect(state.workbenchSpaceSelection).toBe(selection)
+    expect(app.container.querySelector('.surface-tool-dock .file-explorer')).not.toBeNull()
     expect(document.activeElement).toBe(active)
     expect(state.agentFocus).toBe(afterIntent.agentFocus)
-    expect(state.activeWorkspaceId).toBe('project'); expect(state.mainSurface).toBe('board')
+    expect(state.activeWorkspaceId).toBe(afterIntent.activeWorkspaceId); expect(state.mainSurface).toBe(afterIntent.mainSurface)
     expect(state.agentComposerDrafts).toBe(afterIntent.agentComposerDrafts)
     expect(state.sessions).toBe(afterIntent.sessions); expect(state.viewModes).toBe(afterIntent.viewModes)
     expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
@@ -79,38 +74,39 @@ describe('original scoped Mote files consumer', () => {
   it('lets a current original material finish and selects its original File Tab', async () => {
     const file = await delayedFile()
     await file.finish()
-    expect(app.panel().dataset.moteTargetTab).toBe(file.id)
-    expect(app.panel().querySelector('.mote-workface__files')).toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: file.id })
+    expect(app.container.querySelector('[data-editor-boundary]')).not.toBeNull()
     expect(useAppStore.getState().tabs[file.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
   })
 
   it.each([false, true])('preserves original File placement without a Space, late input=%s', async late => {
     const file = await delayedFile(true)
-    if (late) await moteType(app.panel().querySelector<HTMLElement>('[aria-label="Message Agent"]')!, 'Keep typing here')
+    const selection = useAppStore.getState().workbenchSpaceSelection
+    if (late) await moteType(app.container.querySelector<HTMLElement>('[aria-label="Message Agent"]')!, 'Keep typing here')
     await file.finish()
     expect(useAppStore.getState().tabs[file.id]?.space).toBeUndefined()
     expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, file.path)]?.content).toBe('# Original persona')
-    expect(app.panel().dataset.moteTargetTab).toBe(late ? defaultTab.id : file.id)
-    expect(app.panel().querySelector('.mote-workface__files') !== null).toBe(late)
-    expect(useAppStore.getState().activeWorkspaceId).toBe('project')
+    if (late) expect(useAppStore.getState().workbenchSpaceSelection).toBe(selection)
+    else expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: file.id })
+    expect(useAppStore.getState().activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
   })
-  it('shows the exact original Mote root while Float is over another project, then changes scope only explicitly', async () => {
+  it('shows the exact original Mote root in Space after leaving another project, then changes scope only explicitly', async () => {
     const reads = vi.spyOn(api.files, 'readDirectory').mockImplementation(async (_workspace, root) => root ? [entry(root + '/SOUL.md'), entry(other + '/outside.md')] : [entry('global.md')])
     useAppStore.setState({ activeWorkspaceId: 'project', mainSurface: 'board' })
+    await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id }))
     await app.mount()
-    await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
-    await settleMoteApp()
-    await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Mote files"]')!)
-    expect(reads.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, home]])
-    const explorer = app.panel().querySelector<HTMLElement>('.file-explorer')!
+    // Profile's one notes tree and the original Files tree both consume this
+    // exact Mote root; neither may broaden to another directory implicitly.
+    expect(reads.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, home], [SCRATCH_WORKSPACE_ID, home]])
+    const explorer = app.container.querySelector<HTMLElement>('.file-explorer')!
     expect(explorer.dataset.fileWorkspace).toBe(SCRATCH_WORKSPACE_ID)
     expect(explorer.dataset.fileRoot).toBe(home)
     expect([...explorer.querySelectorAll('[data-tree-path]')].map(node => node.getAttribute('data-tree-path'))).toEqual([home + '/SOUL.md'])
-    expect(app.panel().querySelector('.workspace-topics-panel')).toBeNull()
-    await moteClick(app.panel().querySelector<HTMLButtonElement>('.workspace-files-scope')!)
-    expect(app.panel().querySelector<HTMLElement>('.file-explorer')!.dataset.fileRoot).toBe('')
-    expect(reads.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, home], [SCRATCH_WORKSPACE_ID, '']])
-    expect(useAppStore.getState().activeWorkspaceId).toBe('project')
+    expect(app.container.querySelector('.workspace-topics-panel')).toBeNull()
+    await moteClick(app.container.querySelector<HTMLButtonElement>('.workspace-files-scope')!)
+    expect(app.container.querySelector<HTMLElement>('.file-explorer')!.dataset.fileRoot).toBe('')
+    expect(reads.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, home], [SCRATCH_WORKSPACE_ID, home], [SCRATCH_WORKSPACE_ID, '']])
+    expect(useAppStore.getState().activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
   })
 
   it('does not admit sibling roots or traversal and rejects a late previous root result', async () => {
