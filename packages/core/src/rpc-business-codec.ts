@@ -130,6 +130,11 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
   if (isToolkitRequest(request) && isToolkitRequest(result)) assertToolkitResultTarget(request, result)
   const actual = result as unknown as Record<string, unknown>
   switch (request.operation) {
+    case 'message.pending.ls': case 'message.pending.edit': case 'message.pending.send':
+      if (actual.agentSessionId !== request.agentSessionId) fail()
+      if (request.operation === 'message.pending.edit' && (actual.message as { pendingId?: string })?.pendingId !== request.pendingId) fail()
+      if (request.operation === 'message.pending.send' && actual.pendingId !== request.pendingId) fail()
+      break
     case 'browser.targets':
       if (request.workspaceId && (result as Extract<AgentMuxControlResult, { operation: 'browser.targets' }>).targets.some(target => target.workspaceId !== request.workspaceId)) fail()
       break

@@ -11,6 +11,7 @@ import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousP
 import type {
   AgentCatalogEntry,
   AgentPromptCondition,
+  AgentPromptExecution,
   AgentMuxAgentMessageInput,
   AgentMuxAgentCreateInput,
   AgentMuxAgentSession,
@@ -1418,6 +1419,7 @@ export type WindowResizeEvent = {
 
 export type AgentMuxDesktopApi = {
   git: import('./git-contracts').GitProjectIdentityApi
+  notebooks: import('@agentmux/core/notebook-catalog').NotebookApi
   spatial: {
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
@@ -1598,7 +1600,7 @@ export type AgentMuxDesktopApi = {
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn: true }, authorHuman?: boolean, agentMuxNote?: string): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution }, authorHuman?: boolean, agentMuxNote?: string): Promise<void>
     submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
     respondInteraction(
       session: AgentSessionControl,

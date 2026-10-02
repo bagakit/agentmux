@@ -30,6 +30,8 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  */
 export const PRIVILEGED_SENDER_LABELS = {
   'topics:call': 'Topic content',
+  'notebook:read': 'notebook directory',
+  'notebook:apply': 'notebook changes',
   'spatial:read': 'spatial state',
   'spatial:commit': 'spatial state',
   'deviceManagement:ls': 'device administration',

@@ -434,6 +434,28 @@ export type AgentTerminalPromptRenderMatcher = {
   frameEnd: string
 }
 
+/** A single authorized submission's execution semantics, frozen with its bytes. */
+export type AgentPromptExecution = 'default' | 'immediate'
+
+/** Provider-neutral complete visible cells; content after the cursor remains present. */
+export type AgentTerminalScreenSnapshot = {
+  cols: number
+  rows: number
+  cursor: { row: number; column: number }
+  lines: { text: string; wrapped: boolean; cells: { chars: string; dim: boolean }[] }[]
+}
+
+export type AgentPromptExecutionContext = 'idle' | 'interruptible' | 'unavailable'
+
+/** Read-only Provider proof from this native Session, independent of PTY bytes. */
+export type AgentPromptExecutionEvidence = {
+  sourceId: string
+  id: string
+  nativeTurnId?: string
+  state: 'idle' | 'working' | 'ended'
+  endReason?: 'interrupted' | 'completed'
+}
+
 export type AgentPromptInputPlan =
   | { kind: 'single-phase'; data: string }
   | {
@@ -443,6 +465,8 @@ export type AgentPromptInputPlan =
       /** Logical text the Provider TUI renders after consuming transport control bytes. */
       renderedText: string
       submit: string
+      /** Provider-owned control, applied before any payload, never after submit. */
+      prepare?: { interrupt: string; endEvent: string }
     }
 
 export type AgentHookStrategy =
@@ -467,6 +491,8 @@ export type AgentCapabilities = {
   permission: 'none' | 'observe' | 'respond'
   providerResume: boolean
   replyCorrelation: 'none' | 'native-turn-id' | 'acp-turn-id'
+  /** Declared native immediate semantics; absence keeps ordinary prompt input available. */
+  promptExecution?: { immediate: 'interrupt-before-input' }
   /**
    * 这个 Provider 是否报**真实**的原生 token 用量，以及它从哪条通道到达。
    *
@@ -595,6 +621,8 @@ export type AgentHookReceipt = {
   agentSessionId: string
   run: AgentMuxRunRef
   eventName: string
+  /** Provider-proven native turn identity; never inferred from terminal text. */
+  nativeTurnId?: string
   /** Provider-normalized lifecycle; unknown stays absent and the raw eventName is retained. */
   /** Null explicitly withholds lifecycle; undefined retains native-name semantics. */
   lifecycleEvent?: AgentHookLifecycleEvent | null
@@ -827,6 +855,7 @@ export type AgentMuxAgentSession = {
       ownerInstanceId: string
       prompt: string
       plan: AgentPromptInputPlan
+      execution?: AgentPromptExecution
       /** Producer facts frozen with the first wire; tags in user text never establish these. */
       message?: AgentPromptMessageContent
     }
@@ -914,7 +943,7 @@ export type AgentTerminalOutputChannelState = {
  * fail-closed 丢掉且无编译错。
  */
 export const PROMPT_DELIVERY_DEGRADED_REASONS = [
-  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced', 'turn-end-unconfirmed', 'input-unconfirmed'
+  'screen-evidence-gap', 'prompt-render-timeout', 'screen-evidence-replaced', 'turn-end-unconfirmed', 'input-unconfirmed', 'immediate-context-unconfirmed'
 ] as const
 export type PromptDeliveryDegradedReason = (typeof PROMPT_DELIVERY_DEGRADED_REASONS)[number]
 
@@ -961,6 +990,17 @@ export type AgentTerminalPromptSubmissionState = {
     readyThroughByte: number
   }
   outputCursorBytes: number
+  /** Immutable preparation receipt; absent on ordinary input. */
+  prepare?: {
+    context: 'idle' | 'interruptible'
+    nativeTurnId?: string
+    previousReceiptId?: string
+    nativeSourceId?: string
+    /** Native end receipt for that turn, followed by an empty-composer frame. */
+    barrierReceiptId?: string
+    readyThroughByte?: number
+    interrupt?: AgentTerminalInputPhaseState
+  }
   payload: AgentTerminalInputPhaseState
   submit: AgentTerminalInputPhaseState
 }
@@ -1491,6 +1531,7 @@ export type NormalizedHookEvent = {
   eventName: string
   /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
   mainSubject: boolean
+  nativeTurnId?: string
   /**
    * 这条事件归一化后的 Core canonical 生命周期事件，**认不出时缺席**。
    *

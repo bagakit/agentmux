@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node
 import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
-import { promisify } from 'node:util'
+import { isDeepStrictEqual, promisify } from 'node:util'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/dist/spatial-state.js'
 import { regionIds } from '../../../packages/core/dist/spatial-layout.js'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
@@ -15,6 +15,13 @@ import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, re
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
 import { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns, proveOriginalRunOutput } from './goals-entry-restart-proof.mjs'
+
+// This new mode always runs the original restart harness against a private current-source build.
+// Other modes keep their existing build and invocation contract.
+if (process.argv.includes('--pending-edit') && !process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT) {
+  const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
+  process.exit(await runPendingEditRestart(process.argv.slice(2)))
+}
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
 // source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
@@ -26,7 +33,7 @@ const require = createRequire(import.meta.url)
 const exec = promisify(execFile)
 const hash = (value) => createHash('sha256').update(value).digest('hex')
 const delay = (ms) => new Promise((done) => setTimeout(done, ms))
-const knownFlags = new Set(['--message-context', '--goals-entry', '--goals-direct-pmo', '--goals-alignment', '--close-region', '--identity-menu', '--swap-names', '--hold-for-watchdog'])
+const knownFlags = new Set(['--pending-edit', '--message-context', '--goals-entry', '--goals-direct-pmo', '--goals-alignment', '--close-region', '--identity-menu', '--swap-names', '--hold-for-watchdog'])
 for (const argument of process.argv.slice(2)) assert.ok(knownFlags.has(argument) || argument.startsWith('--probe-root=') || argument.startsWith('--receipt-path='), `Unknown workbench restart mode or option: ${argument}`)
 const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?.slice('--probe-root='.length)
 const receiptPath = process.argv.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
@@ -36,13 +43,15 @@ const root = await realpath(await mkdtemp(probeRoot ? join(probeRoot, 'workbench
 const userData = join(root, 'user-data'), runtimeDirectory = join(root, 'runtime'), workspacePath = join(root, 'workspace'), topicsPath = join(root, 'topics')
 const codexHome = join(root, 'codex-home')
 const messageContextProof = process.argv.includes('--message-context')
+const pendingEditProof = process.argv.includes('--pending-edit')
+const revisedPendingText = 'Private revised second pending intent\n  Retained full text and spacing'
 const messagePrompt = { id: 'private-status-context', keyword: 'statuscontext', label: 'Private message context', body: 'Configured private instruction\n  Exact retained spacing', states: ['running', 'working'], providerId: 'codex' }
 const goalsEntryProof = process.argv.includes('--goals-entry')
 const goalsDirectPmoProof = process.argv.includes('--goals-direct-pmo')
 assert.ok(!(goalsEntryProof && goalsDirectPmoProof), 'Goals entry and direct Goal PMO are separate explicit modes')
 const goalsCtaProof = goalsEntryProof || goalsDirectPmoProof
 const ordinaryRecoveryProof = messageContextProof || goalsDirectPmoProof
-const inheritedCallerNames = (goalsCtaProof || messageContextProof) ? Object.keys(process.env).filter(name =>
+const inheritedCallerNames = (goalsCtaProof || messageContextProof || pendingEditProof) ? Object.keys(process.env).filter(name =>
   /^AGENTMUX_(?:ENV|CLI|AGENT_SESSION(?:_.*)?|AGENT_CAPABILITY|HOOK(?:_.*)?|PROVIDER_ID|EXECUTOR_ID|LIFECYCLE_OPERATION_ID|USAGE_TRANSCRIPT_FORMAT)$/.test(name)) : []
 const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_SPATIAL_STATE_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME', ...inheritedCallerNames].map(name => [name, process.env[name]]))
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
@@ -61,6 +70,7 @@ assert.ok(!swapNameProof || (identityMenuProof && !regionCloseProof), 'Three-Age
 assert.ok(!goalsAlignmentProof || (!regionCloseProof && !identityMenuProof && !swapNameProof), 'Goals is a separate original-workspace recovery case')
 assert.ok(!goalsCtaProof || (!goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Actual Goals CTA is a separate original-workspace recovery case')
 assert.ok(!messageContextProof || (!goalsCtaProof && !goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Message context is an explicit separate restart case')
+assert.ok(!pendingEditProof || (!messageContextProof && !goalsCtaProof && !goalsAlignmentProof && !regionCloseProof && !identityMenuProof && !swapNameProof), 'Pending edit is an explicit separate restart case')
 const identityName = 'Private recovery coordinator'
 const holdForWatchdog = process.argv.includes('--hold-for-watchdog')
 assert.ok(!holdForWatchdog || (regionCloseProof && probeRoot), 'Watchdog mutation belongs only to the owned close proof')
@@ -70,6 +80,7 @@ let pressureProducer, pressureFinal, pressureQualification, maximumPressureGap
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
 let goalsEntryFixture, goalsEntryRestored, messageBefore
+let pendingEditAccepted, pendingEditBefore, pendingEditAfter, pendingEditHydratedBaseline
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function focusOriginal() {
@@ -323,7 +334,7 @@ async function compiledRendererIdentity() {
   const resolvedCore = await exec(process.execPath, ['--input-type=module','--experimental-import-meta-resolve','-e',
     "import {pathToFileURL} from 'node:url';process.stdout.write(import.meta.resolve('@agentmux/core',pathToFileURL(process.argv[1]).href))",join(desktopRoot,'out/main/index.js')])
   const coreEntry = fileURLToPath(resolvedCore.stdout)
-  assert.ok(!messageContextProof || coreEntry.startsWith(join(repositoryRoot,'packages/core/dist/')), 'Private Desktop uses the owned Core build')
+  assert.ok(!(messageContextProof || pendingEditProof) || coreEntry.startsWith(join(repositoryRoot,'packages/core/dist/')), 'Private Desktop uses the owned Core build')
   return { htmlDigest: hash(html), entries, assets, coreEntry, coreEntrySha256:hash(await readFile(coreEntry)),
     coreSourceIndexSha256:hash(await readFile(join(repositoryRoot,'packages/core/src/index.ts'))) }
 }
@@ -334,6 +345,13 @@ try {
   // Core injects new private Session/Hook/capability facts only at the actual Run launch boundary.
   for (const name of inheritedCallerNames) delete process.env[name]
   const rendererIdentity = await compiledRendererIdentity()
+  const pendingEditBuild = pendingEditProof ? JSON.parse(await readFile(process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT, 'utf8')) : null
+  if (pendingEditBuild) {
+    assert.equal(pendingEditBuild.privateRoot, repositoryRoot)
+    assert.equal(pendingEditBuild.compiled['apps/desktop/out/main/index.js'], hash(await readFile(join(desktopRoot, 'out/main/index.js'))))
+    assert.equal(pendingEditBuild.compiled['packages/core/dist/index.js'], rendererIdentity.coreEntrySha256)
+    assert.equal(pendingEditBuild.sources['apps/desktop/src/renderer/src/store.ts'], hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))))
+  }
   // Provider Hook installation occurs even for a synthetic command. Parent Core setup and every
   // Electron child must share this private home rather than touching the user's native CLI config.
   Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
@@ -383,7 +401,7 @@ try {
     agentComposerDrafts: { [session.agentSessionId]: oldDraft },
     agentSteerQueues: { [session.agentSessionId]: [
       { operationId: 'private-queue-first', runId: session.run.runId, text: 'Private first pending intent', status: 'queued', enqueuedAt: _hygiene_fixtureTime(23606400000) },
-      { operationId: 'private-queue-unknown', runId: session.run.runId, text: 'Private unknown-time pending intent', status: 'queued' },
+      { operationId: 'private-queue-unknown', runId: session.run.runId, text: 'Private unknown-time pending intent', status: 'queued', ...(pendingEditProof ? { promptCondition: null } : {}) },
       { operationId: 'private-queue-last', runId: session.run.runId, text: 'Private last pending intent', status: 'queued', enqueuedAt: _hygiene_fixtureTime(23606490000) }
     ] } } }
   /** @type {Pick<import('../src/renderer/src/lib/space-agent-control.js').SpatialWorkbench, 'tabs' | 'layouts'>} */
@@ -414,6 +432,53 @@ try {
   assert.equal(before.draft, oldDraft); assert.equal(before.splitPercent, 70)
   assert.deepEqual(before.queued.map(entry => entry.operationId), ['private-queue-first', 'private-queue-unknown', 'private-queue-last'])
   assert.deepEqual(before.queued.map(entry => entry.errorCode), Array(3).fill('AGENT_EXECUTION_NOT_REQUESTED'))
+  let queueBeforeMove = before.queued
+  if (pendingEditProof) {
+    // The old seed predates the attached Run/home projection. Two real native
+    // resize actions return to the original 70% layout and let production publish
+    // its current graph before the edit proof. No fixture commit or flush occurs.
+    await first.cdp.evaluate("document.querySelector('.workbench-region-resize-handle').focus()")
+    await key(first.cdp, 'ArrowRight', 'ArrowRight')
+    await waitFor('pre-edit native split moves to 80 percent', async () => (await surface(first.cdp)).splitPercent === 80)
+    await key(first.cdp, 'ArrowLeft', 'ArrowLeft')
+    await waitFor('pre-edit native split returns to original 70 percent', async () => (await surface(first.cdp)).splitPercent === 70)
+    pendingEditHydratedBaseline = await waitFor('pre-edit production publication retains exact original Run, surfaces and layout', async () => {
+      const core = await readRecoverySpatialState(first.cdp)
+      const projected = await surface(first.cdp)
+      const original = core.graph.regions.find(region => region.regionId === agentRegionId)
+      if (original?.agentSessionId !== session.agentSessionId || original.runId !== session.run.runId ||
+          !isDeepStrictEqual(core.graph.tabLayouts, before.workbench.graph.tabLayouts)) return null
+      assert.deepEqual(projected.tabs, before.tabs); assert.deepEqual(projected.regions, before.regions)
+      assert.equal(projected.draft, oldDraft); assert.deepEqual(projected.queued, before.queued)
+      assert.deepEqual(projected.focus, before.focus); assert.deepEqual(projected.activeRegions, before.activeRegions)
+      const snapshot = await first.cdp.evaluate('window.agentmux.sessions.snapshot()')
+      const attached = snapshot.sessions.find(value => value.id === session.agentSessionId)
+      assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
+      assert.deepEqual(await runProcessIdentity(originalRun.pid), ownedRunProcess)
+      return core
+    })
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+    try {
+      pendingEditBefore = await rpc.call('message.pending.ls', { agentSessionId: session.agentSessionId })
+      assert.equal(pendingEditBefore.messages.length, 3)
+      const original = before.queued[1], publicOriginal = pendingEditBefore.messages[1]
+      assert.equal(original.promptCondition, null); assert.equal(publicOriginal.pendingId, original.operationId)
+      assert.equal(publicOriginal.editable, true); assert.equal(publicOriginal.delivery, 'not-submitted')
+      pendingEditAccepted = await rpc.call('message.pending.edit', { agentSessionId: session.agentSessionId,
+        pendingId: original.operationId, expectedText: original.text, text: revisedPendingText })
+      assert.equal(pendingEditAccepted.changed, true)
+      assert.deepEqual(pendingEditAccepted.message, { ...publicOriginal, text: revisedPendingText })
+      await assert.rejects(rpc.call('message.pending.edit', { agentSessionId: session.agentSessionId,
+        pendingId: original.operationId, expectedText: original.text, text: 'Stale CAS must never replace revised intent' }),
+      error => error.code === 'CONTROL_REQUEST_CONFLICT')
+      pendingEditAfter = await rpc.call('message.pending.ls', { agentSessionId: session.agentSessionId })
+      assert.deepEqual(pendingEditAfter.messages, pendingEditBefore.messages.map((entry, index) => index === 1 ? { ...entry, text: revisedPendingText } : entry))
+      queueBeforeMove = before.queued.map((entry, index) => index === 1 ? { ...entry, text: revisedPendingText } : entry)
+      await waitFor('real public edit reaches production Renderer durable queue', async () =>
+        JSON.stringify((await surface(first.cdp)).queued) === JSON.stringify(queueBeforeMove))
+      assert.equal((await surface(first.cdp)).editorText, before.editorText, 'Public pending edit preserves the independent bottom composer draft')
+    } finally { await rpc.dispose() }
+  }
   await first.cdp.evaluate(`(() => {
     window.__crashProof = { hooks: [], writes: [], unloads: [] }
     const original = Storage.prototype.setItem
@@ -479,17 +544,22 @@ setInterval(tick,100);
   const beforeMove = await surface(first.cdp)
   assert.deepEqual(beforeMove.outbox, [
     { text: 'Private first pending intent', datetime: new Date(_hygiene_fixtureTime(23606400000)).toISOString(), unknownTime: false },
-    { text: 'Private unknown-time pending intent', datetime: null, unknownTime: true },
+    { text: pendingEditProof ? revisedPendingText : 'Private unknown-time pending intent', datetime: null, unknownTime: true },
     { text: 'Private last pending intent', datetime: new Date(_hygiene_fixtureTime(23606490000)).toISOString(), unknownTime: false }
   ])
   const readLast = "Array.from(document.querySelectorAll('.composer-outbox li')).find(row => row.querySelector('.composer-mailbox__preview')?.textContent === 'Private last pending intent')?.querySelector('.composer-mailbox__row')"
   await activateButton(first.cdp, readLast)
-  await waitFor('selected original queue detail', () => first.cdp.evaluate("document.querySelector('.composer-outbox .composer-mailbox__full-text')?.textContent === 'Private last pending intent'"))
-  const moveLastUp = "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.textContent === 'Move up')"
+  const selectedLastDetail = pendingEditProof
+    ? "document.querySelector('.composer-outbox[data-record-key=\"queue:private-queue-last\"] [data-message-id=\"queue:private-queue-last\"] .log-turn__body')?.textContent.trim() === 'Private last pending intent'"
+    : "document.querySelector('.composer-outbox .composer-mailbox__full-text')?.textContent === 'Private last pending intent'"
+  await waitFor('selected original queue detail', () => first.cdp.evaluate(selectedLastDetail))
+  const moveLastUp = pendingEditProof
+    ? "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.getAttribute('aria-label') === 'Move up')"
+    : "Array.from(document.querySelectorAll('.composer-outbox__actions button')).find(button => button.textContent === 'Move up')"
   await activateButton(first.cdp, moveLastUp)
   await activateButton(first.cdp, moveLastUp)
   await activateButton(first.cdp, "document.querySelector('.composer-mailbox__back button')")
-  const expectedQueue = [before.queued[2], before.queued[0], before.queued[1]]
+  const expectedQueue = [queueBeforeMove[2], queueBeforeMove[0], queueBeforeMove[1]]
   await waitFor('actual outbox reordered', async () => (await surface(first.cdp)).outbox.map(row => row.text).join('|') === expectedQueue.map(entry => entry.text).join('|'))
   await activateButton(first.cdp, "document.querySelector('.composer-mailbox button[aria-label=\"Close mailbox\"]')")
   await waitFor('mailbox closed', () => first.cdp.evaluate("document.querySelector('.composer-mailbox').getClientRects().length === 0"))
@@ -506,7 +576,7 @@ setInterval(tick,100);
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
   await waitFor('actual file Region focus changed', async () => { const s = await surface(first.cdp); return s.activeRegions.length === 1 && s.activeRegions[0] === fileRegionId })
   let lastEditAt = Date.now()
-  let expectedWorkbench = structuredClone(before.workbench)
+  let expectedWorkbench = structuredClone(pendingEditHydratedBaseline ?? before.workbench)
   expectedWorkbench.graph.tabLayouts[tabId].root.ratio = 0.6
   expectedWorkbench.graph.tabLayouts[tabId].activeRegionId = fileRegionId
   if (swapNameProof) {
@@ -538,7 +608,10 @@ setInterval(tick,100);
   }
   const editedSpatial = await waitFor('Core confirms the exact original edited topology and resources', async () => {
     const value = await readRecoverySpatialState(first.cdp)
-    return JSON.stringify(value.graph) === JSON.stringify(expectedWorkbench.graph) ? value : null
+    if (pendingEditProof) surfaceDiagnostic = { stage: 'pending-edit-topology', actual: value, expected: expectedWorkbench }
+    const exact = pendingEditProof ? isDeepStrictEqual(value.graph, expectedWorkbench.graph)
+      : JSON.stringify(value.graph) === JSON.stringify(expectedWorkbench.graph)
+    return exact ? value : null
   })
   assert.deepEqual(editedSpatial.graph, expectedWorkbench.graph)
   assert.ok(editedSpatial.revision >= before.workbench.revision, 'The actual owner records the verified UI edit revision')
@@ -626,13 +699,13 @@ setInterval(tick,100);
   const restored = await surface(second.cdp)
   if (goalsCtaProof) surfaceDiagnostic = { stage: 'after-explicit-retry-and-original-focus', regions: restored.regions,
     activeRegions: restored.activeRegions, regionVisibility: restored.regionVisibility }
-  result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
+  result = { schema: 'agentmux.workbench-persistence-crash.v1', sourceCommit: pendingEditBuild?.sourceCommit ?? (await exec('git', ['rev-parse', 'HEAD'], { cwd: repositoryRoot })).stdout.trim(),
     regionClose: regionCloseProof, goalsAlignment: goalsRestored ?? null, goalsEntry: goalsEntryProof ? goalsEntryRestored : null,
     goalsDirectPmo: goalsDirectPmoProof ? goalsEntryRestored : null,
     probeDigest: hash(await readFile(import.meta.filename)), desktopMainDigest: hash(await readFile(join(desktopRoot, 'out/main/index.js'))),
     rendererIdentity,
     storeSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/store.ts'))), writerSourceDigest: hash(await readFile(join(desktopRoot, 'src/renderer/src/lib/persisted-ui-writer.ts'))),
-    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
+    fixture: { userData, origin: first.origin, ordinaryLaunchSeedControlsAbsent: true, callerAgentEnvironmentIsolated: goalsCtaProof || messageContextProof || pendingEditProof, syntheticPty: true, agentSessionId: session.agentSessionId, runId: session.run.runId, runPid: originalRun.pid },
     first: { pid: first.child.pid, signal: first.child.signalCode, producerPid: producer.pid, activeWindowMs: crashAt-lastEditAt,
       rendererHookEvents: hooks.length, maxEventGapMs: maximumPressureGap, successfulHookPosts: acknowledgements.filter(item => item.status === 204).length,
       unloadEvents: observer.unloads, actualLocalStorageWrites: observer.writes, draftWasWrittenBeforeCrash: immediatelyBeforeCrash.draft === newDraft,
@@ -658,6 +731,25 @@ setInterval(tick,100);
   const sessions = await second.cdp.evaluate('window.agentmux.sessions.snapshot()')
   const attached = sessions.sessions.find(value => value.id === session.agentSessionId)
   assert.equal(attached?.processState, 'running'); assert.equal(attached.control.run.runId, session.run.runId)
+  if (pendingEditProof) {
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+    let publicRestored
+    try { publicRestored = await rpc.call('message.pending.ls', { agentSessionId: session.agentSessionId }) }
+    finally { await rpc.dispose() }
+    assert.deepEqual(publicRestored.messages, [pendingEditAfter.messages[2], pendingEditAfter.messages[0], pendingEditAfter.messages[1]])
+    assert.deepEqual(await runProcessIdentity(originalRun.pid), ownedRunProcess, 'The original Run birth must survive actual pending edit and independent Desktop restart')
+    result.pendingEdit = { passed: true, exactFlag: '--pending-edit', buildReceipt: pendingEditBuild,
+      targetWasSecondOriginalEntry: true, original: before.queued[1], edited: queueBeforeMove[1],
+      seededWorkbench: before.workbench, preEditHydratedWorkbench: pendingEditHydratedBaseline,
+      hydratedBaselineReason: 'Old seed omits the live Run/home projection. Actual native ArrowRight then ArrowLeft returned 70→80→70 before pending edit and triggered production publication; no fixture flush/commit. Actual original DOM surfaces, focus, draft, queue, Run and process birth were independently retained.',
+      preEditNativeActions: [{ key: 'ArrowRight', splitPercent: 80 }, { key: 'ArrowLeft', splitPercent: 70 }],
+      exactLayoutEdits: { tabId, ratio: { before: 0.7, after: 0.6 }, activeRegionId: { before: agentRegionId, after: fileRegionId } },
+      publicBefore: pendingEditBefore, publicAccepted: pendingEditAccepted, publicAfter: pendingEditAfter, publicRestored,
+      expectedQueue, actualQueueBeforeCrash: immediatelyBeforeCrash.queued, actualQueueAfterRestart: restored.queued,
+      expectedWorkbench: restoredExpectedWorkbench, actualWorkbenchAfterRestart: restored.workbench,
+      originalRunBirth: ownedRunProcess, automaticallyAttachedSameRun: true, bottomDraftPreservedDuringEdit: true,
+      staleExpectedTextRejected: true, saveGrantedNoExecution: true }
+  }
   if (messageContextProof) {
     const messageAfter = await readMessageContext(second.cdp)
     assert.deepEqual(messageAfter.savedPrompts,messageBefore.savedPrompts)
@@ -700,6 +792,7 @@ setInterval(tick,100);
   const run = (await client.listRuns()).find(value => value.runId === session.run.runId)
   assert.equal(run?.state, 'running'); assert.equal(run.pid, originalRun.pid)
   assert.equal(run.acceptedInputBytes, goalsDirectPmoProof ? result.goalsDirectPmo.originalOutputAfterRestart.acceptedInputBytes : originalRun.acceptedInputBytes, 'Reading, moving and restarting pending intent must not write unrequested input to this private Run')
+  if (pendingEditProof) result.pendingEdit.originalRun = { ...ownedRunProcess, inputBefore: originalRun.acceptedInputBytes, inputAfter: run.acceptedInputBytes }
   if (goalsCtaProof) {
     const entryResult = goalsDirectPmoProof ? result.goalsDirectPmo : result.goalsEntry
     await finishGoalsEntryNativeProof({ client, fixture: goalsEntryFixture, result: entryResult })
@@ -777,5 +870,10 @@ try {
   receipt.passed = false
   receipt.failure = { name: failure.name, message: failure.message }
 }
-process.stdout.write(`${JSON.stringify(receipt)}\n`)
+// The new mode's exact receipt already lives at receiptPath. Avoid duplicating
+// its complete private build/source closure in task runner stdout.
+process.stdout.write(`${JSON.stringify(pendingEditProof
+  ? { schema: receipt.schema, mode: '--pending-edit', passed: receipt.passed, receiptPath,
+      sourceCommit: receipt.sourceCommit, failure: receipt.failure, cleanup: receipt.cleanup }
+  : receipt)}\n`)
 if (failure) { process.stderr.write(`${failure.stack}\n`); process.exitCode = 1 }

@@ -83,7 +83,7 @@ const NATIVE_FIELDS = {
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
-  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId'],
+  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
@@ -282,6 +282,13 @@ export class AgentMuxRpcService {
       return { session: method === 'agent.reopen'
         ? await client.reopenAgent(input as unknown as Parameters<AgentMuxClient['reopenAgent']>[0])
         : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
+    }
+    if (method === 'message.pending.edit' || method === 'message.pending.send') {
+      if (context.caller !== undefined || !context.principal ||
+          !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' ||
+          !context.principal.id.trim() || context.principal.id.includes('\0')) {
+        throw new AgentMuxError('Editing or submitting a human pending draft requires a transport-approved user or device. A managed Agent can use agent.send with its authenticated message envelope; the original draft and Agent remain available.', 'AGENT_CAPABILITY_INVALID')
+      }
     }
     const caller = await this.authenticated(context)
     if (isTopicMethod(method)) {
@@ -631,6 +638,8 @@ export class AgentMuxRpcService {
   private async send(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
     const target = rpcRecord(p.target)
     const operationId = rpcString(p.operationId, 'Operation ID'), text = rpcText(p.text, 'Message text')
+    if (p.execution !== undefined && p.execution !== 'default' && p.execution !== 'immediate') throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
+    const execution = p.execution ?? 'default'
     let recipientId: string
     if (target.kind === 'self') { rpcRecord(target, ['kind']); recipientId = this.requireCaller(caller).agentSessionId }
     else if (target.kind === 'agent-session') {
@@ -671,7 +680,7 @@ export class AgentMuxRpcService {
     // Both participant bindings came from their current Core owners. Public
     // inputs cannot supply sender or Run facts; rechecking a cached registry here
     // would reject a valid capability rotation or a recipient on another Host.
-    const queued = await appendGlobalMessage({ ...envelope, messageId }, queuePath)
+    const queued = await appendGlobalMessage({ ...envelope, messageId, execution }, queuePath)
     if (queued.delivery.state === 'delivered') return queued
     // An admitted envelope with an unconfirmed previous attempt is not a licence
     // to repeat input. Read its persisted receipt, preserving the current Run.
@@ -690,8 +699,10 @@ export class AgentMuxRpcService {
         ? { kind: 'agent-session', agentSessionId: recipientId } : target
       if (!this.ports.execute) await recipientOwner.client.submitAgentMessage({
         agentSessionId: recipientId, envelope: queued.envelope, condition: promptCondition,
+        execution,
         ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
       else await this.execute(this.request('send', { requestId: operationId, target: exactTarget, text, promptCondition,
+        execution,
         message: queued.envelope, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }))
       return { ...await recordGlobalMessageDelivery(queued.messageId, 'delivered', Date.now(), undefined, queuePath), agentSessionId: recipientId }
     } catch (error) {

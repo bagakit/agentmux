@@ -1,3 +1,6 @@
+import type { AgentMuxPendingMessage } from '@agentmux/core/control'
+import type { AgentPromptExecution } from '@agentmux/core'
+import { changeNotebook, type NoteNotebookContext } from './lib/notebook-library'
 import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
@@ -383,7 +386,7 @@ export type ErrorNoticeContext = {
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 const EXECUTION_NOT_REQUESTED = 'AGENT_EXECUTION_NOT_REQUESTED'
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
-const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string> }>()
+const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string> }>()
 
 
 export type AgentSteerQueueEntry = {
@@ -400,6 +403,20 @@ export type AgentSteerQueueEntry = {
   error?: string
   errorCode?: string
   origin?: 'manual'
+  /** Frozen with the first admission; an unknown old input never gains a new execution mode. */
+  execution?: AgentPromptExecution
+}
+
+/** A missing or frozen condition is not evidence that this message was never submitted. */
+export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: string): boolean {
+  return entry.promptCondition === null && entry.operationId !== inFlightId
+}
+
+/** One admission and its labels share the original execution choice, including unknown old input. */
+export function agentSteerExecution(entry: AgentSteerQueueEntry,
+  capabilities: Extract<SessionSnapshot, { kind: 'agent' }>['capabilities']): AgentPromptExecution {
+  return entry.execution ?? (entry.promptCondition === null &&
+    capabilities.promptExecution?.immediate === 'interrupt-before-input' ? 'immediate' : 'default')
 }
 
 type AppState = {
@@ -516,6 +533,9 @@ type AppState = {
   agentNames: Record<string, string>
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
+  surveyNotebookId: string | null
+  surveyNoteId: string | null
+  setSurveyNotebook(notebookId: string | null, noteId?: string | null): void
   surveyZoneSelection: SurveyZoneSelection | null
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyCollectedZones: Record<string, true>
@@ -871,7 +891,7 @@ type AppState = {
    * 所以解析必须只发生一次，然后把结果交给下游，而不是让下游自己再问一遍。
    */
   createPath(input: CreateWorkspacePathInput, workspaceId?: string): Promise<string>
-  createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string): Promise<NoteCreationReceipt>
+  createNote(tabGroupId?: string, launcher?: { tabId: string; regionId: string }, initialContent?: string, projection?: WorkbenchProjection, retryIntentId?: string, notebook?: NoteNotebookContext): Promise<NoteCreationReceipt>
   revealCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   retryCreatedNote(launcherId: string, projection?: WorkbenchProjection): Promise<NoteCreationReceipt | undefined>
   renamePath(path: string, nextPath: string, workspaceId?: string): Promise<void>
@@ -949,7 +969,8 @@ type AppState = {
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
-  sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
+  editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
+  sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
   send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
@@ -2094,6 +2115,8 @@ type PersistedAppState = {
   viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
+  surveyNotebookId?: string | null
+  surveyNoteId?: string | null
   surveyZoneSelection?: PersistedSurveyZoneSelection | null
   surveyCollectedZones?: Record<string, true>
   surveyExplorationNames?: Record<string, string>
@@ -2124,6 +2147,8 @@ export type RestoredUiState = Pick<
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
+  | 'surveyNotebookId'
+  | 'surveyNoteId'
   | 'surveyZoneSelection'
   | 'surveyCollectedZones'
   | 'surveyExplorationNames'
@@ -2206,6 +2231,8 @@ export function restorePersistedUiState(
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
+    | 'surveyNotebookId'
+    | 'surveyNoteId'
     | 'surveyZoneSelection'
     | 'surveyCollectedZones'
     | 'surveyExplorationNames'
@@ -2234,6 +2261,8 @@ export function restorePersistedUiState(
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
+    surveyNotebookId: typeof persisted.surveyNotebookId === 'string' ? persisted.surveyNotebookId : null,
+    surveyNoteId: typeof persisted.surveyNoteId === 'string' ? persisted.surveyNoteId : null,
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
     surveyCollectedZones: restoredSurveyCollection(persisted.surveyCollectedZones),
     surveyExplorationNames: restoredSurveyExplorationNames(persisted.surveyExplorationNames),
@@ -2294,6 +2323,7 @@ function selectPersistedInputs(state: AppState) {
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
+    surveyNotebookId: state.surveyNotebookId, surveyNoteId: state.surveyNoteId,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
     surveyExplorationNames: state.surveyExplorationNames,
@@ -2337,6 +2367,7 @@ function partializeAppState(state: AppState): PersistedAppState {
   const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
   const projection: PersistedAppState = {
     ...presentation,
+    surveyNotebookId: presentation.surveyNotebookId, surveyNoteId: presentation.surveyNoteId,
     surveyZoneSelection: persistedSurveyZoneSelection(presentation.surveyZoneSelection),
     documents: Object.fromEntries(Object.entries(documents).filter(([key]) => dirtyDocuments[key])),
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
@@ -2586,9 +2617,26 @@ let fileOpenIntentVersion = 0
 let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 /** The existing Space and Survey selection facts captured by file display intents. */
+function surveyPresentationAfterClose(state: Pick<AppState, 'tabs' | 'surveyZoneSelection' | 'surveyNotebookId' | 'surveyNoteId'>, tabs: AppState['tabs']) {
+  const active = state.surveyZoneSelection?.active
+  const closedPage = state.surveyNotebookId && state.surveyNoteId && active && state.tabs[active.tabId]?.regions[active.regionId]?.kind === 'file' && !tabs[active.tabId]?.regions[active.regionId]
+  return { surveyNoteId: closedPage ? null : state.surveyNoteId,
+    surveyZoneSelection: closedPage ? null : surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection) }
+}
+
+export async function registerCreatedNote(receipt: NoteCreationReceipt): Promise<NoteCreationReceipt> {
+  if (receipt.status !== 'written' || receipt.notebookRegistered) return receipt
+  try {
+    await changeNotebook({ kind: 'register', noteId: receipt.noteId, title: receipt.draft.trim().split('\n')[0]?.slice(0, 100) || 'Untitled note',
+      resource: { hostId: receipt.target.hostId, workspaceId: receipt.target.workspaceId, workspacePath: receipt.target.workspacePath, path: receipt.path },
+      ...(receipt.target.zoneId ? { workface: { zoneId: receipt.target.zoneId, workspaceId: receipt.target.workspaceId } } : {}), ...receipt.notebook }, 'note-register:' + receipt.intentId)
+    return { ...receipt, notebookRegistered: true, notebookIssue: undefined }
+  } catch (error) { return { ...receipt, notebookIssue: 'Note saved. Notebook registration is unconfirmed; recover this same note. ' + presentError(error) } }
+}
+
 export function fileNavigationSelection(state: AppState): string {
   // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
-  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection])
+  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyNotebookId, state.surveyNoteId, state.surveyZoneSelection])
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
@@ -2779,6 +2827,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
+  surveyNotebookId: null, surveyNoteId: null,
+  setSurveyNotebook(notebookId, noteId = null) { set({ surveyNotebookId: notebookId, surveyNoteId: noteId }) },
   surveyZoneSelection: null,
   surveyCollectedZones: {},
   surveyExplorationNames: {},
@@ -3734,6 +3784,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return session
     }
     requireActive()
+    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send') {
+      const session = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
+      const records = (): AgentMuxPendingMessage[] => {
+        const state = get()
+        const current = reconcileDeliveredSteers(state, session.id)
+        return (current.agentSteerQueues[session.id] ?? []).map(entry => ({
+          pendingId: entry.operationId, text: entry.text, runId: entry.runId ?? null,
+          enqueuedAt: entry.enqueuedAt ?? null, status: entry.status,
+          phase: entry.operationId === state.agentSteerInFlight[session.id]
+            ? state.agentSteerInFlightPhase[session.id] ?? 'preparing' : null,
+          editable: agentSteerCanEdit(entry, state.agentSteerInFlight[session.id]),
+          delivery: entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
+          errorCode: entry.errorCode ?? null, error: entry.error ?? null
+        }))
+      }
+      if (request.operation === 'message.pending.ls') return { operation: request.operation, agentSessionId: session.id, messages: records() }
+      const before = records().find(item => item.pendingId === request.pendingId)
+      if (!before) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original pending message is no longer available. No new message was created.')
+      if (request.operation === 'message.pending.edit') {
+        get().editQueuedAgentSteer(session.id, request.pendingId, request.expectedText, request.text)
+        const message = records().find(item => item.pendingId === request.pendingId)!
+        return { operation: request.operation, agentSessionId: session.id, message, changed: before.text !== message.text }
+      }
+      const disposition = await get().sendQueuedAgentSteer(session.id, request.pendingId)
+      const message = records().find(item => item.pendingId === request.pendingId) ?? null
+      return { operation: request.operation, agentSessionId: session.id, pendingId: request.pendingId,
+        disposition, message }
+    }
     if (request.operation === 'agent.inspect') {
       return { operation: request.operation, agentSessionId: request.agentSessionId,
         override: agentDisplayOverride(get().agentNames, request.agentSessionId) }
@@ -4196,6 +4274,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (condition.expectedRun.runId !== session.control.run.runId) throw controlFailure(
         'STALE_AGENT_SESSION', 'Message intent targets another Run.')
       await api.sessions.submitMessage(session.control, { envelope: request.message, condition,
+        ...(request.execution === undefined ? {} : { execution: request.execution }),
         ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       return { operation: request.operation, agentSessionId: session.id }
     }
@@ -4690,7 +4769,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       set((current) => {
         const topology = applyWorkbenchViewCloseTopology(current, plan, tab)
         const committed = { ...reconcileWorkbenchFileProjection(current, topology),
-          surveyZoneSelection: surveySelectionAfterClose(current.tabs, topology.tabs, current.surveyZoneSelection),
+          ...surveyPresentationAfterClose(current, topology.tabs),
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
@@ -5012,7 +5091,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { ...(obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })
         : { tabs }),
-        surveyZoneSelection: surveySelectionAfterClose(state.tabs, tabs, state.surveyZoneSelection),
+        ...surveyPresentationAfterClose(state, tabs),
         workbenchSpaceSelection: desktopSpaceSelectionAfterClose(state.workbenchSpaceSelection, { tabs, layouts: state.layouts },
           { workspaceId, tabId, regionId }) }
     })
@@ -6421,7 +6500,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       read = { ...read, status: 'unknown', issue: presentError(error) }; publish(); return read
     }
   },
-  async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId) {
+  async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId, notebook) {
     const captured = get(), openingIntent = fileOpenIntentVersion, openingSelection = fileNavigationSelection(captured)
     let navigationChanged = false
     const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== openingSelection) navigationChanged = true })
@@ -6447,6 +6526,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const noteId = retrying ? previous.noteId : crypto.randomUUID(), blockId = retrying ? previous.blockIds[0]! : crypto.randomUUID(), draft = retrying ? previous.draft : initialContent ?? ''
     let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
       ...(launcher ? { launcher } : {}),
+      ...(retrying && previous.notebook ? { notebook: previous.notebook } : notebook ? { notebook } : {}),
       target: { workspaceId, hostId: originalResource.hostId, workspacePath: originalResource.path, directoryPath: null, relativeDirectory: null, zoneId: tab?.space?.zoneId ?? null,
         sourceSpaceId: tab?.space?.spaceId ?? null, displayWorkspaceId: noteCreationDisplayWorkspace(captured, { workspaceId, groupId, ...(projection ? { displayWorkspaceId: projection.displayWorkspaceId } : {}), ...(launcher ? { launcher } : {}) }), groupId },
       ...(projection && launcher ? { presentation: { presentationId: projection.presentationId, entity: projection.entity,
@@ -6479,6 +6559,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     receipt = { ...receipt, status: named.result.status, write: named.result, ...(named.result.status === 'written' ? {} : { issue: named.result.message }) }; publish()
     if (named.result.status !== 'written') return receipt
+    receipt = await registerCreatedNote(receipt); publish()
     set(current => ({ workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId) }))
     // Creation belongs to the captured request; a later navigation never grants it a new reveal intent.
     if (navigationChanged || fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== openingSelection) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
@@ -6520,6 +6601,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== selected) {
       receipt = { ...receipt, issue: 'The same Note was checked. Later navigation was preserved; choose this file when ready.' }; publish(); return receipt
     }
+    receipt = await registerCreatedNote(receipt); publish()
     const placement = noteFilePlacement(target, projection, receipt.launcher)
     if (!resourceCurrent() || !placement) { receipt = { ...receipt, issue: 'The exact Note resource or display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
     try {
@@ -6532,7 +6614,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async retryCreatedNote(launcherId, projection) {
     const receipt = useLauncherState.getState().drafts[launcherId]?.noteCreation
     if (receipt?.status !== 'error') return receipt
-    return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId)
+    return await get().createNote(receipt.target.groupId, receipt.launcher, receipt.draft, projection, receipt.intentId, receipt.notebook)
   },
   async renamePath(path, nextPath, requestedWorkspaceId) {
     const workspaceId = requestedWorkspaceId ?? get().activeWorkspaceId
@@ -7561,6 +7643,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
     void get().flushAgentSteerQueue(sessionId)
   },
+  editQueuedAgentSteer(sessionId, operationId, expectedText, nextText) {
+    if (!nextText.trim() || nextText.includes('\0')) {
+      throw controlFailure('INVALID_AGENT_PROMPT', 'The edited message is empty or exceeds the input budget. Your original message is kept.')
+    }
+    set(state => {
+      const queue = state.agentSteerQueues[sessionId]
+      const entry = queue?.find(item => item.operationId === operationId)
+      if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This pending message is no longer available. No replacement was created.')
+      if (!agentSteerCanEdit(entry, state.agentSteerInFlight[sessionId])) {
+        throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'This message is preparing, submitted or its original delivery is unknown. Its original text and input are kept; you can still read and copy it.')
+      }
+      if (entry.text !== expectedText) {
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This pending message changed while you were editing. The current message is kept.')
+      }
+      if (agentPromptExceedsBudget(composeAgentPrompt(nextText, entry.agentMuxNote).text)) {
+        throw controlFailure('INVALID_AGENT_PROMPT', 'The edited message exceeds the input budget. Your original message is kept.')
+      }
+      if (entry.text === nextText) return state
+      return { agentSteerQueues: { ...state.agentSteerQueues,
+        [sessionId]: queue!.map(item => item.operationId === operationId ? { ...item, text: nextText } : item) } }
+    })
+    // Saving changes only the original intent. It never grants execution or wakes its consumer.
+  },
   moveAgentSteer(sessionId, operationId, direction) {
     set((state) => {
       // The mailbox hides confirmed delivery too. Resolve adjacency from the same pending facts.
@@ -7584,7 +7689,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!entry || session?.kind !== 'agent' || entry.runId !== undefined &&
-      !steerEntryTargetsRun(entry, session.control.run.runId)) return
+      !steerEntryTargetsRun(entry, session.control.run.runId)) return 'unconfirmed'
     set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues,
       [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
         if (item.operationId !== operationId || item.errorCode !== EXECUTION_NOT_REQUESTED) return item
@@ -7592,7 +7697,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
       }) } }))
     // Manual retry uses the same ordered consumer and the entry's original operation identity.
-    await get().flushAgentSteerQueue(sessionId, operationId)
+    const pending = get().flushAgentSteerQueue(sessionId, operationId)
+    const originalDrain = agentSteerDrains.get(sessionId)
+    await pending
+    return originalDrain?.submitted.has(operationId) ? 'submitted' : 'unconfirmed'
   },
   flushAgentSteerQueue(sessionId, explicitOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
@@ -7605,7 +7713,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       active.wake = true
       return active.promise
     }
-    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>(requested ? [requested] : []) }
+    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>(requested ? [requested] : []), submitted: new Set<string>() }
     drain.promise = Promise.resolve().then(async () => {
       try {
         for (;;) {
@@ -7699,9 +7807,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 'The Run changed before message preparation. This message will not be sent to another Run.')
               const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
                 afterSubmissionId: fresh.promptSubmissionPredecessor })
+              const execution = explicitAttempt ? agentSteerExecution(pending, fresh.capabilities) : 'default'
               set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: current.agentSteerQueues[sessionId]!.map(item =>
-                  item.operationId === entry.operationId ? { ...item, promptCondition: condition } : item) } }))
+                  item.operationId === entry.operationId ? { ...item, promptCondition: condition,
+                    ...(execution === 'immediate' ? { execution } : {}) } : item) } }))
               preparedHere = true
             }
             await flushMessageWorkbench(explicitlyBound)
@@ -7715,8 +7825,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               ...current.agentSteerInFlightPhase, [sessionId]: 'submitting'
             } }))
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
-              explicitAttempt ? { allowUncertainTurn: true } : undefined,
+              explicitAttempt ? { allowUncertainTurn: true,
+                ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
+                : pending.execution === 'immediate' ? { execution: 'immediate' } : undefined,
               pending.origin === 'manual', pending.agentMuxNote)
+            drain.submitted.add(entry.operationId)
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
               const agentSteerQueues = { ...current.agentSteerQueues }

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { dirname, join, relative } from 'node:path'
@@ -106,7 +106,8 @@ const DEGRADED_REASON_ANCHOR: Record<PromptDeliveryDegradedReason, true> = {
   'prompt-render-timeout': true,
   'screen-evidence-replaced': true,
   'turn-end-unconfirmed': true,
-  'input-unconfirmed': true
+  'input-unconfirmed': true,
+  'immediate-context-unconfirmed': true
 }
 /** 同一份锚点在 control-host.test.ts 里也有一处（那边用它钉「每个操作都被显式定过档」）。两处都被 tsc 钉住，故不会互相漂移。 */
 const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true> = {
@@ -210,7 +211,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/work"),
+    workspacePath: fixturePath("tmp/work"),
     run: { runId: 'daemon-1' },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',

@@ -5,7 +5,7 @@ import {
 } from './agent-prompt-budget.js'
 import { AgentMuxError } from './errors.js'
 import { assertTerminalCheckpointRestore } from './terminal-continuation.js'
-import type { AgentMuxTerminalCheckpoint } from './types.js'
+import type { AgentMuxTerminalCheckpoint, AgentTerminalScreenSnapshot } from './types.js'
 
 const { Terminal } = headless
 
@@ -142,6 +142,25 @@ export class AgentTerminalScreen {
     return null
   }
 
+  /** Complete viewport, including cells after the cursor and below its row. */
+  snapshot(): AgentTerminalScreenSnapshot {
+    const buffer = this.terminal.buffer.active
+    return {
+      cols: this.terminal.cols, rows: this.terminal.rows,
+      cursor: { row: buffer.cursorY, column: buffer.cursorX },
+      lines: Array.from({ length: this.terminal.rows }, (_, row) => {
+        const line = buffer.getLine(buffer.baseY + row)
+        return {
+          text: line?.translateToString(true) ?? '', wrapped: line?.isWrapped === true,
+          cells: Array.from({ length: this.terminal.cols }, (_, column) => {
+            const cell = line?.getCell(column)
+            return { chars: cell?.getChars() ?? '', dim: Boolean(cell?.isDim()) }
+          })
+        }
+      })
+    }
+  }
+
   dispose(): void {
     this.terminal.dispose()
   }
@@ -162,6 +181,8 @@ export type AgentTerminalScreenWait = {
   requireOutputAfterBoundary: boolean
   /** 只有 initial-composer readiness 需要：boundary 之后必须观察到一个完整的同步更新帧。 */
   requireFrameAfterBoundary?: boolean
+  /** Never decode a half-written synchronized update. */
+  requireCompleteFrame?: boolean
   predicate: (screen: AgentTerminalScreen) => boolean
   timeoutMs?: number
   timeoutMessage: string
@@ -293,7 +314,8 @@ export class AgentTerminalScreenEvidence {
         const frameObserved = !options.requireFrameAfterBoundary ||
           this.startMarker === null ||
           (this.completeFrame !== null && this.completeFrame.startByte >= options.boundaryByte)
-        if (crossedBoundary && frameObserved && options.predicate(this.screen)) {
+        if (crossedBoundary && frameObserved && (!options.requireCompleteFrame ||
+          (this.completeFrame !== null && this.pendingFrameStartByte === null)) && options.predicate(this.screen)) {
           settled = true
           cleanup()
           resolve(this.screen.throughByte)

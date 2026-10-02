@@ -1,6 +1,8 @@
+import type { PendingMessageControlRequest, PendingMessageControlResult } from './pending-message-control.js'
+export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError } from './errors.js'
-import type { AgentExecutorId, AgentProviderId } from './types.js'
+import type { AgentExecutorId, AgentProviderId, AgentPromptExecution } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
@@ -250,7 +252,7 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; execution?: AgentPromptExecution; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy
@@ -554,6 +556,7 @@ export type AgentMuxControlCrashLogResult =
   | { operation: 'diagnostics.crash-log.reveal'; path: string; requested: true }
 
 export type AgentMuxControlRequest =
+  | PendingMessageControlRequest
   | (RequestBase & BrowserTaskControlPayload)
   | ToolkitRequest
   | AgentMuxControlMetricsRequest
@@ -650,6 +653,7 @@ export type AgentMuxControlBrowserReplayPlan = {
 }
 
 export type AgentMuxControlResult =
+  | PendingMessageControlResult
   | BrowserTaskControlResult
   | ToolkitResult
   | { operation: 'metrics.get'; observation: MetricsObservation }
@@ -962,6 +966,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   // 开场帧同样只读本地状态就能答出来（那条操作在不在、有没有缺口），所以是短档——**这个预算管的是
   // 开场帧，不是整条流**。流本身的存活由长连接路径自己管（socket 上没有"请求超时"可言：一个操作
   // 安静十分钟是正常的，不是超时）。若这里给长档，等于让一个只读本地状态的问答白等一分钟。
+  'message.pending.ls': 'short',
+  'message.pending.edit': 'short',
+  'message.pending.send': 'long',
   'browser.subscribe': 'short'
   , 'demand.list': 'short'
   , 'demand.show': 'short'

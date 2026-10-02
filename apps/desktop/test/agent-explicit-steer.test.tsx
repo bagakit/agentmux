@@ -66,6 +66,7 @@ let nativeRunId: string
 let writes: string[], holdInput: ((data: string) => Promise<void>) | undefined
 let loseSubmitAck: boolean
 let privateQueueDirectory: string, capability: string
+let immediateCapability: boolean
 
 function deferred() {
   let resolve!: () => void
@@ -91,6 +92,7 @@ async function settled() {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   writes = []; holdInput = undefined; loseSubmitAck = false; nativeRunId = RUN; gates = []
+  immediateCapability = false
   privateQueueDirectory = await mkdtemp(join(tmpdir(), 'amx-explicit-steer-'))
   bridge.storageDirectory = privateQueueDirectory
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(privateQueueDirectory, 'messages.ndjson'))
@@ -151,6 +153,15 @@ beforeEach(async () => {
   const session = { ...composerSession(ID), workspacePath: durable.workspacePath,
     status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [session], timelines: {}, recoveryCandidates: [] })
+  // Existing transport/fence cases use an ordinary Provider capability. Native immediate
+  // preparation has its separate complete-frame and actual CLI acceptance fixtures.
+  const refresh = api.sessions.refresh
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async control => {
+    const current = await refresh(control)
+    if (current.kind !== 'agent') return current
+    const {promptExecution:_native,...ordinary}=current.capabilities
+    return {...current,capabilities:{...ordinary,...(immediateCapability ? {promptExecution:{immediate:'interrupt-before-input' as const}} : {})}}
+  })
   vi.spyOn(api.providers, 'list').mockResolvedValue([])
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   disposeStore = await useAppStore.getState().initialize()
@@ -196,6 +207,34 @@ it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an
   expect(client.agentSession(ID).terminalPromptDelivery?.reason).toBe('turn-end-unconfirmed')
   await settled()
   expect(writes).toEqual(['first explicit steer', '\r', 'second explicit steer', '\r'])
+})
+
+it('generic immediate capability travels from Cmd+Enter through preload, IPC and Main into the Core Provider plan', async () => {
+  immediateCapability = true
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === ID
+    ? { ...item, capabilities: { ...item.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } } : item) })))
+  const prepare = vi.spyOn((client as any).promptSubmission, 'submitInputPlan').mockImplementation(async (...args: any[]) => args[11])
+  await draft('one authorized native immediate message'); await enter('metaKey'); await settled()
+  expect(prepare).toHaveBeenCalledOnce()
+  expect(prepare.mock.calls[0]![4]).toMatchObject({kind:'render-then-submit',prepare:{interrupt:'\x1b',endEvent:'Interrupt'}})
+  expect(prepare.mock.calls[0]![12]).toBe('immediate')
+  expect(bridge.invoke.mock.calls.find(call=>call[0]==='sessions:submitPrompt')?.[5]).toEqual({allowUncertainTurn:true,execution:'immediate'})
+  expect(queue()).toEqual([]);expect(writes).toEqual([])
+})
+
+it('ordinary Enter and an old unknown default input do not gain native immediate authorization', async () => {
+  immediateCapability = true
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === ID
+    ? { ...item, capabilities: { ...item.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } } : item) })))
+  const prepare = vi.spyOn((client as any).promptSubmission, 'submitInputPlan').mockImplementation(async (...args: any[]) => args[11])
+  await draft('ordinary native queue input'); await enter(); await settled()
+  expect(prepare.mock.calls[0]![4].prepare).toBeUndefined();expect(prepare.mock.calls[0]![12]).toBeUndefined()
+  await act(async () => {
+    useAppStore.setState({agentSteerQueues:{[ID]:[{operationId:'old-unknown-default',text:'original default text',runId:RUN,status:'deferred',promptCondition:{expectedRun:{runId:RUN},afterSubmissionId:null}}]}})
+    await useAppStore.getState().sendQueuedAgentSteer(ID,'old-unknown-default')
+  })
+  expect(prepare.mock.calls.at(-1)![4].prepare).toBeUndefined();expect(prepare.mock.calls.at(-1)![12]).toBeUndefined()
+  expect(writes).toEqual([])
 })
 
 it('retains multiple exact explicit intents arriving while an earlier real Core receipt is pending', async () => {

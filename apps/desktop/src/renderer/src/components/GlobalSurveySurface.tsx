@@ -1,3 +1,7 @@
+import { DEFAULT_NOTEBOOK_ID, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { NotebookHome, NotebookNavigation } from './SurveyNotebook'
+import { changeNotebook, refreshNotebookLibrary, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
+import { openNotebookPage, prepareNotebookWorkface } from '../lib/survey-notebooks'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { useLauncherState } from '../lib/launcher-state'
@@ -36,6 +40,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   selection: ResolvedSurveyZoneSelection | null
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
+  const [pageQuery, setPageQuery] = useState('')
+  const library = useNotebookLibrary(state => state.state)
+  const libraryIssue = useNotebookLibrary(state => state.issue)
+  const notebookId = useAppStore(state => state.surveyNotebookId)
+  useEffect(() => setPageQuery(''), [notebookId])
+  const noteId = useAppStore(state => state.surveyNoteId)
+  const activeNotebook = notebookId ? library?.notebooks[notebookId] : undefined
+  const notebooks = useMemo(() => Object.values(library?.notebooks ?? {}), [library])
+  const pages = useMemo(() => Object.values(library?.pages ?? {}), [library])
+  const newNotebookIntent = useRef<{ notebookId: string; name: string; operationId: string } | null>(null)
   const config = useAppStore(state => state.config)
   const browserInput = useRef<BrowserAddressInputHandle>(null)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
@@ -119,13 +133,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   })
   const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
   const intent = useRef(0)
-  const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; draft?: { launcherId: string; value: string } } | null>(null)
+  const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; notebook?: NoteNotebookContext; notebookPage?: boolean; draft?: { launcherId: string; value: string } } | null>(null)
   const [noteRecovery, setNoteRecovery] = useState(false)
   const failedCreation = useRef<SurveyBrowserPreparation | null>(null)
-  useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId])
+  useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId, notebookId, noteId])
   useEffect(() => { if (toolsOpen) setToolsVisited(true) }, [toolsOpen])
   useEffect(() => {
-    if (controlNavigation) return
+    if (controlNavigation || notebookId) return
     const surface = surfaceRef.current
     if (!visible) { if (surface?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur(); return }
     const findTarget = () => {
@@ -151,7 +165,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     })
     observer.observe(surface, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation])
+  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation, notebookId])
 
   function itemTitle(zone: AgentMuxZoneFact): string {
     return surveyExplorationName(explorationNames[zone.zoneId], (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? [tabs[id]!] : []))
@@ -201,11 +215,37 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }
 
   function chooseZone(zoneId: string): void {
+    useAppStore.getState().setSurveyNotebook(null)
+
     if (!catalog) return
     intent.current += 1
     const held = useAppStore.getState().surveyZoneSelection
     if (held?.zoneId !== zoneId) setSelection(surveyInitialZoneSelection(catalog, zoneId, layouts, tabs, activeWorkspaceId))
     setError(null)
+  }
+
+  function chooseNotebook(id: string): void {
+    intent.current += 1
+    const state = useAppStore.getState()
+    state.setSurveyNotebook(id); state.setSurveyZoneSelection(null); setError(null)
+  }
+  async function newNotebook(): Promise<void> {
+    if (opening) return
+    const started = intent.current
+    setOpening(true); setError(null)
+    const prepared = newNotebookIntent.current ?? { notebookId: crypto.randomUUID(), name: 'Untitled notebook', operationId: crypto.randomUUID() }
+    newNotebookIntent.current = prepared
+    try {
+      await changeNotebook({ kind: 'create', notebookId: prepared.notebookId, name: prepared.name }, prepared.operationId)
+      newNotebookIntent.current = null; if (intent.current === started) chooseNotebook(prepared.notebookId)
+    } catch (cause) { setError('Notebook could not be saved. Retry this same creation; existing pages are kept. ' + presentError(cause)) }
+    finally { setOpening(false) }
+  }
+  async function showNotebookPage(page: NotebookPage): Promise<void> {
+    intent.current += 1
+    useAppStore.getState().setSurveyNotebook(page.notebookId, page.noteId)
+    setError(null)
+    try { await openNotebookPage(page) } catch (cause) { setError(presentError(cause)) }
   }
 
   async function openBrowser(input = 'about:blank', newItem = false): Promise<void> {
@@ -219,7 +259,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       const reference = preparation.reference, current = useAppStore.getState()
       failedCreation.current = null
       setCreationNotice(null)
-      if (intent.current === startedIntent && current.mainSurface === 'survey' && current.surveyZoneSelection === before.surveyZoneSelection) setSelection({ zoneId: preparation.zone.zoneId, selection: [reference], active: reference })
+      if (intent.current === startedIntent && current.mainSurface === 'survey' && current.surveyZoneSelection === before.surveyZoneSelection) { current.setSurveyNotebook(null); setSelection({ zoneId: preparation.zone.zoneId, selection: [reference], active: reference }) }
     } catch (cause) { setError(`Browser could not open: ${presentError(cause)}. Your input and original work surface are kept; retry here.`) }
     finally { setOpening(false) }
   }
@@ -246,7 +286,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     finally { setOpening(false) }
   }
 
-  async function openNote(newExploration: boolean, recover = false): Promise<void> {
+  async function openNote(newExploration: boolean, recover = false, notebookPage = false, parentNoteId: string | null = null): Promise<void> {
     if (opening) return
     const before = useAppStore.getState()
     let heldSelection = before.surveyZoneSelection
@@ -254,14 +294,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     try {
       let prepared = recover ? pendingNote.current : null
       if (!prepared) {
-        if (!workspace) throw new Error('Choose a resource workspace in Space to start a note.')
-        const selected = !newExploration ? selection?.active : null
-        if (!newExploration && !currentZone) throw new Error('This research is unavailable. Your note draft is kept.')
+        const noteWorkspace = notebookPage && activeNotebook?.workface ? resourceWorkspaces.get(activeNotebook.workface.workspaceId) : workspace
+        if (!noteWorkspace) throw new Error('Choose the original resource workspace to start a note.')
+        const selected = !newExploration && !notebookPage ? selection?.active : null
+        if (!newExploration && !notebookPage && !currentZone) throw new Error('This research is unavailable. Your note draft is kept.')
         const active = selected && before.layouts[selected.displayWorkspaceId]?.groups.some(group => group.id === selected.groupId && group.tabOrder.includes(selected.tabId)) ? selected : null
-        const displayWorkspaceId = active?.displayWorkspaceId ?? workspace.id
+        const displayWorkspaceId = active?.displayWorkspaceId ?? noteWorkspace.id
         const groupId = active?.groupId ?? before.layouts[displayWorkspaceId]?.activeGroupId
         if (!groupId) throw new Error('The original display Group is still restoring. No note was created.')
-        const zoneId = newExploration ? (await before.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })).zone.zoneId : currentZone!.zoneId
+        const zoneId = notebookPage && activeNotebook ? (await prepareNotebookWorkface(activeNotebook, noteWorkspace.id, face => { pendingNote.current = { zoneId: face.zoneId, workspaceId: face.workspaceId, displayWorkspaceId, groupId, reference: null, notebook: { notebookId: activeNotebook.notebookId, parentNoteId }, notebookPage: true } })).zoneId
+          : newExploration ? (await before.createWorkbenchZone({ workspaceId: noteWorkspace.id, spaceIds: [] })).zone.zoneId : currentZone!.zoneId
         if (!useAppStore.getState().setSurveyZoneCollected(zoneId, true)) throw new Error('The exploration resource is unconfirmed. Its original target is kept.')
         // Adding content keeps the current exploration's visible name through later Tab changes.
         const existingTitle = !newExploration && currentZone ? itemTitle(currentZone) : null
@@ -269,17 +311,21 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         let reference = active
         const retainedDraft = active ? useLauncherState.getState().drafts[`region:${active.regionId}`]?.note : undefined
         if (active && before.tabs[active.tabId]?.regions[active.regionId]?.kind !== 'launcher') {
-          before.splitRegion(workspace.id, active.tabId, active.regionId, 'right')
+          before.splitRegion(noteWorkspace.id, active.tabId, active.regionId, 'right')
           const split = useAppStore.getState().tabs[active.tabId]
           const regionId = split?.layout.activeRegionId
           if (!regionId || regionId === active.regionId || split?.regions[regionId]?.kind !== 'launcher') throw new Error('The note pane could not open. Your page and draft are kept; try again.')
           reference = { ...active, regionId }
         }
-        prepared = { zoneId, workspaceId: workspace.id, displayWorkspaceId, groupId, reference: reference ?? null,
+        prepared = { zoneId, workspaceId: noteWorkspace.id, displayWorkspaceId, groupId, reference: reference ?? null, notebookPage,
+          notebook: { notebookId: activeNotebook?.notebookId ?? DEFAULT_NOTEBOOK_ID, ...(notebookPage ? { parentNoteId } : {}), ...(currentBrowser && currentBrowser.url !== 'about:blank' && currentZone && selection?.active && !notebookPage ? { source: { sourceId: crypto.randomUUID(), url: currentBrowser.url, title: currentBrowser.title ?? null, recordedAt: Date.now(), position: { zoneId: currentZone.zoneId, tabId: selection.active.tabId, regionId: selection.active.regionId } } } : {}) },
           ...(active && retainedDraft ? { draft: { launcherId: `region:${active.regionId}`, value: retainedDraft } } : {}) }
         pendingNote.current = prepared
       }
       if (!prepared) throw new Error('The original Note preparation is unavailable. No replacement was created.')
+      if (recover && prepared.notebookPage && prepared.notebook?.notebookId) {
+        await changeNotebook({ kind: 'bind', notebookId: prepared.notebook.notebookId, workface: { zoneId: prepared.zoneId, workspaceId: prepared.workspaceId } }, 'notebook-workface:' + prepared.notebook.notebookId + ':' + prepared.zoneId)
+      }
       if (!prepared.reference) {
         const tabId = before.openLauncher({ workspaceId: prepared.workspaceId, displayWorkspaceId: prepared.displayWorkspaceId, tabGroupId: prepared.groupId, zoneId: prepared.zoneId, reveal: false })
         const launcher = tabId ? useAppStore.getState().tabs[tabId] : undefined
@@ -304,12 +350,14 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       const launcherId = `region:${reference.regionId}`
       const retained = useLauncherState.getState().drafts[launcherId]?.noteCreation
       const receipt = recover && retained ? await (retained.status === 'error' ? current.retryCreatedNote(launcherId, scope) : current.revealCreatedNote(launcherId, scope))
-        : await current.createNote(reference.groupId, { tabId: reference.tabId, regionId: reference.regionId }, prepared.draft?.value, scope)
+        : await current.createNote(reference.groupId, { tabId: reference.tabId, regionId: reference.regionId }, prepared.draft?.value, scope, undefined, prepared.notebook)
       if (!receipt || receipt.status !== 'written' || !receipt.revealed || !displayed) {
         setNoteRecovery(true)
         throw new Error(receipt?.issue ?? (receipt?.status === 'written' ? 'The Note is saved. Open this same note when ready; later navigation was kept.' : 'The Note creation or display is unconfirmed. Check this same note; its original target is kept.'))
       }
-      pendingNote.current = null; setNoteRecovery(false)
+      if (prepared.notebookPage && prepared.notebook?.notebookId) useAppStore.getState().setSurveyNotebook(prepared.notebook.notebookId, receipt.noteId)
+      pendingNote.current = receipt.notebookIssue ? prepared : null; setNoteRecovery(!!receipt.notebookIssue)
+      setCreationNotice(receipt.notebookIssue ?? null)
       if (prepared.draft && receipt.draft === prepared.draft.value && useLauncherState.getState().drafts[prepared.draft.launcherId]?.note === prepared.draft.value) {
         useLauncherState.getState().setDraft(prepared.draft.launcherId, 'note', '')
       }
@@ -341,15 +389,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New tab" title="New browser tab" disabled={opening} onClick={() => void openBrowser('about:blank', true)}>
-          {opening ? <LoaderCircle className="spin" size={14} /> : <Plus size={14} />}<span>New tab</span>
-        </button><button type="button" className="survey-icon-button" aria-label="New note exploration" title="Start with a note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /></button></div>
+        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New webpage" disabled={opening} onClick={() => void openBrowser('about:blank', true)}>
+          <Globe2 size={14} /><span>Webpage</span>
+        </button><button type="button" className="survey-new-page" aria-label="New notebook" title="New notebook" disabled={opening} onClick={() => void newNotebook()}><NotebookPen size={14} /><span>Notebook</span></button></div>
         <div className="survey-page-list">
+          <NotebookNavigation notebooks={notebooks} pages={pages} selectedId={notebookId} selectedNoteId={noteId} onSelect={chooseNotebook} onOpen={page => void showNotebookPage(page)} query={pageQuery} onQuery={setPageQuery} onCreateChild={page => { setPageQuery(''); void openNote(false, false, true, page.noteId) }} />
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
             <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
           </div>)}
-          {items.map(zone => {
+          {items.filter(zone => !notebooks.some(book => book.workface?.zoneId === zone.zoneId)).map(zone => {
             const status = activity(zone)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
               activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
@@ -358,8 +407,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         </div>
       </aside>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
-        {options}
-        {selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Write a note alongside this page' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
+        {activeNotebook ? <button className="survey-tab-view" onClick={() => chooseNotebook(activeNotebook.notebookId)}><NotebookPen size={14} /><span>Pages</span></button> : options}
+        {activeNotebook ? <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, false, true)}><Plus size={14} /><span>New page</span></button> : selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Write a note alongside this page' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
       </div>
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
         hidden={sidebarCollapsed}
@@ -373,12 +422,13 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     <div className="survey-content">
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
-        {noteRecovery ? <p className="survey-relation-notice" role="status">The original Note target is kept. <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Recover same note</button></p> : null}
-        {creationNotice ? <p className="survey-relation-notice">{creationNotice}</p> : null}
-        {!selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
+        {noteRecovery && !creationNotice ? <p className="survey-relation-notice" role="status">The original Note target is kept. <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Recover same note</button></p> : null}
+        {creationNotice ? <p className="survey-relation-notice" role="status">{creationNotice}{noteRecovery ? <button className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Retry Notebook registration</button> : null}</p> : null}
+        {libraryIssue && !creationNotice ? <p className="survey-relation-notice" role="status">Notebook directory is unconfirmed. Saved pages and browsing are kept. <button onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh</button><details><summary>Details</summary>{libraryIssue}</details></p> : null}
+        {activeNotebook && !selection ? <NotebookHome query={pageQuery} onQuery={sidebarCollapsed ? setPageQuery : undefined} notebook={activeNotebook} pages={pages.filter(page => page.notebookId === activeNotebook.notebookId)} pending={opening} onCreate={() => void openNote(false, false, true)} onOpen={page => void showNotebookPage(page)} /> : !selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
           <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
             <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
-            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><button type="button" className="survey-start-note" disabled={opening || !workspace} onClick={() => void openNote(true)}><NotebookPen size={16} /><span>Start with a note</span></button>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
+            <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><button type="button" className="survey-start-note" disabled={opening || !workspace} onClick={() => void newNotebook()}><NotebookPen size={16} /><span>Start a notebook</span></button>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}
         </div> : <>
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
             This work surface is outside the Survey list. Its content and selection are kept. Start an independent research from the page’s Research in Survey action.

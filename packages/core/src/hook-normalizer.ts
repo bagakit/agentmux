@@ -57,6 +57,7 @@ export type AgentNativeSubagentTracking = {
 
 export type AgentNativeHookSpecification = {
   rules: readonly AgentNativeHookStateRule[]
+  nativeTurnIdKeys?: readonly string[]
   /** Pure native Session membership/transition evidence; false preserves only observation. */
   matchesNativeSession?: (
     eventName: string,
@@ -603,6 +604,10 @@ export function normalizeNativeHook(
     providerId: envelope.providerId,
     eventName,
     mainSubject,
+    ...(() => {
+      const value = mainSubject ? specification.nativeTurnIdKeys?.map(key => payload[key]).find(value => typeof value === 'string' && value.trim()) : undefined
+      return typeof value === 'string' ? { nativeTurnId: value } : {}
+    })(),
     ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
     semanticState,
     status,

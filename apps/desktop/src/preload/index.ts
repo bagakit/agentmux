@@ -75,6 +75,15 @@ import type {
 } from '../shared/git-contracts.js'
 
 const api: AgentMuxPreloadApi = {
+  notebooks: {
+    read: () => ipcRenderer.invoke('notebook:read'),
+    apply: input => ipcRenderer.invoke('notebook:apply', input),
+    onChange: listener => {
+      const receive = (_event: unknown, event: import('@agentmux/core/notebook-catalog').NotebookObservation) => listener(event)
+      ipcRenderer.on('notebook:changed', receive)
+      return () => ipcRenderer.removeListener('notebook:changed', receive)
+    }
+  },
   spatial: {
     read:()=>ipcRenderer.invoke('spatial:read'),
     commit:input=>ipcRenderer.invoke('spatial:commit',input),

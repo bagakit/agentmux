@@ -7,14 +7,24 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 const dom = composerDOM()
 const queued = (operationId: string, runId = 'run-agent-1') => ({operationId, runId, text:'Original '+operationId, status:'queued' as const})
-const strip = () => dom.container.querySelector<HTMLElement>('.composer-pending')
+const strip = () => document.querySelector<HTMLElement>('.composer-pending:not([hidden])')
+const selectedCard = () => [...strip()!.querySelectorAll<HTMLElement>('.composer-pending__card')].find(card => card.dataset.operationId === strip()!.dataset.operationId)!
+async function pendingClick(selector: string) { await act(async () => selectedCard().querySelector<HTMLButtonElement>(selector)!.click()) }
 const editor = () => dom.container.querySelector('[role="textbox"]')!
 async function mount(visible = true) { await dom.render(<AgentSessionComposer sessionId="agent-1" visible={visible} />) }
 beforeEach(() => {
   vi.spyOn(api.continuousProgress,'list').mockResolvedValue([])
   useAppStore.setState({agentSteerInFlight:{},agentSteerInFlightPhase:{},timelines:{},noticeReadReceipts:{}})
-  Object.defineProperty(HTMLElement.prototype,'showPopover',{configurable:true,value(){ const event=new Event('toggle');Object.defineProperty(event,'newState',{value:'open'});this.dispatchEvent(event) }})
-  Object.defineProperty(HTMLElement.prototype,'hidePopover',{configurable:true,value(){ const event=new Event('toggle');Object.defineProperty(event,'newState',{value:'closed'});this.dispatchEvent(event) }})
+  Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,value(){}})
+  const originalClick = HTMLButtonElement.prototype.click
+  vi.spyOn(HTMLButtonElement.prototype, 'click').mockImplementation(function () {
+    originalClick.call(this)
+    if (this.getAttribute('popovertargetaction') === 'hide') (document.getElementById(this.getAttribute('popovertarget') ?? '') as HTMLElement | null)?.hidePopover()
+  })
+  const nativeOpen = new WeakSet<HTMLElement>(), originalMatches = HTMLElement.prototype.matches
+  vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (selector) { return selector === ':popover-open' ? nativeOpen.has(this) : originalMatches.call(this, selector) })
+  Object.defineProperty(HTMLElement.prototype,'showPopover',{configurable:true,value(){ nativeOpen.add(this);const event=new Event('toggle');Object.defineProperty(event,'newState',{value:'open'});this.dispatchEvent(event) }})
+  Object.defineProperty(HTMLElement.prototype,'hidePopover',{configurable:true,value(){ nativeOpen.delete(this);const event=new Event('toggle');Object.defineProperty(event,'newState',{value:'closed'});this.dispatchEvent(event) }})
 })
 it('retained pending appears outside the original input; empty, confirmed and hidden queues have no slot',async()=>{
   await mount();const original=editor();expect(strip()).toBeNull()
@@ -27,18 +37,18 @@ it('retained pending appears outside the original input; empty, confirmed and hi
 it('direct icon sends the same first actually deliverable operation, never an older Run or the current draft',async()=>{
   const send=vi.spyOn(useAppStore.getState(),'sendQueuedAgentSteer').mockResolvedValue()
   useAppStore.setState({agentSteerQueues:{'agent-1':[queued('old','old-run'),queued('next'),queued('tail')]}})
-  await mount();expect(strip()!.dataset.operationId).toBe('next');expect(strip()!.textContent).toContain('Original next');await dom.click('[aria-label="发送这条待发消息"]')
+  await mount();expect(strip()!.dataset.operationId).toBe('next');expect(strip()!.textContent).toContain('Original next');await pendingClick('[aria-label="发送这条待发消息"]')
   expect(send).toHaveBeenCalledTimes(1);expect(send).toHaveBeenLastCalledWith('agent-1','next');expect(dom.draft()).toBe('Keep my draft')
 })
 it('actual later in-flight entry wins the summary, and preparation is not sending; original Outbox actions keep its lock',async()=>{
   useAppStore.setState({agentSteerQueues:{'agent-1':[queued('head'),queued('explicit')]},agentSteerInFlight:{'agent-1':'explicit'},agentSteerInFlightPhase:{'agent-1':'preparing'}})
   await mount();expect(strip()!.dataset.operationId).toBe('explicit');expect(strip()!.textContent).toContain('准备发送');expect(strip()!.textContent).not.toContain('发送中');expect(strip()!.querySelector<HTMLButtonElement>('.composer-pending__send')!.disabled).toBe(true)
-  await dom.click('[aria-label="在 Outbox 查看待发消息和操作"]');const panel=dom.container.querySelector('.composer-mailbox')!
+  await pendingClick('[aria-label="在 Outbox 查看待发消息和操作"]');const panel=dom.container.querySelector('.composer-mailbox')!
   expect(panel.querySelector('[id$="-outbox-tab"]')!.getAttribute('aria-selected')).toBe('true')
-  await dom.click('[data-record-key="queue:explicit"].composer-mailbox__row')
+  expect(panel.querySelector('[data-record-key="queue:explicit"]')).not.toBeNull()
   for(const label of ['Move up','Move down','Remove'])expect(panel.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)!.disabled).toBe(true)
   expect(panel.textContent).toContain('尚未提交');expect(editor().textContent).toBe('Keep my draft')
-  await act(async()=>useAppStore.setState({agentSteerInFlightPhase:{'agent-1':'submitting'}}));expect(strip()!.textContent).toContain('发送中');expect(panel.textContent).toContain('等待投递确认')
+  await act(async()=>useAppStore.setState({agentSteerInFlightPhase:{'agent-1':'submitting'}}));expect(strip()).toBeNull();expect(panel.textContent).toContain('等待投递确认');await dom.click('[aria-label="Close mailbox"]');expect(strip()!.textContent).toContain('发送中')
 })
 it('pending interaction and changed Run explain waiting while the existing Outbox keeps full text and actions',async()=>{
   useAppStore.setState({sessions:[{...composerSession(),pendingInteraction:{id:'request',kind:'permission',title:'Permission',body:'Confirm',options:[]} as never}],agentSteerQueues:{'agent-1':[queued('a')]}})
@@ -48,7 +58,7 @@ it('pending interaction and changed Run explain waiting while the existing Outbo
 })
 it('unknown delivery is retained and never gets a fabricated successful state',async()=>{
   useAppStore.setState({agentSteerQueues:{'agent-1':[{...queued('unknown'),status:'deferred',promptCondition:{kind:'test'} as never,error:'Original outcome unknown'}]}})
-  await mount();expect(strip()!.textContent).toContain('投递未确认');await dom.click('[aria-label="在 Outbox 查看待发消息和操作"]');await dom.click('[data-record-key="queue:unknown"].composer-mailbox__row')
+  await mount();expect(strip()!.textContent).toContain('投递未确认');await pendingClick('[aria-label="在 Outbox 查看待发消息和操作"]')
   expect(dom.container.textContent).toContain('尚未发送，暂无对话位置');expect(dom.container.textContent).toContain('Original unknown')
 })
 it('a confirmed captured record explains submission separately from CLI acceptance or reply',async()=>{
@@ -69,4 +79,95 @@ it('read-only and changed Session surfaces retain their own queue and draft with
 it.each([['AGENT_EXECUTION_NOT_REQUESTED','待手动发送'],['AGENT_TURN_END_UNCONFIRMED','等待当轮确认'],['AGENT_PROMPT_SUBMISSION_BUSY','等待前条提交']])('the original deferred reason %s explains the wait without disabling healthy draft input',async(code,label)=>{
   useAppStore.setState({agentSteerQueues:{'agent-1':[{...queued('wait'),status:'deferred',promptCondition:null,errorCode:code,error:'Original recorded reason'}]}})
   await mount();expect(strip()!.textContent).toContain(label);expect(editor().getAttribute('contenteditable')).toBe('true');expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('100 distinct cards are discoverable and middle/tail hover, copy, send and More retain their original identity', async () => {
+  const entries = Array.from({ length: 100 }, (_, index) => ({ ...queued('message-' + index), text: 'Unique body ' + index + '\nFull original line ' + index }))
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
+  const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  useAppStore.setState({ agentSteerQueues: { 'agent-1': entries } })
+  await mount()
+  const originalEditor = editor(), cards = [...strip()!.querySelectorAll<HTMLElement>('.composer-pending__card')]
+  expect(cards).toHaveLength(100)
+  expect(new Set(cards.map(card => card.dataset.operationId)).size).toBe(100)
+  for (const index of [0, 49, 99]) {
+    await act(async () => cards[index]!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
+    expect(strip()!.dataset.operationId).toBe(entries[index]!.operationId)
+    expect(strip()!.querySelector('[data-reading-id]')!.textContent).toBe(entries[index]!.text)
+    await pendingClick('[aria-label="复制这条待发消息"]')
+    expect(clipboard).toHaveBeenLastCalledWith(entries[index]!.text)
+  }
+  expect(send).not.toHaveBeenCalled()
+  expect(editor()).toBe(originalEditor); expect(dom.draft()).toBe('Keep my draft')
+  await pendingClick('[aria-label="发送这条待发消息"]')
+  expect(send).toHaveBeenCalledTimes(1); expect(send).toHaveBeenLastCalledWith('agent-1', 'message-99')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual(entries)
+  await pendingClick('[aria-label="在 Outbox 查看待发消息和操作"]')
+  expect(dom.container.querySelector('[data-record-key="queue:message-99"]')).not.toBeNull()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('keyboard reaches a long queue tail without submitting, and dismissed cards remain discoverable', async () => {
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue()
+  useAppStore.setState({ agentSteerQueues: { 'agent-1': Array.from({ length: 25 }, (_, index) => queued('key-' + index)) } })
+  await mount()
+  await act(async () => { selectedCard().focus(); selectedCard().dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })) })
+  expect(strip()!.dataset.operationId).toBe('key-24')
+  expect(document.activeElement).toBe(selectedCard()); expect(send).not.toHaveBeenCalled()
+  await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="收起待发卡片"]')!.click())
+  expect(strip()!.querySelector('.composer-pending__cards')).toBeNull()
+  expect(strip()!.textContent).toContain('待发 25')
+  await act(async () => strip()!.querySelector<HTMLButtonElement>('.composer-pending__restore')!.click())
+  expect(strip()!.querySelectorAll('.composer-pending__card')).toHaveLength(25)
+  expect(send).not.toHaveBeenCalled(); expect(dom.draft()).toBe('Keep my draft')
+})
+
+async function setEditText(text: string) {
+  const textarea = strip()!.querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, text); textarea.dispatchEvent(new Event('input', { bubbles: true })) })
+  return textarea
+}
+it('editing a nonhead never-admitted card saves through the original queue owner without sending or changing the composer draft', async () => {
+  const entries = [{ ...queued('edit-head'), promptCondition: null, enqueuedAt: 10 }, { ...queued('edit-tail'), promptCondition: null, enqueuedAt: 20 }]
+  const save = vi.spyOn(useAppStore.getState(), 'editQueuedAgentSteer')
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue()
+  useAppStore.setState({ agentSteerQueues: { 'agent-1': entries } }); await mount()
+  await act(async () => strip()!.querySelector('[data-queue-index="1"]')!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
+  await pendingClick('[aria-label="编辑这条待发消息"]')
+  const textarea = await setEditText('Edited tail\nFull second line')
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })))
+  expect(strip()!.dataset.operationId).toBe('edit-tail')
+  await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
+  expect(save).toHaveBeenLastCalledWith('agent-1', 'edit-tail', entries[1]!.text, 'Edited tail\nFull second line')
+  expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([entries[0], { ...entries[1], text: 'Edited tail\nFull second line' }])
+  expect(strip()!.querySelector('textarea')).toBeNull();expect(strip()!.querySelector('[data-reading-id]')!.textContent).toBe('Edited tail\nFull second line')
+  expect(send).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();expect(dom.draft()).toBe('Keep my draft')
+})
+it('a rejected compare-and-swap keeps the local edit draft and original delivery record; IME Escape does not dismiss', async () => {
+  const original = { ...queued('edit-race'), promptCondition: null, enqueuedAt: 20 }
+  const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
+  useAppStore.setState({ agentSteerQueues: { 'agent-1': [original] } });await mount();await pendingClick('[aria-label="编辑这条待发消息"]')
+  const textarea = await setEditText('My unsaved draft')
+  await act(async () => textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', isComposing: true, bubbles: true })))
+  expect(strip()!.querySelector('textarea')).toBe(textarea)
+  await act(async () => useAppStore.setState({ agentSteerQueues: { 'agent-1': [{ ...original, text: 'Independent edit' }] } }))
+  await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
+  expect(textarea.value).toBe('My unsaved draft');expect(strip()!.querySelector('[role="alert"]')).not.toBeNull()
+  expect(useAppStore.getState().agentSteerQueues['agent-1']![0]!.text).toBe('Independent edit')
+  const receipt = { expectedRun: { runId: original.runId }, afterSubmissionId: null }
+  await act(async () => useAppStore.setState({ agentSteerQueues: { 'agent-1': [{ ...original, promptCondition: receipt, status: 'deferred', error: 'Original delivery unknown' }] } }))
+  expect(strip()!.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.disabled).toBe(true)
+  expect(textarea.value).toBe('My unsaved draft');expect(useAppStore.getState().agentSteerQueues['agent-1']![0]!.promptCondition).toEqual(receipt)
+  expect(send).not.toHaveBeenCalled();expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('opening and closing the original Mailbox retains the floating edit draft while suppressing its projection', async () => {
+  useAppStore.setState({ agentSteerQueues: { 'agent-1': [{ ...queued('preview-edit'), promptCondition: null }] } });await mount();await pendingClick('[aria-label="编辑这条待发消息"]')
+  const textarea = await setEditText('Unsaved local edit survives Mailbox')
+  const panel = dom.container.querySelector('.composer-mailbox')!
+  await act(async () => (panel as HTMLElement).showPopover())
+  expect(strip()).toBeNull();expect(document.querySelector('.composer-pending[hidden] textarea')).toBe(textarea)
+  await dom.click('[aria-label="Close mailbox"]')
+  expect(strip()!.querySelector('textarea')).toBe(textarea);expect(textarea.value).toBe('Unsaved local edit survives Mailbox');expect(dom.draft()).toBe('Keep my draft')
 })

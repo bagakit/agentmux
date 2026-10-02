@@ -244,6 +244,7 @@ type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'
 export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   /** Explicit choice for this message only: the previous turn may still be running. */
   allowUncertainTurn?: boolean
+  execution?: import('./types.js').AgentPromptExecution
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
   expectedCompletionId?: string
   /** New automatic admission only: final Native cursor must equal this observed input fence. */
@@ -262,6 +263,7 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
 export type AgentMuxAgentMessageInput = {
   agentSessionId: string
   envelope: AgentMuxMessageEnvelope
+  execution?: import('./types.js').AgentPromptExecution
   condition: AgentPromptCondition
   caller?: { agentSessionId: string; capability: string }
 }
@@ -3690,6 +3692,12 @@ export class AgentMuxClient {
 
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string): Promise<void> {
     this.requireConnected()
+    if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') {
+      throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_PROMPT')
+    }
+    if (input.execution === 'immediate' && input.expectedCompletionId !== undefined) {
+      throw new AgentMuxError('Automatic admission cannot authorize native interruption.', 'INVALID_AGENT_PROMPT')
+    }
     const content = input.prompt
     if (input.expectedInputByte !== undefined && (input.expectedCompletionId === undefined ||
         !Number.isSafeInteger(input.expectedInputByte) || input.expectedInputByte < 0)) {
@@ -3715,11 +3723,11 @@ export class AgentMuxClient {
     if (!sameRun(session.run, condition.expectedRun)) {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
-    const plan = this.providers.get(session.providerId).planPromptInput(outbound)
+    const plan = this.providers.get(session.providerId).planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const renderObservation = new AbortController()
     const delivered = await this.serializeAgentInput(session, async (current, run) => {
       return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, message)
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, message, input.execution)
     }, renderObservation)
     if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
@@ -3763,12 +3771,13 @@ export class AgentMuxClient {
     } else if (input.caller || envelope.senderSessionId !== null || envelope.senderRunId !== null) {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
     }
-    const queued = await this.messageQueue.append(envelope)
+    const queued = await this.messageQueue.append({ ...envelope,
+      ...(input.execution === undefined ? {} : { execution: input.execution }) })
     if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state)) return
     if (queued.delivery.state !== 'queued') throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID')
     const originalCondition = await this.messageQueue.preparePrompt(envelope.messageId, async () => condition)
     await this.submitPromptInternal({ ...originalCondition, agentSessionId: input.agentSessionId,
-      operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true }, authorAgentSessionId)
+      operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true, ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
@@ -5453,6 +5462,7 @@ export class AgentMuxClient {
       agentSessionId: session.agentSessionId,
       run: { ...session.run },
       eventName: normalized.eventName,
+      ...(normalized.nativeTurnId ? { nativeTurnId: normalized.nativeTurnId } : {}),
       ...(normalized.lifecycleEvent !== undefined ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
       observedAt: normalized.status.observedAt,
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})

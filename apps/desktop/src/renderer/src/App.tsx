@@ -1,3 +1,4 @@
+import { observeNotebookLibrary } from './lib/notebook-library'
 import { ExecutorIdentityContext } from './components/AgentAvatar'
 import { SettingsNavigation, type SettingsNavigationRequest } from './components/SettingsNavigation'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -60,6 +61,7 @@ import { isSessionSurface } from './lib/workbench-surface-kinds'
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
 export function App() {
+  useEffect(() => observeNotebookLibrary(), [])
   const workflowComponentGallery = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-component-gallery') === '1'
   if (workflowComponentGallery) return <WorkflowComponentGallery />
@@ -109,6 +111,8 @@ function DesktopApp() {
     desktopPresentationCommitted()
   })
   const surveySelection = useAppStore((state) => state.surveyZoneSelection)
+  const surveyNotebookId = useAppStore(state => state.surveyNotebookId)
+  const surveyNoteId = useAppStore(state => state.surveyNoteId)
   const surveyToolsOpen = useAppStore((state) => state.surveyToolsOpen)
   const [unconfirmedBrowserRegionIds, setUnconfirmedBrowserRegionIds] = useState<ReadonlySet<string>>(() => new Set())
   const onBrowserControlConfirmation = useCallback((regionId: string, unconfirmed: boolean) => {
@@ -210,10 +214,18 @@ function DesktopApp() {
     surveyOccurrence.current = reference
     state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
   }, [surveySelection?.zoneId, surveyCatalog, surveyTopics])
-  const surveyProjection = useMemo(() => surveySelection && surveyCatalog
-    ? resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
-      surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference) : null,
-  [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference])
+  const surveyProjection = useMemo(() => {
+    if (!surveySelection || !surveyCatalog) return null
+    const projection = resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
+      surveySelection.active ? [...surveySelection.selection, surveySelection.active] : surveySelection.selection, selectSurveyReference)
+    const active = surveySelection.active
+    const surface = active ? tabs[active.tabId]?.regions[active.regionId] : undefined
+    if (!projection || !surveyNotebookId || !surveyNoteId || !active || surface?.kind !== 'file') return projection
+    const references = projection.selection.filter(reference => reference.tabId === active.tabId && reference.regionId === active.regionId)
+    const reference = references.find(value => surveyOccurrence.current && sameWorkbenchProjectionSelection(value, surveyOccurrence.current))
+      ?? (references.length === 1 ? references[0] : undefined)
+    return reference ? { ...projection, entity: { kind: 'region' as const, regionId: reference.regionId }, selection: [reference] } : projection
+  }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference, surveyNotebookId, surveyNoteId])
   const surveyCurrentSelection = useMemo(() => surveySelection ? surveyResolvedZoneSelection(surveySelection, surveyProjection, surveyOccurrence.current) : null,
     [surveySelection, surveyProjection])
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
@@ -240,7 +252,7 @@ function DesktopApp() {
       const projected = projectWorkbenchProjection(layouts[projection.displayWorkspaceId], tabs, projection)
       for (const reference of projected.selection) {
         if (projected.unsupportedTabIds.has(reference.tabId)) continue
-        append(reference.tabId, { hostId: workbenchProjectionSlotId(`${projection.presentationId}-slot`, reference),
+        append(reference.tabId, { hostId: (projection.entity.kind === 'region' ? workbenchRegionProjectionSlotId : workbenchProjectionSlotId)(`${projection.presentationId}-slot`, reference),
           active: !(surveyToolsOpen && narrowControls) && (surveyCurrentSelection?.active?.tabId !== reference.tabId ||
             sameWorkbenchProjectionSelection(surveyCurrentSelection.active, reference)), visible: !(surveyToolsOpen && narrowControls), surface: 'survey', controlsOpen: surveyToolsOpen,
           projection, reference, retainedRegionId: reference.regionId, onSelectRegion: regionId => selectSurveyReference({ ...reference, regionId }) })

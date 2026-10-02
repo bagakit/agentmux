@@ -6,6 +6,7 @@ import { CircleHelp, Inbox, Send, Bell, ChevronLeft, RefreshCw, Mail, Pause, Rep
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerPendingDelivery } from './ComposerPendingDelivery'
+import type { EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
 import { useAppStore } from '../store'
 import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
@@ -118,7 +119,7 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
   children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
   pendingInteraction?: boolean
   onRevealMessage?: RevealMailboxMessage | undefined
@@ -135,6 +136,8 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   onMoveQueued?: (id: string, direction: 'up' | 'down') => void
   onSendQueued?: (id: string) => void
   onCopyQueued?: (text: string) => Promise<boolean>
+  onEditQueued?: EditQueuedMessage
+  sendImmediately?: boolean
 }) {
   const id = useId()
   const [open, setOpen] = useState(false)
@@ -342,9 +345,10 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
   }, [open])
   const mailboxLabel = `Mailbox: Inbox ${unread} unread, Outbox ${pending.length} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
-  function showOutbox() {
+  function showOutbox(operationId: string) {
     requestedFolder.current = 'outbox'
     pin(); chooseFolder('outbox')
+    setSelection({ scope, folder: 'outbox', key: `queue:${operationId}` })
     if (open) { requestedFolder.current = null; return }
     ;(popover.current!.showPopover as (options: { source: HTMLButtonElement }) => void)
       .call(popover.current, { source: trigger.current! })
@@ -408,7 +412,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
           {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} selectedId={selectedQueue?.id ?? null}
             onSelect={(key, event) => selectRecord(`queue:${key}`, event)} reading={reading}
             {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
-            {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
+            {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
           {!selectedQueue ? <section className="composer-mailbox__history" aria-label="Input history">
             {!selectedMessage ? <h3>History</h3> : null}
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
@@ -441,5 +445,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onMore={showOutbox} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCopy={onCopyQueued} onEdit={onEditQueued} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }
