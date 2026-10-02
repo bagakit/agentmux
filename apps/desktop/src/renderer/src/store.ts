@@ -1342,11 +1342,38 @@ async function refreshFileDocument(
   if (documentLifetime(key) !== expectedLifetime || !useAppStore.getState().documents[key]) return
   const requestId = (fileReadRequestIds.get(key) ?? 0) + 1
   fileReadRequestIds.set(key, requestId)
+  const beforeReadIssue = useAppStore.getState().documentIssues[key]
+  const checkedWrite = beforeReadIssue?.kind === 'write-unknown' ? beforeReadIssue : undefined
   fileReadInFlightCounts.set(key, (fileReadInFlightCounts.get(key) ?? 0) + 1)
+  // Observe only this pending check. A resource changing away and back cannot authorize its result.
+  let resourceChanged = false
+  const stopObservingResource = checkedWrite ? useAppStore.subscribe((state, previous) => {
+    if (state.config?.workspaces === previous.config?.workspaces) return
+    const resource = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    const original = checkedWrite.attempted.resource
+    if (resource?.hostId !== original.hostId || resource.path !== original.path) resourceChanged = true
+  }) : () => {}
   try {
-    let result
+    let result: import('../../shared/contracts').WorkspaceFileReadResult
     try {
+      if (checkedWrite) {
+        const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+        const original = checkedWrite.attempted.resource
+        if (resource?.hostId !== original.hostId || resource.path !== original.path) {
+          useAppStore.setState(state => reduceDocumentRead(state, workspaceId, path, {
+            status: 'error', code: 'WORKSPACE_FILE_RESOURCE_UNCONFIRMED', message: 'The original workspace resource is not confirmed. Restore it before checking this save.'
+          }, checkedWrite))
+          return
+        }
+      }
       result = await api.files.read(workspaceId, path)
+      if (checkedWrite) {
+        const resource = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
+        const original = checkedWrite.attempted.resource
+        if (resourceChanged || resource?.hostId !== original.hostId || resource.path !== original.path) result = {
+          status: 'error', code: 'WORKSPACE_FILE_RESOURCE_UNCONFIRMED', message: 'The original workspace resource changed while checking this save. Its outcome remains unconfirmed.'
+        }
+      }
     } catch (error) {
       result = {
         status: 'error' as const,
@@ -1357,8 +1384,9 @@ async function refreshFileDocument(
       }
     }
     if (documentLifetime(key) !== expectedLifetime || fileReadRequestIds.get(key) !== requestId) return
-    useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result))
+    useAppStore.setState((state) => reduceDocumentRead(state, workspaceId, path, result, checkedWrite))
   } finally {
+    stopObservingResource()
     const remaining = (fileReadInFlightCounts.get(key) ?? 1) - 1
     if (remaining === 0) fileReadInFlightCounts.delete(key)
     else fileReadInFlightCounts.set(key, remaining)
@@ -1505,12 +1533,19 @@ async function enqueueFileSave(
     const format = workspaceFilePreviewFormat(surface.path)
     if (format && !format.sourceEditable) return
     const document = state.documents[currentKey]
+    const savedResource = state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)
     const issue = state.documentIssues[currentKey]
+    if (issue?.kind === 'write-unknown') return
     if (!document) return
     const hasOverwriteConflict = overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted')
     if (!state.dirtyDocuments[currentKey] && !hasOverwriteConflict) return
     if (!overwrite && (issue?.kind === 'changed' || issue?.kind === 'deleted' || issue?.kind === 'read-error')) return
     if (overwrite && issue?.kind !== 'changed' && issue?.kind !== 'deleted') return
+    if (!savedResource) {
+      useAppStore.setState(current => reduceDocumentWriteError(current, surface.workspaceId, surface.path,
+        'WORKSPACE_FILE_RESOURCE_UNCONFIRMED', 'The original workspace is unavailable. Restore it before saving this draft.'))
+      return
+    }
     const generation = state.documentGenerations[currentKey] ?? 0
     const observationGeneration = state.documentObservationGenerations[currentKey] ?? 0
     const savedLifetime = documentLifetime(currentKey)
@@ -1526,7 +1561,7 @@ async function enqueueFileSave(
       })
     } catch (error) {
       result = {
-        status: 'error' as const,
+        status: 'unknown' as const,
         code: typeof error === 'object' && error !== null && 'code' in error
           ? String(error.code)
           : 'WORKSPACE_FILE_WRITE_FAILED',
@@ -1563,7 +1598,14 @@ async function enqueueFileSave(
       if (needsReconciliation) await refreshFileDocument(surface.workspaceId, surface.path, savedLifetime)
       return
     }
-    if (result.status === 'error' || result.status === 'unknown') {
+    if (result.status === 'unknown') {
+      useAppStore.setState(current => ({ savingDocuments: { ...current.savingDocuments, [currentKey]: false },
+        documentIssues: { ...current.documentIssues, [currentKey]: { kind: 'write-unknown', code: result.code, message: result.message,
+          attempted: { content: document.content, expectedRevision, generation,
+            resource: { hostId: savedResource.hostId, path: savedResource.path } } } } }))
+      return
+    }
+    if (result.status === 'error') {
       useAppStore.setState((current) => reduceDocumentWriteError(current, surface.workspaceId, surface.path, result.code, result.message))
       return
     }
@@ -6144,6 +6186,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!surface) return
     const key = documentKey(surface.workspaceId, surface.path)
     const issue = get().documentIssues[key]
+    if (issue?.kind === 'write-unknown') {
+      if (get().savingDocuments[key]) return
+      const checkedLifetime = documentLifetime(key)
+      set(state => reduceDocumentSaving(state, surface.workspaceId, surface.path, true))
+      try { await refreshFileDocument(surface.workspaceId, surface.path) }
+      finally { if (documentLifetime(key) === checkedLifetime && get().documents[key]) set(state => reduceDocumentSaving(state, surface.workspaceId, surface.path, false)) }
+      return
+    }
     if (!get().documents[key] && (issue?.kind === 'binary' || issue?.kind === 'read-error')) {
       // Re-read the same existing File owner; changing format must not require closing its Tab.
       advanceDocumentLifetime(key)

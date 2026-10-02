@@ -366,7 +366,8 @@ export function EditorPane({
           {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <Code size={13} /> : <Eye size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><RefreshCw size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>
             : conflict ? <button className="small-button small-button--warning" disabled={saving} title="Overwrite file with this draft" aria-label="Overwrite file with this draft" onClick={() => void overwrite(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Overwriting…' : 'Overwrite'}</span></button>
-              : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">Retry</span></button>
+              : issue?.kind === 'write-unknown' ? <button className="small-button" disabled={saving} title="Check saved file before retrying" aria-label="Check saved file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">{saving ? 'Checking…' : 'Check saved file'}</span></button>
+                : issue?.kind === 'read-error' ? <button className="small-button" disabled={saving} title="Retry reading file" aria-label="Retry reading file" onClick={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} /><span className="editor-header__label">Retry</span></button>
                 : <button className="small-button" disabled={!dirty || saving} title={saving ? 'Saving file' : dirty ? 'Save file' : 'File saved'} aria-label={saving ? 'Saving file' : dirty ? 'Save file' : 'File saved'} onClick={() => void save(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">{saving ? 'Saving…' : dirty ? 'Save' : 'Saved'}</span></button>}
           <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8}>
@@ -388,7 +389,8 @@ export function EditorPane({
                 ? 'File was deleted on disk. Reload accepts the deletion; Overwrite recreates it.'
                 : issue.kind === 'read-error'
                   ? `Could not refresh the file (${issue.message}). The last buffer is preserved.`
-                  : issue.kind === 'write-error' ? `Save failed (${issue.message}). Your draft is still unsaved.`
+                  : issue.kind === 'write-unknown' ? `Save outcome is not confirmed. Your draft is preserved. Check the saved file before saving again.${issue.checkMessage ? ' Check unavailable: ' + issue.checkMessage : ''}`
+                    : issue.kind === 'write-error' ? `Save failed (${issue.message}). Your draft is still unsaved.`
                     : 'The file is binary. The existing text buffer is preserved.'}
           </span>
         </div>
