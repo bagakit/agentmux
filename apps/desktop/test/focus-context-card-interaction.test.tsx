@@ -95,15 +95,22 @@ it('uses one keyboard-readable preview and the same exact-SID menu without selec
   await act(async () => card(second).focus()); expect(document.querySelectorAll('.focus-context-hover')).toHaveLength(1)
   const before = useAppStore.getState(), copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   await menu(second, 'shift-f10'); expect(preview()).toBeNull()
-  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Open in Focus', 'Rename Agent', 'Copy Session Address'])
-  expect(document.querySelector('.focus-context-menu__identity code')!.textContent).toBe(second)
+  expect([...document.querySelectorAll('.focus-context-menu [role="menuitem"]')].map(node => node.textContent)).toEqual(['Rename Agent', 'Copy Session Address'])
+  const identity = document.querySelector('.focus-context-menu__identity')!
+  expect(identity.textContent).toBe(useAppStore.getState().agentNames[second])
+  expect(identity.querySelector('strong')?.getAttribute('title')).toBe(identity.textContent)
+  expect(identity.querySelector('span, code')).toBeNull()
   expect(card(second).getAttribute('aria-pressed')).toBe('false'); expect(select).not.toHaveBeenCalled()
   await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(second, resolveAgentSharingMetadata(second, before)))
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus); expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
-it('keeps the explicit Open action destination after menu cleanup', async () => {
-  await menu(second, true); await choose('Open in Focus')
+it('keeps exact card navigation after dismissing its action menu', async () => {
+  await menu(second, true)
+  await act(async () => document.querySelector('.focus-context-menu')!.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Escape' })))
+  await advance(1)
+  expect(document.querySelector('.focus-context-menu')).toBeNull()
+  await act(async () => card(second).click())
   expect(select).toHaveBeenCalledExactlyOnceWith(second); expect(document.activeElement).toBe(destination)
 })
 it('keeps a newly opened keyboard menu when an older menu finishes restoring focus', async () => {

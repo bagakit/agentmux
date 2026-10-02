@@ -39,7 +39,7 @@ Focus 的 Mote 待处理入口在窄栏仍能辨认当前 Mote、真实待处理
 
 卡片悬停意图与键盘聚焦按需呈现完整的当前已知任务、活动、摘录及来源；预览只读，不导航、改变选择、夺输入或追加读取。指针可自然移入预览阅读、滚动和选择文字；预览内部滚动不关闭自身。Escape、外部泳道滚动、打开菜单或改名、原来源失效、隐藏及卸载废弃本次查看和迟到计时，不能复活旧对象。普通左键与 Enter／Space 仍执行原 Focus 导航。
 
-卡片右键、Shift+F10 与 ContextMenu 键打开同一准确 Agent 菜单，不改变当前选中；标题名称、状态与按需可读的稳定 SID 明确本次对象。菜单保留 `Open in Focus`、`Rename Agent` 及分隔后的 `Copy Session Address` 三项：打开复用原导航，改名只调用该 SID 的既有命名 owner；复制仅选择原 `copy-session` action、唯一 formatter、clipboard 与错误出口，得到含发送与查看模板的准确 Session 地址名片，不发送消息。只有 SID 时现有 Message 入口与 Session 入口复制内容相同，Focus 不重复展示两项；不改公共 AgentRoster action 源或其他菜单。多位置或无确认 Region 时不猜空间地址，不继承 Region 关闭、重排或 Runtime 控制；复制失败仍沿原错误告知。行内改名的 Escape 取消、空值回既有派生、Enter／失焦提交保护输入法组合过程；退出编辑或菜单不得夺走用户后来选择的焦点。查看和复制保原输入、草稿与生命周期，显式改名仅改变命名事实。
+卡片右键、Shift+F10 与 ContextMenu 键打开同一准确 Agent 菜单，不改变当前选中；菜单头仅用单行名称确认本次对象，长名称省略且按需可读完整名称，不重复状态或 SID 说明。菜单仅保留 `Rename Agent` 及分隔后的 `Copy Session Address` 两项，打开沿原卡片左键与 Enter／Space，不重复为菜单动作；改名只调用该 SID 的既有命名 owner；复制仅选择原 `copy-session` action、唯一 formatter、clipboard 与错误出口，得到含发送与查看模板的准确 Session 地址名片，不发送消息。只有 SID 时现有 Message 入口与 Session 入口复制内容相同，Focus 不重复展示两项；不改公共 AgentRoster action 源或其他菜单。多位置或无确认 Region 时不猜空间地址，不继承 Region 关闭、重排或 Runtime 控制；复制失败仍沿原错误告知。行内改名的 Escape 取消、空值回既有派生、Enter／失焦提交保护输入法组合过程；退出编辑或菜单不得夺走用户后来选择的焦点。查看和复制保原输入、草稿与生命周期，显式改名仅改变命名事实。
 
 Attention 中的失败 Agent 沿原处理面提供可发现的查看与关闭动作。只有公开 Core 已确认该准确 Session 的进程结束或终局事实时，显式关闭失败 Session 才沿原 Session 生命周期能力收尾；关闭请求面和关闭 Focus 投影仍只改变呈现，不能冒成 Session 已关闭。关闭的返回、排队或超时不代替 Core 确认：未确认及失败保留原对象、工作面和可读恢复原因，迟到旧 Run 的回执不能关闭同一 SID 的新 Run。错误状态、握手或观察失败不自行证明进程已结束；健康或未知 Run 保原可用能力及既有显式停止边界，不凭错误文字猜终局。准备失败尚未产生 Session 时，保原 Launcher 与完整草稿供重试，不伪造可关闭的执行对象。Agent Region 的展示关闭与生命周期后果仍归[《Agent Region 关闭与身份入口》](spaces-and-layout.md#agent-region-关闭与身份入口)。
 
