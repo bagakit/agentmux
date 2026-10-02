@@ -1,3 +1,5 @@
+import { TopicKnowledgeOwner } from './topic-knowledge.js'
+import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
@@ -697,6 +699,14 @@ export async function registerIpc(args: {
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
   const spatialState = new AgentMuxSpatialStateStore()
+  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
+  topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
+    workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),
+    categories: () => topicKnowledge.listCategories(), ensureDefaultCategory: () => topicKnowledge.ensureDefaultCategoryContent() }))
+  handleWithEvent('topics:call', async (event, method: import('@agentmux/core').TopicMethod, params: import('@agentmux/core').TopicParams<import('@agentmux/core').TopicMethod>) => {
+    requireTrustedSender('topics:call', event)
+    return topicKnowledge.call(method, params)
+  })
   const disposeSpatial = spatialState.subscribe(state => {
     if(!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('spatial:changed',state)
   })
@@ -1243,6 +1253,7 @@ export async function registerIpc(args: {
   const control = new AgentMuxControlServer({
     execute: executeControl,
     spatialState,
+    topics: topicKnowledge,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     ...(rpcHttp ? { http: rpcHttp } : {}),

@@ -32,12 +32,13 @@ const DEFAULT_MOTE: ScratchTopicSnapshot = {
 /** The same directory objects are used by Space and the footer chooser. */
 export function scratchMoteTopics(topics: readonly ScratchTopicSnapshot[] | null | undefined): readonly ScratchTopicSnapshot[] {
   return [topics?.find(topic => topic.id === PMO_TEAMS_TOPIC_ID) ?? DEFAULT_MOTE,
-    ...(topics?.filter(topic => topic.id !== PMO_TEAMS_TOPIC_ID && topic.soul) ?? [])]
+    ...(topics?.filter(topic => topic.id !== PMO_TEAMS_TOPIC_ID && (topic.soul !== undefined || topic.moteArchive !== undefined)) ?? [])]
 }
 
 export function scratchTopicKind(topicId: string, topics: readonly ScratchTopicSnapshot[] | null | undefined): 'mote' | 'topic' | 'unknown' {
   if (topicId === PMO_TEAMS_TOPIC_ID) return 'mote'
   const topic = topics?.find(topic => topic.id === topicId)
-  if (!topic || topic.readError) return 'unknown'
-  return topic.soul ? 'mote' : 'topic'
+  if (!topic) return 'unknown'
+  if (topic.soul !== undefined || topic.moteArchive !== undefined) return 'mote'
+  return topic.readError ? 'unknown' : 'topic'
 }

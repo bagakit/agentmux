@@ -336,6 +336,7 @@ function normalizeMockBrowserUrl(value: string): string {
 let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState|null=null
 const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
 const mockApi: AgentMuxDesktopApi = {
+  topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
   git: {
     projectIdentity: async (workspaceId) => {
       const workspace = mockConfig.workspaces.find(item => item.id === workspaceId)

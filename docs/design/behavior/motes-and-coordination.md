@@ -31,9 +31,11 @@
 
 用户继续要求把窗口内的 Mote 对象放到左侧，避免与 Tab 叠在一起；可以在宽卡片与仅头像两态切换，「类似 Discord」；窗口边缘更明显，与背后工作面区分。对象导航与事情导航分层，仍是原来的同一个可操作快捷面。
 
-Mote 与 Topic 的文件树使用同一公共能力；二级内容按对象表达：Topic 显示各个主题，Mote 呈现同一持久对象的自我设定、名片与点子，让用户理解这位搭档和怎样继续合作。自我设定与名片沿原名称、头像、SOUL 等事实，点子沿已有持久笔记与资料能力，不另造人格、Memory 引擎、记忆存储或强制资料分类。菜单文案与具体分组数量不由本条规定；框架与共同工作面只见[《Space 的统一工作面框架》](spaces-and-layout.md#space-的统一工作面框架)。Mote 主选择器只列 Mote，跨对象浏览仍由 Space 中分开的 Motes 与 Topics 分区承担。同一 Mote 可以有多个自己的 Tab/Group，这些事情标签不表示多个 Topic；Mote 与 Zone 不合并身份，也不改变既有实体多处展示绑定。共用文件树不改变原文件资源归属，导航分类与物理存储仍是不同事实；目录分离与已授权迁移统一遵守[《Topic 与 Mote 的物理目录》](#topic-与-mote-的物理目录)。
+Mote 与 Topic 的文件树使用同一公共能力；二级内容按对象表达：知识库 Category 展开具体 Topic，Topic 显示自身讨论、知识与资料，Mote 呈现同一持久对象的自我设定、名片与点子，让用户理解这位搭档和怎样继续合作。知识层级只见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)。自我设定与名片沿原名称、头像、SOUL 等事实，点子沿已有持久笔记与资料能力，不另造人格、Memory 引擎、记忆存储或强制资料分类。菜单文案与具体分组数量不由本条规定；框架与共同工作面只见[《Space 的统一工作面框架》](spaces-and-layout.md#space-的统一工作面框架)。Mote 主选择器只列 Mote，跨对象浏览仍由 Space 中分开的 Motes 与 Topics 分区承担。同一 Mote 可以有多个自己的 Tab/Group，这些事情标签不表示多个 Topic；Mote 与 Zone 不合并身份，也不改变既有实体多处展示绑定。共用文件树不改变原文件资源归属，导航分类与物理存储仍是不同事实；目录分离与已授权迁移统一遵守[《Topic 与 Mote 的物理目录》](#topic-与-mote-的物理目录)。
 
 Mote 在 Space 中的二级对象内容以 Profile 为首屏，Ideas 承载原笔记与点子；原 SOUL／自我设定直接呈现在 Profile，沿明确文件编辑动作进入右侧原 Editor，不另设 Persona 切换。对象内容仍在共同框架内，保同一原 Zone 工作面与公共文件能力，不另造 Zone 导航、文件树、Editor 或 Tab/Region 管理；切换与原工作面的保护统一遵守前述 Space 框架，普通 Topic 保持自己的内容。
+
+**对象范围与成员完整隔离。** 从树、快捷面、恢复、来源 Session 或公开导航打开 Mote，都建立同一准确 Mote 与其原 Zone/Tab/Region 展示引用。其工作面只枚举原空间关系明确关联的成员，不因共用 Scratch、旧 `topicId`、cwd、标题或相邻 Tab 把其他 Topic／未绑定 Topic 的 Tab 纳入；经原关系明确绑定的外来 Zone、Tab 与合法跨 Workspace 展示继续可达，隔离不是删除共享内容。该对象内切 Group/Tab/Region、编辑文件、输入或新建工作面保持 Mote 范围，局部落焦不能清掉对象选择后跳回 Topics。只有明确的跨对象导航才切换对象；外来文件的资源归属不自行改写当前 Mote 的选择。成员或位置未知时保原引用、已确认成员和当前工作，给出持续恢复说明，不退回整份 Scratch、猜邻居或自动创建替代 Session。未绑定 Topic 的原 Zone/Tab 仍在明确的全局入口可找到。名片、文件动作和讨论导航使用同一范围，进程重启先恢复该对象与工作面，健康 Run、草稿、布局及执行 cwd 保留。
 
 Mote 浮窗是原交流工作面的快捷入口，文件、编辑及名片／自我设定／点子等完整对象内容在同一 Space 内继续可达，浮窗不再重复承载这些工具面。进入完整 Space 的动作放在原公共 Tab 行的 `Open in Space` 快捷图标；空 Mote 沿原空态顶部保留同一动作，不为了提供入口新建 Tab 或 Session。导航沿当前已选 Mote 与已确认的完整 Tab／Group／Region 引用接手原工作，保原草稿、模式与健康 Session／Run；位置未确认时仍按本节原目标保护与恢复说明处理，不猜另一个位置，也不关闭可用正文。此分工不取消 Space 的原文件、编辑、人格和资料能力。空 Mote 的文件或目录终端动作由用户在已确认的同一 Space 明确发起，沿它当前实际呈现的活动 Pane 放置；先核原资源、Space 绑定和可见 Group，不借背景项目或未知保存地址，不先造讨论。
 
@@ -48,7 +50,7 @@ Mote 的事情导航沿原 Tab 控件使用 `Discussions`／`New discussion` 等
 
 尚未启动 Agent／睡眠的 Mote 工作面也围绕当前 Mote 自身：原启动面标题显示已确认的这个 Mote 名称，不把 Topics/Scratch 收纳容器当作当前对象。对象名称与实际运行环境分开，Host、工作目录和启动参数仍是原资源事实；名称尚未确认时保原工作面并如实说明，不借默认或邻居 Mote。普通 Topic、Folder 与空 Group 沿原环境身份。此要求不合并 Mote、Zone、Tab 或 Session，不改变多处展示绑定或物理目录。
 
-- **同一个当前目标**。左下入口的无障碍描述、快捷面选择、当前状态和「Open in Space」都指向同一个已选 Mote、实际 Tab 与当前 Region。Mote 表达持久协调对象，Tab 名表达当前事情，Provider/Executor 和 Session 表达实际执行者，不能相互冒充。Goal 的专属讨论仍是自己的 Tab，入口必须能读出该 Goal 的上下文，不能只用泛称 Mote 掩盖正在打开另一件事。自定义 Mote 的投影、准备与完整 Space 都归它自己的 Topic，不借默认 Mote 的工作面。
+- **同一个当前目标**。左下入口的无障碍描述、快捷面选择、当前状态和「Open in Space」都指向同一个已选 Mote、实际 Tab 与当前 Region。Mote 表达持久协调对象，Tab 名表达当前事情，Provider/Executor 和 Session 表达实际执行者，不能相互冒充。Goal 的专属讨论仍是自己的 Tab，入口必须能读出该 Goal 的上下文，不能只用泛称 Mote 掩盖正在打开另一件事。自定义 Mote 的投影、准备与完整 Space 都指向它自身的持久对象与准确原空间关系，不借默认 Mote 的工作面。
 - **可进入的悬停面**。鼠标悬停入口即显示原可操作面，允许越过按钮与面板间的小间隙进入、滚动、选择和输入；未固定时离开两者后自然收起。悬停本身不改变 DOM 焦点、光标或组字，不选择另一个 Mote/Tab/Region，不持久化打开状态、不写视图模式、不启动 Session/Run、不发送或入队输入。键盘与触控有等效的明确打开入口；Escape 收起预览，不抢走输入法或另一块已打开浮层拥有的按键，也不把未移动过的焦点拉回入口。
 - **不同工作面同样可操作**。用户反馈在 Mote 工作面 hover 后可移入操作，切到设置页却只能看到窗口、无法操作。Settings、Space、Focus、Goals、Survey 等窗口内容切换不改变同一个 Mote 快捷面的可进入性；面板及原投影不能继承被设置遮住的背景工作面的 inert/隐藏归属。移入、明确固定、选择与输入仍沿原 owner，悬停不关闭设置、不移动原焦点、不写 Agent 模式；被设置遮住的背景继续不接收输入，健康 Run 和原 Tab/Region/草稿保留。
 - **全部 Mote 可选**。快捷面呈现既有默认 Mote 和文件系统已确认含 SOUL 的全部 Mote 对象，每个对象有紧凑可选行、可读身份与它实际目标的状态；多个 Tab 或 Session 不冒充多个 Mote，普通 Topic 不混入名册。超出可用空间时仍能滚动到全部对象，不只取默认或当前一个。目录、快捷选择与焦点分类共享同一份文件快照事实及修订边界，不新增 Mote id 名册、不在 Tab/Session 上复制身份布尔，也不把分类另行持久化；目录读取失败保留已有事实与已选原引用，说明未知和失败步骤。
@@ -59,7 +61,7 @@ Mote 的事情导航沿原 Tab 控件使用 `Discussions`／`New discussion` 等
 - **目标状态来自目标本身**。入口及各 Mote 行表达各自实际目标 Region 所引用 Agent 的真实状态，不把邻居 Session 的 Working、Needs you 或错误当作当前目标状态。已保存目标尚在恢复、尚无 Agent、当前 Region 是其他工作面以及状态未知分别按事实说明；读不到状态不能猜空闲或错误，也不因无关 Session 更新改变当前反馈。收起态只消费当前目标，展开后只增加所示 Mote 与原工作面需要的 Session、名称和事实消费者；目录读取只随所属修订更新，不订阅整份 Timeline 或逐 Session 反复扫描全部 Tab，不让无关 Run 输出放大入口工作。成本底线继续归[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)。
 - **协调焦点不污染执行历史**。默认和文件事实确认的自定义 Mote 都使用既有独立协调焦点；选择 Region/Session、切模式、明确输入与初始化恢复遵守同一归属，不能只在浮窗补一个特判后仍把自定义 Mote 写入执行 Agent 的历史。已知普通 Topic 和执行 Agent 继续沿原执行焦点。Scratch 身份暂时未知时保留原 lane、选择与历史，给出旁边的服务窗；不猜成普通执行对象，也不等待目录检查完成才允许运行。
 - **开合保留上下文**。关闭只收起快捷面，保留已选 Mote/Tab/Region及原 SessionId 或 launcher RegionId 草稿；重新打开回到同一工作。已固定开合与目标沿原 UI owner 持久化，临时悬停不在重启后伪装成用户固定。显式 Goal/Focus 入口仍选择其精确目标，用户在快捷面主动选择其他 Mote/Tab/Region 后各处身份与状态同步。背景工作面切换、Session 列表顺序、迟到目录读取或恢复事实不擅自更换已选目标。打开完整 Space 进入同一目标，收起不停止 Run、不新建 Session、不改写执行 Agent 的独立焦点与历史；只有明确 Send/Queue/Launch 沿原输入 owner 消费原文字。
-- **关闭 Tab 按明确意图继续**。用户反馈关掉 Mote 的 Tab 后仍显示“Original Tab retained”并要求回 Space 恢复。收起快捷面与关闭其中的 Tab 是不同意图：经既有确认已实际删除当前 Tab 后，同一 Mote 有其他原 Tab 就继续其原工作面，没有剩余 Tab 就保留该 Mote 的可操作空态，允许用户明确新建；入口、正文、状态与完整 Space 指向同一结果。取消或失败而仍保留原 Tab 时保留原目标；只移除一处位置而 Tab 仍有其他合法位置时保留原对象，不冒称实体或 Session/Run 终局。已关闭事实与后置清理失败分别表达，原错误告示保留，不能继续引用已删除 Tab。不借其他 Mote，也不为清理失效目标停止 Session/Run、悄悄新建或重开已关闭 Tab；空态打开完整 Space 仍展示同一 Topic 的空态，新建只由用户明确 New Tab/+ 消费。已确认存在的选中 Mote Topic 没有已放置的原 Tab 时，统一呈现此可操作空态；切到其他 Mote 再回来仍为空，目录确认不自动补 launcher，不另存逐 Mote 的关闭历史。保存的精确未知 Tab 引用不因没有已放置 Tab 被清成空态。仅因原目标暂未恢复、位置未知、恢复超时或读取失败时，仍按“恢复未知仍有原目标”保留原引用；明确关闭的结果和空态跨普通重启保持。
+- **关闭 Tab 按明确意图继续**。用户反馈关掉 Mote 的 Tab 后仍显示“Original Tab retained”并要求回 Space 恢复。收起快捷面与关闭其中的 Tab 是不同意图：经既有确认已实际删除当前 Tab 后，同一 Mote 有其他原 Tab 就继续其原工作面，没有剩余 Tab 就保留该 Mote 的可操作空态，允许用户明确新建；入口、正文、状态与完整 Space 指向同一结果。取消或失败而仍保留原 Tab 时保留原目标；只移除一处位置而 Tab 仍有其他合法位置时保留原对象，不冒称实体或 Session/Run 终局。已关闭事实与后置清理失败分别表达，原错误告示保留，不能继续引用已删除 Tab。不借其他 Mote，也不为清理失效目标停止 Session/Run、悄悄新建或重开已关闭 Tab；空态打开完整 Space 仍展示同一 Mote 的空态，新建只由用户明确 New Tab/+ 消费。已确认存在的选中 Mote 没有已放置的原 Tab 时，统一呈现此可操作空态；切到其他 Mote 再回来仍为空，目录确认不自动补 launcher，不另存逐 Mote 的关闭历史。保存的精确未知 Tab 引用不因没有已放置 Tab 被清成空态。仅因原目标暂未恢复、位置未知、恢复超时或读取失败时，仍按“恢复未知仍有原目标”保留原引用；明确关闭的结果和空态跨普通重启保持。
 - **恢复未知仍有原目标**。目标 Tab/Region 或 Session 暂未恢复时，保留原引用与工作面投影，原草稿不交给其他 Agent；在同一快捷面说明等待或失败步骤、当前可用或未知事实及已有恢复动作。不能跳到另一个可用 Agent 来伪装恢复成功，不能为流程失败清空原目标或停止健康 Run。跨真实进程重启仍先恢复工作面与本入口的已选目标，再沿既有公开能力尝试 reattach/resume。
 - **恢复说明旁仍能继续原工作**。用户实际反馈 Mote 浮窗正文全空，只剩原 Tab 位置不可用并要求回 Space 的说明，也追问 Space 中点 Mote 是否还没有专属页面。身份已确认的 Mote 在浮窗与 Space 都通过共同框架呈现同一交流体验，自己的原讨论、实际 Region／Session 与资料入口仍可辨，不另造第二套页面。保存的精确 Tab／Region 暂未恢复或当前位置未确认时，保原引用与可行动的服务窗；说明不能拿走整个讨论导航和正文操作面，同一 Mote 已确认的其他原讨论仍可枚举并由用户明确选择。恢复动作指向准确原对象，不能仅让用户凭技术字符串猜去哪里操作；已确认原目标可恢复时继续其原正文，暂不可确认则如实说明。快照、Tabs 或当前 Group 中缺席不等于明确删除、retired 或 unknown 终局，不从另一个 Topic 的 active Group、别的 Mote 或第一个健康 Agent 猜恢复；实际明确关闭仍只按前述关闭合同处理。原草稿、布局、Session／Run 与后来选择保留，不为修空白自动新建、重开已关闭 Tab 或停止健康执行。
 - **投影只承担自己的上下文**。窗口工作面 owner 绘制全局导航 chrome；快捷面等 workbench projection 保留自己的 Tab/Region 与操作，不复制背后 Goals、Focus 或其他主工作面的全局标题。快捷面内和背后的 Browser 都保持原内容与可操作区域。没有真实显示 bounds 变化时，悬停不触发 Terminal fit/Runtime resize；所选 Mote 的原 View 真正转入快捷面时，相关显示尺寸可由原 fit/Runtime owner 适配，收起仍恢复原 Tab/Region、阅读与工作面。背景、无关 Terminal 和隐藏 slot 不因浮层开合产生尺寸写入或工作放大。原生层级与尺寸统一沿[《Browser 任务能力与可复用资产》](browser-workface.md#browser-任务能力与可复用资产)及[《Hover 提示不改变 Terminal 几何》](terminal-reading.md#hover-提示不改变-terminal-几何)，只依赖通用 overlay 与实际 Region 事实，不为 Mote 或具体站点写特例。
@@ -70,7 +72,7 @@ Mote 的事情导航沿原 Tab 控件使用 `Discussions`／`New discussion` 等
 
 普通 Topic 的 canonical 文件目录在 `~/.agentmux/topics`，Mote 在 `~/.agentmux/motes`。用户明确要求分离并迁移已有对象，原目录保留对应软链接，以后再删；本轮不删除这些链接。这是明确授权的数据迁移与临时旧地址，不由一般“不留 migration／fallback”的实现规则否定，也不扩展为任意目录迁移。归类沿已有文件事实：主 Mote 与已确认含 SOUL 的对象是 Mote，已归档对象同样迁移；分类读取失败保持未知，不当普通 Topic 猜着搬。内容组织仍自主，不改写用户知识文件或强制分类。
 
-- **展示身份与物理地址分开。** `__scratch__` Workspace 保留原 Scratch 逻辑容器地址与 ID；既有 Topic/Mote ID、Space、Zone、Tab/Group、Region、选择、草稿、文件逻辑引用与执行绑定保持。Snapshot 明确给出实际物理目录，真实 IO、新启动 cwd 与公开查询的对象 path 消费该地址；公开查询只投影原协议字段，不泄漏内部路径元数据；原相对文件地址仍由同一受限文件 owner 解析，不按背景项目或显示位置猜对象。新对象直接写入对应 canonical 根，不先创建旧实体再搬。
+- **展示身份与物理地址分开。** `__scratch__` Workspace 保留原 Scratch 逻辑容器地址与 ID；物理目录迁移本身保既有 Topic/Mote 内容身份、空间实体、选择、草稿、文件逻辑引用与执行绑定。普通 Topic 到 Category→Topic 的空间层级承接是另一个明确动作，旧普通 Topic Space 节点转换与原内容 ID 保留只见[《Topics 知识库的层级与沉淀》](spaces-and-layout.md#topics-知识库的层级与沉淀)，不据旧文件 alias 保留永久旧空间 owner。Snapshot 明确给出实际物理目录，真实 IO、新启动 cwd 与公开查询的对象 path 消费该地址；公开查询只投影原协议字段，不泄漏内部路径元数据；原相对文件地址仍由同一受限文件 owner 解析，不按背景项目或显示位置猜对象。新对象直接写入对应 canonical 根，不先创建旧实体再搬。
 - **迁移保留原对象。** 已确认的旧目录在同盘以不覆盖目标的同一次原子 exchange 保留原 inode 与完整内容，同时把精确旧地址变为对应软链接，不留下旧路径不可用的间隙；`topic.md`、SOUL、Wiki、`.agents`、`.agentmux`、头像资产、归档和任意用户文件不重建、不清洗、不丢弃。旧绝对目录身份由对象内 app-owned `.agentmux/directory-identity.json` 保持，保原头像与 Space/Zone 地址，即使将来删除旧链接也不重发身份；记录的版本及旧地址须严格验证为原逻辑根下同一已校验目录名，且在 canonical 对象暴露前耐久保存。记录只承载旧目录身份，不成为 Session/Run 或第二份工作面事实，损坏或未知不得退回物理地址重铸身份。新对象使用自己的 canonical 目录身份。冲突、失败或无法确认的步骤如实可恢复，不能覆盖已有目标、将部分结果称为完成、跳过对象不说明，或删除未确认的原数据。
 - **旧执行与新启动各用真实地址。** 已有 Session/Run 的保存 cwd 与身份原样，迁移不停止、重启或改写健康执行；旧地址仍连到同一对象，活跃进程继续读写原 inode。新启动使用 canonical cwd，经 Core 原公共能力创建。真实进程重启后恢复原工作面、引用与状态，旧 Session 继续沿自己的原地址恢复，不借迁移造替代 Session 或把 unknown 当终局。
 - **旧 alias 不放宽文件边界。** ScratchTopics 与通用文件入口共用 Main 的受限目录解析，只接受已确认身份、精确旧直系目录与相应 canonical 目标的映射；读取仍遵守原已允许的 explicit 只读链接能力；任意链接不因此获得变更权限或新增可访问范围，被替换的根/目标及逃逸继续按原权限与路径规则拒绝。主 Mote 的删除／移动保护、头像资产范围及原保存冲突检查仍成立；失败只拒绝这次错误目标的动作，不拿走健康 Agent 与原工作面。
@@ -107,7 +109,7 @@ Mote 头像「平时也要偶尔活动」：实际可见的日常身份头像不
 
 用户确认：Board 不作为 Agents 的默认主视图。Board 是全局任务面，跨 Project、Workspace、Branch、Topic 可见；它承载任务卡、任务状态、目标项目和与 Agent 执行的关联，不再以当前 Workspace 的 Branch/Topic × Agent 状态矩阵作为产品模型。任务状态与 Agent/Attempt/Session 状态是不同事实，不能用同一个列或状态字段互相替代。
 
-Agents 提供一个常驻 Mote 快捷入口，其全部对象选择与当前目标遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。默认对象的固定 Topic 仍是原 Leader Topic；其中 Session 是正常 AgentSession，必须通过 Core 公开能力运行，不建立隐藏 Runtime。它可以读取全局项目目录与 Board，不借背景当前 Scratch 选择替换已选协调上下文。
+Agents 提供一个常驻 Mote 快捷入口，其全部对象选择与当前目标遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。默认对象保原 Leader Topic 的耐久内容身份，当前产品对象是主 Mote；其中 Session 是正常 AgentSession，必须通过 Core 公开能力运行，不建立隐藏 Runtime。它可以读取全局项目目录与 Board，不借背景当前 Scratch 选择替换已选协调上下文。
 
 用户可以直接与默认 Session 讨论需求。Session 分析后可以在全局 Board 创建任务，并为任务标记应执行的 Project；创建结果、目标 Project、分析依据和关联 Session 必须在对话与任务卡上可追踪，不能把跨项目的创建变成不可见的副作用。无法确定目标 Project 时保留待确认状态，不猜测归属，也不阻断 Session 继续对话。
 
@@ -135,25 +137,25 @@ Leader Topic 的当前产品身份与字形沿[《Space、Folder 与 Topic》](s
 
 ## Leader Topic 与任务写入确认
 
-项目调度 Agent 适合作为一个固定的 Leader Topic，而不是一段无法定位的临时对话。该 Topic 持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执；它仍然是普通 Topic/Session，遵守 Topic 的文件系统真相和重启恢复约束，但使用产品固定的 `launcher:leader` 身份，不进入用户 Scratch Topic 的选择投影，也不随着用户当前 Scratch Topic 改变。
+项目调度 Agent 的持久协调对象是主 Mote，历史称为 Leader Topic。它持续承载全局项目目录、Board 需求、路由分析、用户确认和结果回执，保原耐久内容及固定 `launcher:leader` 身份；实际执行仍是正常 AgentSession，不把 Mote 当成普通知识库 Topic 或某次 Session。其文件系统真相和重启恢复继续由原 owner 持有，不进入普通 Topic 的默认成员，也不随着用户当前 Scratch Topic 改变。
 
 Task 写入策略必须是用户可配置的开关，默认值为“按风险确认”。明确且低风险的单项目请求可以直接创建，并在对话和 Board 中产生可追踪的 Task receipt；涉及跨项目路由、目标不明确、不可逆或高影响动作时，先展示来源与依据、候选 Project、风险和待确认项，不能静默写入。用户也可以切换为“全部确认”或“默认直接创建”，设置的改变必须持久化并在入口可见。
 
-每次用户确认、修改目标 Project、接受/拒绝风险判断或撤销 Task，都要作为该默认 Topic 的结构化决策记录进入全局知识库。记录至少包含原始请求、候选与最终 Project、风险判断、用户选择、Task/operationId、时间和来源 Session；不能把完整聊天转储冒充可检索知识。默认 Topic 可以根据这些记录学习风险与路由建议，但学习只改变建议和默认排序，不能绕过用户当前设置、确认闸门或既有事实；当证据不足时仍显示“无法确定”，让用户决定。
+每次用户确认、修改目标 Project、接受/拒绝风险判断或撤销 Task，都要作为该主 Mote 的结构化决策记录进入原全局知识库。记录至少包含原始请求、候选与最终 Project、风险判断、用户选择、Task/operationId、时间和来源 Session；不能把完整聊天转储冒充可检索知识。主 Mote 可以根据这些记录学习风险与路由建议，但学习只改变建议和默认排序，不能绕过用户当前设置、确认闸门或既有事实；当证据不足时仍显示“无法确定”，让用户决定。
 
 该知识库的读取、写入、检索和增量订阅必须通过通用版本化 CUI/JSON 能力暴露给调度 Agent；Provider 不拥有知识库语义，也不能通过 Provider 配置暗中改变 Board 的写入规则。
 
 ## 默认 Session 的浮动工作面
 
-默认 Session 和全部 Mote 的快捷打开形态统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)：保留背后原工作面，不用跳转 Scratch 主路由冒充快捷面。内容是已选 Topic 的原 Tab、Region、Agent 身份、输出和 composer，只是附着投影，不创建第二个 Session、PTY 或聊天产品；Board、Focus 等入口共享同一目标与面，不另维护一份 Mote。
+默认 Session 和全部 Mote 的快捷打开形态统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)：保留背后原工作面，不用跳转 Scratch 主路由冒充快捷面。内容是已选 Mote 的原 Tab、Region、Agent 身份、输出和 composer，只是附着投影，不创建第二个 Session、PTY 或聊天产品；Board、Focus 等入口共享同一目标与面，不另维护一份 Mote。
 
 固定开合与目标属于持久 UI 状态。重启先恢复原面与 Tab/Region，再尝试 reattach/resume；恢复握手、探测或渲染失败时保留入口和持久工作面，在服务窗说明失败步骤，不清空布局。
 
-快捷面与主工作面分别拥有自己的导航焦点；面内新建、关闭、文件与快捷键必须按该 Topic 的明确身份执行。默认 Topic 的可见性也必须进入现有终端泊车、内存预算与通知判定，不能一边显示一边回收。定位与开合统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，关闭只收起。旧的“跳到 Scratch 主路由”实现不能作为此行为的替代。
+快捷面与主工作面分别拥有自己的导航焦点；面内新建、关闭、文件与快捷键必须按该 Mote 的明确身份与原空间关系执行。当前 Mote 工作面的可见性也必须进入现有终端泊车、内存预算与通知判定，不能一边显示一边回收。定位与开合统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)，关闭只收起。旧的“跳到 Scratch 主路由”实现不能作为此行为的替代。
 
 ## Leader 对话浮窗的清晰度
 
-Leader 浮窗默认以已有 Agent 对话模式打开，用户仍可切换终端；悬停与固定的模式优先级统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。外缘在复杂工作面上清晰可辨，选择区与内容是一体的紧凑表面，不保留独立身份标题行。固定 Topic、原 Session、收纳和重启恢复保持同一事实。
+Leader 浮窗默认以已有 Agent 对话模式打开，用户仍可切换终端；悬停与固定的模式优先级统一遵守[《Mote 快捷入口与当前协调上下文》](#mote-快捷入口与当前协调上下文)。外缘在复杂工作面上清晰可辨，选择区与内容是一体的紧凑表面，不保留独立身份标题行。固定 Mote 的原内容、Session、收纳和重启恢复保持同一事实。
 
 ## PMO Teams 入口位置与展开动效
 
@@ -170,7 +172,7 @@ PMO Teams 不再提供独立的浮动头像形态；产品入口的位置见[《
 
 ## PMO teams topic 名称与职责
 
-固定协调对象的产品类型与快捷入口统一称为 Mote，原 `PMO teams topic` / `PMO teams` 是历史名称；PMO 作为默认角色之一，约束见[《Space、Folder 与 Topic》](spaces-and-layout.md#spacefolder-与-topic)。现有协调职责是和人讨论需求、组织执行 Agent、分配工作并持续跟进结果；底层仍是同一个 Topic，改名不创建新 Topic，不改变已存在的 Session、对话、文件目录和布局身份。用户已明确授权的分配与推进直接执行，不重复索要确认；默认把项目实现交给执行 Agent，只有用户明确要求 PMO 亲自实现时才承担该项实现。普通 Topic 不继承 PMO 身份。
+固定协调对象的产品类型与快捷入口统一称为 Mote，原 `PMO teams topic` / `PMO teams` 是历史名称；PMO 作为默认角色之一，约束见[《Space、Folder 与 Topic》](spaces-and-layout.md#spacefolder-与-topic)。现有协调职责是和人讨论需求、组织执行 Agent、分配工作并持续跟进结果；底层仍是同一个耐久内容对象，改名不创建新对象，不改变已存在的 Session、对话、文件目录和布局身份。Mote 保原 Space，普通 Topic 对应 Category 中的 Zone，两者不会因复用文件能力而合并归属。用户已明确授权的分配与推进直接执行，不重复索要确认；默认把项目实现交给执行 Agent，只有用户明确要求 PMO 亲自实现时才承担该项实现。普通 Topic 不继承 PMO 身份。
 
 ## PMO Teams 从入口展开
 

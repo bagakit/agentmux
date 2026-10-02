@@ -52,7 +52,7 @@ import { resolveWorkbenchZone, sameWorkbenchProjectionSelection, projectWorkbenc
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
-import { activeTopicIdFromLayout, layoutForActiveTopic } from './lib/scratch-topic-layout'
+import { useWorkbenchObjectLayout } from './hooks/useWorkbenchObjectLayout'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
 import { isSessionSurface } from './lib/workbench-surface-kinds'
@@ -221,17 +221,15 @@ function DesktopApp() {
   const retainedOrdinaryLayout = useRef<{ workspaceId: string; layout: NonNullable<typeof currentOrdinaryLayout> } | null>(null)
   if (currentOrdinaryLayout && activeWorkspaceId) retainedOrdinaryLayout.current = { workspaceId: activeWorkspaceId, layout: currentOrdinaryLayout }
   const ordinaryLayout = currentOrdinaryLayout ?? (retainedOrdinaryLayout.current?.workspaceId === activeWorkspaceId ? retainedOrdinaryLayout.current.layout : undefined)
+  const ordinaryObject = useWorkbenchObjectLayout(activeWorkspaceId ?? '', ordinaryLayout)
   const ordinaryTargets = useMemo(() => {
-    const layout = ordinaryLayout
+    const layout = ordinaryObject.layout
     if (!layout || !activeWorkspaceId) return {}
-    const choice = workbenchSpaceSelection?.workspaceId === activeWorkspaceId ? workbenchSpaceSelection : null
     const held = retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
-    const topicId = choice?.topicId ?? held?.topicId ?? activeTopicIdFromLayout(layout, tabs)
-    const displayed = layoutForLogicalRegionFocus(layoutForActiveTopic(layout, tabs, topicId,
-      !(activeWorkspaceId === SCRATCH_WORKSPACE_ID && choice?.topicId)), tabs, held)
+    const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId)
     return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsRoute }))]))
-  }, [activeWorkspaceId, ordinaryLayout, tabs, mainSurface, settingsRoute, workbenchSpaceSelection, retainedSpatialFocus])
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsRoute, retainedSpatialFocus])
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, WorkbenchViewTarget[]> = {}
     const append = (tabId: string, target: WorkbenchViewTarget) => (targets[tabId] ??= []).push(target)
@@ -504,7 +502,7 @@ function DesktopApp() {
                         inert={!mounted}
                       >
                         <MoteWorkface workspaceId={candidate.id} visible={visible}
-                          topicId={candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
+                          topicId={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
                         <WorkspaceWorkbench
                           workspaceId={candidate.id}
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId

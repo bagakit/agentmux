@@ -1483,6 +1483,9 @@ export type AgentMuxDesktopApi = {
     openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
+  topics: {
+    call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>
+  }
   scratch: {
     setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<import('./scratch-topics').MoteArchiveState & { state: 'active' | 'archived' }>
     previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>

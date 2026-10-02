@@ -65,7 +65,9 @@ export function committedSecondaryWorkbenchTarget(tab: WorkbenchTab, target: Wor
     (target.projection?.entity.kind === 'region'
       ? child.dataset.workbenchViewReference === workbenchRegionProjectionSlotId('view', reference)
       : committedTabMarkerMatches(tab, 'view', reference, child.dataset.workbenchViewReference)))
-  return secondary?.length === 1 && secondary[0] instanceof HTMLElement && desktopElementVisible(secondary[0]) ? target : undefined
+  // Positioning can briefly hide a confirmed host. Retaining this exact tree
+  // does not claim native input; focused input readers still check visibility.
+  return secondary?.length === 1 && secondary[0] instanceof HTMLElement && secondary[0].isConnected ? target : undefined
 }
 
 /** A shared entity in multiple Groups has no uniquely proven ordinary home occurrence. */

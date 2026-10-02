@@ -1,5 +1,7 @@
 import { validateProjectGroup } from './lib/cross-device-project-groups'
-import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
+import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
+import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
+import { categoriesFromSpatial } from '../../shared/topic-categories'
 import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
@@ -22,11 +24,11 @@ import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
 import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
-import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
+import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
-import { directoryIdentity } from '../../shared/space-addresses'
+import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared/space-addresses'
 import type { DemandAlignmentProposal, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { readContinuousProgressInput } from './lib/continuous-progress-input'
 import type { DesktopWorkbenchObservation } from '../../shared/client-observation'
@@ -127,7 +129,7 @@ import { workbenchTabDisplayWorkspaceId } from './lib/workbench-resource-display
 import type { OpenDestination, OpenHttpLinkOrigin } from './lib/open-destination'
 import { resolveSessionPlacement } from './lib/session-placement'
 import { regionFocusClaimsCaret, type RegionFocusCause } from './lib/region-focus'
-import { scratchTopicsForWorkspace, scratchTopicsScope, type ScratchTopicsSnapshot } from './lib/scratch-topic-snapshots'
+import { scratchTopicsForWorkspace, scratchTopicsScope, scratchTopicKind, type ScratchTopicsSnapshot } from './lib/scratch-topic-snapshots'
 import { createNoteWithAvailableName } from './lib/note-names'
 import { rendererResourceOwnerCounts } from './lib/resource-owner-counts'
 import { terminalResourceOwnerCounts } from './lib/terminal-resource-owners'
@@ -152,6 +154,7 @@ import {
   findGroupForTab,
   focusGroup,
   removeTab as removeLayoutTab,
+  moveTab as moveLayoutTab,
   regionIds,
   setSplitRatio,
   moveTabToNewGroup as moveLayoutTabToNewGroup,
@@ -281,7 +284,6 @@ import {
   type WorkbenchViewCloseReceipt,
   type WorkbenchViewCloseResource
 } from './lib/workbench-view-close'
-import { moveTabWithinActiveTopic } from './lib/scratch-topic-layout'
 import { isPathWithinSubtree, remapPathWithinSubtree } from './lib/workspace-paths'
 import {
   createEmptyFileExplorerViewState,
@@ -480,6 +482,7 @@ type AppState = {
   noteDirectorySources: Record<string, NoteDirectoryRead | undefined>
   refreshNoteDirectorySources(tabId: string, regionId: string): Promise<NoteDirectoryRead | undefined>
   scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot>
+  topicCategories: TopicCategory[]
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
   executorDetections: Record<string, ExecutorDetectionState>
@@ -844,7 +847,7 @@ type AppState = {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
-  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }): Promise<ScratchTopicSnapshot>
+  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }, knowledge?: { categoryId?: string; title?: string }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
   setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<void>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<boolean>
@@ -2757,6 +2760,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   workspaceFileRevisions: {},
   noteDirectorySources: {},
   scratchTopicSnapshots: {},
+  topicCategories: [],
   fileExplorerStates: {},
   viewModes: {},
   editorWordWrap: false,
@@ -2936,7 +2940,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         coreSpatialPersistence=new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
         try {
           const spatial=await coreSpatialPersistence.read()
-          if(spatial) set({projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph)})
+          if(spatial) set({topicCategories:categoriesFromSpatial(spatial.graph),projectGroups:spatial.graph.projectGroups ?? [],restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph)})
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
       // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
@@ -3250,13 +3254,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               live.regions[regionId] && sameSpatialValue(old.tabs[id]?.regions[regionId],persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
             return [id,{...tab,regions}]
           }))}
-          set({tabs,layouts:saved.graph.layouts,projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
+          set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
         }
         // Keep observation and local edit capture available even when the first storage read
         // or bootstrap fails. The existing save Retry re-reads Core before admitting a write.
         const offRemote=spatial.connect(apply)
         const offLocal=useAppStore.subscribe((state,previous)=>{
-          if(state.loading || (state.projectGroups===previous.projectGroups && state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
+          if(state.loading || (state.topicCategories===previous.topicCategories && state.projectGroups===previous.projectGroups && state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
           spatial.stage(capture())
         })
         disposeCoreSpatial=()=>{offLocal();offRemote()}
@@ -3548,26 +3552,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return outcome
   },
   focusTabGroup(workspaceId, tabGroupId) {
-    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
-    const layout = get().layouts[workspaceId]
-    if (!layout || !findGroup(layout, tabGroupId)) return
+    const current = get(), layout = current.layouts[workspaceId]
+    if (!layout || !findGroup(layout, tabGroupId) || !groupIds(layout.root).includes(tabGroupId)) return
+    let choice = current.workbenchSpaceSelection
+    try {
+      const catalog = workbenchSelectionCatalog(current)
+      const shown = choice ? projectWorkbenchSpaceSelection(layout, current.tabs, catalog, choice).layout : layout
+      if (choice && (!shown || !groupIds(shown.root).includes(tabGroupId))) throw new Error('This Group is not confirmed in the selected object. Its original workface and input are kept.')
+      const tabId = shown?.groups.find(group => group.id === tabGroupId)?.activeTabId
+      if (tabId) choice = resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId, groupId: tabGroupId, tabId })
+      else if (choice && !shown) throw new Error('The original Group position is unconfirmed. Its selected object and workface are kept.')
+    } catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
     set((state) => ({
-      regionCaretFocus: null,
+      regionCaretFocus: null, workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null,
       layouts: { ...state.layouts, [workspaceId]: focusGroup(layout, tabGroupId) }
     }))
   },
   activateTab(workspaceId, tabGroupId, tabId) {
-    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
-    const layout = get().layouts[workspaceId]
+    const current = get(), layout = current.layouts[workspaceId]
     if (!layout) return
-    const tab = get().tabs[tabId]
+    let choice: AgentMuxDesktopSpaceSelection
+    try { choice = resolveWorkbenchOccurrenceSelection(current, workbenchSelectionCatalog(current),
+      { workspaceId, groupId: tabGroupId, tabId }, 'navigation') }
+    catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
+    const tab = current.tabs[tabId]
     const surface = tab ? titleWorkbenchSurface(tab) : null
     const activeRegion = tab?.regions[tab.layout.activeRegionId]
     const focusedSessionId = activeRegion && isSessionSurface(activeRegion) ? activeRegion.sessionId : null
     set((state) => ({
-      regionCaretFocus: null,
+      regionCaretFocus: null, workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null,
+      retainedSpatialFocus: null, activeWorkspaceId: workspaceId, mainSurface: 'workbench',
       layouts: {
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout, tabGroupId, tabId)
@@ -4041,6 +4055,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           set({ mainSurface: desktopMainSurface[request.target.surface], regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
         } else {
           const resolved = resolveDesktopSpaceSelection(get(), catalog, request.target)
+          // Establish the exact parent before local focus, while leaving the visible
+          // surface/input policy in place until that focus has changed atomically.
+          set({ workbenchSpaceSelection: resolved })
           if (resolved.tabId && resolved.regionId) get().focusRegion(resolved.workspaceId, resolved.tabId, resolved.regionId, 'pointer', resolved.groupId ?? undefined)
           set({ activeWorkspaceId: resolved.workspaceId, mainSurface: 'workbench', retainedSpatialFocus: null,
             workbenchSpaceSelection: resolved, regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
@@ -4467,33 +4484,44 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   selectSession(id, preferredTabGroupId) {
-    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, id)) return
-    const existing = Object.values(get().tabs).flatMap((tab) => (
+    const current = get(), catalog = workbenchSelectionCatalog(current)
+    const existing = Object.values(current.tabs).flatMap((tab) => (
       workbenchSurfaces(tab).flatMap((surface) => (
         isSessionSurface(surface) && surface.sessionId === id
           ? [{ tab, surface }]
           : []
       ))
-    ))[0]
-    if (existing) {
+    ))
+    if (existing.length) {
       // A projection's durable placement owns navigation. Its Session's cwd owns execution,
       // and can differ after a spatial move; rebuilding this Tab from cwd would move its other
       // Regions too and leave the same Tab in two Workspace layouts. Recovery may also retain
       // this projection before a fresh Session snapshot arrives.
-      const workspaceId = existing.tab.workspaceId
-      const layout = get().layouts[workspaceId]
-      if (!layout || !tabGroupForTab(layout, existing.tab.id)) {
-        get().reportError(new Error('The Tab Group is no longer available'))
+      const owners = new Set(existing.map(item => JSON.stringify([item.tab.id, item.surface.regionId])))
+      let references = [...new Map(catalog.locations.filter(location => owners.has(JSON.stringify([location.tabId, location.regionId])))
+        .map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
+      const held = current.agentFocus.execution.sessionId === id ? current.agentFocus.execution.reference : undefined
+      if (held && references.some(reference => reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId &&
+        reference.tabId === held.tabId && reference.regionId === held.regionId)) references = references.filter(reference =>
+          reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId && reference.tabId === held.tabId && reference.regionId === held.regionId)
+      if (preferredTabGroupId) references = references.filter(reference => reference.groupId === preferredTabGroupId)
+      if (references.length !== 1) {
+        current.reportError(new Error('The Session has no unique confirmed display occurrence. Its original workface and input are kept; choose its exact Tab, Group and Region.'), { kind: 'indeterminate' })
         return
       }
+      const reference = references[0]!
+      let choice: AgentMuxDesktopSpaceSelection
+      try { choice = resolveWorkbenchOccurrenceSelection(current, catalog, { workspaceId: reference.displayWorkspaceId,
+        groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation') }
+      catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
       set((state) => ({
-        activeWorkspaceId: workspaceId,
+        activeWorkspaceId: reference.displayWorkspaceId, workbenchSpaceSelection: choice,
+        retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
         mainSurface: 'workbench',
         displacedAgentSessionIds: state.displacedAgentSessionIds.filter((sessionId) => sessionId !== id)
       }))
-      get().focusRegion(workspaceId, existing.tab.id, existing.surface.regionId)
+      get().focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'pointer', reference.groupId)
       return
     }
     const session = get().sessions.find((candidate) => candidate.id === id)
@@ -4526,10 +4554,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(new Error('The Tab Group is no longer available'))
       return
     }
+    const next = { ...get(), tabs: { ...get().tabs, [tab.id]: tab }, layouts: { ...get().layouts, [workspace.id]: nextLayout } }
+    let choice: AgentMuxDesktopSpaceSelection
+    try { choice = resolveWorkbenchOccurrenceSelection(next, workbenchSelectionCatalog(next),
+      { workspaceId: workspace.id, groupId: targetTabGroupId, tabId: tab.id, regionId }, 'navigation') }
+    catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
     set((state) => ({
       activeWorkspaceId: workspace.id,
       mainSurface: 'workbench',
-      regionCaretFocus: null,
+      regionCaretFocus: null, workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
       agentFocus: focusSessionContext(state, id),
       tabs: { ...state.tabs, [tab.id]: tab },
       layouts: { ...state.layouts, [workspace.id]: nextLayout },
@@ -4599,13 +4632,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       get().reportError(new Error('The Tab Group is no longer available'))
       return
     }
+    let selectedObject = state.workbenchSpaceSelection
+    if (reveal) {
+      const next = { ...state, tabs: { ...state.tabs, [tab.id]: tab }, layouts: { ...state.layouts, [displayId]: nextLayout } }
+      try { selectedObject = resolveWorkbenchOccurrenceSelection(next, workbenchSelectionCatalog(next),
+        { workspaceId: displayId, groupId: targetTabGroupId, tabId: tab.id }, 'navigation') }
+      catch (error) { state.reportError(error, { kind: 'indeterminate' }); return }
+    }
     if (initialInputs) useLauncherState.getState().copyUtilityDraft(
       warmLauncherId({ tabGroupId: targetTabGroupId, regionId: undefined }),
       warmLauncherId({ tabGroupId: targetTabGroupId, regionId: tab.layout.activeRegionId }))
     set((state) => ({
       // Only a successful explicit main-surface navigation changes global selection.
       ...(reveal ? { activeWorkspaceId: displayId, mainSurface: 'workbench' as const, regionCaretFocus: null,
-        workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}),
+        workbenchSpaceSelection: selectedObject, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null } : {}),
       tabs: { ...state.tabs, [tab.id]: tab },
       ...(initialInputs ? {
         agentComposerDrafts: { ...state.agentComposerDrafts, [tab.layout.activeRegionId]: initialInputs.prompt },
@@ -4749,17 +4789,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!workbenchViewCloseAllowsView(current.closingWorkbenchViews, tabId)) return
     const layout = current.layouts[workspaceId]
     if (!layout) return
+    const projected = workbenchObjectLayout(current, workspaceId).layout
+    const visibleGroup = projected?.groups.find(group => group.id === targetPaneId)
+    const storedGroup = layout.groups.find(group => group.id === targetPaneId)
+    if (!visibleGroup || !storedGroup) { current.reportError(new Error('The selected object Group is unconfirmed. Original Tabs are kept.'), { kind: 'indeterminate' }); return }
+    const anchor = visibleGroup.tabOrder[visibleTargetIndex]
+    const storedIndex = anchor ? storedGroup.tabOrder.indexOf(anchor) : storedGroup.tabOrder.length
     set((state) => ({
       layouts: {
         ...state.layouts,
-        // 落点下标来自渲染层看到的（已按 Topic 投影的）顺序，必须先翻回存储坐标再交给
-        // reducer；直接透传就是 #556 的主缺陷。翻译只有一处，见 moveTabWithinActiveTopic。
-        [workspaceId]: moveTabWithinActiveTopic(layout, current.tabs, {
-          tabId,
-          sourceGroupId: sourcePaneId,
-          targetGroupId: targetPaneId,
-          visibleTargetIndex
-        })
+        [workspaceId]: moveLayoutTab(layout, tabId, sourcePaneId, targetPaneId, storedIndex)
       }
     }))
   },
@@ -4804,9 +4843,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       return
     }
-    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
+    let choice: AgentMuxDesktopSpaceSelection
+    try { choice = resolveWorkbenchOccurrenceSelection(get(), workbenchSelectionCatalog(get()),
+      { workspaceId, groupId: tabGroupId, tabId, regionId }) }
+    catch (error) { get().reportError(error, { kind: 'indeterminate' }); return }
     set((state) => ({
+      workbenchSpaceSelection: choice, workbenchNavigationInputPolicy: null, retainedSpatialFocus: null,
       tabs: { ...state.tabs, [tabId]: focusWorkbenchTabRegion(tab, regionId) },
       layouts: {
         ...state.layouts,
@@ -5130,13 +5172,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
   },
   setMainSurface(mainSurface) {
-    set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    if (get().regionCaretFocus) set({ regionCaretFocus: null })
+    set({ workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     const selectedSessionId = executionFocusSessionId(get().agentFocus)
     const selectedSession = selectedSessionId
       ? get().sessions.find((session) => session.id === selectedSessionId)
       : undefined
-    if (mainSurface === 'workbench' && selectedSession) {
+    if (mainSurface === 'workbench' && selectedSession && !get().workbenchSpaceSelection) {
       // The selected Session is the cross-surface navigation context. Reuse the existing
       // selectSession path so Workspaces activates its durable Tab/Region instead of creating
       // a second projection or losing the user's place.
@@ -5624,6 +5665,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (placement?.focus === true && placement.selection && resourceCurrent()) {
         const choice = placement.selection
         if (!choice.tabId || !choice.regionId || !choice.groupId) return
+        set({ workbenchSpaceSelection: choice })
         get().focusRegion(choice.workspaceId, choice.tabId, choice.regionId, 'pointer', choice.groupId)
         set({ activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench', workbenchSpaceSelection: choice,
           regionCaretFocus: null, workbenchNavigationInputPolicy: 'preserve' })
@@ -5960,7 +6002,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         await get().refreshScratchTopics(workspaceId, true)
     } catch (error) { get().reportError(error); throw error }
   },
-  async createScratchTopic(preset, initialRequest) {
+  async createScratchTopic(preset, initialRequest, knowledge) {
     const state = get()
     const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
     if (!workspace) throw new Error('Topics workspace is unavailable')
@@ -5968,11 +6010,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // A Topic owns its directory before any Tab or Session exists. The launcher is a projection,
     // not the identity from which the Topic is derived.
     const topicId = `launcher:${crypto.randomUUID()}`
-    const targetTab = { ...newLauncherTab(workspace.id, topicId),
+    const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
+    const targetTab = { ...newLauncherTab(workspace.id, topicId), space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) },
       ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
     const regionId = targetTab.layout.activeRegionId
     const initialSurface = targetTab.regions[regionId]
-    const placeLauncher = (): void => {
+    const placeLauncher = (reveal = true): void => {
       let placementFailed = false
       set((current) => {
         const currentLayout = current.layouts[workspace.id] ?? layout
@@ -5988,10 +6031,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return current
         }
         return {
-          activeWorkspaceId: workspace.id,
-          mainSurface: 'workbench' as const,
+          ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
+            workbenchSpaceSelection: { ...nextTab.space, workspaceId: workspace.id, topicId,
+              tabId: nextTab.id, groupId: layout.activeGroupId, regionId },
+            retainedSpatialFocus: null, regionCaretFocus: null, workbenchNavigationInputPolicy: null } : {}),
           tabs: { ...current.tabs, [nextTab.id]: nextTab },
-          layouts: { ...current.layouts, [workspace.id]: nextLayout },
+          layouts: { ...current.layouts, [workspace.id]: reveal ? nextLayout : { ...nextLayout,
+            activeGroupId: currentLayout.activeGroupId, groups: nextLayout.groups.map(group => {
+              const previous = currentLayout.groups.find(item => item.id === group.id)
+              return previous ? { ...group, activeTabId: previous.activeTabId, recentTabIds: previous.recentTabIds } : group
+            }) } },
           ...(initialRequest ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: initialRequest.prompt },
             ...(initialRequest.agentMuxNote === undefined ? {} : { agentComposerNotes: { ...current.agentComposerNotes, [regionId]: initialRequest.agentMuxNote } }) } : {}),
           workspaceFileRevisions: bumpWorkspaceFileRevision(
@@ -6004,23 +6053,44 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     // A first request belongs to a real durable Region before metadata can fail or navigation unmounts Goals.
     if (initialRequest) placeLauncher()
+    const bornSelection = fileNavigationSelection(get())
     let snapshot: ScratchTopicSnapshot
     try {
-      snapshot = preset === 'mote'
-        ? await api.scratch.ensureMote(workspace.id, topicId)
-        : await api.scratch.ensureTopic(workspace.id, topicId)
+      if (preset === 'mote') snapshot = await api.scratch.ensureMote(workspace.id, topicId)
+      else {
+        await api.topics.call('topic.create', { topicId, title: knowledge?.title ?? 'New Topic', ...(knowledge?.categoryId ? { categoryId: knowledge.categoryId } : {}) })
+        await refreshTopicSpatial()
+        const created = await api.scratch.readTopic(workspace.id, topicId)
+        if (!created) throw new Error('The created Topic content is still unconfirmed. Its workface is kept; read the original Topic before retrying.')
+        snapshot = created
+      }
     } catch (cause) {
       if (initialRequest && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) get().reportError(cause, {
         kind: 'indeterminate', summary: 'Topic preparation is unconfirmed. Your request has not been sent; the same Topic, Region and draft are kept. Retry Start agent here.'
       })
       throw cause
     }
-    if (!initialRequest) placeLauncher()
+    const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
+    if (!address || address.zoneId !== targetTab.space.zoneId) throw new Error('The created Topic original identity is unconfirmed. Its Tab, Region and draft are kept.')
+    const mayReveal = fileNavigationSelection(get()) === bornSelection
+    if (!initialRequest) placeLauncher(mayReveal)
     else set(current => {
       const tab = current.tabs[targetTab.id]
       if (tab?.topicId !== topicId || tab.regions[regionId] !== initialSurface || !tab.topicPreparation) return current
       const { topicPreparation: _prepared, ...preparedTab } = tab
       return { tabs: { ...current.tabs, [tab.id]: preparedTab }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
+    })
+    set(current => {
+      const previous = current.scratchTopicSnapshots[workspace.id], scope = scratchTopicsScope(workspace)
+      const topics = previous?.scope === scope ? previous.topics ?? [] : []
+      const live = current.tabs[targetTab.id]
+      if (!live) return current
+      const groupId = tabGroupForTab(current.layouts[workspace.id], live.id)
+      return { tabs: { ...current.tabs, [live.id]: { ...live, space: address } },
+        scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: { scope, revision: previous?.revision ?? 0,
+          reading: false, error: null, topics: [...topics.filter(topic => topic.id !== topicId), snapshot] } },
+        ...(mayReveal && groupId ? { workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId,
+          tabId: live.id, groupId, regionId: live.layout.activeRegionId } } : {}) }
     })
     // Ordinary Topics open one attached Terminal through the existing Region lifecycle.
     // Mote creation keeps its launcher so selecting a personality does not start a shell.
@@ -6029,7 +6099,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (initialRequest && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) {
       if (initialRequest.executorId && createdGroup) await get().launchAgent(initialRequest.executorId, initialRequest.prompt, createdGroup, { tabId: targetTab.id, regionId }, undefined, undefined, initialRequest.agentMuxNote)
       else if (!initialRequest.executorId) get().reportError(new Error('No Agent Executor is configured. Add an Agent in Settings, then Start agent in this same Region. Your request is kept and has not been sent.'), { kind: 'indeterminate' })
-    } else if (createdGroup && !initialRequest && preset !== 'mote' && !snapshot.soul) {
+    } else if (createdGroup && !initialRequest && preset !== 'mote' && scratchTopicKind(snapshot.id, [snapshot]) === 'topic') {
       await get().promoteWarmTerminal(createdGroup, { tabId: targetTab.id, regionId: targetTab.layout.activeRegionId })
     }
     return snapshot
@@ -6047,18 +6117,43 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
     )
     const reveal = options?.reveal ?? true
-    if (reveal && !options?.signal?.aborted) {
-      const current = get()
-      if (current.retainedSpatialFocus || current.workbenchSpaceSelection) set({ retainedSpatialFocus: null,
-        workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-    }
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
     }
+    const remember = (snapshot: ScratchTopicSnapshot) => set(current => {
+      const scope = scratchTopicsScope(workspace), previous = current.scratchTopicSnapshots[workspace.id]
+      const topics = previous?.scope === scope ? previous.topics ?? [] : []
+      return { scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: {
+        scope, revision: previous?.revision ?? 0, reading: previous?.reading ?? false, error: previous?.error ?? null,
+        topics: [...topics.filter(topic => topic.id !== snapshot.id), snapshot] } } }
+    })
+    const selectObject = (current: AppState, snapshot: ScratchTopicSnapshot, targetTabId?: string): AgentMuxDesktopSpaceSelection => {
+      const address = topicSpatialAddress(current.config, snapshot, current.spaceZoneBindings, current.topicCategories)
+      if (!address) throw new Error('The Topic Category relationship is unconfirmed. Its original content and workface are kept.')
+      const catalog = workbenchSelectionCatalog(current)
+      const parent = { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null }
+      const held = current.workbenchSpaceSelection
+      const layout = current.layouts[workspace.id]
+      const projected = projectWorkbenchSpaceSelection(layout, current.tabs, catalog,
+        held?.spaceId === address.spaceId && held.zoneId === address.zoneId ? held : parent).layout
+      const groups = projected?.groups.filter(group => group.tabOrder.length && groupIds(projected.root).includes(group.id)) ?? []
+      const group = targetTabId ? groups.find(group => group.tabOrder.includes(targetTabId))
+        : groups.find(group => group.id === projected?.activeGroupId) ?? (groups.length === 1 ? groups[0] : undefined)
+      const tabId = targetTabId ?? group?.activeTabId
+      if (!tabId && !catalog.tabs.some(tab => tab.zoneId === address.zoneId)) return parent
+      if (!group || !tabId) throw new Error('This object has no unique confirmed Tab occurrence. Its original workface is kept; choose an exact Tab and Group.')
+      return { ...resolveDesktopSpaceSelection(current, catalog, { ...address, tabId, groupId: group.id,
+        displayWorkspaceId: workspace.id }), topicId }
+    }
     if (options?.newTab) {
       const request = options.initialRequest
-      const tab = { ...newLauncherTab(workspace.id, topicId), ...(request ? { topicPreparation: 'mote' as const } : {}) }
+      const known = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(topic => topic.id === topicId)
+      const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
+      const address = known ? topicSpatialAddress(state.config, known, state.spaceZoneBindings, state.topicCategories)
+        : { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) }
+      if (!address) throw new Error('The Topic Category relationship is unconfirmed. Original workface is kept.')
+      const tab = { ...newLauncherTab(workspace.id, topicId), space: address, ...(request ? { topicPreparation: 'mote' as const } : {}) }
       const regionId = tab.layout.activeRegionId, initialSurface = tab.regions[regionId]
       let groupId: string | undefined
       set(current => {
@@ -6075,18 +6170,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               return previous ? { ...group, activeTabId: previous.activeTabId, recentTabIds: previous.recentTabIds } : group
             })
           } },
-          ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
+          ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
+            workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: tab.id,
+              groupId: layout.activeGroupId, regionId }, retainedSpatialFocus: null, regionCaretFocus: null,
+            workbenchNavigationInputPolicy: null } : {}),
           ...(request ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: request.prompt },
             ...(request.agentMuxNote === undefined ? {} : { agentComposerNotes: { ...current.agentComposerNotes, [regionId]: request.agentMuxNote } }) } : {}),
           workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id)
         }
       })
       if (!groupId) throw new Error('The Scratch Tab Group is no longer available')
+      const bornSelection = fileNavigationSelection(get())
       // Present the exact born owner once. A late preparation receipt never reopens a closed float.
       if (request && !options.signal?.aborted) requestPmoTeamsTopicFloatingOpen({ targetTopicId: topicId, targetTabId: tab.id })
       try {
         const snapshot = request ? await api.scratch.ensureMote(workspace.id, topicId) : await api.scratch.readTopic(workspace.id, topicId)
         if (!snapshot) throw new Error('Scratch Topic no longer exists')
+        remember(snapshot)
+        const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
+        if (!address) throw new Error('The born Topic relationship is unconfirmed. Its Tab, Region and draft are retained.')
+        if (address.zoneId !== tab.space.zoneId) throw new Error('The confirmed Topic identity differs from its born owner. Its original Tab, Region and draft are retained.')
+        set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: address } } }))
+        if (reveal && !options.signal?.aborted && fileNavigationSelection(get()) === bornSelection && get().tabs[tab.id]?.regions[regionId] === initialSurface) {
+          const choice = selectObject(get(), snapshot, tab.id)
+          set({ workbenchSpaceSelection: choice, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })
+        }
       } catch (cause) {
         if (request && get().tabs[tab.id]?.regions[regionId] === initialSurface) get().reportError(cause, {
           kind: 'indeterminate', summary: 'Topic preparation is unconfirmed. Your request has not been sent; the same Mote, Tab, Region and draft are kept. Retry Start agent here.'
@@ -6108,16 +6216,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // preparation step, not permission to hide the workbench: if the read is slow or fails, the
     // user must still see the Scratch work surface and its error/retry path instead of an empty
     // right side. Background preparation explicitly keeps the current surface untouched.
-    let revealedTabId: string | undefined
+    const known = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(topic => topic.id === topicId)
     if (reveal && !options?.signal?.aborted) {
+      if (known) {
+        const choice = selectObject(get(), known, options?.tabId)
+        set({ activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench', workbenchSpaceSelection: choice,
+          retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
+        if (choice.tabId && choice.groupId) {
+          get().activateTab(choice.workspaceId, choice.groupId, choice.tabId)
+        }
+      }
       set((current) => {
+        // An unconfirmed discovery cannot replace a previously selected object.
+        if (!known && current.workbenchSpaceSelection) return current
         const layout = current.layouts[workspace.id]
         const requestedTab = options?.tabId ? current.tabs[options.tabId] : undefined
         const groupId = layout && requestedTab?.workspaceId === workspace.id && requestedTab.topicId === topicId
           ? tabGroupForTab(layout, requestedTab.id) : null
         // A durable exact target is navigation truth already. Reveal it now;
         // a delayed metadata read must not repeat this choice over a later Tab click.
-        if (requestedTab && groupId) revealedTabId = requestedTab.id
         return {
           activeWorkspaceId: workspace.id,
           mainSurface: 'workbench',
@@ -6149,33 +6266,36 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     let snapshot: ScratchTopicSnapshot | null
     try { snapshot = await api.scratch.readTopic(workspace.id, topicId) }
+    catch (error) { get().reportError(error, { kind: 'indeterminate', summary: 'Topic metadata is unavailable. Original workface, references and healthy Agents are retained; retry this Topic.' }); throw error }
     finally { release() }
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
+    remember(snapshot)
     const mayReveal = reveal && !options?.signal?.aborted && !laterIntent
     if (reveal && !mayReveal) return false
     let createdLauncher: WorkbenchTab | undefined
     let placementFailed = false
     set((current) => {
       const layout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
+      const address = topicSpatialAddress(current.config, snapshot!, current.spaceZoneBindings, current.topicCategories)
+      if (!address) { placementFailed = true; return current }
+      const catalog = workbenchSelectionCatalog(current)
       const requestedTab = options?.tabId ? current.tabs[options.tabId] : undefined
       const boundTab = options?.tabId
-        ? requestedTab?.workspaceId === workspace.id && requestedTab.topicId === topicId && tabGroupForTab(layout, requestedTab.id) !== null
+        ? requestedTab && catalog.tabs.some(tab => tab.tabId === requestedTab.id && tab.zoneId === address.zoneId) && tabGroupForTab(layout, requestedTab.id) !== null
           ? requestedTab
           : undefined
-        : Object.values(current.tabs).find((tab) =>
-          tab.workspaceId === workspace.id &&
-          tab.topicId === topicId &&
-          tabGroupForTab(layout, tab.id) !== null
-        )
+        : (() => { const choice = selectObject(current, snapshot!); return choice.tabId ? current.tabs[choice.tabId] : undefined })()
       if (options?.tabId && !boundTab) {
         placementFailed = true
         return current
       }
       if (boundTab) {
-        if (!mayReveal || boundTab.id === revealedTabId) return current
+        if (!mayReveal) return current
+        const choice = selectObject(current, snapshot!, boundTab.id)
         const groupId = tabGroupForTab(layout, boundTab.id)!
         return {
-          ...(mayReveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
+          activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const, workbenchSpaceSelection: choice,
+          retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
           // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout——激活该 Topic 的
           // Tab 就够了，当前 Topic 由活动 Tab 派生（scratch-topic-layout.ts），不另存一份。
           layouts: {
@@ -6184,7 +6304,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }
         }
       }
-      const tab = { ...newLauncherTab(workspace.id), topicId }
+      // A confirmed empty Mote is an empty discussion surface, not missing discovery.
+      if (scratchTopicKind(snapshot!.id, [snapshot!]) === 'mote' && mayReveal) return { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
+        workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId, tabId: null, groupId: null, regionId: null },
+        retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null }
+      const tab = { ...newLauncherTab(workspace.id), topicId, space: address }
       const nextLayout = addTabPlacement(layout, layout.activeGroupId, tab.id)
       if (!nextLayout) {
         placementFailed = true
@@ -6203,7 +6327,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return {
         ...(mayReveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
         tabs: { ...current.tabs, [tab.id]: tab },
-        layouts: { ...current.layouts, [workspace.id]: placedLayout }
+        layouts: { ...current.layouts, [workspace.id]: placedLayout },
+        ...(mayReveal ? { workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId,
+          tabId: tab.id, groupId: layout.activeGroupId, regionId: tab.layout.activeRegionId },
+          retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null } : {})
       }
     })
     if (placementFailed) throw new Error('The Tab Group is no longer available')
@@ -6213,7 +6340,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // fixed PMO Teams Topic) deliberately stops at the launcher so it cannot steal the user's focus
     // or start a duplicate terminal.
     const liveLayout = get().layouts[workspace.id]
-    if (createdLauncher && mayReveal && liveLayout && !snapshot.soul) {
+    if (createdLauncher && mayReveal && liveLayout && scratchTopicKind(snapshot.id, [snapshot]) === 'topic') {
       await get().promoteWarmTerminal(tabGroupForTab(liveLayout, createdLauncher.id)!, {
         tabId: createdLauncher.id,
         regionId: createdLauncher.layout.activeRegionId

@@ -329,7 +329,7 @@ describe('actual Desktop navigation and content-free observation owners', () => 
     const prewarm = vi.spyOn(useAppStore.getState(), 'prewarmTerminal')
     await act(async () => useAppStore.getState().openLauncher({ workspaceId: 'target', tabGroupId: 'target-group', reveal: true })); await settle()
     expect(useAppStore.getState().workbenchNavigationInputPolicy).toBeNull()
-    expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: space, zoneId: zone, workspaceId: 'target', groupId: 'target-group' })
     expect(useAppStore.getState().layouts.target!.groups[0]!.tabOrder).toHaveLength(2)
     expect(prewarm).toHaveBeenCalledWith('target', expect.any(String))
     expect(container.querySelector('.launch-surface')).not.toBeNull()
@@ -866,13 +866,17 @@ describe('actual Desktop navigation and content-free observation owners', () => 
       tabs: { ...state.tabs, [chosenTab.id]: chosenTab, [peerTab.id]: peerTab },
       layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('topics-group', [chosenTab.id, peerTab.id]) } })))
     const selected = (await control({ kind: 'space', regionId: 'chosen-region' })).navigation.selection.space!
+    // Core save hydration may add the exact original Zone descriptor. Closing a
+    // peer must preserve that authoritative descriptor and the complete body.
+    const originalPeer = useAppStore.getState().tabs[peerTab.id]!
+    expect(originalPeer).toMatchObject(peerTab)
     const sessions = useAppStore.getState().sessions, stop = vi.spyOn(api.sessions, 'stop'), prewarm = vi.spyOn(useAppStore.getState(), 'prewarmTerminal')
     await act(async () => { expect(await useAppStore.getState().closeTab(SCRATCH_WORKSPACE_ID, 'topics-group', chosenTab.id, { keepAgentSessions: true })).toBe(true) })
     await settle()
     const parent = { ...selected, tabId: null, groupId: null, regionId: null }
     expect(useAppStore.getState().workbenchSpaceSelection).toEqual(parent)
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBeNull()
-    expect(useAppStore.getState().tabs[peerTab.id]).toEqual(peerTab)
+    expect(useAppStore.getState().tabs[peerTab.id]).toEqual(originalPeer)
     expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.tabOrder).toEqual([peerTab.id])
     const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'closed-topic-observe', operation: 'inspect.client' })
     if (result.operation !== 'inspect.client') throw new Error('Wrong operation')

@@ -9,6 +9,13 @@ import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-te
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { customMoteId, customTab, defaultAgent, defaultTab, moteTopics, neighborAgent, neighborTab, ordinaryTopicId, ordinaryTab, savedMoteKey } from './fixtures/mote-workface'
 
+// The Node build registers no Panels in happy-dom. Use the same real browser
+// implementation as Desktop so the multi-Region layout owner is exercised.
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
+
 let app: MoteAppFixture
 beforeEach(() => { app = createMoteApp() })
 afterEach(async () => { await app.dispose() })

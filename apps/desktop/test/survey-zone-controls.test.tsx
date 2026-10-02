@@ -4,14 +4,13 @@ import { act, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
-import { SurveyTopicRelations } from '../src/renderer/src/components/SurveyTopicRelations'
 import { SurveyZoneItem } from '../src/renderer/src/components/SurveyZoneItem'
 import { SurveyItemOptions } from '../src/renderer/src/components/SurveyItemOptions'
 
 const zone: AgentMuxZoneFact = { zoneId: 'original-zone', workspaceId: 'resource-workspace', kind: 'worktree', hostId: 'local', directoryPath: _hygiene_fixturePath("resource/project"), branch: 'work' }
 const topicA: AgentMuxSpaceFact = { spaceId: 'topic-a', kind: 'topic', name: 'Research', hostId: 'local', directoryPath: _hygiene_fixturePath("topics/a"), projectId: null }
 const topicB: AgentMuxSpaceFact = { ...topicA, spaceId: 'topic-b', hostId: 'remote', directoryPath: _hygiene_fixturePath("topics/b") }
-const mote: AgentMuxSpaceFact = { ...topicA, spaceId: 'mote', kind: 'mote' }
+const mote: AgentMuxSpaceFact = { ...topicA, spaceId: 'mote', kind: 'mote', name: 'Team' }
 let container: HTMLDivElement, root: Root
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -20,93 +19,81 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount()); document.body.replaceChildren(); vi.unstubAllGlobals()
 })
-async function pointer(target: Element, type: string, relatedTarget: EventTarget | null = null) {
-  await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'mouse', buttons: 0, button: 0, relatedTarget })))
+async function pointer(target: Element, type: string) {
+  await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'mouse', buttons: 0, button: 0 })))
 }
 async function key(target: Element, value: string) {
   await act(async () => target.dispatchEvent(new KeyboardEvent('keydown', { key: value, bubbles: true, cancelable: true })))
 }
-const menu = () => document.querySelector<HTMLElement>('.survey-topic-submenu[role="menu"]')
-function checkbox(id: string) {
-  const item = document.querySelector<HTMLElement>(`[role="menuitemcheckbox"][data-survey-topic-id="${id}"]`)
-  expect(item, `actual checkbox for ${id}`).not.toBeNull(); return item!
+const menu = () => document.querySelector<HTMLElement>('.survey-item-menu[role="menu"]')
+const details = () => document.querySelector<HTMLElement>('.survey-item-details-content')
+function action(text: string) {
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === text)
+  expect(item, 'actual menu action ' + text).toBeDefined(); return item!
 }
-async function mount(overrides: Partial<ComponentProps<typeof SurveyTopicRelations>> = {}) {
-  const props = { zone, topics: [topicA, topicB], relatedTopics: [topicA], pendingSpaceId: null, onLinkChange: vi.fn(), onOpenTopic: vi.fn(), ...overrides }
+async function mount(overrides: Partial<ComponentProps<typeof SurveyItemOptions>> = {}) {
+  const props = { visible: true, title: 'Original mixed workface', zone, workspace: null, collected: true, relatedSpaces: [topicA],
+    activityDetails: 'Mixed control', onSaveToTopic: vi.fn(), currentPanelAvailable: true,
+    onCollectedChange: vi.fn(), onManageBrowsers: vi.fn(), onOpenWorkspace: vi.fn(), ...overrides }
   await act(async () => root.render(<><input aria-label="original editor" defaultValue="Retain this editor selection" />
-    <SurveyItemOptions visible title="Original mixed workface" zone={zone} workspace={null} collected={false} relatedTopics={props.relatedTopics}
-      activityDetails="Mixed control" panels={null} relations={props} onCollectedChange={() => {}} onManageBrowsers={() => {}} onOpenWorkspace={() => {}} /></>))
+    <SurveyItemOptions {...props} /></>))
   return props
 }
 async function open() {
   const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Exploration options"]')!
   expect(trigger).not.toBeNull(); await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
-  const details = document.querySelector<HTMLElement>('[aria-label="Item details"]')!
-  expect(details).not.toBeUndefined()
-  await act(async () => { details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
-  const sub = document.querySelector<HTMLElement>('[aria-label="Link Topics"]')!
-  expect(sub).not.toBeNull(); await act(async () => sub.focus()); await key(sub, 'ArrowRight')
   expect(menu()).not.toBeNull(); return trigger
 }
+async function openDetails() {
+  const sub = action('Details'); await act(async () => sub.focus()); await key(sub, 'ArrowRight')
+  expect(details()).not.toBeNull()
+}
 async function close() {
-  await key(menu()!, 'Escape')
-  const parent = document.querySelector<HTMLElement>('.survey-item-menu')
-  if (parent) await key(parent, 'Escape')
+  await key(details()?.closest<HTMLElement>('[role="menu"]') ?? menu()!, 'Escape')
+  if (menu()) await key(menu()!, 'Escape')
 }
 
-it('uses exact Topic identities and only owner props update checked relations', async () => {
-  const props = await mount({ topics: [topicA, topicB, topicA, mote] }); await open()
-  expect(menu()!.querySelectorAll('[role="menuitemcheckbox"]')).toHaveLength(2)
-  expect(checkbox('topic-a').getAttribute('aria-checked')).toBe('true')
-  expect(checkbox('topic-b').getAttribute('aria-checked')).toBe('false')
-  expect(checkbox('topic-b').getAttribute('aria-label')).toContain(("remote, " + _hygiene_fixturePath("topics/b")))
-  expect(checkbox('topic-b').textContent).toContain(("remote · " + _hygiene_fixturePath("topics/b")))
-  await act(async () => checkbox('topic-b').click())
-  expect(props.onLinkChange).toHaveBeenCalledExactlyOnceWith('topic-b', true)
-  expect(props.onOpenTopic).not.toHaveBeenCalled()
-  expect(checkbox('topic-b').getAttribute('aria-checked')).toBe('false')
-  await mount({ ...props, relatedTopics: [topicA, topicB] })
-  expect(checkbox('topic-b').getAttribute('aria-checked')).toBe('true')
-  await act(async () => checkbox('topic-b').click())
-  expect(props.onLinkChange).toHaveBeenCalledTimes(2)
-  expect(props.onLinkChange).toHaveBeenLastCalledWith('topic-b', false)
-  expect(menu()).not.toBeNull()
+it('offers explicit research and current-panel capture without changing location bindings or navigating', async () => {
+  const props = await mount({ relatedSpaces: [topicA, topicB, mote] }); await open()
+  expect(document.querySelector('[data-survey-topic-id]')).toBeNull()
+  expect(document.querySelector('[aria-label="Link Topics"]')).toBeNull()
+  expect(document.querySelector('[aria-label="Organize into Topic"]')).toBeNull()
+  expect(props.onSaveToTopic).not.toHaveBeenCalled()
+  await act(async () => action('Save research to Topic…').click())
+  expect(props.onSaveToTopic).toHaveBeenCalledExactlyOnceWith('research')
+  expect(props.onOpenWorkspace).not.toHaveBeenCalled(); expect(props.onCollectedChange).not.toHaveBeenCalled()
+  await open(); await act(async () => action('Save current panel to Topic…').click())
+  expect(props.onSaveToTopic).toHaveBeenLastCalledWith('panel'); expect(props.onSaveToTopic).toHaveBeenCalledTimes(2)
 })
 
-it.each([{ topics: null }, { topics: [topicA] }])('keeps a confirmed linked Topic removable when discovery omits it (%j)', async ({ topics }) => {
-  const props = await mount({ topics, relatedTopics: [topicB] }); await open()
-  expect(checkbox('topic-b').getAttribute('aria-checked')).toBe('true')
-  await act(async () => checkbox('topic-b').click())
-  expect(props.onLinkChange).toHaveBeenCalledExactlyOnceWith('topic-b', false)
-  expect(props.onOpenTopic).not.toHaveBeenCalled()
-  expect(checkbox('topic-b').getAttribute('aria-checked')).toBe('true')
-  if (topics === null) expect(menu()!.textContent).toContain('Topic discovery is not confirmed.')
+it.each([false, true])('keeps known exact same-name locations read-only when some observations are unconfirmed (%s)', async unconfirmed => {
+  const props = await mount({ relatedSpaces: [topicA, topicB], relatedSpacesUnconfirmed: unconfirmed }); await open(); await openDetails()
+  expect(details()!.textContent).toContain('2 linked locations')
+  expect(details()!.textContent).toContain(("Research · local · " + _hygiene_fixturePath("topics/a")))
+  expect(details()!.textContent).toContain(("Research · remote · " + _hygiene_fixturePath("topics/b")))
+  expect(details()!.querySelectorAll('[role="menuitemcheckbox"], button')).toHaveLength(0)
+  expect(details()!.textContent?.includes('Original bindings are retained.')).toBe(unconfirmed)
+  await close(); expect(props.onSaveToTopic).not.toHaveBeenCalled(); expect(props.onOpenWorkspace).not.toHaveBeenCalled()
 })
 
-it('shows unknown relations as mixed and refuses guesses while preserving visible feedback', async () => {
-  const props = await mount({ relatedTopics: null, error: 'The relationship read is unconfirmed.', notice: 'Original work remains available.' }); await open()
-  expect(menu()!.querySelectorAll('[role="menuitemcheckbox"]')).toHaveLength(2)
-  for (const id of ['topic-a', 'topic-b']) {
-    expect(checkbox(id).getAttribute('aria-checked')).toBe('mixed')
-    expect(checkbox(id).getAttribute('aria-disabled')).toBe('true')
-    await act(async () => checkbox(id).click())
-  }
-  expect(props.onLinkChange).not.toHaveBeenCalled(); expect(props.onOpenTopic).not.toHaveBeenCalled()
-  expect(menu()!.textContent).toContain('Topic links are not confirmed.')
-  expect(menu()!.textContent).toContain('The relationship read is unconfirmed.')
-  expect(menu()!.textContent).toContain('Original work remains available.')
-  await close(); expect(menu()).toBeNull()
+it('reports unknown linked locations without guessing or blocking capture from the confirmed original research', async () => {
+  const props = await mount({ relatedSpaces: null }); await open(); await openDetails()
+  expect(details()!.textContent).toContain('Linked locations unknown')
+  expect(details()!.textContent).not.toContain('No linked locations')
+  expect(details()!.querySelectorAll('[role="menuitemcheckbox"]')).toHaveLength(0)
+  await close(); await open(); await act(async () => action('Save research to Topic…').click())
+  expect(props.onSaveToTopic).toHaveBeenCalledExactlyOnceWith('research')
 })
 
-it('keeps pending relation changes controlled and opening a linked Topic independent', async () => {
-  const props = await mount({ pendingSpaceId: 'topic-b', notice: 'Local relationship applied; disk save is not confirmed.' }); await open()
-  expect(menu()!.querySelector('[data-survey-topic-id="topic-b"] .spin')).not.toBeNull()
-  expect(checkbox('topic-a').getAttribute('aria-disabled')).toBe('true')
-  expect(checkbox('topic-b').getAttribute('aria-checked')).toBe('false')
-  const navigation = document.querySelector<HTMLElement>('[role="menuitem"][data-survey-topic-id="topic-a"]')!
-  expect(navigation).not.toBeNull(); await act(async () => navigation.click())
-  expect(props.onOpenTopic).toHaveBeenCalledExactlyOnceWith('topic-a'); expect(props.onLinkChange).not.toHaveBeenCalled()
-  expect(props.notice).toContain('disk save is not confirmed.')
+it('keeps research capture available while an exact current panel is unavailable and never adopts an uncollected workface', async () => {
+  const props = await mount({ currentPanelAvailable: false }); await open()
+  expect([...menu()!.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Save current panel to Topic…')).toBe(false)
+  await act(async () => action('Save research to Topic…').click())
+  expect(props.onSaveToTopic).toHaveBeenCalledExactlyOnceWith('research')
+  await mount({ ...props, collected: false }); await open()
+  expect(menu()!.textContent).not.toContain('Save research to Topic')
+  expect(menu()!.textContent).not.toContain('Save current panel to Topic')
+  expect(props.onCollectedChange).not.toHaveBeenCalled()
 })
 
 it('keeps the original editor draft and selection while explicit Item-menu disclosure follows Radix', async () => {
@@ -114,29 +101,30 @@ it('keeps the original editor draft and selection while explicit Item-menu discl
   const editor = container.querySelector('input')!, trigger = container.querySelector('[aria-label="Exploration options"]')!
   editor.focus(); editor.setSelectionRange(3, 14); await pointer(trigger, 'pointerover')
   expect(menu()).toBeNull(); expect(document.activeElement).toBe(editor)
-  await open(); await pointer(checkbox('topic-a'), 'pointermove')
+  await open(); await pointer(action('Save research to Topic…'), 'pointermove')
   expect([editor.selectionStart, editor.selectionEnd]).toEqual([3, 14])
   expect(editor.value).toBe('Retain this editor selection')
-  await close(); expect(menu()).toBeNull(); expect(props.onLinkChange).not.toHaveBeenCalled()
+  await close(); expect(menu()).toBeNull(); expect(props.onSaveToTopic).not.toHaveBeenCalled()
   expect([editor.selectionStart, editor.selectionEnd]).toEqual([3, 14])
 })
 
-it('lets Radix keyboard selection toggle only the chosen relation and Escape restore trigger focus', async () => {
+it('lets Radix keyboard selection capture only the chosen scope and Escape restore trigger focus', async () => {
   const props = await mount(), trigger = await open()
-  await act(async () => checkbox('topic-b').focus()); await key(checkbox('topic-b'), 'Enter')
-  expect(props.onLinkChange).toHaveBeenCalledExactlyOnceWith('topic-b', true)
-  expect(props.onOpenTopic).not.toHaveBeenCalled(); expect(menu()).not.toBeNull()
-  await close(); expect(menu()).toBeNull()
+  const panel = action('Save current panel to Topic…'); await act(async () => panel.focus()); await key(panel, 'Enter')
+  expect(props.onSaveToTopic).toHaveBeenCalledExactlyOnceWith('panel')
+  expect(props.onOpenWorkspace).not.toHaveBeenCalled(); expect(menu()).toBeNull()
+  await act(async () => { await vi.waitFor(() => expect(document.activeElement).toBe(trigger)) })
+  await open(); await key(menu()!, 'Escape'); expect(menu()).toBeNull()
   await act(async () => { await vi.waitFor(() => expect(document.activeElement).toBe(trigger)) })
 })
 
 it('selects the original Zone and keeps its resource and membership actions in the single selected Item menu', async () => {
   const onSelect = vi.fn(), onOpenWorkspace = vi.fn(), onCollectedChange = vi.fn()
   const resource = { id: 'foreign-resource', name: 'Resource project', hostId: 'remote', path: _hygiene_fixturePath("source/worktree"), branch: 'resource-branch', kind: 'worktree' as const }
-  const render = async (sourceWorkspace: typeof resource | null, relatedTopics: AgentMuxSpaceFact[] | null) => {
+  const render = async (sourceWorkspace: typeof resource | null, relatedSpaces: AgentMuxSpaceFact[] | null) => {
     await act(async () => root.render(<><SurveyZoneItem zone={zone} title="Original mixed workface" glyph={<span>Mixed</span>} selected activity="Mixed" onSelect={onSelect} />
-      <SurveyItemOptions visible title="Original mixed workface" zone={zone} workspace={sourceWorkspace} relatedTopics={relatedTopics} collected={true}
-        onCollectedChange={onCollectedChange} activityDetails="Two Browsers: mixed control" panels={null} relations={null}
+      <SurveyItemOptions visible title="Original mixed workface" zone={zone} workspace={sourceWorkspace} relatedSpaces={relatedSpaces} collected={true}
+        onCollectedChange={onCollectedChange} activityDetails="Two Browsers: mixed control"
         onManageBrowsers={() => {}} onOpenWorkspace={onOpenWorkspace} /></>))
   }
   await render(resource, [topicA, topicB, mote])
@@ -145,21 +133,19 @@ it('selects the original Zone and keeps its resource and membership actions in t
   expect(container.querySelectorAll('.survey-item-details')).toHaveLength(0)
   expect(container.textContent).not.toContain('Resource project')
   await act(async () => trigger.focus()); await key(trigger, 'ArrowDown')
-  const main = document.querySelector<HTMLElement>('.survey-item-menu')!
-  expect(main).not.toBeNull()
+  const main = menu()!; expect(main).not.toBeNull()
   const member = main.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!
   await act(async () => member.focus()); await key(member, 'Enter')
   expect(onCollectedChange).toHaveBeenCalledExactlyOnceWith(false)
-  const details = [...main.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Details')!
-  expect(details).not.toBeNull(); await act(async () => details.focus()); await key(details, 'ArrowRight')
-  const content = document.querySelector('.survey-item-details-content')!
-  expect(content).not.toBeNull(); expect(content.textContent).toContain('2 linked Topics')
-  expect(content.textContent).toContain(("Research · remote · " + _hygiene_fixturePath("topics/b"))); expect(content.textContent).toContain('Branch: resource-branch')
-  expect(content.textContent).not.toContain('Branch: work'); expect(content.textContent).toContain('Two Browsers: mixed control')
-  await key(content.closest<HTMLElement>('[role="menu"]')!, 'Escape')
+  await openDetails()
+  expect(details()!.textContent).toContain('3 linked locations')
+  expect(details()!.textContent).toContain(("Research · remote · " + _hygiene_fixturePath("topics/b"))); expect(details()!.textContent).toContain(("Team · local · " + _hygiene_fixturePath("topics/a")))
+  expect(details()!.textContent).toContain('Branch: resource-branch')
+  expect(details()!.textContent).not.toContain('Branch: work'); expect(details()!.textContent).toContain('Two Browsers: mixed control')
+  await key(details()!.closest<HTMLElement>('[role="menu"]')!, 'Escape')
   await vi.waitFor(() => expect(document.activeElement).toBe(trigger))
-  if (!document.querySelector('.survey-item-menu')) await key(trigger, 'ArrowDown')
-  await vi.waitFor(() => expect(document.querySelector('.survey-item-menu')).not.toBeNull())
+  if (!menu()) await key(trigger, 'ArrowDown')
+  await vi.waitFor(() => expect(menu()).not.toBeNull())
   const source = document.querySelector<HTMLElement>(("[aria-label=\"Open resource Workspace: Resource project, remote, " + _hygiene_fixturePath("source/worktree") + "\"]"))!
   expect(source).not.toBeNull(); await act(async () => source.click()); expect(onOpenWorkspace).toHaveBeenCalledExactlyOnceWith('foreign-resource')
   await render(null, null); await key(trigger, 'ArrowDown')

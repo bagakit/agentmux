@@ -1005,3 +1005,5 @@ export function agentMuxControlTimeoutMs(operation: AgentMuxControlRequest['oper
 export function isAgentMuxControlOperation(value: unknown): value is AgentMuxControlRequest['operation'] {
   return typeof value === 'string' && Object.hasOwn(OPERATION_BUDGET, value)
 }
+
+export * from './public-rpc-topics.js'
