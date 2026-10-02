@@ -15,6 +15,7 @@ import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 const repositoryRoot = resolve(import.meta.dirname, '../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const core = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 const output = resolve(repositoryRoot, process.env.AGENTMUX_FOCUS_CLOSED_GUI_OUTPUT ?? (".tmp/focus-closed-session-history-gui-" + (globalThis.crypto.randomUUID()) + ""))
 await mkdir(output, { recursive: true })
 const digest = value => createHash('sha256').update(value).digest('hex'), delay = ms => new Promise(done => setTimeout(done, ms))
@@ -139,9 +140,17 @@ async function normalQuit(probe) {
   assert.equal(probe.child.exitCode, 0); assert.equal(probe.child.signalCode, null); children.delete(probe.child)
   return { pid: probe.child.pid, exitCode: probe.child.exitCode, signal: probe.child.signalCode, inspectorReplyError: replyError ?? null }
 }
-async function focus(target) {
-  const response = await core.requestAgentMuxControl({ schemaVersion: core.AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation: 'focus', target, inputPolicy: 'preserve' }, join(runtimeDirectory, 'control.sock'))
-  assert.equal(response.ok, true, JSON.stringify(response)); assert.ok(['applied', 'unchanged'].includes(response.result.navigation.state)); return response.result
+/**
+ * @param {'space.focus' | 'app.focus'} method
+ * @param {import('../../../packages/core/dist/desktop-focus-control.js').AgentMuxDesktopFocusTarget} target
+ */
+async function focus(method, target) {
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try {
+    const response = await rpc.call(method, { target, inputPolicy: 'preserve' })
+    assert.ok(['applied', 'unchanged'].includes(response.navigation.state)); return response
+  } finally { await rpc.dispose() }
 }
 async function close(probe, name, action) {
   await click(probe.cdp, `[data-workbench-tab-id="${name}"] .workbench-tab__close`)
@@ -234,12 +243,12 @@ try {
   const seed={version:1,state:{activeWorkspaceId:'beta',mainSurface:'workbench',focusTimelineHeight:260,focusTimelineNameWidth:112,agentComposerDrafts:Object.fromEntries(['keep','peer-one','peer-two'].map(name=>[agents.get(name).agentSessionId,DRAFT])),agentFocus:{execution:{sessionId:agents.get('closed').agentSessionId,history:[{sessionId:agents.get('closed').agentSessionId,focusedAt:now-90*60_000,identity:{kind:'agent',providerId:'claude',name:'Archived Beta input',hostId:'local',workspacePath:join(privateRoot,'beta'),project:{id:'beta',name:'Beta'}}}]},pmo:{sessionId:null}},restoredWorkbench:{tabs:Object.fromEntries([...agents.keys()].map(name=>[name,tab(name)])),layouts:Object.fromEntries(['alpha','beta','__scratch__'].map(id=>{const groupId=`${id}-group`,tabOrder=id==='alpha'?['keep','unfocused','peer-one','peer-two']:id==='beta'?['closed']:[];return[id,{root:{type:'leaf',groupId},groups:[{id:groupId,tabOrder,activeTabId:tabOrder[0]??null,recentTabIds:tabOrder.slice(0,1)}],activeGroupId:groupId}]}))}}}
   const first=await launch('first',seed);receipt.processes.push({pid:first.child.pid,seedCount:1,seedReport:first.seedReport});await save('first-ready-checkpoint.json')
   await close(first,'closed','Stop & Close');assert.equal((await descriptor('closed')).state,'retired');receipt.defaultCloseRetired=true
-  await focus({kind:'space',tabId:'keep',displayWorkspaceId:'alpha',groupId:'alpha-group'})
+  await focus('space.focus', {kind:'space',tabId:'keep',displayWorkspaceId:'alpha',groupId:'alpha-group'})
   await close(first,'unfocused','Stop & Close');assert.equal((await descriptor('unfocused')).state,'retired')
   assert.ok(!(await surface(first)).focus.execution.history.some(item=>item.sessionId===agents.get('unfocused').agentSessionId));receipt.neverFocusedArchivedSource=true
   await close(first,'keep','Keep Session & Close');const keep=(await client.listRuns()).find(run=>run.runId===agents.get('keep').run.runId);assert.equal(keep.pid,originalRuns.get('keep').pid);receipt.keepSessionPreserved=true
   receipt.legitimateCloseControls=await counts(first);assert.equal(receipt.legitimateCloseControls.stop,2)
-  await focus({kind:'surface',surface:'focus'});await waitFor('Actual Focus timeline',()=>first.cdp.evaluate('Boolean(document.querySelector(".recent-focus"))'))
+  await focus('app.focus', {kind:'surface',surface:'focus'});await waitFor('Actual Focus timeline',()=>first.cdp.evaluate('Boolean(document.querySelector(".recent-focus"))'))
   const readonlyBefore=await counts(first);await choose(first,'closed');assert.ok((await surface(first)).projects.some(project=>project.name==='Beta'));await screenshot(first,'first-wide-closed.png',1200)
   await choose(first,'unfocused');assert.ok((await surface(first)).projects.some(project=>project.name==='Project not recorded'));await screenshot(first,'first-narrow-unfocused.png',640)
   await click(first.cdp,'[aria-label="Close message"]');await click(first.cdp,'[aria-label="Previous focus window"]');await waitFor('Out-of-window archived messages disappear',()=>first.cdp.evaluate('document.querySelectorAll(".recent-focus__message[data-message-id]").length===0'))
