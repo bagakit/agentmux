@@ -7,7 +7,7 @@ import { headlessFixture } from '../../../packages/core/test/helpers/headless-ru
 const exec = promisify(execFile)
 
 it('the actual installer observes and releases the exact public Headless owner through its shipped fenced contract', async () => {
-  const scope = await headlessFixture()
+  const scope = await headlessFixture({ cli: true })
   try {
     const result = await exec(process.execPath, [
       resolve(import.meta.dirname, '../scripts/package-semantic-host.mjs'), '--bootstrap',
