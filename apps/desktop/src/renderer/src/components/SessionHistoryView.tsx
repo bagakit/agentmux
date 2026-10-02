@@ -8,10 +8,12 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import { ConversationMessage, parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationRecordSequence, type ConversationRecordRenderer } from '@agentmux/client-ui/components/ConversationRecordSequence'
+import { NativeProcessObservation } from './NativeProcessObservation'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
-type ReadingAnchor = { id: string; offset: number }
+type ReadingAnchor = { kind: 'record' | 'group'; id: string; offset: number }
 type ReadingState = {
   pages: AgentSessionHistoryPage[]
   source: AgentSessionHistorySource | null
@@ -36,7 +38,16 @@ function readingAnchor(viewport: HTMLElement): ReadingAnchor | null {
   for (const row of viewport.querySelectorAll<HTMLElement>('[data-history-item-id]')) {
     const rect = row.getBoundingClientRect()
     if (rect.bottom > bounds.top && rect.top < bounds.bottom) {
-      return { id: row.dataset.historyItemId!, offset: rect.top - bounds.top }
+      return { kind: 'record', id: row.dataset.historyItemId!, offset: rect.top - bounds.top }
+    }
+  }
+  // Only a truly collapsed group may provide geometry while its real raw rows are hidden.
+  for (const group of viewport.querySelectorAll<HTMLElement>('[data-history-group-anchor]')) {
+    const head = group.querySelector<HTMLElement>(':scope > .wf-card--observation > .wf-head[aria-expanded="false"]')
+    if (!head) continue
+    const rect = head.getBoundingClientRect()
+    if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom) {
+      return { kind: 'group', id: group.dataset.historyGroupAnchor!, offset: rect.top - bounds.top }
     }
   }
   return null
@@ -115,12 +126,17 @@ export function SessionHistoryView({
     const viewport = viewportRef.current
     const anchor = anchorRef.current
     if (!visibleRef.current || !viewport || !anchor) return
-    const row = Array.from(viewport.querySelectorAll<HTMLElement>('[data-history-item-id]'))
-      .find((candidate) => candidate.dataset.historyItemId === anchor.id)
+    const row = anchor.kind === 'record'
+      ? Array.from(viewport.querySelectorAll<HTMLElement>('[data-history-item-id]'))
+        .find(candidate => candidate.dataset.historyItemId === anchor.id)
+      : Array.from(viewport.querySelectorAll<HTMLElement>('[data-history-group-anchor]'))
+        .find(candidate => candidate.dataset.historyGroupAnchor === anchor.id)
+        ?.querySelector<HTMLElement>(':scope > .wf-card--observation > .wf-head[aria-expanded="false"]')
     if (!row) return
     const bounds = viewport.getBoundingClientRect()
-    if (bounds.height <= 0) return
-    viewport.scrollTop += row.getBoundingClientRect().top - bounds.top - anchor.offset
+    const rect = row.getBoundingClientRect()
+    if (bounds.height <= 0 || rect.height <= 0) return
+    viewport.scrollTop += rect.top - bounds.top - anchor.offset
     lastScrollTopRef.current = viewport.scrollTop
   }
   async function readPage(direction: 'latest' | 'older'): Promise<void> {
@@ -160,7 +176,14 @@ export function SessionHistoryView({
       if (pages.length > MAX_NEARBY_PAGES) {
         const newest = pages.at(-1)!
         const currentAnchor = anchorRef.current ?? (viewportRef.current ? readingAnchor(viewportRef.current) : null)
-        const anchorInNewest = currentAnchor && newest.items.some((item) => item.id === currentAnchor.id)
+        const anchorGroup = currentAnchor?.kind === 'group' && viewportRef.current
+          ? Array.from(viewportRef.current.querySelectorAll<HTMLElement>('[data-history-group-anchor]'))
+            .find(group => group.dataset.historyGroupAnchor === currentAnchor.id)
+          : undefined
+        const anchorInNewest = currentAnchor?.kind === 'record'
+          ? newest.items.some(item => item.id === currentAnchor.id)
+          : anchorGroup && Array.from(anchorGroup.querySelectorAll<HTMLElement>('[data-history-item-id]'))
+            .some(row => newest.items.some(item => item.id === row.dataset.historyItemId))
         const sel = typeof window !== 'undefined' ? window.getSelection() : null
         const hasActiveSelection = Boolean(
           sel &&
@@ -332,6 +355,41 @@ export function SessionHistoryView({
     '--history-selection-background': theme.selectionBackground,
     '--history-selection-foreground': theme.selectionForeground
   } as CSSProperties
+  const renderRecord: ConversationRecordRenderer = (item, wrapBody) => {
+    const userMsg = item.kind === 'user-message' ? userMessagesByRawId.get(item.id) : undefined
+    const speaker: ConversationSpeaker | undefined = item.kind === 'activity'
+      ? undefined
+      : item.kind === 'user-message'
+        ? (userMsg ? speakerOfUserMessage(userMsg) : { role: 'unknown', id: UNKNOWN_SPEAKER_ID })
+        : { role: 'agent', id: control.agentSessionId }
+    const described = speaker ? resolveSpeaker(speaker) : undefined
+    const displayName = described?.name ?? (item.kind === 'activity' ? item.title ?? 'Activity' : 'Input')
+    const message = (
+      <ConversationMessage
+        messageId={item.id}
+        conversationSessionId={control.agentSessionId}
+        {...(userMsg ? { inputSource: userMsg.source } : {})}
+        describeSpeaker={resolveSpeaker}
+        {...(speaker ? { speaker } : {})}
+        name={displayName}
+        {...(described?.providerId ? { providerId: described.providerId } : reading.source ? { providerId: reading.source.providerId } : {})}
+        content={item.contentParts}
+        {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})}
+        {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
+        workspaceRoot={workspaceRoot}
+        openWorkspaceFile={openWorkspaceFile}
+        openHttpLink={openHttpLink}
+        expandedTraces={openedTraces}
+        onToggleTrace={handleToggleTrace}
+        {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+      />
+    )
+    return (
+      <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
+        {wrapBody ? wrapBody(message) : message}
+      </article>
+    )
+  }
   return <section className={`session-history${onClose ? '' : ' session-history--inline'}`} style={style} hidden={!visible} aria-label={visible ? 'Conversation history' : undefined} onKeyDown={(event) => {
     if (event.key === 'Escape' && onClose) { event.stopPropagation(); onClose() }
   }}>
@@ -365,39 +423,12 @@ export function SessionHistoryView({
           {reading.loading ? <><LoaderCircle size={12} className="spin" /> Reading history…</> : reading.source && reading.nextCursor === null ? 'Beginning of the available native history' : null}
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
-        {items.map((item) => {
-          const userMsg = item.kind === 'user-message' ? userMessagesByRawId.get(item.id) : undefined
-          const speaker: ConversationSpeaker | undefined = item.kind === 'activity'
-            ? undefined
-            : item.kind === 'user-message'
-              ? (userMsg ? speakerOfUserMessage(userMsg) : { role: 'unknown', id: UNKNOWN_SPEAKER_ID })
-              : { role: 'agent', id: control.agentSessionId }
-
-          const described = speaker ? resolveSpeaker(speaker) : undefined
-          const displayName = described?.name ?? (item.kind === 'activity' ? item.title ?? 'Activity' : 'Input')
-
-          return (
-            <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
-              <ConversationMessage
-                messageId={item.id}
-                conversationSessionId={control.agentSessionId}
-                {...(userMsg ? { inputSource: userMsg.source } : {})}
-                describeSpeaker={resolveSpeaker}
-                {...(speaker ? { speaker } : {})}
-                name={displayName}
-                {...(described?.providerId ? { providerId: described.providerId } : reading.source ? { providerId: reading.source.providerId } : {})}
-                content={item.contentParts}
-                {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
-                workspaceRoot={workspaceRoot}
-                openWorkspaceFile={openWorkspaceFile}
-                openHttpLink={openHttpLink}
-                expandedTraces={openedTraces}
-                onToggleTrace={handleToggleTrace}
-                {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-              />
-            </article>
-          )
-        })}
+        <ConversationRecordSequence items={items}
+          sourceKey={JSON.stringify([control.hostId, control.agentSessionId, reading.source])}
+          renderRecord={renderRecord}
+          renderProcess={props => <div data-history-group-anchor={props.id}>
+            <NativeProcessObservation {...props} />
+          </div>} />
         {!reading.loading && reading.source && items.length === 0 ? <p className="session-history__empty">No records in this page.{reading.nextCursor !== null ? ' Earlier records can still be read.' : ''}</p> : null}
         {reading.newerOutsideWindow ? <div className="session-history__boundary" role="status">Newer records are outside this three-page reading window. <button type="button" className="small-button" disabled={reading.loading && retryDirectionRef.current === 'latest'} onClick={() => void readPage('latest')}>Return to latest</button></div> : null}
       </div>
