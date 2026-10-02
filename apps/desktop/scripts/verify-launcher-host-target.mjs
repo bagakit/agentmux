@@ -16,7 +16,8 @@ const targetTest = 'apps/desktop/test/launcher-host-target.test.tsx'
 const spatialTest = 'apps/desktop/test/desktop-spatial-state.test.ts'
 const tests = [targetTest, spatialTest, 'apps/desktop/test/new-tab-resource-contract.test.ts',
   'apps/desktop/test/launcher-entry-polish.test.tsx', 'apps/desktop/test/create-note-wiring.test.tsx',
-  'apps/desktop/test/workbench-tabs.test.ts', 'apps/desktop/test/workbench-region-store.test.ts']
+  'apps/desktop/test/workbench-tabs.test.ts', 'apps/desktop/test/workbench-region-store.test.ts',
+  'apps/desktop/test/session-connecting-surface.test.tsx']
 const product = ['components/NewTabSurface.tsx', 'components/LauncherEnvironment.tsx',
   'components/LauncherExecutionPicker.tsx', 'components/LauncherFileReferences.tsx',
   'lib/launcher-workspace.ts', 'lib/note-creation.ts', 'lib/session-state.ts',
