@@ -81,7 +81,12 @@ export async function runRemoteTerminalReadingProof({ win, reading, identity, ph
   const beforeInput = await evaluate('window.remoteProof.request("remote-terminal-status")')
   await evaluate('window.remoteFocusReadingTerminal(); true')
   await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'char', text: reading.inputText })
-  const input = await wait(observe, value => value.lines.some(line => line?.includes(reading.inputMarker)), 'Actual keyboard input produces the deterministic output in the same original terminal')
+  // An ordinary restart retains the first generation's marker. Wait for this
+  // generation's actual writer pulse as well as the visible producer reply.
+  const input = await wait(observe, value => value.lines.some(line => line?.includes(reading.inputMarker)) &&
+    value.metrics.writeCalls > idle.metrics.writeCalls && value.metrics.inputBytes > idle.metrics.inputBytes &&
+    value.metrics.completedWrites === value.metrics.writeCalls,
+  'Actual keyboard input produces a completed new writer pulse in the same original terminal')
   const afterInput = await evaluate('window.remoteProof.request("remote-terminal-status")')
   assert.deepEqual([afterInput.runId, afterInput.pid, afterInput.state], [reading.runId, reading.pid, 'running'])
   assert.ok(afterInput.acceptedInputBytes > beforeInput.acceptedInputBytes)

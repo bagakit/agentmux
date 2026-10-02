@@ -58,7 +58,7 @@
 
 - **「把一个链接存成文件」和「打开一个存着链接的文件」是一般浏览器的既有能力，走标准格式，不自造。** 本机实测确认三种格式都被系统认得：`.webloc`（macOS，plist，键为 `URL`；`kMDItemContentType = com.apple.web-internet-location`，XML 与二进制 plist 两种皆可）、`.url`（`[InternetShortcut]` + `URL=`，CRLF；macOS 报 `com.microsoft.internet-shortcut`）、以及 Netscape bookmark HTML（`<!DOCTYPE NETSCAPE-Bookmark-file-1>`，每家浏览器导入导出都用它）。约束：单条链接的存取用前两者（`.webloc` 在本平台是首选，`.url` 只读即可），整批导入导出用第三者。存下来的文件必须能被本机 Finder 与其他浏览器直接打开——自造一份 JSON 就把这条能力关在了应用内部，那还不如不做。
   - 这是与应用链接移交**不同的闭包**，单开 Feature，不混进同一批验收。
-- 内置浏览器只能打开本机可达的地址。**没有 SSH 转发或隧道**，因此"看远端主机的 dev server"当前不成立——这与 Remote 能力整体延后一致，不为它单开一条私有通路。
+- 内置浏览器只能打开本机可达的地址。**没有 SSH 转发或隧道**，因此"看远端主机的 dev server"当前不成立。远端 Agent 的 Runtime 管理沿[联邦 Runtime 与远端恢复边界](session-recovery.md#联邦-runtime-与远端恢复边界)；这项能力不提供 Browser 的端口转发，也不为 Browser 单开私有通路。
 
 ### Browser 地址／搜索输入历史与基础编辑
 
