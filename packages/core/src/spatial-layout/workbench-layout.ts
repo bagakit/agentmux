@@ -12,10 +12,10 @@ import {
   removeLeaf,
   replaceLeaf,
   setSplitRatioAtPath
-} from './split-tree'
+} from './split-tree.js'
 // 方向的两半含义（哪根轴、哪一侧）只从这里取。本文件定义 SplitDirection，而 split-direction.ts 只
 // `import type` 它——类型导入编译后被擦除，故这条反向的值导入不构成运行时循环。
-import { orientationOf, placementOf } from './split-direction'
+import { orientationOf, placementOf } from './split-direction.js'
 
 export type SplitDirection = 'left' | 'right' | 'up' | 'down'
 

@@ -99,7 +99,7 @@ describe('每个改动 tab-group 集合的地方都必须过 assertGroupInvarian
   // （reconcilePersistedLayout / layoutForActiveTopic）仍在渲染层。于是这道接线闸的扫描面现在横跨
   // 两棵源码树：渲染层 + 包。下面把两棵树各扫一遍再合并——包里的站点文件标签加 `pkg/` 前缀，与渲染层
   // 站点区分开。包里的 definer 是 `split-tree.ts`（相对包 src），扫描时同样跳过它自己。
-  const PKG = new URL('../../../packages/layout/src/', import.meta.url).pathname
+  const PKG = new URL('../../../packages/core/src/spatial-layout/', import.meta.url).pathname
   const PKG_CONFIG: LeafSetWiringConfig = { ...CONFIG, rendererRoot: PKG, definer: 'split-tree.ts' }
 
   /** 两棵树合并后的「会动集合」调用点：包里的站点文件标签加 `pkg/` 前缀。 */

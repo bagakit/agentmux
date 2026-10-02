@@ -132,6 +132,15 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  empty('space.state', 'Read the Core durable spatial graph and revision without a graphical frontend.'),
+  command('space.commit', '--revision N [--allow-entity-removal] < graph.json', 'Commit a spatial graph from JSON stdin using an exact revision; stale writes are refused.',
+    {'--revision':'value','--allow-entity-removal':'boolean'}, f => {
+      const expectedRevision = Number(value(f,'--revision',true))
+      if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) invalid('Revision must be a nonnegative integer.')
+      return {expectedRevision,...(f.booleans.has('--allow-entity-removal') ? {allowEntityRemoval:true} : {})}
+    }),
+  command('space.resolve', '--tab ID --region ID --direction left|right|up|down', 'Resolve relative positions from the original durable split tree.',
+    {'--tab':'data','--region':'data','--direction':'value'}, f => ({tabId:id(f,'--tab'),regionId:id(f,'--region'),direction:value(f,'--direction',true)})),
   empty('whoami', 'Read your verified Session, Run, presentation and available capabilities.'),
   empty('device.ls', 'Read original Host device and pending-request facts through a local Unix user request.'),
   empty('device.invite', 'Request an invitation; the Host requires actual local OS confirmation.'),

@@ -1,0 +1,11 @@
+# Durable spatial state
+
+Space, Zone, Tab, Group and Region identities, topology, ordering, split ratios, selections and all bindings are amux product data. Core owns these independently of Electron, React and any graphical frontend. Clients own screen geometry, DOM mounts, occlusion and input focus. Lookup maps and screen projections are derived; the underlying position relationships are durable.
+
+A remote host without an App must maintain, persist, query and manage the same graph through the public API and CLI. A Zone is loaded by stable identity and its original members and layout, not by whether one saved presentation address still exists. Multiple bindings are allowed; unbinding one location does not delete the entity or close its Run. AgentSession, Run and execution cwd remain with their original owners.
+
+The filesystem owner uses `spatial-state.json` in the Core state directory. `AGENTMUX_SPATIAL_STATE_STORE` may select an absolute path; hosts can inject that same path. Revision checks and a cross-process lock protect concurrent writes. Existing durable file writes commit atomically; the previous valid document is retained. Corrupt or unavailable reads never become an empty graph or authorize destructive replacement. Recovery from the retained document is explicit.
+
+The document keeps entity facts, every binding, original Group and Region trees and selections. Client resource metadata is preserved as JSON, interpreted by the original host; Core does not create Browser pages, files, PTYs or Runs. Public spatial management uses the existing JSON-RPC and remote transports. A persisted layout does not imply a Native surface is mounted.
+
+Desktop may import its old workbench only when the Core document is absent. Once present, the Core document and revision are authoritative; a stale client cannot overwrite it. UI preferences and drafts remain client concerns. Implementation is tracked in `f-2km8fddse`, with Survey consumer cleanup in `f-2kp8f6c5d`. This design does not certify unfinished Desktop cutover or Native capabilities.

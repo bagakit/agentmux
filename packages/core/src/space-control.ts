@@ -1,4 +1,4 @@
-/** Client-owned spatial facts. Core transports these without owning Git, directories or layouts. */
+/** Core spatial identities and relationships. Hosts retain Git, files, Native content and execution. */
 export type AgentMuxSpaceSelector = {
   spaceId?: string
   zoneId?: string
@@ -85,8 +85,8 @@ export type AgentMuxSpatialSave = {
   layoutApplied: boolean
   localStorageWritten: boolean
   storageFlushRequested: boolean
-  /** Chromium's void flush API supplies no disk acknowledgement. */
-  diskDurability: 'unconfirmed'
+  /** Confirmed only by the filesystem owner after file and directory fsync. */
+  diskDurability: 'unconfirmed' | 'confirmed'
   reason: string | null
 }
 export type AgentMuxSpatialIssue = { step: string; code: string; message: string; recovery: string; candidates?: AgentMuxSpaceSelector[] }

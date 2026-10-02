@@ -6,6 +6,8 @@ export interface DurableWriteOptions {
   /** 新文件的权限位。默认 0o600——状态文件只给属主读写。 */
   readonly mode?: number
   readonly signal?: AbortSignal
+  /** Require an acknowledged parent-directory fsync; failure leaves the write unconfirmed. */
+  readonly requireDirectorySync?: boolean
 }
 
 /**
@@ -43,7 +45,7 @@ export async function durableWriteFile(
     signal?.throwIfAborted()
     await rename(temporaryPath, path)
     committed = true
-    await syncDirectory(dirname(path))
+    await syncDirectory(dirname(path), options.requireDirectorySync === true)
   } finally {
     if (!committed) {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
@@ -57,12 +59,13 @@ export async function durableWriteFile(
  * fsync 父目录，让「新文件名指向新 inode」这条目录项本身落盘——否则断电后文件内容在盘上，
  * 但目录还指向旧的或没有这一项。尽力而为：目录 fsync 在部分平台/文件系统不被支持。
  */
-async function syncDirectory(directory: string): Promise<void> {
+async function syncDirectory(directory: string, required: boolean): Promise<void> {
   let handle
   try {
     handle = await open(directory, 'r')
     await handle.sync()
-  } catch {
+  } catch (error) {
+    if (required) throw error
     // 目录 fsync 不被支持不代表数据没落盘，忽略。
   } finally {
     await handle?.close().catch(() => {})

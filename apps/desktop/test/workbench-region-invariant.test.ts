@@ -150,8 +150,8 @@ describe('每个改动 region 集合的函数都必须过那道闸（#515 接线
   // 文件的删除一并删掉（实测：把它改成任何在渲染层里不存在的名字，15 条不变；这正说明它已无可跳过之物）。
   // 别名表直接按 `@agentmux/layout` 解析（见 aliasMapFor）。DEFINER 只剩一个用处：**导出穷举**那条读
   // 引擎真实源码时的文件标签，真实字节来自 DEFINER_SOURCE（包里）。
-  const DEFINER = 'packages/layout/src/workbench-view-layout.ts'
-  const DEFINER_SOURCE = fileURLToPath(new URL('../../../packages/layout/src/workbench-view-layout.ts', import.meta.url))
+  const DEFINER = 'packages/core/src/spatial-layout/workbench-view-layout.ts'
+  const DEFINER_SOURCE = fileURLToPath(new URL('../../../packages/core/src/spatial-layout/workbench-view-layout.ts', import.meta.url))
 
   /**
    * 布局引擎每个导出函数对 region-id **集合**的作用。分两档，且必须穷举（下方有断言）：

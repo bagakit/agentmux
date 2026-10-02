@@ -1,3 +1,4 @@
+import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentMuxClient } from './client.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates,
@@ -40,6 +41,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  spatialState?: AgentMuxSpatialStateStore
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
@@ -66,6 +68,8 @@ const NATIVE_FIELDS = {
   'runtime.bootstrap': ['consumerId'], 'runtime.invoke': ['consumerId', 'invocation'],
   'runtime.release-consumer': ['consumerId'], 'runtime.events': ['consumerId'],
   'runtime.history-watch': ['consumerId', 'agentSessionId', 'options'],
+  'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval'],
+  'space.resolve': ['tabId','regionId','direction'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
@@ -106,8 +110,9 @@ function validateFilters(p: Record<string, unknown>): void {
 
 /** All business orchestration lives here; transports carry messages, clients parse argv. */
 export class AgentMuxRpcService {
+  private readonly spatial: AgentMuxSpatialStateStore
   private local: Promise<AgentMuxClient> | undefined
-  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) {}
+  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore() }
 
   private async hosted(method: AgentMuxRpcMethod, params: unknown, context: AgentMuxRpcCallContext) {
     // Native SDK writes are authorized as a user/device by the transport. An
@@ -179,6 +184,20 @@ export class AgentMuxRpcService {
     return caller
   }
   private async execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> {
+    if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation)) {
+      const state = await this.spatial.read()
+      if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
+      if (request.operation === 'space.ls' || request.operation === 'space.inspect') {
+        if ('requestId' in request.target) throw new AgentMuxError('No mutation journal is attached to this headless owner.', 'CONTROL_UNAVAILABLE')
+        return {operation:request.operation,catalog:spatialCatalog(state.graph,request.target)}
+      }
+      if (request.operation === 'space.bind' || request.operation === 'space.unbind') {
+        const next = await this.spatial.bind(request.binding,request.operation === 'space.unbind')
+        return {operation:request.operation,requestId:request.requestId,binding:request.binding,catalog:spatialCatalog(next.graph),
+          outcome:JSON.stringify(state.graph) === JSON.stringify(next.graph) ? 'unchanged' : request.operation === 'space.bind' ? 'linked' : 'unlinked',
+          save:{layoutApplied:true,localStorageWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
+      }
+    }
     if (!this.ports.execute) throw new AgentMuxError('The original Desktop business owner is unavailable.', 'CONTROL_UNAVAILABLE')
     const result = await this.ports.execute(request)
     if (result.operation !== request.operation) throw new AgentMuxError('Business owner returned another operation.', 'CONTROL_PROTOCOL_ERROR')
@@ -307,6 +326,19 @@ export class AgentMuxRpcService {
     if (!fields) throw new AgentMuxError('Unknown RPC method.', 'RPC_METHOD_NOT_FOUND')
     rpcRecord(p, fields)
     switch (method) {
+      case 'space.state': result = {state:await this.spatial.read()}; break
+      case 'space.commit': {
+        if (p.allowEntityRemoval !== undefined && typeof p.allowEntityRemoval !== 'boolean') throw new AgentMuxError('Explicit entity removal must be boolean.', 'INVALID_CONTROL_REQUEST')
+        result = {state:await this.spatial.commit({expectedRevision:rpcCount(p.expectedRevision,-1,Number.MAX_SAFE_INTEGER),graph:p.graph as import('./spatial-state.js').AgentMuxSpatialGraph,
+          ...(p.allowEntityRemoval === undefined ? {} : {allowEntityRemoval:p.allowEntityRemoval as boolean})})}; break
+      }
+      case 'space.resolve': {
+        const tabId = rpcString(p.tabId,'Tab ID'), regionId = rpcString(p.regionId,'Region ID')
+        if (!['left','right','up','down'].includes(String(p.direction))) throw new AgentMuxError('A spatial direction is required.', 'INVALID_CONTROL_REQUEST')
+        const state = await this.spatial.read()
+        if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
+        result = resolveSpatialRegion(state.graph,{tabId,regionId,direction:p.direction as import('./spatial-layout.js').SplitDirection}); break
+      }
       case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines',
         endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() } }; break
       case 'system.doctor': {

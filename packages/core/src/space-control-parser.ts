@@ -257,7 +257,7 @@ function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'
 function save(value: unknown, code: Code): AgentMuxSpatialSave {
   const saved = fields(value, ['layoutApplied', 'localStorageWritten', 'storageFlushRequested', 'diskDurability', 'reason'], code)
   return { layoutApplied: bool(saved.layoutApplied, 'layoutApplied', code), localStorageWritten: bool(saved.localStorageWritten, 'localStorageWritten', code),
-    storageFlushRequested: bool(saved.storageFlushRequested, 'storageFlushRequested', code), diskDurability: member(saved.diskDurability, ['unconfirmed'], 'Disk durability', code),
+    storageFlushRequested: bool(saved.storageFlushRequested, 'storageFlushRequested', code), diskDurability: member(saved.diskDurability, ['unconfirmed','confirmed'], 'Disk durability', code),
     reason: nullableString(saved.reason, 'Save reason', code) }
 }
 function report(value: unknown, code: Code): AgentMuxSpaceMutationReport {

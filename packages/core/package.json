@@ -115,6 +115,14 @@
     "./hosted": {
       "types": "./dist/hosted.d.ts",
       "import": "./dist/hosted.js"
+    },
+    "./spatial-layout": {
+      "types": "./dist/spatial-layout.d.ts",
+      "import": "./dist/spatial-layout.js"
+    },
+    "./spatial-state": {
+      "types": "./dist/spatial-state.d.ts",
+      "import": "./dist/spatial-state.js"
     }
   },
   "bin": {

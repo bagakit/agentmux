@@ -1,5 +1,5 @@
-import type { SplitDirection } from './workbench-layout'
-import { orientationOf, placementOf } from './split-direction'
+import type { SplitDirection } from './workbench-layout.js'
+import { orientationOf, placementOf } from './split-direction.js'
 import {
   type SplitTreeNode,
   type SplitTreeLeaf,
@@ -10,8 +10,8 @@ import {
   removeLeaf,
   replaceLeaf,
   setSplitRatioAtPath
-} from './split-tree'
-import type { WorkbenchLayoutPreset } from '@agentmux/core/workbench-layout-preset'
+} from './split-tree.js'
+import type { WorkbenchLayoutPreset } from '../workbench-layout-preset.js'
 
 // tab 内 region 分屏树 = 叶子挂 regionId 的通用分屏树（见 split-tree.ts）。ratio 必填，与 tab-group
 // 树统一：每个 split 都由 splitWorkbenchRegion/gridLayout/balanceNode 现算一个比例，不存在缺省的情形。

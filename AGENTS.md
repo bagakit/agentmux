@@ -12,8 +12,8 @@
 | 唯一 owner | 持有的事实 |
 | --- | --- |
 | ctxmux | 通用 Run Runtime：PTY、进程、Run lifecycle、ordered bytes、Replay、Gap、Attachment 与权威 Runtime 状态 |
-| AgentMux Core | Provider、AgentSession、Hook、Permission、Prompt readiness、Agent status 与 semantic resume |
-| Desktop / client | 展示布局、焦点及宿主编辑、文件、Git、Browser 能力；通过 Core 操作 Agent |
+| AgentMux Core | Provider, AgentSession, Hook, Permission, readiness, semantic recovery, and frontend-independent durable spatial identities, topology and bindings |
+| Desktop / client | Screen presentation, focus and host editing, files, Git and Browser capabilities; consumes Core positions and operates Agents through Core |
 
 Core 不得依赖 Electron、React 或编辑器实现；任一侧不得复制另一侧的 Runtime 或语义实现。空间身份与执行身份按 [交互 SSOT《统一概念与空间寻址》](docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址) 区分，移动展示不改变执行 cwd。请求 Level B 语义恢复时，不得暗中降为 Level A 重启。
 

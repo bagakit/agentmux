@@ -144,6 +144,9 @@ type NativeParams = AgentMuxRpcDeviceParameterMap & {
   'runtime.events': { consumerId: string }
   'runtime.history-watch': { consumerId: string; agentSessionId: string;
     options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
+  'space.state': Record<string, never>
+  'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
+  'space.resolve': import('./spatial-state.js').AgentMuxSpatialResolve
   whoami: Record<string, never>
   'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
@@ -174,6 +177,9 @@ type NativeResult = AgentMuxRpcDeviceResultMap & {
   'runtime.release-consumer': { released: boolean }
   'runtime.events': never
   'runtime.history-watch': never
+  'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
+  'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
+  'space.resolve': ReturnType<typeof import('./spatial-state.js').resolveSpatialRegion>
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
     view: import('./agent-self-context.js').SelfViewOutcome; topic: string;
     messaging: typeof import('./agent-messaging-guidance.js').AGENTMUX_AGENT_MESSAGING_RULES; unavailable: AgentMuxRpcUnavailable[] }
@@ -216,6 +222,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_DEVICE_METHODS,
   'runtime.bootstrap': 'short', 'runtime.invoke': 'long', 'runtime.release-consumer': 'long',
   'runtime.events': 'long', 'runtime.history-watch': 'long',
+  'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',

@@ -191,7 +191,7 @@ const LIB_DIR = new URL('../src/renderer/src/lib/', import.meta.url)
 // 几何产地（方向判定 SSOT split-direction 与 tiler workbench-view-layout）已抽进 @agentmux/layout；
 // 渲染层的旧薄壳已删。消费者（directional-addressing / workbench-shortcuts）仍在渲染层，且直接
 // 写 `from '@agentmux/layout'`。所以：消费者发现走渲染层，产地源码读包里。
-const PKG_DIR = new URL('../../../packages/layout/src/', import.meta.url)
+const PKG_DIR = new URL('../../../packages/core/src/spatial-layout/', import.meta.url)
 
 function readLib(relative: string): string {
   return readFileSync(new URL(relative, LIB_DIR), 'utf8')
@@ -324,7 +324,7 @@ const DESKTOP_DIR = fileURLToPath(new URL('../', import.meta.url))
 // 方向两半真相（orientationOf/placementOf/edgeGap 的方向 case）与 SplitDirection 声明都随
 // split-direction.ts / workbench-layout.ts 抽进了 @agentmux/layout。独占性守卫因此要同时扫渲染层与包
 // 两棵树：渲染层的消费者不许自算方向，包里除 split-direction 外也不许。
-const PKG_SRC_DIR = fileURLToPath(new URL('../../../packages/layout/src/', import.meta.url))
+const PKG_SRC_DIR = fileURLToPath(new URL('../../../packages/core/src/spatial-layout/', import.meta.url))
 const DIRECTION_MEMBERS = ['left', 'right', 'up', 'down'] as const
 
 /** 方向的两半真相所在——只有这个文件可以把 direction 拆成轴与侧（现居 @agentmux/layout，标签加 pkg/ 前缀）。 */
@@ -353,7 +353,7 @@ function findDirectionComparisons(): { hits: DirectionComparison[]; scannedFiles
   const roots = [...rendererSourceFiles(RENDERER_DIR), ...rendererSourceFiles(PKG_SRC_DIR)]
   const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
   const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
-  const program = ts.createProgram(roots, parsed.options)
+  const program = ts.createProgram(roots, owningSourceOptions(parsed.options))
   const checker = program.getTypeChecker()
 
   // 锚点从 SplitDirection 的声明处取，不在测试里重列那四个词——否则这里就成了第 N 份手抄。它已随
@@ -374,6 +374,10 @@ function findDirectionComparisons(): { hits: DirectionComparison[]; scannedFiles
     const type = checker.getTypeAtLocation(node)
     const parts = type.isUnion() ? type.types : [type]
     if (parts.length === 0) return false
+    // An anonymous up/down ordering parameter (for example a queued-message list)
+    // is not the four-direction spatial protocol. Named spatial aliases and the
+    // full direction set remain covered; runtime geometry cases stay asserted.
+    if (!type.aliasSymbol && parts.length < members.length) return false
     return parts.every((part) => part.isStringLiteral() && members.includes(part.value))
   }
 
@@ -497,6 +501,7 @@ type OriginPackage = 'renderer' | 'core' | 'layout' | 'unresolved'
 /** 这个声明文件属于哪一侧。`lib` 是 TS 自带声明（`Extract` 之类），不参与归包。 */
 function packageOfFile(file: string): OriginPackage | 'lib' {
   if (/[\\/]node_modules[\\/]typescript[\\/]/.test(file)) return 'lib'
+  if (/[\\/]packages[\\/]core[\\/]src[\\/]spatial-layout[\\/]/.test(file)) return 'layout'
   if (/[\\/]packages[\\/]core[\\/]|[\\/]@agentmux[\\/]core[\\/]/.test(file)) return 'core'
   // 布局代数已抽进 @agentmux/layout：SplitDirection 与 WorkbenchRegionBounds 的定义现居此包。渲染层
   // 那道跨包证明直接从 `@agentmux/layout` import 它们（旧的同名转发文件已删），追出处会落到这里——
@@ -581,9 +586,13 @@ type ProofProbe = {
 }
 
 /** desktop 的真实编译配置。反事实探针必须用它，否则「诚实树上零错误」这个前提说的不是生产的事。 */
+function owningSourceOptions(options: ts.CompilerOptions): ts.CompilerOptions {
+  return {...options,baseUrl:DESKTOP_DIR,paths:{'@agentmux/core':['../../packages/core/src/index.ts'],'@agentmux/core/*':['../../packages/core/src/*.ts'],'@agentmux/layout':['../../packages/layout/src/index.ts']}}
+}
 function desktopParsedConfig(): ts.ParsedCommandLine {
   const configFile = ts.readConfigFile(path.join(DESKTOP_DIR, 'tsconfig.json'), ts.sys.readFile)
-  return ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
+  const parsed = ts.parseJsonConfigFileContent(configFile.config, ts.sys, DESKTOP_DIR)
+  return {...parsed,options:owningSourceOptions(parsed.options)}
 }
 
 function crossPackageProofProbe(): ProofProbe {

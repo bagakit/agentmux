@@ -129,6 +129,10 @@ async function main(): Promise<number> {
   }
   const client = await connectAgentMuxRpc({ endpoint, ...(sid && capability ? { credentials: { agentSessionId: sid, capability } } : {}) })
   try {
+    if (method === 'space.commit') {
+      try { invocation.params.graph = JSON.parse(await readStdin()) }
+      catch { throw new AgentMuxError('A spatial graph JSON object is required on stdin.', 'INVALID_CLI_ARGUMENT') }
+    }
     if (method === 'browser.run') invocation.params.code = await readStdin()
     if (method === 'browser.task.run') {
       const text = await readStdin(65_536)

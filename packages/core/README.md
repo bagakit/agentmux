@@ -136,3 +136,21 @@ await core.dispose()
 HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，每次 HTTP 请求都验证这个 token。Agent 的 Session capability 在所有传输中继续按同一业务合同验证，HTTP token不替代 Agent 身份。SSH 通过远端 `agentmux system endpoint --stdio` 转发到已有本地服务，不另起 Agent Run。
 
 JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。
+
+## Durable spatial graph
+
+`@agentmux/core/spatial-state` exports the filesystem spatial owner and its typed graph. Stable Space/Zone/Tab/Region identities, all bindings, Group/Region topology and selection are available without Electron or a graphical frontend. `@agentmux/core/spatial-layout` exports the existing UI-independent split-tree algebra; `@agentmux/layout` consumes this same implementation.
+
+The store uses `spatial-state.json` under the Core state directory, or the absolute `AGENTMUX_SPATIAL_STATE_STORE` path. Writes compare an exact revision under an OS-released filesystem lock, fsync the document and parent directory, and retain the previous valid document. Corrupt reads and missing entities in an observation refuse destructive writes and keep original bytes. Explicit entity deletion requires `allowEntityRemoval`; unbinding a location preserves the entity and execution references.
+
+The public CLI can run against a headless Core RPC host using the existing Unix, HTTP or SSH transport:
+
+```sh
+amux space state
+amux space commit --revision 0 < graph.json
+amux space ls --zone ZONE_ID
+amux space resolve --tab TAB_ID --region REGION_ID --direction left
+amux space unbind --zone ZONE_ID --space SPACE_ID
+```
+
+`space commit` takes a complete graph and its last observed revision. Revision `0` creates an absent store. A conflict requires reading and reconciling edits; it is never automatically retried. Client resource metadata is preserved as JSON and interpreted by its original host. Saving or querying a location does not create a Run or claim a Native page is mounted. Desktop workbench cutover is a separate consumer slice; this API alone does not claim that cutover complete.

@@ -1,3 +1,4 @@
+import { parseAgentMuxSpatialGraph } from './spatial-state.js'
 import { AgentMuxError } from './errors.js'
 import { normalizeAgentSession } from './agent-session-store.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
@@ -193,6 +194,23 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
             if (w.updatedAt !== null && (typeof w.updatedAt !== 'number' || !Number.isFinite(w.updatedAt) || w.updatedAt < 0)) fail() }
           if (t.moteArchive !== undefined) { const a = record(t.moteArchive); member(a.state, ['active', 'archived', 'unknown']); if (a.state === 'unknown') text(a.issue); else string(a.version) } }
         array(p.topics, topic); array(p.motes, topic); break
+      }
+      case 'space.state':
+      case 'space.commit': {
+        record(p,['state'])
+        if (p.state === null && method === 'space.state') break
+        const state = record(p.state,['schemaVersion','revision','graph'])
+        if (state.schemaVersion !== 1) fail(); count(state.revision)
+        if ((state.revision as number) < 1) fail()
+        parseAgentMuxSpatialGraph(state.graph); break
+      }
+      case 'space.resolve': {
+        record(p,['region','locations'])
+        const graph = {spaces:[],zones:[],tabs:[],regions:p.region === null ? [] : [p.region],bindings:[],layouts:{},tabLayouts:{},resources:{}}
+        parseAgentMuxSpatialGraph(graph)
+        if (p.region !== null && record(p.region).tabId !== record(params).tabId) fail()
+        array(p.locations,item => { const l = record(item); if (l.tabId !== record(params).tabId || !p.region || l.regionId !== record(p.region).regionId) fail() })
+        break
       }
       case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh']); string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }

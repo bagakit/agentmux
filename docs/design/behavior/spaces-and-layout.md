@@ -148,6 +148,11 @@ Scratch 不再承担与其他工作上下文分离的一套产品组织方式。
 
 ## 统一概念与空间寻址
 
+### Frontend-independent positions
+
+The stable spatial graph is part of amux and is maintained by Core even on a remote host without an App. Identities, topology, ordering, split ratios, selection and every binding are durable; only lookup caches, screen geometry and UI mounts are derived. All clients and the public CLI consume the same owner. Loading a Zone uses its stable identity and complete composition, without a saved display-coordinate gate. Unknown presentation coordinates do not remove original content, references or healthy Runs. Technical ownership and persistence are defined in [Durable spatial state](../../architecture/spatial-state.md).
+
+
 用户要求「基于这套定义把项目里的概念定义统一」，随后「马上固化cli」。最新定义明确：「在cli上显示给出space概念，符合我们当前的设计，前面说的project/zone，其实也是space/zone更好。因为在我们的设定中，project不等同于space」。本节是产品文档、公开控制协议与 CLI 的唯一概念词典；源码旧字段的当前含义与需要修正的差异只作来源证据，不反过来改变产品定义。
 
 | 概念 | 必须成立的含义与身份 | 权威事实归属 |
