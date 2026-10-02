@@ -39,7 +39,7 @@ const probe = {
     flushSync(() => useAppStore.setState(state => ({agentSteerQueues:{},agentSteerInFlight:{},agentSteerInFlightPhase:{},
       timelines:{},sessions:state.sessions.map(s => s.id === base.sessionId ? {...s,promptSubmissionPredecessor:null} : s)})))
   },
-  queue() { flushSync(() => useAppStore.getState().enqueueAgentSteer(base.sessionId,'Review the mailbox design and keep the original message identity',undefined,undefined,'manual')) },
+  queue(text = 'Review the mailbox design and keep the original message identity', count = 1) { flushSync(() => { for (let i = 0; i < count; i++) useAppStore.getState().enqueueAgentSteer(base.sessionId,text,undefined,undefined,'manual') }) },
   prepared() { if(!releasePreparation)throw Error('No actual preparation'); const release=releasePreparation;releasePreparation=undefined;release() },
   submitted(fail = false) { if(!releaseSubmission)throw Error('No actual submission'); const release=releaseSubmission,reject=rejectSubmission;releaseSubmission=undefined;rejectSubmission=undefined;fail?reject!(new Error('Delivery result unknown')):release() },
   interaction(value: boolean) { flushSync(() => useAppStore.setState(state => ({sessions:state.sessions.map(s => s.id===base.sessionId?{...s,pendingInteraction:value?{id:'private-request',kind:'permission',agentSessionId:s.id,title:'Original request',options:[{id:'allow',label:'Allow once',kind:'allow_once'}],evidence:{source:'native-hook',observedAt:1,run:s.control.run}} satisfies AgentMuxPermissionRequest:undefined}:s)}))) },
