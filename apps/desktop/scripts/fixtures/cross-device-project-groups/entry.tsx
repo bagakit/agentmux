@@ -39,6 +39,7 @@ api.demands.list = async () => []
 api.scratch.listTopics = async () => []
 api.sessions.snapshot = async () => ({ sessions: [], recoveryCandidates: [], timelines: {}, localHome: _hygiene_fixturePath("Users/private-proof") })
 api.sessions.onEvent = () => () => {}
+api.workspaces.appearance = async workspaceId => ({ kind: 'repository', icon: `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="${workspaceId === 'groups-local' ? '#718fa6' : workspaceId === 'groups-remote' ? '#88a27f' : '#a99178'}"/><text x="16" y="23" text-anchor="middle" font-family="sans-serif" font-size="22" fill="white">${workspaceId === 'groups-local' ? 'A' : workspaceId === 'groups-remote' ? 'R' : 'D'}</text></svg>`)}` })
 api.git.projectIdentity = workspaceId => request('git-project-identity', workspaceId)
 api.files.read = (workspaceId, file) => request('file-read', workspaceId, file)
 api.files.readDirectory = (workspaceId, directory) => request('file-directory', workspaceId, directory)

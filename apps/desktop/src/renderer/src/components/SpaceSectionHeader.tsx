@@ -15,10 +15,10 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
 
 /** Categories share controls; member indentation expresses category ownership, not a directory. */
 export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen,
-  createLabel, onCreate, activity, selected = false }: {
+  createLabel, onCreate, activity, selected = false, navigationId }: {
   label: string; count: number; icon: ReactNode; expanded: boolean; filtering: boolean;
   onToggle(): void; onOpen?: () => void; createLabel: string; onCreate(): Promise<unknown>;
-  activity?: ReactNode; selected?: boolean
+  activity?: ReactNode; selected?: boolean; navigationId?: string
 }) {
   const [busy, setBusy] = useState(false)
   const reportError = useAppStore((state) => state.reportError)
@@ -32,7 +32,7 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
       disabled={filtering} onToggle={onToggle} /> : <span className="project-rail-row__icon" aria-hidden="true">{icon}</span>}
     <button type="button" className={`space-section-label space-${label.toLowerCase()}-row`}
       aria-label={onOpen ? `${label} overview` : label} aria-current={selected ? 'page' : undefined}
-      data-space-nav={`space:${label.toLowerCase()}`} data-space-expanded={canCollapse && !filtering ? expanded : undefined}
+      data-space-nav={navigationId ?? `space:${label.toLowerCase()}`} data-space-expanded={canCollapse && !filtering ? expanded : undefined}
       disabled={!canCollapse && !onOpen} onClick={onOpen ?? (() => { if (!filtering) onToggle() })}>
       <strong>{label}</strong><small>{count}</small>
     </button>

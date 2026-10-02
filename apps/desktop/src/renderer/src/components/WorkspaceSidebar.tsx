@@ -3,6 +3,7 @@ import { projectGroupsFor } from '../lib/cross-device-project-groups'
 import { useGitProjectAssociations } from '../hooks/useGitProjectAssociations'
 import { ProjectGroupDialog } from './ProjectGroupDialog'
 import { ProjectGroupsTree } from './ProjectGroupsTree'
+import { HostFolderDialog } from './HostFolderDialog'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { folderSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
@@ -36,6 +37,7 @@ import { matchesSpaceQuery, navigateSpaceTree } from '../lib/space-tree-navigati
 import { folderLastActivityAt } from '../lib/space-folder-icon-recency'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
+function folderSectionKey(hostId: string): string { return hostId === 'local' ? 'space:folders' : `space:folders:${hostId}` }
 function projectCollapseKey(id: string): string { return `project:${id}` }
 function isPathInside(inner: string, outer: string): boolean {
   const root = outer.replace(/[\\/]+$/, '')
@@ -56,6 +58,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const icons = useAppStore((state) => state.spaceObjectIcons)
   const projectGroups = useAppStore(state => state.projectGroups)
   const dissolveProjectGroup = useAppStore(state => state.dissolveProjectGroup)
+  const [folderHost, setFolderHost] = useState<{ hostId: string; label: string } | null>(null)
   const [groupDialog, setGroupDialog] = useState<{ seed?: string; editing?: AgentMuxProjectGroupFact } | null>(null)
   const [dissolveRequest, setDissolveRequest] = useState<AgentMuxProjectGroupFact | null>(null)
   const [dissolving, setDissolving] = useState(false)
@@ -92,12 +95,12 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const shownGroups = useMemo(() => groups.map((group) => {
     if (!filtering) return group
     const hits = group.nodes.filter(({ project }) => matchesSpaceQuery(
-      query, 'Folders', group.label ?? undefined, group.groupPath ?? undefined,
+      query, 'Folders', config?.hosts.find(host => host.id === group.hostId)?.label, group.label ?? undefined, group.groupPath ?? undefined,
       project.name, project.repoPath, project.hostId,
       ...project.workspaces.flatMap((workspace) => [workspace.name, workspace.path, workspace.branch])
     ))
     return { ...group, nodes: group.nodes.filter(({ project }) => hits.some(({ project: hit }) => hit.id === project.id || (hit.hostId === project.hostId && isPathInside(hit.repoPath, project.repoPath)))) }
-  }).filter((group) => group.nodes.length > 0), [groups, filtering, query])
+  }).filter((group) => group.nodes.length > 0), [groups, filtering, query, config?.hosts])
   // Build location buckets once. Rows and collapsed summaries only visit their own consumers.
   const sessionsByProject = useMemo(() => {
     const byLocation = new Map<string, typeof sessions>()
@@ -114,8 +117,15 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     const now = Date.now()
     return new Map([...sessionsByProject].map(([id, owned]) => [id, folderLastActivityAt(owned, now)]))
   }, [sessionsByProject])
-  const folderSessions = useMemo(() => [...new Map([...sessionsByProject.values()].flat().map((session) => [session.id, session])).values()], [sessionsByProject])
-  const foldersCollapsed = !filtering && collapsedProjectGroups['space:folders'] === true
+  const folderSections = useMemo(() => {
+    const hostIds = [...new Set(['local', ...(config?.hosts.map(host => host.id) ?? []), ...projects.map(project => project.hostId)])]
+    const remote = hostIds.some(id => id !== 'local')
+    return hostIds.map(hostId => ({ hostId, key: folderSectionKey(hostId),
+      label: hostId === 'local' && !remote ? 'Folders' : config?.hosts.find(host => host.id === hostId)?.label ?? (hostId === 'local' ? 'This Mac' : hostId),
+      projects: projects.filter(project => project.hostId === hostId),
+      groups: shownGroups.filter(group => group.hostId === hostId)
+    }))
+  }, [config?.hosts, projects, shownGroups])
 
   // Relations change with the folder projection, not with each Session update.
   const projectRelations = useMemo(() => {
@@ -226,7 +236,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       visible={manualIcon === null ? visible : undefined} />
     const ancestors = projectRelations.ancestors.get(project.id) ?? []
     if (!filtering && ancestors.some((id) => collapsedProjectGroups[projectCollapseKey(id)] === true)) return null
-    const parentKey = ancestors.at(-1) ?? projectRelations.groupKeys.get(project.id) ?? 'space:folders'
+    const parentKey = ancestors.at(-1) ?? projectRelations.groupKeys.get(project.id) ?? folderSectionKey(project.hostId)
     const descendants = projectRelations.descendants.get(project.id) ?? []
     const hasChildren = descendants.length > 0
     const collapsed = !filtering && collapsedProjectGroups[projectCollapseKey(project.id)] === true
@@ -343,7 +353,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     <aside className="sidebar project-rail" {...(railDensity !== 'default' ? { 'data-rail-density': railDensity } : {})}>
       <header className="project-rail-titlebar">
         <SidebarToggleChrome />
-        <SpaceCreateMenu onOpenFolder={chooseFolder} />
+        <SpaceCreateMenu onOpenFolder={chooseFolder} onCreateProjectGroup={() => setGroupDialog({})} />
       </header>
       <div className="space-tree-search">
         <Search size={13} aria-hidden="true" />
@@ -375,15 +385,19 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
         {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={setIconTarget} /> : null}
         <ProjectGroupsTree projects={projects} query={query} activeProjectId={activeProjectId}
+          visible={visible} sessionsByProject={sessionsByProject} lastActivityByProject={lastActivityByProject}
           onCreate={() => setGroupDialog({})} onEdit={editing => setGroupDialog({ editing })} onDissolve={group => { setDissolveIssue(null); setDissolveRequest(group) }} />
-        <nav className="project-list" aria-label="Folders">
-          <SpaceSectionHeader label="Folders" count={projects.length} icon={<Folders size={14} />}
-            expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup('space:folders')}
-            createLabel="Open Folder" onCreate={chooseFolder}
+        {folderSections.map(section => {
+          const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
+          const folderSessions = [...new Map(section.projects.flatMap(project => sessionsByProject.get(project.id) ?? []).map(session => [session.id, session])).values()]
+          return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders`} key={section.hostId} data-folder-host={section.hostId}>
+          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={<Folders size={14} />}
+            expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
+            createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed && folderSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={folderSessions}
-              contexts={activityContextsForWorkspaces(projects.flatMap((project) => project.workspaces))} /> : undefined} />
-          {filtering && shownGroups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
-          {foldersCollapsed ? null : shownGroups.map((group) => {
+              contexts={activityContextsForWorkspaces(section.projects.flatMap((project) => project.workspaces))} /> : undefined} />
+          {filtering && section.groups.length === 0 ? <p className="space-tree-empty" role="status">No matching Folders</p> : null}
+          {foldersCollapsed ? null : section.groups.map((group) => {
             const key = projectGroupKey(group)
             const collapsed = !filtering && key !== null && collapsedProjectGroups[key] === true
             return (
@@ -391,6 +405,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
                 {group.label && key !== null ? (
                   <GroupHeader
                     group={group}
+                    parentKey={section.key}
                     collapsed={collapsed}
                     filtering={filtering}
                     sessions={[...new Map(group.nodes.flatMap((node) => sessionsByProject.get(node.project.id) ?? []).map((session) => [session.id, session])).values()]}
@@ -405,11 +420,13 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
               </div>
             )
           })}
-          {projects.length === 0 && !filtering && !foldersCollapsed ? (
-            <div className="workspace-list__empty"><strong>No projects yet</strong><span>Add a local folder, then manage its branches and worktrees from the navigator.</span><button className="small-button" onClick={() => void chooseFolder()}><Plus size={12} /> Add project</button></div>
+          {section.projects.length === 0 && !filtering && !foldersCollapsed ? (
+            <div className="workspace-list__empty"><span>{section.hostId === 'local' ? 'Open a folder to get started.' : `No folders on ${section.label}.`}</span></div>
           ) : null}
-        </nav>
+        </nav>)
+        })}
       </div>
+      {folderHost ? <HostFolderDialog {...folderHost} onClose={() => setFolderHost(null)} /> : null}
       {groupDialog ? <ProjectGroupDialog projects={projects} {...groupDialog} related={associations.related}
         observations={associations.observations} onClose={() => setGroupDialog(null)} /> : null}
       <ConfirmationDialog open={dissolveRequest !== null} title="Dissolve project group?" intent="neutral"
@@ -448,11 +465,13 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
 /** Path-derived disclosure; member attention remains visible when collapsed. */
 function GroupHeader({
   group,
+  parentKey,
   collapsed,
   filtering,
   sessions: groupSessions,
   onToggle
 }: {
+  parentKey: string
   group: ProjectRailGroup
   collapsed: boolean
   filtering: boolean
@@ -479,7 +498,7 @@ function GroupHeader({
         aria-label={[group.label, memberLabel, ...(attentionLabel ? [attentionLabel] : [])].join(' · ')}
         aria-expanded={!collapsed}
         data-space-nav={projectGroupKey(group) ?? undefined}
-        data-space-parent="space:folders"
+        data-space-parent={parentKey}
         data-space-expanded={!filtering ? !collapsed : undefined}
         data-space-disclosure
         title={[group.groupPath ? displayPath(group.groupPath, group.hostId) : null, memberLabel, ...(workingLabel ? [workingLabel] : []), ...(idleLabel ? [idleLabel] : [])]

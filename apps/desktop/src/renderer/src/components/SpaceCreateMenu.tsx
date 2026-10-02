@@ -1,11 +1,11 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
-import { FolderOpen, NotebookText, Plus } from 'lucide-react'
+import { FolderOpen, Link2, NotebookText, Plus } from 'lucide-react'
 import { MoteIcon } from './MoteIcon'
 import { useState } from 'react'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
-export function SpaceCreateMenu({ onOpenFolder }: { onOpenFolder(): Promise<void> }) {
+export function SpaceCreateMenu({ onOpenFolder, onCreateProjectGroup }: { onOpenFolder(): Promise<void>; onCreateProjectGroup?(): void }) {
   const createTopic = useAppStore((state) => state.createScratchTopic)
   const reportError = useAppStore((state) => state.reportError)
   const [busy, setBusy] = useState(false)
@@ -29,6 +29,9 @@ export function SpaceCreateMenu({ onOpenFolder }: { onOpenFolder(): Promise<void
           <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => void run(() => createTopic('mote'))}>
             <MoteIcon size={14} /><span>Create Mote</span>
           </DropdownMenu.Item>
+          {onCreateProjectGroup ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={onCreateProjectGroup}>
+            <Link2 size={14} /><span>Create project group</span>
+          </DropdownMenu.Item> : null}
         </DropdownMenu.Content>
       </DropdownMenu.Portal>
     </DropdownMenu.Root>
