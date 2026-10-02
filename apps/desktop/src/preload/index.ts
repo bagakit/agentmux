@@ -290,9 +290,9 @@ const api: AgentMuxPreloadApi = {
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
     observeHistory: async (session, listener, options) => {
-      options?.signal?.throwIfAborted()
       const token = crypto.randomUUID()
       let disposed = false
+      let releaseAbort: (() => void) | undefined
       const receive = (_event: unknown, payload: SessionHistoryObservationEvent): void => {
         if (!disposed && payload.token === token && payload.observation.agentSessionId === session.agentSessionId) listener(payload.observation)
       }
@@ -300,15 +300,18 @@ const api: AgentMuxPreloadApi = {
         if (disposed) return
         disposed = true
         ipcRenderer.removeListener(SESSION_HISTORY_OBSERVATION_CHANNEL, receive)
-        options?.signal?.removeEventListener('abort', dispose)
-        void ipcRenderer.invoke('sessions:releaseHistoryObservation', token).catch(() => {})
+        try { releaseAbort?.() }
+        finally { void ipcRenderer.invoke('sessions:releaseHistoryObservation', token).catch(() => {}) }
       }
       ipcRenderer.on(SESSION_HISTORY_OBSERVATION_CHANNEL, receive)
-      options?.signal?.addEventListener('abort', dispose, { once: true })
       try {
+        releaseAbort = options?.onAbort?.(dispose)
+        if (disposed) {
+          releaseAbort?.()
+          throw new Error('History observation was cancelled before acquisition.')
+        }
         const ready: SessionHistoryObservationReady = await ipcRenderer.invoke('sessions:observeHistory', token, session)
         if (disposed) {
-          options?.signal?.throwIfAborted()
           throw new Error('History observation was released before ready.')
         }
         if ('error' in ready) throw Object.assign(new Error(ready.error.message), { code: ready.error.code })

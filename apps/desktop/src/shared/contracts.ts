@@ -1747,9 +1747,12 @@ export type AgentMuxDesktopApi = {
 }
 
 export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'> & {
-  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent'> & {
+  sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory'> & {
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void
+    /** Functions cross contextBridge; AbortSignal and its prototype stay in Renderer. */
+    observeHistory(session: SessionHistoryReference, listener: (observation: AgentSessionHistoryObservation) => void,
+      options?: { onAbort?: (abort: () => void) => () => void }): Promise<AgentSessionHistoryObservationHandle>
   }
   control: {
     onRequest(listener: (request: DesktopControlRequest) => void): () => void
