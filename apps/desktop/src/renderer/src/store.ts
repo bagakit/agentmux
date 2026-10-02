@@ -482,6 +482,8 @@ type AppState = {
   /** Launcher producer context shares the draft's durable Region owner; editing only changes body. */
   agentComposerNotes: Record<string, string>
   agentSteerInFlight: Record<string, string>
+  /** Transient display facts from the existing queue drain; never persisted as delivery evidence. */
+  agentSteerInFlightPhase: Record<string, 'preparing' | 'submitting'>
   agentSteerQueues: Record<string, AgentSteerQueueEntry[]>
   /**
    * 启动对话框里填的两个可选名字，按 launcher 的 regionId 存——与 {@link agentComposerDrafts} 同一
@@ -2635,6 +2637,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentComposerNotes: {},
   agentSteerQueues: {},
   agentSteerInFlight: {},
+  agentSteerInFlightPhase: {},
   launcherNameDrafts: {},
   launcherOptionDrafts: {},
   noticeReadReceipts: {},
@@ -7317,7 +7320,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Capture before recovery: a newly restored binding grants no save bypass.
           const explicitlyBound = explicitAttempt && entry.runId === currentRunId
           let preparedHere = false
-          set((current) => ({ agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId } }))
+          set((current) => ({
+            agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId },
+            agentSteerInFlightPhase: { ...current.agentSteerInFlightPhase, [sessionId]: 'preparing' }
+          }))
           try {
             if (entry.runId === undefined) {
               set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
@@ -7385,6 +7391,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const condition = validateAgentPromptCondition(pending.promptCondition)
             if (!steerEntryTargetsRun(pending, session.control.run.runId) || condition.expectedRun.runId !== session.control.run.runId) throw new Error(
               'The bound Run changed before dispatch. This message will not be sent to another Run.')
+            set((current) => ({ agentSteerInFlightPhase: {
+              ...current.agentSteerInFlightPhase, [sessionId]: 'submitting'
+            } }))
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
               explicitAttempt ? { allowUncertainTurn: true } : undefined,
               pending.origin === 'manual', pending.agentMuxNote)
@@ -7404,11 +7413,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const turnEndUnconfirmed = typeof error === 'object' && error !== null &&
               'code' in error && error.code === 'AGENT_TURN_END_UNCONFIRMED' ||
               message.includes('Diagnostic: code=AGENT_TURN_END_UNCONFIRMED')
+            const submissionBusy = typeof error === 'object' && error !== null &&
+              'code' in error && error.code === 'AGENT_PROMPT_SUBMISSION_BUSY' ||
+              message.includes('Diagnostic: code=AGENT_PROMPT_SUBMISSION_BUSY')
             // These first-call refusals occur before admission. A restored or previously
             // uncertain intent never refreshes, even if a later attempt reports BUSY.
-            const unadmitted = preparedHere && (turnEndUnconfirmed || typeof error === 'object' && error !== null &&
-              'code' in error && error.code === 'AGENT_PROMPT_SUBMISSION_BUSY' ||
-              message.includes('Diagnostic: code=AGENT_PROMPT_SUBMISSION_BUSY'))
+            const unadmitted = preparedHere && (turnEndUnconfirmed || submissionBusy)
             // A delivery refusal is a retained local fact, not another global notification.
             set((current) => {
               const pending = current.agentSteerQueues[sessionId]
@@ -7421,7 +7431,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     const { errorCode: _oldCode, ...retained } = item
                     return { ...retained, ...(unadmitted ? { promptCondition: null } : {}),
                       status: item.status === 'restoring' ? 'restoring' : 'deferred', error: message,
-                      ...(turnEndUnconfirmed ? { errorCode: 'AGENT_TURN_END_UNCONFIRMED' } : {}) }
+                      ...(turnEndUnconfirmed ? { errorCode: 'AGENT_TURN_END_UNCONFIRMED' }
+                        : submissionBusy ? { errorCode: 'AGENT_PROMPT_SUBMISSION_BUSY' } : {}) }
                   })
                 }
               }
@@ -7439,12 +7450,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       } finally {
         // Release this owner before notifying subscribers that its attempt has ended. A new
         // explicit send during that synchronous notification must get its own live drain.
-        if (agentSteerDrains.get(sessionId) === drain) agentSteerDrains.delete(sessionId)
-        set((current) => {
-          const agentSteerInFlight = { ...current.agentSteerInFlight }
-          delete agentSteerInFlight[sessionId]
-          return { agentSteerInFlight }
-        })
+        if (agentSteerDrains.get(sessionId) === drain) {
+          agentSteerDrains.delete(sessionId)
+          set((current) => {
+            const agentSteerInFlight = { ...current.agentSteerInFlight }
+            const agentSteerInFlightPhase = { ...current.agentSteerInFlightPhase }
+            delete agentSteerInFlight[sessionId]
+            delete agentSteerInFlightPhase[sessionId]
+            return { agentSteerInFlight, agentSteerInFlightPhase }
+          })
+        }
       }
     })
     agentSteerDrains.set(sessionId, drain)

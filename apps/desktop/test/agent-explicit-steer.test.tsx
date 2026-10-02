@@ -1,5 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+// Install the actual mocked preload before Source UI helpers read its desktop API.
+import '../src/preload/index'
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
 import { fileURLToPath } from 'node:url'
@@ -28,7 +30,7 @@ vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => {
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
-  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() },
+  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() },
   webFrame: { getZoomFactor: () => 1 }, app: {
     getPath: () => bridge.storageDirectory, getAppPath: () => resolve(dirname(fileURLToPath(import.meta.url)), '..'), isPackaged: false
   },
@@ -46,7 +48,6 @@ vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOUR
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -138,7 +139,7 @@ beforeEach(async () => {
   }, workspaces: [{ id: 'private', name: 'Fixture', hostId: 'local', path: durable.workspacePath, kind: 'folder' }] }
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
     session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
-  disposeIpc = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+  disposeIpc = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
@@ -232,7 +233,7 @@ it('the sole queued Send retries its exact paused operation without an additiona
   expect(firstRow).not.toBeNull()
   await act(async () => firstRow!.click())
   const buttons = [...container.querySelectorAll<HTMLButtonElement>('.composer-outbox__actions button')]
-  const send = buttons.filter(button => button.textContent === 'Send queued message')
+  const send = buttons.filter(button => button.getAttribute('aria-label') === 'Send queued message')
   expect(send).toHaveLength(1)
   expect(buttons.map(button => button.textContent)).not.toContain('Send now — turn may still be running')
   await act(async () => send[0]!.click()); await settled()

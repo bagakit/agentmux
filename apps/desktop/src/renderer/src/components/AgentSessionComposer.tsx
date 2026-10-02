@@ -95,6 +95,7 @@ export function AgentSessionComposer({
   // selector on every store update (zustand compares by reference) — the `.map` to text happens once per
   // real render below, not inside the selector, so it does not defeat that reference check.
   const sendingId = useAppStore((state) => state.agentSteerInFlight?.[sessionId])
+  const sendingPhase = useAppStore((state) => state.agentSteerInFlightPhase?.[sessionId])
   const queuedEntries = useAppStore((state) => state.agentSteerQueues?.[sessionId] ?? EMPTY_QUEUE)
   const executors = useAppStore((state) => state.config?.executors)
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
@@ -263,10 +264,7 @@ export function AgentSessionComposer({
   const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
 
   return (
-    <AgentComposer key={sessionId}
-      readPastedImage={(path) => api.ui.readPastedImage(path)}
-      insertionRef={insertionRef}
-      mailbox={<SessionMailbox mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+    <SessionMailbox key={sessionId} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
         queued={queuedEntries.map((entry) => ({
@@ -274,16 +272,24 @@ export function AgentSessionComposer({
           text: entry.text,
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
-          sending: entry.operationId === sendingId,
+          preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',
+          sending: entry.operationId === sendingId && sendingPhase === 'submitting',
+          unconfirmed: entry.promptCondition != null && (entry.status === 'deferred' || entry.status === 'failed'),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
+          ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
           ...(entry.error ? { error: errorIdentity(entry.error) } : {}),
         }))}
         onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
-        onSendQueued={(operationId) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) }}
+        pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
+        {...(!disabled && !readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) } } : {})}
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
-      />}
+    >
+    {(mailbox, pending) => (
+    <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
+      readPastedImage={(path) => api.ui.readPastedImage(path)}
+      insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
         executorLabel={executors?.[session.executorId]?.label ?? session.executorId}
         appearance={executors?.[session.executorId]?.avatar} prompts={shortcutsHere} visible={visible}
@@ -365,5 +371,7 @@ export function AgentSessionComposer({
         onQueue: () => queue()
       } : {})}
     />
+    )}
+    </SessionMailbox>
   )
 }
