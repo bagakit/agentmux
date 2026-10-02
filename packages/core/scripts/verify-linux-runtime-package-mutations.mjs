@@ -40,15 +40,15 @@ const cases = [
   { name: 'checkpoint-imports-prefix-at-final-geometry', path: 'src/agent-terminal-screen.ts',
     before: 'this.terminal.resize(checkpoint.restoreSize.cols, checkpoint.restoreSize.rows)',
     after: 'this.terminal.resize(checkpoint.size.cols, checkpoint.size.rows)',
-    assertion: 'restores owner geometry and temporary history for the prefix, then original policy/current geometry for the suffix' },
+    assertion: 'imports the complete owner seed at its acknowledged geometry before advancing the original byte fence' },
   { name: 'checkpoint-retains-temporary-history-policy', path: 'src/agent-terminal-screen.ts',
     before: 'this.terminal.options.scrollback = scrollback',
     after: 'this.terminal.options.scrollback = checkpoint.restoreScrollbackRows ?? scrollback',
-    assertion: 'restores owner geometry and temporary history for the prefix, then original policy/current geometry for the suffix' },
+    assertion: 'imports the complete owner seed at its acknowledged geometry before advancing the original byte fence' },
   { name: 'checkpoint-replays-prefix-as-suffix', path: 'src/agent-terminal-screen.ts',
     before: 'restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes), resolve',
     after: 'restoreBytes, resolve',
-    assertion: 'restores owner geometry and temporary history for the prefix, then original policy/current geometry for the suffix' }
+    assertion: 'imports the complete owner seed at its acknowledged geometry before advancing the original byte fence' }
 ]
 const results = []
 async function run(name) {
