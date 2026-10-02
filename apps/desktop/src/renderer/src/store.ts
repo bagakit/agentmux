@@ -329,7 +329,7 @@ export type MainSurface = 'survey' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** An explicit new discussion keeps the Mote identity and owns its first draft before preparation. */
   newTab?: boolean
-  initialRequest?: { prompt: string; executorId?: string }
+  initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }
   /** User navigation reveals the Topic workbench; background preparation must leave focus alone. */
   reveal?: boolean
   /** Cancels this caller's late navigation, without cancelling metadata or a Session. */
@@ -826,7 +826,7 @@ type AppState = {
   attachPersistedFileDocument(workspaceId: string, path: string): Promise<void>
   clearDocumentRevealTarget(key: string): void
   openProjectFolder(): Promise<void>
-  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; executorId?: string }): Promise<ScratchTopicSnapshot>
+  createScratchTopic(preset?: 'mote', initialRequest?: { prompt: string; agentMuxNote?: string; executorId?: string }): Promise<ScratchTopicSnapshot>
   refreshScratchTopics(workspaceId: string, force?: boolean): Promise<void>
   setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<void>
   openScratchTopic(topicId: string, workspaceId?: string, options?: OpenScratchTopicOptions): Promise<boolean>
@@ -5693,7 +5693,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           mainSurface: 'workbench' as const,
           tabs: { ...current.tabs, [nextTab.id]: nextTab },
           layouts: { ...current.layouts, [workspace.id]: nextLayout },
-          ...(initialRequest ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: initialRequest.prompt } } : {}),
+          ...(initialRequest ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: initialRequest.prompt },
+            ...(initialRequest.agentMuxNote === undefined ? {} : { agentComposerNotes: { ...current.agentComposerNotes, [regionId]: initialRequest.agentMuxNote } }) } : {}),
           workspaceFileRevisions: bumpWorkspaceFileRevision(
             current.workspaceFileRevisions,
             workspace.id
@@ -5727,7 +5728,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const createdLayout = get().layouts[workspace.id]
     const createdGroup = tabGroupForTab(createdLayout, targetTab.id)
     if (initialRequest && get().tabs[targetTab.id]?.regions[regionId] === initialSurface) {
-      if (initialRequest.executorId && createdGroup) await get().launchAgent(initialRequest.executorId, initialRequest.prompt, createdGroup, { tabId: targetTab.id, regionId })
+      if (initialRequest.executorId && createdGroup) await get().launchAgent(initialRequest.executorId, initialRequest.prompt, createdGroup, { tabId: targetTab.id, regionId }, undefined, undefined, initialRequest.agentMuxNote)
       else if (!initialRequest.executorId) get().reportError(new Error('No Agent Executor is configured. Add an Agent in Settings, then Start agent in this same Region. Your request is kept and has not been sent.'), { kind: 'indeterminate' })
     } else if (createdGroup && !initialRequest && preset !== 'mote' && !snapshot.soul) {
       await get().promoteWarmTerminal(createdGroup, { tabId: targetTab.id, regionId: targetTab.layout.activeRegionId })
@@ -5776,7 +5777,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             })
           } },
           ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const } : {}),
-          ...(request ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: request.prompt } } : {}),
+          ...(request ? { agentComposerDrafts: { ...current.agentComposerDrafts, [regionId]: request.prompt },
+            ...(request.agentMuxNote === undefined ? {} : { agentComposerNotes: { ...current.agentComposerNotes, [regionId]: request.agentMuxNote } }) } : {}),
           workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id)
         }
       })
@@ -5799,7 +5801,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const { topicPreparation: _prepared, ...prepared } = currentTab
         return { tabs: { ...current.tabs, [tab.id]: prepared }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
       })
-      if (request?.executorId) await get().launchAgent(request.executorId, request.prompt, groupId, { tabId: tab.id, regionId })
+      if (request?.executorId) await get().launchAgent(request.executorId, request.prompt, groupId, { tabId: tab.id, regionId }, undefined, undefined, request.agentMuxNote)
       else if (request) get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. Your request has not been sent; choose an Agent and Start agent in this same Region.'), { kind: 'indeterminate' })
       return true
     }

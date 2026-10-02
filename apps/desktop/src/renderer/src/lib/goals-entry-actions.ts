@@ -61,10 +61,10 @@ export function startGoalExploration(text: string, project?: GoalExplorationProj
   const current = flight
   listeners.forEach(listener => listener())
   const state = useAppStore.getState()
-  const prompt = project ? `${text}\n\n${goalProjectContextText(project)}` : text
+  const agentMuxNote = project ? goalProjectContextText(project) : undefined
   const executorId = requestedExecutorId ?? primaryMoteExecutorId(state)
   void state.openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, {
-    newTab: true, reveal: false, initialRequest: { prompt, ...(executorId ? { executorId } : {}) }
+    newTab: true, reveal: false, initialRequest: { prompt: text, ...(agentMuxNote === undefined ? {} : { agentMuxNote }), ...(executorId ? { executorId } : {}) }
   })
     .then(() => resolve(), reject).finally(() => {
       if (flight === current) { flight = null; listeners.forEach(listener => listener()) }
