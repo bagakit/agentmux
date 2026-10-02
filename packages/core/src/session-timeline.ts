@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { semanticStatusStale } from './agent-status-freshness.js'
+import { isAgentActivityStatusSource, semanticStatusStale } from './agent-status-freshness.js'
 import { applyNormalizedTimelineMutation, MAX_TIMELINE_ITEMS_PER_WINDOW } from './session-timeline-reducer.js'
 import type {
   AgentActivityState,
@@ -7,6 +7,7 @@ import type {
   AgentMuxRunRef,
   AgentStatus,
   AgentWorkHistoryProjection,
+  AgentActivityHistoryProjection,
   AgentMuxAcpEvent,
   AgentMuxEvidence,
   AgentMuxEvidenceSource,
@@ -19,6 +20,7 @@ import type {
 export type {
   AgentActivityState,
   AgentWorkHistoryProjection,
+  AgentActivityHistoryProjection,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineItemKind,
@@ -331,13 +333,13 @@ export function agentTimelineMutationFromAcpEvent(
 }
 
 /** Pure projection of the already bounded typed window. Reading never creates work facts. */
-export function projectAgentWorkHistory(
+export function projectAgentActivityHistory(
   items: readonly AgentTimelineItem[],
   options: {
     now?: number
     current?: { run: AgentMuxRunRef; processState: 'running' | 'exited' | 'interrupted' | 'unknown'; semanticStatus?: AgentStatus; available: boolean }
   } = {}
-): AgentWorkHistoryProjection {
+): AgentActivityHistoryProjection {
   const observations = items.filter((item) => item.activityState !== undefined)
   const byId = new Map(observations.map((item) => [item.id, item]))
   const successors = new Map<string, AgentTimelineItem[]>()
@@ -352,19 +354,23 @@ export function projectAgentWorkHistory(
   }
   const tails = observations.filter(item => !successors.has(item.id))
   const uniqueTailId = tails.length === 1 ? tails[0]!.id : undefined
-  const segments: AgentWorkHistoryProjection['segments'] = []
+  const segments: AgentActivityHistoryProjection['segments'] = []
   for (const item of observations) {
     const activity = item.activityState!
     if ('boundary' in activity) {
       if (activity.boundary === 'lost' || activity.boundary === 'history-gap') coverage.gaps = true
       continue
     }
-    if (activity.state !== 'working') continue
-    const segment: AgentWorkHistoryProjection['segments'][number] = {
+    const trusted = isAgentActivityStatusSource(item.source)
+    const state = activity.state === 'working' ? 'working' : !trusted ? 'unknown'
+      : activity.state === 'done' || activity.state === 'error' ? 'idle'
+      : activity.state === 'waiting' || activity.state === 'blocked' ? 'awaiting-input' : 'unknown'
+    const segment: AgentActivityHistoryProjection['segments'][number] = {
+      state, observationId: item.id, ...(activity.state === 'error' ? { detail: item.content ?? item.title } : {}),
       run: { ...activity.run }, startAt: item.createdAt, endAt: null, end: 'unknown',
       startKnown: activity.stateEnteredAt === item.createdAt
     }
-    if (!segment.startKnown) coverage.gaps = true
+    if (!segment.startKnown && state === 'working') coverage.gaps = true
     const following = successors.get(item.id) ?? []
     const next = following.length === 1 ? following[0] : undefined
     if (next && next.createdAt > item.createdAt && next.activityState!.run.runId === activity.run.runId) {
@@ -372,8 +378,8 @@ export function projectAgentWorkHistory(
       segment.endAt = next.createdAt
       segment.end = 'boundary' in state
         ? state.boundary === 'exited' || state.boundary === 'interrupted' ? 'run-ended' : 'observation-gap'
-        : state.state !== 'working' ? 'state-change' : 'unknown'
-    } else if (!next && following.length === 0 && uniqueTailId === item.id &&
+        : state.state !== activity.state ? 'state-change' : 'unknown'
+    } else if (state === 'working' && !next && following.length === 0 && uniqueTailId === item.id &&
       options.current?.available === true && options.current.processState === 'running' &&
       options.current.run.runId === activity.run.runId && options.current.semanticStatus?.state === 'working' &&
       activity.stateEnteredAt !== undefined && options.current.semanticStatus.stateEnteredAt === activity.stateEnteredAt &&
@@ -382,8 +388,15 @@ export function projectAgentWorkHistory(
       segment.endAt = options.now
       segment.end = 'current'
     }
-    if (segment.end === 'unknown' || segment.end === 'observation-gap') coverage.gaps = true
+    if (state === 'working' && (segment.end === 'unknown' || segment.end === 'observation-gap')) coverage.gaps = true
     segments.push(segment)
   }
   return { segments, coverage }
+}
+
+/** Existing work-only contract delegates pairing to the same activity owner. */
+export function projectAgentWorkHistory(items: readonly AgentTimelineItem[], options: Parameters<typeof projectAgentActivityHistory>[1] = {}): AgentWorkHistoryProjection {
+  const result = projectAgentActivityHistory(items, options)
+  return { coverage: result.coverage, segments: result.segments.filter(segment => segment.state === 'working')
+    .map(({ state: _state, observationId: _id, detail: _detail, ...segment }) => segment) }
 }
