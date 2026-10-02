@@ -36,24 +36,26 @@ async function checkCallers() {
     childProcesses: 0, temporaryCopies: 0, runtimeControl: [], calls: [], jsx: [] }
   try {
     const ts = createRequire(join(root, 'apps/desktop/package.json'))('typescript')
-    const cli = 'packages/core/src/agentmux.ts', spatial = `${renderer}lib/space-agent-control.ts`
+    const cli = 'packages/core/src/agentmux.ts', registry = 'packages/core/src/agentmux-cli-commands.ts', publicClient = 'packages/core/src/public-rpc-client.ts', creation = `${renderer}lib/survey-browser-creation.ts`, spatial = `${renderer}lib/space-agent-control.ts`
     const stable = `${renderer}components/StableWorkbenchView.tsx`
     const requirements = [
       { label: 'survey-zone-create', caller: survey, name: 'createWorkbenchZone', owner: store },
       { label: 'survey-browser-preparation', caller: survey, name: 'openLauncher', owner: store },
-      { label: 'survey-browser-create', caller: survey, name: 'createBrowser', owner: store },
+      { label: 'survey-browser-create', caller: survey, name: 'createSurveyBrowser', owner: store },
+      { label: 'original-survey-browser-owner', caller: store, name: 'createSurveyBrowser', owner: creation },
+      { label: 'original-browser-create-owner', caller: creation, name: 'createBrowser', owner: store },
       { label: 'survey-topic-relation', caller: survey, name: 'setZoneSpaceRelation', owner: store },
       { label: 'survey-exact-open', caller: survey, name: 'executeControl', owner: store, operations: ['focus'] },
       { label: 'original-zone-owner', caller: store, name: 'createSpatialZone', owner: spatial },
       { label: 'original-spatial-control-owner', caller: store, name: 'executeSpatialControl', owner: spatial },
       { label: 'app-workbench-projection', caller: app, name: 'projectWorkbenchProjection', owner: projection },
       { label: 'original-workbench-projection', caller: workbench, name: 'projectWorkbenchProjection', owner: projection },
-      { label: 'cli-topic-binding-parser', caller: cli, name: 'parseSpaceControlRequest', owner: 'packages/core/src/space-control-parser.ts', operations: ['space.bind', 'space.unbind'] },
-      { label: 'cli-topic-binding-transport', caller: cli, name: 'requestAgentMuxControl', owner: 'packages/core/src/control-host.ts', operations: ['space.bind', 'space.unbind'] },
-      { label: 'cli-zone-open-parser', caller: cli, name: 'parseSpaceControlRequest', owner: 'packages/core/src/space-control-parser.ts', operations: ['agent.open'] },
-      { label: 'cli-zone-open-transport', caller: cli, name: 'requestAgentMuxControl', owner: 'packages/core/src/control-host.ts', operations: ['agent.open'] },
-      { label: 'cli-exact-focus-parser', caller: cli, name: 'parseDesktopFocusRequest', owner: 'packages/core/src/desktop-focus-parser.ts', operations: ['focus'] },
-      { label: 'cli-exact-focus-transport', caller: cli, name: 'requestAgentMuxControl', owner: 'packages/core/src/control-host.ts', operations: ['focus'] }
+      { label: 'cli-topic-binding-parser', caller: cli, name: 'parseAgentMuxCliInvocation', owner: registry, methods: ['space.bind', 'space.unbind'] },
+      { label: 'cli-topic-binding-transport', caller: cli, name: 'call', owner: publicClient, methods: ['space.bind', 'space.unbind'] },
+      { label: 'cli-zone-open-parser', caller: cli, name: 'parseAgentMuxCliInvocation', owner: registry, methods: ['agent.open'] },
+      { label: 'cli-zone-open-transport', caller: cli, name: 'call', owner: publicClient, methods: ['agent.open'] },
+      { label: 'cli-exact-focus-parser', caller: cli, name: 'parseAgentMuxCliInvocation', owner: registry, methods: ['space.focus'] },
+      { label: 'cli-exact-focus-transport', caller: cli, name: 'call', owner: publicClient, methods: ['space.focus'] }
     ]
     const components = [
       { label: 'app-survey', caller: app, name: 'GlobalSurveySurface', owner: survey },
@@ -85,30 +87,68 @@ async function checkCallers() {
       const source = node.getSourceFile(), position = source.getLineAndCharacterOfPosition(node.getStart(source))
       return { file: path(source.fileName), line: position.line + 1, column: position.character + 1 }
     }
-    const operations = (argument, requireParser = false) => {
-      if (!argument || requireParser && !ts.isIdentifier(argument)) return []
-      let parserName = null
-      if (ts.isIdentifier(argument)) {
-        const declarations = symbolAt(argument)?.declarations?.filter(ts.isVariableDeclaration) ?? []
-        if (declarations.length !== 1 || !declarations[0].initializer || !ts.isCallExpression(declarations[0].initializer)) return []
-        // Follow the exact transported request symbol to its original typed parser call.
-        const initializer = declarations[0].initializer, parser = symbolAt(initializer.expression)
-        parserName = parser?.getName()
-        const owner = parserName === 'parseSpaceControlRequest' ? 'packages/core/src/space-control-parser.ts'
-          : parserName === 'parseDesktopFocusRequest' ? 'packages/core/src/desktop-focus-parser.ts' : null
-        const signatureOwner = checker.getResolvedSignature(initializer)?.declaration?.getSourceFile()
-        if (!owner || !signatureOwner || path(signatureOwner.fileName) !== owner ||
-            !parser.declarations?.some(declaration => path(declaration.getSourceFile().fileName) === owner)) return []
-        argument = initializer.arguments[0]
-      }
+    const operations = argument => {
       if (!argument || !ts.isObjectLiteralExpression(argument)) return []
       const operation = argument.properties.find(property => ts.isPropertyAssignment(property) && property.name.getText() === 'operation')
-      if (!operation) return []
-      const value = operation.initializer
-      const values = ts.isStringLiteral(value) ? [value.text] : ts.isConditionalExpression(value) && ts.isStringLiteral(value.whenTrue) && ts.isStringLiteral(value.whenFalse) ? [value.whenTrue.text, value.whenFalse.text].sort() : []
-      if (requireParser && parserName !== (values.includes('focus') ? 'parseDesktopFocusRequest' : 'parseSpaceControlRequest')) return []
+      return operation && ts.isStringLiteral(operation.initializer) ? [operation.initializer.text] : []
+    }
+    const unwrap = node => node && (ts.isAwaitExpression(node) || ts.isAsExpression(node) || ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node)) ? unwrap(node.expression) : node
+    const nodes = (source, predicate) => {
+      const found = []
+      const visit = node => { if (predicate(node)) found.push(node); ts.forEachChild(node, visit) }
+      visit(source); return found
+    }
+    const signatureFrom = (call, owner) => path(checker.getResolvedSignature(call)?.declaration?.getSourceFile().fileName ?? '') === owner
+    const cliSource = program.getSourceFile(join(root, cli)), registrySource = program.getSourceFile(join(root, registry))
+    assert.ok(cliSource && registrySource, 'The sole CLI and command registry must be actual loaded production Source.')
+    const parserCalls = nodes(cliSource, node => ts.isCallExpression(node) && symbolAt(node.expression)?.getName() === 'parseAgentMuxCliInvocation' && signatureFrom(node, registry))
+    assert.equal(parserCalls.length, 1, 'Exactly one typed invocation parser is called by the actual CLI.')
+    const parsedDeclaration = parserCalls[0].parent.parent
+    assert.ok(ts.isVariableDeclaration(parsedDeclaration) && unwrap(parsedDeclaration.initializer) === parserCalls[0] && ts.isIdentifier(parsedDeclaration.name), 'The CLI retains one parsed invocation symbol.')
+    const invocation = symbolAt(parsedDeclaration.name)
+    const invocationProperty = (node, property) => ts.isPropertyAccessExpression(node) && node.name.text === property && ts.isIdentifier(node.expression) && symbolAt(node.expression) === invocation
+    const transports = nodes(cliSource, node => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'call' && signatureFrom(node, publicClient))
+    assert.equal(transports.length, 1, 'Exactly one typed public client call carries ordinary CLI invocations.')
+    const transported = transports[0], method = unwrap(transported.arguments[0]), params = unwrap(transported.arguments[1])
+    assert.ok(method && ts.isIdentifier(method) && params && invocationProperty(params, 'params'), 'Transport carries the original invocation params, not a copied request.')
+    const methodDeclarations = symbolAt(method)?.declarations ?? []
+    assert.equal(methodDeclarations.length, 1, 'The transported method has one original declaration.')
+    const binding = methodDeclarations[0]
+    assert.ok(ts.isBindingElement(binding) && binding.name.getText() === 'method' && ts.isVariableDeclaration(binding.parent.parent) && invocationProperty(binding.parent.parent.initializer, 'command'), 'Method comes from that same invocation.command.')
+    const clientDeclarations = symbolAt(transported.expression.expression)?.declarations ?? []
+    assert.equal(clientDeclarations.length, 1, 'The ordinary transport uses one connected client.')
+    const connection = unwrap(clientDeclarations[0].initializer)
+    assert.ok(connection && ts.isCallExpression(connection) && symbolAt(connection.expression)?.getName() === 'connectAgentMuxRpc' && signatureFrom(connection, publicClient), 'The original sole public client is the actual connected receiver.')
+    const registrations = nodes(registrySource, node => ts.isVariableDeclaration(node) && node.name.getText() === 'AGENTMUX_CLI_COMMANDS')
+    assert.equal(registrations.length, 1, 'One actual executable registry owns these methods.')
+    const literalValues = node => {
+      if (ts.isStringLiteral(node)) return [node.text]
+      if (!ts.isTemplateExpression(node)) return []
+      let values = [node.head.text]
+      for (const span of node.templateSpans) {
+        const type = checker.getTypeAtLocation(span.expression), parts = type.isUnion() ? type.types : [type]
+        if (!parts.length || parts.some(part => !part.isStringLiteral())) return []
+        values = values.flatMap(prefix => parts.map(part => prefix + part.value + span.literal.text))
+      }
       return values
     }
+    const registered = nodes(registrations[0].initializer, node => ts.isCallExpression(node) && symbolAt(node.expression)?.getName() === 'command' && signatureFrom(node, registry))
+      .flatMap(node => literalValues(node.arguments[0]).map(method => ({ method, ...location(node), owner: location(checker.getResolvedSignature(node).declaration) })))
+    assert.ok(registered.length > 0, 'Executable command factory calls cannot be empty or replaced with imports/definitions.')
+    const parser = symbolAt(parserCalls[0].expression).declarations.find(ts.isFunctionDeclaration)
+    const parseReturns = nodes(parser.body, node => ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression))
+    assert.equal(parseReturns.length, 1, 'Invocation parser returns the original matched command and its parsed params together.')
+    const properties = parseReturns[0].expression.properties
+    const commandValue = properties.find(node => ts.isPropertyAssignment(node) && node.name.getText() === 'command')?.initializer
+    const paramsValue = unwrap(properties.find(node => ts.isPropertyAssignment(node) && node.name.getText() === 'params')?.initializer)
+    assert.ok(commandValue && ts.isPropertyAccessExpression(commandValue) && commandValue.name.text === 'command' && paramsValue && ts.isCallExpression(paramsValue) && signatureFrom(paramsValue, registry) && ts.isPropertyAccessExpression(paramsValue.expression) && paramsValue.expression.name.text === 'parse' && paramsValue.expression.expression.getText() === commandValue.getText(), 'Params are parsed by that exact matched registry command.')
+    const matches = symbolAt(unwrap(commandValue.expression))?.declarations ?? []
+    assert.equal(matches.length, 1, 'The matched registry entry is unambiguous.')
+    const matching = unwrap(matches[0].initializer)
+    assert.ok(matching && ts.isCallExpression(matching) && symbolAt(matching.expression)?.getName() === 'agentMuxCliMatch' && signatureFrom(matching, registry), 'Invocation matching comes from the sole registry owner.')
+    const matcher = symbolAt(matching.expression).declarations.find(ts.isFunctionDeclaration)
+    assert.equal(nodes(matcher.body, node => ts.isForOfStatement(node) && symbolAt(node.expression) === symbolAt(registrations[0].name)).length, 1, 'The matcher enumerates the actual executable registry.')
+    receipt.cliPipeline = { parser: location(parserCalls[0]), connection: location(connection), call: location(transported), parsedParams: location(paramsValue), matcher: location(matching), registered }
     const calls = [], jsx = []
     for (const file of callerFiles) {
       assert.ok(productionFile(file), `A caller must be production source: ${file}`)
@@ -126,7 +166,7 @@ async function checkCallers() {
               const owner = path(declaration.getSourceFile().fileName)
               if (owner === file || !productionFile(owner) || !expected.some(item => item.caller === file && item.name === name && item.owner === owner)) continue
               if (call && (!signatureOwner || path(signatureOwner.fileName) !== owner)) continue
-              const fact = { ...location(node), kind: call ? 'CallExpression' : 'JSX', name, owner: location(declaration), ...(call ? { operations: operations(node.arguments[0], name === 'requestAgentMuxControl') } : {}) }
+              const fact = { ...location(node), kind: call ? 'CallExpression' : 'JSX', name, owner: location(declaration), ...(call ? { operations: operations(node.arguments[0]) } : {}) }
               if (element && name === 'WorkspaceWorkbench') {
                 assert.ok(node.attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText() === 'projection' && attribute.initializer), 'Survey must pass the original typed projection to WorkspaceWorkbench.')
                 assert.ok(node.attributes.properties.some(attribute => ts.isJsxAttribute(attribute) && attribute.name.getText() === 'viewOwnership' && attribute.initializer && ts.isStringLiteral(attribute.initializer) && attribute.initializer.text === 'projection'), 'Survey loads the original projection without another content owner.')
@@ -142,8 +182,15 @@ async function checkCallers() {
     assert.ok(calls.length > 0, 'The actual production CallExpression collection must not be empty.')
     assert.ok(jsx.length > 0, 'The actual production JSX-consumer collection must not be empty.')
     for (const requirement of requirements) {
-      const found = calls.filter(call => call.file === requirement.caller && call.name === requirement.name && call.owner.file === requirement.owner &&
+      let found = calls.filter(call => call.file === requirement.caller && call.name === requirement.name && call.owner.file === requirement.owner &&
         (!requirement.operations || JSON.stringify(call.operations) === JSON.stringify([...requirement.operations].sort())))
+      if (requirement.methods) {
+        for (const method of requirement.methods) {
+          const declarations = registered.filter(entry => entry.method === method)
+          assert.equal(declarations.length, 1, `One actual executable method registration: ${method}`)
+        }
+        found = found.map(call => ({ ...call, methods: requirement.methods.map(method => registered.find(entry => entry.method === method)) }))
+      }
       assert.ok(found.length > 0, `No actual typed production caller: ${requirement.label}`)
       receipt.calls.push({ label: requirement.label, found })
     }
