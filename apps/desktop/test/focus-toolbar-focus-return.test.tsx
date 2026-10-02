@@ -81,10 +81,25 @@ it('Rename keeps input focus after menu cleanup, then Escape returns to the curr
   expect(identity().textContent).toContain(tab.name)
   expect(document.activeElement).toBe(identity())
 })
-it.each(['Close Focus workspace', 'Review request'])('%s leaves focus with the selected action owner after menu cleanup', async label => {
-  await open('dropdown'); await pick(label)
-  if (label === 'Close Focus workspace') expect(owners.focusExecutionSession).toHaveBeenCalledExactlyOnceWith(null)
-  else expect(review).toHaveBeenCalledTimes(1)
+it.each(['dropdown', 'context', 'keyboard'] as const)('the %s menu retains its actions without duplicating the permanent collapse shortcut', async kind => {
+  await open(kind)
+  const labels = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(node => node.textContent)
+  expect(labels).toContain('Rename Tab')
+  expect(labels).toContain('Review request')
+  expect(labels).toContain('Stop Agent')
+  expect(labels).not.toContain('Close Focus workspace')
+  expect(container.querySelectorAll('button[aria-label="Close Focus workspace"]')).toHaveLength(1)
+})
+it('the permanent collapse shortcut leaves focus with its existing action owner', async () => {
+  const shortcut = container.querySelector<HTMLButtonElement>('button[aria-label="Close Focus workspace"]')!
+  expect(shortcut).toBeTruthy()
+  await act(async () => shortcut.click())
+  expect(owners.focusExecutionSession).toHaveBeenCalledExactlyOnceWith(null)
+  expect(document.activeElement).toBe(destination)
+})
+it('Review request leaves focus with the selected action owner after menu cleanup', async () => {
+  await open('dropdown'); await pick('Review request')
+  expect(review).toHaveBeenCalledTimes(1)
   expect(document.activeElement).toBe(destination)
 })
 it('the promoted Space button leaves focus with the existing action owner', async () => {

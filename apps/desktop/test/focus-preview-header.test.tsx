@@ -145,7 +145,8 @@ it('retains the original single owner across History, Space, Focus rename and pr
   const identity = toolbar().querySelector<HTMLButtonElement>('.focus-toolbar__identity')!
   await act(async () => { identity.focus(); identity.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })) })
   const focusMenu = document.querySelector<HTMLElement>('[role="menu"]')!; expect(focusMenu).not.toBeNull()
-  expect([...focusMenu.querySelectorAll('[role="menuitem"]')].map(x => x.textContent?.trim())).toEqual(['Rename Tab', 'Close Focus workspace'])
+  expect([...focusMenu.querySelectorAll('[role="menuitem"]')].map(x => x.textContent?.trim())).toEqual(['Rename Tab', 'Stop Agent'])
+  expect(toolbar().querySelectorAll('button[aria-label="Close Focus workspace"]')).toHaveLength(1)
   await act(async () => item(focusMenu, 'Rename Tab').click())
   const rename = toolbar().querySelector<HTMLInputElement>('[aria-label="Rename Tab"]')!; expect(document.activeElement).toBe(rename)
   await act(async () => rename.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
