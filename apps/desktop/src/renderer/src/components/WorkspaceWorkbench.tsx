@@ -49,7 +49,7 @@ import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-to
 import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionMatches, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
 import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
-import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, workbenchHomePresentationReferences, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, focusedPrimaryWorkbenchTarget, focusedSecondaryWorkbenchTarget, committedSecondaryWorkbenchTarget, workbenchHomePresentationReferences, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -502,6 +502,7 @@ function SurfaceContent({
   interactiveResize,
   headerPortalTargetId,
   focus,
+  focusForPresentation,
   browserFrame,
   onBrowserInputSelected,
   primaryPresentationHostId
@@ -515,6 +516,7 @@ function SurfaceContent({
   headerPortalTargetId: string | null
   /** 这一格的焦点表达。只有 browser 那格真用得到（原生视图要让位），但由上游一次算好传下来。 */
   focus: RegionFocusExpression
+  focusForPresentation: (target: WorkbenchViewTarget) => RegionFocusExpression
   primaryPresentationHostId?: string | undefined
   browserFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onBrowserInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
@@ -568,7 +570,7 @@ function SurfaceContent({
         presentations={browserTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
           ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId } },
             stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
-            active: target.active, yieldToFocusRing: focus.nativeViewYieldsToRing, target }] : [])}
+            active: target.active, yieldToFocusRing: focusForPresentation(target).nativeViewYieldsToRing, target }] : [])}
         renderPresentationFrame={browserFrame}
         onPresentationInputSelected={onBrowserInputSelected}
         visible={nativeSurfacesVisible}
@@ -698,7 +700,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
   const visible = target ? target.visible !== false : props.surfaceVisible
   return <>
     <div id={homeId} className="workbench-region-slot" />
-    <StableWorkbenchView kind="region" homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
+    <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       visible={visible}
       retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
       surface={target?.surface ?? parent.surface}
@@ -822,6 +824,11 @@ function WorkbenchRegionContent({
     }
   }
 
+  // A secondary Mote owns its local Region choice, independently of the retained Space.
+  const focusForPresentation = (target?: WorkbenchViewTarget): RegionFocusExpression =>
+    target?.surface === 'mote' && target.reference?.tabId === tab.id && Object.hasOwn(tab.regions, target.reference.regionId)
+      ? regionFocusExpression(target.reference.regionId, node.regionId, regionCount) : focus
+
   const renderFrame = (content: ReactNode, target?: WorkbenchViewTarget): ReactNode => (
     <RegionContextMenu
       regionId={node.regionId}
@@ -859,7 +866,7 @@ function WorkbenchRegionContent({
       }
     >
     <section
-      className={`${REGION_CLASS} ${focus.className}`}
+      className={`${REGION_CLASS} ${focusForPresentation(target).className}`}
       data-workbench-region-id={node.regionId}
       // tabIndex={-1}：可编程聚焦但不进 Tab 序（理由见 openRegionMenuFromKeyboard 上方注释）。
       tabIndex={-1}
@@ -903,6 +910,7 @@ function WorkbenchRegionContent({
           interactiveResize={interactiveResize}
           headerPortalTargetId={headerPortalTargetId}
           focus={focus}
+          focusForPresentation={focusForPresentation}
           browserFrame={renderFrame}
           primaryPresentationHostId={primaryPresentationHostId}
           onBrowserInputSelected={target => selectFrameRegion(target)}
@@ -1568,12 +1576,14 @@ export function WorkspaceWorkbench({
   const activityPresentable = useAppStore(useShallow(state => Object.fromEntries(presentedAgentIds.map(id =>
     [id, sessionPresentationById(state.sessions).get(id)?.kind === 'agent' && effectiveSessionViewMode(state, id) !== 'terminal']))))
   const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
-    tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => target.surface === 'space' && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
+    tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => (target.surface === 'space' || target.surface === 'mote') && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
   const ordinaryLayouts = useAppStore(useShallow(state => Object.fromEntries(ordinaryDisplayIds.map(id => [id, state.layouts[id]]))))
   // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
+  const navigationInputPolicy = useAppStore(state => state.workbenchNavigationInputPolicy)
+  const requestedInputRegionId = useAppStore(state => state.workbenchNavigationInputPolicy === 'target' ? state.workbenchSpaceSelection?.regionId : undefined)
   const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId) : null,
     [residentLayout, tabs, projection, projectionActiveGroupId])
   const projectionContext = useMemo(() => projection && zoneLayout
@@ -1883,19 +1893,29 @@ export function WorkspaceWorkbench({
         const repeatableContent = regions.length > 0 && regions.every(region => region.kind === 'browser' || region.kind === 'agent' && activityPresentable[region.sessionId])
         const activityOnly = regions.length > 0 && regions.every(region => region.kind === 'agent' && activityPresentable[region.sessionId])
         const visibleExternal = activityOnly ? targets.filter(target => target.visible !== false && target.surface !== 'space') : []
+        const confirmedReferenceGroup = (target: WorkbenchViewTarget | undefined) => {
+          const ref = target?.reference
+          return target && ref?.tabId === tab.id && Object.hasOwn(tab.regions, ref.regionId) &&
+            (target.surface === 'space' || target.surface === 'mote' ? workbenchDisplayReferenceMatches(ordinaryLayouts[ref.displayWorkspaceId], ref)
+              : target.projection?.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, ref)))
+            ? ref.groupId : undefined
+        }
+        const homeReference = homeReferences.get(tab.id)
+        const homeId = homeReference ? workbenchProjectionSlotId(viewHostPrefix, homeReference) : `${viewHostPrefix}:${tab.id}`
+        const secondaryInputTarget = navigationInputPolicy === 'preserve' || navigationInputPolicy === 'target' && requestedInputRegionId
+          ? focusedSecondaryWorkbenchTarget(tab, targets, homeId, homeReference, requestedInputRegionId ?? undefined) : undefined
+        const inputTarget = navigationInputPolicy === 'preserve' ? focusedPrimaryWorkbenchTarget(tab, targets) : undefined
         // A unique visible activity presentation keeps its input tree through
         // preview and pin. Activation still belongs to the actual target.
-        const projection = (visibleExternal.length === 1 ? visibleExternal[0] : undefined) ??
+        const proposedProjection = confirmedReferenceGroup(secondaryInputTarget) ? undefined : (confirmedReferenceGroup(inputTarget) ? inputTarget : undefined) ??
+          (visibleExternal.length === 1 ? visibleExternal[0] : undefined) ??
           [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space' && !target.reference) ??
           (repeatableContent ? targets.find(target => target.surface === 'space') : undefined) ??
           [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space') ?? targets.find(target => target.visible !== false) ??
           [...targets].reverse().find(target => target.surface !== 'space') ?? targets[0]
-        const reference = projection?.reference
-        const ordinaryLayout = reference ? ordinaryLayouts[reference.displayWorkspaceId] : undefined
-        const confirmedDisplayGroup = reference?.tabId === tab.id && tab.regions[reference.regionId] &&
-          (projection?.surface === 'space' ? workbenchDisplayReferenceMatches(ordinaryLayout, reference)
-            : projection?.projection?.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference)))
-          ? reference.groupId : undefined
+        const projection = repeatableContent && navigationInputPolicy === null && confirmedReferenceGroup(proposedProjection) &&
+          committedSecondaryWorkbenchTarget(tab, proposedProjection, homeId, homeReference) ? undefined : proposedProjection
+        const confirmedDisplayGroup = confirmedReferenceGroup(projection)
         if (confirmedDisplayGroup) retainedOwners.current.set(tab.id, confirmedDisplayGroup)
         const originalOwnerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
         const ownerId = projection?.surface === 'space' && confirmedDisplayGroup ? confirmedDisplayGroup : originalOwnerId ?? confirmedDisplayGroup
@@ -1909,7 +1929,6 @@ export function WorkspaceWorkbench({
         const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
         const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
           primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
-        const homeId = homeReferences.get(tab.id) ? workbenchProjectionSlotId(viewHostPrefix, homeReferences.get(tab.id)!) : `${viewHostPrefix}:${tab.id}`
         const primaryHostId = targetId ?? homeId
         const tabVisible = (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
         return <WorkbenchBrowserTargetsContext.Provider key={tab.id} value={targets}>
@@ -1918,7 +1937,7 @@ export function WorkspaceWorkbench({
             active={target.active} visible={target.visible !== false} surface={target.surface} retainedRegionId={target.reference!.regionId} reference={target.reference}>
             <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
           </StableWorkbenchView>)}
-        <StableWorkbenchView homeId={homeId} targetId={targetId}
+        <StableWorkbenchView homeId={homeId} targetId={targetId} primaryTabId={tab.id}
           active={tabProjection?.active ?? true}
           visible={tabVisible}
           surface={tabProjection?.surface}

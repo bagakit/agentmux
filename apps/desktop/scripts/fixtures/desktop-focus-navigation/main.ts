@@ -6,6 +6,7 @@ import { execFile as execFileCallback } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxControlServer, AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxSpatialStateStore, type AgentMuxSpatialCommit } from '@agentmux/core/spatial-state'
 import { agentMuxCliMatch } from '../../../../../packages/core/src/agentmux-cli-commands'
 import { openDemandStore } from '@agentmux/demand'
 import { RuntimeController } from '../../../src/main/runtime-controller'
@@ -23,10 +24,12 @@ import type { AppConfig } from '../../../src/shared/contracts'
 
 const execFile = promisify(execFileCallback)
 const [html, privateRoot, phase, preload, evidence, nodeExecutable, cliPath, sourceCommit, sourceTree, rendererId, identityJson] = process.argv.slice(2)
+assert.ok(privateRoot && path.isAbsolute(privateRoot), 'The Focus spatial fixture requires its explicit private root')
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
+process.env.AGENTMUX_SPATIAL_STATE_STORE = path.join(privateRoot, 'runtime', 'state', 'spatial-state.json')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const configFile = path.join(privateRoot, 'config.json')
 const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private proof' }],
@@ -41,6 +44,7 @@ const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'loc
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 let config = phase === 'seed' ? initialConfig : JSON.parse(await fs.readFile(configFile, 'utf8')) as AppConfig
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
+const spatialState = new AgentMuxSpatialStateStore(process.env.AGENTMUX_SPATIAL_STATE_STORE)
 const topics = new ScratchTopics()
 const demands = openDemandStore({ root: path.join(privateRoot, 'user-data', 'demands') })
 const runtime = new RuntimeController(store, localRuntimeConnector, topics)
@@ -58,6 +62,9 @@ const coldPoint = (kind: string, facts: Record<string, unknown> = {}) => {
 }
 let win: BrowserWindow
 let server: AgentMuxControlServer
+const disposeSpatial = spatialState.subscribe(state => {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('focus-proof:spatial-changed', state)
+})
 let finishing = false
 let emptySnapshot = phase === 'empty-restore'
 let canonicalReleased = phase !== 'empty-restore'
@@ -84,6 +91,8 @@ ipcMain.handle('focus-proof:request', async (_event, operation, ...args) => {
   if (operation === 'topics' || operation === 'flush') coldPoint('main-boundary-request', { operation })
   switch (operation) {
     case 'setup': return { phase, config }
+    case 'spatial-read': return spatialState.read()
+    case 'spatial-commit': return spatialState.commit(args[0] as AgentMuxSpatialCommit)
     case 'topics': return topics.list(scratch())
     case 'demands': return demands.list()
     case 'ensure-topic': return args[1] === PMO_TEAMS_TOPIC_ID ? topics.ensureMote(scratch(), args[1]) : topics.ensure(scratch(), args[1])
@@ -227,11 +236,13 @@ async function observeBorrowedHomeNotice(tabId: string, regionId: string) {
   ])
   return notice
 }
-async function freshTerminalInput(name: string, address: any, character: string, precedingReceipt?: any) {
+async function freshTerminalInput(name: string, address: any, character: string, precedingReceipt?: any, expectedPresentation: 'main-visible' | 'floating' = 'main-visible') {
   return recordStep(name, async () => {
     const beforeDom = await evaluate(`({ liveReady: window.focusProofReadyTerminal(${JSON.stringify(address.to.regionId)}, ${JSON.stringify(address.agent.agentSessionId)}, ${JSON.stringify(address.agent.runId)}),
       regionPresent: Boolean(document.querySelector('[data-workbench-region-id=' + CSS.escape(${JSON.stringify(address.to.regionId)}) + ']')) })`)
-    const receipt = precedingReceipt ?? await cli(['space', 'focus', '--region', address.to.regionId, '--input', 'target'])
+    const receipt = precedingReceipt ?? await cli(['space', 'focus', '--region', address.to.regionId, '--input', 'target'], expectedPresentation === 'floating' ? 1 : 0)
+    assert.equal(receipt.presentation.state, expectedPresentation)
+    assert.equal(receipt.partial, expectedPresentation === 'floating')
     assert.equal(receipt.input.outcome, 'transferred')
     assert.equal(receipt.input.after.regionId, address.to.regionId)
     assert.equal(receipt.input.after.sessionId, address.agent.agentSessionId)
@@ -270,6 +281,9 @@ async function finish(passed: boolean) {
     nativeHandle: one.nativeHandle, workspacePath: one.workspacePath, creation: one.creation }))
   try { result.runs = (await client().listRuns()).filter((one: any) => one.state === 'running').map((one: any) => ({ runId: one.runId, pid: one.pid })) }
   catch (error) { result.runObservationFailure = String(error) }
+  try { result.spatialState = await spatialState.read() }
+  catch (error) { result.spatialObservationFailure = String(error); result.passed = false }
+  disposeSpatial()
   bridge.dispose()
   try { await server?.stop(); await runtime.dispose() }
   catch (error) { result.cleanupFailure = String(error); result.passed = false }
@@ -297,7 +311,7 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until('window.focusProofReady === true && !window.focusProofState().loading')
     const loadedRenderer = { kind: 'bundled' as const, id: rendererId, identity: JSON.parse(identityJson) }
-    server = new AgentMuxControlServer({ execute: request => request.operation === 'inspect.client'
+    server = new AgentMuxControlServer({ spatialState, execute: request => request.operation === 'inspect.client'
       ? inspectDesktopClient(request, { pid: process.pid,
         package: { schema: 'agentmux.package-identity.v1', sourceCommit, sourceTree, appVersion: 'private-proof', platform: process.platform, arch: process.arch },
         renderer: () => loadedRenderer, generation: () => runtime.rendererGeneration(win.webContents),
@@ -321,6 +335,8 @@ app.whenReady().then(async () => {
           return opened
         }
         const source = await open('source', ['--zone', zone('source').zoneId, '--new-tab', '--focus'])
+        assert.equal(typeof source.to.spaceId, 'string')
+        assert.ok(catalog.bindings.some((binding: { zoneId: string; spaceId: string }) => binding.zoneId === source.to.zoneId && binding.spaceId === source.to.spaceId))
         const target = await open('target', ['--zone', zone('target').zoneId, '--new-tab'])
         const mote = await open('mote', ['--space', moteSpace.spaceId, '--new-tab'])
         const moteSecond = await cli(['agent', 'open', '--session', mote.agent.agentSessionId,
@@ -379,7 +395,7 @@ app.whenReady().then(async () => {
         await evaluate('window.focusProofFocusMoteInput(); true')
         await win.webContents.debugger.sendCommand('Input.insertText', { text: 'Private unsent Mote draft' })
         await until(`window.focusProofState().agentComposerDrafts[${JSON.stringify(mote.agent.agentSessionId)}]?.includes('Private unsent Mote draft')`)
-        const setupIds = { source, target, mote, moteSecond, topic, empty: zone('empty'), sourceSpace: zone('source').spaceId, moteSpace, topicSpace, emptyTopicSpace }
+        const setupIds = { source, target, mote, moteSecond, topic, empty: zone('empty'), sourceSpace: source.to.spaceId, moteSpace, topicSpace, emptyTopicSpace }
         await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(setupIds))
         return setupIds
       })
@@ -452,7 +468,7 @@ app.whenReady().then(async () => {
       await freshTerminalInput('mounted-target-native-input', ids.source, 'q')
       await freshTerminalInput('target-native-input', ids.target, 'x')
       await evaluate(`window.focusProofHumanViewMode(${JSON.stringify(ids.mote.agent.agentSessionId)}, 'terminal'); true`)
-      await freshTerminalInput('mote-native-input', ids.mote, 'm')
+      await freshTerminalInput('mote-native-input', ids.mote, 'm', undefined, 'floating')
       await evaluate(`window.focusProofHumanViewMode(${JSON.stringify(ids.mote.agent.agentSessionId)}, 'activity'); true`)
       await until('window.focusProofMoteInput()')
       await evaluate('window.focusProofFocusMoteInput(); window.focusProofCaptureInput()')
@@ -502,12 +518,14 @@ app.whenReady().then(async () => {
         const pending = cli(['space', 'focus', '--region', ids.target.to.regionId, '--input', 'target'], 1)
         await until(`window.focusProofState().regionCaretFocus?.regionId === ${JSON.stringify(ids.target.to.regionId)}`)
         const held = await state()
+        result.humanNavigationDiagnostics = { moteDom, before, held }
         const humanNavigationRequestedAt = Date.now()
         await evaluate("window.focusProofHumanNavigate(); true")
         await until(`window.focusProofState().mainSurface === "agents" && document.querySelector('[aria-label="Search contexts"]')?.getBoundingClientRect().width > 0`)
         await evaluate(`document.querySelector('[aria-label="Search contexts"]').focus(); true`)
         const humanNavigationReturnedAt = Date.now()
         const receipt = await pending
+        result.humanNavigationDiagnostics.receipt = receipt
         assert.equal(receipt.navigation.state, 'unconfirmed')
         assert.equal(receipt.navigation.selection.surface, 'focus')
         assert.notEqual(receipt.input.outcome, 'transferred')
@@ -526,30 +544,26 @@ app.whenReady().then(async () => {
         assert.equal(preserved.caret.selectionEnd, humanInput.caret.selectionEnd)
         assert.deepEqual(preserved.events.filter((one: any) => ['focusin', 'focusout'].includes(one.type)), [])
         const afterHuman = await state(), moteNodes = await evaluate('window.focusProofCheckMoteRegions()')
+        Object.assign(result.humanNavigationDiagnostics, { afterHuman, moteNodes, humanInput, preserved })
         assert.ok(moteNodes.leftSame && moteNodes.rightSame && moteNodes.leftValueSame && moteNodes.rightValueSame, 'The original Mote DOM and values survive independently of the human input move')
         assert.deepEqual(afterHuman.agentComposerDrafts, before.agentComposerDrafts)
         assert.equal(afterHuman.regionCaretFocus, null)
         await screenshot('later-navigation-keeps-human-focus-input')
         const returned = await cli(['space', 'focus', '--region', ids.target.to.regionId], 1)
-        // Main Focus is now hidden/inert. Its input cannot be claimed as visible/preserved;
-        // default display navigation still never authorizes the cancelled target caret.
-        assert.equal(returned.input.outcome, 'unavailable')
+        // Leaving Focus unmounts its search input under the current App owner.
+        // Display navigation reports unavailable and never replays the cancelled target caret.
         const hiddenFocus = await evaluate('window.focusProofCapturedInputState()')
-        assert.ok(hiddenFocus.capturedExists && hiddenFocus.capturedIsFocusInput && hiddenFocus.capturedConnected &&
-          hiddenFocus.capturedHidden && hiddenFocus.capturedInert, 'The same original Focus input is now actually hidden and inert')
-        // The receipt captures its own instant. Chromium may leave the hidden Focus active
-        // then move to body before this live read; both observations must tell their real facts.
-        if (returned.input.after.scope === 'main') {
-          assert.deepEqual(returned.input.after, { provenance: 'observed', scope: 'main', ownerKind: 'other',
-            tabId: null, regionId: null, sessionId: null, connected: true, visible: false, inert: true })
-        } else {
-          assert.deepEqual(returned.input.after, { provenance: 'observed', scope: 'none', ownerKind: null,
-            tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
-        }
         const afterReturn = await state()
+        Object.assign(result.humanNavigationDiagnostics, { returned, hiddenFocus, afterReturn })
+        assert.equal(returned.input.outcome, 'unavailable')
+        assert.ok(hiddenFocus.capturedExists && hiddenFocus.capturedWasFocusInput && hiddenFocus.currentFocusInputCount === 0 &&
+          !hiddenFocus.capturedIsFocusInput && !hiddenFocus.capturedConnected,
+          'The original Focus input is unmounted after leaving Focus, with no replacement Search input')
+        assert.deepEqual(returned.input.after, { provenance: 'observed', scope: 'none', ownerKind: null,
+          tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
         assert.equal(hiddenFocus.activeConnected, true)
-        assert.ok(hiddenFocus.activeSameCaptured || hiddenFocus.activeBody || !hiddenFocus.activeEditable,
-          'The live owner is the original hidden Focus or a real non-input control, never a different editable owner')
+        assert.equal(hiddenFocus.activeSameCaptured, false)
+        assert.equal(hiddenFocus.activeEditable, false, 'Default return never assigns another editable input owner')
         assert.equal(afterReturn.regionCaretFocus, null)
         assert.ok(humanInput.eventCursor > 0, 'The actual focus event stream was populated before cancellation')
         assert.deepEqual(afterReturn.events.slice(humanInput.eventCursor).filter((one: any) => one.type === 'focusin' && one.editableTarget), [])
@@ -607,7 +621,16 @@ app.whenReady().then(async () => {
       })
       await recordStep('empty-topic-original-mote-pointer', async () => {
         const cursor = calls.length
-        const receipt = await cli(['space', 'focus', '--space', ids.emptyTopicSpace.spaceId])
+        const receipt = await cli(['space', 'focus', '--space', ids.emptyTopicSpace.spaceId], 1)
+        assert.equal(receipt.navigation.state, 'applied')
+        assert.equal(receipt.presentation.state, 'main-visible')
+        assert.equal(receipt.input.policy, 'preserve')
+        assert.equal(receipt.input.outcome, 'unavailable')
+        const noInput = { provenance: 'observed', scope: 'none', ownerKind: null, tabId: null,
+          regionId: null, sessionId: null, connected: null, visible: null, inert: null }
+        assert.deepEqual(receipt.input.before, noInput)
+        assert.deepEqual(receipt.input.after, noInput)
+        assert.equal(receipt.partial, true)
         assert.equal(receipt.navigation.selection.space.tabId, null)
         assert.equal(receipt.navigation.selection.space.topicId, 'view:focus-proof-empty')
         const before = durable(await state())
@@ -647,7 +670,9 @@ app.whenReady().then(async () => {
         await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: dom.box.x, y: dom.box.y, button: 'left', clickCount: 1 })
         await delay(160)
         const actual = await state(), after = durable(actual), nodes = await evaluate('window.focusProofCheckMoteRegions()')
-        assert.deepEqual(nodes, { leftSame: true, rightSame: true, leftActive: false, rightActive: true,
+        const physicalInput = { leftSame: nodes.leftSame, rightSame: nodes.rightSame, leftActive: nodes.leftActive, rightActive: nodes.rightActive,
+          rightCaret: nodes.rightCaret, rightSelection: nodes.rightSelection, rightValueSame: nodes.rightValueSame, leftValueSame: nodes.leftValueSame }
+        assert.deepEqual(physicalInput, { leftSame: true, rightSame: true, leftActive: false, rightActive: true,
           rightCaret: true, rightSelection: true, rightValueSame: true, leftValueSame: true })
         assert.equal(after.tabs[ids.mote.to.tabId].layout.activeRegionId, ids.moteSecond.to.regionId)
         assert.deepEqual(after.tabs[ids.mote.to.tabId].layout.root, before.tabs[ids.mote.to.tabId].layout.root)
@@ -660,7 +685,8 @@ app.whenReady().then(async () => {
         assert.equal(after.mainSurface, before.mainSurface)
         assert.deepEqual(after.agentComposerDrafts, before.agentComposerDrafts)
         assert.deepEqual(after.viewModes, before.viewModes)
-        assert.deepEqual(after.floating, before.floating)
+        assert.deepEqual(after.floating, { ...before.floating,
+          reference: { ...before.floating.reference, regionId: ids.moteSecond.to.regionId } })
         assert.equal(after.selectedDemandId, before.selectedDemandId)
         assert.deepEqual(actual.navigationInputPolicy, beforeState.navigationInputPolicy)
         assert.deepEqual(actual.retainedSpatialFocus, beforeState.retainedSpatialFocus)
@@ -734,7 +760,27 @@ app.whenReady().then(async () => {
         assert.equal(opened.agent.agentSessionId, ids.target.agent.agentSessionId)
         assert.equal(opened.agent.runId, ids.target.agent.runId)
         assert.notEqual(opened.to.tabId, ids.target.to.tabId)
-        const selected = await cli(['space', 'focus', '--tab', opened.to.tabId])
+        const originalInput = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation).workbench.desktop.input
+        assert.equal(originalInput.provenance, 'observed')
+        const noOriginalInput = originalInput.scope === 'none'
+        if (noOriginalInput) assert.deepEqual(originalInput, { provenance: 'observed', scope: 'none',
+          ownerKind: null, tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
+        else {
+          assert.equal(originalInput.connected, true)
+          assert.equal(originalInput.visible, true)
+          assert.equal(originalInput.inert, false)
+        }
+        const selected = await cli(['space', 'focus', '--tab', opened.to.tabId], noOriginalInput ? 1 : 0)
+        assert.equal(selected.navigation.state, 'applied')
+        assert.equal(selected.presentation.state, 'main-visible')
+        assert.equal(selected.presentation.tabId, opened.to.tabId)
+        assert.deepEqual(selected.presentation.blockers, [])
+        assert.equal(selected.input.policy, 'preserve')
+        assert.deepEqual(selected.input.before, originalInput)
+        assert.deepEqual(selected.input.after, originalInput)
+        assert.equal(selected.input.outcome, noOriginalInput ? 'unavailable' : 'preserved')
+        assert.equal(selected.partial, noOriginalInput)
+        assert.equal(selected.save.diskDurability, 'confirmed')
         assert.equal(selected.navigation.selection.space.tabId, opened.to.tabId)
         await until(`document.querySelector('[data-workbench-tab-id=' + CSS.escape(${JSON.stringify(opened.to.tabId)}) + '] .workbench-tab__close')`)
         // Activate the actual observed Tab button and its original close/confirmation owner.
@@ -765,7 +811,7 @@ app.whenReady().then(async () => {
         await evaluate('window.focusProofFocusMoteInput(); window.focusProofCaptureInput()')
         const receipt = await cli(['space', 'focus', '--zone', ids.empty.zoneId])
         assert.equal(receipt.navigation.selection.space.tabId, null)
-        assert.equal(receipt.save.diskDurability, 'unconfirmed')
+        assert.equal(receipt.save.diskDurability, 'confirmed')
         await evaluate('window.focusProofFlush()')
         const beforeNarrow = durable(await state())
         await screenshot('before-ordinary-exit')
@@ -797,14 +843,28 @@ app.whenReady().then(async () => {
         assert.equal(modes.present, true, 'Final production writer must include durable viewModes')
         assert.deepEqual(modes.modes, expected.viewModes, 'Compare the whole mode map consumed by the actual writer')
         assert.equal(expected.viewModes[ids.mote.agent.agentSessionId], 'activity')
+        const saved = await evaluate('window.focusProofDurableWorkbench()')
+        const independentSpatial = await spatialState.read()
+        assert.ok(independentSpatial, 'The original Core owner has a nonempty durable spatial document')
+        assert.deepEqual(saved.spatialState, independentSpatial, 'Renderer and Main read the same exact Core revision and graph')
+        assert.deepEqual(saved.workbench, { tabs: expected.tabs, layouts: expected.layouts }, 'Core retains the complete original Tab/Region/layout graph; UI preferences use their original writer')
+        await fs.writeFile(path.join(privateRoot, 'spatial-expected.json'), JSON.stringify(independentSpatial))
         await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(expected))
-        return { expected, receipt, actualWriterModes: modes, narrowInputBefore, narrowBorrowed, narrowNotice, narrowInput, narrowReturned }
+        return { expected, receipt, actualWriterModes: modes, coreSpatialState: independentSpatial, narrowInputBefore, narrowBorrowed, narrowNotice, narrowInput, narrowReturned }
       })
     } else {
       ids = JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8'))
       await recordStep('ordinary-process-durable-restore', async () => {
-        const expected = JSON.parse(await fs.readFile(path.join(privateRoot, 'expected.json'), 'utf8'))
+        const expected = JSON.parse(await fs.readFile(path.join(privateRoot, phase === 'empty-restore' ? 'restore-expected.json' : 'expected.json'), 'utf8'))
         const actual = durable(await state())
+        const expectedSpatial = JSON.parse(await fs.readFile(path.join(privateRoot, phase === 'empty-restore' ? 'restore-spatial-expected.json' : 'spatial-expected.json'), 'utf8'))
+        const saved = await evaluate('window.focusProofDurableWorkbench()')
+        const independentSpatial = await spatialState.read()
+        assert.ok(independentSpatial, 'An independent ordinary process reads the original Core spatial document')
+        assert.deepEqual(saved.spatialState, independentSpatial)
+        assert.ok(independentSpatial.revision >= expectedSpatial.revision)
+        assert.deepEqual(independentSpatial.graph, expectedSpatial.graph, 'The complete original Core spatial graph survives the ordinary process restart')
+        assert.deepEqual(saved.workbench, { tabs: actual.tabs, layouts: actual.layouts })
         assert.ok(Object.keys(actual.tabs).length >= 4, 'Durable workface is nonempty')
         assert.deepEqual(actual, expected, 'Independent ordinary Electron reads exact original durable workface')
         const modes = await evaluate('window.focusProofPersistedModes()')
@@ -816,7 +876,7 @@ app.whenReady().then(async () => {
         assert.ok(!Object.values(actual.tabs).some((tab: any) => Boolean(tab.regions[ids.closedProjection.regionId])))
         if (phase === 'empty-restore') assert.equal(result.emptySnapshotInjected, true)
         await screenshot('durable-restored')
-        return { expected, actual, actualWriterModes: modes }
+        return { expected, actual, actualWriterModes: modes, expectedSpatial, coreSpatialState: independentSpatial }
       })
       if (phase === 'empty-restore') {
         const firstMount = await recordStep('canonical-first-mount-exact-input', async () => {
@@ -834,7 +894,14 @@ app.whenReady().then(async () => {
           assert.equal(savedRegion?.kind, 'agent')
           assert.equal(savedRegion.sessionId, ids.target.agent.agentSessionId)
           assert.ok(!before.sessions.some((one: any) => one.id === ids.target.agent.agentSessionId))
-          const preservedReceipt = await cli(['space', 'focus', '--region', ids.target.to.regionId])
+          const originalInput = parseDesktopClientObservation((await cli(['app', 'inspect'])).observation).workbench.desktop.input
+          assert.deepEqual(originalInput, { provenance: 'observed', scope: 'none', ownerKind: null,
+            tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
+          const preservedReceipt = await cli(['space', 'focus', '--region', ids.target.to.regionId], 1)
+          assert.deepEqual(preservedReceipt.input.before, originalInput)
+          assert.deepEqual(preservedReceipt.input.after, originalInput)
+          assert.equal(preservedReceipt.input.outcome, 'unavailable')
+          assert.equal(preservedReceipt.partial, true)
           assert.equal(preservedReceipt.navigation.state, 'applied')
           assert.equal(preservedReceipt.input.policy, 'preserve')
           assert.notEqual(preservedReceipt.input.outcome, 'transferred')
@@ -906,6 +973,8 @@ app.whenReady().then(async () => {
           await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: box.x, y: box.y, button: 'left', clickCount: 1 })
           await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'End', code: 'End', windowsVirtualKeyCode: 35 })
           await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'End', code: 'End', windowsVirtualKeyCode: 35 })
+          await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 })
+          await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 })
           const afterKeys = await evaluate('({ owner: window.focusProofMoteSelectionOwner(), input: window.focusProofCaptureInput() })')
           result.restoredInputSetup = { box, afterKeys, keysReturnedAt: Date.now() }
           assert.ok(afterKeys.owner.inputPresent && afterKeys.owner.inputActive && afterKeys.owner.editorAttached &&
@@ -950,8 +1019,27 @@ app.whenReady().then(async () => {
       await evaluate(`window.focusProofHumanViewMode(${JSON.stringify(ids.mote.agent.agentSessionId)}, 'activity'); true`)
       await until('window.focusProofMoteInput()')
       await evaluate('window.focusProofFocusMoteInput(); window.focusProofCaptureInput()')
-      await cli(['space', 'focus', '--zone', ids.empty.zoneId])
-      await evaluate('window.focusProofFlush()')
+      await recordStep('restored-durable-before-exit', async () => {
+        const returned = await cli(['space', 'focus', '--zone', ids.empty.zoneId])
+        assert.equal(returned.navigation.selection.space.zoneId, ids.empty.zoneId)
+        assert.equal(returned.navigation.selection.space.tabId, null)
+        assert.equal(returned.save.diskDurability, 'confirmed')
+        await evaluate('window.focusProofFlush()')
+        const expected = durable(await state())
+        const saved = await evaluate('window.focusProofDurableWorkbench()')
+        const independentSpatial = await spatialState.read()
+        assert.ok(independentSpatial, 'The successful prior generation retains its original durable Core document')
+        assert.deepEqual(saved.spatialState, independentSpatial)
+        assert.deepEqual(saved.workbench, { tabs: expected.tabs, layouts: expected.layouts })
+        const modes = await evaluate('window.focusProofPersistedModes()')
+        assert.equal(modes.present, true)
+        assert.deepEqual(modes.modes, expected.viewModes)
+        if (phase === 'restore') {
+          await fs.writeFile(path.join(privateRoot, 'restore-expected.json'), JSON.stringify(expected))
+          await fs.writeFile(path.join(privateRoot, 'restore-spatial-expected.json'), JSON.stringify(independentSpatial))
+        }
+        return { expected, returned, actualWriterModes: modes, coreSpatialState: independentSpatial }
+      })
     }
     await finish(true)
   } catch (error: any) {

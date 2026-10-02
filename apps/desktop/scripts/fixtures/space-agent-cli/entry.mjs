@@ -6,6 +6,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { createRendererControlApi } from '../../../src/renderer/src/lib/control-api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { desktopWorkbenchFromSpatial, desktopBindingsFromSpatial } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { dispatchWorkbenchCommand, focusedSessionId } from '../../../src/renderer/src/lib/workbench-shortcuts'
 import { readTerminalViewObservation } from '../../../src/renderer/src/lib/terminal-view-observation'
 import { SessionObservationRegions } from '../../../src/renderer/src/components/SessionObservationRegions'
@@ -18,6 +19,11 @@ for (const type of ['focusin', 'focusout']) document.addEventListener(type, even
     relatedRegionId: event.relatedTarget?.closest?.('[data-workbench-region-id]')?.dataset.workbenchRegionId ?? null })
 })
 const request = window.spaceBoundary.request
+api.spatial = {
+  read: () => request('spatial-read'),
+  commit: input => request('spatial-commit', input),
+  onChange: listener => window.spaceBoundary.onSpatialChange(listener)
+}
 const setup = await request('setup')
 api.config.get = async () => setup.config
 api.providers.list = async () => []
@@ -69,6 +75,12 @@ window.spaceState = () => {
     neutralNotice: document.querySelector('[data-workbench-moved-focus]')?.textContent ?? null,
     terminalCount: window.terminals.filter(one => one.element?.isConnected).length }
 }
+window.spaceDurableState = async () => {
+  const spatialState = await api.spatial.read()
+  if (!spatialState) throw new Error('The private Core spatial document has not been established.')
+  const topology = desktopWorkbenchFromSpatial(spatialState.graph, tabId => { throw new Error(`The Core Tab ${tabId} lacks its original host descriptor.`) })
+  return { ...window.spaceState(), ...topology, spatialState, spaceZoneBindings: desktopBindingsFromSpatial(spatialState.graph) }
+}
 window.spaceFocus = address => {
   const state = useAppStore.getState()
   const layout = state.layouts[address.workspaceId]
@@ -83,7 +95,7 @@ window.spaceCommands = () => {
   return { before, after: projectPersistedWorkbench(useAppStore.getState()), results,
     focusedSessionId: focusedSessionId(useAppStore.getState()) }
 }
-window.spaceFlush = async () => { prepareRendererUpdate(); await request('flush') }
+window.spaceFlush = async () => { await prepareRendererUpdate(); await request('flush') }
 window.spaceSelectCaller = async () => useAppStore.getState().selectWorkspace('caller')
 // Mount the actual observation consumer, rather than calling selectSession from the fixture.
 // Its existing Open Session button must resolve the persisted projection after a process restart.

@@ -8,6 +8,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import { AgentMuxSpatialStateStore } from '../../../packages/core/dist/spatial-state.js'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { sourceUpdateIdentity } from './update-identity.mjs'
 
@@ -37,7 +38,7 @@ const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scri
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'), electron]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const names = ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH']
+const names = ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_SPATIAL_STATE_STORE', 'AGENTMUX_MESSAGE_QUEUE_PATH']
 const previousEnvironment = new Map(names.map(name => [name, process.env[name]]))
 const receipt = { schema: 'agentmux.desktop-focus-navigation.native.v1', passed: false, phases: [],
   scope: diagnosticOnly ? 'diagnostic-delayed-input-only' : 'three-ordinary-generations',
@@ -48,7 +49,7 @@ const receipt = { schema: 'agentmux.desktop-focus-navigation.native.v1', passed:
     'The native Provider executable is the repository fake Codex CLI with authenticated hooks and a real Provider native handle; this does not assert upstream Provider behavior.',
     'Renderer API boundaries for config, files and provider discovery are private. Session lifecycle, attachment, bytes, optional warm shells, Scratch resource owner and Demand durability are real.',
     'The empty initial snapshot is one explicit private boundary fault, followed by real canonical reconciliation; no production outage is asserted.',
-    'Instant caret is observed again after restart. localStorage write and flush request are not a disk ACK.',
+    'Tab/Region/layout restoration reads the same Core spatial store with filesystem and directory-sync ACK. UI preferences and drafts retain their original Chromium writer; its flush request alone is not a disk ACK.',
     'Screenshots are capture evidence requiring independent human/Agent visual review; capture success does not sign aesthetic acceptance.'
   ] }
 let client
@@ -56,6 +57,7 @@ await fs.mkdir(evidence, { recursive: true })
 const privateEnvironment = () => {
   process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
   process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
+  process.env.AGENTMUX_SPATIAL_STATE_STORE = path.join(privateRoot, 'runtime', 'state', 'spatial-state.json')
   process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 }
 try {
@@ -96,9 +98,17 @@ try {
   const rendererFiles = Object.fromEntries(Object.entries(receipt.compiled).filter(([file]) => file.startsWith('renderer/')).map(([file, digest]) => [file.slice('renderer/'.length), digest]))
   const rendererId = hash(JSON.stringify({ identity: receipt.updateIdentity, files: Object.entries(rendererFiles).sort() }))
   receipt.rendererRelease = { id: rendererId, identity: receipt.updateIdentity, files: rendererFiles }
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
-  for (const name of ['AGENTMUX_ENV', 'AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_RUN_ID',
-    'AGENTMUX_WORKSPACE_ID', 'AGENTMUX_REGION_ID', 'AGENTMUX_TAB_ID', 'AGENTMUX_VIEW_ID']) delete env[name]
+  const env = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+    !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_') && name !== 'ELECTRON_RUN_AS_NODE'))
+  Object.assign(env, {
+    AGENTMUX_RUNTIME_DIRECTORY: path.join(privateRoot, 'runtime'),
+    AGENTMUX_STATE_DIRECTORY: path.join(privateRoot, 'runtime', 'state'),
+    AGENTMUX_SPATIAL_STATE_STORE: path.join(privateRoot, 'runtime', 'state', 'spatial-state.json'),
+    AGENTMUX_MESSAGE_QUEUE_PATH: path.join(privateRoot, 'messages.ndjson'),
+    ...(diagnosticOnly ? { AGENTMUX_FOCUS_PROOF_DIAGNOSTIC: 'delayed-input' } : {})
+  })
+  receipt.privateEnvironment = Object.fromEntries(names.map(name => [name, env[name]]))
+  const spatialState = new AgentMuxSpatialStateStore(env.AGENTMUX_SPATIAL_STATE_STORE)
   for (const phase of diagnosticOnly ? ['seed'] : ['seed', 'restore', 'empty-restore']) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
     await fs.mkdir(phaseRoot)
@@ -116,6 +126,10 @@ try {
     assert.equal(exit.timedOut, false, `${phase} watchdog fired`)
     assert.equal(exit.exitCode, 0, native.failure?.message)
     assert.equal(native.passed, true)
+    const independentSpatial = await spatialState.read()
+    assert.ok(independentSpatial && independentSpatial.graph.tabs.length > 0 && independentSpatial.graph.regions.length > 0, 'The driver reads a nonempty original Core spatial document after the ordinary App exits')
+    assert.deepEqual(independentSpatial, native.spatialState, 'Independent driver and ordinary App read the same exact durable Core revision and graph')
+    entry.spatialState = independentSpatial
     privateEnvironment()
     client ??= await connectLocalAgentMux({ store: new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json')) })
     receipt.runtimeIdentity = client.runtimeIdentity()

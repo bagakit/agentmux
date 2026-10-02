@@ -1,6 +1,7 @@
 import type { AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
   AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection } from '@agentmux/core'
 import type { WorkbenchTab } from './workbench-tabs'
+import { workbenchRegionProjectionSlotId } from './workbench-projection'
 
 export type DesktopAppPresentationOwner = {
   loading: boolean
@@ -27,6 +28,23 @@ export function desktopElementVisible(element: HTMLElement | null): boolean {
 }
 function queryIdentity(attribute: string, id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[${attribute}=${CSS.escape(id)}]`)
+}
+/** Read the original View's committed occurrence, independently of secondary DOM order. */
+function primaryRegion(selection: AgentMuxDesktopSelection['space'], tabs: Readonly<Record<string, WorkbenchTab>>): HTMLElement | null {
+  if (!selection?.tabId || !selection.regionId || !selection.groupId) return null
+  const tab = tabs[selection.tabId]
+  if (!tab || !Object.hasOwn(tab.regions, selection.regionId)) return null
+  const reference = { displayWorkspaceId: selection.workspaceId, groupId: selection.groupId,
+    tabId: selection.tabId, regionId: selection.regionId }
+  const exactRegion = workbenchRegionProjectionSlotId('primary', reference)
+  const matches = Array.from(document.querySelectorAll<HTMLElement>(`[data-workbench-region-id=${CSS.escape(selection.regionId)}]`)).filter(region => {
+    const native = region.closest<HTMLElement>('.retained-workbench-region')
+    if (native) return native.dataset.workbenchRegionReference === exactRegion
+    const primary = region.closest<HTMLElement>('[data-workbench-primary-tab-id]')
+    return primary?.dataset.workbenchPrimaryTabId === tab.id && Object.keys(tab.regions).some(regionId =>
+      primary.dataset.workbenchPrimaryReference === workbenchRegionProjectionSlotId('primary', { ...reference, regionId }))
+  })
+  return matches.length === 1 ? matches[0]! : null
 }
 const unknownInput = (): AgentMuxDesktopInput => ({ provenance: 'unknown', scope: 'unknown', ownerKind: null,
   tabId: null, regionId: null, sessionId: null, connected: null, visible: null, inert: null })
@@ -59,7 +77,10 @@ function observeFloating(owner: DesktopAppPresentationOwner | null, tabs: Readon
   const regionId = tab?.layout.activeRegionId ?? null
   const surface = regionId ? tab?.regions[regionId] : undefined
   const panel = document.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')
-  const region = regionId ? queryIdentity('data-workbench-region-id', regionId) : null
+  const region = regionId ? Array.from(panel?.querySelectorAll<HTMLElement>(`[data-workbench-region-id=${CSS.escape(regionId)}]`) ?? []).find(element => {
+    const slot = element.closest<HTMLElement>('[data-workbench-tab-id], [data-workbench-primary-tab-id]')
+    return (slot?.dataset.workbenchTabId ?? slot?.dataset.workbenchPrimaryTabId) === tabId && desktopElementVisible(element)
+  }) ?? null : null
   return { provenance: 'observed', state, topicId, tabId, regionId,
     sessionId: surface?.kind === 'agent' || surface?.kind === 'terminal' ? surface.sessionId : null,
     presentation: state === 'closed' ? 'hidden' : !tab || !surface ? 'unknown'
@@ -81,13 +102,13 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
     else if (blockers.length) presentation = { ...base, provenance: 'observed', state: 'covered' }
     else {
       const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
-      const target = selection.surface !== 'space' ? main : regionId ? queryIdentity('data-workbench-region-id', regionId)
+      const target = selection.surface !== 'space' ? main : regionId ? primaryRegion(selection.space, tabs)
         : selection.space?.zoneId ? queryIdentity('data-desktop-zone-id', selection.space.zoneId) : selection.space ? null : main
       const borrowed = selection.surface === 'space' && target?.closest('[data-pmo-teams-topic-floating]')
       const exactGoal = selection.surface !== 'goals' || !selection.goalId ||
         Boolean(main?.querySelector(`[data-goal-detail-id=${CSS.escape(selection.goalId)}]`))
       presentation = { ...base, provenance: 'observed', state: borrowed && desktopElementVisible(target) ? 'floating'
-        : desktopElementVisible(main) && desktopElementVisible(target) && exactGoal ? 'main-visible' : 'pending' }
+        : desktopElementVisible(main) && desktopElementVisible(target) && Boolean(target && main?.contains(target)) && exactGoal ? 'main-visible' : 'pending' }
     }
   }
   return { presentation, floating: observeFloating(owner, tabs), overlays, input: captureDesktopInput(tabs).fact }

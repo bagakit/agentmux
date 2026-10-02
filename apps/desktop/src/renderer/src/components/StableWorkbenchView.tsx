@@ -1,6 +1,7 @@
 import { Component, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
+import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
 
 type ReadingRange = { start: Node; startOffset: number; end: Node; endOffset: number }
 type ReadingSnapshot = { ranges: ReadingRange[]; activeElement: Element | null; parent: Element | null; interrupted: boolean; dispose(): void }
@@ -79,8 +80,12 @@ class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: bo
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, active, visible = true, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegionId, active, visible = true, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
   homeId: string
+  /** Only the unique primary View carries an input-retention identity. */
+  primaryTabId?: string | undefined
+  /** The original Region leaf supplies its actual identity, not the selected sibling. */
+  nativeRegionId?: string | undefined
   kind?: 'tab' | 'region'
   targetId: string | null
   active: boolean
@@ -126,6 +131,23 @@ export function StableWorkbenchView({ homeId, targetId, active, visible = true, 
         if (host.isConnected && destination.isConnected) destination.moveBefore(host, null)
         else destination.append(host)
         if (visible) restoreReadingRanges(host, ranges, activeElement, active)
+      }
+      if (kind === 'tab' && reference) {
+        host.dataset.workbenchViewReference = workbenchRegionProjectionSlotId('view', reference)
+      } else {
+        delete host.dataset.workbenchViewReference
+      }
+      if (primaryTabId && reference?.tabId === primaryTabId) {
+        host.dataset.workbenchPrimaryTabId = primaryTabId
+        host.dataset.workbenchPrimaryReference = workbenchRegionProjectionSlotId('primary', reference)
+      } else {
+        delete host.dataset.workbenchPrimaryTabId
+        delete host.dataset.workbenchPrimaryReference
+      }
+      if (kind === 'region' && reference && nativeRegionId) {
+        host.dataset.workbenchRegionReference = workbenchRegionProjectionSlotId('primary', { ...reference, regionId: nativeRegionId })
+      } else {
+        delete host.dataset.workbenchRegionReference
       }
       setPlacedHostId(destinationId)
       // Confirm the actual placement before describing it. Pending targets retain
