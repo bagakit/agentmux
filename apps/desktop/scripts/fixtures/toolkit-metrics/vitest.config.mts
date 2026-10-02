@@ -26,14 +26,23 @@ const mutant = process.env.AGENTMUX_METRICS_MUTANT ?? 'baseline'
 const changes: Record<string, [string, string, string]> = {
   registration: ['apps/desktop/src/main/ipc.ts', '    metrics,', '    metrics: undefined,'],
   shared: ['apps/desktop/src/main/resource-usage-control.ts', 'args.sampler.subscribe(sample', 'globalThis.__metricsMutantSampler.subscribe(sample'],
-  'get-finally': ['packages/core/src/control-host.ts', '} finally { dispose() }', '} finally { /* injected missing get release */ }'],
-  establish: ['packages/core/src/control-host.ts', 'if (closed || controller.signal.aborted) { try { value.dispose() }', 'if (closed || controller.signal.aborted) { try { void value }'],
-  identity: ['packages/core/src/control-host.ts', 'raw.requestId !== request.requestId', 'false'],
-  'callback-cancel': ['packages/core/src/control-host.ts', 'handlers.onFrame(frame)\n          if (closed) return', 'handlers.onFrame(frame)'],
+  'get-finally': ['packages/core/src/public-rpc-service.ts', 'controller.abort(); sub.dispose() }', 'controller.abort(); /* injected missing get release */ }'],
+  establish: ['packages/core/src/public-rpc-service.ts', 'cleanup = () => sub.dispose(); initial = { observation: await first }', 'cleanup = () => {}; initial = { observation: await first }'],
+  identity: ['packages/core/src/public-rpc-client.ts', "if (response.id !== request.id) throw new AgentMuxError('RPC response ID does not match the request.', 'CONTROL_PROTOCOL_ERROR')", 'if (response.id !== request.id) response.id = request.id!'],
   age: ['apps/desktop/src/main/process-resource-sampler.ts', 'processObservedAt: unavailable ? this.latest?.processObservedAt ?? null : observedAt', 'processObservedAt: observedAt'],
   nullable: ['apps/desktop/src/renderer/src/lib/resource-owner-counts.ts', 'if (!getter) return null', 'if (!getter) return 0'],
   panel: ['apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx', "observation.renderer.data.counts.monacoEditors ?? '—'", 'observation.renderer.data.counts.monacoEditors']
 }
+// A same-chunk cancellation is protected at every read of the current receive block.
+// Withdraw that complete block; deleting one fence can be masked by another guard.
+const clientPath = 'packages/core/src/public-rpc-client.ts'
+const clientSource = readFileSync(resolve(root, clientPath), 'utf8')
+const receiveStart = clientSource.indexOf('    const receive = (value: unknown) => {')
+const receiveEnd = clientSource.indexOf('    const rpc = new JSONRPCClient(', receiveStart)
+assert.ok(receiveStart >= 0 && receiveEnd > receiveStart, 'Actual public receive block must be nonempty')
+const receiveBlock = clientSource.slice(receiveStart, receiveEnd)
+assert.equal(receiveBlock.split('if (finished) return').length - 1, 4, 'All actual callback/receive cancellation fences must be present')
+changes['callback-cancel'] = [clientPath, receiveBlock, receiveBlock.replaceAll('if (finished) return', '')]
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },
   cacheDir: resolve(evidence, 'cache'), resolve: { alias: aliases },
   plugins: [{ name: 'actual-toolkit-metrics-source', enforce: 'pre', transform(input, id) {
