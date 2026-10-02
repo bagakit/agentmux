@@ -167,7 +167,7 @@ app.whenReady().then(async () => {
       await dispatch('Input.dispatchKeyEvent', { type: 'keyUp', key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 })
       await until(`window.projectGroupsState().focusedMember===${JSON.stringify(remoteId)}`)
       assert.equal((await state()).activeWorkspaceId, local.id, 'Keyboard focus movement does not activate another Project')
-      await dispatch('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
+      await dispatch('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' })
       await dispatch('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
       await until(`window.projectGroupsState().activeWorkspaceId===${JSON.stringify(remote.id)}`)
       result.remoteSelection = await checkPreserved('remote member keyboard activation + Core ACK')
@@ -212,6 +212,10 @@ app.whenReady().then(async () => {
     await stage('native-complete')
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
+    if (win && !win.isDestroyed()) {
+      try { result.failureState = await win.webContents.executeJavaScript('window.projectGroupsState?.() ?? null') }
+      catch (observationError) { result.failureObservationError = observationError.message }
+    }
     process.stderr.write(`project-groups:failed:${error.stack}\n`)
   } finally {
     try { unsubscribe?.(); if (win && !win.isDestroyed()) { await win.webContents.session.flushStorageData(); win.destroy() } }
