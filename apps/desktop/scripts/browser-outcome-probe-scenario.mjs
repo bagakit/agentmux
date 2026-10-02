@@ -167,16 +167,14 @@ export function auditPublicCompletion(value, actual) {
   assert.equal(Object.hasOwn(value, 'outcome'), false, 'Producer declarations stay in the Main DTO')
 }
 export async function publicFacts(ctx, actual) {
-  assert.equal(typeof ctx.requestControl, 'function', 'The canonical context must expose its existing public control socket')
-  const listed = await ctx.requestControl({ operation: 'browser.history', browserId: ctx.browserId })
-  assert.equal(listed.operation, 'browser.history'); assert.equal(listed.ok, true)
-  const operations = listed.result.operations
-  assert.ok(Array.isArray(operations) && operations.length > 0, 'Public history must retain operations in the SuccessReceipt result')
+  assert.equal(typeof ctx.rpc?.call, 'function', 'The canonical context must expose its existing public RPC client')
+  const listed = await ctx.rpc.call('browser.history', { browserId: ctx.browserId })
+  const operations = listed.operations
+  assert.ok(Array.isArray(operations) && operations.length > 0, 'Public RPC history must retain the actual operations')
   auditPublicCompletion(operations.find(item => item.id === actual.id), actual)
-  const read = await ctx.requestControl({ operation: 'browser.operation', operationId: actual.id })
-  assert.equal(read.operation, 'browser.operation'); assert.equal(read.ok, true)
-  auditPublicCompletion(read.result.runOperation, actual)
-  return { history: operations.find(item => item.id === actual.id), operation: read.result.runOperation }
+  const read = await ctx.rpc.call('browser.inspect', { operationId: actual.id })
+  auditPublicCompletion(read.runOperation, actual)
+  return { history: operations.find(item => item.id === actual.id), operation: read.runOperation }
 }
 
 /** Consume the original T003 bytes. This path never executes browser.run. */

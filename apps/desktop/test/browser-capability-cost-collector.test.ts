@@ -1,10 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer, requestAgentMuxControl, subscribeAgentMuxControl } from '../../../packages/core/src/control-host'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/src/control'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host'
 import { assertNativeBrowserMeasurements, collectBrowserCapabilityMeasurements, summarizeBrowserOutcomeCollection } from '../scripts/lib/browser-capability-cost-collector.mjs'
 
 // Source contract models and one actual public socket consumer; no Native extraction, GUI or user Run is claimed.
@@ -46,12 +44,13 @@ describe('actual cost fact consumer', () => {
       return 0 as any
     }) as any)
     const ctx = { receipt: { sourceCommit: 'a'.repeat(40), identityBefore: { collector: 'b'.repeat(64) }, browserOutcome: { recordedResult } },
-      requestControl: async (request: any) => ({ ok: true, operation: request.operation, result: request.operation === 'browser.operation' ? { runOperation: operation } : { operations: [sibling] } }),
-      subscribeControl: async (request: any, handlers: any) => {
+      rpc: { call: async (method: string) => method === 'browser.inspect' ? { runOperation: operation } : { operations: [sibling] },
+      subscribe: async (_method: string, request: any, handlers: any) => {
         const actual = request.operationId === operation.id ? operation : sibling, sequence = actual === operation ? 8 : 3
-        if (request.afterSequence < sequence) handlers.onEvent({ sequence, event: { operationId: actual.id, type: 'phase-changed', phase: 'completed' } })
-        return { runOperation: actual, gap: null, dispose: () => handlers.onEnd('closed') }
-      }, waitFor: async (_label: string, read: () => unknown) => { expect(read()).toBe(true) } }
+        handlers.onInitial({ runOperation: actual, gap: null })
+        if (request.afterSequence < sequence) handlers.onEvent({ type: 'progress', data: { sequence, event: { operationId: actual.id, type: 'phase-changed', phase: 'completed' } } })
+        return { subscriptionId: actual.id, dispose: async () => handlers.onEnd() }
+      } }, waitFor: async (_label: string, read: () => unknown) => { expect(read()).toBe(true) } }
     try {
       const result = await collectBrowserCapabilityMeasurements(ctx, { relatedOperationId: operation.id, siblingBrowserId: sibling.browserId })
       expect(waits).toEqual([100, 1])
@@ -125,23 +124,30 @@ describe('actual cost fact consumer', () => {
       async subscribeBrowserOperation(request: any, callback: any) {
         subscriptions.push({ operationId: request.operationId, afterSequence: request.afterSequence })
         const actual = request.operationId === operation.id ? operation : sibling, sequence = actual === operation ? 8 : 3
-        if (request.afterSequence < sequence) callback({ sequence, event: { operationId: actual.id, type: 'phase-changed', phase: 'completed' } })
+        if (request.afterSequence < sequence) {
+          if (actual === operation) callback({ sequence: sequence - 1, event: { operationId: actual.id, type: 'phase-changed', phase: 'running' } })
+          callback({ sequence, event: { operationId: actual.id, type: 'phase-changed', phase: 'completed' } })
+        }
         return { runOperation: actual, gap: null, dispose: () => disposals.push(actual.id) }
       }
     } as any, socket)
     try {
       await server.start()
+      const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
       const ctx = { receipt: { sourceCommit: 'a'.repeat(40), identityBefore: { collector: 'b'.repeat(64) }, browserOutcome: { recordedResult } },
-        requestControl: (fields: any) => requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), ...fields }, socket),
-        subscribeControl: (fields: any, handlers: any) => subscribeAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), ...fields }, handlers, socket),
+        rpc,
         waitFor: async (_label: string, read: any) => { for (let i = 0; i < 100; i++) { const value = read(); if (value) return value; await new Promise(done => setTimeout(done, 2)) } throw new Error('Source observation budget exceeded') } }
       const result = await collectBrowserCapabilityMeasurements(ctx, { relatedOperationId: operation.id, siblingBrowserId: sibling.browserId })
-      expect(result.journal.related.events).toEqual([{ sequence: 8, event: { operationId: operation.id, type: 'phase-changed', phase: 'completed' } }])
+      expect(result.journal.related.events).toEqual([
+        { sequence: 7, event: { operationId: operation.id, type: 'phase-changed', phase: 'running' } },
+        { sequence: 8, event: { operationId: operation.id, type: 'phase-changed', phase: 'completed' } }
+      ])
+      expect(result.journal.related).toMatchObject({ opened: { runOperation: { id: operation.id }, gap: null } })
       expect(result.journal.unrelated.events).toEqual([])
       expect(requests).toEqual(['browser.operation', 'browser.history'])
       expect(subscriptions).toEqual([{ operationId: sibling.id, afterSequence: 0 }, { operationId: sibling.id, afterSequence: 3 }, { operationId: operation.id, afterSequence: 0 }])
       expect(result.producer.totals.physicalMetadataBytes).toBe(34)
-      expect(disposals.sort()).toEqual([sibling.id, sibling.id, operation.id].sort())
+      await vi.waitFor(() => expect(disposals.sort()).toEqual([sibling.id, sibling.id, operation.id].sort()))
     } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }
   })
 })

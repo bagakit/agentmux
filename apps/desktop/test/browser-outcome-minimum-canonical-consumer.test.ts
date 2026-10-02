@@ -51,7 +51,7 @@ function fixture() {
   const expected = { original: initial.surface }, pages = [{ originalPage: urls[0] }], before = { durableIdentity: 'before-source' }
   const dependencies = { urls, receipt, localRecoveryKind: null, click: vi.fn(), selectors: vi.fn(), waitFor: vi.fn(), runBrowser: vi.fn(),
     phase: 'source', observeNativeFrameReady: vi.fn(), nativePageScript: vi.fn(), resize: vi.fn(),
-    requestAgentMuxControl: vi.fn(), subscribeAgentMuxControl: vi.fn(), AGENTMUX_CONTROL_SCHEMA_VERSION: 1, randomUUID: vi.fn(), join,
+    rpc: { call: vi.fn(), subscribe: vi.fn() }, randomUUID: vi.fn(), join,
     runtimeDirectory: _hygiene_fixturePath("tmp/source-only-no-created-directory"), process: { argv: [] },
     demonstrationCase: false, taskAssetsCase: false, taskDownloadCase: false, overlayCase: false, browserToolsCase: false, structuredCase: false,
     capture: vi.fn(), desktopRoot: 'source-desktop', userData: 'source-user-data', workspacePath: 'source-workspace', repositoryRoot: 'source-root' }
@@ -82,6 +82,7 @@ describe('actual canonical minimum outcome consumer', () => {
     expect(item.scenarioContext.mock.calls).toEqual([[item.first, item.initial.surface.browserId, item.urls[0]]])
     expect(observeMinimumBrowserOutcome.mock.calls).toHaveLength(1)
     const context = observeMinimumBrowserOutcome.mock.calls[0]![0]
+    expect(context.rpc).toBe(item.dependencies.rpc)
     expect(context.probe).toBe(item.first)
     expect(context.browserId).toBe(item.initial.surface.browserId)
     expect(context.pageUrl).toBe(item.urls[0])

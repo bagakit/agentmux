@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,8 +7,8 @@ import { Window, type HTMLButtonElement, type HTMLInputElement } from 'happy-dom
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
-import { AgentMuxControlServer, requestAgentMuxControl } from '../../../packages/core/src/control-host'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest, type AgentMuxControlSuccessReceipt } from '../../../packages/core/src/control'
+import { AgentMuxControlServer, connectAgentMuxRpc, type AgentMuxRpcResult, type AgentMuxRpcParams } from '../../../packages/core/src/control-host'
+import { type AgentMuxControlRequest } from '../../../packages/core/src/control'
 import { projectBrowserControlResult } from '../src/main/browser-completion-control'
 import { BrowserOutcomeCriteria } from '../src/renderer/src/components/BrowserOutcomeCriteria'
 import { auditFieldOperation, auditPublicCompletion, numberCondition, outcomeFixture, publicFacts, readRecordedOutcome } from '../scripts/browser-outcome-probe-scenario.mjs'
@@ -108,9 +108,9 @@ function keyboardTransport(initial: 'string' | 'number' | 'boolean', commit = tr
 }
 
 describe('completion scenario source oracles, without launching a Desktop', () => {
-  it('consumes result.operations and result.runOperation from the actual production socket SuccessReceipt', async () => {
+  it('consumes canonical operations and runOperation from the actual production RPC socket', async () => {
     const data = sample(), root = await mkdtemp(join(tmpdir(), 'amx-t020-'))
-    const socket = join(root, 'control.sock'), requests: AgentMuxControlRequest[] = [], receipts: AgentMuxControlSuccessReceipt[] = []
+    const socket = join(root, 'control.sock'), requests: AgentMuxControlRequest[] = [], results: Array<AgentMuxRpcResult<'browser.history'> | AgentMuxRpcResult<'browser.inspect'>> = []
     const server = new AgentMuxControlServer({ async execute(request) {
       requests.push(request)
       if (request.operation === 'browser.history') return projectBrowserControlResult({ operation: request.operation, operations: [data.actual] })
@@ -119,20 +119,19 @@ describe('completion scenario source oracles, without launching a Desktop', () =
     } }, socket)
     try {
       await server.start()
-      const ctx = { browserId, requestControl: async (fields: Record<string, unknown>) => {
-        const receipt = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-          requestId: randomUUID(), ...fields } as AgentMuxControlRequest, socket)
-        receipts.push(receipt)
-        return receipt
-      } }
+      const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+      const ctx = { browserId, rpc: { call: async (...[method, fields]:
+        | [method: 'browser.history', fields: AgentMuxRpcParams<'browser.history'>]
+        | [method: 'browser.inspect', fields: AgentMuxRpcParams<'browser.inspect'>]) => {
+        const result = await rpc.call(method, fields)
+        results.push(result)
+        return result
+      } } }
       await expect(publicFacts(ctx, data.actual)).resolves.toEqual({ history: data.publicOperation, operation: data.publicOperation })
       expect(requests.map(request => request.operation)).toEqual(['browser.history', 'browser.operation'])
-      expect(receipts.map(receipt => [receipt.ok, receipt.operation, Object.keys(receipt.result)])).toEqual([
-        [true, 'browser.history', ['operations']], [true, 'browser.operation', ['runOperation']]
-      ])
-      expect(Object.hasOwn(receipts[0]!, 'operations')).toBe(false)
-      expect(Object.hasOwn(receipts[1]!, 'runOperation')).toBe(false)
-      expect(JSON.stringify(receipts)).not.toContain('registration')
+      expect(results.map(result => Object.keys(result))).toEqual([['operations'], ['runOperation']])
+      expect(results.every(result => !Object.hasOwn(result, 'operation') && !Object.hasOwn(result, 'result'))).toBe(true)
+      expect(JSON.stringify(results)).not.toContain('registration')
     } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }
   })
 

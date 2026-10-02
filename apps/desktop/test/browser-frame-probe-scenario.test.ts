@@ -150,17 +150,17 @@ describe('thin frame Native scenario contract oracles', () => {
     report.runOperation.warning = 'by appearance, not identity'; report.runOperation.steps.push({ method: 'click', status: 'completed' })
     expect(() => auditRestoredFrameRead(report, pageUrl)).toThrow()
   })
-  it('the actual thin consumer reads only SuccessReceipt.result and validates the original operation/Browser and nonempty trace', async () => {
+  it('the actual thin consumer reads canonical RPC facts and validates the original operation/Browser and nonempty trace', async () => {
     let mode = 'actual'
     const ctx = { browserId: 'browser-original', receipt: { frames: { operations: [] } },
-      requestControl: async (request: { operationId: string; browserId: string }) => {
+      rpc: { call: async (method: string, request: { operationId: string; browserId: string; code: string }) => {
+        expect(method).toBe('browser.run'); expect(request.code).toBe('return await snapshot()')
         const report = { outcome: { kind: 'completed' }, result: 7, runOperation: {
           id: mode === 'foreign-operation' ? 'other-operation' : request.operationId,
           browserId: mode === 'foreign-browser' ? 'other-browser' : request.browserId,
           steps: mode === 'empty' ? [] : [{ method: 'snapshot', status: 'completed' }] } }
-        return mode === 'legacy-body' ? { ok: true, operation: 'browser.run', ...report }
-          : { ok: true, operation: 'browser.run', result: report }
-      } }
+        return mode === 'legacy-body' ? { ok: true, operation: 'browser.run', result: report } : report
+      } } }
     const report = await runFrameOperation(ctx, 'return await snapshot()')
     expect(report.result).toBe(7); expect(ctx.receipt.frames.operations).toEqual([report.runOperation])
     for (mode of ['legacy-body', 'foreign-operation', 'foreign-browser', 'empty']) {
