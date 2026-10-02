@@ -27,7 +27,9 @@ const originalBridge = Object.getOwnPropertyDescriptor(window, 'agentmux')
 let read: ReturnType<typeof vi.spyOn>, clipboard: ReturnType<typeof vi.spyOn>, report: ReturnType<typeof vi.fn>
 beforeEach(() => {
   read = vi.spyOn(api.files, 'readDirectory').mockImplementation(async (id, path) => {
-    expect(id).toBe(SCRATCH_WORKSPACE_ID); expect(path).toBe(logical)
+    expect(id).toBe(SCRATCH_WORKSPACE_ID)
+    if (path === '') return [{ name: logical, path: logical, isDirectory: true, isSymlink: false }]
+    expect(path).toBe(logical)
     return files.map(name => ({ name, path: `${logical}/${name}`, isDirectory: false, isSymlink: false }))
   })
   clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
@@ -50,9 +52,12 @@ function row(path = addresses[0]!) {
   return element!
 }
 async function mount() {
-  await dom.render(<FileExplorer workspaceId={workspace.id} rootPath={logical} />)
-  expect([...dom.container.querySelectorAll<HTMLElement>('[data-tree-path]')].map(node => node.dataset.treePath)).toEqual(addresses)
-  expect(read).toHaveBeenCalledExactlyOnceWith(workspace.id, logical)
+  await dom.render(<FileExplorer />)
+  const directory = dom.container.querySelector<HTMLButtonElement>(`[aria-label="Expand ${logical}"]`)
+  expect(directory, 'Current Topic root exposes its original directory').not.toBeNull()
+  await act(async () => directory!.click())
+  expect([...dom.container.querySelectorAll<HTMLElement>('[data-tree-path]')].filter(node => node.dataset.treePath !== logical).map(node => node.dataset.treePath)).toEqual(addresses)
+  expect(read.mock.calls.map(call => call.slice(0, 2))).toEqual([[workspace.id, ''], [workspace.id, logical]])
 }
 async function selectBoth() {
   await act(async () => {
@@ -99,7 +104,7 @@ describe('actual FileExplorer Scratch physical hover and clipboard admission', (
     expect([...useAppStore.getState().fileExplorerStates[workspace.id]!.selection.selectedPaths]).toEqual(addresses)
     expect(useAppStore.getState().config!.workspaces[0]!.path).toBe(workspace.path)
     expect(useAppStore.getState().scratchTopicSnapshots[workspace.id]!.topics![0]!.directoryPath).toBe(logical)
-    expect(read).toHaveBeenCalledTimes(1)
+    expect(read).toHaveBeenCalledTimes(2)
     expect(report).not.toHaveBeenCalled()
   })
 
@@ -121,7 +126,7 @@ describe('actual FileExplorer Scratch physical hover and clipboard admission', (
     expect(row().title).toBe(`${physical}/first.md`)
     await openMenu(); await chooseCopy('Copy Path')
     expect(clipboard).toHaveBeenCalledExactlyOnceWith(`${physical}/first.md`)
-    expect(read).toHaveBeenCalledTimes(1)
+    expect(read).toHaveBeenCalledTimes(2)
     expect(report).toHaveBeenCalledTimes(1)
   })
 })
