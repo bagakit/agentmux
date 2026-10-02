@@ -165,3 +165,24 @@
   .activity-log__segment > .wf-tool-row--observation ~ :is(.log-row__payload, .log-row__output, .log-diff, .log-row__prose) { margin-left: var(--sp-7); margin-right: var(--sp-3); }
 }
 @media (pointer: coarse) { .wf-tool-row--observation[data-expandable], .wf-card--observation > .wf-head { min-height: 44px; } }
+
+/* Recorded native process uses real timestamps only; no empty clock track. */
+.wf-tool-row--observation[data-recorded-time='false'] { grid-template-columns: 20px minmax(0, 1fr) auto; }
+.wf-native-process__body { margin: var(--sp-2) var(--sp-3) var(--sp-3) var(--sp-7); }
+.wf-native-process__references { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-3); font-size: var(--fs-meta); }
+.wf-native-process__references > div { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: var(--sp-3); }
+.wf-native-process__references dt { color: var(--text-3); }
+.wf-native-process__references dd { display: grid; min-width: 0; margin: 0; gap: var(--sp-1); overflow-wrap: anywhere; }
+.wf-native-process__references code { font-size: var(--fs-micro); }
+.wf-native-process__prompt { margin-bottom: var(--sp-3); }
+.wf-native-process__text { max-height: 260px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: var(--sp-3); margin: var(--sp-2) 0; background: var(--surface-1); border-radius: var(--radius-sm); font: var(--fs-body)/1.5 var(--font-sans); color: var(--text-2); }
+.wf-native-process__raw { margin-top: var(--sp-3); }
+.wf-native-process__raw > summary { cursor: pointer; color: var(--text-3); font-size: var(--fs-meta); }
+.wf-native-process__raw > summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: var(--sp-1); }
+.wf-agent--observation .wf-agent__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.wf-detail[data-for-recorded-agent] dl { grid-template-columns: minmax(0, 1fr); }
+.wf-detail[data-for-recorded-agent] dd { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .wf-native-process__body { margin-inline: var(--sp-3); }
+  .wf-native-process__references > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
+}

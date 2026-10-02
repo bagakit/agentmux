@@ -1,4 +1,4 @@
-import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
+import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ChevronRight, Copy } from 'lucide-react'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -18,6 +18,8 @@ const MemoizedAgentMarkdown = memo(AgentMarkdown)
 export type ConversationMessageProps = {
   /** A compact record face, without changing ordinary conversation defaults. */
   compact?: boolean
+  /** A Provider-recorded public message phase; never inferred from the text. */
+  messagePhase?: AgentSessionHistoryMessagePhase
   recordedIdentity?: boolean
   messageDetails?: ReactNode
   /** Independent host actions; the shared reader remains the only message body. */
@@ -100,7 +102,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
-  compact = false, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
+  compact = false, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
   speaker: recordedSpeaker, conversationSessionId, inputSource, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
@@ -205,6 +207,7 @@ export function ConversationMessage({
     <div
       className="log-turn"
       data-compact={compact || undefined}
+      data-message-phase={messagePhase}
       data-recorded-identity={recordedIdentity || undefined}
       data-message-id={messageId || undefined}
       data-message-source-key={conversationMessageSourceKey(conversationSessionId, inputSource)}
@@ -216,7 +219,7 @@ export function ConversationMessage({
       data-declared-source={prefix?.sourceLabel}
       data-status={status}
       data-trace-only={isTraceOnly ? 'true' : undefined}
-      data-message-bubble={!compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
+      data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human') ? 'true' : undefined}
     >
       <span className="log-turn__node" aria-hidden="true">
         {speaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker, name: displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}

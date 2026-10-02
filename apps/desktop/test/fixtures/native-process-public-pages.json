@@ -1,0 +1,354 @@
+{
+  "current": {
+    "agentSessionId": "private-main-session",
+    "source": {
+      "providerId": "codex",
+      "nativeSessionId": "private-native-main"
+    },
+    "items": [
+      {
+        "id": "user-original",
+        "kind": "user-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "Please inspect the recorded process."
+          }
+        ],
+        "turnId": "native-turn-1"
+      },
+      {
+        "id": "progress-a",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "\n  公开进度说明 exact 中\n"
+          }
+        ],
+        "messagePhase": "progress",
+        "turnId": "native-turn-1",
+        "startedAt": "relative-time:-67225599900",
+        "completedAt": "relative-time:-67225599800"
+      },
+      {
+        "id": "collab-call",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"collabAgentToolCall\",\n  \"id\": \"collab-call\",\n  \"tool\": \"spawnAgent\",\n  \"status\": \"inProgress\",\n  \"senderThreadId\": \"private-native-main\",\n  \"receiverThreadIds\": [\n    \"native-worker-b\",\n    \"native-worker-a\"\n  ],\n  \"prompt\": \"\\n  Review exact 原输入\\n请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。\",\n  \"model\": \"recorded-request-model\",\n  \"reasoningEffort\": \"high\",\n  \"agentsStates\": {\n    \"native-worker-a\": {\n      \"status\": \"completed\",\n      \"message\": \"Recorded result A\"\n    },\n    \"native-worker-b\": {\n      \"status\": \"errored\",\n      \"message\": \"Recorded failure B\"\n    }\n  },\n  \"extraField\": {\n    \"keep\": \"complete native payload\"\n  }\n}"
+          }
+        ],
+        "collaboration": {
+          "kind": "operation",
+          "operation": "spawn",
+          "status": "running",
+          "sender": {
+            "providerId": "codex",
+            "nativeSessionId": "private-native-main"
+          },
+          "receivers": [
+            {
+              "providerId": "codex",
+              "nativeSessionId": "native-worker-b"
+            },
+            {
+              "providerId": "codex",
+              "nativeSessionId": "native-worker-a"
+            }
+          ],
+          "prompt": "\n  Review exact 原输入\n请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。",
+          "agentStates": [
+            {
+              "source": {
+                "providerId": "codex",
+                "nativeSessionId": "native-worker-a"
+              },
+              "state": "completed",
+              "message": "Recorded result A"
+            },
+            {
+              "source": {
+                "providerId": "codex",
+                "nativeSessionId": "native-worker-b"
+              },
+              "state": "failed",
+              "message": "Recorded failure B"
+            }
+          ]
+        },
+        "turnId": "native-turn-1",
+        "title": "collabAgentToolCall"
+      },
+      {
+        "id": "agent-activity",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"subAgentActivity\",\n  \"id\": \"agent-activity\",\n  \"kind\": \"interacted\",\n  \"agentThreadId\": \"native-worker-a\",\n  \"agentPath\": \"root/reviewer\"\n}"
+          }
+        ],
+        "collaboration": {
+          "kind": "agent-activity",
+          "event": "interacted",
+          "agent": {
+            "providerId": "codex",
+            "nativeSessionId": "native-worker-a"
+          },
+          "path": "root/reviewer"
+        },
+        "turnId": "native-turn-1",
+        "title": "subAgentActivity"
+      },
+      {
+        "id": "command",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "tool-call",
+            "name": "shell",
+            "input": "read-only-example",
+            "callId": "command"
+          },
+          {
+            "kind": "tool-result",
+            "output": "complete output",
+            "callId": "command",
+            "name": "shell"
+          }
+        ],
+        "turnId": "native-turn-1",
+        "title": "commandExecution"
+      },
+      {
+        "id": "final-a",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "\n  公开进度说明 exact 中\n"
+          }
+        ],
+        "messagePhase": "final",
+        "turnId": "native-turn-1"
+      },
+      {
+        "id": "progress-b",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "\n  公开进度说明 exact 中\n"
+          }
+        ],
+        "messagePhase": "progress",
+        "turnId": "native-turn-1"
+      },
+      {
+        "id": "missing-phase",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "Contains commentary and final_answer; these words prove nothing."
+          }
+        ],
+        "turnId": "native-turn-2"
+      },
+      {
+        "id": "null-phase",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "A phase is not recorded."
+          }
+        ],
+        "turnId": "native-turn-2"
+      },
+      {
+        "id": "future-phase",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "A future phase stays unclassified."
+          }
+        ],
+        "turnId": "native-turn-2"
+      },
+      {
+        "id": "unknown-call",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"collabAgentToolCall\",\n  \"id\": \"unknown-call\",\n  \"tool\": \"__proto__\",\n  \"status\": \"future-state\",\n  \"receiverThreadIds\": [\n    \"native-unknown\"\n  ],\n  \"agentsStates\": {\n    \"native-unknown\": {\n      \"status\": \"future-state\",\n      \"message\": \"Exact unknown-state message\"\n    }\n  }\n}"
+          }
+        ],
+        "collaboration": {
+          "kind": "operation",
+          "receivers": [
+            {
+              "providerId": "codex",
+              "nativeSessionId": "native-unknown"
+            }
+          ],
+          "agentStates": [
+            {
+              "source": {
+                "providerId": "codex",
+                "nativeSessionId": "native-unknown"
+              },
+              "message": "Exact unknown-state message"
+            }
+          ]
+        },
+        "turnId": "native-turn-2",
+        "title": "collabAgentToolCall"
+      },
+      {
+        "id": "unknown-activity",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"futureActivity\",\n  \"id\": \"unknown-activity\",\n  \"phase\": \"commentary\",\n  \"nested\": {\n    \"keep\": \"complete record\"\n  }\n}"
+          }
+        ],
+        "turnId": "native-turn-2",
+        "title": "futureActivity"
+      },
+      {
+        "id": "unknown-event",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"subAgentActivity\",\n  \"id\": \"unknown-event\",\n  \"kind\": \"future-event\",\n  \"agentThreadId\": \"native-worker-a\",\n  \"agentPath\": \"native/path\"\n}"
+          }
+        ],
+        "turnId": "native-turn-2",
+        "title": "subAgentActivity"
+      },
+      {
+        "id": "missing-fields",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"collabAgentToolCall\",\n  \"id\": \"missing-fields\",\n  \"tool\": \"sendMessage\",\n  \"status\": \"completed\",\n  \"senderThreadId\": null,\n  \"prompt\": null\n}"
+          }
+        ],
+        "collaboration": {
+          "kind": "operation",
+          "operation": "send-message",
+          "status": "completed",
+          "receivers": [],
+          "agentStates": []
+        },
+        "turnId": "native-turn-2",
+        "title": "collabAgentToolCall"
+      },
+      {
+        "id": "missing-agent",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"subAgentActivity\",\n  \"id\": \"missing-agent\",\n  \"kind\": \"started\"\n}"
+          }
+        ],
+        "turnId": "native-turn-2",
+        "title": "subAgentActivity"
+      }
+    ],
+    "nextCursor": "older-opaque"
+  },
+  "older": {
+    "agentSessionId": "private-main-session",
+    "source": {
+      "providerId": "codex",
+      "nativeSessionId": "private-native-main"
+    },
+    "items": [
+      {
+        "id": "old-progress",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "Earlier public progress."
+          }
+        ],
+        "messagePhase": "progress",
+        "turnId": "native-turn-0"
+      },
+      {
+        "id": "old-collab",
+        "kind": "activity",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "{\n  \"type\": \"collabAgentToolCall\",\n  \"id\": \"old-collab\",\n  \"tool\": \"sendMessage\",\n  \"status\": \"completed\",\n  \"senderThreadId\": \"private-native-main\",\n  \"receiverThreadIds\": [\n    \"native-worker-b\",\n    \"native-worker-a\"\n  ],\n  \"prompt\": \"\\n  Review exact 原输入\\n请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。\",\n  \"model\": \"recorded-request-model\",\n  \"reasoningEffort\": \"high\",\n  \"agentsStates\": {\n    \"native-worker-a\": {\n      \"status\": \"completed\",\n      \"message\": \"Recorded result A\"\n    },\n    \"native-worker-b\": {\n      \"status\": \"errored\",\n      \"message\": \"Recorded failure B\"\n    }\n  },\n  \"extraField\": {\n    \"keep\": \"complete native payload\"\n  }\n}"
+          }
+        ],
+        "collaboration": {
+          "kind": "operation",
+          "operation": "send-message",
+          "status": "completed",
+          "sender": {
+            "providerId": "codex",
+            "nativeSessionId": "private-native-main"
+          },
+          "receivers": [
+            {
+              "providerId": "codex",
+              "nativeSessionId": "native-worker-b"
+            },
+            {
+              "providerId": "codex",
+              "nativeSessionId": "native-worker-a"
+            }
+          ],
+          "prompt": "\n  Review exact 原输入\n请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。请仔细检查公开记录的身份、来源与失败事实；不要推断未记录的执行结果。",
+          "agentStates": [
+            {
+              "source": {
+                "providerId": "codex",
+                "nativeSessionId": "native-worker-a"
+              },
+              "state": "completed",
+              "message": "Recorded result A"
+            },
+            {
+              "source": {
+                "providerId": "codex",
+                "nativeSessionId": "native-worker-b"
+              },
+              "state": "failed",
+              "message": "Recorded failure B"
+            }
+          ]
+        },
+        "turnId": "native-turn-0",
+        "title": "collabAgentToolCall"
+      },
+      {
+        "id": "old-final",
+        "kind": "assistant-message",
+        "contentParts": [
+          {
+            "kind": "text",
+            "text": "Earlier final answer."
+          }
+        ],
+        "messagePhase": "final",
+        "turnId": "native-turn-0"
+      }
+    ],
+    "nextCursor": null
+  }
+}

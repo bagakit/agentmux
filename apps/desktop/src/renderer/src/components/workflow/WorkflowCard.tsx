@@ -25,7 +25,8 @@ type ObservationProps = {
     stepCount: number
     counts?: { complete: number; streaming: number; failed: number; unknown: number }
     status?: WorkflowObservationStatus
-    recordedTime: WorkflowRecordedTime
+    recordedTime?: WorkflowRecordedTime
+    label?: string
     elapsed?: string
     streaming?: boolean
   }
@@ -49,15 +50,18 @@ function RecordedStepsCard({ observation, expanded, onExpandedChange, children }
   const { recordedTime, status } = observation
   return <article className="wf-card wf-card--observation" data-observation-id={observation.id} data-status={status}>
     <button type="button" className="log-fold wf-head" data-open={expanded ? '' : undefined}
-      aria-expanded={expanded} aria-controls={contentId} aria-description={recordedTime.offset}
+      aria-expanded={expanded} aria-controls={contentId} aria-description={recordedTime?.offset}
       onClick={() => onExpandedChange(!expanded)}>
       <span className="log-fold__node"><ChevronRight size={12} className="wf-chev log-fold__chevron" /></span>
       <span className="log-fold__label">
-        <span className="log-fold__time" title={recordedTime.offset}>
+        {observation.label ? <span className="wf-observation__recorded">{observation.label}</span> : null}
+        {recordedTime ? <span className="log-fold__time" title={recordedTime.offset}>
           <span>{recordedTime.from}</span><span aria-hidden="true">–</span><span>{recordedTime.to}</span>
-        </span>
+        </span> : null}
         <span className="log-fold__steps">{observation.stepCount} steps</span>
         {observation.elapsed ? <span className="log-fold__elapsed">{observation.elapsed}</span> : null}
+        {status === 'running' ? <span className="wf-chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
+        {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
         {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
         {observation.streaming ? <span className="wf-chip"><WorkflowStatusGlyph status="running" />Streaming</span> : null}
         {status === 'complete' ? <span className="wf-observation__recorded">Recorded</span> : null}

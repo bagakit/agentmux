@@ -156,3 +156,11 @@
 /* The short reveal state takes precedence over each speaker's ordinary bubble fill. */
 .log-turn[data-message-located] { background: var(--surface-2) !important; outline: 1px solid var(--focus-line); outline-offset: 3px; }
 .log-turn__location { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
+
+/* Public progress keeps the shared reading body, with a quiet conversational face. */
+.log-turn[data-message-phase='progress'] { grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); margin: var(--sp-1) 0; border: 0; border-radius: 0; background: transparent; }
+.log-turn[data-message-phase='progress'] .log-turn__node { width: 32px; height: 32px; background: transparent; }
+.log-turn[data-message-phase='progress'] :is(.log-turn__head, .log-turn__body, .log-turn__continue) { grid-column: 2; }
+.log-turn[data-message-phase='progress'] .log-turn__body { width: fit-content; max-width: 100%; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); }
+.log-turn[data-message-phase='progress'] .md-paragraph { color: inherit; }
+.log-turn[data-message-phase='progress'] .log-turn__who { color: var(--text-2); font-weight: 500; }

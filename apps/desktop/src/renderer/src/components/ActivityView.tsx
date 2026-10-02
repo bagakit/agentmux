@@ -34,6 +34,7 @@ import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conver
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'
+import { NativeProcessObservation } from './NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'
 
@@ -927,6 +928,7 @@ export function ActivityView({
       ) : null}
       {nativeHistoryPage ? <ConversationNativeThread
         page={nativeHistoryPage}
+        renderProcess={(props) => <NativeProcessObservation {...props} />}
         sessionId={sessionId}
         locatedMessageKey={locatedMessageKey}
         {...(onContinue ? { onContinue } : {})}
