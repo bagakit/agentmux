@@ -1057,6 +1057,14 @@ export function TerminalView({
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       const core = event.event
+      if (event.hostId === session.hostId && core.type === 'attachment-state' &&
+        core.run.runId === session.control.run.runId) {
+        setAttachmentFailure(core.state === 'restored' ? null : {
+          step: 'Observing this Region’s output',
+          message: `${core.diagnostic.code}: ${core.diagnostic.message} Last confirmed output byte: ${core.afterByte}.`
+        })
+        return
+      }
       const snapshot = event.hostId === session.hostId && core.type === 'terminal-snapshot' &&
         core.run.runId === session.control.run.runId ? core : null
       const resize = event.hostId === session.hostId && core.type === 'terminal-resized' &&
@@ -1582,7 +1590,7 @@ export function TerminalView({
     (session.kind === 'agent' ? serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session))) : null)
   const attachmentNotice = attachmentFailure ? { kind: 'indeterminate' as const, notice: {
     step: attachmentFailure.step,
-    mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}; current availability and input delivery are unconfirmed. Your Session, history and draft are kept.`,
+    mode: `${attachmentFailure.message} The original Run was last observed ${session.processState}. This read does not determine current Run availability or input delivery. Your Session, history and draft are kept.`,
     restore: 'Refresh observation to re-read this Session and reopen its output connection. Unknown Input is never replayed.'
   } } : null
   const noticeScope = JSON.stringify(['terminal', session.hostId, session.id, session.control.run])
