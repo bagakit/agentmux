@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
-import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, type AgentMuxToolkitPort,
+import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitSnapshot, type AgentMuxToolkitPort,
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
@@ -12,7 +12,10 @@ import { ToolkitReceiptStore } from './toolkit-receipt-store.js'
 
 type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort | null; ended: boolean
-  creationPending: boolean; lastAppObservedAt: number | null; cursor: number; buffer: string; decoder: TextDecoder; sequence: number }
+  creationPending: boolean; admissionSaved: boolean; receiptUnconfirmed: boolean; cleanupConfirmed: boolean
+  lastAppObservedAt: number | null; cursor: number; buffer: string; decoder: TextDecoder; sequence: number }
+type PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1'; admission:
+  (Pick<ToolkitMetricsSnapshot, 'executionId' | 'run' | 'reason' | 'startedAt'>) | null }
 /** Observation state only. Core/ctxmux remains the sole Run and process owner. */
 export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private readonly leases = new Set<Lease>()
@@ -20,12 +23,13 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private closed = false
   private starting: Promise<void> | null = null
   private stopping: Promise<void> | null = null
+  private loaded: Promise<void> | null = null
   private execution: Execution | null = null
   private value: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: null,
     run: null, state: 'idle', reason: null, startedAt: null, observedAt: null, observation: null,
     manual: false, consumerCount: 0, sequence: 0, trend: [] }
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
-    enabled(): boolean; mainPid?: number; now?: () => number }) {}
+    enabled(): boolean; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>; mainPid?: number; now?: () => number }) {}
   get current(): ToolkitMetricsSnapshot {
     return structuredClone({ ...this.value, manual: this.manual, consumerCount: this.leases.size })
   }
@@ -36,6 +40,52 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     }
   }
   private wanted() { return !this.closed && (this.manual || this.leases.size > 0) }
+  private newExecution(id: string): Execution {
+    return { id, ref: null, port: null, ended: false, creationPending: false, admissionSaved: false,
+      receiptUnconfirmed: false, cleanupConfirmed: false, lastAppObservedAt: null,
+      cursor: 0, buffer: '', decoder: new TextDecoder('utf-8', { fatal: true }), sequence: 0 }
+  }
+  private async load(): Promise<void> {
+    if (!this.loaded) this.loaded = (async () => {
+      try {
+        const receipt = await this.args.receipts.read('performance') as PerformanceReceipt | null
+        if (receipt === null) return
+        if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
+          receipt.schema !== 'agentmux.performance.receipt.v1' || Object.keys(receipt).sort().join() !== 'admission,schema') {
+          throw new AgentMuxError('Performance receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        if (receipt.admission === null) return
+        const admission = receipt.admission
+        if (!admission || typeof admission !== 'object' || Array.isArray(admission) ||
+          Object.keys(admission).sort().join() !== 'executionId,reason,run,startedAt') {
+          throw new AgentMuxError('Performance admission is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        const value = parseToolkitSnapshot({ ...this.value, ...admission, state: 'unknown' })
+        if (value.kind !== 'metrics' || value.executionId === null || value.startedAt === null ||
+          (value.run !== null && value.run.hostId !== 'local')) {
+          throw new AgentMuxError('Performance admission identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        const execution = this.newExecution(value.executionId)
+        execution.ref = value.run === null ? null : { runId: value.run.runId }
+        execution.creationPending = execution.ref === null
+        execution.admissionSaved = true; execution.ended = true
+        this.execution = execution
+        this.value = { ...value, reason: value.reason ?? 'Previous Performance execution outcome needs confirmation.' }
+      } catch (error) {
+        this.value.state = 'unknown'
+        this.value.reason = 'Performance admission is unconfirmed: ' + String(error instanceof Error ? error.message : error).slice(0,4000)
+      }
+    })()
+    return await this.loaded
+  }
+  private async save(execution: Execution): Promise<void> {
+    execution.receiptUnconfirmed = true
+    const receipt: PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1', admission: {
+      executionId: execution.id, run: execution.ref === null ? null : { hostId: 'local', runId: execution.ref.runId },
+      startedAt: this.value.startedAt, reason: this.value.reason } }
+    await this.args.receipts.save('performance', receipt)
+    execution.admissionSaved = true; execution.receiptUnconfirmed = false
+  }
   private allowed(signal: AbortSignal) {
     if (signal.aborted) throw new AgentMuxError('Toolkit consumer cancelled.', 'CONTROL_CANCELLED')
     if (this.closed) throw new AgentMuxError('Toolkit owner closed.', 'CONTROL_UNAVAILABLE')
@@ -45,10 +95,11 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     if (request.operation !== 'toolkit.list' && request.toolId !== 'performance') throw new AgentMuxError('Toolkit tool is unknown.', 'INVALID_CONTROL_REQUEST')
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [{ kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true }] }
     if (request.operation === 'toolkit.script') return { operation: request.operation, script: await readPerformanceScript(this.args.launch()) }
+    await this.load()
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: this.current }
     if (request.operation === 'toolkit.run') {
       this.allowed(signal)
-      if (this.execution && this.value.state === 'unknown') throw new AgentMuxError('Previous tool outcome is unconfirmed.', 'CONTROL_UNAVAILABLE')
+      if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool outcome is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
       // Admission is the explicit write. A lost receipt is unknown, not an implicit undo.
       this.manual = true
       await this.ensure()
@@ -57,12 +108,13 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     if (request.operation === 'toolkit.stop') {
       this.manual = false
       for (const lease of [...this.leases]) { lease.release(); lease.end() }
-      await this.quiesce()
+      await this.quiesce(true)
       return { operation: request.operation, snapshot: this.current }
     }
     throw new AgentMuxError('Watch requires the Toolkit subscription port.', 'INVALID_CONTROL_REQUEST')
   }
   async subscribe(_toolId: 'performance', snapshot: Lease['snapshot'], end: Lease['end'], signal: AbortSignal) {
+    await this.load()
     this.allowed(signal)
     let released = false
     const lease: Lease = { snapshot, end, release: () => {
@@ -82,11 +134,10 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private async ensure(): Promise<void> {
     if (this.stopping) await this.stopping
     if (!this.wanted()) return
-    if (this.execution && this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed.', 'CONTROL_UNAVAILABLE')
+    if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
     if (this.starting) return await this.starting
     if (this.execution?.ref && !this.execution.ended) return
-    const execution: Execution = { id: randomUUID(), ref: null, port: null, ended: false,
-      creationPending: false, lastAppObservedAt: null, cursor: 0, buffer: '', decoder: new TextDecoder('utf-8', { fatal: true }), sequence: 0 }
+    const execution = this.newExecution(randomUUID())
     this.execution = execution
     this.value = { ...this.value, executionId: execution.id, run: null, state: 'starting', reason: null,
       startedAt: (this.args.now ?? Date.now)(), observation: null, observedAt: null, sequence: 0, trend: [] }
@@ -94,6 +145,9 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     const work = async () => {
       const launch = this.args.launch()
       await readPerformanceScript(launch)
+      if (!this.wanted() || execution.ended) return
+      // Admit durably before acquiring or dispatching the native creation port.
+      await this.save(execution)
       const port = await this.args.openRunPort()
       execution.port = port
       if (!this.wanted() || execution.ended) return
@@ -104,16 +158,25 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       execution.ref = { runId: run.runId }
       execution.creationPending = false
       this.value.run = { hostId: 'local', runId: run.runId }
+      await this.save(execution)
       if (!this.wanted() || execution.ended) return
       const attached = await port.attach(execution.ref, 0)
       if (attached.gap) throw new AgentMuxError('Tool output replay has a Gap.', 'CONTROL_PROTOCOL_ERROR')
       for (const chunk of attached.replay) this.bytes(execution, chunk.startByte, chunk.endByte, chunk.dataBytes)
       if (!execution.ended) { this.value.state = 'observing'; this.publish() }
     }
-    this.starting = work().catch(error => {
+    this.starting = work().catch(async error => {
       this.manual = false; execution.ended = true
-      this.value.state = execution.creationPending ? 'unknown' : 'failed'
+      this.value.state = execution.creationPending || execution.receiptUnconfirmed ? 'unknown' : 'failed'
       this.value.reason = String(error instanceof Error ? error.message : error).slice(0,4096)
+      if (execution.admissionSaved && !execution.receiptUnconfirmed) {
+        try { await this.save(execution) }
+        catch (saveError) {
+          this.value.state = 'unknown'
+          this.value.reason = (this.value.reason + '; Performance receipt save is unconfirmed: ' +
+            String(saveError instanceof Error ? saveError.message : saveError)).slice(0,4096)
+        }
+      }
       this.publish(); throw error
     }).finally(() => {
       this.starting = null
@@ -182,30 +245,45 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     for (const lease of [...this.leases]) { lease.release(); lease.end(new AgentMuxError(this.value.reason, 'CONTROL_FAILED')) }
     void this.quiesce()
   }
-  private async quiesce(): Promise<void> {
+  private async quiesce(explicit = false): Promise<void> {
     if (this.starting) { try { await this.starting } catch { /* Cleanup the exact partial creation below. */ } }
     if (this.wanted() && !this.execution?.ended) return
     if (this.stopping) return await this.stopping
     const execution = this.execution
-    if (!execution?.ref || !execution.port) {
-      if (execution && !execution.ref) {
-        if (execution.creationPending) { this.value.state = 'unknown'; this.publish(); return }
-        execution.ended = true; this.execution = null; this.value.run = null
-        if (this.value.state !== 'failed' && this.value.state !== 'unknown') this.value.state = 'paused'
-        this.publish()
-      }
-      return
+    if (!execution) return
+    if ((!execution.ref && execution.creationPending) ||
+      (!explicit && (execution.receiptUnconfirmed || this.value.state === 'unknown'))) {
+      this.value.state = 'unknown'; this.publish(); return
+    }
+    if (!execution.ref && !execution.admissionSaved && !execution.receiptUnconfirmed) {
+      execution.ended = true; this.execution = null; this.value.run = null
+      if (this.value.state !== 'failed' && this.value.state !== 'unknown') this.value.state = 'paused'
+      this.publish(); return
     }
     execution.ended = true
     const failed = this.value.state === 'failed'
     this.value.state = 'stopping'; this.publish()
     this.stopping = (async () => {
       try {
-        try { await execution.port!.stop(execution.ref!) } finally { await execution.port!.release(execution.ref!) }
-        await execution.port!.remove(execution.ref!)
+        if (execution.ref) {
+          if (!execution.port) execution.port = await this.args.openRunPort()
+          if (!execution.cleanupConfirmed) {
+            try { await execution.port.stop(execution.ref) } finally { await execution.port.release(execution.ref) }
+            await execution.port.remove(execution.ref)
+            execution.cleanupConfirmed = true
+          }
+        }
+        execution.receiptUnconfirmed = true
+        await this.args.receipts.save('performance', { schema: 'agentmux.performance.receipt.v1', admission: null } satisfies PerformanceReceipt)
+        execution.receiptUnconfirmed = false
         if (this.execution === execution) { this.execution = null; this.value.run = null; this.value.state = failed ? 'failed' : 'paused' }
       } catch (error) {
         this.value.state = 'unknown'; this.value.reason = 'Tool cleanup is unconfirmed: ' + String(error instanceof Error ? error.message : error).slice(0,4000)
+        if (!execution.receiptUnconfirmed) {
+          try { await this.save(execution) }
+          catch (saveError) { this.value.reason = (this.value.reason + '; receipt save is unconfirmed: ' +
+            String(saveError instanceof Error ? saveError.message : saveError)).slice(0,4096) }
+        }
       } finally { this.stopping = null; this.publish() }
     })()
     return await this.stopping
@@ -224,11 +302,12 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   private readonly custom: CustomToolkitOwner
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
     enabled(): boolean; config: ConfigOwner; receiptPath: string; mainPid?: number; now?: () => number }) {
-    this.performance = new PerformanceToolkitOwner(args)
+    const receipts = new ToolkitReceiptStore(args.receiptPath, () => ['performance', ...toolkitTools(args.config.current).map(tool => tool.id)])
+    this.performance = new PerformanceToolkitOwner({ ...args, receipts })
     const launch = args.launch()
     this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
       runner: launch.runner, env: launch.env, ...(args.now ? { now: args.now } : {}),
-      receipts: new ToolkitReceiptStore(args.receiptPath, () => toolkitTools(args.config.current).map(tool => tool.id)) })
+      receipts })
   }
   prepareConfig(current: AppConfig, next: AppConfig): Promise<AppConfig> {
     return prepareToolkitConfig(current, next, id => this.custom.guardDelete(id))
