@@ -696,7 +696,7 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
     <div id={homeId} className="workbench-region-slot" />
     <StableWorkbenchView kind="region" homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
-      surface={target ? target.surface : parent.surface}
+      surface={target?.surface ?? parent.surface}
       survey={target ? target.surface === 'survey' : parent.survey} controlsOpen={target?.controlsOpen ?? parent.controlsOpen}
       onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
       projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}

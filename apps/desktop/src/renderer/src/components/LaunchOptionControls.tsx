@@ -2,18 +2,19 @@ import { AlertTriangle, SlidersHorizontal, X } from 'lucide-react'
 import { useLayoutEffect, useRef, useState } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { LaunchOption, LaunchOptionSelection } from '@agentmux/core'
 import type { LauncherNames } from '../lib/launcher-name-draft'
 
 /** Provider DESCRIBE choices only. Native selects keep even large declarations compact and keyboard usable. */
-export function LaunchRefine({ options, selection, expanded, active, onToggle, onSelect, disabled, names, onNameChange }: {
+export function LaunchRefine({ options, selection, expanded, active, onToggle, onSelect, onReset, disabled, names, onNameChange }: {
   options: LaunchOption[]
   selection: LaunchOptionSelection
   expanded: boolean
   active: boolean
   onToggle(): void
   onSelect(optionId: string, choiceId: string | null): void
+  onReset?: () => void
   disabled?: boolean
   names?: LauncherNames
   onNameChange?: (field: keyof LauncherNames, value: string) => void
@@ -23,27 +24,39 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
   useLayoutEffect(() => {
     const anchor = trigger.current, panel = content
     if (!active || !expanded || !anchor || !panel) return
+    const boundary = anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? ('clippingAncestors' as const)
+    const collision = { boundary, padding: 12 }
     let disposed = false
     const position = async () => {
       const result = await computePosition(anchor, panel, { placement: 'top-start', strategy: 'fixed',
-        middleware: [offset(8), flip({ padding: 12 }), shift({ padding: 12 })] })
+        middleware: [offset(8), flip(collision), shift(collision), size({ ...collision,
+          apply({ availableWidth, availableHeight, elements }) {
+            Object.assign(elements.floating.style, { maxWidth: `${Math.max(0, Math.min(400, availableWidth))}px`,
+              maxHeight: `${Math.max(0, Math.min(480, availableHeight))}px` })
+          } })] })
       if (!disposed) Object.assign(panel.style, { left: `${result.x}px`, top: `${result.y}px`, visibility: 'visible' })
     }
     const stop = autoUpdate(anchor, panel, () => { void position() })
     return () => { disposed = true; stop() }
   }, [active, expanded, content])
-  if (!options.length && !names) return null
+  if (!options.length && !names && !Object.values(selection).some(Boolean)) return null
   const chosen = options.flatMap(option => {
     const choice = option.choices.find(candidate => candidate.id === selection[option.id])
     return choice ? [{ ...choice, optionId: option.id }] : []
   })
+  const unavailable = Object.entries(selection).flatMap(([optionId, choiceId]) => {
+    if (!choiceId) return []
+    const option = options.find(item => item.id === optionId)
+    return option?.choices.some(choice => choice.id === choiceId) ? [] : [{ label: option?.label ?? optionId, choiceId }]
+  })
+  const selectionCount = chosen.length + unavailable.length
   const selectedTier = chosen.some(choice => choice.tier === 'danger') ? 'danger' : chosen.some(choice => choice.tier === 'caution') ? 'caution' : 'safe'
   return <Dialog.Root modal={false} open={expanded && active} onOpenChange={open => { if (open !== expanded) onToggle() }}>
     <Dialog.Trigger asChild><button type="button" className="launch-refine__toggle" ref={trigger} disabled={disabled || !active}
-      aria-label="Launch options" title={chosen.length ? chosen.map(choice => choice.label).join(' · ') : 'Launch options and optional names'}>
+      aria-label="Launch options" title={[...chosen.map(choice => choice.label), ...(unavailable.length ? ['Saved choices need review'] : [])].join(' · ') || 'Launch options and optional names'}>
       <SlidersHorizontal size={13} /><span>Options</span>
-      {chosen.length ? <span className="launch-refine__count" data-tier={selectedTier} aria-label={`${chosen.length} options set${selectedTier === 'safe' ? '' : ` · ${selectedTier}`}`}>
-        {selectedTier !== 'safe' ? <AlertTriangle size={11} /> : null}{chosen.length}{selectedTier !== 'safe' ? <span>{selectedTier === 'danger' ? 'Risk' : 'Caution'}</span> : null}
+      {selectionCount ? <span className="launch-refine__count" data-tier={selectedTier} data-unconfirmed={unavailable.length ? true : undefined} aria-label={`${selectionCount} options set${selectedTier === 'safe' ? '' : ` · ${selectedTier}`}${unavailable.length ? ` · ${unavailable.length} saved choices need review` : ''}`}>
+        {selectedTier !== 'safe' || unavailable.length ? <AlertTriangle size={11} /> : null}{selectionCount}{selectedTier !== 'safe' || unavailable.length ? <span>{selectedTier === 'danger' ? 'Risk' : selectedTier === 'caution' ? 'Caution' : 'Review'}</span> : null}
       </span> : null}
       {chosen.length ? <span className="launch-refine__summary">{chosen.map(choice => <span key={choice.optionId} data-tier={choice.tier ?? 'safe'}>{choice.label}</span>)}</span> : null}
       {names?.agentName || names?.tabName ? <i className="launch-refine__named" aria-label="Custom names set" /> : null}
@@ -52,6 +65,8 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
       onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
       <header><Dialog.Title>Launch options</Dialog.Title><Dialog.Close className="icon-button" aria-label="Close launch options" onClick={() => trigger.current?.focus()}><X size={14} /></Dialog.Close></header>
       <Dialog.Description>Choices apply to this launch. Unset values use the Agent’s defaults.</Dialog.Description>
+      {unavailable.length ? <p className="launch-refine__notice" role="status">Saved choices are no longer listed: {unavailable.map(({ label, choiceId }) => `${label}: ${choiceId}`).join(' · ')}. They are retained until you choose another value or use Agent defaults.</p> : null}
+      {selectionCount && onReset ? <button type="button" className="small-button launch-refine__reset" disabled={disabled} onClick={onReset}>Use Agent defaults</button> : null}
       <div className="launch-refine__fields">
         {options.map(option => {
           const choice = option.choices.find(item => item.id === selection[option.id])
@@ -60,6 +75,7 @@ export function LaunchRefine({ options, selection, expanded, active, onToggle, o
             <select aria-label={option.label} value={selection[option.id] ?? ''} disabled={disabled} data-tier={choice?.tier ?? 'safe'}
               onChange={event => onSelect(option.id, event.target.value || null)}>
               <option value="">Agent default</option>
+              {selection[option.id] && !choice ? <option value={selection[option.id]} disabled>Saved choice: {selection[option.id]}</option> : null}
               {option.choices.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
             </select>
             {choice?.description ? <small className="launch-refine__choice-description">{choice.description}</small> : null}

@@ -1,10 +1,10 @@
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { Check, ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
-import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { useWorkbenchBrowserPresentation, useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { currentHostCheck } from '../lib/host-check'
 import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { configuredExecutors } from '../lib/executors'
@@ -36,6 +36,8 @@ import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
+import { SettingsNavigation } from './SettingsNavigation'
+import { useContext } from 'react'
 
 export function NewTabSurface({
   tabGroupId,
@@ -50,8 +52,25 @@ export function NewTabSurface({
   visible?: boolean
 }) {
   const presentationActive = useWorkbenchPresentationActive()
+  const presentation = useWorkbenchBrowserPresentation()
+  const settings = useContext(SettingsNavigation)
+  const surfaceRef = useRef<HTMLElement>(null)
+  const [regionHeight, setRegionHeight] = useState<number | null>(null)
+  const restoreAgentsFocus = useRef<LauncherSectionMode | null>(null)
   const [documentVisible, setDocumentVisible] = useState(() => !document.hidden)
   const motionActive = visible && presentationActive && documentVisible
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current
+    if (!motionActive || !surface) return
+    const measure = () => {
+      const height = surface.getBoundingClientRect().height
+      if (height > 0) setRegionHeight(current => current === height ? current : height)
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(surface)
+    return () => observer.disconnect()
+  }, [motionActive])
   useEffect(() => {
     if (!visible || !presentationActive) return
     const changed = () => setDocumentVisible(!document.hidden)
@@ -136,15 +155,25 @@ export function NewTabSurface({
   const unavailableExecutors = executors.filter(executor => executor.detection?.state === 'missing')
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
-  const sections = { ...DEFAULT_LAUNCHER_SECTIONS, ...savedSections }
+  const sections = { ...DEFAULT_LAUNCHER_SECTIONS,
+    terminal: presentation.surface === 'mote' || presentation.surface === 'survey' || presentation.survey ? 'collapsed' as const : 'expanded' as const,
+    ...savedSections }
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
   const saveSection = useLauncherState(state => state.setSection)
   const saveExecutor = useLauncherState(state => state.selectExecutor)
   const savedExecutor = useLauncherState(state => workspace ? state.executors[workspace.id] : undefined)
   const selectedExecutor = executors.find(executor => executor.id === displayedExecutorId)
   function setSection(section: LauncherSection, mode: LauncherSectionMode) {
+    if (section === 'agents' && mode !== 'expanded' && surfaceRef.current?.contains(document.activeElement)) restoreAgentsFocus.current = mode
     if (workspace) saveSection(workspace.id, section, mode)
   }
+  useLayoutEffect(() => {
+    const mode = restoreAgentsFocus.current
+    restoreAgentsFocus.current = null
+    if (!mode || !motionActive || !surfaceRef.current || sections.agents !== mode) return
+    const label = mode === 'hidden' ? 'Restore Agents' : 'Expand Agents'
+    surfaceRef.current.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`)?.focus({ preventScroll: true })
+  }, [sections.agents, motionActive])
   function chooseExecutor(id: string) {
     setManualChoice({ regionId, executorId: id })
     setExecutorId(id)
@@ -250,12 +279,15 @@ export function NewTabSurface({
   async function chooseComposerFiles(): Promise<void> {
     await insertionRef.current?.insert(async () => {
       const paths = await api.ui.chooseFiles(workspace?.path ? { defaultPath: workspace.path } : undefined)
+      if (!feedback.isCurrent()) return null
       return paths?.length ? appendFileReferences('', paths, workspace?.path) : null
     }, { separate: true })
   }
 
   return (
-    <section className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}>
+    <section ref={surfaceRef} className="launch-surface" data-agent-section={sections.agents} data-motion-active={motionActive}
+      data-density={regionHeight !== null && regionHeight < 520 ? 'compact' : 'normal'}
+      style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties}>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive} />
 
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
@@ -296,7 +328,7 @@ export function NewTabSurface({
               {executor.id === displayedExecutorId ? <Check size={12} className="agent-pick__check" /> : null}
             </button>)}
             {unavailableExecutors.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable} onClick={() => setShowUnavailable(value => !value)}>{showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailableExecutors.length}`}<ChevronDown size={12} /></button> : null}
-            {!executors.length ? <div className="agent-catalog__empty">No Agent is configured. Add one in Settings to launch here.</div> : !installedExecutors.length ? <div className="agent-catalog__empty">Configured Agent commands were not found on this host. Recheck after installation.</div> : null}
+            {!executors.length ? <div className="agent-catalog__empty">No Agent is configured.{settings ? <button type="button" className="small-button" onClick={() => settings.open('agents')}>Configure an Agent</button> : ' Add one in Settings to launch here.'}</div> : !installedExecutors.length ? <div className="agent-catalog__empty">Configured Agent commands were not found on this host. Recheck after installation.</div> : null}
           </div>
           {showUnavailable ? <div className="launcher-unavailable-agents">{unavailableExecutors.map(executor => <span key={executor.id} title={executor.detection?.detail}><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={14} /><strong>{executor.label}</strong><small>{executorDetectionLabel(executor.detection)}</small></span>)}</div> : null}
         </div>
@@ -314,14 +346,15 @@ export function NewTabSurface({
           <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
         </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
           onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
+          onReset={() => { if (selectedProviderId) for (const optionId of Object.keys(launchOptionSelection)) selectOption(selectedProviderId, optionId, null) }}
           onSelect={(optionId, choiceId) => { if (selectedProviderId) selectOption(selectedProviderId, optionId, choiceId) }} /></div>
         <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">
-        <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
         <div className="launcher-primary-actions"><LauncherResumePicker workspace={workspace} disabled={busy !== null} />
-          <button className="primary-button launcher-launch-button" disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
+          <button className="primary-button launcher-launch-button" title={`Launch · ${isMacPlatform() ? '⌘' : 'Ctrl+'}Enter`} disabled={!launcherCanLaunch(readiness)} onClick={launchFromLauncher}>{busy === 'agent' ? <LoaderCircle size={13} className="spin" /> : <Play size={13} />}{busy === 'agent' ? 'Launching…' : 'Launch'}</button>
         </div>
+        <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
       </div> : null}
       {selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
@@ -330,7 +363,7 @@ export function NewTabSurface({
         sections={sections} onSectionChange={setSection} warmSession={warmSession} warmPending={warmPending}
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
         onRun={run} />
-      {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}
+      {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}
     </section>
   )
 }

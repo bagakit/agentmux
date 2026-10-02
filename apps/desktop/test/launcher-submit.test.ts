@@ -230,9 +230,11 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
       '第 2 个实参必须是裸 isMacPlatform()：true/false/!isMacPlatform() 三种改法此前全在 13 条下存活，' +
         '取反那种会让 Cmd+Enter 在 mac 上静默失效'
     ).toBe('isMacPlatform()')
-    expect(prevented!.getText()).toBe('event.preventDefault()')
+    expect(ts.isExpressionStatement(prevented!)).toBe(true)
+    expect((prevented as ts.ExpressionStatement).expression.getText()).toBe('event.preventDefault()')
     // 启动走与按钮同一个函数——抄第二份就会漏掉精调/名字里的某一项。
-    expect(launched!.getText()).toBe('launchFromLauncher()')
+    expect(ts.isExpressionStatement(launched!)).toBe(true)
+    expect((launched as ts.ExpressionStatement).expression.getText()).toBe('launchFromLauncher()')
   })
 
   it('主按钮与键盘读同一次闸判定，且调同一个启动函数', () => {
@@ -253,7 +255,8 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
     }
     walk(source)
     expect(disabledValues, '主按钮的 disabled 必须恰好由 launcherCanLaunch 决定').toEqual(['!launcherCanLaunch(readiness)'])
-    expect(onClickValues, '主按钮必须点同一个启动函数').toEqual(['() => launchFromLauncher()'])
+    expect(onClickValues, '主按钮必须点同一个启动函数').toHaveLength(1)
+    expect(['launchFromLauncher', '() => launchFromLauncher()']).toContain(onClickValues[0])
   })
 
   it('readiness 的三个取值来自组件已有的那三个事实，不是重新取一遍', () => {
@@ -262,6 +265,6 @@ describe('NewTabSurface 真的把键盘接到了 prompt 那一格', () => {
     const text = readSource(relative)
     expect(text).toMatch(/hasWorkspace:\s*Boolean\(workspace\)/)
     expect(text).toMatch(/busy:\s*busy\s*!==\s*null/)
-    expect(text).toMatch(/installedExecutorCount:\s*installedExecutors\.length/)
+    expect(text).toMatch(/installedExecutorCount:\s*primaryBotUnconfirmed\s*&&\s*!explicitExecutorChoice\s*\?\s*0\s*:\s*installedExecutors\.length/)
   })
 })

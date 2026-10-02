@@ -15,10 +15,12 @@ type LauncherState = {
   sections: Record<string, Partial<Record<LauncherSection, LauncherSectionMode>>>
   drafts: Record<string, LauncherDraft>
   executors: Record<string, string>
+  moteTopicId: string | null
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note', value: string): boolean
   setNoteCreation(launcherId: string, receipt: NoteCreationReceipt): boolean
   selectExecutor(workspaceId: string, executorId: string): boolean
+  selectMote(topicId: string): boolean
 }
 
 // Presentation and unsent utility drafts only. Runtime, Session, Tab and warm PTY ownership stay in
@@ -28,7 +30,7 @@ let reportStorageIssue: (message: string) => void = () => {}
 export const useLauncherState = create<LauncherState>()(persist((set) => {
   reportStorageIssue = message => { try { set({ persistenceIssue: storageReadConfirmed ? message : 'Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.' }) } catch { /* The in-memory warning is already retained. */ } }
   return {
-  persistenceIssue: null, sections: {}, drafts: {}, executors: {},
+  persistenceIssue: null, sections: {}, drafts: {}, executors: {}, moteTopicId: null,
   setSection(workspaceId, section, mode) {
     try { set(state => ({ persistenceIssue: null, sections: { ...state.sections, [workspaceId]: { ...state.sections[workspaceId], [section]: mode } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
@@ -44,6 +46,10 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
   selectExecutor(workspaceId, executorId) {
     try { set(state => ({ persistenceIssue: null, executors: { ...state.executors, [workspaceId]: executorId } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  selectMote(topicId) {
+    try { set({ persistenceIssue: null, moteTopicId: topicId }); return true }
+    catch { reportStorageIssue('The selected Mote could not be saved. This Launcher keeps your choice.'); return false }
   }
 }
 }, {
@@ -62,5 +68,5 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
     if (error) reportStorageIssue('Saved Launcher preferences could not be read. Current input remains available; existing storage was not cleared.')
     else storageReadConfirmed = true
   } },
-  partialize: state => ({ sections: state.sections, drafts: state.drafts, executors: state.executors })
+  partialize: state => ({ sections: state.sections, drafts: state.drafts, executors: state.executors, moteTopicId: state.moteTopicId })
 }))

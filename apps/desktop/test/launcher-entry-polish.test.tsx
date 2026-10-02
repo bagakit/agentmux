@@ -148,7 +148,7 @@ describe('the mounted Launcher entry polish', () => {
     const panel = await openEnvironment()
     expect(panel.textContent).toContain('Check failed')
     expect(panel.textContent).toContain('Diagnostic unavailable')
-    expect(panel.textContent).toContain('Isolated environments are not supported yet.')
+    expect(panel.querySelector('.launcher-environment__directory')?.getAttribute('title')).toBe(_hygiene_fixturePath("Users/alice/project"))
     await closeEnvironment()
     expect(useAppStore.getState().warmTerminal?.session?.control.run.runId).toBe('original-shell')
   })
