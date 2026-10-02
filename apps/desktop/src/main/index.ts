@@ -5,6 +5,7 @@ import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { app, BrowserWindow, crashReporter, dialog, Menu, shell } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { applicationMenuTemplate } from './application-menu.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
 import { isScratchWorkspaceId } from '../shared/contracts.js'
@@ -324,10 +325,19 @@ function startPrimaryInstance(): void {
       const storage = await window.webContents.executeJavaScript(
         "localStorage.getItem('agentmux-workbench-v1')"
       ) as string | null
-      const persistedWorkbench = storage ? JSON.parse(storage)?.state?.restoredWorkbench : null
-      const workbenchStructure = persistedWorkbench ? {
-        tabs: Object.fromEntries(Object.entries(persistedWorkbench.tabs ?? {}).map(([id, tab]) => [id, (tab as { layout?: unknown }).layout])),
-        layouts: persistedWorkbench.layouts ?? null
+      let spatialState: import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null = null
+      let spatialUnavailable: { code: string; message: string } | null = null
+      try { spatialState = await new AgentMuxSpatialStateStore().read() }
+      catch (error) {
+        // A failed observation must not close the already loaded workbench or stop a healthy Run.
+        spatialUnavailable = {
+          code: error && typeof error === 'object' && 'code' in error ? String(error.code) : 'SPATIAL_STATE_READ_UNCONFIRMED',
+          message: error instanceof Error ? error.message : String(error)
+        }
+      }
+      const workbenchStructure = spatialState ? {
+        tabs: spatialState.graph.tabLayouts,
+        layouts: spatialState.graph.layouts
       } : null
       const sessionStore = await readFile(desktopAgentSessionStorePath(), 'utf8').catch(() => null)
       const renderedWorkbench = await window.webContents.executeJavaScript(`(() => {
@@ -348,7 +358,9 @@ function startPrimaryInstance(): void {
         rendererLoadedAtMs,
         renderedWorkbench,
         workbenchStructure,
-        workbench: summarizeRecoveryStorage(storage),
+        spatialState,
+        spatialUnavailable,
+        workbench: summarizeRecoveryStorage(storage, spatialState),
         sessions: summarizeRecoverySessionStore(sessionStore)
       }
       const reportPath = process.env.AGENTMUX_DESKTOP_RECOVERY_REPORT

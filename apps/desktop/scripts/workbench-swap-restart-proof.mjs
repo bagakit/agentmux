@@ -30,8 +30,8 @@ export async function createSwapPeers({ client, root, workspacePath, codexHome, 
   assert.equal(peers.length, 2)
 }
 
-export function seedSwapRegions(seed, { session, peers, tabId, agentRegionId, fileRegionId, workspaceId, identityName }) {
-  const thirdId = 'crash-third', tab = seed.state.restoredWorkbench.tabs[tabId]
+export function seedSwapRegions(seed, { session, peers, tabId, agentRegionId, fileRegionId, workspaceId, identityName, tabs }) {
+  const thirdId = 'crash-third', tab = tabs[tabId]
   const all = [session, ...peers.map(peer => peer.session)]
   seed.state.agentNames = { [session.agentSessionId]: identityName,
     [peers[0].session.agentSessionId]: 'Private saved reviewer', [peers[1].session.agentSessionId]: identityName }
@@ -57,16 +57,29 @@ export async function readSwapFacts(cdp, ids) {
 }
 
 export async function selectSwapTarget({ cdp, key, activateButton, waitFor, focusNeighbor, agentRegionId, fileRegionId, identityName, tabId }) {
-  await cdp.evaluate(`(()=>{window.__swapRestartEvents=[];for(const type of ['keydown','click'])document.addEventListener(type,event=>{
+  await cdp.evaluate(`(async()=>{const spatial=await window.agentmux.spatial.read();if(!spatial)throw new Error('The original Core spatial document is unavailable');window.__swapRestartEvents=[];window.__swapRestartEventSelectionOwner='gui';for(const type of ['keydown','click'])document.addEventListener(type,event=>{
     const item=event.target instanceof Element?event.target.closest('[role="menuitem"]'):null,menu=item?.closest('.agent-region-menu');
-    if(menu&&(type!=='keydown'||event.key==='Enter')){const state=JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state;
-      window.__swapRestartEvents.push({type,trusted:event.isTrusted,label:item.textContent.trim(),owner:menu.dataset.ownerRegionId,open:menu.dataset.state==='open',active:state.restoredWorkbench.tabs[${JSON.stringify(tabId)}].layout.activeRegionId})}
+    if(menu&&(type!=='keydown'||event.key==='Enter')){
+      const visible=node=>node.getClientRects().length>0&&getComputedStyle(node).visibility==='visible'&&!node.closest('[inert]');
+      const owner=menu.dataset.ownerRegionId;
+      const triggers=Array.from(document.querySelectorAll('.agent-region-header__more'))
+        .filter(node=>visible(node)&&menu.id&&node.getAttribute('aria-controls')===menu.id&&node.id===menu.getAttribute('aria-labelledby'));
+      const owners=Array.from(document.querySelectorAll('[data-workbench-region-id]'))
+        .filter(node=>visible(node)&&node.dataset.workbenchRegionId===owner);
+      if(owner!==${JSON.stringify(agentRegionId)}||triggers.length!==1||owners.length!==1||!spatial.graph.regions.some(region=>region.regionId===owner&&region.tabId===${JSON.stringify(tabId)}))throw new Error('The Portal menu does not identify one visible original Region presentation');
+      const host=owners[0].closest('.workspace-workbench');
+      if(!host)throw new Error('The original Region presentation has no Workbench host');
+      const active=Array.from(host.querySelectorAll('.workbench-region--active[data-workbench-region-id]'))
+        .filter(node=>node.getClientRects().length>0&&getComputedStyle(node).visibility==='visible'&&!node.closest('[inert]'))
+        .map(node=>node.dataset.workbenchRegionId);
+      if(active.length!==1||!spatial.graph.regions.some(region=>region.regionId===active[0]&&region.tabId===${JSON.stringify(tabId)}))throw new Error('The event does not identify one visible original Region in its actual GUI host');
+      window.__swapRestartEvents.push({type,trusted:event.isTrusted,label:item.textContent.trim(),owner:menu.dataset.ownerRegionId,open:menu.dataset.state==='open',active:active[0]})}
   },true)})()`)
   await activateButton(cdp, `document.querySelector('[data-workbench-region-id="${agentRegionId}"] .agent-region-header__more')`)
   await waitFor('original three-Agent menu is open', () => cdp.evaluate(`document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')?.dataset.state==='open'`))
   const focusReceipt = await focusNeighbor()
   const menu = `document.querySelector('.agent-region-menu[data-owner-region-id="${agentRegionId}"]')`
-  const observed = await waitFor('three Agent Swap targets', () => cdp.evaluate(`(()=>{const menu=${menu};if(!menu)return null;return{open:menu.dataset.state==='open',active:JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state.restoredWorkbench.tabs[${JSON.stringify(tabId)}].layout.activeRegionId,
+  const observed = await waitFor('three Agent Swap targets', () => cdp.evaluate(`(async()=>{const menu=${menu};if(!menu)return null;const spatial=await window.agentmux.spatial.read();return{open:menu.dataset.state==='open',active:spatial.graph.tabLayouts[${JSON.stringify(tabId)}].activeRegionId,
     entries:[...menu.querySelectorAll('[role="menuitem"]')].filter(item=>item.textContent.trim().startsWith('Swap with ')).map(item=>item.textContent.trim())}})()`)
     .then(value => value?.open && value.active === fileRegionId ? value : null))
   assert.deepEqual(observed, { open: true, active: fileRegionId, entries: ['Swap with Private saved reviewer', `Swap with ${identityName} 2`] })
@@ -77,7 +90,9 @@ export async function selectSwapTarget({ cdp, key, activateButton, waitFor, focu
     { type: 'keydown', trusted: true, label: `Swap with ${identityName} 2`, owner: agentRegionId, open: true, active: fileRegionId },
     { type: 'click', trusted: false, label: `Swap with ${identityName} 2`, owner: agentRegionId, open: true, active: fileRegionId }
   ])
-  return { observed, events, focusReceipt }
+  const eventSelectionOwner = await cdp.evaluate('window.__swapRestartEventSelectionOwner')
+  assert.equal(eventSelectionOwner, 'gui')
+  return { observed, events, focusReceipt, eventSelectionOwner }
 }
 
 export async function restoreSwapMenu({ cdp, key, activateButton, waitFor, agentRegionId, identityName }) {

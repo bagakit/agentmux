@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics.ts'
 import { openDemandStore } from '../../../packages/demand/dist/src/index.js'
+import { readRecoverySpatialState, assertOriginalRecoveryGraph } from './goals-alignment-restart-proof.mjs'
 
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
@@ -70,26 +71,37 @@ async function retainRaw(fixture, name, bytes) {
 }
 
 async function state(cdp) {
-  return cdp.evaluate(`JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state`)
+  const ui = await cdp.evaluate(`JSON.parse(localStorage.getItem('agentmux-workbench-v1')).state`)
+  return { ...ui, spatial: await readRecoverySpatialState(cdp) }
+}
+
+function topicFacts(value, tabId) {
+  const graph = value.spatial.graph, tab = graph.tabs.find(tab => tab.tabId === tabId)
+  if (!tab) return null
+  const tabResource = graph.resources['tab:' + tabId], layout = graph.tabLayouts[tabId]
+  if (!tabResource || typeof tabResource !== 'object' || Array.isArray(tabResource) || !layout) return null
+  const region = graph.regions.find(region => region.regionId === layout.activeRegionId && region.tabId === tabId)
+  if (!region) return null
+  const regionResource = graph.resources['region:' + region.regionId]
+  if (!regionResource || typeof regionResource !== 'object' || Array.isArray(regionResource)) return null
+  return { tab, region, tabResource, regionResource, draft: value.agentComposerDrafts[region.regionId] ?? null }
 }
 
 function newTopic(value, previousIds) {
-  const tabs = Object.values(value.restoredWorkbench.tabs).filter(tab => !previousIds.includes(tab.id) && tab.workspaceId === '__scratch__' && tab.topicId)
+  const tabs = value.spatial.graph.tabs.filter(tab => !previousIds.includes(tab.tabId) && tab.workspaceId === '__scratch__' && value.spatial.graph.resources['tab:' + tab.tabId]?.topicId)
   assert.ok(tabs.length <= 1, 'One real CTA click must not create multiple Topic Tabs')
-  if (!tabs.length) return null
-  const tab = tabs[0], region = tab.regions[tab.layout.activeRegionId]
-  return { tab, region, draft: value.agentComposerDrafts[region.regionId] ?? null }
+  return tabs.length ? topicFacts(value, tabs[0].tabId) : null
 }
 
 async function launchEvidence(cdp, fixture, topic, request, waitFor) {
   const snapshot = await waitFor('same CTA Region has a live Main/Core Session', async () => {
     const reply = await cdp.evaluate('window.agentmux.sessions.snapshot()')
-    return reply.sessions.find(session => session.id === topic.region.sessionId && session.processState === 'running')
+    return reply.sessions.find(session => session.id === topic.region.agentSessionId && session.processState === 'running')
   })
-  const metadata = await cdp.evaluate(`window.agentmux.scratch.readTopic('__scratch__', ${JSON.stringify(topic.tab.topicId)})`)
-  assert.equal(metadata?.id, topic.tab.topicId)
+  const metadata = await cdp.evaluate(`window.agentmux.scratch.readTopic('__scratch__', ${JSON.stringify(topic.tabResource.topicId)})`)
+  assert.equal(metadata?.id, topic.tabResource.topicId)
   if (!fixture.directGoal) assert.ok(metadata.soul?.content, 'The same real Topic has a prepared Mote SOUL')
-  assert.equal(metadata.directoryPath, scratchTopicDirectoryName(topic.tab.topicId))
+  assert.equal(metadata.directoryPath, scratchTopicDirectoryName(topic.tabResource.topicId))
   const directory = await realpath(join(fixture.topicsPath, metadata.directoryPath))
   assert.equal(snapshot.workspacePath, directory, 'Main launches the CTA Session in its exact real Topic directory')
   const created = await waitFor('Core confirms the provider launch request', async () => {
@@ -114,7 +126,7 @@ async function launchEvidence(cdp, fixture, topic, request, waitFor) {
   const recordedBirth = (await readFile(join(fixture.directory, `${snapshot.id}.birth`), 'utf8')).trim()
   const process = parseBirth(recordedBirth)
   assert.equal(await birth(process.pid), recordedBirth, 'The actual private cat process is still the recorded birth')
-  const agent = { tabId: topic.tab.id, topicId: topic.tab.topicId, regionId: topic.region.regionId,
+  const agent = { tabId: topic.tab.tabId, topicId: topic.tabResource.topicId, regionId: topic.region.regionId,
     agentSessionId: snapshot.id, run: snapshot.control.run, workspacePath: directory,
     soulDigest: metadata.soul?.content ? digest(metadata.soul.content) : null, process, birth: recordedBirth,
     request, requestDigest: digest(request), inputTransport: 'provider-launch-argv',
@@ -133,10 +145,10 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
   const before = await state(cdp)
   await activateButton(cdp, `document.querySelector('button[data-goals-entry-action="understand"]')`)
   const normal = await waitFor('CTA creates an attached real Topic Region', async () => {
-    const value = await state(cdp), topic = newTopic(value, Object.keys(before.restoredWorkbench.tabs))
-    return topic?.region.kind === 'agent' && topic.region.phase === 'attached' ? topic : null
+    const value = await state(cdp), topic = newTopic(value, before.spatial.graph.tabs.map(tab => tab.tabId))
+    return topic?.region.kind === 'agent' && topic.regionResource.phase === 'attached' ? topic : null
   })
-  assert.equal(normal.tab.topicPreparation, undefined)
+  assert.equal(normal.tabResource.topicPreparation, undefined)
   assert.notEqual(normal.draft, requests.understand, 'Successful launch clears the original Region request')
   fixture.normal = await launchEvidence(cdp, fixture, normal, requests.understand, waitFor)
   await activateButton(cdp, `document.querySelector('[aria-label="Goals: show goals and progress"]')`)
@@ -148,11 +160,11 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
     await chmod(fixture.topicsPath, 0o500)
     await activateButton(cdp, `document.querySelector('button[data-goals-entry-action="ideas"]')`)
     fixture.failed = await waitFor('failed preparation retains the exact real launcher and request', async () => {
-      const value = await state(cdp), topic = newTopic(value, Object.keys(beforeFailure.restoredWorkbench.tabs))
-      if (topic?.region.kind !== 'launcher' || topic.tab.topicPreparation !== 'mote' || topic.draft !== requests.ideas) return null
+      const value = await state(cdp), topic = newTopic(value, beforeFailure.spatial.graph.tabs.map(tab => tab.tabId))
+      if (topic?.region.kind !== 'launcher' || topic.tabResource.topicPreparation !== 'mote' || topic.draft !== requests.ideas) return null
       const shown = await cdp.evaluate(`document.querySelector('[data-workbench-region-id="${topic.region.regionId}"]')?.innerText.toLowerCase()`)
       if (!shown?.includes('preparation') || !shown.includes('not been sent')) return null
-      const directory = join(await realpath(fixture.topicsPath), scratchTopicDirectoryName(topic.tab.topicId))
+      const directory = join(await realpath(fixture.topicsPath), scratchTopicDirectoryName(topic.tabResource.topicId))
       const cause = await cdp.evaluate(`Array.from(document.querySelectorAll('.error-notice__original')).map(node => node.textContent).find(text => text.includes('EACCES') && text.includes('mkdir') && text.includes(${JSON.stringify(directory)}))`)
       if (!cause) return null
       fixture.preparationFailure = { code: 'EACCES', operation: 'mkdir', workspacePath: directory }
@@ -163,16 +175,13 @@ export async function clickGoalsEntryInActualUI({ cdp, fixture, activateButton, 
     await activateButton(cdp, `Array.from(document.querySelectorAll('.error-notice__original')).find(node => node.textContent.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)})).closest('details').querySelector('summary')`)
     await waitFor('actual preparation cause is visible', () => cdp.evaluate(`Array.from(document.querySelectorAll('.error-notice__original')).some(node => node.textContent.includes(${JSON.stringify(fixture.preparationFailure.workspacePath)}) && node.getClientRects().length > 0)`))
   } finally { await chmod(fixture.topicsPath, fixture.topicsMode) }
-  assert.notEqual(fixture.failed.tab.id, fixture.normal.tabId)
-  assert.notEqual(fixture.failed.tab.topicId, fixture.normal.topicId)
+  assert.notEqual(fixture.failed.tab.tabId, fixture.normal.tabId)
+  assert.notEqual(fixture.failed.tabResource.topicId, fixture.normal.topicId)
   assert.equal((await readdir(fixture.directory)).filter(name => name.endsWith('.argv')).length, 1, 'Preparation failure starts no second Agent')
   const after = await state(cdp)
-  for (const [id, tab] of Object.entries(expectedOriginalWorkbench.tabs)) assert.deepEqual(after.restoredWorkbench.tabs[id], tab)
-  for (const [id, layout] of Object.entries(expectedOriginalWorkbench.layouts)) {
-    if (id !== '__scratch__') assert.deepEqual(after.restoredWorkbench.layouts[id], layout)
-  }
+  assertOriginalRecoveryGraph(after.spatial, expectedOriginalWorkbench)
   assert.deepEqual(after.agentFocus.execution, expectedOriginalFocus.execution, 'Exploration never steals the original execution focus')
-  fixture.expectedWorkbench = after.restoredWorkbench
+  fixture.expectedWorkbench = after.spatial
   fixture.expectedFocus = after.agentFocus
   return { workbench: fixture.expectedWorkbench, focus: fixture.expectedFocus }
 }
@@ -189,33 +198,33 @@ export async function readGoalsEntryNativeBaseline({ client, fixture }) {
 export async function restoreGoalsEntryBeforeSpace({ cdp, fixture, activateButton, waitFor, focusOriginal }) {
   if (fixture.directGoal) return await restoreDirectGoalBeforeSpace({ cdp, fixture, activateButton, waitFor, focusOriginal })
   const restored = await waitFor('same failed CTA launcher is visible after an ordinary process restart', async () => {
-    const value = await state(cdp), tab = value.restoredWorkbench.tabs[fixture.failed.tab.id]
+    const value = await state(cdp), tab = value.spatial.graph.tabs.find(tab => tab.tabId === fixture.failed.tab.tabId)
     const text = await cdp.evaluate(`document.querySelector('[data-workbench-region-id="${fixture.failed.region.regionId}"]')?.innerText.toLowerCase()`)
     return tab && text?.includes('not been sent') ? value : null
   })
-  assert.deepEqual(restored.restoredWorkbench, fixture.expectedWorkbench)
+  assert.deepEqual(restored.spatial, fixture.expectedWorkbench)
   assert.deepEqual(restored.agentFocus, fixture.expectedFocus)
   assert.equal(restored.agentComposerDrafts[fixture.failed.region.regionId], requests.ideas)
-  assert.equal(restored.restoredWorkbench.tabs[fixture.failed.tab.id].topicPreparation, 'mote')
+  assert.equal(restored.spatial.graph.resources['tab:' + fixture.failed.tab.tabId].topicPreparation, 'mote')
   assert.equal((await readdir(fixture.directory)).filter(name => name.endsWith('.argv')).length, 1, 'Restart does not launch or send the failed request')
   const reply = await cdp.evaluate('window.agentmux.sessions.snapshot()')
   const normal = reply.sessions.find(session => session.id === fixture.normal.agentSessionId)
   assert.equal(normal?.processState, 'running'); assert.deepEqual(normal.control.run, fixture.normal.run)
   await activateButton(cdp, `Array.from(document.querySelectorAll('[data-workbench-region-id="${fixture.failed.region.regionId}"] button')).find(button => button.textContent.trim() === 'Launch agent')`)
   const retry = await waitFor('explicit Launch agent retries preparation in the same Topic and Region', async () => {
-    const value = await state(cdp), tab = value.restoredWorkbench.tabs[fixture.failed.tab.id]
-    const region = tab?.regions[fixture.failed.region.regionId]
-    return region?.kind === 'agent' && region.phase === 'attached' ? { tab, region, draft: value.agentComposerDrafts[region.regionId] ?? null } : null
+    const value = await state(cdp), tab = value.spatial.graph.tabs.find(tab => tab.tabId === fixture.failed.tab.tabId)
+    const facts = tab && topicFacts(value, tab.tabId)
+    return facts?.region.kind === 'agent' && facts.regionResource.phase === 'attached' ? facts : null
   })
-  assert.equal(retry.tab.topicId, fixture.failed.tab.topicId); assert.equal(retry.tab.topicPreparation, undefined)
+  assert.equal(retry.tabResource.topicId, fixture.failed.tabResource.topicId); assert.equal(retry.tabResource.topicPreparation, undefined)
   assert.notEqual(retry.draft, requests.ideas)
   fixture.retry = await launchEvidence(cdp, fixture, retry, requests.ideas, waitFor)
   assert.equal((await readdir(fixture.directory)).filter(name => name.endsWith('.argv')).length, 2)
-  fixture.expectedWorkbench = (await state(cdp)).restoredWorkbench
+  fixture.expectedWorkbench = (await state(cdp)).spatial
   fixture.expectedFocus = (await state(cdp)).agentFocus
   await focusOriginal()
   return { actualMountedClicks: ['understand', 'ideas'], preparedTopic: fixture.normal.topicId,
-    retainedFailureTopic: fixture.failed.tab.topicId, retainedFailureTab: fixture.failed.tab.id,
+    retainedFailureTopic: fixture.failed.tabResource.topicId, retainedFailureTab: fixture.failed.tab.tabId,
     retainedFailureRegion: fixture.failed.region.regionId, sameOwnerExplicitRetry: true, restartAutomaticallySent: false,
     preparationFailure: fixture.preparationFailure, sourceBefore: fixture.sourceBefore, agents: fixture.agents,
     limitations: ['Synthetic private Codex command records actual launch argv and then execs cat; argv receipt is distinct from PTY input and does not prove model understanding.',
@@ -248,14 +257,13 @@ function assertUndefinedGoal(goal) {
 }
 
 function mappedGoal(value, goalId) {
-  const tabId = value.demandPmoTabIds?.[goalId], tab = value.restoredWorkbench.tabs[tabId]
-  if (!tab) return null
-  assert.equal(tab.workspaceId, '__scratch__'); assert.equal(tab.topicId, PMO_TEAMS_TOPIC_ID)
-  const group = value.restoredWorkbench.layouts.__scratch__?.groups.find(group => group.tabOrder.includes(tabId))
+  const tabId = value.demandPmoTabIds?.[goalId], facts = topicFacts(value, tabId)
+  if (!facts) return null
+  assert.equal(facts.tab.workspaceId, '__scratch__'); assert.equal(facts.tabResource.topicId, PMO_TEAMS_TOPIC_ID)
+  const group = value.spatial.graph.layouts.__scratch__?.groups.find(group => group.tabOrder.includes(tabId))
   assert.ok(group, 'The dedicated mapped PMO Tab is actually placed in the original workbench')
-  const region = tab.regions[tab.layout.activeRegionId]
-  assert.ok(region, 'The mapped PMO Tab has its actual active Region')
-  return { goalId, tab, region, draft: value.agentComposerDrafts[region.regionId] ?? null }
+  assert.ok(facts.region, 'The mapped PMO Tab has its actual active Region')
+  return { goalId, ...facts }
 }
 
 async function closeMote(cdp, activateButton, waitFor) {
@@ -284,11 +292,11 @@ async function clickDirectGoalInActualUI({ cdp, fixture, activateButton, waitFor
   const normalGoal = await create([])
   const normal = await waitFor('the same new Goal has a dedicated attached PMO Region', async () => {
     const value = await state(cdp), mapped = mappedGoal(value, normalGoal.id)
-    return mapped?.region.kind === 'agent' && mapped.region.phase === 'attached' ? mapped : null
+    return mapped?.region.kind === 'agent' && mapped.regionResource.phase === 'attached' ? mapped : null
   })
   fixture.normal = await launchEvidence(cdp, fixture, normal, normalGoal.id, waitFor)
   fixture.normal.goal = normalGoal
-  assert.equal(await cdp.evaluate(`document.querySelector('[data-pmo-teams-topic-floating][data-state="open"]')?.dataset.moteTargetTab`), normal.tab.id)
+  assert.equal(await cdp.evaluate(`document.querySelector('[data-pmo-teams-topic-floating][data-state="open"]')?.dataset.moteTargetTab`), normal.tab.tabId)
   await closeMote(cdp, activateButton, waitFor)
   try {
     // A definite private executable preparation failure occurs AFTER the real mapped Tab is
@@ -304,15 +312,14 @@ async function clickDirectGoalInActualUI({ cdp, fixture, activateButton, waitFor
       return mapped
     })
   } finally { await chmod(fixture.executable, 0o700) }
-  assert.notEqual(fixture.failed.tab.id, fixture.normal.tabId)
+  assert.notEqual(fixture.failed.tab.tabId, fixture.normal.tabId)
   assert.notEqual(fixture.failedGoal.id, normalGoal.id)
   assert.equal((await readdir(fixture.directory)).filter(name => name.endsWith('.argv')).length, 1, 'A failed preparation never starts a second Agent')
   const after = await state(cdp)
   assert.equal(after.selectedDemandId, fixture.failedGoal.id)
-  for (const [id, tab] of Object.entries(expectedOriginalWorkbench.tabs)) assert.deepEqual(after.restoredWorkbench.tabs[id], tab)
-  for (const [id, layout] of Object.entries(expectedOriginalWorkbench.layouts)) if (id !== '__scratch__') assert.deepEqual(after.restoredWorkbench.layouts[id], layout)
+  assertOriginalRecoveryGraph(after.spatial, expectedOriginalWorkbench)
   assert.deepEqual(after.agentFocus.execution, expectedOriginalFocus.execution, 'New Goal PMO never takes the original execution focus')
-  fixture.expectedWorkbench = after.restoredWorkbench; fixture.expectedFocus = after.agentFocus
+  fixture.expectedWorkbench = after.spatial; fixture.expectedFocus = after.agentFocus
   fixture.expectedMapping = after.demandPmoTabIds
   fixture.beforeStore = await retainRaw(fixture, 'demands-before-restart.json', await readFile(fixture.demandStorePath))
   return { workbench: fixture.expectedWorkbench, focus: fixture.expectedFocus }
@@ -325,7 +332,7 @@ async function restoreDirectGoalBeforeSpace({ cdp, fixture, activateButton, wait
     return value.mainSurface === 'board' && value.selectedDemandId === fixture.failedGoal.id &&
       mapped?.region.kind === 'launcher' && shown === fixture.failed.region.regionId ? value : null
   })
-  assert.deepEqual(restored.restoredWorkbench, fixture.expectedWorkbench)
+  assert.deepEqual(restored.spatial, fixture.expectedWorkbench)
   assert.deepEqual(restored.agentFocus, fixture.expectedFocus)
   assert.deepEqual(restored.demandPmoTabIds, fixture.expectedMapping)
   assert.equal(restored.agentComposerDrafts[fixture.failed.region.regionId], fixture.failed.draft)
@@ -343,26 +350,26 @@ async function restoreDirectGoalBeforeSpace({ cdp, fixture, activateButton, wait
   })
   assert.deepEqual(snapshot.control.run, fixture.normal.run)
   const automaticallyRestored = mappedGoal(restored, fixture.normal.goalId)
-  assert.equal(automaticallyRestored.region.kind, 'agent'); assert.equal(automaticallyRestored.region.phase, 'attached')
-  assert.equal(automaticallyRestored.region.sessionId, snapshot.id)
+  assert.equal(automaticallyRestored.region.kind, 'agent'); assert.equal(automaticallyRestored.regionResource.phase, 'attached')
+  assert.equal(automaticallyRestored.region.agentSessionId, snapshot.id)
   await closeMote(cdp, activateButton, waitFor)
   await activateButton(cdp, `document.querySelector('.goals-detail button[data-goal-grill]')`)
   const retry = await waitFor('actual Goal request retries its existing PMO Tab and Region', async () => {
     const value = await state(cdp), mapped = mappedGoal(value, fixture.failedGoal.id)
-    return mapped?.region.kind === 'agent' && mapped.region.phase === 'attached' ? mapped : null
+    return mapped?.region.kind === 'agent' && mapped.regionResource.phase === 'attached' ? mapped : null
   })
-  assert.equal(retry.tab.id, fixture.failed.tab.id); assert.equal(retry.region.regionId, fixture.failed.region.regionId)
+  assert.equal(retry.tab.tabId, fixture.failed.tab.tabId); assert.equal(retry.region.regionId, fixture.failed.region.regionId)
   fixture.retry = await launchEvidence(cdp, fixture, retry, fixture.failedGoal.id, waitFor)
   assert.deepEqual(await fixture.owner.list(), durableGoals, 'Explicit mapped retry does not create or rewrite a Goal')
   assert.equal((await readdir(fixture.directory)).filter(name => name.endsWith('.argv')).length, 2)
   const after = await state(cdp)
   assert.deepEqual(after.demandPmoTabIds, fixture.expectedMapping)
-  fixture.expectedWorkbench = after.restoredWorkbench; fixture.expectedFocus = after.agentFocus
+  fixture.expectedWorkbench = after.spatial; fixture.expectedFocus = after.agentFocus
   await closeMote(cdp, activateButton, waitFor)
   await focusOriginal()
   return { passed: true, exactFlag: '--goals-direct-pmo', actualMountedClicks: ['New Goal', 'New Goal', 'Clarify goal'],
     durableGoalIds: durableGoals.map(goal => goal.id), normalGoalId: fixture.normal.goalId, failedGoalId: fixture.failedGoal.id,
-    retainedFailureTab: fixture.failed.tab.id, retainedFailureRegion: fixture.failed.region.regionId,
+    retainedFailureTab: fixture.failed.tab.tabId, retainedFailureRegion: fixture.failed.region.regionId,
     retainedDraftSha256: digest(fixture.failed.draft), mapping: fixture.expectedMapping,
     sameOwnerExplicitRetry: true, automaticallyAttachedSamePmoRun: true, restartAutomaticallyCreatedGoal: false,
     restartAutomaticallySent: false, preparationFailure: fixture.preparationFailure,

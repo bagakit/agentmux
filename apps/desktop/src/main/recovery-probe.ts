@@ -3,9 +3,10 @@
  *
  * The probe must inspect the same durable records the application reads. It must not create a second
  * layout or Session store just for verification. The seed is delivered before application scripts;
- * reports read the same persisted Zustand projection and Core-owned Session store.
+ * reports read Core spatial and Session facts while UI drafts/focus remain in Zustand.
  */
 
+import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import type { WebContents } from 'electron'
 import { pathToFileURL } from 'node:url'
 
@@ -89,47 +90,15 @@ function sortedStrings(values: Iterable<string>): string[] {
   return [...new Set(values)].sort()
 }
 
-export function summarizeRecoveryStorage(raw: string | null): RecoveryWorkbenchSummary {
-  if (raw === null) {
-    return {
-      storagePresent: false,
-      tabIds: [],
-      regionIds: [],
-      activeRegionIds: [],
-      activeWorkspaceId: null,
-      draftSessionIds: [],
-      drafts: {},
-      executionFocusSessionId: null,
-      executionFocusHistory: [],
-      pmoFocusSessionId: null
-    }
+export function summarizeRecoveryStorage(raw: string | null, spatial: AgentMuxSpatialState | null): RecoveryWorkbenchSummary {
+  let state: Record<string, unknown> = {}
+  if (raw !== null) {
+    try { state = objectRecord(objectRecord(JSON.parse(raw)).state) }
+    catch { /* The UI observation is unavailable; independently known Core facts stay readable. */ }
   }
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(raw)
-  } catch {
-    return {
-      storagePresent: true,
-      tabIds: [],
-      regionIds: [],
-      activeRegionIds: [],
-      activeWorkspaceId: null,
-      draftSessionIds: [],
-      drafts: {},
-      executionFocusSessionId: null,
-      executionFocusHistory: [],
-      pmoFocusSessionId: null
-    }
-  }
-  const state = objectRecord(objectRecord(parsed).state)
-  const workbench = objectRecord(state.restoredWorkbench)
-  const tabs = objectRecord(workbench.tabs)
-  const tabIds = sortedStrings(Object.keys(tabs))
-  const regionIds = sortedStrings(Object.values(tabs).flatMap((tab) => Object.keys(objectRecord(objectRecord(tab).regions))))
-  const activeRegionIds = sortedStrings(Object.values(tabs).flatMap((tab) => {
-    const activeRegionId = stringValue(objectRecord(tab).layout && objectRecord(objectRecord(tab).layout).activeRegionId)
-    return activeRegionId ? [activeRegionId] : []
-  }))
+  const tabIds = sortedStrings(spatial?.graph.tabs.map(tab => tab.tabId) ?? [])
+  const regionIds = sortedStrings(spatial?.graph.regions.map(region => region.regionId) ?? [])
+  const activeRegionIds = sortedStrings(Object.values(spatial?.graph.tabLayouts ?? {}).map(layout => layout.activeRegionId))
   const rawDrafts = objectRecord(state.agentComposerDrafts)
   const drafts = Object.fromEntries(Object.entries(rawDrafts).flatMap(([sessionId, draft]) => (
     typeof draft === 'string' ? [[sessionId, draft] as const] : []
@@ -144,7 +113,7 @@ export function summarizeRecoveryStorage(raw: string | null): RecoveryWorkbenchS
     : []
   const pmo = objectRecord(agentFocus.pmo)
   return {
-    storagePresent: true,
+    storagePresent: raw !== null,
     tabIds,
     regionIds,
     activeRegionIds,

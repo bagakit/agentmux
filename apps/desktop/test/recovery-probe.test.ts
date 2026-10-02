@@ -1,4 +1,5 @@
 import { fixtureFileUrl as _hygiene_fixtureFileUrl, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import { describe, expect, it, vi } from 'vitest'
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -18,23 +19,24 @@ function storage(overrides: Record<string, unknown> = {}): string {
         pmo: { sessionId: null }
       },
       agentComposerDrafts: { 'session-probe': 'draft survives restart' },
-      restoredWorkbench: {
-        tabs: {
-          'tab-probe': {
-            layout: { root: { type: 'leaf', regionId: 'region-probe' }, activeRegionId: 'region-probe' },
-            regions: { 'region-probe': { regionId: 'region-probe', kind: 'agent', sessionId: 'session-probe' } }
-          }
-        }
-      },
       ...overrides
     },
     version: 1
   })
 }
 
+function spatial(): AgentMuxSpatialState {
+  return { schemaVersion: 1, revision: 4, graph: {
+    spaces: [], zones: [], bindings: [],
+    tabs: [{ tabId: 'tab-probe', workspaceId: 'workspace-probe', zoneId: null, name: null, regionIds: ['region-probe'] }],
+    regions: [{ regionId: 'region-probe', tabId: 'tab-probe', kind: 'agent', agentSessionId: 'session-probe', runId: 'run-probe', execution: null }],
+    layouts: {}, tabLayouts: { 'tab-probe': { root: { type: 'leaf', regionId: 'region-probe' }, activeRegionId: 'region-probe' } }, resources: {}
+  } }
+}
+
 describe('real Electron recovery receipt projections', () => {
   it('summarizes durable Workbench identity, active Region and draft', () => {
-    expect(summarizeRecoveryStorage(storage())).toEqual({
+    expect(summarizeRecoveryStorage(storage(), spatial())).toEqual({
       storagePresent: true,
       tabIds: ['tab-probe'],
       regionIds: ['region-probe'],
@@ -49,8 +51,22 @@ describe('real Electron recovery receipt projections', () => {
   })
 
   it('keeps an empty or malformed snapshot explicit instead of treating it as recovered', () => {
-    expect(summarizeRecoveryStorage(null)).toMatchObject({ storagePresent: false, tabIds: [], regionIds: [] })
-    expect(summarizeRecoveryStorage('{bad json')).toMatchObject({ storagePresent: true, tabIds: [], regionIds: [] })
+    expect(summarizeRecoveryStorage(null, null)).toMatchObject({ storagePresent: false, tabIds: [], regionIds: [] })
+    expect(summarizeRecoveryStorage('{bad json', null)).toMatchObject({ storagePresent: true, tabIds: [], regionIds: [] })
+  })
+
+  it('does not let missing or malformed UI storage erase independently known Core facts', () => {
+    for (const raw of [null, '{bad json']) {
+      expect(summarizeRecoveryStorage(raw, spatial())).toMatchObject({
+        tabIds: ['tab-probe'], regionIds: ['region-probe'], activeRegionIds: ['region-probe'],
+        drafts: {}, executionFocusSessionId: null
+      })
+    }
+  })
+
+  it('keeps UI drafts and focus while Core spatial observation is absent or unavailable', () => {
+    expect(summarizeRecoveryStorage(storage(), null)).toMatchObject({ tabIds: [], regionIds: [], activeRegionIds: [],
+      drafts: { 'session-probe': 'draft survives restart' }, executionFocusSessionId: 'session-probe' })
   })
 
   it('summarizes Core-owned Session identity and Run reference', () => {
@@ -77,7 +93,7 @@ describe('real Electron recovery receipt projections', () => {
     const common = {
       userData: _hygiene_fixturePath("tmp/probe-user-data"),
       runtimeDirectory: _hygiene_fixturePath("tmp/probe-runtime"),
-      workbench: summarizeRecoveryStorage(storage()),
+      workbench: summarizeRecoveryStorage(storage(), spatial()),
       sessions: summarizeRecoverySessionStore(JSON.stringify({ sessions: [{ agentSessionId: 'session-probe', run: { runId: 'run-probe' } }] }))
     }
     const before = {
