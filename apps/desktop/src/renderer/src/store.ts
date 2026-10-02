@@ -3500,6 +3500,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (gap) void get().resyncTimeline(gap)
         },
         save: saveWorkbenchSelection,
+        recordRemovedTab: tabId => coreSpatialPersistence?.removeEntity(tabId),
         preserveMovedFocus: from => {
           const state = get(), tab = state.tabs[from.tabId], layout = state.layouts[from.displayWorkspaceId]
           const group = layout?.groups.find(group => group.id === from.groupId)

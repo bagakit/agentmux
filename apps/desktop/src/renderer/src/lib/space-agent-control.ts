@@ -39,6 +39,7 @@ export type SpatialControlPorts = {
   notice(issue: AgentMuxSpatialIssue): void
   closing(tabId: string): boolean
   preserveMovedFocus?(from: AgentMuxSpaceAddress): void
+  recordRemovedTab?(tabId: string): void
 }
 
 class SpatialFailure extends Error {
@@ -528,6 +529,8 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       regionId: target.address.regionId, workspaceId: target.address.workspaceId, sessionId }
     const placement = applySpatialPlacement(ports.get(), topics, target, surface, from)
     if (from && !request.focus) ports.preserveMovedFocus?.(from)
+    // Record the known removal before patch synchronously captures the durable graph.
+    if (from && !Object.hasOwn(placement.tabs, from.tabId)) ports.recordRemovedTab?.(from.tabId)
     ports.patch(placement)
     report.to = target.address
     report.save = await ports.save(true)
