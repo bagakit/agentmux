@@ -2669,7 +2669,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setSurveyZoneSelection(selection) {
     const surveyZoneSelection = persistedSurveyZoneSelection(selection)
     // Re-emitting the current member preference is a refresh, not later navigation.
-    set(state => sameSpatialValue(state.surveyZoneSelection, surveyZoneSelection) ? state : { surveyZoneSelection })
+    if (sameSpatialValue(get().surveyZoneSelection, surveyZoneSelection)) return
+    set({ surveyZoneSelection })
+    void saveWorkbenchSelection(false)
   },
   setSurveyZoneCollected(zoneId, collected) {
     const state = get()
@@ -2684,6 +2686,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { [zoneId]: _removed, ...surveyCollectedZones } = state.surveyCollectedZones
       set({ surveyCollectedZones })
     }
+    // Membership is a discrete user action, not a drag that can wait for a trailing write.
+    void saveWorkbenchSelection(false)
     return true
   },
   setSurveyToolsOpen(surveyToolsOpen) { set({ surveyToolsOpen, workbenchNavigationInputPolicy: null, regionCaretFocus: null }) },

@@ -1,6 +1,7 @@
 import { surveyExplorationName } from '../lib/survey-exploration-name'
 import { spatialCatalog } from '../lib/space-agent-control'
 import { useLauncherState } from '../lib/launcher-state'
+import { sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation, AgentMuxSpatialSave, AgentMuxZoneFact } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
 import { ArrowUpRight, Bot, CircleHelp, FileText, Globe2, PanelsTopLeft, PanelLeftClose, PanelLeftOpen, NotebookPen, LoaderCircle, Plus, X } from 'lucide-react'
@@ -17,6 +18,7 @@ import { useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
+import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
 import { SurveyNoteCapture } from './SurveyNoteCapture'
 import { SurveyItemOptions } from './SurveyItemOptions'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -67,6 +69,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     subscribe: visible ? useAppStore.subscribe : () => () => {} }), [visible])
   const tabs = useStore(store, state => state.tabs)
   const layouts = useStore(store, state => state.layouts)
+  const sessions = useStore(store, state => state.sessions)
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
   const currentZone = catalog?.zones.find(zone => zone.zoneId === selection?.zoneId)
   const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? SCRATCH_WORKSPACE_ID : null)
@@ -169,11 +172,21 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   function activity(zone: AgentMuxZoneFact) {
     const surfaces = (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? workbenchSurfaces(tabs[id]!) : [])
     const browsers = surfaces.filter(surface => surface.kind === 'browser')
+    const operators = new Map<string, SelectorPresenceAgent>()
+    const sessionIndex = sessionPresentationById(sessions)
     const labels = browsers.map(browser => {
       const control = releasedBrowserRegionIds.has(browser.regionId) || unconfirmedBrowserRegionIds?.has(browser.regionId) || browser.nativeOwnerUnavailable || !browser.navigationId
         ? 'unknown' : browser.driving ? 'agent' : browser.activity?.control === 'human' ? 'human' : browser.activity ? 'idle' : 'unknown'
       const operation = browser.activity?.operation
       const operator = control === 'agent' && operation?.browserId === browser.browserId && operation.finishedAt === undefined && ['preparing', 'running', 'waiting'].includes(operation.phase) ? operation.operator : undefined
+      if (operator && operator.id !== 'agent:unknown') {
+        const candidate = sessionIndex.get(operator.id)
+        const session = candidate?.kind === 'agent' ? candidate : undefined
+        operators.set(operator.id, { key: operator.id, sessionId: operator.id, label: operator.name,
+          providerId: session?.providerId ?? operator.providerId ?? '', executorId: session?.executorId,
+          appearance: session ? config?.executors[session.executorId]?.avatar : undefined,
+          state: session?.status.state })
+      }
       return control === 'agent' ? `Agent operating${operator?.name ? ` · ${operator.name}` : ''}` : control === 'human' ? 'Human control' : control === 'idle' ? 'No active Agent operation' : 'Control unknown · restoring'
     })
     const kinds = new Set(labels)
@@ -183,8 +196,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const unknown = labels.some(label => label.startsWith('Control unknown'))
     const operating = labels.some(label => label.startsWith('Agent operating'))
     // Normal manual control is availability, not activity; keep its facts in Details.
-    const Icon = operating ? Bot : unknown ? CircleHelp : null
-    return { summary: Icon ? <span title={detail} aria-label={description}><Icon size={12} aria-hidden="true" /></span> : null,
+    const Icon = unknown ? CircleHelp : operating && operators.size === 0 ? Bot : null
+    return { summary: operators.size || Icon ? <span title={detail} aria-label={description}>
+      <SelectorPresence agents={[...operators.values()]} />
+      {Icon ? <Icon size={12} aria-hidden="true" /> : null}
+    </span> : null,
       details: <span>{description}{detail ? `\n${detail}` : ''}</span> }
   }
 
