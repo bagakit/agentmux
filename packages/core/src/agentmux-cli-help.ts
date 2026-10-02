@@ -1,5 +1,5 @@
 import { AGENTMUX_CLI_COMMANDS, type AgentMuxCliCommand } from './agentmux-cli-commands.js'
-import { AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE } from './agentmux-cli-browser-guide.js'
+import { AGENTMUX_BROWSER_PROGRAM_GUIDE, AGENTMUX_BROWSER_TASK_GUIDE, AGENTMUX_BROWSER_TARGET_GUIDE } from './agentmux-cli-browser-guide.js'
 import { browserPageCapabilityNames } from './browser-page-capability.js'
 import { AGENTMUX_SETTINGS_RESOURCE_GUIDE, AGENTMUX_TOOLKIT_GUIDE, AGENTMUX_GOAL_CREATE_GUIDE } from './agentmux-cli-resource-guide.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
@@ -95,7 +95,8 @@ export function agentMuxCommandHelp(path: string): string | null {
     : path === 'toolkit' || path.startsWith('toolkit.') ? AGENTMUX_TOOLKIT_GUIDE
     : path === 'settings' || path.startsWith('settings.') ? AGENTMUX_SETTINGS_RESOURCE_GUIDE
     : path === 'goal.create' ? AGENTMUX_GOAL_CREATE_GUIDE
-    : path === 'browser.task' || path.startsWith('browser.task.') ? AGENTMUX_BROWSER_TASK_GUIDE : ''
+    : path === 'browser.task' || path.startsWith('browser.task.') ? AGENTMUX_BROWSER_TASK_GUIDE
+    : (path === 'browser' || path.startsWith('browser.')) && path !== 'browser.run' ? AGENTMUX_BROWSER_TARGET_GUIDE : ''
   if (!exact) return `${path.replaceAll('.', ' ')}\n\n${list(selected)}\n\n${COMMON}\n\n${guide}`
   return `${exact.summary}\n\nUsage: ${syntax(exact)}\n\n${exact.details ?? ''}\n\n${COMMON}\n\n${guide}${path === 'browser.run' ? '\n\n' + AGENTMUX_BROWSER_PROGRAM_GUIDE : ''}`
 }

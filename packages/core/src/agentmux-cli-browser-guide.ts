@@ -3,6 +3,14 @@ import { browserPageCapabilityNames } from './browser-page-capability.js'
 const capabilityExamples = () => (['observe', 'act', 'wait'] as const)
   .flatMap(effect => browserPageCapabilityNames(effect).slice(0, 1)).map(name => `\`${name}\``).join(', ')
 
+export const AGENTMUX_BROWSER_TARGET_GUIDE = `First inspect the exact Tab/Region and read its typed Browser id with
+\`agentmux space inspect --tab TAB\` or \`agentmux space inspect --region REGION\`.
+Use \`agentmux browser targets\` to discover original available Browser targets.
+If the target is absent, unavailable or driving is refused, report that exact result.
+Do not guess another Browser or use GUI input to get around that result.
+Opening a Browser preserves the current Workbench selection and eligible input;
+explicit focus is a separate navigation action. Browser progress does not select another Tab.`
+
 export const AGENTMUX_BROWSER_TASK_GUIDE = `Read and run saved Browser task versions
 
 Read \`browser task assets --browser <id>\` to select an existing immutable version.
@@ -26,6 +34,8 @@ execution while preserving original progress. This does not reclaim human input.
 
 /** Original Browser program contract; command spelling follows the object surface. */
 export const AGENTMUX_BROWSER_PROGRAM_GUIDE = `Run a program in an open Browser
+
+${AGENTMUX_BROWSER_TARGET_GUIDE}
 
 Usage:
   agentmux browser run --browser <browser-id> [--operation-id <operation-id>] < program.js
