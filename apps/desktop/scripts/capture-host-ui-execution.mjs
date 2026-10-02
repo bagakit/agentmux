@@ -61,7 +61,7 @@ export async function captureHostUiExecution() {
     originalBusinessSessionMutation: false, remoteOwnerLifecycleAction: false,
     boundary: { actual: ['NewTabSurface and WorkspaceWorkbench', 'Store and RuntimeController',
       'production desktop-host connector', 'public SSH Hosted SDK', 'native GeminiCC and PTYs',
-      'real WorkspaceFiles', 'real durable CoreSpatial read/commit/onChange'],
+        'real WorkspaceFiles', 'real durable CoreSpatial read/commit/subscribe'],
       controlled: ['private configuration with registered QA projects', 'initial local display graph',
         'optional Git/browser/topic metadata and file observation', 'DOM input simulation',
         'final Focus presentation selection'], emptyHost: 'Menu-only candidate; never connects or owns a Session' } }
