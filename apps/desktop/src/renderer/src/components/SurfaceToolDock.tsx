@@ -40,6 +40,7 @@ import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { GitHistoryPanel } from './GitHistoryPanel'
+import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
 import { SidebarToggleChrome } from './TopRowChrome'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
@@ -107,9 +108,11 @@ function WorkspaceFilesTool({
         tabs[next]!.focus()
         tabs[next]!.click()
       }}>
+        <LiquidSelectionSurface selected={bottomView} active={visible} targetAttribute="data-git-view" />
         <button
           type="button"
           role="tab"
+          data-git-view="branches"
           aria-selected={bottomView === 'branches'}
           tabIndex={bottomView === 'branches' ? 0 : -1}
           className={bottomView === 'branches' ? 'selected' : ''}
@@ -120,6 +123,7 @@ function WorkspaceFilesTool({
         <button
           type="button"
           role="tab"
+          data-git-view="changes"
           aria-selected={bottomView === 'changes'}
           tabIndex={bottomView === 'changes' ? 0 : -1}
           className={bottomView === 'changes' ? 'selected' : ''}
@@ -130,6 +134,7 @@ function WorkspaceFilesTool({
         <button
           type="button"
           role="tab"
+          data-git-view="history"
           aria-selected={bottomView === 'history'}
           tabIndex={bottomView === 'history' ? 0 : -1}
           className={bottomView === 'history' ? 'selected' : ''}
