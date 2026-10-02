@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
 import UniqueID from '@tiptap/extension-unique-id'
-import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, type NodeViewProps } from '@tiptap/react'
-import { ChevronDown, CornerDownRight, Link2, List, IndentDecrease, IndentIncrease, Quote } from 'lucide-react'
+import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
+import { ChevronDown, CornerDownRight, Heading1, Link2, List, IndentDecrease, IndentIncrease, Quote } from 'lucide-react'
 import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, noteContentExtensions } from '../../../shared/note-content-schema'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -126,6 +126,14 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     if (typeof handleRef === 'function') { handleRef(handle); return () => { handleRef(null) } }
     if (handleRef) { handleRef.current = handle; return () => { handleRef.current = null } }
   }, [editor, handleRef])
+  const formatting = useEditorState({ editor, selector: ({ editor }) => ({
+    heading: editor?.isActive('heading', { level: 1 }) ?? false,
+    list: editor?.isActive('bulletList') ?? false,
+    quote: editor?.isActive('blockquote') ?? false,
+    indent: editor?.can().sinkListItem('listItem') ?? false,
+    outdent: editor?.can().liftListItem('listItem') ?? false,
+    from: editor?.state.selection.from, to: editor?.state.selection.to
+  }) })
   const backlinks = selected ? noteBacklinks(knowledge, { noteId: note.noteId, blockId: selected }) : []
   const candidates = useMemo(() => {
     if (!picker) return []
@@ -148,16 +156,21 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   }
   return <ReferenceContext.Provider value={{ knowledge, trail: [], onOpen }}><div className="note-editor" data-note-empty={note.content.content?.length === 1 && note.content.content[0]?.type === 'paragraph' && !note.content.content[0].content?.length}>
     <div className="note-editor__tools" role="toolbar" aria-label="Note block tools">
-      <button type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={15} /></button>
-      <button type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!editor?.can().sinkListItem('listItem')} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><IndentIncrease size={15} /></button>
-      <button type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!editor?.can().liftListItem('listItem')} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><IndentDecrease size={15} /></button>
-      <button type="button" className="note-tool" title="Quote" aria-label="Quote" onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote size={15} /></button>
-      <button type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
-        if (!editor || !foldId) return
-        if (folded.current.has(foldId)) folded.current.delete(foldId); else folded.current.add(foldId)
-        editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
-      }}><ChevronDown size={15} /></button>
-      <button type="button" className="note-tool note-tool--label" aria-expanded={picker} onClick={() => setPicker(value => !value)}><Link2 size={14} /> Reference block</button>
+      <div className="note-editor__tool-group" role="group" aria-label="Block style">
+        <button type="button" className="note-tool" title="Heading" aria-label="Heading" aria-pressed={formatting?.heading ?? false} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).run()}><Heading1 size={15} /></button>
+        <button type="button" className="note-tool" title="Bullet list" aria-label="Bullet list" aria-pressed={formatting?.list ?? false} onClick={() => editor?.chain().focus().toggleBulletList().run()}><List size={15} /></button>
+        <button type="button" className="note-tool" title="Quote" aria-label="Quote" aria-pressed={formatting?.quote ?? false} onClick={() => editor?.chain().focus().toggleBlockquote().run()}><Quote size={15} /></button>
+      </div>
+      <div className="note-editor__tool-group" role="group" aria-label="Block structure">
+        <button type="button" className="note-tool" title="Indent block" aria-label="Indent block" disabled={!formatting?.indent} onClick={() => editor?.chain().focus().sinkListItem('listItem').run()}><IndentIncrease size={15} /></button>
+        <button type="button" className="note-tool" title="Outdent block" aria-label="Outdent block" disabled={!formatting?.outdent} onClick={() => editor?.chain().focus().liftListItem('listItem').run()}><IndentDecrease size={15} /></button>
+        <button type="button" className="note-tool" title="Fold or unfold nested blocks" aria-label="Fold or unfold nested blocks" disabled={!foldId} aria-pressed={foldId ? folded.current.has(foldId) : false} onClick={() => {
+          if (!editor || !foldId) return
+          if (folded.current.has(foldId)) folded.current.delete(foldId); else folded.current.add(foldId)
+          editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
+        }}><ChevronDown size={15} /></button>
+      </div>
+      <button type="button" className="note-tool note-tool--label" title="Reference block" aria-label="Reference block" aria-expanded={picker} onClick={() => setPicker(value => !value)}><Link2 size={14} /><span>Reference block</span></button>
     </div>
     {picker ? <section className="note-reference-picker" aria-label="Choose an original block">
       <input aria-label="Find a Note block" placeholder="Find in loaded Notes…" value={query} onChange={event => setQuery(event.target.value)} />
@@ -168,7 +181,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         <button type="button" className="note-text-button" aria-label={`Embed ${source.location.workspaceId} · ${source.location.path} · ${block.blockId}`} onClick={() => insertReference(target, 'embed')}>Embed</button>
       </div>)}{!candidates.length ? <p className="note-scope">No matching block is confirmed in this scope.</p> : null}</div>
     </section> : null}
-    <EditorContent editor={editor} />
+    <div className="note-editor__body"><EditorContent editor={editor} /></div>
     <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>
       {selected ? backlinks.length ? backlinks.map(link => <button type="button" className="note-backlink" key={JSON.stringify([link.source.location.workspaceId, link.source.location.path, link.referenceId])}
         title={`${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`} aria-label={`Open ${link.source.location.workspaceId} · ${link.source.location.path} · ${link.blockId}`}

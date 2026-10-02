@@ -133,7 +133,7 @@ afterEach(() => {
 })
 async function renderApp() { await dom.render(<DesktopClientUiProvider><App /></DesktopClientUiProvider>) }
 async function saveReadingNote() {
-  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-note-capture button')].find(button => button.textContent?.includes('Save & open note'))!
+  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-note-capture button')].find(button => button.textContent?.includes('Save & open'))!
   expect(button).not.toBeNull(); await act(async () => button.click())
 }
 async function typeReadingNote(text: string) {

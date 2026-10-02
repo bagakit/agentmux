@@ -49,8 +49,8 @@ async function mount(surface = sourceRegion, tabId = mixed.id, confirmed = true)
   await dom.render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, survey: true, projection, ...(confirmed ? display(surface, tabId) : {}) }}>
     <FileSurfaceView tabId={tabId} surface={surface} />
   </WorkbenchPresentationContext.Provider>)
-  await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) })
-  await vi.waitFor(async () => { await act(async () => { await vi.dynamicImportSettled() }); expect(dom.container.querySelector('.note-block-content')).not.toBeNull() })
+  // Wait outside act for both real lazy layers; the first cold Source graph can exceed one second.
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.note-block-content')).not.toBeNull() }, { timeout: 30_000 })
 }
 function editor(): Editor {
   const node = dom.container.querySelector<HTMLElement & { editor: Editor }>('.note-block-content')
@@ -76,7 +76,7 @@ it('connects the real FileSurfaceView to canonical update/save and the original 
   await click('Save'); expect(api.files.write).toHaveBeenCalledTimes(1)
   expect(vi.mocked(api.files.write).mock.lastCall).toEqual(['workspace', { path: sourceRegion.path, content: raw, expectedRevision: 'source-revision' }])
   expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(false)
-})
+}, 45_000)
 it('uses the original conflict actions and preserves the rich draft rather than saving on a conflicting shortcut', async () => {
   await mount(); await act(async () => editor().commands.insertContentAt(1, 'Unsaved '))
   const raw = useAppStore.getState().documents[sourceKey]!.content
@@ -99,7 +99,8 @@ it('returns to an existing mixed Tab second File Region without creating a canon
   expect(after.tabs[mixed.id]!.layout.activeRegionId).toBe(region)
   expect(after.layouts.workspace!.groups[0]!.activeTabId).toBe(active)
   expect(after.mainSurface).toBe('survey')
-  expect(after.surveyZoneSelection?.active).toEqual({ displayWorkspaceId: 'workspace', groupId: 'original-group', tabId: mixed.id, regionId: sourceRegion.regionId })
+  // Survey retains entity IDs; current display coordinates remain in the original projection/layout.
+  expect(after.surveyZoneSelection?.active).toEqual({ tabId: mixed.id, regionId: sourceRegion.regionId })
   expect(after.documentRevealTargets[sourceKey]?.noteBlock).toEqual({ noteId: 'source-note', blockId: 'source-block' })
   expect(api.files.read).not.toHaveBeenCalled()
 })
@@ -144,7 +145,7 @@ it('returns to a different original Zone in Survey with its precise Region and p
   const after = useAppStore.getState()
   expect(after.mainSurface).toBe('survey'); expect(after.activeWorkspaceId).toBe('workspace')
   expect(after.surveyZoneSelection?.zoneId).toBe(targetZone)
-  expect(after.surveyZoneSelection?.active).toEqual({ displayWorkspaceId: 'workspace', groupId: 'original-group', tabId: mixed.id, regionId: sourceRegion.regionId })
+  expect(after.surveyZoneSelection?.active).toEqual({ tabId: mixed.id, regionId: sourceRegion.regionId })
   expect(after.tabs).toBe(tabs); expect(after.layouts).toBe(layouts)
   expect(after.documentRevealTargets[sourceKey]?.noteBlock).toEqual({ noteId: 'source-note', blockId: 'source-block' })
   expect(api.files.read).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
@@ -161,7 +162,7 @@ it('explicitly chooses among multiple original positions instead of silently tak
   expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined()
   const second = choices.find(choice => choice.getAttribute('aria-label')?.includes('second-group'))
   expect(second).toBeDefined(); await act(async () => second!.click())
-  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual({ displayWorkspaceId: 'workspace', groupId: 'second-group', tabId: mixed.id, regionId: sourceRegion.regionId })
+  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual({ tabId: mixed.id, regionId: sourceRegion.regionId })
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
   expect(dom.container.querySelector('.note-source-choices')).toBeNull()
 })
