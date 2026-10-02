@@ -757,6 +757,7 @@ export async function registerIpc(args: {
     sessionSnapshotPayload(await args.runtime.snapshot(config), args.environmentWarning, app.getPath('home'))
   ))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
+    if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     const result = await args.runtime.launchAgent(input, config)
     if (!event.sender.isDestroyed()) return result
     const primary = Object.assign(
@@ -857,15 +858,17 @@ export async function registerIpc(args: {
     operationId: string,
     condition: AgentPromptCondition,
     choice?: { allowUncertainTurn: true },
-    authorHuman?: boolean
+    authorHuman?: boolean,
+    agentMuxNote?: string
   ) => {
     let effectiveAuthorHuman = false
+    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     if (authorHuman === true) {
       assertManualPromptSenderTrusted(event.sender, args.window.webContents)
       effectiveAuthorHuman = true
     }
     pauseUserProgress(session, 'Paused for your message.')
-    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman)
+    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote)
   })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => {
     await args.runtime.submitMessage(session, message)
@@ -880,9 +883,10 @@ export async function registerIpc(args: {
   handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string) => {
     await args.runtime.setPosture(session, modeId)
   })
-  handle('sessions:resume', async (session: AgentSessionControl, prompt: string, operationId: string) => (
-    await args.runtime.resumeSession(session, prompt, operationId, config)
-  ))
+  handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) => {
+    if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote)
+  })
   handle('sessions:interrupt', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you interrupted the Agent.'); await args.runtime.interrupt(session) })
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)

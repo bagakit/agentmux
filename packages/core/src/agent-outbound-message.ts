@@ -73,6 +73,19 @@ export function composeOutboundMessage(input: { amux?: string; user?: string }):
   return segments.join('\n\n')
 }
 
+/** Compose explicit producer content and the original request for any existing Session. */
+export function composeAgentPrompt(
+  prompt: string | undefined,
+  agentMuxNote?: string
+): { text: string; systemContext?: string } {
+  const request = prompt?.trim() ? prompt : undefined
+  const context = agentMuxNote?.trim() ? agentMuxNote : undefined
+  return {
+    text: composeOutboundMessage({ ...(context ? { amux: context } : {}), ...(request === undefined ? {} : { user: request }) }),
+    ...(context ? { systemContext: context } : {})
+  }
+}
+
 /**
  * 启动 Prompt：把 AgentMux 要说的话（运行时引导 + 可选的 `agentMuxNote`，如 Scratch Topic 说明）
  * 署名进信封，用户的原始请求原样透传进 `user` 段。Agent 首条消息也走这里——其经过 Core 核验的来源头与原正文
@@ -101,11 +114,5 @@ export function composeAgentLaunchPrompt(
   const amux = amuxParts.join('\n\n')
   // Retain the generated system segment before wire formatting. Clients consume this fact;
   // an amux-looking string in the user's text never becomes a system message.
-  return {
-    text: composeOutboundMessage({
-      ...(amux ? { amux } : {}),
-      ...(userRequest === undefined ? {} : { user: userRequest })
-    }),
-    ...(amux ? { systemContext: amux } : {})
-  }
+  return composeAgentPrompt(userRequest, amux)
 }

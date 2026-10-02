@@ -757,6 +757,8 @@ export type AgentMuxAgentSession = {
       ownerInstanceId: string
       prompt: string
       plan: AgentPromptInputPlan
+      /** Producer facts frozen with the first wire; tags in user text never establish these. */
+      message?: AgentPromptMessageContent
     }
     acknowledged?: boolean
     notApplied?: boolean
@@ -781,6 +783,14 @@ export type AgentMuxAgentSession = {
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
   initialPrompt: 'not-requested' | 'confirmed' | 'unconfirmed' | 'unknown'
+}
+
+/** Original message segments and verified authors captured before Input dispatch. */
+export type AgentPromptMessageContent = {
+  userContent?: string
+  systemContext?: string
+  authorAgentSessionId?: string
+  authorHuman?: true
 }
 
 export type AgentTerminalHandshakeState = {

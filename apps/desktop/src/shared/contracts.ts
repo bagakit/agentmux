@@ -806,6 +806,8 @@ export type AgentLaunchInput = {
   agentSessionId?: string
   createOperationId?: string
   prompt?: string
+  /** Host-generated content, kept separate from the original request. */
+  agentMuxNote?: string
   /** Core-authenticated author of the original creation prompt. */
   initialMessage?: AgentMuxAgentCreateInput['initialMessage']
   /**
@@ -1559,7 +1561,7 @@ export type AgentMuxDesktopApi = {
     // prompt passes the SAME id so Core recognizes the replay (idempotent same-id continuation) instead
     // of gating it BUSY; a genuinely new prompt passes a fresh id. Omitting it lets the main process mint
     // a fresh one — used only by test callers, never by the UI, which always decides the id itself.
-    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn: true }, authorHuman?: boolean): Promise<void>
+    submitPrompt(session: AgentSessionControl, prompt: string, operationId: string, condition: AgentPromptCondition, choice?: { allowUncertainTurn: true }, authorHuman?: boolean, agentMuxNote?: string): Promise<void>
     submitMessage(session: AgentSessionControl, message: Omit<AgentMuxAgentMessageInput, 'agentSessionId'>): Promise<void>
     respondInteraction(
       session: AgentSessionControl,
@@ -1568,7 +1570,7 @@ export type AgentMuxDesktopApi = {
     // Set the Agent's live security posture in-band. The renderer sends the picked mode id; Core resolves
     // the Provider's declared keystroke and writes it over the PTY-input transport (bytes never cross IPC).
     setPosture(session: AgentSessionControl, modeId: string): Promise<void>
-    resume(session: AgentSessionControl, prompt: string, operationId: string): Promise<SessionSnapshot>
+    resume(session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string): Promise<SessionSnapshot>
     interrupt(session: SessionControl): Promise<void>
     resize(
       attachmentId: string,

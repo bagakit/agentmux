@@ -1065,7 +1065,16 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
   }
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
   return { run: runRef(source.run), ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
-    prompt: bytes(source.prompt), plan: input }
+    prompt: bytes(source.prompt), plan: input,
+    ...(source.message === undefined ? {} : { message: (() => {
+      const message = record(source.message, 'promptCompletionAdmission.intent.message')
+      return {
+        ...(message.userContent === undefined ? {} : { userContent: bytes(message.userContent) }),
+        ...(message.systemContext === undefined ? {} : { systemContext: bytes(message.systemContext) }),
+        ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'prompt message author') }),
+        ...(message.authorHuman === true ? { authorHuman: true as const } : {})
+      }
+    })() }) }
 }
 
 /** Public and durable Session facts share the same validation owner. */

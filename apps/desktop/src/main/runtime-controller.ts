@@ -756,7 +756,7 @@ export class RuntimeController {
           },
           injectAgentMuxGuide: executor.injectAgentMuxGuide,
           commandOverride: executor.command,
-          ...(preparedTopic ? { agentMuxNote: preparedTopic.prompt } : {}),
+          ...([preparedTopic?.prompt, request.agentMuxNote].some(note => note?.trim()) ? { agentMuxNote: [preparedTopic?.prompt, request.agentMuxNote].filter(note => note?.trim()).join('\n\n') } : {}),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),
@@ -1213,7 +1213,8 @@ export class RuntimeController {
     condition: AgentPromptCondition,
     automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     choice?: { allowUncertainTurn: true },
-    authorHuman?: boolean
+    authorHuman?: boolean,
+    agentMuxNote?: string
   ): Promise<void> {
     const capturedCondition = validateAgentPromptCondition(condition)
     await this.trackHostLifecycleOperation(control.hostId, async () => {
@@ -1238,6 +1239,7 @@ export class RuntimeController {
           operationId,
           ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
           prompt,
+          ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(authorHuman === true ? { authorHuman: true } : {})
         })
@@ -1327,7 +1329,8 @@ export class RuntimeController {
     control: Extract<SessionControl, { kind: 'agent' }>,
     prompt: string,
     operationId: string,
-    config: AppConfig
+    config: AppConfig,
+    agentMuxNote?: string
   ): Promise<SessionSnapshot> {
     return await this.trackHostLifecycleOperation(control.hostId, async () => {
       const client = await this.connectedClient(control.hostId)
@@ -1340,6 +1343,7 @@ export class RuntimeController {
         agentSessionId: control.agentSessionId,
         operationId,
         prompt,
+        ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
         args: executor.args,
         env: executor.env,
         commandOverride: executor.command

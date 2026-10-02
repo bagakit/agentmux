@@ -317,15 +317,15 @@ const api: AgentMuxPreloadApi = {
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source).then(unwrapSessionInputWriteResult),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData).then(unwrapSessionInputWriteResult),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
     setPosture: (session: AgentSessionControl, modeId: string) =>
       ipcRenderer.invoke('sessions:setPosture', session, modeId),
-    resume: (session: AgentSessionControl, prompt: string, operationId: string) =>
-      ipcRenderer.invoke('sessions:resume', session, prompt, operationId),
+    resume: (session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) =>
+      ipcRenderer.invoke('sessions:resume', session, prompt, operationId, agentMuxNote),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),

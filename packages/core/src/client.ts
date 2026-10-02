@@ -32,7 +32,7 @@ import {
 } from './hook-turn-phase.js'
 import { runBoundedReconnect } from './ctxmux-reconnect.js'
 import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-budget.js'
-import { composeAgentLaunchPrompt, composeOutboundMessage } from './agent-outbound-message.js'
+import { composeAgentLaunchPrompt, composeAgentPrompt } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
 import {
@@ -115,6 +115,7 @@ import type {
   AgentMuxAgentPasteInput,
   AgentMuxAgentWriteInput,
   AgentMuxAgentSession,
+  AgentPromptMessageContent,
   AgentMuxClientEvent,
   AgentMuxObservationOrigin,
   AgentMuxInteractionRequest,
@@ -196,6 +197,8 @@ export type AgentMuxTerminalCreateInput = {
 export type AgentMuxAgentResumeInput = {
   agentSessionId: string
   operationId: string
+  /** Explicit host-generated context, separate from original user text. */
+  agentMuxNote?: string
   prompt: string
   args?: readonly string[]
   env?: Readonly<Record<string, string>>
@@ -221,6 +224,8 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   operationId: string
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
+  /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
+  agentMuxNote?: string
   prompt: string
 }
 
@@ -2230,6 +2235,7 @@ export class AgentMuxClient {
       // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
       const composed = composeAgentLaunchPrompt(originalPrompt, input.injectAgentMuxGuide, input.agentMuxNote)
+      assertAgentPromptSize(composed.text)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
         provider.catalog, composed.text
       )
@@ -2351,7 +2357,11 @@ export class AgentMuxClient {
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
       const promptConfirmed = await this.deliverPostLaunchPrompt(
-        provider, readySession, run, lifecycleOperationId, deferredPrompt
+        provider, readySession, run, lifecycleOperationId, deferredPrompt, {
+          ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+          ...(originalPrompt?.trim() ? { userContent: originalPrompt } : {}),
+          ...(initialEnvelope?.senderSessionId ? { authorAgentSessionId: initialEnvelope.senderSessionId } : {})
+        }
       )
       if (composed.systemContext) {
         await this.recordMessageAfterSideEffect(
@@ -2598,10 +2608,8 @@ export class AgentMuxClient {
   }
 
   async resumeAgent(input: AgentMuxAgentResumeInput): Promise<AgentMuxAgentSession> {
-    const prompt = input.prompt.trim()
-    if (!prompt) throw new AgentMuxError('Agent resume prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
-    assertAgentPromptSize(prompt)
-    return await this.resumeAgentRun({ ...input, prompt })
+    if (!input.prompt.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent resume prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    return await this.resumeAgentRun(input)
   }
 
   private async resumeAgentRun(
@@ -2617,9 +2625,13 @@ export class AgentMuxClient {
         'STALE_AGENT_SESSION'
       )
     }
-    const trimmedPrompt = input.prompt?.trim()
-    // resume 是纯用户话：非空时经唯一出口产出，不加 amux 信封——用户原文逐字节透传。
-    const prompt = trimmedPrompt ? composeOutboundMessage({ user: trimmedPrompt }) : undefined
+    const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
+    assertAgentPromptSize(composed.text)
+    const prompt = composed.text || undefined
+    const message: AgentPromptMessageContent = {
+      ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+      ...(input.prompt?.trim() ? { userContent: input.prompt } : {})
+    }
     const lifecycleOperationId = agentLifecycleOperationIdentity(
       'resume',
       current.agentSessionId,
@@ -2797,19 +2809,10 @@ export class AgentMuxClient {
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
       // available when input confirmation fails; the retained history must not claim it was sent.
       const promptConfirmed = await this.deliverPostLaunchPrompt(
-        provider, readySession, run, lifecycleOperationId, deferredResumePrompt
+        provider, readySession, run, lifecycleOperationId, deferredResumePrompt, message
       )
-      if (prompt) {
-        await this.recordMessageAfterSideEffect(
-          readySession,
-          `prompt:${lifecycleOperationId}`,
-          'Resume prompt',
-          prompt,
-          Date.now(),
-          'user',
-          { status: promptConfirmed ? 'complete' : 'failed' }
-        )
-      }
+      await this.recordPromptMessageAfterSideEffect(readySession, lifecycleOperationId, 'Resume prompt', message,
+        promptConfirmed ? 'complete' : 'failed')
       return cloneSession(readySession)
     } catch (error) {
       operationError = error
@@ -3036,10 +3039,16 @@ export class AgentMuxClient {
         !Number.isSafeInteger(input.expectedInputByte) || input.expectedInputByte < 0)) {
       throw new AgentMuxError('Automatic prompt admission requires its completion and finite input fence together.', 'INVALID_AGENT_PROMPT')
     }
-    if (!content.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
-    assertAgentPromptSize(content)
-    // Authenticated message sources were rendered by submitAgentMessage; manual text stays byte-for-byte.
-    const outbound = composeOutboundMessage({ user: content })
+    if (!content.trim() && !input.agentMuxNote?.trim()) throw new AgentMuxError('Agent prompt cannot be empty.', 'INVALID_AGENT_PROMPT')
+    // Producer facts come from explicit input, never by parsing the user's string.
+    const composed = composeAgentPrompt(content, input.agentMuxNote)
+    const outbound = composed.text
+    assertAgentPromptSize(outbound)
+    const message: AgentPromptMessageContent = {
+      ...(content.trim() ? { userContent: content } : {}),
+      ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+      ...(authorAgentSessionId ? { authorAgentSessionId } : input.authorHuman === true ? { authorHuman: true } : {})
+    }
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
     // 而 `[?u` 是 codex 一次性的启动输出，对一个几分钟前启动的 run 早已不可达，于是一旦拦在
@@ -3052,25 +3061,12 @@ export class AgentMuxClient {
     }
     const plan = this.providers.get(session.providerId).planPromptInput(outbound)
     const renderObservation = new AbortController()
-    await this.serializeAgentInput(session, async (current, run) => {
-      await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte)
+    const delivered = await this.serializeAgentInput(session, async (current, run) => {
+      return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, message)
     }, renderObservation)
-    await this.recordMessageAfterSideEffect(
-      session,
-      `prompt:${operationId}`,
-      'Prompt',
-      outbound,
-      Date.now(),
-      'user',
-      {
-        ...(authorAgentSessionId
-          ? { authorAgentSessionId }
-          : input.authorHuman === true
-            ? { authorHuman: true }
-            : {})
-      }
-    )
+    if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+    await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
   }
 
   /** Persist the original creation transport, without turning missing receipts into another Input. */
@@ -4132,6 +4128,22 @@ export class AgentMuxClient {
     }
   }
 
+  private async recordPromptMessageAfterSideEffect(
+    session: AgentMuxAgentSession,
+    operationId: string,
+    title: string,
+    message: AgentPromptMessageContent,
+    status: 'complete' | 'failed' = 'complete'
+  ): Promise<void> {
+    const now = Date.now()
+    if (message.systemContext) await this.recordMessageAfterSideEffect(session, `system-context:${operationId}`,
+      'AgentMux context', message.systemContext, now, 'agentmux', { status })
+    if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
+      title, message.userContent, now, 'user', { status,
+        ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
+        ...(message.authorHuman ? { authorHuman: true } : {}) })
+  }
+
   private async recordMessageAfterSideEffect(
     session: AgentMuxAgentSession,
     itemId: string,
@@ -4192,7 +4204,8 @@ export class AgentMuxClient {
     session: AgentMuxAgentSession,
     run: CtxmuxAdapterRun,
     lifecycleOperationId: string,
-    text: string
+    text: string,
+    message: AgentPromptMessageContent
   ): Promise<boolean> {
     if (!text.trim()) return true
     try {
@@ -4217,7 +4230,9 @@ export class AgentMuxClient {
           undefined,
           undefined,
           false,
-          renderObservation.signal
+          renderObservation.signal,
+          undefined,
+          message
         )
       }, renderObservation)
       return true
