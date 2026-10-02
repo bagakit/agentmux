@@ -45,6 +45,23 @@ async function enter(editor: Editor, pos: number) {
 }
 
 describe('actual rich Note identity and controlled content', () => {
+  it('formats a heading through the visible tools and reflects its current style without replacing the original block', async () => {
+    const { editor, changes } = await mount()
+    const heading = host.querySelector<HTMLButtonElement>('[aria-label="Heading"]')!
+    expect(heading).not.toBeNull(); expect(heading.getAttribute('aria-pressed')).toBe('false')
+    await act(async () => heading.click())
+    expect(editor.getJSON().content![0]!.type).toBe('heading')
+    expect(heading.getAttribute('aria-pressed')).toBe('true')
+    expect(semanticIds(editor)).toEqual(['source-block'])
+    const saved = readNoteDocument(changes.mock.lastCall![0])
+    expect(saved.status).toBe('valid')
+    if (saved.status === 'valid') expect(saved.note.noteId).toBe(source.noteId)
+    await act(async () => heading.click())
+    expect(editor.getJSON().content![0]!.type).toBe('paragraph')
+    expect(heading.getAttribute('aria-pressed')).toBe('false')
+    expect(editor.getText()).toBe('Original finding')
+    expect(semanticIds(editor)).toEqual(['source-block'])
+  })
   it.each([1, 5, 17])('splits with actual Enter at %i, keeps the original ID and restores exact undo/redo identities', async pos => {
     const { editor, changes } = await mount()
     expect(semanticIds(editor)).toEqual(['source-block'])
