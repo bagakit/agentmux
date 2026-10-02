@@ -304,6 +304,7 @@ const store: AgentMuxAgentSessionStore = {
   async load() { return [] },
   async loadRetiredRuns() { return [] },
   async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
+  async confirmDurability() { throw new Error('Read-only Store fixture cannot confirm a write') },
   async loadRetiredAgentSessions() { return [] },
   async loadReopenCorrelations() { return [] },
   async compareAndSwap() {},
@@ -419,6 +420,7 @@ describe('RuntimeController configuration transaction', () => {
 
   it('waits for the original Host handshake before reading the Provider catalog', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => null) })
     const handshake = deferred<void>()
     const catalog = new AgentProviderRegistry().catalog()
     let confirmed = false
@@ -444,6 +446,7 @@ describe('RuntimeController configuration transaction', () => {
 
   it('retains the original Host and working input when the Provider catalog handshake fails', async () => {
     const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    Object.assign(client, { runtimeOwnerIdentity: vi.fn(() => null) })
     const host = controller.executionHost('local'), originalSession = client.agentSession()
     const failure = new AgentMuxError('The original Host observation is unavailable.', 'CONTROL_UNAVAILABLE')
     client.connect.mockRejectedValueOnce(failure)

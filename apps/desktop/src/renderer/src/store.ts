@@ -16,7 +16,7 @@ import type { EditorRegionMode } from './lib/file-region-presentation'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
-import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext } from './lib/space-agent-control'
+import { executeSpatialControl, spatialCatalog, createSpatialZone, zoneContext, type SpatialControlOptions } from './lib/space-agent-control'
 import { executeWorkfaceAgentView } from './lib/workface-agent-view'
 import { executeWorkfaceRegionSwap } from './lib/workface-region-swap'
 import { executeWorkfaceFileOpen } from './lib/workface-file-open'
@@ -698,7 +698,8 @@ type AppState = {
   activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
   executeControl(
     request: AgentMuxControlRequest,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    options?: SpatialControlOptions
   ): Promise<AgentMuxControlResult>
   selectSession(id: string, tabGroupId?: string): void
   createWorkbenchZone(input: { workspaceId: string; spaceIds: readonly string[] }): Promise<{ zone: AgentMuxZoneFact; save: AgentMuxSpatialSave; issues: AgentMuxSpatialIssue[] }>
@@ -1650,30 +1651,92 @@ async function enqueueFileSave(
   }
 }
 
-type SessionMembershipResync = {
-  events: Array<{
-    event: RuntimeEvent
-    pendingLaunchAgentSessionId: string | null
-  }>
+type BufferedSessionEvent = {
+  event: RuntimeEvent
+  pendingLaunchAgentSessionId: string | null
+  sequence: number
+}
+type SessionMembershipEventBuffer = {
+  events: BufferedSessionEvent[]
+  // Replacement facts are bounded by the Hosts/Sessions actually observed, not output
+  // volume or historical Run generations. Timeline mutations need their canonical reader.
+  retainedFacts: Map<string, BufferedSessionEvent>
+  timelineGaps: Set<string>
+  endpointWarnings: Map<string, { warning: RuntimeEndpointWarning | null; restored: boolean }>
   overflowed: boolean
+  sequence: number
+}
+type SessionMembershipResync = SessionMembershipEventBuffer & {
   recoverSavedAgents: boolean
   restoredHostIds: Set<string>
   startupNotice: ErrorNoticeContext | null
+  cancelDelay: (() => void) | null
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
 let regionCaretFocusNonce = 0
 let sessionMembershipResync: SessionMembershipResync | null = null
 let runtimeSubscriptionCount = 0
 
+function sessionMembershipEventBuffer(): SessionMembershipEventBuffer {
+  return { events: [], retainedFacts: new Map(), timelineGaps: new Set(), endpointWarnings: new Map(), overflowed: false, sequence: 0 }
+}
+
+function sessionEventAgentId(event: RuntimeEvent): string | null {
+  const core = event.event
+  if (core.type === 'agent-session') return core.session.agentSessionId
+  if (core.type === 'interaction') return core.request.agentSessionId
+  return 'agentSessionId' in core ? core.agentSessionId ?? null : null
+}
+
 function enqueueSessionMembershipEvent(
-  entry: SessionMembershipResync,
+  entry: SessionMembershipEventBuffer,
   event: RuntimeEvent,
   pendingLaunchAgentSessionId: string | null = null
 ): void {
-  entry.events.push({ event, pendingLaunchAgentSessionId })
+  if (event.endpointWarning !== undefined) entry.endpointWarnings.set(event.hostId, {
+    warning: event.endpointWarning, restored: event.event.type === 'connection-state' && event.event.state === 'restored'
+  })
+  entry.events.push({ event, pendingLaunchAgentSessionId, sequence: ++entry.sequence })
   if (entry.events.length <= MAX_SESSION_MEMBERSHIP_EVENTS) return
-  entry.events.shift()
+  const dropped = entry.events.shift()!
+  const core = dropped.event.event
   entry.overflowed = true
+  if (core.type === 'agent-timeline') {
+    entry.timelineGaps.add(core.agentSessionId)
+  } else if (core.type !== 'terminal-output' && core.type !== 'terminal-snapshot' && core.type !== 'terminal-resized') {
+    const identity = sessionEventAgentId(dropped.event) ?? ('run' in core ? core.run.runId : null)
+    entry.retainedFacts.set(JSON.stringify([dropped.event.hostId, identity, core.type]), dropped)
+  }
+}
+
+function resetSessionMembershipRead(entry: SessionMembershipEventBuffer): void {
+  // The next canonical cut covers facts received before the read. A dropped timeline
+  // mutation still needs explicit history compensation, even if its Agent went quiet.
+  entry.events.length = 0
+  entry.retainedFacts.clear()
+  entry.endpointWarnings.clear()
+  entry.overflowed = false
+}
+
+function drainSessionMembershipEvents(entry: SessionMembershipEventBuffer): BufferedSessionEvent[] {
+  const events = [...entry.retainedFacts.values(), ...entry.events].sort((a, b) => a.sequence - b.sequence)
+  entry.events.length = 0
+  entry.retainedFacts.clear()
+  return events
+}
+
+function cancelSessionMembershipResync(): void {
+  const entry = sessionMembershipResync
+  sessionMembershipResync = null
+  entry?.cancelDelay?.()
+}
+
+function delaySessionMembershipRead(entry: SessionMembershipResync, milliseconds: number): Promise<void> {
+  return new Promise(resolve => {
+    const finish = () => { clearTimeout(timer); entry.cancelDelay = null; resolve() }
+    const timer = setTimeout(finish, milliseconds)
+    entry.cancelDelay = finish
+  })
 }
 
 function runtimeEndpointWarningsAfterEvent(
@@ -1735,13 +1798,15 @@ function startSessionMembershipResync(
     return
   }
   const entry: SessionMembershipResync = {
-    events: event ? [{ event, pendingLaunchAgentSessionId: null }] : [],
-    overflowed: false,
+    ...sessionMembershipEventBuffer(),
+    cancelDelay: null,
     recoverSavedAgents: options.recoverSavedAgents === true,
     restoredHostIds: new Set(options.restoredHostId ? [options.restoredHostId] : []),
     startupNotice
   }
+  if (event) enqueueSessionMembershipEvent(entry, event)
   sessionMembershipResync = entry
+  let retryDelay = 50
   const attemptedStartupRecovery = new Set<string>()
   void (async () => {
     try {
@@ -1749,15 +1814,18 @@ function startSessionMembershipResync(
         // Everything already queued happened before this snapshot and is covered by its
         // canonical baseline. Only events that arrive while the snapshot is in flight
         // need ordered replay afterward.
-        entry.events.length = 0
-        entry.overflowed = false
+        resetSessionMembershipRead(entry)
         const snapshot = await api.sessions.snapshot()
-        if (entry.overflowed) continue
+        if (sessionMembershipResync !== entry) return
         let historySources: readonly AgentSessionHistoryDescriptor[] = []
         if (entry.startupNotice?.startupSessionSnapshot) {
           try { historySources = await api.sessions.historySources() }
           catch { /* A failed metadata read cannot settle the original unknown-facts notice. */ }
         }
+        if (sessionMembershipResync !== entry) return
+        // Recheck after the metadata await too. Loss requires another canonical cut,
+        // but cannot discard the useful facts from this completed read.
+        const readOverflowed = entry.overflowed
         // A cold-start observation may have contained no usable Session facts. The saved shell is
         // already visible now; admit its later canonical candidates through the same recovery
         // policy and action as ordinary startup, without another initialize or lifecycle owner.
@@ -1770,13 +1838,15 @@ function startSessionMembershipResync(
             ? [{ ...session, agentSessionId: session.id, run: session.control.run }]
             : [])
         ].filter((candidate) => savedSessionIds.has(candidate.agentSessionId)) : []
-        const events = entry.events.splice(0)
+        const events = drainSessionMembershipEvents(entry)
         const restoredDuringRead = new Set(events.flatMap(({ event }) => event.event.type === 'connection-state' && event.event.state === 'restored' ? [event.hostId] : []))
-        let membershipGap = false
-        const timelineGaps = new Set<string>()
+        let membershipGap = readOverflowed
+        const timelineGaps = new Set(entry.timelineGaps)
+        entry.timelineGaps.clear()
         useAppStore.setState((state) => {
           const protectedAgentSessionIds = new Set(events.flatMap((pending) => (
-            pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId] : []
+            pending.pendingLaunchAgentSessionId ? [pending.pendingLaunchAgentSessionId]
+              : sessionEventAgentId(pending.event) ? [sessionEventAgentId(pending.event)!] : []
           )))
           let projected = reduceAgentMembershipSnapshot(state, snapshot, protectedAgentSessionIds)
           projected = reduceTerminalMembershipSnapshot(projected, snapshot)
@@ -1812,7 +1882,7 @@ function startSessionMembershipResync(
           const notice = entry.startupNotice
           const source = notice?.startupSessionSnapshot
           let resolvedStartupNotice: Partial<AppState> = {}
-          if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0) {
+          if (source && state.errorNoticeContext === notice && source.sessionIds.length > 0 && !readOverflowed) {
             const currentReferences = persistedSessionSurfaceIds(projectPersistedWorkbench(projected))
             const retiredReferences = retiredHistoryReferenceIds(historySources, projected.tabs, state.config)
             const unresolved = source.sessionIds.filter(id => currentReferences.has(id) && !retiredReferences.has(id)
@@ -1834,9 +1904,15 @@ function startSessionMembershipResync(
           for (const session of snapshot.sessions) {
             if (!runtimeSnapshotHostUnavailable(snapshot, session.hostId)) reconciled = reconcileDeliveredSteers(reconciled, session.id)
           }
-          const runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
+          let runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
             pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
               ? warnings : runtimeEndpointWarningsAfterEvent(warnings, pending.event), snapshot.runtimeEndpointWarnings ?? [])
+          for (const [hostId, { warning, restored }] of entry.endpointWarnings) {
+            if (restored && warning === null) continue
+            runtimeEndpointWarnings = (runtimeEndpointWarnings ?? []).filter(item => item.hostId !== hostId)
+            if (warning) runtimeEndpointWarnings.push(warning)
+          }
+          entry.endpointWarnings.clear()
           return { ...reconciled, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
         for (const pending of events) {
@@ -1857,6 +1933,7 @@ function startSessionMembershipResync(
           if (decision.kind !== 'resume') continue
           attemptedStartupRecovery.add(candidate.agentSessionId)
           await useAppStore.getState().recoverSession(candidate.agentSessionId)
+          if (sessionMembershipResync !== entry) return
         }
         for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) {
           const current = useAppStore.getState(), session = current.sessions.find((item) => item.id === sessionId)
@@ -1878,6 +1955,9 @@ function startSessionMembershipResync(
         // Recovery above can publish events while its public API call is pending. Drain those
         // queued facts before releasing this resync owner, just as events during snapshot reads.
         if (!membershipGap && entry.events.length === 0 && !entry.overflowed) return
+        // One owner/one read, with a yield and capped backoff under sustained pressure.
+        await delaySessionMembershipRead(entry, retryDelay)
+        retryDelay = Math.min(1000, retryDelay * 2)
       }
     } catch (error) {
       // A best-effort retry launched after an initial startup outage must not replace the richer
@@ -2328,6 +2408,14 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
   return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
 }
+
+/** Admit only the chosen recipient's correlation to the existing intent owner before queue input. */
+export async function retainRecoveryMessageIntent(binding: SpatialRequestBinding): Promise<AgentMuxSpatialSave | null> {
+  if (binding.operation !== 'agent.message' || binding.createAgent || !binding.recoveryRecipient || !binding.recovery) throw new Error('An exact recovery message reference is required.')
+  if (useAppStore.getState().spatialRequests[binding.requestId]) return null
+  useAppStore.setState(state => ({ spatialRequests: { ...state.spatialRequests, [binding.requestId]: binding } }))
+  return await saveWorkbenchSelection(false)
+}
 function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
 }
@@ -2754,17 +2842,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (!api.control || typeof api.control.onRequest !== 'function') {
       throw new Error('AgentMux Control API is unavailable')
     }
-    const pendingSessionEvents: RuntimeEvent[] = []
-    let sessionEventBufferOverflowed = false
+    const pendingSessionEvents = sessionMembershipEventBuffer()
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
     const disposeSessions = api.sessions.onEvent((event) => {
       if (booting) {
-        pendingSessionEvents.push(event)
-        if (pendingSessionEvents.length > 256) {
-          pendingSessionEvents.shift()
-          sessionEventBufferOverflowed = true
-        }
+        enqueueSessionMembershipEvent(pendingSessionEvents, event)
         return
       }
       get().applyEvent(event)
@@ -2791,6 +2874,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeCoreSpatial?.();disposeCoreSpatial=null
       if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
+      cancelSessionMembershipResync()
       disposeSessions()
       disposeBrowsers()
       disposeControl()
@@ -2993,12 +3077,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       // A previous process's unclaimed View marker is not a current Stop intent.
       // Keep observed Runs discoverable; only an exact, current cancellation owns cleanup.
-      while (sessionEventBufferOverflowed) {
-        pendingSessionEvents.length = 0
-        sessionEventBufferOverflowed = false
+      // One compensating read keeps the existing quiet-overflow behavior. Sustained
+      // Runtime traffic cannot hold the original durable workface behind another read.
+      if (pendingSessionEvents.overflowed) {
+        resetSessionMembershipRead(pendingSessionEvents)
         const refreshedSnapshot = await readCanonicalSnapshot('Runtime Session snapshot during startup reconciliation')
-        if (!refreshedSnapshot) break
-        snapshot = refreshedSnapshot
+        if (refreshedSnapshot) snapshot = refreshedSnapshot
       }
       // A canonical read already adopted during startup can finish this producer before publication.
       // An incomplete read keeps the original scope for the existing membership resync below.
@@ -3007,7 +3091,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // that committed fact; use the existing Store identity, with no second configuration cache.
       const config = persistedState.config !== configBeforeRead && persistedState.config !== null
         ? persistedState.config : configResult.value
-      if (emptySessionSnapshotWarning && snapshotVerified && startupSnapshotConfirmsSessions(
+      if (emptySessionSnapshotWarning && snapshotVerified && !pendingSessionEvents.overflowed && startupSnapshotConfirmsSessions(
         snapshot, [...persistedSessionIds], persistedState.restoredWorkbench?.tabs ?? {}, config
       )) {
         emptySessionSnapshotWarning = null
@@ -3092,6 +3176,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } : null,
         errorDismissed: false
       })
+      // Publication releases the boot buffer before optional spatial/browser work awaits.
+      // Latest replacement facts survive a noisy neighbor; truncated timelines use Core.
+      booting = false
+      for (const pending of drainSessionMembershipEvents(pendingSessionEvents)) get().applyEvent(pending.event)
+      for (const sessionId of pendingSessionEvents.timelineGaps) void get().resyncTimeline(sessionId)
+      for (const [hostId, { warning }] of pendingSessionEvents.endpointWarnings) {
+        set(state => {
+          const warnings = (state.runtimeEndpointWarnings ?? []).filter(item => item.hostId !== hostId)
+          if (warning) warnings.push(warning)
+          return { runtimeEndpointWarnings: warnings, sessions: projectRuntimeEndpointSessions(state.sessions, warnings) }
+        })
+      }
+      if (pendingSessionEvents.overflowed || !snapshotVerified || emptySessionSnapshotWarning) {
+        startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: !snapshotVerified || Boolean(emptySessionSnapshotWarning) })
+      }
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
@@ -3149,9 +3248,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!config.workspaces.some((workspace) => workspace.id === workspaceId)) continue
         void api.files.observe(workspaceId, path).then(() => get().refreshDocument(workspaceId, path)).catch((error) => get().reportError(error))
       }
-      booting = false
       for (const sessionId of Object.keys(get().agentSteerQueues)) void get().flushAgentSteerQueue(sessionId)
-      for (const event of pendingSessionEvents) get().applyEvent(event)
       for (const event of pendingBrowserEvents) get().applyBrowserEvent(event)
       // Cold-start browser rehydration. `restoreTab` is a pure presentation projection that emits a
       // neutral browser shell (url/title from disk, transient fields defaulted); the WebContentsView
@@ -3209,7 +3306,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
       // Agent recovery candidates remain protected by the same reducer used for event-driven resync.
-      if (!snapshotVerified || emptySessionSnapshotWarning) startSessionMembershipResync(undefined, { reportFailure: false, recoverSavedAgents: true })
       return () => {
         disposeRuntimeSubscriptions()
       }
@@ -3454,7 +3550,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         : {})
     }))
   },
-  async executeControl(request, signal) {
+  async executeControl(request, signal, options) {
     if (isToolkitRequest(request)) {
       throw Object.assign(new Error('Toolkit requests belong to the Main execution owner.'), { code: 'CONTROL_FAILED' })
     }
@@ -3560,7 +3656,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         },
         notice: notice => get().reportError(new Error(`${notice.message} ${notice.recovery}`)),
         closing: tabId => !workbenchViewCloseAllowsView(get().closingWorkbenchViews, tabId)
-      }, request, signal)
+      }, request, signal, options)
     }
     const input = () => {
       const state = get()

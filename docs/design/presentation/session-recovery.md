@@ -129,6 +129,8 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共用同一套
 - 动效仅是短促渐显与轻微位移，不缩放文字、改变布局或反复呼吸；减少动态效果偏好下静态完整。小窗与矮窗弹层有界，必要时内部滚动，对象、正文、输入与所有动作都能到达。
 
 
+原 Session 的恢复动作沿[三种显式动作](../behavior/session-recovery.md#恢复原会话接手与分析)呈现：Restore original、Take over 与 Analyze 保持紧凑的一组，前者继续原身份，后两者的弹层清楚展示原 Session／Host、所选 Executor 或 Mote 输入及历史来源。选择与取消不表示提交；未知回复原位保留同一请求的检查动作，不能用新建成功措辞覆盖未确认结果。明暗主题、窄窗与内部滚动复用上面的任务弹层品质。
+
 ## 启动与恢复的分量分开
 
 用户确认「新版当前启动页不错，就是要更好一点」，希望保留其构图并增加鼠标交互；restore 需「另一种简约的酷法」，避免既与启动页相同又「过于素了」。加载与恢复面的排版要有分量，减少不重要的冗余信息；阶段、事实、信息资格与 owner 仅见交互 SSOT[《启动与 restoring 的不同重量》](../behavior/session-recovery.md#启动与-restoring-的不同重量)。

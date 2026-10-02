@@ -1,5 +1,6 @@
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeAgentSession } from './agent-session-store.js'
@@ -117,6 +118,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break
+      case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['session', 'status', 'displayName', 'unavailable'])
         const session = parseRpcAgentSession(p.session), target = method === 'whoami' ? { kind: 'self' } : record(input.target)

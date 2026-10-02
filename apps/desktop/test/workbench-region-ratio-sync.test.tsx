@@ -148,6 +148,42 @@ it('keeps real layout preview during a drag and commits its final intent through
   expect(observed.setLayouts).toEqual([])
 })
 
+it('keeps hidden real Panel feedback out of durable ratios and restores visible resizing without replacing the leaf', async () => {
+  await firstSplit()
+  const group = panelGroup(), content = leaf(), owner = (content as HTMLElement & { leafOwner: object }).leafOwner
+  const original = useAppStore.getState(), sessions = original.sessions, drafts = original.agentComposerDrafts
+  const run = sessions[0]!.control.run, lifecycle = { mounts: observed.mounts, unmounts: observed.unmounts }
+  const writes = vi.spyOn(original, 'updateRegionSplitRatio')
+  await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId, visible: false })))
+  const handleId = group.element.querySelector<HTMLElement>(':scope > .workbench-region-resize-handle')!.dataset.panelResizeHandleId!
+  expect(group.element.querySelector<HTMLElement>(':scope > .workbench-region-resize-handle')!.dataset.panelResizeHandleEnabled).toBe('false')
+  // The real library can publish layout without a user drag while its retained host is hidden.
+  await act(async () => group.handle.setLayout([70, 30]))
+  expect(group.handle.getLayout()).toEqual([70, 30])
+  expect(ratio()).toBe(0.5)
+  expect(useAppStore.getState().tabs.original).toBe(original.tabs.original)
+  expect(writes).not.toHaveBeenCalled()
+
+  await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId, visible: true })))
+  expect(panelGroup().element).toBe(group.element)
+  expect(group.handle.getLayout()).toEqual([50, 50])
+  expect(writes).not.toHaveBeenCalled()
+  const onDragging = observed.dragging.get(handleId)
+  expect(onDragging).toBeDefined()
+  await act(async () => onDragging!(true))
+  await act(async () => group.handle.setLayout([70, 30]))
+  expect(ratio()).toBe(0.5)
+  await act(async () => onDragging!(false))
+  expect(ratio()).toBe(0.7)
+  expect(writes).toHaveBeenCalledTimes(1)
+  expect(leaf()).toBe(content)
+  expect((leaf() as HTMLElement & { leafOwner: object }).leafOwner).toBe(owner)
+  expect({ mounts: observed.mounts, unmounts: observed.unmounts }).toEqual(lifecycle)
+  expect(useAppStore.getState().sessions).toBe(sessions)
+  expect(useAppStore.getState().sessions[0]!.control.run).toBe(run)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+})
+
 it('uses the same real Panel synchronization for the adjacent Tab Group branch', async () => {
   const other = createWorkbenchTab('other', { kind: 'launcher', regionId: 'other-region', workspaceId })
   await act(async () => useAppStore.setState(state => ({ tabs: { ...state.tabs, other }, layouts: { ...state.layouts, [workspaceId]: addTabPlacement(state.layouts[workspaceId]!, 'original-group', 'other')! } })))

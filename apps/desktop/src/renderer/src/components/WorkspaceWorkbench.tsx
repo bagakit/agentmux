@@ -946,8 +946,9 @@ function WorkbenchBrowserPresentationSlots({ tab, target, node }: { tab: Workben
 }
 
 /** Project the Store's accepted ratio into the existing PanelGroup, leaving drag commits with its owner. */
-function usePersistedSplitLayout(ratio: number, dragging: boolean) {
+function usePersistedSplitLayout(ratio: number, dragging: boolean, visible: boolean) {
   const groupRef = useRef<ImperativePanelGroupHandle>(null)
+  // Showing a retained branch restores durable sizes after hidden local layout feedback.
   useLayoutEffect(() => {
     if (dragging) return
     const group = groupRef.current
@@ -957,7 +958,7 @@ function usePersistedSplitLayout(ratio: number, dragging: boolean) {
     // The library rounds percentages; ignore only numerical dust in this visible projection.
     if (current.length === 2 && current.every((size, index) => Math.abs(size - sizes[index]!) < 1e-6)) return
     group.setLayout(sizes)
-  }, [ratio, dragging])
+  }, [ratio, dragging, visible])
   return groupRef
 }
 
@@ -988,14 +989,16 @@ function WorkbenchRegionBranch({
   const commitRef = useRef((ratio: number) => (
     updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
   ))
-  commitRef.current = (ratio) => updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
+  commitRef.current = (ratio) => {
+    if (surfaceVisible) updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
+  }
   const committerRef = useRef<SplitRatioCommitter | null>(null)
   if (committerRef.current === null) {
     committerRef.current = new SplitRatioCommitter(node.ratio, (ratio) => commitRef.current(ratio))
   }
   const committer = committerRef.current
   committer.synchronizePersistedRatio(node.ratio)
-  const groupRef = usePersistedSplitLayout(node.ratio, dragging)
+  const groupRef = usePersistedSplitLayout(node.ratio, dragging, surfaceVisible)
   return (
     <PanelGroup
       ref={groupRef}
@@ -1398,7 +1401,7 @@ function SplitBranch({
   }
   const committer = committerRef.current
   committer.synchronizePersistedRatio(ratio)
-  const groupRef = usePersistedSplitLayout(ratio, dragging)
+  const groupRef = usePersistedSplitLayout(ratio, dragging, surfaceVisible)
   return (
     <PanelGroup
       ref={groupRef}

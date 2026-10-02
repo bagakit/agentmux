@@ -148,6 +148,7 @@ type NativeParams = AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParamet
   whoami: Record<string, never>
   'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
+  'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadInput
   'agent.reopen': Parameters<AgentMuxClient['reopenAgent']>[0]
   'agent.reopen.check': Parameters<AgentMuxClient['reconcileAgentReopen']>[0]
   'agent.role.ls': { workspacePath?: string }
@@ -179,6 +180,7 @@ type NativeResult = AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap 
   'agent.ls': { sessions: Awaited<ReturnType<AgentMuxClient['statusAgent']>>[];
     errors: Array<{ agentSessionId: string | null; hostId?: string; code: string; message: string }> }
   'agent.inspect': AgentMuxRpcAgentInspection
+  'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadPage
   'agent.reopen': { session: Awaited<ReturnType<AgentMuxClient['reopenAgent']>> }
   'agent.reopen.check': { session: Awaited<ReturnType<AgentMuxClient['reconcileAgentReopen']>> }
   'agent.role.ls': { bindings: AgentRoleBinding[] }
@@ -219,7 +221,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short',
-  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.history': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',

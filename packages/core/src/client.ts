@@ -8,6 +8,7 @@ import {
   type AgentMuxAcpBinding
 } from './acp-adapter.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from './agent-native-locator.js'
+import { captureAgentNativeSessionIdentity } from './agent-native-session-capture.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import {
@@ -86,6 +87,7 @@ import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
   AgentMuxFileAgentSessionStore,
+  AgentMuxSessionDurabilityError,
   loadAgentSessions,
   agentLifecycleOperationIdentity,
   loadSessionHistorySources,
@@ -609,6 +611,9 @@ export class AgentMuxClient {
   /** Consumer-owned read-only resources; never occupy Provider page slots or Run lifecycle locks. */
   private readonly historyObservationControllers = new Map<string, Set<NativeHistoryObservationResource>>()
   private providerReadsDisposed = false
+  private readonly nativeIdentityCaptures = new Map<string, { controller: AbortController; run: AgentMuxRunRef }>()
+  private readonly nativeIdentityPending: Array<() => void> = []
+  private nativeIdentityActive = 0
   // 「用户为这个 runId 发起过停止」这条**意图**事实的台账。与内核报的退出**结果**分居两处：控制面在
   // stop 路径写入意图，acceptKernelEvent 在退出事件里读它、合成 exitReason。一个 runId 只会退出一次，
   // 分类后即删，不留驻。裸集合足矣——意图是布尔（在场即「我们关的」），不需要携带别的。
@@ -676,7 +681,13 @@ export class AgentMuxClient {
       (options.store !== undefined || Boolean(process.env.AGENTMUX_AGENT_SESSION_STORE?.trim()))
       ? this.store.path : null
     this.messageQueue = new DurableAgentMuxMessageQueue(defaultAgentMuxMessageQueuePath(adoptedFileStore))
-    this.registry = new AgentMuxAgentSessionRegistry(this.store)
+    this.registry = new AgentMuxAgentSessionRegistry(this.store, (session, error) => {
+      if (error) this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: error.code,
+        message: 'The original Session is readable, but its durable save is unconfirmed. The Agent and input are kept. Refresh this Session to retry the durable save.',
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+      else this.publisher.publish({ type: 'agent-session', session: cloneSession(session) })
+    })
     this.kernel = new CtxmuxRunAdapter()
     this.hookServer = new AgentHookServer(
       async (event, signal) => await this.acceptHookEvent(event, signal)
@@ -846,6 +857,11 @@ export class AgentMuxClient {
       // 少了这一句，`connectionHealthySince` 会停在 0，于是第一次掉线时 `now - 0` 必然超过缓刑期、
       // 账被无条件清零，跨成功的界永远攒不起来（即：这道界会变成死代码）。
       this.connectionHealthySince = Date.now()
+      for (const session of this.registry.list()) {
+        if (runs.some(run => run.runId === session.run.runId && run.state.type === 'running')) {
+          this.queueNativeIdentityCapture(session)
+        }
+      }
     } catch (error) {
       this.kernel.resetConnection()
       await this.hookServer.stop()
@@ -890,6 +906,7 @@ export class AgentMuxClient {
       if (session && !this.endedRuns.has(runId)) void this.persistActivityBoundary(session, 'lost', now)
     }
     this.cancelProviderReads()
+    this.cancelNativeIdentityCaptures()
     // 线断了 ⇒ 一切**长命的屏幕观察**当场失效。这不是卫生，是可观测的行为改变，也是 #628 的关键一环：
     //
     // 掉线时，`observeOutput` 的排空循环把错误交给 adapter 那个**全局** errorListener，而不是交给某次观察
@@ -1270,6 +1287,7 @@ export class AgentMuxClient {
 
   disconnect(): void {
     this.cancelProviderReads()
+    this.cancelNativeIdentityCaptures()
     this.connectionEpoch += 1
     this.connected = false
     this.connecting = null
@@ -1412,7 +1430,107 @@ export class AgentMuxClient {
   /** Read one exact durable Session binding without starting, attaching or stopping its Run. */
   async refreshAgentSession(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxAgentSession> {
     this.requireConnected()
-    return cloneSession(await this.registry.refresh(agentSessionId, expectedRun))
+    const session = await this.registry.refresh(agentSessionId, expectedRun)
+    this.queueNativeIdentityCapture(session)
+    return cloneSession(session)
+  }
+
+  private retainUnconfirmedLifecycle(error: unknown, expected: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession {
+    if (!(error instanceof AgentMuxSessionDurabilityError) || !error.replacementApplied) throw error
+    const readable = this.registry.get(expected.agentSessionId)
+    if (!sameRun(readable.run, expected.run) || readable.providerId !== expected.providerId ||
+      readable.hostId !== expected.hostId || readable.workspacePath !== expected.workspacePath) throw error
+    return readable
+  }
+
+  private cancelNativeIdentityCaptures(): void {
+    for (const capture of this.nativeIdentityCaptures.values()) capture.controller.abort()
+    this.nativeIdentityCaptures.clear()
+    this.nativeIdentityPending.length = 0
+  }
+
+  /** Passive, bounded capture never delays create, connection readiness or Agent input. */
+  private queueNativeIdentityCapture(session: AgentMuxStoredAgentSession,
+    options: Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'> = {}): void {
+    const provider = this.providers.get(session.providerId)
+    const unconfirmed = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
+    if (session.hostId !== 'local' || (!unconfirmed && (session.nativeHandle || !provider.discoverNativeSession ||
+      provider.catalog.resumeStrategy.kind !== 'provider-native')) || !this.connected || !this.kernel.isConnected()) return
+    const previous = this.nativeIdentityCaptures.get(session.agentSessionId)
+    if (previous && sameRun(previous.run, session.run)) return
+    previous?.controller.abort()
+    const controller = new AbortController(), epoch = this.connectionEpoch
+    const capture = { controller, run: { ...session.run } }
+    this.nativeIdentityCaptures.set(session.agentSessionId, capture)
+    const execute = async (): Promise<void> => {
+      const timer = setTimeout(() => controller.abort(new Error('Native identity capture timed out.')), 10_000)
+      let failure: unknown
+      try {
+        for (const delayMs of [0, 200, 1_000]) {
+          if (delayMs) await new Promise<void>((resolve, reject) => {
+            const abort = () => { clearTimeout(delay); reject(controller.signal.reason) }
+            const delay = setTimeout(() => { controller.signal.removeEventListener('abort', abort); resolve() }, delayMs)
+            controller.signal.addEventListener('abort', abort, { once: true })
+            if (controller.signal.aborted) abort()
+          })
+          try {
+            const assertConnection = (): void => {
+              controller.signal.throwIfAborted()
+              if (epoch !== this.connectionEpoch || !this.connected || !this.kernel.isConnected()) {
+                throw new AgentMuxError('Native identity observation changed. Refresh the original Session.', 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
+              }
+            }
+            const attempt = (async () => {
+              assertConnection()
+              if (this.registry.isDurabilityUnconfirmed(session.agentSessionId)) {
+                const confirmed = await this.registry.confirmDurability(session.agentSessionId, session.run)
+                assertConnection()
+                if (confirmed.nativeHandle || !provider.discoverNativeSession) return confirmed
+              }
+              return await captureAgentNativeSessionIdentity({ session, provider, registry: this.registry,
+                kernel: this.kernel, signal: controller.signal, assertConnection,
+                command: resolveAgentExecutable(options.commandOverride, provider.executable),
+                args: options.args ?? [], env: options.env ?? {} })
+            })()
+            const next = await new Promise<AgentMuxStoredAgentSession>((resolve, reject) => {
+              const abort = () => reject(controller.signal.reason)
+              controller.signal.addEventListener('abort', abort, { once: true })
+              attempt.then(resolve, reject).finally(() => controller.signal.removeEventListener('abort', abort))
+              if (controller.signal.aborted) abort()
+            })
+            this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            return
+          } catch (error) {
+            failure = error
+            if (controller.signal.aborted) throw error
+          }
+        }
+      } catch (error) { failure = error }
+      finally { clearTimeout(timer) }
+      if (epoch !== this.connectionEpoch || !this.connected || !this.kernel.isConnected()) return
+      let current: AgentMuxStoredAgentSession
+      try { current = this.registry.get(session.agentSessionId) } catch { return }
+      if (!sameRun(current.run, session.run)) return
+      const code = failure && typeof failure === 'object' && 'code' in failure ? String(failure.code) : ''
+      const persistence = ['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS',
+        'AGENT_SESSION_STORE_LIMIT', 'AGENT_SESSION_STORE_BUSY', 'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED'].includes(code)
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: persistence ? 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED' : 'AGENT_NATIVE_IDENTITY_UNCONFIRMED',
+        message: `${persistence ? 'Saving the native recovery identity is unconfirmed.' : 'The native recovery identity could not be confirmed.'} ` +
+          `The original Agent and input are kept. Refresh this Session to retry; recovery after Run loss is not yet confirmed. ${failure instanceof Error ? failure.message : ''}`,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+    }
+    const start = (): void => {
+      if (controller.signal.aborted) { this.nativeIdentityPending.shift()?.(); return }
+      this.nativeIdentityActive++
+      void execute().finally(() => {
+        this.nativeIdentityActive--
+        if (this.nativeIdentityCaptures.get(session.agentSessionId) === capture) this.nativeIdentityCaptures.delete(session.agentSessionId)
+        this.nativeIdentityPending.shift()?.()
+      })
+    }
+    if (this.nativeIdentityActive < 4) start()
+    else this.nativeIdentityPending.push(start)
   }
 
   async sessionTimeline(agentSessionId: string): Promise<AgentTimelineSnapshot> {
@@ -2644,11 +2762,17 @@ export class AgentMuxClient {
       }
       let readySession = session
       try {
-        persisted = await this.registry.commitLifecycle(reservation, session)
+        try {
+          persisted = await this.registry.commitLifecycle(reservation, session)
+        } catch (error) {
+          // The replacement is readable but lacks a durable acknowledgement. Keep its healthy Run.
+          persisted = this.retainUnconfirmedLifecycle(error, session)
+          readySession = persisted
+        }
         await hookBinding.bindRun(run.runId)
         // 超时不回滚。下面的 catch 会关 hook 绑定、退休 run、删 session——那是在用我们一次
         // 慢探测杀掉一个刚启动好的健康 Agent。只有 run 真的退出了才该走那条路。
-        readySession = await this.ensureTerminalHandshakeOrDegrade(session, run)
+        readySession = await this.ensureTerminalHandshakeOrDegrade(readySession, run)
       } catch (error) {
         const rollbackErrors: unknown[] = [error]
         try {
@@ -2673,6 +2797,7 @@ export class AgentMuxClient {
       }
       this.hookBindings.set(run.runId, hookBinding)
       this.runPids.set(run.runId, run.pid)
+      this.queueNativeIdentityCapture(readySession, input)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
       this.publisher.publishRunState(this.projectRun(run, readySession), agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains
@@ -3240,12 +3365,13 @@ export class AgentMuxClient {
       }
       let readySession = next
       try {
-        persisted = await this.registry.commitLifecycle(reservation, next)
+        try { persisted = await this.registry.commitLifecycle(reservation, next) }
+        catch (error) { persisted = this.retainUnconfirmedLifecycle(error, next); readySession = persisted }
         await hookBinding.bindRun(run.runId)
         hookBound = true
         // 同 launch：超时降级，只有 run 退出才回滚。
         readySession = await this.ensureTerminalHandshakeOrDegrade(
-          retirement ? this.registry.get(current.agentSessionId) : next, run)
+          retirement ? this.registry.get(current.agentSessionId) : readySession, run)
       } catch (error) {
         if (reopening) {
           const recoveredCommit = !persisted
@@ -3323,6 +3449,7 @@ export class AgentMuxClient {
       if (hookBound) this.hookBindings.set(run.runId, hookBinding)
       this.runPids.delete(current.run.runId)
       this.runPids.set(run.runId, run.pid)
+      this.queueNativeIdentityCapture(readySession, input)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
       this.publisher.publishRunState(this.projectRun(run, readySession), readySession.agentSessionId)
       // A deferred input receipt must precede the history's delivery status. A healthy Run remains

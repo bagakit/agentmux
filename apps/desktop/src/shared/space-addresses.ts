@@ -43,13 +43,20 @@ export type SpaceZoneBindings = Record<string, SpaceZoneBinding>
 export type SpatialRequestBinding = {
   requestId: string
   inputDigest: string
-  operation: 'agent.open' | 'space.mv'
+  operation: 'agent.open' | 'space.mv' | 'agent.message'
   tabId: string
   regionId: string
   agentSessionId: string
   createAgent: boolean
   /** Original Core owner, independent of any later display move. */
   executionHostId?: string
+  /** User's recovery choice. Correlation only; Core remains the creation/history owner. */
+  recovery?: {
+    hostId: string; agentSessionId: string; tabId: string; regionId: string
+    mode: 'takeover' | 'analyze'; historySource: 'captured' | 'native'; executorId?: string
+  }
+  /** An explicit message recipient reference, never a payload or delivery receipt. */
+  recoveryRecipient?: { hostId: string; agentSessionId: string; topicId: string; tabId: string; regionId: string }
   from?: AgentMuxSpaceAddress
   target: Pick<AgentMuxSpaceDestination, 'spaceId' | 'zoneId' | 'tabId' | 'regionId' | 'displayWorkspaceId' | 'groupId'>
   resource?: { hostId: string; path: string; kind: 'directory' | 'worktree'; branch: string | null; sourceWorkspaceId: string }

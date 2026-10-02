@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
-import { durableWriteFile } from './durable-write.js'
+import { durableWriteFile, DurableWriteConfirmationError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
@@ -72,11 +72,6 @@ const MAX_TIMELINE_STORE_BYTES = 8 * 1024 * 1024
 const LOCK_ATTEMPTS = 300
 const LOCK_RETRY_MIN_MS = 5
 const LOCK_RETRY_JITTER_MS = 10
-// `open(path, 'wx')` and the following owner write are two syscalls. If the process dies between them,
-// contenders can observe an empty lock. Keep a just-created owner-less lock for a short grace window so
-// a healthy acquirer that is still writing its PID cannot be mistaken for a dead owner; after that window
-// the lock is stale because no valid owner could have been recorded.
-const LOCK_OWNER_WRITE_GRACE_MS = 250
 
 export type AgentMuxRecoverableStopOperation = {
   daemonInstance: string
@@ -124,6 +119,8 @@ export type AgentMuxRetiredAgentSession = {
 export type AgentMuxAgentSessionStore = {
   /** Exclusive in-flight Prompt orchestration; contention rejects without invoking operation. */
   withPromptSubmission<T>(agentSessionId: string, operation: () => Promise<T>): Promise<T>
+  /** Flush the current exact binding; reading bytes alone does not acknowledge persistence. */
+  confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void>
   load(): Promise<readonly unknown[]>
   loadRetiredRuns(): Promise<readonly AgentMuxRunRef[]>
   loadRetiredAgentSessions(): Promise<readonly AgentMuxRetiredAgentSession[]>
@@ -1656,6 +1653,13 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     }
   }
 
+  async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void> {
+    const current = this.sessions.get(agentSessionId)
+    if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession)) {
+      throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
+    }
+  }
+
   async load(): Promise<readonly unknown[]> {
     return [...this.sessions.values()].map((session) => structuredClone(session))
   }
@@ -2002,6 +2006,15 @@ export function defaultAgentMuxAgentSessionStorePath(): string {
 
 const requireNative = createRequire(import.meta.url)
 
+/** Only the post-replacement phase carries this receipt. It is not a success acknowledgement. */
+export class AgentMuxSessionDurabilityError extends AgentMuxError {
+  readonly replacementApplied = true
+  constructor(cause: DurableWriteConfirmationError) {
+    super('The Session is readable, but its durable save is not confirmed. Its Run is retained; retry save confirmation.',
+      'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED', cause.cause instanceof Error ? cause.cause.message : String(cause.cause))
+  }
+}
+
 export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore {
   private tail: Promise<void> = Promise.resolve()
   private lockReleaseFailure: AgentMuxError | null = null
@@ -2026,6 +2039,17 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     } finally {
       await handle.close()
     }
+  }
+
+  async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef, expectedSession: AgentMuxStoredAgentSession): Promise<void> {
+    await this.enqueue(async () => {
+      const document = await this.read()
+      const current = document.sessions.find(session => session.agentSessionId === agentSessionId)
+      if (!current || current.run.runId !== expectedRun.runId || !sameSession(current, expectedSession)) {
+        throw new AgentMuxError('Session snapshot changed before confirmation. Refresh the original binding and retry.', 'STALE_AGENT_SESSION')
+      }
+      await this.write(document)
+    })
   }
 
   async load(): Promise<readonly unknown[]> {
@@ -2603,7 +2627,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       throw new AgentMuxError('Agent Session store exceeds its size limit.', 'AGENT_SESSION_STORE_LIMIT')
     }
     await mkdir(dirname(this.path), { recursive: true, mode: 0o700 })
-    await durableWriteFile(this.path, content, { mode: 0o600, ...(signal ? { signal } : {}) })
+    try {
+      await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true, ...(signal ? { signal } : {}) })
+    } catch (error) {
+      if (error instanceof DurableWriteConfirmationError) throw new AgentMuxSessionDurabilityError(error)
+      throw error
+    }
     if (pruneTimelines || retained !== document) await this.maintainTimelineFiles(retained)
   }
 
@@ -2770,67 +2799,24 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     signal?: AbortSignal,
     attempts = LOCK_ATTEMPTS
   ): Promise<() => Promise<void>> {
+    const native: { tryLock(fd: number): boolean } = requireNative('fs-native-extensions')
     const path = `${this.path}.lock`
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      signal?.throwIfAborted()
-      try {
-        const handle = await open(path, 'wx', 0o600)
-        await handle.writeFile(`${process.pid}\n`, 'utf8')
-        return async () => {
-          await handle.close()
-          await unlink(path).catch((error: NodeJS.ErrnoException) => {
-            if (error.code !== 'ENOENT') throw error
-          })
+    // All writers keep this inode. Kernel ownership ends on close or process death;
+    // a dead owner's pathname is never unlinked underneath a new healthy owner.
+    const handle = await open(path, 'a+', 0o600)
+    try {
+      for (let attempt = 0; attempt < attempts; attempt += 1) {
+        signal?.throwIfAborted()
+        if (native.tryLock(handle.fd)) return async () => { await handle.close() }
+        if (attempt + 1 < attempts) {
+          await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
         }
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
-        await this.removeDeadOwnerLock(path)
-        await delay(LOCK_RETRY_MIN_MS + Math.random() * LOCK_RETRY_JITTER_MS, signal)
       }
-    }
-    throw new AgentMuxError('Agent Session store is busy.', 'AGENT_SESSION_STORE_BUSY')
-  }
-
-  private async removeDeadOwnerLock(path: string): Promise<void> {
-    let content: string
-    try {
-      content = await readFile(path, 'utf8')
+      throw new AgentMuxError('Agent Session store is busy. Retry the same operation.', 'AGENT_SESSION_STORE_BUSY')
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      return
-    }
-
-    const firstToken = content.trim().split(/\s+/u)[0]
-    const pid = Number(firstToken)
-    if (!Number.isSafeInteger(pid) || pid <= 0) {
-      // An empty/malformed lock has no owner to probe. It is only reclaimable once the two-syscall
-      // acquisition grace period has elapsed; otherwise the original acquirer may still be writing.
-      let metadata
-      try {
-        metadata = await stat(path)
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-        return
-      }
-      if (Date.now() - metadata.mtimeMs < LOCK_OWNER_WRITE_GRACE_MS) return
-    } else {
-      try {
-        process.kill(pid, 0)
-        // The owner is alive; never reclaim its lock. Keep waiting for the owner to release it.
-        return
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return
-      }
-    }
-
-    // Re-read before unlinking so a contender that already replaced the observed bytes is not removed.
-    // The unlink still remains best-effort: another contender may win the race first.
-    try {
-      if (await readFile(path, 'utf8') !== content) return
-      await unlink(path)
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      await handle.close()
+      throw error
     }
   }
 }

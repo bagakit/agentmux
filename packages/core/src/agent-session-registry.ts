@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import {
   loadAgentSessions,
+  AgentMuxSessionDurabilityError,
   normalizeStoredAgentSession,
   type AgentMuxAgentSessionStore,
   type AgentMuxLifecycleReservation,
@@ -57,8 +58,45 @@ export class AgentMuxAgentSessionRegistry {
   private readonly writeDrains = new Map<string, AgentSessionWriteDrain>()
   private readonly lifecycleOwnerId = randomUUID()
   private static readonly lifecycleLeaseMs = 30_000
+  private readonly unconfirmedDurability = new Set<string>()
 
-  constructor(private readonly store: AgentMuxAgentSessionStore) {}
+  constructor(private readonly store: AgentMuxAgentSessionStore,
+    private readonly onDurabilityChange?: (session: AgentMuxStoredAgentSession, error: AgentMuxSessionDurabilityError | null) => void) {}
+
+  isDurabilityUnconfirmed(agentSessionId: string): boolean {
+    return this.unconfirmedDurability.has(agentSessionId)
+  }
+
+  async confirmDurability(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxStoredAgentSession> {
+    return await this.enqueue(agentSessionId, async () => {
+      const session = this.get(agentSessionId)
+      if (!sameRun(session.run, expectedRun)) throw new AgentMuxError('Session changed before save confirmation.', 'STALE_AGENT_SESSION')
+      await this.persist(session, () => this.store.confirmDurability(agentSessionId, expectedRun, session))
+      return this.get(agentSessionId)
+    })
+  }
+
+  /** A post-replacement receipt retains usable identity without claiming a durable acknowledgement. */
+  private async persist(session: AgentMuxStoredAgentSession | null, write: () => Promise<void>): Promise<void> {
+    try {
+      await write()
+    } catch (error) {
+      if (session && error instanceof AgentMuxSessionDurabilityError) {
+        const previous = this.sessions.get(session.agentSessionId)
+        if (previous) this.forget(previous)
+        this.remember(session)
+        this.unconfirmedDurability.add(session.agentSessionId)
+        this.notifyDurability(session, error)
+      }
+      throw error
+    }
+    if (session && this.unconfirmedDurability.delete(session.agentSessionId)) this.notifyDurability(session, null)
+  }
+
+  private notifyDurability(session: AgentMuxStoredAgentSession, error: AgentMuxSessionDurabilityError | null): void {
+    try { this.onDurabilityChange?.(structuredClone(session), error) }
+    catch { /* An observation consumer cannot change the completed filesystem operation. */ }
+  }
 
   async load(hostId: string): Promise<void> {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
@@ -236,7 +274,7 @@ export class AgentMuxAgentSessionRegistry {
     session: AgentMuxStoredAgentSession | null
   ): Promise<AgentMuxStoredAgentSession | null> {
     const normalized = session ? normalizeStoredAgentSession(session) : null
-    await this.store.commitLifecycle(reservation, normalized)
+    await this.persist(normalized, () => this.store.commitLifecycle(reservation, normalized))
     const previous = this.sessions.get(reservation.agentSessionId)
     if (previous) this.forget(previous)
     if (!normalized) {
@@ -277,7 +315,7 @@ export class AgentMuxAgentSessionRegistry {
         throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
       }
       this.assertAvailable(normalized)
-      await this.store.compareAndSwap(previous ?? null, normalized, signal)
+      await this.persist(normalized, () => this.store.compareAndSwap(previous ?? null, normalized, signal))
       if (previous) this.forget(previous)
       this.remember(normalized)
       return this.get(normalized.agentSessionId)
@@ -307,7 +345,7 @@ export class AgentMuxAgentSessionRegistry {
         )
       }
       this.assertAvailable(normalized)
-      await this.store.compareAndSwap(previous, normalized, writeSignal)
+      await this.persist(normalized, () => this.store.compareAndSwap(previous, normalized, writeSignal))
       this.forget(previous)
       this.remember(normalized)
       return this.get(agentSessionId)

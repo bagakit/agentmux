@@ -171,6 +171,14 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     }),
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect Core identity and current Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) })),
+  command('agent.history', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
+    'Read exact retained Session history without operating its Run.',
+    { '--host': 'data', '--session': 'data', '--source': 'value', '--limit': 'value', '--cursor': 'data', '--max-bytes': 'value' }, f => {
+      const source = value(f, '--source', true)
+      if (source !== 'captured' && source !== 'native') invalid('--source requires captured or native.')
+      return { hostId: id(f, '--host'), agentSessionId: id(f, '--session', true), source,
+        ...numbers(f, { '--limit': 'limit', '--max-bytes': 'maxBytes' }), ...fields(f, { '--cursor': 'cursor' }) }
+    }, 'Sources are explicit: missing native identity does not erase captured work. Follow nextCursor with the same Host/Session/source. A fragment is exact JSON UTF-8 bytes in base64; concatenate contiguous offsets and verify its SHA-256 before parsing. Host restart or source change requires reading the first page again. Reading never restores, attaches, sends or stops a Run.'),
   command('agent.open', '(--executor ID|--session ID) <destination> [--prompt TEXT] [--focus] [--operation-id ID]', 'Open an Agent at an explicit Space/Zone/Tab/Region; default is background.',
     { ...DESTINATION, '--executor': 'data', '--session': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean', '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data', '--project': 'data', '--source-workspace': 'data' }, f => {
       const selected = one(f, ['--executor', '--session'], 'Agent open')

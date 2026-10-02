@@ -610,7 +610,7 @@ export class RuntimeController {
   async providerCatalog(): Promise<AgentCatalogEntry[]> {
     const catalog = new Map<string, AgentCatalogEntry>()
     for (const host of this.hosts.values()) {
-      if (!('runtimeOwnerIdentity' in host.client)) await host.client.connect()
+      await host.client.connect()
       for (const entry of host.client.providers.catalog()) {
         if (!catalog.has(entry.id)) catalog.set(entry.id, entry)
       }
