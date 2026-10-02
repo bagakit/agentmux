@@ -84,6 +84,8 @@ const visible = (element: Element) => {
 window.projectGroupsState = () => {
   const state = useAppStore.getState()
   const active = document.activeElement as HTMLElement | null
+  const tree = document.querySelector('.space-tree')
+  const box = (element: Element | null) => element?.getBoundingClientRect().toJSON() ?? null
   return JSON.parse(JSON.stringify({ loading: state.loading, error: state.error,
     activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
     projectRailOpen: state.projectRailOpen, projectGroups: state.projectGroups,
@@ -93,6 +95,18 @@ window.projectGroupsState = () => {
     focusedMember: active?.dataset.projectGroupMember ?? null, focusedNavigation: active?.dataset.spaceNav ?? null,
     selectedMembers: [...document.querySelectorAll('[data-project-group-member][aria-current="page"]')].map(element =>
       (element as HTMLElement).dataset.projectGroupMember),
+    geometry: {
+      spaceTree: tree ? { scrollLeft: tree.scrollLeft, clientWidth: tree.clientWidth, scrollWidth: tree.scrollWidth, box: box(tree) } : null,
+      groups: [...document.querySelectorAll('[data-project-group]')].map(element => ({
+        groupId: (element as HTMLElement).dataset.projectGroup, box: box(element),
+        clientWidth: element.clientWidth, scrollWidth: element.scrollWidth,
+        heading: box(element.querySelector('.project-group__heading')),
+        members: [...element.querySelectorAll('[data-project-group-member]')].map(member => ({
+          projectId: (member as HTMLElement).dataset.projectGroupMember, box: box(member),
+          clientWidth: member.clientWidth, scrollWidth: member.scrollWidth, title: member.getAttribute('title')
+        }))
+      }))
+    },
     visibleRegions: [...document.querySelectorAll('[data-workbench-region-id]')].filter(visible).map(element => ({
       id: (element as HTMLElement).dataset.workbenchRegionId, text: (element as HTMLElement).innerText,
       box: element.getBoundingClientRect().toJSON()
