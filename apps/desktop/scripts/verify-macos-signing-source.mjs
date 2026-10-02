@@ -32,8 +32,9 @@ async function callers() {
   }
   assert.deepEqual(sign.args, ['stagedApp', 'signingPlan'])
   assert.deepEqual(verify.args, ['stagedApp', 'signingPlan'])
-  assert.ok(sign.position < verify.position && verify.position < one('createDmg').position)
-  assert.ok(verify.position < one('installApplication').position)
+  assert.ok(sign.position < verify.position, 'Application signing must precede verification')
+  assert.ok(verify.position < one('createDmg').position, 'Signature verification must precede createDmg')
+  assert.ok(verify.position < one('installApplication').position, 'Signature verification must precede installApplication')
   const importNode = tree.statements.find(node => ts.isImportDeclaration(node) && node.moduleSpecifier.text === './macos-signing.mjs')
   assert.ok(importNode?.importClause?.namedBindings && ts.isNamedImports(importNode.importClause.namedBindings))
   const imports = importNode.importClause.namedBindings.elements.map(node => node.name.text)
@@ -103,10 +104,64 @@ async function verifyMutations(evidence) {
   console.log(JSON.stringify({ passed: true, sourceMutations: receipt.cases.length, productionCallers: receipt.callers.count, scope: 'Source only' }))
 }
 
+async function verifyCallerMutations(evidence) {
+  const original = await readFile(packagePath)
+  await mkdir(evidence, { recursive: true })
+  const receipt = { scope: 'Production Source AST only; package script, build, signing and installation are never executed', passed: false,
+    inputs: { package: sha(original), verifier: sha(await readFile(import.meta.filename)), node: process.version, typescript: ts.version }, cases: [], artifacts: {} }
+  const run = async name => {
+    const result = spawnSync(process.execPath, [import.meta.filename, 'callers'], { cwd: root, encoding: 'utf8', timeout: 10_000 })
+    const log = `${result.stdout ?? ''}${result.stderr ?? ''}`
+    await writeFile(join(evidence, name + '.log'), log)
+    receipt.artifacts[name + '.log'] = sha(log)
+    return { status: result.status, log }
+  }
+  const move = (source, line, anchor, after) => {
+    for (const text of [line, anchor]) assert.equal(source.split(text).length - 1, 1, 'Production caller mutation needs a unique line')
+    return source.replace(line, '').replace(anchor, after ? anchor + line : line + anchor)
+  }
+  const cases = [
+    { name: 'preflight-after-first-production-build', expected: 'Signing qualification must precede run',
+      change: source => move(source, "  await run('pnpm', ['--filter', '@agentmux/core...', 'build'], { cwd: repositoryRoot })\n", '  const signingPlan = await preflightMacosSigning()\n', false) },
+    { name: 'verify-after-create-dmg', expected: 'Signature verification must precede createDmg',
+      change: source => move(source, '    const signature = await verifyMacosSigning(stagedApp, signingPlan)\n', '    await createDmg(stagedApp, stagedDmg, temporaryRoot)\n', true) },
+  ]
+  try {
+    const baseline = await run('candidate-callers')
+    assert.equal(baseline.status, 0, baseline.log)
+    assert.equal(JSON.parse(baseline.log).count, 3)
+    for (const { name, expected, change } of cases) {
+      const changed = change(original.toString())
+      try {
+        await writeFile(packagePath, changed)
+        const red = await run(name)
+        assert.ok(Number.isInteger(red.status) && red.status !== 0, `Production caller mutation survived: ${name}`)
+        assert.match(red.log, /AssertionError/, `Production caller mutation failed outside assertion: ${name}`)
+        assert.ok(red.log.includes(expected), `Production caller mutation missed its target assertion: ${name}`)
+        receipt.cases.push({ name, mutatedPackageSha256: sha(changed), redExit: red.status, targetAssertion: expected })
+      } finally { await writeFile(packagePath, original) }
+    }
+    const restored = await run('restored-callers')
+    assert.equal(restored.status, 0, restored.log)
+    receipt.callers = JSON.parse(restored.log)
+    assert.equal(receipt.callers.count, 3)
+    receipt.passed = true
+  } catch (error) { receipt.failure = { message: error.message, stack: error.stack } }
+  finally {
+    await writeFile(packagePath, original)
+    receipt.restoredPackageSha256 = sha(await readFile(packagePath))
+    assert.equal(receipt.restoredPackageSha256, receipt.inputs.package)
+    await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
+  }
+  assert.equal(receipt.passed, true, receipt.failure?.message)
+  console.log(JSON.stringify({ passed: true, productionCallerMutations: receipt.cases.length, restoredProductionCallers: receipt.callers.count, scope: 'Source AST only' }))
+}
+
 const mode = process.argv[2]
 if (mode === 'callers') console.log(JSON.stringify(await callers()))
-else if (mode === 'mutations') {
+else if (mode === 'mutations' || mode === 'caller-mutations') {
   const index = process.argv.indexOf('--evidence-dir')
   assert.ok(index >= 0 && process.argv[index + 1], 'An owned evidence directory is required')
-  await verifyMutations(resolve(process.argv[index + 1]))
-} else throw Error('Expected callers or mutations')
+  if (mode === 'caller-mutations') await verifyCallerMutations(resolve(process.argv[index + 1]))
+  else await verifyMutations(resolve(process.argv[index + 1]))
+} else throw Error('Expected callers, mutations or caller-mutations')
