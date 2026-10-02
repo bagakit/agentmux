@@ -1,16 +1,14 @@
+import { encodeTerminalBinaryInput, subscribeTerminalInput, type TerminalInputEventSource } from '@agentmux/client-ui/terminal/input'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
 import type { AgentMuxRunInputData } from '@agentmux/core'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
-  encodeTerminalBinaryInput,
-  subscribeTerminalInput,
   terminalAcceptsInput,
   terminalInputSender,
   terminalRevealDecision,
-  terminalRevealServiceOutcome,
-  type TerminalInputEventSource
+  terminalRevealServiceOutcome
 } from '../src/renderer/src/lib/terminal-reveal.js'
 import { classifyServiceNotice, serviceNoticeToRender } from '../src/renderer/src/lib/service-window-notice.js'
 

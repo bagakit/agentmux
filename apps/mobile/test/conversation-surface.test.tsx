@@ -1,0 +1,362 @@
+import { fixturePath } from '../../../test/fixture-values.mjs'
+import { act } from 'react'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { MobileConversationSurface, type MobileConversationSurfaceProps } from '../src/conversation/MobileConversationSurface'
+import { createBrowserPlatform } from '../src/platform/browser'
+import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
+import { button, click, deferred, editor, evidence, fixture, history, mount, mounted, paste, session } from './conversation-fixture'
+
+const connected = { state: 'connected' as const, message: '已连接原 Host' }
+const STORAGE = 'agentmux-mobile-workface-v1'
+beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+function props(f: ReturnType<typeof fixture>): MobileConversationSurfaceProps {
+  return { client: f.client, agentSessionId: 'session-original', connection: connected,
+    platform: createBrowserPlatform({ clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } }) }
+}
+afterEach(async () => {
+  for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
+  vi.unstubAllGlobals()
+})
+describe('mounted mobile consumer of the original hosted Session and shared UI', () => {
+  it('preserves an editable draft and continuation reference without an authorized client', async () => {
+    const f = fixture(), attach = vi.fn(), options = props(f)
+    const view = await mount(<MobileConversationSurface {...options} onAttach={attach} />)
+    await paste(view.element, '待完成的草稿')
+    await click(button(view.element, 'Continue from here'))
+    expect(editor(view.element).textContent).toContain('待完成的草稿')
+    expect(editor(view.element).textContent).toContain('原生输入')
+    await view.render(<MobileConversationSurface {...options} client={null}
+      connection={{ state: 'unavailable', message: '尚未授权' }} onAttach={attach} />)
+    expect(view.element.textContent).toContain('当前不能发送；草稿与引用保留')
+    expect(editor(view.element).textContent).toContain('待完成的草稿')
+    expect(editor(view.element).textContent).toContain('原生输入')
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    await paste(view.element, '离线补充')
+    expect(editor(view.element).textContent).toContain('离线补充')
+    expect(f.submit).not.toHaveBeenCalled()
+    // The optional attachment port remains a local chooser operation owned by the shell.
+    await click(button(view.element, 'Reference files for the Agent to read'))
+    expect(attach).toHaveBeenCalledOnce()
+    expect(f.unsubscribe).toHaveBeenCalledOnce()
+    expect(f.disposeHistory).toHaveBeenCalledOnce()
+  })
+
+  it('retains native source order and recorded human/peer/unknown authorship; delegates copy and web links', async () => {
+    const f = fixture(), copy = vi.fn().mockResolvedValue(undefined), open = vi.fn()
+    f.setTimeline({ agentSessionId: 'session-original', revision: 1, items: [
+      { id: 'captured-peer', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 1, updatedAt: 1, title: 'Input', content: '来自同事', authorAgentSessionId: 'peer' },
+      { id: 'captured-human', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Input', content: '来自本人', authorHuman: true },
+      { id: 'captured-unknown', agentSessionId: 'session-original', kind: 'user_message', status: 'failed', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: '未记录作者' }
+    ] })
+    const view = await mount(<MobileConversationSurface {...props(f)} openHttpLink={open}
+      platform={createBrowserPlatform({ clipboard: { writeText: copy } })} />)
+    expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
+      .toEqual(['native-input', 'native-answer'])
+    expect(view.element.textContent).toContain('peer')
+    expect(view.element.textContent).toContain('来自本人')
+    expect(view.element.textContent).toContain('未记录作者')
+    await click(button(view.element, '文档'))
+    expect(open).toHaveBeenCalledExactlyOnceWith('https://example.test/docs', expect.objectContaining({ ctrlKey: false }))
+    await click(button(view.element, 'Copy message'))
+    expect(copy).toHaveBeenCalledExactlyOnceWith('原生输入 [文档](https://example.test/docs)')
+    await click(button(view.element, 'Message details'))
+    expect(document.body.textContent).toContain('Not recorded · shown as You')
+    expect(document.body.textContent).toContain('native-session-original')
+    expect(document.body.textContent).toContain('native-input')
+    const human = view.element.querySelector<HTMLElement>('[data-message-id="captured:captured-human"]')
+    const unknown = view.element.querySelector<HTMLElement>('[data-message-id="captured:captured-unknown"]')
+    expect(human).not.toBeNull(); expect(unknown).not.toBeNull()
+    await click(button(human!, 'Message details'))
+    expect(human!.querySelector('.conversation-input-details__facts')?.textContent).toContain('Recorded authorhuman')
+    await click(button(unknown!, 'Message details'))
+    expect(unknown!.textContent).toContain('Not recorded · shown as You')
+  })
+
+  it('sends one captured condition and preserves unknown delivery without retry on reconnect; settles only its exact receipt', async () => {
+    const f = fixture(), original = session()
+    original.promptCompletionAdmission = { operationId: 'prior-op', submissionId: 'prior-submission', startByte: 1, endByte: 2 }
+    f.sessions.set(original.agentSessionId, original)
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('lost after dispatch'), { code: 'STALE_AGENT_SESSION' }))
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    const skillPath = fixturePath('workspace/skill.md')
+    await paste(view.element, `[工具](agentmux-skill:${encodeURIComponent(skillPath)}) 保留引用`)
+    await act(async () => { editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', isComposing: true, keyCode: 229 })) })
+    expect(f.submit).not.toHaveBeenCalled()
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+    const input = f.submit.mock.calls[0]![0]
+    expect(input).toEqual({ agentSessionId: 'session-original', operationId: expect.any(String), prompt: expect.any(String),
+      authorHuman: true, expectedRun: { runId: 'run-original' }, afterSubmissionId: 'prior-submission' })
+    expect(input.prompt.trim()).toBe(`${skillPath} 保留引用`)
+    expect(input.operationId).not.toBe('')
+    expect(editor(view.element).textContent).toContain('保留引用')
+    expect(view.element.textContent).toContain('回执未知')
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    await act(async () => { f.emit({ type: 'connection-state', state: 'lost', evidence }); f.emit({ type: 'connection-state', state: 'restored', evidence }) })
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+    f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
+      { id: 'prompt:other-operation', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Input', content: input.prompt, authorHuman: true }
+    ] })
+    await click(button(view.element, '刷新'))
+    expect(editor(view.element).textContent).toContain('保留引用')
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    f.setTimeline({ agentSessionId: 'session-original', revision: 3, items: [
+      { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: input.prompt, authorHuman: true }
+    ] })
+    await click(button(view.element, '刷新'))
+    expect(editor(view.element).textContent).toBe('')
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].draft).toBe('')
+    expect(view.element.textContent).toContain('Core 已确认输入')
+    expect(f.submit).toHaveBeenCalledOnce()
+  })
+
+  it('keeps authoritative rejection editable and retries only by an explicit new action', async () => {
+    const f = fixture()
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('Agent prompt exceeds its maximum byte length.'), { code: 'INVALID_AGENT_PROMPT' }))
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '明确拒绝后保留')
+    await click(button(view.element, 'Send'))
+    expect(editor(view.element).textContent).toBe('明确拒绝后保留')
+    expect(view.element.textContent).toContain('Core 已拒绝')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    expect(f.submit).toHaveBeenCalledOnce()
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledTimes(2)
+    expect(f.submit.mock.calls[1]![0].operationId).not.toBe(f.submit.mock.calls[0]![0].operationId)
+    expect(editor(view.element).textContent).toBe('')
+  })
+
+  it('binds a late receipt to its original operation and preserves edits in both Sessions', async () => {
+    const f = fixture(), ack = deferred<void>()
+    f.submit.mockImplementationOnce(() => ack.promise)
+    const options = props(f), view = await mount(<MobileConversationSurface {...options} />)
+    await paste(view.element, '原会话提交')
+    await click(button(view.element, 'Send'))
+    await paste(view.element, '提交后的原会话补充')
+    await view.render(<MobileConversationSurface {...options} agentSessionId="other" />)
+    await paste(view.element, '另一个会话新草稿')
+    await act(async () => ack.resolve())
+    expect(editor(view.element).textContent).toBe('另一个会话新草稿')
+    await view.render(<MobileConversationSurface {...options} />)
+    expect(editor(view.element).textContent).toContain('原会话提交')
+    expect(editor(view.element).textContent).toContain('提交后的原会话补充')
+    expect(f.submit).toHaveBeenCalledOnce()
+    expect(f.submit.mock.calls[0]![0].agentSessionId).toBe('session-original')
+  })
+
+  it('does not resend an accepted payload when only its submit phase was rejected', async () => {
+    const f = fixture()
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('The original prompt phase was not applied. Its accepted payload is kept; this input range cannot be reused.'),
+      { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' }))
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '已接受的 payload 不能重投')
+    await click(button(view.element, 'Send'))
+    const input = f.submit.mock.calls[0]![0], value = session()
+    value.terminalPromptSubmission = { run: value.run, submissionId: input.operationId, promptDigest: 'actual-core-digest', outputCursorBytes: 0,
+      payload: { operationId: 'payload-original', inputByteRange: { startByte: 0, endByte: 20 }, acknowledged: true },
+      submit: { operationId: 'submit-original', inputByteRange: { startByte: 20, endByte: 21 }, acknowledged: false, notApplied: true } }
+    await act(async () => f.emit({ type: 'agent-session', session: value }))
+    expect(view.element.textContent).toContain('回执未知')
+    expect(editor(view.element).textContent).toBe('已接受的 payload 不能重投')
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+  })
+
+  it('does not resend an accepted payload when a pending interaction interrupts submit', async () => {
+    const f = fixture(), ack = deferred<void>()
+    f.submit.mockImplementationOnce(() => ack.promise)
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '交互之前已接受的 payload')
+    await click(button(view.element, 'Send'))
+    const input = f.submit.mock.calls[0]![0], value = session()
+    value.terminalPromptSubmission = { run: value.run, submissionId: input.operationId, promptDigest: 'actual-core-digest', outputCursorBytes: 0,
+      payload: { operationId: 'payload-original', inputByteRange: { startByte: 0, endByte: 20 }, acknowledged: true },
+      submit: { operationId: 'submit-original', inputByteRange: { startByte: 20, endByte: 21 }, acknowledged: false } }
+    value.pendingInteraction = { request: { kind: 'permission', agentSessionId: value.agentSessionId, id: 'request-after-payload', title: 'Payload 后出现的请求', evidence,
+      options: [{ id: 'original-allow', label: '允许原请求', kind: 'allow-once' }] } }
+    f.sessions.set(value.agentSessionId, value)
+    await act(async () => { f.emit({ type: 'agent-session', session: value }); ack.reject(Object.assign(
+      new Error('Answer the pending Agent interaction before submitting another prompt.'), { code: 'AGENT_INTERACTION_PENDING' })) })
+    expect(view.element.textContent).toContain('Payload 后出现的请求')
+    expect(view.element.textContent).toContain('回执未知')
+    expect(editor(view.element).textContent).toBe('交互之前已接受的 payload')
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    // Even disappearance of the interaction cannot turn a phase error into whole-intent nonapplication.
+    const settled = { ...value }
+    delete settled.pendingInteraction
+    f.sessions.set(value.agentSessionId, settled)
+    await act(async () => f.emit({ type: 'agent-session', session: settled }))
+    await click(button(view.element, '刷新'))
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+  })
+
+  it('unlocks an unknown input only when Core proves this original intent was entirely unapplied', async () => {
+    const f = fixture()
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('The original prompt phase was not applied.'),
+      { code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', detail: 'not_applied' }))
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '原意图的未应用事实')
+    await click(button(view.element, 'Send'))
+    const input = f.submit.mock.calls[0]![0], value = session()
+    value.promptCompletionAdmission = { submissionId: 'another-operation', operationId: 'native-phase-original', startByte: 0, endByte: 20,
+      notApplied: true, intent: { run: value.run, ownerInstanceId: 'original-core-instance', prompt: input.prompt,
+        plan: { kind: 'render-then-submit', payload: input.prompt, renderedText: input.prompt, submit: '\r' } } }
+    await act(async () => f.emit({ type: 'agent-session', session: value }))
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    const wrongRun = { ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission,
+      submissionId: input.operationId, intent: { ...value.promptCompletionAdmission.intent!, run: { runId: 'another-run' } } } }
+    await act(async () => f.emit({ type: 'agent-session', session: wrongRun }))
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    const exact = { ...value, promptCompletionAdmission: { ...value.promptCompletionAdmission, submissionId: input.operationId } }
+    f.sessions.set(value.agentSessionId, exact)
+    await act(async () => f.emit({ type: 'agent-session', session: exact }))
+    expect(view.element.textContent).toContain('Core 已确认原输入未应用')
+    expect(editor(view.element).textContent).toBe('原意图的未应用事实')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    expect(f.submit).toHaveBeenCalledOnce()
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledTimes(2)
+    expect(f.submit.mock.calls[1]![0].operationId).not.toBe(input.operationId)
+  })
+
+  it('answers the original permission option once and keeps an unknown request unavailable when another request replaces it', async () => {
+    const f = fixture(), value = session(), answer = deferred<void>()
+    value.pendingInteraction = { request: { kind: 'permission', agentSessionId: value.agentSessionId, id: 'request-original', title: '原请求', evidence,
+      options: [{ id: 'exact-allow', label: '原选项', kind: 'allow-once' }, { id: 'exact-deny', label: '拒绝原请求', kind: 'reject-once' }] } }
+    f.sessions.set(value.agentSessionId, value); f.respond.mockImplementationOnce(() => answer.promise)
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await click(button(view.element, '原选项'))
+    expect(f.respond).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' },
+      response: { kind: 'permission', requestId: 'request-original', decision: { outcome: 'selected', optionId: 'exact-allow' } } })
+    const newer = { ...value, pendingInteraction: { request: { ...value.pendingInteraction.request, id: 'request-new', title: '新请求' } } }
+    f.sessions.set(value.agentSessionId, newer)
+    await act(async () => f.emit({ type: 'agent-session', session: newer }))
+    await act(async () => answer.reject(new Error('transport lost')))
+    expect(view.element.textContent).toContain('新请求')
+    expect(button(view.element, '原选项').disabled).toBe(false)
+    // Returning to the still-current original tuple cannot accidentally reopen its unknown answer.
+    await act(async () => f.emit({ type: 'agent-session', session: value }))
+    expect(view.element.textContent).toContain('答复回执未知')
+    expect(view.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
+    expect([...view.element.querySelectorAll<HTMLButtonElement>('[data-request-id="request-original"] button')].map(item => item.disabled)).toEqual([])
+    expect(f.respond).toHaveBeenCalledOnce()
+  })
+
+  it('retains reading when a history probe fails and accepts healthy Session input without gating on that probe', async () => {
+    const f = fixture(), view = await mount(<MobileConversationSurface {...props(f)} />)
+    f.readHistory.mockRejectedValueOnce(new Error('native transcript temporarily unavailable'))
+    await click(button(view.element, '刷新'))
+    expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
+      .toEqual(['native-input', 'native-answer'])
+    expect(view.element.textContent).toContain('native transcript temporarily unavailable')
+    await paste(view.element, '健康会话继续工作')
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+    f.readHistory.mockResolvedValueOnce({ ...history(), agentSessionId: 'unexpected', items: [{ id: 'wrong', kind: 'assistant-message', contentParts: [{ kind: 'text', text: '错误会话历史' }] }] })
+    await click(button(view.element, '刷新'))
+    expect(view.element.textContent).not.toContain('错误会话历史')
+    expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
+      .toEqual(['native-input', 'native-answer'])
+  })
+
+  it('restores the durable draft, references and original unknown input after a cold remount without reinvoking it', async () => {
+    const f = fixture(), receipt = deferred<void>(), options = props(f)
+    f.submit.mockImplementationOnce(() => receipt.promise)
+    const original = await mount(<MobileConversationSurface {...options} />)
+    await paste(original.element, '冷启草稿 [工具](agentmux-skill:%2Foriginal%2Ftool.md)')
+    await click(button(original.element, 'Send'))
+    const input = f.submit.mock.calls[0]![0]
+    const saved = JSON.parse(localStorage.getItem(STORAGE)!).conversation
+    expect(saved.attempts).toEqual([[JSON.stringify(['draft', 'session-original']), {
+      operationId: input.operationId, runId: 'run-original', draft: '冷启草稿 [工具](agentmux-skill:%2Foriginal%2Ftool.md)', phase: 'sending'
+    }]])
+    const previous = mounted.pop()!
+    await act(async () => previous.root.unmount()); previous.element.remove()
+    const restored = await mount(<MobileConversationSurface {...options} client={null}
+      connection={{ state: 'unavailable', message: '重启后尚未授权' }} />)
+    expect(editor(restored.element).textContent).toContain('冷启草稿')
+    expect(editor(restored.element).textContent).toContain('工具')
+    expect(restored.element.textContent).toContain('重启后的原输入回执未知')
+    expect(f.submit).toHaveBeenCalledOnce()
+    await restored.render(<MobileConversationSurface {...options} />)
+    expect(button(restored.element, 'Send').disabled).toBe(true)
+    await paste(restored.element, '冷启后的补充')
+    const beforeLate = localStorage.getItem(STORAGE)
+    await act(async () => receipt.resolve())
+    expect(editor(restored.element).textContent).toContain('冷启后的补充')
+    expect(localStorage.getItem(STORAGE)).toBe(beforeLate)
+    expect(f.submit).toHaveBeenCalledOnce()
+    f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
+      { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'user', createdAt: 2, updatedAt: 2, title: 'Prompt', content: input.prompt, authorHuman: true }
+    ] })
+    await click(button(restored.element, '刷新'))
+    expect(restored.element.textContent).toContain('Core 已确认输入')
+    expect(editor(restored.element).textContent).toContain('冷启后的补充')
+    expect(button(restored.element, 'Send').disabled).toBe(false)
+    expect(f.submit).toHaveBeenCalledOnce()
+  })
+
+  it('restores an unconfirmed original permission answer as unavailable and never automatically answers on startup', async () => {
+    const f = fixture(), value = session(), receipt = deferred<void>()
+    value.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: value.agentSessionId, title: '冷启原请求', evidence,
+      options: [{ id: 'allow-original', label: '原答复', kind: 'allow-once' }] } }
+    f.sessions.set(value.agentSessionId, value); f.respond.mockImplementationOnce(() => receipt.promise)
+    const options = props(f), view = await mount(<MobileConversationSurface {...options} />)
+    await click(button(view.element, '原答复'))
+    const saved = JSON.parse(localStorage.getItem(STORAGE)!).conversation
+    expect(saved.responses).toEqual([[JSON.stringify(['session-original', 'run-original', 'request-original']), { phase: 'sending' }]])
+    const previous = mounted.pop()!
+    await act(async () => previous.root.unmount()); previous.element.remove()
+    const restored = await mount(<MobileConversationSurface {...options} />)
+    expect(restored.element.querySelector('[data-request-id="request-original"]')).not.toBeNull()
+    expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
+    expect(restored.element.querySelector('[data-request-id="request-original"] button')).toBeNull()
+    expect(f.respond).toHaveBeenCalledOnce()
+    await click(button(restored.element, '刷新'))
+    expect(f.respond).toHaveBeenCalledOnce()
+    await act(async () => receipt.resolve())
+    expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
+  })
+
+  it('keeps unreadable original draft bytes intact while healthy SDK input and copying remain available', async () => {
+    localStorage.setItem(STORAGE, '{unreadable-original-drafts')
+    const f = fixture(), copy = vi.fn().mockResolvedValue(undefined)
+    const view = await mount(<MobileConversationSurface {...props(f)} platform={createBrowserPlatform({ clipboard: { writeText: copy } })} />)
+    expect(view.element.textContent).toContain('原记录尚未覆盖')
+    await paste(view.element, '存储坏了仍可编辑')
+    expect(localStorage.getItem(STORAGE)).toBe('{unreadable-original-drafts')
+    await click(button(view.element, '复制当前草稿'))
+    expect(copy).toHaveBeenCalledExactlyOnceWith('存储坏了仍可编辑')
+    expect(view.element.textContent).toContain('原记录尚未覆盖')
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+    expect(localStorage.getItem(STORAGE)).toBe('{unreadable-original-drafts')
+    expect(view.element.textContent).toContain('原记录尚未覆盖')
+  })
+
+  it('preserves previously durable bytes on a failed write, reports the gap, and retries only saving', async () => {
+    const f = fixture(), view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '先前保存的草稿')
+    const original = localStorage.getItem(STORAGE)
+    const originalStorage = localStorage, write = vi.fn(() => { throw new Error('quota exhausted') })
+    vi.stubGlobal('localStorage', { getItem: originalStorage.getItem.bind(originalStorage), setItem: write })
+    await paste(view.element, '本次未保存的补充')
+    expect(editor(view.element).textContent).toContain('本次未保存的补充')
+    expect(view.element.textContent).toContain('先前记录仍保留')
+    expect(localStorage.getItem(STORAGE)).toBe(original)
+    expect(write).toHaveBeenCalled()
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledOnce()
+    expect(localStorage.getItem(STORAGE)).toBe(original)
+    expect(view.element.textContent).toContain('先前记录仍保留')
+    vi.stubGlobal('localStorage', originalStorage)
+    await click(button(view.element, '重试保存'))
+    expect(view.element.textContent).not.toContain('本机草稿暂时无法保存')
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.drafts).toEqual([[JSON.stringify(['draft', 'session-original']), '']])
+    expect(f.submit).toHaveBeenCalledOnce()
+  })
+})
