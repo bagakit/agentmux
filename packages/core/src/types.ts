@@ -1293,6 +1293,15 @@ export type AgentActivityCommit = {
   pending?: AgentActivityObservation
 }
 
+export type AgentActivityHistoryProjection = {
+  segments: Array<AgentWorkHistoryProjection['segments'][number] & {
+    state: 'working' | 'idle' | 'awaiting-input' | 'unknown'
+    observationId: string
+    detail?: string
+  }>
+  coverage: AgentWorkHistoryProjection['coverage']
+}
+
 export type AgentWorkHistoryProjection = {
   segments: Array<{
     run: AgentMuxRunRef
