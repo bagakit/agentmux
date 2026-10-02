@@ -1,3 +1,4 @@
+import { gapFacts, sdkGap } from './helpers/output-gap.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -6,7 +7,7 @@ import type { AgentMuxClientEvent, AgentMuxRunAttachmentView } from '../src/type
 
 // Only the SDK transport is a deterministic fixture. The public Adapter attach/pump, Core
 // producer and public event subscription are real; this test never connects to a daemon.
-async function fixture(view: AgentMuxRunAttachmentView, publishedByte: number) {
+async function fixture(view: AgentMuxRunAttachmentView, publishedByte: number, origin: 'unknown' | 'daemon' | 'client' | 'mixed' = 'unknown') {
   const core = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
   const inner = core as unknown as {
     kernel: CtxmuxRunAdapter
@@ -28,7 +29,7 @@ async function fixture(view: AgentMuxRunAttachmentView, publishedByte: number) {
       if (publishedByte > 0) yield { type: 'output', chunk: {
         start_byte: 0, end_byte: publishedByte, data: new Uint8Array(publishedByte).fill(65)
       } }
-      yield { type: 'gap', latest_output_bytes: 27 }
+      yield sdkGap('gap-run', origin)
       await closed
     },
     detach: async () => finish?.(), close: () => finish?.()
@@ -56,7 +57,7 @@ describe('the existing Gap producer retains this observation without claiming de
       type: 'agent-error', code: 'OUTPUT_GAP',
       message: 'This Attachment did not receive a continuous output stream.',
       evidence: { source: 'terminal-output', observedAt: 12345, run: { runId: 'gap-run' },
-        outputGap: { kind: 'live-stream', latestOutputBytes: 27, publishedThroughByte: 4, representation: view } }
+        outputGap: { kind: 'live-stream', latestOutputBytes: 27, publishedThroughByte: 4, representation: view, ...gapFacts('gap-run') } }
     }])
     expect(sdk.attach).toHaveBeenCalledTimes(view === 'raw' ? 1 : 0)
     expect(sdk.attachTerminal).toHaveBeenCalledTimes(view === 'terminal' ? 1 : 0)
@@ -74,12 +75,21 @@ describe('the existing Gap producer retains this observation without claiming de
     const seen: AgentMuxClientEvent[] = []
     const unsubscribe = core.onEvent(event => seen.push(event))
     const inner = core as unknown as { acceptKernelEvent(event: unknown): void }
-    try { inner.acceptKernelEvent({ type: 'gap', runId: 'unowned-run', latestOutputBytes: 31 }) }
+    try { inner.acceptKernelEvent({ type: 'gap', runId: 'unowned-run', latestOutputBytes: 31, ...gapFacts('unowned-run') }) }
     finally { unsubscribe() }
     expect(seen).toMatchObject([{
       type: 'agent-error', evidence: { run: { runId: 'unowned-run' },
-        outputGap: { kind: 'live-stream', latestOutputBytes: 31, publishedThroughByte: null, representation: null } }
+        outputGap: { kind: 'live-stream', latestOutputBytes: 31, publishedThroughByte: null, representation: null, ...gapFacts('unowned-run') } }
     }])
     expect(seen).toHaveLength(1)
   })
+})
+
+// This crosses the actual loaded SDK adapter/pump, then the public Core publisher.
+it.each(['daemon', 'client', 'mixed'] as const)('keeps complete %s SDK facts at the public publisher', async origin => {
+  const { seen } = await fixture('raw', 4, origin)
+  const gap = seen.find(event => event.type === 'agent-error')
+  expect(gap).toMatchObject({ evidence: { outputGap: { ...gapFacts('gap-run', origin),
+    latestOutputBytes: 27, publishedThroughByte: 4, representation: 'raw' } } })
+  expect(seen.filter(event => event.type === 'process-state')).toEqual([])
 })

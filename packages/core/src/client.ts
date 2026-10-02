@@ -2739,8 +2739,10 @@ export class AgentMuxClient {
     const publisher = new AgentMuxClientEventPublisher()
     publisher.onEvent(listener)
     const off = this.publisher.onStatusEvent(event => {
-      if (event.type === 'agent-error' && event.evidence?.run?.runId === session.run.runId) publisher.publish(event)
-      else if (event.type === 'connection-state' && event.state !== 'restored') publisher.publish({
+      // This observation receives faults and Gaps from its own Attachment below.
+      // A shared workflow, input or another reader's diagnostic cannot establish
+      // failure of this healthy raw-output lane merely by naming the same Run.
+      if (event.type === 'connection-state' && event.state !== 'restored') publisher.publish({
         type: 'agent-error', agentSessionId, code: 'CONTROL_UNAVAILABLE',
         message: 'This output reader lost its Runtime connection. Reconnect using the original byte cursor.',
         evidence: { source: 'run-process', observedAt: Date.now(), run: session.run }
@@ -2748,11 +2750,15 @@ export class AgentMuxClient {
     })
     let closed = false
     let observation: Awaited<ReturnType<CtxmuxRunAdapter['observeOutput']>> | undefined
+    let publishedThroughByte: number | null = null
     const close = async () => { if (closed) return; closed = true; off(); publisher.dispose(); await observation?.close() }
     try {
       observation = await this.kernel.observeOutput(session.run.runId, afterByte, event => {
         if (closed) return
-        if (event.type === 'data') publisher.publishRunEvent(event, cloneSession(session))
+        if (event.type === 'data') {
+          publishedThroughByte = event.endByte
+          publisher.publishRunEvent(event, cloneSession(session))
+        }
         else if (event.type === 'exit') publisher.publish({
           type: 'process-state', agentSessionId, run: session.run, state: event.state.type,
           pid: observation?.run.pid ?? null,
@@ -2763,9 +2769,12 @@ export class AgentMuxClient {
         else if (event.type === 'error' || event.type === 'gap') publisher.publish({
           type: 'agent-error', agentSessionId, code: event.type === 'error' ? event.error.code : 'OUTPUT_GAP',
           message: event.type === 'error' ? event.error.message : 'This reader missed a continuous output range. Reconnect from its original cursor.',
-          evidence: { source: 'terminal-output', observedAt: Date.now(), run: session.run }
+          evidence: { source: 'terminal-output', observedAt: Date.now(), run: session.run,
+            ...(event.type === 'gap' ? { outputGap: { kind: 'live-stream', latestOutputBytes: event.latestOutputBytes,
+              publishedThroughByte, representation: 'raw', causes: event.causes, observation: event.observation } } : {}) }
         })
       })
+      publishedThroughByte ??= observation.replay.at(-1)?.endByte ?? null
       if (this.requireAgentSession(agentSessionId).run.runId !== session.run.runId) throw new AgentMuxError(
         'Agent Session changed while the output reader was being established.', 'STALE_AGENT_SESSION_BINDING')
       this.assertAgentRun(session, observation.run)
@@ -5566,7 +5575,9 @@ export class AgentMuxClient {
             kind: 'live-stream',
             latestOutputBytes: event.latestOutputBytes,
             publishedThroughByte: ownsAttachment ? this.kernel.continuationByte(event.runId) : null,
-            representation: ownsAttachment ? this.kernel.continuationView(event.runId) : null
+            representation: ownsAttachment ? this.kernel.continuationView(event.runId) : null,
+            causes: event.causes,
+            observation: event.observation
           }
         }
       })

@@ -10,7 +10,7 @@ import type {
 } from '../../../shared/contracts'
 import { runInterruptionFact } from '../../../shared/contracts'
 import { configValuesEqual } from '../../../shared/config-edit'
-import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses } from '@agentmux/core'
 import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
@@ -113,6 +113,22 @@ function acceptsAgentSessionTransition(
 }
 
 /** A diagnostic explains a failed step; only Session/Run facts can change Agent status. */
+const GAP_CAUSE_LABELS: Record<keyof AgentMuxOutputGapCauses, string> = {
+  liveEventPressure: 'Runtime output pressure', subscriberLag: 'slow Attachment subscriber',
+  sourceDiscontinuity: 'source output discontinuity', terminalCatchup: 'terminal catch-up',
+  geometryLag: 'missed terminal geometry', clientViewPressure: 'client view pressure', unknown: 'unknown'
+}
+
+/** Display recovery-relevant facts from this observation without inferring permanent loss. */
+function gapObservationDetail(o: AgentMuxAttachmentGapObservation): string {
+  const origin = o.origins.daemon ? o.origins.client ? 'mixed (daemon + client)' : 'daemon' : 'client'
+  return `\nOrigin: ${origin}. Attachment: ${o.attachmentId}; Run: ${o.runId}.` +
+    `\nRuntime: ${o.runtime?.runtimeId ?? 'unknown'}; Native instance: ${o.runtime?.daemonInstanceId ?? 'unknown'}.` +
+    `\nSDK received output head: ${o.receivedOutputHeadByte ?? 'unknown'}; continuous delivery through: ${o.deliveredThroughByte ?? 'unknown'}.` +
+    `\nRequested after byte: ${o.requestedAfterByte}; recovery after byte: ${o.recoveryAfterByte}; decoded output missed by this observation: ${o.missingOutputBytes ?? 'unknown'}.` +
+    `\nThese are Attachment observations, not proof of permanent history loss, Renderer parsing or Input delivery.`
+}
+
 export function runtimeDiagnosticNotice(
   state: Pick<SessionProjectionState, 'sessions'>,
   event: RuntimeEvent
@@ -149,9 +165,9 @@ export function runtimeDiagnosticNotice(
     : 'Check the terminal and error details before choosing a recovery action.'
   const gap = core.code === 'OUTPUT_GAP' ? core.evidence.outputGap : undefined
   const observation = gap
-    ? `\nObserved at (Unix ms): ${core.evidence.observedAt}. Gap phase: ${gap.kind}. Cause: unknown.` +
+    ? `\nObserved at (Unix ms): ${core.evidence.observedAt}. Gap phase: ${gap.kind}. Cause: ${gap.kind === 'live-stream' ? Object.entries(gap.causes).filter(([, observed]) => observed).map(([cause]) => GAP_CAUSE_LABELS[cause as keyof AgentMuxOutputGapCauses]).join(', ') : 'unknown'}.` +
       (gap.kind === 'live-stream'
-        ? `\nGap latest output byte: ${gap.latestOutputBytes}. Core published-through byte: ${gap.publishedThroughByte ?? 'unknown'}. Representation: ${gap.representation ?? 'unknown'}.\nThe publication boundary is not a Renderer parsing or Input acknowledgement.`
+        ? `\nGap latest output byte: ${gap.latestOutputBytes}. Core published-through byte: ${gap.publishedThroughByte ?? 'unknown'}. Representation: ${gap.representation ?? 'unknown'}.\nThe publication boundary is not a Renderer parsing or Input acknowledgement.` + gapObservationDetail(gap.observation)
         : `\nReplay requested after byte: ${gap.requestedAfterByte}. First available byte: ${gap.firstAvailableByte}. Snapshot latest output byte: ${gap.latestOutputBytes}.`)
     : ''
   const summary = `${scope}${run ? `; Run "${run.runId}"` : ''}: ${core.code}: ${core.message}`

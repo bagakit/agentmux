@@ -4,7 +4,7 @@ import { decodeHostedValue } from './hosted-value.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxHostedOutputRpcPort, AgentMuxHostedSubscription } from './hosted-client-contract.js'
 import type { AgentMuxRpcOutputInitial } from './public-rpc.js'
-import type { AgentMuxRunDataEvent } from './types.js'
+import type { AgentMuxRunDataEvent, AgentMuxEvidence } from './types.js'
 
 /** One existing public output lease; its callback never joins the SDK's global event publisher. */
 export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
@@ -24,12 +24,12 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
     rejectReplay(new AgentMuxError('This output reader was closed before its replay was confirmed.', 'CONTROL_CANCELLED'))
     await subscription?.dispose()
   }
-  const fail = (error: Error) => {
+  const fail = (error: Error, evidence?: AgentMuxEvidence) => {
     if (closed) return
     rejectReplay(error)
     if (initial) publisher.publish({ type: 'agent-error', agentSessionId,
       code: error instanceof AgentMuxError ? error.code : 'CONTROL_UNAVAILABLE', message: error.message,
-      evidence: { source: 'terminal-output', observedAt: Date.now(), run: { runId: initial.run.runId } } })
+      evidence: evidence ?? { source: 'terminal-output', observedAt: Date.now(), run: { runId: initial.run.runId } } })
     void close().catch(() => {})
   }
   const complete = () => {
@@ -58,8 +58,11 @@ export function createHostedOutputObservation(rpc: AgentMuxHostedOutputRpcPort,
           try {
             if (!initial) throw new AgentMuxError('Output arrived before its original attachment identity.', 'CONTROL_PROTOCOL_ERROR')
             if (event.type === 'error') {
+              if (event.error.evidence?.run && event.error.evidence.run.runId !== initial.run.runId) {
+                throw new AgentMuxError('Output diagnostic belongs to another Run.', 'CONTROL_PROTOCOL_ERROR')
+              }
               fail(new AgentMuxError(event.error.message, event.error.code,
-                event.error.detail ?? (typeof event.error.details === 'string' ? event.error.details : undefined), event.error.controlFailure)); return
+                event.error.detail ?? (typeof event.error.details === 'string' ? event.error.details : undefined), event.error.controlFailure), event.error.evidence); return
             }
             if (event.type === 'output') {
               const output = event.data

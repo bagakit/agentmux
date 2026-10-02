@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 import { CTXMUX_COMMIT, CTXMUX_VERSION } from '../src/ctxmux-run-adapter.js'
+import ctxmuxArtifacts from '../src/ctxmux-artifact-contract.json' with { type: 'json' }
 
 // ---------------------------------------------------------------------------
 // 「随包 CtxMux 版本/commit 必须绑定到 SHA 校验过的那份原件」的接线守护（F2）。
@@ -12,7 +13,7 @@ import { CTXMUX_COMMIT, CTXMUX_VERSION } from '../src/ctxmux-run-adapter.js'
 // 由来：`client.ts` 的 `runtimeDiagnostics`（ctxmux.bundled.version / ctxmux.bundled.sourceCommit）与
 // `terminalEnvironment`（TERM_PROGRAM_VERSION）、以及 `ctxmux-run-adapter.ts` 的 daemonEnvironment
 // 曾各自**手抄**一份 '0.1.0' / 40 位 commit 字面量。可信原件是 `ctxmux-run-adapter.ts` 里的
-// `CTXMUX_VERSION` / `CTXMUX_COMMIT`（以及 `runtime-paths.ts` 的 `CTXMUX_MANIFEST_SHA256`）——那些
+// 唯一来源现为 ctxmux-artifact-contract.json；adapter 导出的版本/commit 和 runtime-paths 的平台 digest
 // 模块在 load 时拿它们对着 SHA 校验过的 vendored manifest.json 断言（verifyArtifacts：
 // manifest.source.commit===CTXMUX_COMMIT、manifest.product.version===CTXMUX_VERSION，由
 // CTXMUX_MANIFEST_SHA256 兜底）。手抄的那几处一旦 vendored artifact 被 bump 就静默漂移，
@@ -128,15 +129,13 @@ function namedImportsFrom(sourceFile: ts.SourceFile, specifier: string): Set<str
 /**
  * 可区分的身份哈希：commit / tree / manifest-sha256。每个都长到不会误命中别的东西。
  *
- * **这里必须是当前 vendored artifact 的三个值。** 派生器靠它们搜出「还有谁手抄了身份字面量」——
- * 留着上一代的值，搜到的就是一张过期的地图：新 artifact 的手抄一份都看不见，而 anchor 角色那些
- * **故意**写死历史值的 test fixture 会继续命中，于是清单看起来还是满的、判据却已经全空。
- * bump artifact 时这三个值跟着 `CTXMUX_COMMIT` / `CTXMUX_TREE` / `CTXMUX_MANIFEST_SHA256` 一起改。
+ * 从唯一合同取当前搜索目标，避免 artifact bump 后扫描器仍只寻找上一代身份。
+ * 分类表和实际 import 接线独立校验；不能靠过期哈希与历史 fixture 制造非空假绿。
  */
 const IDENTITY_HASHES = [
-  'b061b8d05b8553398bb5ad43bf7e81b7f42733a6',
-  '1f643ee07f48c5810e9e34ef9715c78e8024ba38',
-  '0641f3e7f9330d0ee2c49f566a0b3038cc830bccf35405c9bd08d96ab4db5372'
+  ctxmuxArtifacts.source.commit,
+  ctxmuxArtifacts.source.tree,
+  ...Object.values(ctxmuxArtifacts.manifests)
 ] as const
 
 /**
@@ -209,9 +208,7 @@ function identityMentioningFiles(): string[] {
  */
 const IDENTITY_ROLES: Record<string, 'ssot' | 'manifest-verifier' | 'anchor' | 'preview-mock' | 'guard'> = {
   'packages/core/test/ctxmux-version-binding.test.ts': 'guard',
-  'packages/core/src/ctxmux-run-adapter.ts': 'ssot',
-  'packages/core/src/runtime-paths.ts': 'ssot',
-  'packages/core/scripts/build.mjs': 'manifest-verifier',
+  'packages/core/src/ctxmux-artifact-contract.json': 'ssot',
   'apps/desktop/test/package-runtime-upgrade-owner.test.ts': 'anchor',
   'apps/desktop/src/renderer/src/lib/api.ts': 'preview-mock'
 }
@@ -222,9 +219,11 @@ function roleViolation(relPath: string, role: string): string | null {
   const text = readFileSync(abs, 'utf8')
   switch (role) {
     case 'ssot': {
-      // 原件文件里必须**导出** identity 常量声明（不是别处引来的同名符号）。
-      const exportsAnIdentity = /export const CTXMUX_(COMMIT|VERSION|MANIFEST_SHA256)\s*=/.test(text)
-      return exportsAnIdentity ? null : `${relPath} 声明为 ssot 却没有 \`export const CTXMUX_*\` 声明`
+      if (relPath !== 'packages/core/src/ctxmux-artifact-contract.json') return `${relPath} 不是唯一 artifact 合同`
+      const contract = JSON.parse(text)
+      const hashes = [contract.source?.commit, contract.source?.tree, ...Object.values(contract.manifests ?? {})]
+      return hashes.length >= 3 && hashes.every(value => typeof value === 'string' && /^[a-f0-9]{40}$|^[a-f0-9]{64}$/.test(value))
+        ? null : `${relPath} 缺少可辨认的 Source 或平台 manifest identity`
     }
     case 'manifest-verifier': {
       // 自校验前提：读 manifest.json，且拿某个 manifest 字段（或 CTXMUX_ARTIFACT 冻结体）作比对。
@@ -296,6 +295,25 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
     expect(CTXMUX_VERSION.length).toBeGreaterThan(0)
     expect(typeof CTXMUX_COMMIT).toBe('string')
     expect(CTXMUX_COMMIT).toMatch(/^[0-9a-f]{40}$/)
+    expect(CTXMUX_COMMIT).toBe(ctxmuxArtifacts.source.commit)
+    expect(CTXMUX_VERSION).toBe(ctxmuxArtifacts.version)
+  })
+
+  it('生产 adapter、平台路径、构建和安装均从唯一合同读取身份', () => {
+    const consumers = [
+      ['packages/core/src/ctxmux-run-adapter.ts', './ctxmux-artifact-contract.json'],
+      ['packages/core/src/runtime-paths.ts', './ctxmux-artifact-contract.json'],
+      ['packages/core/scripts/build.mjs', '../src/ctxmux-artifact-contract.json'],
+      ['packages/core/bin/install-ctxmux.mjs', '../dist/ctxmux-artifact-contract.json']
+    ] as const
+    for (const [path, module] of consumers) {
+      const source = parse(path, readFileSync(join(repoRoot, path), 'utf8'))
+      const imports = source.statements.filter(ts.isImportDeclaration)
+      expect(imports.some(value => ts.isStringLiteral(value.moduleSpecifier) &&
+        value.moduleSpecifier.text === module && value.importClause?.name !== undefined), path).toBe(true)
+    }
+    expect(readFileSync(join(coreRoot, 'scripts/build.mjs'), 'utf8')).toContain('manifest.source.commit !== ctxmuxArtifacts.source.commit')
+    expect(readFileSync(adapterPath, 'utf8')).toContain('manifest.source.commit !== CTXMUX_COMMIT')
   })
 
   it('自检：若把某个消费点改回字面量，判据必红（证明它不是恒真）', () => {
@@ -319,12 +337,8 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
       ).toBeGreaterThan(0)
       expect(
         discovered,
-        'SSOT adapter 文件没出现在派生集合里——提取器坏了或漏了 commit 哈希那一路'
-      ).toContain('packages/core/src/ctxmux-run-adapter.ts')
-      expect(
-        discovered,
-        'runtime-paths（manifest-sha SSOT）没出现在派生集合里——漏了 sha256 那一路'
-      ).toContain('packages/core/src/runtime-paths.ts')
+        '唯一 artifact 合同没出现在派生集合里——扫描器已失去当前身份靶子'
+      ).toContain('packages/core/src/ctxmux-artifact-contract.json')
     })
 
     it('派生集合恰好等于分类表（新增一处未分类手抄 → 多出成员 → 红）', () => {
@@ -342,7 +356,7 @@ describe('CtxMux 运行时版本/commit 绑定到 SHA 校验过的原件（F2）
       const empty = new Set<string>()
       expect(empty).not.toEqual(new Set(Object.keys(IDENTITY_ROLES)))
       // 已知成员断言在空集上也必红。
-      expect([...empty]).not.toContain('packages/core/src/ctxmux-run-adapter.ts')
+      expect([...empty]).not.toContain('packages/core/src/ctxmux-artifact-contract.json')
     })
   })
 })

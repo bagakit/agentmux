@@ -1,4 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { gapFacts } from '../../../packages/core/test/helpers/output-gap.js'
 import { describe, expect, it } from 'vitest'
 import { reduceRuntimeEvent, runtimeDiagnosticNotice } from '../src/renderer/src/lib/session-state.js'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
@@ -142,7 +143,7 @@ describe('output gap diagnostics and Run state have separate owners', () => {
     const event = gapError()
     if (event.event.type !== 'agent-error') throw new Error('Expected diagnostic')
     event.event.evidence.outputGap = { kind: 'live-stream', latestOutputBytes: 99,
-      publishedThroughByte: cursor, representation: cursor === null ? null : 'raw' }
+      publishedThroughByte: cursor, representation: cursor === null ? null : 'raw', ...gapFacts('run-1') }
     const diagnostic = runtimeDiagnosticNotice({ sessions: [SESSION] }, event)
     expect(diagnostic?.subject).toBe(SESSION.control)
     expect(diagnostic?.message).toContain('Observed at (Unix ms): 100. Gap phase: live-stream. Cause: unknown.')

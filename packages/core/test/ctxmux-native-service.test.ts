@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -11,6 +11,8 @@ import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/typ
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
+import type { AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract.js'
 import type { AgentMuxRpcStreamEvent } from '../src/public-rpc.js'
 
 const clients: AgentMuxClient[] = []
@@ -22,7 +24,7 @@ function service(): NativeServiceSnapshot {
     terminal_fault: null }
 }
 function runInfo(id: string, nativeService: NativeServiceSnapshot = service()): RunInfo {
-  return { id, spec: { program: 'codex', args: [], cwd: upstreamFixturePath("fixture"), env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] },
+  return { id, spec: { program: 'codex', args: [], cwd: fixturePath("fixture"), env: {}, initial_size: { cols: 80, rows: 24 }, declared_inputs: [] },
     lineage: null, backend: { type: 'native' }, capabilities: { input: true, resize: true, signal: true, stop: true,
       fork_level_a: false, fork_level_b: false, replay: 'raw_from_start' }, pid: 4321, state: { type: 'running' },
     current_size: { cols: 80, rows: 24 }, latest_output_bytes: 0, durable_output_bytes: 0, first_available_byte: 0,
@@ -32,10 +34,13 @@ class Stream {
   private eventsQueue: RunEvent[] = []
   private wake: (() => void) | undefined
   private closed = false
+  private failure: Error | undefined
   push(event: RunEvent): void { this.eventsQueue.push(event); this.wake?.() }
   close(): void { this.closed = true; this.wake?.() }
+  fail(error: Error): void { this.failure = error; this.wake?.() }
   async *events(): AsyncGenerator<RunEvent> {
     while (!this.closed) {
+      if (this.failure) throw this.failure
       const event = this.eventsQueue.shift()
       if (event) yield event
       else await new Promise<void>(resolve => { this.wake = resolve })
@@ -45,7 +50,7 @@ class Stream {
 async function fixture() {
   const store = new AgentMuxMemoryAgentSessionStore()
   const stored: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'service-agent', providerId: 'codex', executorId: 'codex',
-    hostId: 'local', workspacePath: upstreamFixturePath("fixture"), run: { runId: 'agent-run' }, retiredRuns: [], hookBindingId: 'fixture', hookToken: 'fixture', createdAt: 1, updatedAt: 1 }
+    hostId: 'local', workspacePath: fixturePath("fixture"), run: { runId: 'agent-run' }, retiredRuns: [], hookBindingId: 'fixture', hookToken: 'fixture', createdAt: 1, updatedAt: 1 }
   await store.compareAndSwap(null, stored)
   const client = new AgentMuxClient({ store }); clients.push(client)
   const inner = client as unknown as { connected: boolean; registry: AgentMuxAgentSessionRegistry; kernel: CtxmuxRunAdapter; acceptKernelEvent(event: CtxmuxAdapterEvent): void }
@@ -65,6 +70,7 @@ async function fixture() {
     recoverableInput: vi.fn(async () => { throw new CtxmuxCommandError('io', 'input write failed', 'unknown') })
   }
   ;(inner.kernel as unknown as { client: unknown }).client = sdk
+  inner.kernel.identity = () => ({ buildIdentity: 'private-native-service', protocolVersion: 22, daemonInstanceId: 'private-owner' }) as never
   inner.kernel.onEvent(event => inner.acceptKernelEvent(event))
   const events: AgentMuxClientEvent[] = []; client.onEvent(event => events.push(event))
   const restored = await client.reattachAgent('service-agent')
@@ -115,7 +121,10 @@ it('preserves native snapshot facts through the public Client and service change
   h.facts.set('agent-run', change)
   h.events.length = 0; h.sdk.list.mockClear(); h.sdk.status.mockClear()
   h.streams.get('agent-run')!.push({ type: 'service_changed', service: change })
-  await vi.waitFor(() => expect(h.events.map(event => event.type)).toEqual(['run-service']))
+  await vi.waitFor(() => expect(h.events.map(event => event.type)).toEqual(['run-service', 'agent-error']))
+  expect(h.events[1]).toMatchObject({ type: 'agent-error', code: 'CTXMUX_NATIVE_SERVICE_UNAVAILABLE',
+    agentSessionId: 'service-agent', evidence: { run: { runId: 'agent-run' } } })
+  expect(h.events.filter(event => event.type === 'process-state')).toEqual([])
   expect(h.events[0]).toMatchObject({ type: 'run-service', agentSessionId: 'service-agent', run: { runId: 'agent-run' },
     nativeService: { revision: 2, owner: { type: 'stopped', reason: { ownerIoFailed: { stage: 'wake_drain', osError: 5 } } },
       input: { phase: { type: 'unavailable', reason: 'control_closed' }, activeConfirmedBytes: 3 } } })
@@ -135,7 +144,9 @@ it('a Run-local derived terminal fault leaves raw bytes and another Run live and
   await vi.waitFor(() => expect(h.events.filter(event => event.type === 'terminal-output').length).toBe(2))
   expect(h.events.filter(event => event.type === 'terminal-output').map(event => [event.run.runId, event.data]).sort())
     .toEqual([['agent-run', 'raw'], ['other-run', 'other']])
-  expect(h.events.filter(event => event.type === 'agent-error')).toEqual([])
+  expect(h.events.filter(event => event.type === 'agent-error')).toEqual([expect.objectContaining({
+    code: 'CTXMUX_TERMINAL_DERIVED_FAULT', agentSessionId: 'service-agent',
+    evidence: expect.objectContaining({ source: 'terminal-output', run: { runId: 'agent-run' } }) })])
   expect(h.events).toContainEqual(expect.objectContaining({ type: 'run-service', nativeService: expect.objectContaining({ terminalFault: { stage: 'export', throughByte: 0 } }) }))
   expect(h.events.filter(event => event.type === 'process-state')).toEqual([])
   expect(h.inner.kernel.hasAttachment('agent-run')).toBe(true)
@@ -154,7 +165,7 @@ it.each([{ disposition: 'unknown' as const, prefix: 3 }, { disposition: 'unknown
 
 it('keeps a real public raw reader live across independent input and derived-view faults', async () => {
   const h = await fixture(), visible = h.streams.get('agent-run')!
-  const directory = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-native-public-")), path = join(directory, 'owner.sock')
+  const directory = await mkdtemp(fixturePath("tmp/amx-native-public-")), path = join(directory, 'owner.sock')
   const owner = new AgentMuxControlServer({ socketPath: path, coreClients: () => [{ hostId: 'local', client: h.client }] })
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
   const observed: AgentMuxRpcStreamEvent<'agent.output'>[] = [], ended = vi.fn()
@@ -169,6 +180,8 @@ it('keeps a real public raw reader live across independent input and derived-vie
     visible.push({ type: 'service_changed', service: changed })
     raw.push({ type: 'service_changed', service: changed })
     raw.push({ type: 'output', chunk: { start_byte: 0, end_byte: 5, data: new TextEncoder().encode('alive') } })
+    await vi.waitFor(() => expect(observed.length).toBeGreaterThan(0))
+    expect(ended).not.toHaveBeenCalled()
     await vi.waitFor(() => expect(observed).toContainEqual(expect.objectContaining({ type: 'output', data: expect.objectContaining({ startByte: 0, endByte: 5, dataBase64: Buffer.from('alive').toString('base64') }) })))
     expect(ended).not.toHaveBeenCalled()
     expect(observed.filter(event => event.type === 'error' || event.type === 'end')).toEqual([])
@@ -181,20 +194,49 @@ it('keeps a real public raw reader live across independent input and derived-vie
   }
 })
 
+it('reports its own Attachment iterator failure through the public raw reader without stopping healthy lanes', async () => {
+  const h = await fixture(), primary = h.streams.get('agent-run')!, neighbor = h.streams.get('other-run')!
+  const directory = await mkdtemp(fixturePath("tmp/amx-native-reader-fault-")), path = join(directory, 'owner.sock')
+  const owner = new AgentMuxControlServer({ socketPath: path, coreClients: () => [{ hostId: 'local', client: h.client }] })
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } }), ended = vi.fn()
+  try {
+    await owner.start()
+    const reader = await client.subscribe('agent.output', { agentSessionId: 'service-agent', follow: true }, {
+      onInitial() {}, onEvent() {}, onEnd: ended
+    })
+    h.streams.get('agent-run')!.fail(new CtxmuxCommandError('io', 'This reader transport failed', 'unknown'))
+    await vi.waitFor(() => expect(ended).toHaveBeenCalledOnce())
+    expect(ended.mock.calls[0]?.[0]).toMatchObject({ code: 'CTXMUX_io', message: 'This reader transport failed' })
+    primary.push({ type: 'output', chunk: { start_byte: 0, end_byte: 4, data: new TextEncoder().encode('live') } })
+    neighbor.push({ type: 'output', chunk: { start_byte: 0, end_byte: 5, data: new TextEncoder().encode('other') } })
+    await vi.waitFor(() => expect(h.events.filter(event => event.type === 'terminal-output').map(event => event.data).sort()).toEqual(['live', 'other']))
+    expect(h.events.filter(event => event.type === 'process-state' && event.state !== 'running')).toEqual([])
+    expect(h.events.filter(event => event.type === 'agent-error')).toEqual([])
+    expect(h.inner.kernel.hasAttachment('agent-run')).toBe(true)
+    expect(h.inner.kernel.hasAttachment('other-run')).toBe(true)
+    expect(h.sdk.recoverableInput).not.toHaveBeenCalled()
+    await reader.dispose()
+  } finally {
+    await client.dispose(); await owner.stop(); await rm(directory, { recursive: true, force: true })
+  }
+})
+
 it.each([3, 0, null])('carries Native confirmed prefix %s through a real hosted public write without retry', async prefix => {
   const h = await fixture()
   ;(h.inner.kernel as unknown as { identity(): unknown }).identity = () => ({ buildIdentity: 'private-sdk', protocolVersion: 21, daemonInstanceId: 'private-owner' })
   h.sdk.recoverableInput.mockRejectedValue(new CtxmuxCommandError('io', 'input write failed', 'unknown', undefined, prefix))
-  const directory = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-native-write-")), path = join(directory, 'owner.sock')
-  const hosted = new AgentMuxHostedRuntimeService(h.client), consumerId = 'original-native-consumer'
+  const directory = await mkdtemp(fixturePath("tmp/amx-native-write-")), path = join(directory, 'owner.sock')
+  const identity: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-native-host', ownerInstanceId: 'private-native-host-epoch',
+    protocolVersion: 1, processId: process.pid, ctxmux: h.client.runtimeIdentity(), availability: 'connected' }
+  const hosted = new AgentMuxHostedRuntimeService(h.client, join(directory, 'sessions.json'), () => identity)
   const owner = new AgentMuxControlServer({ socketPath: path, hostedRuntime: () => hosted, coreClients: () => [{ hostId: 'local', client: h.client }] })
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
   try {
     await owner.start()
-    const reader = await client.subscribe('runtime.events', { consumerId }, { onInitial() {}, onEvent() {} })
-    await expect(client.call('runtime.invoke', { consumerId, invocation: { method: 'writeTerminal', args: [
-      { runId: 'other-run' }, { ownerInstanceId: 'private-owner', operationId: 'one-write', expectedByte: 5, data: 'abcdef' }
-    ] } })).rejects.toMatchObject({ code: 'CTXMUX_io', detail: 'unknown', controlFailure: { disposition: 'unknown', confirmedInputBytes: prefix } })
+    const reader = await connectHostedAgentMux({ rpc: client })
+    await expect(reader.writeTerminal({ runId: 'other-run' }, {
+      ownerInstanceId: 'private-owner', operationId: 'one-write', expectedByte: 5, data: 'abcdef'
+    })).rejects.toMatchObject({ code: 'CTXMUX_io', detail: 'unknown', controlFailure: { disposition: 'unknown', confirmedInputBytes: prefix } })
     expect(h.sdk.recoverableInput).toHaveBeenCalledOnce()
     expect(h.inner.kernel.hasAttachment('other-run')).toBe(true)
     await reader.dispose()
