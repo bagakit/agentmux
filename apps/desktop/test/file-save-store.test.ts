@@ -61,6 +61,7 @@ import {
   type WorkbenchTab
 } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
+import { editorSaveAction } from '../src/renderer/src/lib/editor-save-shortcut.js'
 
 const initialState = useAppStore.getState()
 
@@ -776,5 +777,146 @@ describe('revision-aware file save Store', () => {
       content: 'newer',
       revision: 'revision-newer'
     })
+  })
+})
+describe('original File owner unconfirmed save checks', () => {
+  it('rejects only a save without its original workspace and can retry when restored', async () => {
+    const { tab, key, workspace } = seed()
+    useAppStore.getState().updateDocument(tab.id, 'saved attempt')
+    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [] } }))
+    await useAppStore.getState().saveDocument(tab.id)
+    expect(fileApi.writes).toHaveLength(0)
+    expect(useAppStore.getState().documentIssues[key]).toMatchObject({ kind: 'write-error', code: 'WORKSPACE_FILE_RESOURCE_UNCONFIRMED' })
+    expect(useAppStore.getState().documents[key]?.content).toBe('saved attempt')
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [workspace] } }))
+    const retry = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    fileApi.writes[0]!.resolve({ status: 'written', revision: 'restored-write' })
+    await retry
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+  })
+
+  async function unknown() {
+    const original = seed()
+    useAppStore.getState().updateDocument(original.tab.id, 'saved attempt')
+    const save = useAppStore.getState().saveDocument(original.tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    fileApi.writes[0]!.resolve({ status: 'unknown', code: 'RECEIPT_LOST', message: 'receipt missing' })
+    await save
+    return original
+  }
+  it.each(['same', 'old', 'different', 'unreadable'] as const)('checks %s disk contents without blindly writing again', async kind => {
+    const { workspace, tab, key } = await unknown()
+    expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
+    expect(editorSaveAction({ dirty: true, saving: false, issue: 'write-unknown' })).toBe('none')
+    const blocked = useAppStore.getState().saveDocument(tab.id)
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(fileApi.writes).toHaveLength(1)
+    await blocked
+    await useAppStore.getState().overwriteDocument(tab.id)
+    expect(fileApi.writes).toHaveLength(1)
+    const check = useAppStore.getState().reloadDocument(tab.id)
+    await waitFor(() => fileApi.reads.length === 1)
+    expect(fileApi.reads[0]).toMatchObject({ workspaceId: workspace.id, path: tab.path })
+    expect(useAppStore.getState().savingDocuments[key]).toBe(true)
+    fileApi.reads[0]!.resolve(kind === 'unreadable'
+      ? { status: 'error', code: 'EIO', message: 'source unavailable' }
+      : { status: 'read', document: { path: tab.path,
+          content: kind === 'same' ? 'saved attempt' : kind === 'old' ? 'alpha' : 'another discussion changed this',
+          revision: kind === 'old' ? 'revision-alpha' : 'revision-observed' } })
+    await check
+    expect(useAppStore.getState().documents[key]?.content).toBe('saved attempt')
+    expect(useAppStore.getState().savingDocuments[key]).toBe(false)
+    expect(fileApi.writes).toHaveLength(1)
+    if (kind === 'same') {
+      expect(useAppStore.getState().documents[key]?.revision).toBe('revision-observed')
+      expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+      expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+    } else if (kind === 'old') {
+      expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+      expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+      const retry = useAppStore.getState().saveDocument(tab.id)
+      await waitFor(() => fileApi.writes.length === 2)
+      expect(fileApi.writes[1]?.input).toMatchObject({ content: 'saved attempt', expectedRevision: 'revision-alpha' })
+      fileApi.writes[1]!.resolve({ status: 'written', revision: 'revision-retry' }); await retry
+    } else if (kind === 'different') {
+      expect(useAppStore.getState().documentIssues[key]).toMatchObject({ kind: 'changed', observed: { content: 'another discussion changed this' } })
+      expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    } else {
+      expect(useAppStore.getState().documentIssues[key]).toMatchObject({ kind: 'write-unknown', checkMessage: 'source unavailable' })
+      expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    }
+  })
+  it.each(['deleted', 'binary', 'directory'] as const)('keeps the original draft when check finds %s', async status => {
+    const { tab, key } = await unknown()
+    const check = useAppStore.getState().reloadDocument(tab.id)
+    await waitFor(() => fileApi.reads.length === 1)
+    fileApi.reads[0]!.resolve({ status })
+    await check
+    expect(useAppStore.getState().documents[key]?.content).toBe('saved attempt')
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().documentIssues[key]?.kind).toBe(status === 'deleted' ? 'deleted' : 'write-unknown')
+    expect(useAppStore.getState().savingDocuments[key]).toBe(false)
+    expect(fileApi.writes).toHaveLength(1)
+  })
+  it('confirms the attempted bytes while retaining input typed during the check', async () => {
+    const { tab, key } = await unknown()
+    const check = useAppStore.getState().reloadDocument(tab.id)
+    await waitFor(() => fileApi.reads.length === 1)
+    useAppStore.getState().updateDocument(tab.id, 'later unsaved input')
+    fileApi.reads[0]!.resolve({ status: 'read', document: { path: tab.path, content: 'saved attempt', revision: 'revision-saved' } })
+    await check
+    expect(useAppStore.getState().documents[key]).toEqual({ path: tab.path, content: 'later unsaved input', revision: 'revision-saved' })
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+  })
+  it('does not use a read started before the missing receipt to authorize another save', async () => {
+    const { workspace, tab, key } = seed()
+    const stale = useAppStore.getState().refreshDocument(workspace.id, tab.path)
+    await waitFor(() => fileApi.reads.length === 1)
+    useAppStore.getState().updateDocument(tab.id, 'saved attempt')
+    const save = useAppStore.getState().saveDocument(tab.id)
+    await waitFor(() => fileApi.writes.length === 1)
+    fileApi.writes[0]!.resolve({ status: 'unknown', code: 'RECEIPT_LOST', message: 'receipt missing' }); await save
+    fileApi.reads[0]!.resolve({ status: 'read', document: { path: tab.path, content: 'alpha', revision: 'revision-alpha' } }); await stale
+    expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
+    await useAppStore.getState().saveDocument(tab.id)
+    expect(fileApi.writes).toHaveLength(1)
+  })
+  it('rejects a check across resource A → B → A and allows a fresh check on A', async () => {
+    const { workspace, tab, key } = await unknown()
+    const check = useAppStore.getState().reloadDocument(tab.id)
+    await waitFor(() => fileApi.reads.length === 1)
+    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [{ ...workspace, path: _hygiene_fixturePath("other-resource") }] } }))
+    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [workspace] } }))
+    fileApi.reads[0]!.resolve({ status: 'read', document: { path: tab.path, content: 'saved attempt', revision: 'wrong-resource' } })
+    await check
+    expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
+    expect(useAppStore.getState().documents[key]?.revision).toBe('revision-alpha')
+    const fresh = useAppStore.getState().reloadDocument(tab.id)
+    await waitFor(() => fileApi.reads.length === 2)
+    fileApi.reads[1]!.resolve({ status: 'read', document: { path: tab.path, content: 'saved attempt', revision: 'original-resource' } })
+    await fresh
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined()
+    expect(useAppStore.getState().documents[key]?.revision).toBe('original-resource')
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+  })
+  it.each(['before', 'during'] as const)('preserves unknown when the original workspace resource changes %s checking', async when => {
+    const { workspace, tab, key } = await unknown()
+    const change = () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [{ ...workspace, path: _hygiene_fixturePath("different-resource") }] } }))
+    if (when === 'before') change()
+    const check = useAppStore.getState().reloadDocument(tab.id)
+    if (when === 'during') {
+      await waitFor(() => fileApi.reads.length === 1)
+      change()
+      fileApi.reads[0]!.resolve({ status: 'read', document: { path: tab.path, content: 'saved attempt', revision: 'wrong-resource' } })
+    }
+    await check
+    expect(fileApi.reads).toHaveLength(when === 'before' ? 0 : 1)
+    expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
+    expect(useAppStore.getState().documents[key]?.revision).toBe('revision-alpha')
+    expect(useAppStore.getState().dirtyDocuments[key]).toBe(true)
   })
 })

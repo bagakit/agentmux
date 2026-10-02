@@ -39,6 +39,7 @@ export type FileDocumentIssue =
   | { kind: 'deleted' }
   | { kind: 'read-error'; code: string; message: string }
   | { kind: 'write-error'; code: string; message: string }
+  | { kind: 'write-unknown'; code: string; message: string; attempted: { content: string; expectedRevision: string | null; generation: number; resource: { hostId: string; path: string } }; checkMessage?: string }
 
 export type FileRenameProjectionCollision = {
   owner: 'tab' | 'document' | 'region'
@@ -303,7 +304,7 @@ export function reduceDocumentWritten(
       (issue?.kind === 'changed' && issue.observed.revision === expectedRevision) ||
       (issue?.kind === 'deleted' && expectedRevision === null)
     )
-  const clearsIssue = issue?.kind === 'write-error' || observedConflictIsSavedRevision || observedConflictWasCaptured
+  const clearsIssue = issue?.kind === 'write-error' || issue?.kind === 'write-unknown' || observedConflictIsSavedRevision || observedConflictWasCaptured
   const hasNewerDiskConflict =
     (issue?.kind === 'changed' && !clearsIssue) ||
     (issue?.kind === 'deleted' && !clearsIssue)
@@ -323,7 +324,8 @@ export function reduceDocumentRead(
   state: FileWorkbenchState,
   workspaceId: string,
   path: string,
-  result: WorkspaceFileReadResult
+  result: WorkspaceFileReadResult,
+  checkedWrite?: Extract<FileDocumentIssue, { kind: 'write-unknown' }>
 ): FileWorkbenchState {
   const key = documentKey(workspaceId, path)
   const current = state.documents[key]
@@ -331,6 +333,29 @@ export function reduceDocumentRead(
   const documentObservationGenerations = {
     ...state.documentObservationGenerations,
     [key]: (state.documentObservationGenerations[key] ?? 0) + 1
+  }
+  const unknown = state.documentIssues[key]
+  if (unknown?.kind === 'write-unknown') {
+    // A read begun before the missing receipt cannot settle that write.
+    if (unknown !== checkedWrite) return state
+    if (result.status === 'read' && result.document.content === unknown.attempted.content) {
+      return reduceDocumentWritten({ ...state, documentObservationGenerations }, workspaceId, path,
+        unknown.attempted.generation, result.document.revision, unknown.attempted.expectedRevision)
+    }
+    if (result.status === 'read' && result.document.revision === unknown.attempted.expectedRevision) {
+      return { ...state, documentObservationGenerations, documentIssues: withoutIssue(state.documentIssues, key) }
+    }
+    if (result.status === 'read') return {
+      ...state, documentObservationGenerations,
+      documentIssues: { ...state.documentIssues, [key]: { kind: 'changed', observed: result.document } }
+    }
+    if (result.status === 'deleted') return {
+      ...state, documentObservationGenerations, documentIssues: { ...state.documentIssues, [key]: { kind: 'deleted' } }
+    }
+    return { ...state, documentObservationGenerations, documentIssues: { ...state.documentIssues, [key]: {
+      ...unknown, checkMessage: result.status === 'error' ? result.message
+        : result.status === 'binary' ? 'The file now contains binary bytes.' : 'The original path is now a directory.'
+    } } }
   }
   if (result.status === 'deleted') return {
     ...state,

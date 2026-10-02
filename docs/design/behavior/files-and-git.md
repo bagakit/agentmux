@@ -39,10 +39,11 @@
 ### Revision-aware 保存与外部冲突
 
 - Desktop Main 的 `WorkspaceFiles` 独占 Workspace Root confinement、磁盘 revision、同目录临时写入、同步、mode 保留、原子替换、单文件观察和磁盘错误事实。Shared contract 与 preload 只暴露 typed read、write、observe 和 move 能力。
-- Read 返回内容和不透明 revision。Write 必须携带 expected revision，只返回 `written | conflict | error`。Remote workspace 无法满足同一原子保存合同时返回 typed unsupported。
+- Read 返回内容和不透明 revision。Write 必须携带 expected revision，返回 `written | conflict | error | unknown`；替换后回执缺失是 unknown，不能解释成明确未写入。Remote workspace 无法满足同一原子保存合同时返回 typed unsupported。
 - 临时写入或替换失败会清理临时文件并保持原文件字节不变。普通文件系统 revision 是 optimistic concurrency signal；最终 revision 复核与原子替换之间仍存在外部进程竞争窗口，不宣称强跨进程 compare-and-swap。
 - Renderer 持有 Monaco buffer、dirty、保存 generation、observation generation、document lifetime 和冲突交互。每文件保存串行化；保存期间继续输入时旧 written 回执只更新落盘 revision，不清除更新后的 buffer 或 dirty。
 - Main observation 只发布 `{ workspaceId, path }` 失效事实，Renderer 重新 read。Clean buffer 自动采用新内容与 revision；dirty buffer 保留草稿并进入 changed/deleted conflict；read error 保留最后 buffer且不能伪装成删除。
+- 保存结果 unknown 时原 FileDocument 保留尝试内容、原 revision、编辑 generation 与准确 Host/Workspace/path，原 Editor 提供核对已保存文件动作；核对前不自动或重复写入。只接受在该 unknown 后启动、仍绑定同一 Document lifetime、尝试和原资源的 read。读回等于尝试内容才确认保存，后来输入保持未保存；仍是原 revision 则保草稿并允许用户明确再保存；其他版本／删除沿原 changed/deleted 冲突保草稿；读取失败、binary、目录或资源身份未确认持续说明未知并保可达核对。旧 watcher 回执不能消除该未知状态。这个文件保存流程不移除原工作面、拿走无关编辑能力或停止健康 Agent/Run。
 - Reload 明确采用 observed disk state。Overwrite 使用最近一次 observed revision；若磁盘再次变化则继续 conflict。旧 save/read completion 不能越过 close、reopen 或 move 的 lifetime 边界修改新文档 owner。
 
 ## 扇出比稿
