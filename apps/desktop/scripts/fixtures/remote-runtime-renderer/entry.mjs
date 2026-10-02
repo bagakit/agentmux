@@ -139,9 +139,29 @@ window.remoteAttachmentNotices = () => [identity.regionId, (setup.terminalReadin
     const notice = [...(region?.querySelectorAll('.terminal-service-window') ?? [])].find(item =>
       [...item.querySelectorAll('.service-window__step')].some(step => step.textContent === 'Observing this Region’s output'))
     const recovery = notice?.querySelector('.service-disclosure__actions button')
+    const panel = notice?.querySelector('.service-disclosure__details')
+    let recoveryPainted = false
+    if (recovery && panel?.matches(':popover-open')) {
+      const button = recovery.getBoundingClientRect()
+      const clip = { left: 0, top: 0, right: innerWidth, bottom: innerHeight }
+      for (let ancestor = recovery.parentElement; ancestor; ancestor = ancestor.parentElement) {
+        const bounds = ancestor.getBoundingClientRect(), style = getComputedStyle(ancestor)
+        if (ancestor === panel || /^(auto|scroll|hidden|clip)$/.test(style.overflowX)) {
+          clip.left = Math.max(clip.left, bounds.left); clip.right = Math.min(clip.right, bounds.right)
+        }
+        if (ancestor === panel || /^(auto|scroll|hidden|clip)$/.test(style.overflowY)) {
+          clip.top = Math.max(clip.top, bounds.top); clip.bottom = Math.min(clip.bottom, bounds.bottom)
+        }
+        if (ancestor === panel) break
+      }
+      const hit = document.elementFromPoint(button.left + button.width / 2, button.top + button.height / 2)
+      recoveryPainted = button.width > 0 && button.height > 0 && button.left >= clip.left && button.right <= clip.right &&
+        button.top >= clip.top && button.bottom <= clip.bottom && Boolean(hit && (hit === recovery || recovery.contains(hit)))
+    }
     return { regionId, regionPresent: Boolean(region), unavailable: Boolean(notice),
+      noticeCount: notice?.querySelectorAll('.service-window').length ?? 0,
       recoveryAvailable: recovery?.textContent === 'Refresh observation' && !recovery.disabled,
-      recoveryPainted: Boolean(recovery?.getClientRects().length) }
+      recoveryPainted }
   })
 window.remoteOpenAttachmentNotice = regionId => {
   const region = document.querySelector(`[data-workbench-region-id="${regionId}"]`)

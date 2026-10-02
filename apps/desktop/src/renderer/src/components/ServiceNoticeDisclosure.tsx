@@ -106,8 +106,8 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, visi
       </div>
       <div className="service-disclosure__content">
         {children}
-        {actions ? <div className="service-disclosure__actions">{actions}</div> : null}
       </div>
+      {actions ? <div className="service-disclosure__actions">{actions}</div> : null}
     </div>
   </div>
 }
