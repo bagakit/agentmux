@@ -211,8 +211,19 @@ app.whenReady().then(async () => {
       if (recoveryInput.splitTerminal) {
         await readerAssertion('window.remoteAttachmentNotices().some(notice => notice.unavailable && notice.recoveryAvailable)',
           'The original reader failure must have its Region service window and available observation recovery')
-        const notice = (await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')).find(item => item.unavailable)
-        await win.webContents.executeJavaScript(`window.remoteOpenAttachmentNotice(${JSON.stringify(notice.regionId)}); true`)
+        result.readerRecoveryActions = []
+        for (const [regionId, multiple] of [[recoveryInput.identity.regionId, true], [recoveryInput.splitTerminal.regionId, false]] as const) {
+          await win.webContents.executeJavaScript(`window.remoteOpenAttachmentNotice(${JSON.stringify(regionId)}); true`)
+          await readerAssertion(`window.remoteAttachmentNotices().some(notice => notice.regionId === ${JSON.stringify(regionId)} && notice.unavailable && notice.recoveryPainted && notice.recoveryAvailable)`,
+            multiple ? 'The original multi-notice reader recovery action must be fully visible and reachable'
+              : 'The original single-notice reader recovery action must be fully visible and reachable')
+          const notice = (await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')).find(item => item.regionId === regionId)
+          assert.equal(multiple ? notice.noticeCount > 1 : notice.noticeCount === 1, true,
+            'Both original multi-notice and single-notice recovery surfaces must be exercised')
+          result.readerRecoveryActions.push(notice)
+          if (!multiple) await capture(`${phase}-reader-single-notice.png`)
+        }
+        await win.webContents.executeJavaScript(`window.remoteOpenAttachmentNotice(${JSON.stringify(recoveryInput.identity.regionId)}); true`)
         await readerAssertion('window.remoteAttachmentNotices().some(notice => notice.unavailable && notice.recoveryPainted && notice.recoveryAvailable)',
           'The original reader recovery action must actually be painted and enabled')
         result.offlineAttachmentNotices = await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')
