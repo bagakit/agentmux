@@ -88,7 +88,7 @@ window.projectGroupsState = () => {
     activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
     projectRailOpen: state.projectRailOpen, projectGroups: state.projectGroups,
     workbench: projectPersistedWorkbench(state), spaceZoneBindings: state.spaceZoneBindings,
-    execution: setup.config.workspaces.map(workspace => ({ id: workspace.id, hostId: workspace.hostId, path: workspace.path,
+    execution: (state.config?.workspaces ?? []).map(workspace => ({ id: workspace.id, hostId: workspace.hostId, path: workspace.path,
       projectId: workspaceProjectId(workspace) })),
     focusedMember: active?.dataset.projectGroupMember ?? null, focusedNavigation: active?.dataset.spaceNav ?? null,
     selectedMembers: [...document.querySelectorAll('[data-project-group-member][aria-current="page"]')].map(element =>

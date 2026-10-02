@@ -76,6 +76,7 @@ app.whenReady().then(async () => {
     win.webContents.on('console-message', (_event, _level, message) => process.stderr.write(`project-groups:console:${message}\n`))
     win.webContents.on('render-process-gone', (_event, details) => process.stderr.write(`project-groups:renderer-gone:${JSON.stringify(details)}\n`))
     const read = expression => win.webContents.executeJavaScript(expression)
+    const exists = selector => read(`Boolean(document.querySelector(${JSON.stringify(selector)}))`)
     const state = () => read('window.projectGroupsState()')
     const until = async (expression, budget = 15_000) => {
       const deadline = Date.now() + budget
@@ -117,8 +118,8 @@ app.whenReady().then(async () => {
     const memberExpression = id => `[...document.querySelectorAll('[data-project-group-member]')].find(one=>one.dataset.projectGroupMember===${JSON.stringify(id)})`
     const projectId = workspace => JSON.stringify([workspace.hostId, workspace.repoPath ?? workspace.path])
     const localId = projectId(local), remoteId = projectId(remote)
-    if (await read('!!document.querySelector("[aria-label=\"Show projects sidebar\"]")')) await click('[aria-label="Show projects sidebar"]')
-    if (await read('!!document.querySelector("[aria-label=\"Hide Space tools\"]")')) await click('[aria-label="Hide Space tools"]')
+    if (await exists('[aria-label="Show projects sidebar"]')) await click('[aria-label="Show projects sidebar"]')
+    if (await exists('[aria-label="Hide Space tools"]')) await click('[aria-label="Hide Space tools"]')
     if (phase === 'seed') await click(`[data-space-folder] [data-workspace-id="${local.id}"]`)
     await until('window.projectGroupsState().mainSurface === "workbench" && window.projectGroupsState().visibleRegions.length > 0')
     result.initialState = await state(); result.originalDurable = await flush()
@@ -189,7 +190,7 @@ app.whenReady().then(async () => {
       await clickNode(memberExpression(unknownProjectId))
       assert.equal((await state()).activeWorkspaceId, remote.id, 'Unavailable original member does not redirect to another registered device')
       await click(`[aria-label=${JSON.stringify(`Dissolve ${input.renamedName}`)}]`)
-      await until('!!document.querySelector("[data-confirm-label=\"Dissolve group\"]")')
+      await until(() => exists('[data-confirm-label="Dissolve group"]'))
       await capture('dissolve-confirmation', 'Original neutral confirmation explains that Projects, directories and Sessions keep their devices')
       await click('[data-confirm-label="Dissolve group"]')
       await until(`!document.querySelector('[data-confirm-label="Dissolve group"]') && !window.projectGroupsState().projectGroups.some(one=>one.groupId===${JSON.stringify(expected.created.groupId)})`)
