@@ -41,7 +41,8 @@ const cwdEnv = { ...process.env, ...fixtureEnvironment }
 for (const key of Object.keys(cwdEnv)) if (key.startsWith('AGENTMUX_') && !Object.hasOwn(fixtureEnvironment, key)) delete cwdEnv[key]
 Object.assign(process.env, fixtureEnvironment)
 const { CtxmuxClient } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')))
-const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectLocalAgentMux, AgentMuxFileAgentSessionStore } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 async function identity(pid) {
   try { return (await exec('/bin/ps', ['-p', String(pid), '-o', 'pid=,pgid=,lstart='], { timeout: 1500 })).stdout.trim() }
   catch (error) { if (error.code === 1) return ''; throw error }
@@ -138,7 +139,24 @@ async function click(selector) {
   await active.cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
   await active.cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
 }
-async function control(operation, fields = {}) { return requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation, ...fields }, join(runtimeDirectory, 'control.sock')) }
+/**
+ * @template {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcMethod} M
+ * @param {M} method
+ * @param {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcParams<M>} params
+ * @returns {Promise<import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcResult<M>>}
+ */
+async function control(method, params) {
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try { return await rpc.call(method, params) }
+  finally { await rpc.dispose() }
+}
+async function inspectedRegion(regionId) {
+  const reply = await control('space.inspect', { target: { regionId } })
+  assert.ok(reply.presentation?.region, 'The exact original Region presentation must exist')
+  return reply.presentation.region
+}
+
 async function dragOriginalSplit() {
   const before=await observeUiClient(destination), tab=before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId))
   assert.equal(tab.layout.root.type,'split');const ratio=tab.layout.root.ratio
@@ -155,8 +173,8 @@ async function mountedTerminal() {
   return await waitFor('actual mounted Terminal and authoritative grid', async () => {
     await active.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
     const fits = await active.cdp.evaluate(`(() => { const region=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(terminal.regionId)}+'"]');const viewport=region?.querySelector('.terminal-view__xterm'),screen=region?.querySelector('.xterm-screen');if(!viewport||!screen)return false;const a=viewport.getBoundingClientRect(),b=screen.getBoundingClientRect();return a.width>50&&b.width<=a.width+1&&b.width>a.width-32 })()`)
-    const inspected = await control('inspect.region', { target: { kind: 'region', regionId: terminal.regionId } })
-    const view = inspected.result.region.terminalView, run = await sdk.status(terminal.runId)
+    const inspected = await inspectedRegion(terminal.regionId)
+    const view = inspected.terminalView, run = await sdk.status(terminal.runId)
     return fits && view?.runId === terminal.runId && view.liveReady && view.viewGrid.cols === run.current_size?.cols &&
       view.viewGrid.rows === run.current_size?.rows ? run : null
   })
@@ -247,13 +265,13 @@ try {
   await active.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...button});await active.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...button})
   const initial=await waitFor('UI-created Browser descriptor',async()=>{const observation=await observeUiClient(destination);return observation.workbench.tabs.flatMap(tab=>tab.regions).find(region=>region.kind==='browser')})
   await active.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(initial.browserId)},${JSON.stringify(pageUrl)})`)
-  const opened=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:initial.regionId,split:'right'},focus:true});assert.equal(opened.result.outcome,'opened');assert.ok(opened.result.to)
-  const command=`/bin/cat`;const openedTerminal=await control('open.terminal',{shellCommand:command,destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.result.to.regionId}}})
-  terminal=openedTerminal.result.region;let terminalRun=await sdk.status(terminal.runId);owners.set(terminalRun.pid,await identity(terminalRun.pid));receipt.terminal={run:terminal.runId,pid:terminalRun.pid}
+  const opened=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:initial.regionId,split:'right'},focus:true});assert.equal(opened.outcome,'opened');assert.ok(opened.to)
+  const command=`/bin/cat`;const openedTerminal=await control('terminal.open',{shellCommand:command,destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.to.regionId}}})
+  terminal=openedTerminal.region;let terminalRun=await sdk.status(terminal.runId);owners.set(terminalRun.pid,await identity(terminalRun.pid));receipt.terminal={run:terminal.runId,pid:terminalRun.pid}
   // A real user resize supplies the durable ratio through the existing committer.
   // The earlier programmatic nested-split/defaultSize mismatch is retained separately.
   await dragOriginalSplit()
-  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:initial.regionId}})
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:initial.regionId}})
   receipt.browserBefore=await nativePages(pageUrl);receipt.before=projectObservation(await observeUiClient(destination));assert.equal(receipt.before.workbench.tabs.flatMap(tab=>tab.regions).length,3)
   const loadedIdentityPath=packageIdentityPath(destination), loadedIdentityBytes=await readFile(loadedIdentityPath)
   try {

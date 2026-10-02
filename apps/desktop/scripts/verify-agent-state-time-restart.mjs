@@ -14,7 +14,8 @@ const repositoryRoot = process.env.AGENTMUX_VERIFY_REPOSITORY_ROOT ?? resolve(im
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const { listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
-const { requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
@@ -172,9 +173,29 @@ async function post(label,eventName,receiptId=randomUUID()) {
   assert.equal(response.status,204,'Actual accepted private Core Hook')
   return await waitFor('durable semantic '+label,async()=>{const s=await stored(label);return s.semanticStatus?.state===({UserPromptSubmit:'working',PermissionRequest:'waiting',Stop:'done'})[eventName]&&s.semanticStatus.observedAt>=postedAt?s.semanticStatus:null})
 }
-async function control(operation,options) {
-  return requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation,...options},join(runtimeDirectory,'control.sock'))
+/**
+ * @template {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcMethod} M
+ * @param {M} method
+ * @param {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcParams<M>} params
+ * @returns {Promise<import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcResult<M>>}
+ */
+async function control(method, params) {
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try { return await rpc.call(method, params) }
+  finally { await rpc.dispose() }
 }
+async function inspectedRegion(regionId) {
+  const reply = await control('space.inspect', { target: { regionId } })
+  assert.ok(reply.presentation?.region, 'The exact original Region presentation must exist')
+  return reply.presentation.region
+}
+async function inspectedTab(tabId) {
+  const reply = await control('space.inspect', { target: { tabId } })
+  assert.ok(reply.presentation?.tab, 'The exact original Tab presentation must exist')
+  return reply.presentation.tab
+}
+
 async function uiSnapshot(cdp) {return cdp.evaluate('window.agentmux.sessions.snapshot()')}
 async function durableLayout(cdp) {
   return cdp.evaluate(`(()=>{const raw=localStorage.getItem('agentmux-workbench-v1');if(!raw)return null;const s=JSON.parse(raw).state;return {workbench:s.restoredWorkbench,activeWorkspaceId:s.activeWorkspaceId,focus:s.agentFocus}})()`)
@@ -240,11 +261,10 @@ try {
   await openActivity(first.cdp)
   await click(first.cdp,`${selectors('.project-activity-menu__item')}.filter(e=>e.querySelector('strong')?.textContent.startsWith('Known clock'))`)
   const opened=await waitFor('real Activity navigation opens exact Session',async()=>{const value=await durableLayout(first.cdp);return Object.values(value?.workbench?.tabs??{}).flatMap(t=>Object.values(t.regions)).find(r=>r.kind==='agent'&&r.sessionId===known.agentSessionId)})
-  const inspected=await control('inspect.region',{target:{kind:'region',regionId:opened.regionId}})
-  const region=inspected.result.region;assert.equal(region.agentSessionId,known.agentSessionId)
+  const region=await inspectedRegion(opened.regionId);assert.equal(region.agentSessionId,known.agentSessionId)
   const split=await control('agent.open',{content:{kind:'agent-session',agentSessionId:unknown.agentSessionId},destination:{regionId:region.regionId,split:'right'},focus:true})
-  assert.equal(split.result.outcome,'opened');assert.ok(split.result.to);assert.equal(split.result.agent.agentSessionId,unknown.agentSessionId)
-  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:region.regionId}})
+  assert.equal(split.outcome,'opened');assert.ok(split.to);assert.equal(split.agent.agentSessionId,unknown.agentSessionId)
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:region.regionId}})
   const working=await post('Known clock','UserPromptSubmit');assert.ok(Number.isSafeInteger(working.stateEnteredAt))
   await waitFor('native working reaches actual snapshot',async()=>{const s=await sameRuns(first.cdp);return s.sessions.find(s=>s.id===known.agentSessionId)?.semanticStatus?.observedAt===working.observedAt})
   const beforeMenuGeometry=await actualGeometry(first.cdp)
@@ -284,12 +304,12 @@ try {
   assert.deepEqual(restoredGeometry,beforeMenuGeometry,'Actual restored Region identities and geometry must match')
   const activeRegions=await second.cdp.evaluate(`${selectors('.workbench-region--active[data-workbench-region-id]')}.map(e=>e.dataset.workbenchRegionId)`)
   assert.deepEqual(activeRegions,[region.regionId],'Actual UI focus must restore before any focus operation')
-  const restoredTab=await control('inspect.tab',{target:{kind:'tab',tabId:Object.values(layout.workbench.tabs)[0].id}})
-  assert.deepEqual(restoredTab.result.tab.regions.map(r=>({id:r.regionId,kind:r.kind,session:r.agentSessionId})).sort((a,b)=>a.id.localeCompare(b.id)),
-    [{id:region.regionId,kind:'agent',session:known.agentSessionId},{id:split.result.to.regionId,kind:'agent',session:unknown.agentSessionId}].sort((a,b)=>a.id.localeCompare(b.id)))
+  const restoredTab=await inspectedTab(Object.values(layout.workbench.tabs)[0].id)
+  assert.deepEqual(restoredTab.regions.map(r=>({id:r.regionId,kind:r.kind,session:r.agentSessionId})).sort((a,b)=>a.id.localeCompare(b.id)),
+    [{id:region.regionId,kind:'agent',session:known.agentSessionId},{id:split.to.regionId,kind:'agent',session:unknown.agentSessionId}].sort((a,b)=>a.id.localeCompare(b.id)))
   const restartUi=await openActivity(second.cdp);verifyAge(restartUi,'Known clock','waiting',waiting.stateEnteredAt)
   assert.equal(restartUi.rows.find(r=>r.label.startsWith('Unknown clock'))?.meta,'start time unknown')
-  receipt.secondUi={persisted,restoredGeometry,activeRegions,restoredTab:restoredTab.result.tab,restartUi,sessionFacts:snapshot.sessions.map(s=>({id:s.id,processState:s.processState,control:s.control,semanticStatus:s.semanticStatus}))}
+  receipt.secondUi={persisted,restoredGeometry,activeRegions,restoredTab:restoredTab,restartUi,sessionFacts:snapshot.sessions.map(s=>({id:s.id,processState:s.processState,control:s.control,semanticStatus:s.semanticStatus}))}
   const marker='private-state-time-after-restart-'+randomUUID()
   await second.cdp.evaluate(`(async()=>{const s=(await window.agentmux.sessions.snapshot()).sessions.find(s=>s.id===${JSON.stringify(unknown.agentSessionId)});await window.agentmux.sessions.write(s.control,${JSON.stringify(marker+'\r')},'user');return true})()`)
   // The exact public Core reader observes the native output after UI->registered Main->Core input.

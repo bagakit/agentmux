@@ -14,7 +14,8 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const { listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
-const { requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
@@ -173,16 +174,38 @@ async function monaco(cdp, original, modified, regionId) {
   // presentation, retaining exact separate-side checks whenever both sides are displayed.
   return waitFor('actual readonly Monaco content', () => cdp.evaluate(`(() => { const pane = ${regionId ? `document.querySelector('[data-git-diff-region="${regionId}"]')` : `Array.from(document.querySelectorAll('.git-branch-diff')).find(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')`}; if (!pane || getComputedStyle(pane).visibility === 'hidden') return null; const canvas=pane.querySelector('.monaco-diff-editor');if(!canvas)return null; const read = side => canvas.querySelector('.editor.'+side+' .view-lines')?.innerText.replace(/\u00a0/g,' ').trim(); const left=read('original'),right=read('modified');const presentation=canvas.classList.contains('side-by-side')?'side-by-side':'inline';const displayedLines=Array.from(canvas.querySelectorAll('.view-lines')).flatMap(e=>e.innerText.replace(/\u00a0/g,' ').split('\\n').map(line=>line.trim()).filter(Boolean));const valid=presentation==='side-by-side'?left===${JSON.stringify(original)}&&right===${JSON.stringify(modified)}:displayedLines.includes(${JSON.stringify(original)})&&displayedLines.includes(${JSON.stringify(modified)});return valid?{presentation,original:left,modified:right,displayedLines,viewportWidth:canvas.getBoundingClientRect().width,canvases:pane.querySelectorAll('.monaco-diff-editor').length}:null })()`))
 }
-async function control(operation, target) { return requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation,target}, join(runtimeDirectory,'control.sock')) }
+/**
+ * @template {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcMethod} M
+ * @param {M} method
+ * @param {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcParams<M>} params
+ * @returns {Promise<import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcResult<M>>}
+ */
+async function control(method, params) {
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try { return await rpc.call(method, params) }
+  finally { await rpc.dispose() }
+}
+async function inspectedRegion(regionId) {
+  const reply = await control('space.inspect', { target: { regionId } })
+  assert.ok(reply.presentation?.region, 'The exact original Region presentation must exist')
+  return reply.presentation.region
+}
+async function inspectedTab(tabId) {
+  const reply = await control('space.inspect', { target: { tabId } })
+  assert.ok(reply.presentation?.tab, 'The exact original Tab presentation must exist')
+  return reply.presentation.tab
+}
+
 async function inspectView(opened) {
   const { tab, surface } = opened
   assert.ok(tab.id.length <= 512 && surface.regionId.length <= 512)
-  const inspected = await control('inspect.tab', {kind:'tab',tabId:tab.id})
-  assert.ok(inspected.result.tab.regions.length > 0)
-  assert.equal(inspected.result.tab.regions.find(region => region.regionId === surface.regionId)?.kind, 'view')
-  const region = await control('inspect.region',{kind:'region',regionId:surface.regionId}); assert.equal(region.result.region.kind,'view')
-  await control('focus',{kind:'region',regionId:surface.regionId})
-  return {tabId:tab.id,regionId:surface.regionId,inspection:inspected.result}
+  const inspected = await inspectedTab(tab.id)
+  assert.ok(inspected.regions.length > 0)
+  assert.equal(inspected.regions.find(region => region.regionId === surface.regionId)?.kind, 'view')
+  const region = await inspectedRegion(surface.regionId); assert.equal(region.kind,'view')
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:surface.regionId}})
+  return {tabId:tab.id,regionId:surface.regionId,inspection:inspected}
 }
 async function normalQuit(probe) {
   phase = 'normal-quit'
@@ -228,21 +251,21 @@ async function dirtyFile(cdp) {
 }
 async function splitAndGroup(cdp,opened) {
   phase='actual-split-group-geometry'
-  await control('focus',{kind:'region',regionId:opened.surface.regionId})
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.surface.regionId}})
   const group=await cdp.evaluate(`document.querySelector('[data-workbench-region-id="${opened.surface.regionId}"]').closest('[data-pane-group-id]').dataset.paneGroupId`)
   assert.ok(group)
   await click(cdp,selectors(`[data-pane-group-id="${group}"] [aria-label="Split current tab to the right"]`))
   // A blank launcher is deliberately transient outside a Topic. Fill the actual newly split
   // Region with the already healthy fixture Session using the existing public Control operation.
-  const live=await control('inspect.tab',{kind:'tab',tabId:opened.tab.id})
-  assert.equal(live.result.tab.regions.length,2)
-  const launcher=live.result.tab.regions.find(region=>region.kind==='launcher');assert.ok(launcher)
-  const openedAgent=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'agent.open',content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{regionId:launcher.regionId},focus:true},join(runtimeDirectory,'control.sock'))
-  assert.equal(openedAgent.result.outcome,'opened');assert.ok(openedAgent.result.to);assert.equal(openedAgent.result.agent.agentSessionId,session.agentSessionId)
-  const mixed=await control('inspect.tab',{kind:'tab',tabId:opened.tab.id});assert.deepEqual(mixed.result.tab.regions.map(region=>region.kind),['view','agent'])
-  receipt.mixedViewAgent=mixed.result.tab
+  const live=await inspectedTab(opened.tab.id)
+  assert.equal(live.regions.length,2)
+  const launcher=live.regions.find(region=>region.kind==='launcher');assert.ok(launcher)
+  const openedAgent=await control('agent.open',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{regionId:launcher.regionId},focus:true})
+  assert.equal(openedAgent.outcome,'opened');assert.ok(openedAgent.to);assert.equal(openedAgent.agent.agentSessionId,session.agentSessionId)
+  const mixed=await inspectedTab(opened.tab.id);assert.deepEqual(mixed.regions.map(region=>region.kind),['view','agent'])
+  receipt.mixedViewAgent=mixed
   await waitFor('real split topology',async()=>{const s=await state(cdp);const tab=s?.workbench.tabs[opened.tab.id];return tab?.layout.root.type==='split'&&Object.keys(tab.regions).length===2?tab:null})
-  await control('focus',{kind:'region',regionId:opened.surface.regionId})
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.surface.regionId}})
   const focused=await cdp.evaluate(`(() => { const handle=document.querySelector('[data-workbench-region-id="${opened.surface.regionId}"]').closest('.workbench-region-split').querySelector('.workbench-region-resize-handle');handle.focus();return document.activeElement===handle })()`)
   assert.equal(focused,true);await key(cdp,'ArrowLeft','ArrowLeft')
   await waitFor('actual split ratio committed',async()=>{const s=await state(cdp);return Math.abs(s.workbench.tabs[opened.tab.id].layout.root.ratio-0.4)<0.001})
@@ -252,7 +275,7 @@ async function splitAndGroup(cdp,opened) {
   await click(cdp,`${selectors('[role="menuitem"]')}.filter(e=>e.textContent==='New Group Right')`)
   const grouped=await waitFor('actual second group persisted',async()=>{const s=await state(cdp);return s.workbench.layouts[workspaceId].groups.length===2?s:null})
   assert.equal(grouped.workbench.layouts[workspaceId].root.type,'split')
-  await control('focus',{kind:'region',regionId:opened.surface.regionId});await settleFocused(cdp,opened)
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.surface.regionId}});await settleFocused(cdp,opened)
   return geometry(cdp,opened)
 }
 async function geometry(cdp,opened) {
@@ -324,7 +347,7 @@ try {
   const long=await waitFor('long path descriptor',async()=>{const s=await state(first.cdp);return Object.values(s.workbench.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='git-diff'&&x.surface.comparison.file.path===longPath)})
   assert.ok(JSON.stringify(long.surface.comparison).length>512); const longControl=await inspectView(long)
   const firstGeometry=await splitAndGroup(first.cdp,point)
-  await control('focus',{kind:'region',regionId:point.surface.regionId}); await monaco(first.cdp,'base A','target B',point.surface.regionId)
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:point.surface.regionId}}); await monaco(first.cdp,'base A','target B',point.surface.regionId)
   const persisted=await settleFocused(first.cdp,point); assert.ok(Object.keys(persisted.workbench.tabs).length>=4)
   assert.deepEqual(await agentIds(first.cdp),beforeAgents); assert.deepEqual(await gitFacts(),receipt.gitBefore)
   await sameHealthyRun(first.cdp,originalRun.acceptedInputBytes)
@@ -337,22 +360,22 @@ try {
     assert.equal(restored.activeWorkspaceId,persisted.activeWorkspaceId)
     const restoredViews=await assertRestoredViews(second.cdp,[merge,point,long,renamed])
     const restoredRename=await monaco(second.cdp,'rename retained body','rename retained body',renamed.surface.regionId)
-    await control('focus',{kind:'region',regionId:dirty.opened.surface.regionId})
+    await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:dirty.opened.surface.regionId}})
     await waitFor('same dirty Monaco editor restored',()=>second.cdp.evaluate(`window.__agentmuxFileEditingProbe?.value() === ${JSON.stringify(dirtyContent)}`))
     assert.deepEqual(restored.documents,persisted.documents);assert.deepEqual(restored.dirtyDocuments,persisted.dirtyDocuments)
-    await control('focus',{kind:'region',regionId:point.surface.regionId}); const oldCanvas=await monaco(second.cdp,'base A','target B',point.surface.regionId)
+    await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:point.surface.regionId}}); const oldCanvas=await monaco(second.cdp,'base A','target B',point.surface.regionId)
     const secondGeometry=await geometry(second.cdp,point);assert.deepEqual(secondGeometry.regionPanels,firstGeometry.regionPanels);assert.deepEqual(secondGeometry.groups,firstGeometry.groups);assert.ok(Math.abs(secondGeometry.width-firstGeometry.width)<2);assert.ok(Math.abs(secondGeometry.height-firstGeometry.height)<2)
-    const restoredMixed=await control('inspect.tab',{kind:'tab',tabId:point.tab.id})
-    assert.deepEqual(restoredMixed.result.tab.regions.map(region=>({regionId:region.regionId,kind:region.kind})),receipt.mixedViewAgent.regions.map(region=>({regionId:region.regionId,kind:region.kind})))
-    const restoredAgent=restoredMixed.result.tab.regions.find(region=>region.kind==='agent');assert.equal(restoredAgent.agentSessionId,session.agentSessionId)
+    const restoredMixed=await inspectedTab(point.tab.id)
+    assert.deepEqual(restoredMixed.regions.map(region=>({regionId:region.regionId,kind:region.kind})),receipt.mixedViewAgent.regions.map(region=>({regionId:region.regionId,kind:region.kind})))
+    const restoredAgent=restoredMixed.regions.find(region=>region.kind==='agent');assert.equal(restoredAgent.agentSessionId,session.agentSessionId)
     const agentRegionVisible=await second.cdp.evaluate(`(() => {const e=document.querySelector('[data-workbench-region-id="${restoredAgent.regionId}"]');const r=e?.getBoundingClientRect();return Boolean(r?.width>0&&r?.height>0&&getComputedStyle(e).visibility!=='hidden')})()`);assert.equal(agentRegionVisible,true)
     await sameHealthyRun(second.cdp,originalRun.acceptedInputBytes)
-    receipt.secondRestored={restored,restoredViews,restoredRename,oldCanvas,secondGeometry,restoredMixed:restoredMixed.result,agentRegionVisible}
+    receipt.secondRestored={restored,restoredViews,restoredRename,oldCanvas,secondGeometry,restoredMixed,agentRegionVisible}
     await click(second.cdp,selectors('[aria-label="Compare two local branches"]'))
     const refreshed=await compare(second.cdp,'two-point',nextOid); assert.equal(refreshed.surface.comparison.snapshot.targetOid,nextOid); assert.notEqual(refreshed.tab.id,point.tab.id)
     const newCanvas=await monaco(second.cdp,'base A','target B next',refreshed.surface.regionId)
     phase='local-blob-failure-isolation'
-    await control('focus',{kind:'region',regionId:point.surface.regionId});await monaco(second.cdp,'base A','target B',point.surface.regionId)
+    await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:point.surface.regionId}});await monaco(second.cdp,'base A','target B',point.surface.regionId)
     const blob=(await git('rev-parse',`${targetOid}:shared.txt`)).trim();assert.match(blob,/^[a-f0-9]{40}$/)
     const blobPath=join(workspacePath,'.git/objects',blob.slice(0,2),blob.slice(2));const blobBytes=await readFile(blobPath);assert.ok(blobBytes.length>0)
     await rm(blobPath)
@@ -365,8 +388,8 @@ try {
     const ack=await client.writeAgent({agentSessionId:session.agentSessionId,expectedRun:session.run,data:`${marker}\r`,source:"user"});assert.equal(ack.runId,session.run.runId);assert.equal(ack.appliedByteRange.startByte,originalRun.acceptedInputBytes);assert.ok(ack.appliedByteRange.endByte>ack.appliedByteRange.startByte)
     const output=await waitFor('actual healthy cat output after Git failure',async()=>{const reply=await client.readRunReplay(session.run);const text=reply.replay.map(event=>event.data).join('');return text.includes(marker)?{run:reply.run,marker,outputDigest:digest(text),events:reply.replay.length,gap:reply.gap}:null});assert.ok(output.events>0);assert.equal(output.run.pid,originalRun.pid)
     receipt.failureIsolation={blob,blobDigest:digest(blobBytes),error,retainedCanvas,ack,output}
-    await control('focus',{kind:'region',regionId:long.surface.regionId});const goodCanvas=await monaco(second.cdp,'long ancestor','long target B',long.surface.regionId)
-    await control('focus',{kind:'region',regionId:refreshed.surface.regionId});await monaco(second.cdp,'base A','target B next',refreshed.surface.regionId)
+    await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:long.surface.regionId}});const goodCanvas=await monaco(second.cdp,'long ancestor','long target B',long.surface.regionId)
+    await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:refreshed.surface.regionId}});await monaco(second.cdp,'base A','target B next',refreshed.surface.regionId)
     await click(second.cdp,`${selectors('.branch-comparison__file')}.filter(e=>e.title==='binary.bin')`)
     const binary=await waitFor('actual binary fixed descriptor',async()=>{const s=await state(second.cdp);return Object.values(s.workbench.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='git-diff'&&x.surface.comparison.file.path==='binary.bin')})
     const binaryReason=await waitFor('honest binary-or-large display',()=>second.cdp.evaluate(`(() => {const p=document.querySelector('[data-git-diff-region="${binary.surface.regionId}"] .pane-state > span');return p?.textContent==='Binary file or too large for textual diff.'?p.textContent:null})()`));assert.equal(await second.cdp.evaluate(`document.querySelector('[data-git-diff-region="${binary.surface.regionId}"]').querySelectorAll('.monaco-diff-editor').length`),0)
