@@ -7,7 +7,8 @@ import { createRequire } from 'node:module'
 import { fileURLToPath } from 'node:url'
 import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
-import { AgentMuxFileAgentSessionStore, connectLocalAgentMux, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } from '../../../packages/core/dist/index.js'
+import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import { connectAgentMuxRpc } from '../../../packages/core/dist/public-rpc-client.js'
 import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace } from './goals-alignment-restart-proof.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
@@ -68,6 +69,16 @@ let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRe
 let goalsEntryFixture, goalsEntryRestored, messageBefore
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
+async function focusOriginal() {
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try {
+    const reply = await rpc.call('space.focus', { inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } })
+    assert.ok(['applied', 'unchanged'].includes(reply.navigation.state), JSON.stringify(reply))
+    return reply
+  } finally { await rpc.dispose() }
+}
+
 async function waitFor(label, read, budget = goalsDirectPmoProof ? 45_000 : 20_000) {
   const end = Math.min(deadline, Date.now() + budget)
   while (Date.now() < end) { const value = await read(); if (value) return value; await delay(60) }
@@ -121,16 +132,12 @@ async function launch(label) {
   try {
   if (goalsCtaProof && label === 'second') {
     goalsEntryRestored = await restoreGoalsEntryBeforeSpace({ cdp, fixture: goalsEntryFixture, activateButton, waitFor,
-      focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: randomUUID(), operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
-        assert.equal(reply.ok, true, JSON.stringify(reply)) } })
+      focusOriginal })
   }
   if (goalsAlignmentProof && label === 'second') {
     goalsRestored = await restoreGoalsBeforeSpace({ cdp, fixture: goalsFixture, accepted: goalsAccepted,
       expectedWorkbench: goalsExpectedWorkbench, expectedFocus: goalsExpectedFocus, waitFor,
-      focusOriginal: async () => { const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: randomUUID(), operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'));
-        assert.equal(reply.ok, true, JSON.stringify(reply)) } })
+      focusOriginal })
   }
   await waitFor(`${label} restored surfaces`, () => cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]')${!regionCloseProof || label === 'first' ? ` && document.querySelector('[data-workbench-region-id="${fileRegionId}"]')` : ''}${swapNameProof ? ` && document.querySelector('[data-workbench-region-id="crash-third"] .composer [role="textbox"]')` : ''})`))
   } catch (error) {
@@ -474,11 +481,7 @@ setInterval(tick,100);
   expectedWorkbench.tabs[tabId].layout.root.ratio = 0.6
   expectedWorkbench.tabs[tabId].layout.activeRegionId = fileRegionId
   if (swapNameProof) {
-    const focusNeighbor = async () => {
-      const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
-        operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: fileRegionId } }, join(runtimeDirectory, 'control.sock'))
-      assert.equal(reply.ok, true, JSON.stringify(reply)); assert.equal(reply.operation, 'focus'); return reply
-    }
+    const focusNeighbor = focusOriginal
     swapSelection = await selectSwapTarget({ cdp: first.cdp, key, activateButton, waitFor, focusNeighbor, agentRegionId, fileRegionId, identityName, tabId })
     const split = expectedWorkbench.tabs[tabId].layout.root
     split.first.regionId = 'crash-third'; split.second.second.regionId = agentRegionId

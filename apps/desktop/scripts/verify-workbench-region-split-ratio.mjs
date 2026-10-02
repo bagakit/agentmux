@@ -25,7 +25,8 @@ const cwdEnv = { ...process.env, ...fixtureEnvironment }
 for (const key of Object.keys(cwdEnv)) if (key.startsWith('AGENTMUX_') && !Object.hasOwn(fixtureEnvironment, key)) delete cwdEnv[key]
 Object.assign(process.env, fixtureEnvironment)
 const { CtxmuxClient } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')))
-const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectLocalAgentMux, AgentMuxFileAgentSessionStore } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')).href)
 const receipt = { schema: 'agentmux.workbench-split-ratio-sync.v1', passed: false, temporaryRoot: root, userRuntimeTouched: false,
   startedAt: Date.now(), limitations: ['Private ordinary compiled GUI processes; no installed-package qualification.',
     'Same-process xterm reference is read from its real React owner after the two splits and through a same-value public balance; restart creates a new xterm.'], cleanup: {} }
@@ -66,11 +67,29 @@ async function cdpConnect(url) {
     return reply.result.value
   } }); return cdp
 }
-async function control(operation, fields = {}) {
-  const reply = await requestAgentMuxControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(), operation, ...fields }, join(runtimeDirectory, 'control.sock'))
-  assert.equal(reply.ok, true, JSON.stringify(reply)); assert.equal(reply.operation, operation); return reply.result
+/**
+ * @template {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcMethod} M
+ * @param {M} method
+ * @param {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcParams<M>} params
+ * @returns {Promise<import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcResult<M>>}
+ */
+async function control(method, params) {
+  /** @type {import('../../../packages/core/dist/public-rpc-client.js').AgentMuxRpcClient} */
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+  try { return await rpc.call(method, params) }
+  finally { await rpc.dispose() }
 }
-async function observe() { return (await control('inspect.client')).observation }
+async function observe() { return (await control('app.inspect', {})).observation }
+async function inspected(regionId) {
+  const reply = await control('space.inspect', { target: { regionId } })
+  assert.ok(reply.presentation?.region, 'The exact original Region presentation must exist')
+  return reply.presentation.region
+}
+async function spatialState() {
+  const reply = await control('space.state', {})
+  assert.ok(reply.state, 'The original Core durable spatial document must exist')
+  return reply.state
+}
 function durableWorkbench(observation) {
   const { activeWorkspaceId, mainSurface, focus, layouts, tabs } = observation.workbench
   return { activeWorkspaceId, mainSurface, focus, layouts, tabs: tabs.map(tab => ({
@@ -138,7 +157,7 @@ async function geometry(browser, pageUrl) {
     if (!dom || dom.panels.length !== 2 || dom.viewport.width < 50 || dom.screen.width > dom.viewport.width + 1 || dom.screen.width < dom.viewport.width - 32) return null
     const native = await active.main.evaluate(`(async()=>{const{BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');const w=BrowserWindow.getAllWindows()[0];if(!w)return null;const vs=w.contentView.children.filter(v=>v.webContents&&!v.webContents.isDestroyed()&&v.webContents.getURL()===${JSON.stringify(pageUrl)});if(vs.length!==1)return null;return{bounds:vs[0].getBounds(),webContentsId:vs[0].webContents.id,text:await vs[0].webContents.executeJavaScript('document.querySelector("h1")?.textContent'),windowBounds:w.getBounds()}})()`)
     if (!native || native.text !== 'Private split ratio Browser' || !['x','y','width','height'].every(key => Math.abs(native.bounds[key] - dom.stage[key]) < 2)) return null
-    const view = (await control('inspect.region', { target: { kind: 'region', regionId: terminal.regionId } })).region.terminalView, run = await sdk.status(terminal.runId)
+    const view = (await inspected(terminal.regionId)).terminalView, run = await sdk.status(terminal.runId)
     if (!view?.liveReady || view.runId !== terminal.runId || view.viewGrid.cols !== run.current_size?.cols || view.viewGrid.rows !== run.current_size?.rows) return null
     return { native, dom, grid: view.viewGrid, run: { id: run.id, pid: run.pid, current_size: run.current_size }, browserRegionId: browser.regionId }
   })
@@ -195,19 +214,21 @@ try {
   await active.cdp.evaluate(`window.agentmux.browser.navigate(${JSON.stringify(browser.browserId)},${JSON.stringify(pageUrl)})`)
   phase='two-public-splits'
   const opened=await control('agent.open',{content:{kind:'agent-session',agentSessionId:agent.agentSessionId},destination:{regionId:browser.regionId,split:'right'},focus:true});assert.equal(opened.outcome,'opened');assert.ok(opened.to)
-  terminal=(await control('open.terminal',{shellCommand:'/bin/cat',destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.to.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)
-  await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:browser.regionId}})
+  terminal=(await control('terminal.open',{shellCommand:'/bin/cat',destination:{kind:'split',direction:'down',region:{kind:'region',regionId:opened.to.regionId}}})).region;await own((await sdk.status(terminal.runId)).pid)
+  await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:browser.regionId}})
   receipt.before=await waitFor('public Browser descriptor reaches the actual page',async()=>{const value=await observe(),region=value.workbench.tabs.flatMap(tab=>tab.regions).find(region=>region.regionId===browser.regionId);return region?.kind==='browser'&&region.url===pageUrl?value:null});const tab=receipt.before.workbench.tabs.find(tab=>tab.regions.some(region=>region.regionId===terminal.regionId));assert.ok(tab);assert.equal(tab.regions.length,3);assert.equal(tab.layout.root.type,'split');assert.equal(tab.layout.root.ratio,1/3)
+  receipt.spatialBefore=await spatialState();
   receipt.geometryBefore=await geometry(browser,pageUrl);assert.equal(receipt.geometryBefore.dom.panels[0].grow,33.3)
   const widths=receipt.geometryBefore.dom.panels.map(panel=>panel.bounds.width);assert.ok(Math.abs(widths[0]/(widths[0]+widths[1])-1/3)<0.002)
   receipt.xtermBefore=await waitFor('real xterm owner ref',()=>xtermReference(true));assert.equal(receipt.xtermBefore.candidates,1)
-  await control('arrange',{target:{kind:'tab',tabId:tab.id},mode:{kind:'balance'}})
+  await control('space.arrange',{target:{kind:'tab',tabId:tab.id},mode:{kind:'balance'}})
+  receipt.spatialSameValue=await spatialState();assert.deepEqual(receipt.spatialSameValue,receipt.spatialBefore,'A same-value public balance must preserve the entire Core spatial document');
   receipt.sameValue=await observe();assert.deepEqual(durableWorkbench(receipt.sameValue),durableWorkbench(receipt.before))
   receipt.xtermSameProcess=await xtermReference(false);assert.deepEqual(receipt.xtermSameProcess,{...receipt.xtermBefore,sameTerminal:true,sameElement:true,sameRegion:true})
   receipt.acksBefore=[];receipt.acksBefore.push(await healthyInput(opened.to.regionId,agent.run.runId,'PRIVATE_RATIO_AGENT_BEFORE'));receipt.acksBefore.push(await healthyInput(terminal.regionId,terminal.runId,'PRIVATE_RATIO_TERMINAL_BEFORE\n'))
   const targetIds=[agent.run.runId,terminal.runId];assert.equal(new Set(targetIds).size,2)
   receipt.allRunsBefore=await sdk.list();receipt.runsBefore=receipt.allRunsBefore.filter(run=>targetIds.includes(run.id));assert.equal(receipt.runsBefore.length,2);assert.deepEqual(receipt.runsBefore.map(run=>run.id).sort(),[...targetIds].sort());receipt.firstQuit=await quit(active)
-  phase='ordinary-restart';await launch('after');receipt.after=await observe();assert.notEqual(receipt.after.main.pid,receipt.before.main.pid);assert.deepEqual(durableWorkbench(receipt.after),durableWorkbench(receipt.before))
+  phase='ordinary-restart';await launch('after');receipt.spatialAfter=await spatialState();assert.deepEqual(receipt.spatialAfter,receipt.spatialBefore,'The entire original Core durable spatial document must survive the ordinary restart');receipt.after=await observe();assert.notEqual(receipt.after.main.pid,receipt.before.main.pid);assert.deepEqual(durableWorkbench(receipt.after),durableWorkbench(receipt.before))
   receipt.geometryAfter=await geometry(browser,pageUrl);assert.deepEqual(receipt.geometryAfter.native.bounds,receipt.geometryBefore.native.bounds);assert.deepEqual(receipt.geometryAfter.native.windowBounds,receipt.geometryBefore.native.windowBounds);assert.deepEqual(receipt.geometryAfter.grid,receipt.geometryBefore.grid);assert.deepEqual(receipt.geometryAfter.dom.panels,receipt.geometryBefore.dom.panels)
   assert.equal(await active.cdp.evaluate('window.__privateRatioXterm === undefined'),true)
   receipt.xtermAfter=await waitFor('new process real xterm owner ref',()=>xtermReference(true));assert.equal(receipt.xtermAfter.candidates,1);receipt.crossProcessXterm={newRendererProcess:true,previousFixtureReferenceAbsent:true,originalObjectComparisonPossible:false}
