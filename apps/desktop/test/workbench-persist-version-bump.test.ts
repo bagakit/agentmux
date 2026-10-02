@@ -137,6 +137,7 @@ const PERSISTED_PREFERENCES = {
   agentComposerDrafts: { 'sess-1': 'unfinished prompt' },
   launcherNameDrafts: { 'launcher-region': { agentName: 'Unsent reviewer', tabName: 'Unsent tab' } },
   launcherOptionDrafts: { 'launcher-region': { 'provider-alpha': { mode: 'review' } } },
+  agentComposerNotes: { 'launcher-region': 'Retain the original launch note' },
   // 排队的消息与草稿同一档：都是用户亲手敲下的字，跨一次版本升级都不许丢。
   // 条目整份进来（含 operationId / runId / status），因为恢复后的可投递性就是靠 runId 判的。
   agentSteerQueues: {
@@ -253,6 +254,7 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     )
     expect(state.launcherNameDrafts).toEqual(PERSISTED_PREFERENCES.launcherNameDrafts)
     expect(state.launcherOptionDrafts).toEqual(PERSISTED_PREFERENCES.launcherOptionDrafts)
+    expect(state.agentComposerNotes).toEqual(PERSISTED_PREFERENCES.agentComposerNotes)
     expect(state.agentSteerQueues, '排着的消息丢了——用户重启后发现自己写的字没了').toEqual(
       PERSISTED_PREFERENCES.agentSteerQueues
     )

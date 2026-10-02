@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { readFileSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import ts from 'typescript'
@@ -32,7 +33,18 @@ function mutations(path, minimum) {
     assert(report.numFailedTests > 0)
     assert(report.testResults.some(file => file.assertionResults.some(item => item.status === 'failed')))
   }
-  for (const binding of receipt.sourceBindings ?? []) assert.equal(digest(binding.path), binding.sha256, binding.path)
+  for (const binding of receipt.sourceBindings ?? []) {
+    if (binding.commentOnly) {
+      assert.equal(digest(binding.commentOnly.qualifiedSource), binding.sha256)
+      assert.equal(digest(binding.path), binding.commentOnly.currentSha256)
+      const emitted = source => ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.ESNext, jsx: ts.JsxEmit.ReactJSX, removeComments: true } }).outputText
+      const typed = source => ts.createPrinter({ removeComments: true }).printFile(
+        ts.createSourceFile(binding.path, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX))
+      assert.equal(typed(read(binding.path)), typed(read(binding.commentOnly.qualifiedSource)), 'Typed AST must also be unchanged')
+      assert.equal(emitted(read(binding.path)), emitted(read(binding.commentOnly.qualifiedSource)), 'Only equivalent emitted code can reuse a comment-only qualification')
+    } else assert.equal(digest(binding.path), binding.sha256, binding.path)
+  }
   return receipt.mutants.length
 }
 const sourceRoot = resolve(root, 'apps/desktop/src/renderer/src')
@@ -62,9 +74,13 @@ function caller(symbol, definition, relative) {
 }
 const callers = [], result = { task, passed: true }
 if (task === 'inputs') {
-  result.tests = tests('.tmp/launcher-product-quality/inputs/test-result-r2.json', 60)
-  tests('.tmp/launcher-product-quality/inputs/mutation-baseline-r2.json', 7)
-  result.mutations = mutations('.tmp/launcher-product-quality/inputs/mutations.json', 7)
+  const first = json('.tmp/launcher-product-quality/empty-group/receipt.json')
+  assert.equal(first.passed, true)
+  result.tests = tests(first.inputsRegressionR3.report, 60) + tests(first.sharedBaseline.report, 3)
+  tests(first.baseline.report, 10)
+  result.mutations = mutations('.tmp/launcher-product-quality/empty-group/mutations.json', 10)
+  assert.equal(first.sourceBindings.length, 3)
+  for (const binding of first.sourceBindings) assert.equal(digest(binding.path), binding.sha256, binding.path)
   for (const path of ['lib/launcher-inputs.ts', 'lib/launcher-option-draft.ts']) {
     assert.equal(digest(resolve(sourceRoot, path)), digest(resolve(evidence, 'inputs/source-evidence', path)), path)
   }
@@ -72,7 +88,7 @@ if (task === 'inputs') {
   // fields and presentation work to change independently of this slice.
   const live = parse(resolve(sourceRoot, 'store.ts'))
   const qualified = parse(resolve(evidence, 'inputs/source-evidence/store.ts'))
-  for (const symbol of ['launchAgent', 'setLauncherOptionDraft']) {
+  for (const symbol of ['launchAgent', 'setLauncherOptionDraft', 'openLauncher']) {
     const find = source => nodes(source, node => (ts.isPropertyAssignment(node) || ts.isMethodDeclaration(node)) && node.name.getText(source) === symbol)
       .map(node => ts.isPropertyAssignment(node) ? node.initializer.getText(source) : node.getText(source))
     const current = find(live), original = find(qualified)
@@ -90,6 +106,13 @@ if (task === 'inputs') {
   const routes = source => nodes(source, node => ts.isPropertyAssignment(node) && node.name.getText(source) === 'partialize').map(node => node.initializer.getText(source))
   assert.deepEqual(pipeline(live), pipeline(qualified)); assert.equal(pipeline(live).length, 1)
   assert.deepEqual(routes(live), ['partializeAppState'])
+  assert.equal(digest(resolve(sourceRoot, 'lib/launcher-state.ts')), digest(first.qualifiedSource.state))
+  const launcher = parse(resolve(sourceRoot, 'components/NewTabSurface.tsx'))
+  const launch = nodes(launcher, node => ts.isFunctionDeclaration(node) && node.name?.text === 'launchFromLauncher')
+  assert.equal(launch.length, 1)
+  const materialize = nodes(launch[0], node => ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'openLauncher')
+  assert.equal(materialize.length, 1, 'The empty Group must use its real production owner action')
+  callers.push({ symbol: 'openLauncher', definition: 'store.ts', caller: 'components/NewTabSurface.tsx', count: materialize.length })
   callers.push(caller('useLauncherInputs', 'lib/launcher-inputs.ts', 'components/NewTabSurface.tsx'),
     caller('updateLauncherOption', 'lib/launcher-option-draft.ts', 'store.ts'))
 } else if (task === 'targets') {
@@ -139,18 +162,42 @@ if (task === 'inputs') {
 } else {
   const receipt = json('.tmp/launcher-product-quality/integrated-acceptance.json')
   assert.equal(receipt.passed, true)
+  assert(receipt.sourceBindings.length >= 17, 'Integrated production bindings cannot be empty')
   for (const binding of receipt.sourceBindings) assert.equal(digest(binding.path), binding.sha256, binding.path)
   const review = json(receipt.visualReview)
   assert.equal(review.verdict, 'pass'); assert.equal(review.sourceDigest, receipt.sourceDigest)
-  assert(review.images.length > 0)
+  assert(review.images.length >= 25, 'The full Launcher review must remain qualified')
   for (const item of review.images) { assert.equal(item.verdict, 'pass'); assert.equal(digest(item.path), item.sha256) }
   assert.equal(receipt.restart.passed, true)
   assert.equal(receipt.restart.processIds.length, 2)
   assert.notEqual(...receipt.restart.processIds)
   assert.equal(receipt.restart.originalWorkfacePreserved, true)
   assert.equal(receipt.restart.unsentInputsPreserved, true)
+  const restart = json(receipt.restart.receipt)
+  assert.equal(digest(receipt.restart.receipt), receipt.restart.sha256)
+  assert.equal(restart.passed, true)
+  assert.deepEqual(restart.processIds, receipt.restart.processIds)
+  assert.equal(restart.originalWorkfacePreserved, true)
+  assert.equal(restart.unsentInputsPreserved, true)
+  const firstRestart = json(receipt.firstStartRestart.receipt)
+  assert.equal(digest(receipt.firstStartRestart.receipt), receipt.firstStartRestart.sha256)
+  assert.equal(firstRestart.passed, true)
+  assert.equal(firstRestart.records.length, 3)
+  assert.equal(new Set(firstRestart.records.map(record => record.pid)).size, 3)
+  assert(firstRestart.records.every(record => record.passed && record.pid > 0))
+  assert.equal(firstRestart.originalWorkfacePreserved, true)
+  assert.equal(firstRestart.unsentInputsPreserved, true)
+  assert.equal(firstRestart.stopCalls, 0)
+  for (const artifact of [firstRestart.expectedEmpty, firstRestart.expectedRegion, firstRestart.capture]) {
+    assert.equal(digest(artifact.path), artifact.sha256)
+  }
   assert(receipt.commits.length >= 2)
-  for (const commit of receipt.commits) assert.equal(commit.singleParent, true)
+  for (const commit of receipt.commits) {
+    assert.equal(commit.singleParent, true)
+    const parents = execFileSync('git', ['rev-list', '--parents', '-n', '1', commit.commit], { cwd: root, encoding: 'utf8' }).trim().split(/\s+/)
+    assert.deepEqual(parents, [commit.commit, commit.parent], 'Delivery commits must have one actual parent')
+    execFileSync('git', ['merge-base', '--is-ancestor', commit.commit, 'main'], { cwd: root })
+  }
   assert.equal(receipt.concurrentWorkPreserved, true)
   assert.equal(receipt.cleanup.passed, true)
   result.images = review.images.length
