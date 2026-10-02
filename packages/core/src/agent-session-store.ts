@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
@@ -19,6 +20,8 @@ import {
   normalizeNativeTranscriptPath
 } from './agent-native-locator.js'
 import type {
+  AgentActivityCommit,
+  AgentActivityObservation,
   AgentHookReceipt,
   AgentMuxAgentSession,
   AgentMuxEvidence,
@@ -113,6 +116,7 @@ export type AgentMuxRetiredAgentSession = {
   source: 'user'
   observedAt: number
   history?: AgentSessionHistoryMetadata
+  activityCommit?: AgentActivityCommit
 }
 
 export type AgentMuxAgentSessionStore = {
@@ -307,6 +311,40 @@ function unboundRetiredRuns(value: unknown): AgentMuxRunRef[] {
   return runs
 }
 
+function activityObservation(value: unknown, agentSessionId: string): AgentActivityObservation {
+  const source = record(value, 'accepted activity observation')
+  const item = normalizeAgentTimelineMutation({ type: 'append', agentSessionId, item: {
+    ...source, agentSessionId, kind: 'lifecycle', status: 'complete', title: 'Accepted activity', updatedAt: source.createdAt
+  } })
+  if (item.type !== 'append' || !item.item.activityState) {
+    throw new AgentMuxError('Accepted activity observation is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { id: item.item.id, source: item.item.source, createdAt: item.item.createdAt, activityState: item.item.activityState }
+}
+
+function activityCommit(value: unknown, agentSessionId: string): AgentActivityCommit {
+  const source = record(value, 'activity commit')
+  if (typeof source.latestCommitted !== 'boolean') {
+    throw new AgentMuxError('Activity commit acknowledgement is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const latest = activityObservation(source.latest, agentSessionId)
+  const pending = source.pending === undefined ? undefined : activityObservation(source.pending, agentSessionId)
+  if (pending?.id === latest.id) {
+    throw new AgentMuxError('Activity commit duplicates its pending observation.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { latest, latestCommitted: source.latestCommitted, ...(pending ? { pending } : {}) }
+}
+
+/** Retirement may race an already accepted append; only that exact persisted observation is authorized. */
+function acceptedRetiredActivity(
+  retired: readonly AgentMuxRetiredAgentSession[], mutation: AgentTimelineMutation
+): boolean {
+  if (mutation.type !== 'append' || !mutation.item.activityState) return false
+  const commit = retired.find(session => session.agentSessionId === mutation.agentSessionId)?.activityCommit
+  return [commit?.pending, commit?.latest].some(observation => observation &&
+    JSON.stringify(agentActivityTimelineItem(mutation.agentSessionId, observation)) === JSON.stringify(mutation.item))
+}
+
 function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
   const source = record(value, 'retired Agent Session')
   if (source.source !== 'user') {
@@ -318,7 +356,8 @@ function retiredAgentSession(value: unknown): AgentMuxRetiredAgentSession {
     run: runRef(source.run),
     source: 'user',
     observedAt: timestamp(source.observedAt, 'retiredAgentSession.observedAt'),
-    ...(source.history === undefined ? {} : { history: normalizeHistoryMetadata(source.history) })
+    ...(source.history === undefined ? {} : { history: normalizeHistoryMetadata(source.history) }),
+    ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'retiredAgentSession.agentSessionId')) })
   }
 }
 
@@ -1244,7 +1283,8 @@ export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgent
   return { ...normalizeAgentSession(source),
     hookBindingId: string(source.hookBindingId, 'hookBindingId'),
     hookToken: string(source.hookToken, 'hookToken'),
-    ...(source.capabilityHash === undefined ? {} : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }) }
+    ...(source.capabilityHash === undefined ? {} : { capabilityHash: string(source.capabilityHash, 'capabilityHash') }),
+    ...(source.activityCommit === undefined ? {} : { activityCommit: activityCommit(source.activityCommit, string(source.agentSessionId, 'agentSessionId')) }) }
 }
 
 function normalizeAgentSessions(values: readonly unknown[]): AgentMuxStoredAgentSession[] {
@@ -1660,7 +1700,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
             run: { ...previous.run },
             source: 'user',
             observedAt: Date.now(),
-            history: sessionHistoryMetadata(previous)
+            history: sessionHistoryMetadata(previous),
+            ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {})
           }])
         : this.retiredAgentSessions,
       retiredRuns
@@ -1698,7 +1739,8 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   ): Promise<AgentTimelineCommit> {
     signal?.throwIfAborted()
     const canonicalMutation = normalizeAgentTimelineMutation(mutation)
-    if (!this.sessions.has(canonicalMutation.agentSessionId)) {
+    if (!this.sessions.has(canonicalMutation.agentSessionId) &&
+      !acceptedRetiredActivity(this.retiredAgentSessions, canonicalMutation)) {
       throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
     }
     const current = this.timelines.get(canonicalMutation.agentSessionId) ?? {
@@ -2075,7 +2117,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
               run: { ...previous.run },
               source: 'user',
               observedAt: Date.now(),
-              history: sessionHistoryMetadata(previous)
+              history: sessionHistoryMetadata(previous),
+              ...(previous.activityCommit ? { activityCommit: previous.activityCommit } : {})
             }])
           : document.retiredAgentSessions,
         retiredRuns
@@ -2116,7 +2159,8 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       signal?.throwIfAborted()
       const canonicalMutation = normalizeAgentTimelineMutation(mutation)
       const document = await this.read(signal)
-      if (!document.sessions.some((session) => session.agentSessionId === canonicalMutation.agentSessionId)) {
+      if (!document.sessions.some((session) => session.agentSessionId === canonicalMutation.agentSessionId) &&
+        !acceptedRetiredActivity(document.retiredAgentSessions, canonicalMutation)) {
         throw new AgentMuxError(`Unknown Agent Session: ${canonicalMutation.agentSessionId}`, 'UNKNOWN_AGENT_SESSION')
       }
       const timeline = await this.readTimeline(canonicalMutation.agentSessionId, signal)

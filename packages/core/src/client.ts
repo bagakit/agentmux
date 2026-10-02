@@ -107,7 +107,10 @@ import {
   type AgentMuxRuntimeSubjectTarget
 } from './runtime.js'
 import { agentTimelineMutationFromAcpEvent } from './session-timeline.js'
+import { acceptsAgentActivityState, advanceAgentActivityCommit, agentActivityTimelineItem } from './agent-activity-state.js'
 import type {
+  AgentActivityObservation,
+  AgentActivityState,
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
   AgentExecutorId,
@@ -851,6 +854,10 @@ export class AgentMuxClient {
     const verdict = judgeReconnectFlap({ flapCount: this.reconnectFlaps })
     this.reconnectFlaps = verdict.flapCount
     this.connected = false
+    for (const runId of this.runPids.keys()) {
+      const session = this.registry.findByRun(runRef(runId))
+      if (session && !this.endedRuns.has(runId)) void this.persistActivityBoundary(session, 'lost', now)
+    }
     this.cancelProviderReads()
     // 线断了 ⇒ 一切**长命的屏幕观察**当场失效。这不是卫生，是可观测的行为改变，也是 #628 的关键一环：
     //
@@ -926,10 +933,15 @@ export class AgentMuxClient {
       // 这里刻意**不**重置 `connectionHealthySince`：唯一的写入点是 `open()` 成功那一句，重连成功
       // 走的正是同一条 `open()`，所以那边已经写过了。分两处各写一次的形状必然漂移（其中一条会漏掉
       // 某条路径），而缓刑期起点算错的后果是这道界静默失效，全绿。要改就改那一处。
+      const restoredAt = Date.now()
+      for (const runId of this.runPids.keys()) {
+        const session = this.registry.findByRun(runRef(runId))
+        if (session && !this.endedRuns.has(runId)) await this.persistActivityBoundary(session, 'restored', restoredAt)
+      }
       this.publisher.publish({
         type: 'connection-state',
         state: 'restored',
-        evidence: { source: 'run-process', observedAt: Date.now() }
+        evidence: { source: 'run-process', observedAt: restoredAt }
       })
     } else {
       this.publisher.publish({
@@ -4284,12 +4296,24 @@ export class AgentMuxClient {
         current.semanticStatus &&
         current.semanticStatus.observedAt > status.observedAt
       ) return current
+      const semanticStatus = transitionAgentSemanticStatus(current.semanticStatus, status)
       return {
         ...current,
-        semanticStatus: transitionAgentSemanticStatus(current.semanticStatus, status),
+        semanticStatus,
+        ...(acceptsAgentActivityState(current.activityCommit, expectedRun, semanticStatus) ? {
+          activityCommit: advanceAgentActivityCommit(current.activityCommit, {
+            id: JSON.stringify(['activity-state', status.source, expectedRun.runId, randomUUID()]),
+            source: status.source, createdAt: status.observedAt,
+            activityState: { run: { ...expectedRun }, state: semanticStatus.state,
+              ...(semanticStatus.stateEnteredAt === undefined ? {} : { stateEnteredAt: semanticStatus.stateEnteredAt }) }
+          })
+        } : {}),
         updatedAt: Math.max(current.updatedAt, status.observedAt)
       }
     })
+    if (next.activityCommit?.latest.createdAt === status.observedAt && !next.activityCommit.latestCommitted) {
+      await this.flushAgentActivity(next)
+    }
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
     return next
   }
@@ -4699,6 +4723,12 @@ export class AgentMuxClient {
       ...(session.nativeHandle ? { nativeHandle: Object.freeze({ ...session.nativeHandle }) } : {})
     })
     const normalized = provider.normalizeHook(envelope, context)
+    const activityId = JSON.stringify(['activity-state', 'native-hook', session.run.runId, envelope.receiptId])
+    const knownActivity = session.activityCommit?.latest.id === activityId || session.activityCommit?.pending?.id === activityId
+    if (knownActivity) {
+      await this.flushAgentActivity(session)
+      return
+    }
     // 读与推进的先后**在今天不承重**，别照着「先读后推」写注释骗下一个人：实测调换这两句，7 条断言全绿。
     // 原因是结构性的——会推进阶段的事件（turn-end / 重开事件）与会被闸门拦的事件
     // （tool-use-start / tool-use-end）是两个不相交的集合，所以「拿推进前的值还是推进后的值」对任何一条
@@ -4707,7 +4737,6 @@ export class AgentMuxClient {
     const turnPhase = this.hookTurnPhases.get(envelope.runId) ??
       (agentTurnEndEvidence(session) ? 'turn-ended' : undefined)
     const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
-    if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
     // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。
     // Unknown outcome ends a known main turn; an ordinary unknown observation stays neutral.
@@ -4717,6 +4746,26 @@ export class AgentMuxClient {
       normalized.lifecycleEvent,
       provider.hook.rules.some((rule) => eventNamesCanReopenTurn(rule.events, rule.lifecycleEvent))
     ) && (normalized.semanticState !== 'unknown' || normalized.lifecycleEvent === 'turn-end')
+    if (updatesSemanticStatus && acceptsAgentActivityState(session.activityCommit, session.run, normalized.status)) {
+      // This bounded lookup is only for a candidate transition, never each tool/output observation.
+      try {
+        const history = await this.store.loadTimeline(session.agentSessionId)
+        if (history.items.some(item => item.id === activityId && item.activityState)) {
+          await this.flushAgentActivity(session)
+          return
+        }
+      } catch (error) {
+        this.publishActivityFailure(session, error, normalized.status.observedAt)
+        // Cannot distinguish a late receipt from a new transition while its history is unreadable.
+        // Keep the confirmed latest state; reject only this unconfirmed attribution.
+        const latest = session.activityCommit?.latest.activityState
+        if (session.activityCommit?.latestCommitted || (latest && 'boundary' in latest && latest.boundary === 'history-gap')) {
+          await this.persistActivityBoundary(session, 'history-gap', normalized.status.observedAt)
+          return
+        }
+      }
+    }
+    if (nextTurnPhase) this.hookTurnPhases.set(envelope.runId, nextTurnPhase)
     // 「这一 turn 结束了」与「取不到输出光标快照」是两件事，不许共用一个失败出口。
     //
     // 这次 status() 图的只是 `latestOutputBytes`——一个给 composer 就绪判定用的光标快照。可它在**断线
@@ -4786,7 +4835,17 @@ export class AgentMuxClient {
         hookReceipt: persistedReceipt,
         ...(!updatesSemanticStatus
           ? {}
-          : { semanticStatus: transitionAgentSemanticStatus(current.semanticStatus, normalized.status) }),
+          : (() => {
+              const semanticStatus = transitionAgentSemanticStatus(current.semanticStatus, normalized.status)
+              return { semanticStatus,
+                ...(acceptsAgentActivityState(current.activityCommit, current.run, semanticStatus) ? {
+                  activityCommit: advanceAgentActivityCommit(current.activityCommit, {
+                    id: activityId, source: 'native-hook', createdAt: normalized.status.observedAt,
+                    activityState: { run: { ...current.run }, state: semanticStatus.state,
+                      ...(semanticStatus.stateEnteredAt === undefined ? {} : { stateEnteredAt: semanticStatus.stateEnteredAt }) }
+                  })
+                } : {}) }
+            })()),
         ...(normalized.lifecycleEvent === 'turn-end'
           ? {
               terminalPromptReadiness: existingReadiness ?? {
@@ -4896,8 +4955,14 @@ export class AgentMuxClient {
       run: { ...next.run },
       hookReceiptId: persistedReceipt.id
     }
+    if (next.activityCommit?.latest.id === activityId) await this.flushAgentActivity(next)
     for (const mutation of normalized.timeline) {
-      await this.persistAndPublishTimeline(mutation, evidence, signal)
+      try { await this.persistAndPublishTimeline(mutation, evidence, signal) }
+      catch (error) {
+        if (signal.aborted || (error instanceof AgentMuxError &&
+          error.code !== 'INVALID_AGENT_TIMELINE_STORE' && error.code !== 'AGENT_TIMELINE_TOO_LARGE')) throw error
+        this.publishActivityFailure(next, error, evidence.observedAt)
+      }
     }
     // 语义状态的**两个**写入点必须判得一样（同 endedRuns 那道闸的教训）：只挡落盘、不挡发事件，UI 上
     // 那个 Agent 照旧被点亮成 working，而磁盘是对的；只挡发事件、不挡落盘，本次 UI 是对的而下次冷启动
@@ -4941,6 +5006,59 @@ export class AgentMuxClient {
       (current) => ({ ...current, nativeHandle: handle, updatedAt: Date.now() })
     )
     this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+  }
+
+  private publishActivityFailure(session: AgentMuxStoredAgentSession, error: unknown, observedAt: number): void {
+    this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+      code: 'AGENT_WORK_HISTORY_PERSIST_FAILED',
+      message: `Work history is incomplete; accepted Agent state remains available. Retry on the next state transition: ${error instanceof Error ? error.message : String(error)}`,
+      evidence: { source: 'agentmux', run: { ...session.run }, observedAt } })
+  }
+
+  /** Best-effort projection; the durable accepted identity/time already belongs to the Session. */
+  private async flushAgentActivity(session: AgentMuxStoredAgentSession): Promise<void> {
+    const commit = session.activityCommit
+    if (!commit) return
+    const observations: AgentActivityObservation[] = [
+      ...(commit.pending ? [commit.pending] : []), ...(!commit.latestCommitted ? [commit.latest] : [])
+    ]
+    for (const observation of observations) {
+      try {
+        await this.persistAndPublishTimeline({ type: 'append', agentSessionId: session.agentSessionId,
+          item: agentActivityTimelineItem(session.agentSessionId, observation) },
+          { source: observation.source, observedAt: observation.createdAt, run: { ...observation.activityState.run } })
+        const active = this.registry.findByRun(session.run)
+        if (active?.agentSessionId !== session.agentSessionId) continue
+        await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
+          if (!current.activityCommit) return current
+          const next = { ...current.activityCommit }
+          if (next.pending?.id === observation.id) delete next.pending
+          if (next.latest.id === observation.id) next.latestCommitted = true
+          return { ...current, activityCommit: next }
+        })
+      } catch (error) {
+        this.publishActivityFailure(session, error, observation.createdAt)
+        return
+      }
+    }
+  }
+
+  private async persistActivityBoundary(
+    session: AgentMuxStoredAgentSession,
+    boundary: Extract<AgentActivityState, { boundary: string }>['boundary'], observedAt: number
+  ): Promise<void> {
+    try {
+      const next = await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
+        const latest = current.activityCommit?.latest.activityState
+        if (latest?.run.runId === session.run.runId && 'boundary' in latest && latest.boundary === boundary) return current
+        return { ...current, updatedAt: Math.max(current.updatedAt, observedAt),
+          activityCommit: advanceAgentActivityCommit(current.activityCommit, {
+            id: JSON.stringify(['activity-state', boundary === 'history-gap' ? 'agentmux' : 'run-process', session.run.runId, randomUUID()]),
+            source: boundary === 'history-gap' ? 'agentmux' : 'run-process', createdAt: observedAt, activityState: { run: { ...session.run }, boundary }
+          }) }
+      })
+      await this.flushAgentActivity(next)
+    } catch (error) { this.publishActivityFailure(session, error, observedAt) }
   }
 
   private async persistAndPublishTimeline(
@@ -5033,7 +5151,10 @@ export class AgentMuxClient {
     // 拒收（见 acceptHookEvent），以及 snapshot 重投影时还能说出「它为什么没了」。必须记在分类**之后**：
     // 意图已经在上一行被读走并删掉，事后再没有第二次机会算出这个答案。
     this.endedRuns.set(event.runId, exitReason)
-    if (agentSession) this.invalidateEndedRunReadiness(agentSession, runRef(event.runId))
+    if (agentSession) {
+      this.invalidateEndedRunReadiness(agentSession, runRef(event.runId))
+      if (event.state.type !== 'running') void this.persistActivityBoundary(agentSession, event.state.type, event.observedAt)
+    }
     this.publisher.publish({
       type: 'process-state',
       ...(agentSession ? { agentSessionId: agentSession.agentSessionId } : {}),

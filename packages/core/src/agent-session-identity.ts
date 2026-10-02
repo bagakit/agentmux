@@ -6,7 +6,7 @@ export function sameRun(left: AgentMuxRunRef, right: AgentMuxRunRef): boolean {
 }
 
 export function cloneSession(session: AgentMuxStoredAgentSession): AgentMuxAgentSession {
-  const { hookBindingId: _bindingId, hookToken: _token, ...publicSession } = structuredClone(session)
+  const { hookBindingId: _bindingId, hookToken: _token, activityCommit: _activityCommit, ...publicSession } = structuredClone(session)
   return publicSession
 }
 

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -39,6 +39,7 @@ function fakeKernel(overrides: Partial<Record<string, unknown>> = {}) {
     isConnected: () => false,
     connect: vi.fn(async () => {}),
     disconnect: vi.fn(() => {}),
+    resetConnection: vi.fn(() => {}),
     list: vi.fn(async () => []),
     onEvent: () => () => {},
     onError: () => () => {},
@@ -109,7 +110,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
       runId: 'run-1',
       pid: 4321,
       state: { type: 'running' as const },
-      workspacePath: upstreamFixturePath("repo"),
+      workspacePath: fixturePath("repo"),
       cols: 80,
       rows: 24,
       latestOutputBytes: 0,
@@ -339,7 +340,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
       providerId: 'codex',
       executorId: 'codex',
       hostId: 'local',
-      workspacePath: upstreamFixturePath("tmp/readiness-agent"),
+      workspacePath: fixturePath("tmp/readiness-agent"),
       run: { runId: 'readiness-run' },
       retiredRuns: [],
       hookBindingId: 'binding-readiness',
@@ -402,7 +403,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
           lifecycleOperationId: null,
           program: 'codex',
           args: [],
-          workspacePath: upstreamFixturePath("tmp/readiness-agent"),
+          workspacePath: fixturePath("tmp/readiness-agent"),
           pid: 321,
           state: { type: 'running' as const },
           cols: 80,
