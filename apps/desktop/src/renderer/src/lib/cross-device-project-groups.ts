@@ -2,8 +2,8 @@ import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { projectWorkspaces, type WorkspaceProject } from './workspace-projects'
 
-export function projectGroupFor(groups: readonly AgentMuxProjectGroupFact[], projectId: string) {
-  return groups.find(group => group.projectIds.includes(projectId))
+export function projectGroupsFor(groups: readonly AgentMuxProjectGroupFact[], projectId: string) {
+  return groups.filter(group => group.projectIds.includes(projectId))
 }
 
 /** Reject only an invalid organization request; original resources and Runs stay usable. */
@@ -15,10 +15,8 @@ export function validateProjectGroup(group: AgentMuxProjectGroupFact, groups: re
   if (!renaming) {
     const projects = new Map(projectWorkspaces(workspaces).map(project => [project.id, project]))
     const members = group.projectIds.map(id => projects.get(id))
-    if (members.some(member => !member)) throw new Error('A selected Project registration changed. Review the current projects; your selection is retained.')
-    if (new Set(members.map(member => member!.hostId)).size < 2) throw new Error('Choose Projects on at least two different devices.')
+    if (members.some((member, index) => !member && !existing?.projectIds.includes(group.projectIds[index]!))) throw new Error('A selected Project registration changed. Review the current projects; your selection is retained.')
   }
-  if (groups.some(other => other.groupId !== group.groupId && other.projectIds.some(id => group.projectIds.includes(id)))) throw new Error('A selected Project already belongs to another group. Review its current group first.')
   return { ...group, name: group.name.trim(), projectIds: [...group.projectIds] }
 }
 

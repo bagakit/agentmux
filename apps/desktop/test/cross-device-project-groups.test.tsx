@@ -43,16 +43,20 @@ describe('actual Space cross-device group interaction', () => {
     expect(document.querySelectorAll('[data-project-group-reference]')).toHaveLength(2)
     expect(document.querySelectorAll('[data-project-group-member]')).toHaveLength(2)
     expect(document.querySelector('[data-project-group-member][aria-current="page"]')).toBeTruthy()
-    expect(document.querySelectorAll('[data-project-group-reference][aria-current="page"]')).toHaveLength(0)
+    expect(document.querySelectorAll('[data-project-group-reference][aria-current="page"]')).toHaveLength(1)
+    expect(document.querySelectorAll('.project-association')).toHaveLength(2)
   })
-  it('keeps original folder entries, redirects into the exact selected group member and dissolves without moving the original workface', async () => {
+  it('keeps original folder entries, directly selects the exact original folder and dissolves without moving the original workface', async () => {
     const owner = await mount()
     await act(async () => { await useAppStore.getState().saveProjectGroup(group) })
     const before = useAppStore.getState(), originalTabs = before.tabs, originalLayouts = before.layouts
     const alias = [...document.querySelectorAll<HTMLButtonElement>('[data-project-group-reference]')].find(element => element.dataset.workspaceId === 'remote-project')!
     expect(alias.getAttribute('aria-current')).toBeNull()
-    expect(alias.classList.contains('project-rail-row--group-reference')).toBe(true)
+    expect(alias.classList.contains('project-rail-row--group-reference')).toBe(false)
+    await act(async () => useAppStore.setState({ collapsedProjectGroups: { 'project-group:shared-group': true } }))
     await click(alias)
+    expect(useAppStore.getState().collapsedProjectGroups['project-group:shared-group']).toBe(true)
+    await act(async () => useAppStore.setState({ collapsedProjectGroups: {} }))
     await vi.waitFor(() => expect(document.querySelector('[data-project-group-member][aria-current="page"]')?.getAttribute('data-project-group-member')).toBe(ids[1]))
     expect(useAppStore.getState().activeWorkspaceId).toBe('remote-project')
     expect(useAppStore.getState().tabs).toEqual(originalTabs)
