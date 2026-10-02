@@ -64,7 +64,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
       if (previous.edit && previous.note.trim() &&
         (previous.edit.sessionId !== sourceSessionId || previous.edit.target.messageId !== target.messageId ||
           !sameRange(previous.edit.target.range, target.range))) {
-        setError('Finish or discard the current note before choosing another passage.')
+        setError('请先完成或丢弃当前批注，再选择另一段原文。')
         if (previous.edit.sessionId === sessionId) setOpened(true)
         return
       }
@@ -194,7 +194,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
     try {
       onAnnotate({ messageId: edit.target.messageId, quote: edit.target.quote, note: note.trim() })
     } catch (failure) {
-      setError(`Could not add note to reply draft: ${failure instanceof Error ? failure.message : String(failure)}`)
+      setError(`无法将批注加入回复草稿：${failure instanceof Error ? failure.message : String(failure)}`)
       return
     }
     const selection = window.getSelection()
@@ -203,22 +203,22 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
   }
 
   if (!edit || !available) return null
-  const editor = <div ref={surfaceRef} className="log-turn__annotation" role="dialog" aria-label="Annotate selected text"
+  const editor = <div ref={surfaceRef} className="log-turn__annotation" role="dialog" aria-label="批注选中原文"
     data-anchor-state={rects.length ? 'range' : 'unavailable'}
     style={{ position: 'fixed', left: position?.x, top: position?.y, visibility: position ? 'visible' : 'hidden' }}
     onKeyDown={event => { if (event.key === 'Escape' && !event.nativeEvent.isComposing) { event.preventDefault(); event.stopPropagation(); close() } }}>
     <header className="conversation-annotation-note__header">
-      <strong>Note</strong>
-      <button type="button" className="conversation-annotation-note__close" aria-label="Close note" title="Close note · keep draft" onClick={close}><X size={14} aria-hidden="true" /></button>
+      <strong>批注</strong>
+      <button type="button" className="conversation-annotation-note__close" aria-label="关闭批注" title="关闭批注 · 保留草稿" onClick={close}><X size={14} aria-hidden="true" /></button>
     </header>
-    {!rects.length ? <span className="conversation-annotation-note__location" role="status">Original selection position is unavailable. Your note is retained.</span> : null}
+    {!rects.length ? <span className="conversation-annotation-note__location" role="status">原选区位置暂不可用，批注已保留。</span> : null}
     <details className="conversation-annotation-note__passage">
       <summary aria-label="Selected passage"><span className="conversation-annotation-note__preview">{edit.target.quote}</span><ChevronDown size={12} aria-hidden="true" /></summary>
       <blockquote className="log-turn__annotation-quote" tabIndex={0} aria-label="Selected passage">{edit.target.quote}</blockquote>
     </details>
-    <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="Note for selected text" placeholder="Add a note…" rows={1} />
+    <ComposerTextarea ref={inputRef} value={note} onValueChange={setNote} aria-label="批注内容" placeholder="添加批注…" rows={1} />
     {error ? <div className="conversation-annotation-note__error" role="alert">{error}</div> : null}
-    <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" onClick={discard}>Discard note</button><button type="button" className="conversation-annotation-note__add" aria-label="Add to reply draft" disabled={!note.trim()} onClick={add}><Plus size={12} aria-hidden="true" />Add to draft</button></div>
+    <div className="log-turn__annotation-actions"><button type="button" className="conversation-annotation-note__discard" onClick={discard}>丢弃批注</button><button type="button" className="conversation-annotation-note__add" aria-label="将批注加入回复草稿" disabled={!note.trim()} onClick={add}><Plus size={12} aria-hidden="true" />加入草稿</button></div>
   </div>
 
   return <>
@@ -227,8 +227,8 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
       {opened ? editor : null}
     </WindowOverlayPortal>
     {!opened ? <div className="conversation-annotation-recovery" role="status">
-      {rects.length ? 'Note draft retained for the underlined passage.' : 'Note draft retained; original selection position unavailable.'}
-      <button type="button" className="small-button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setOpened(true) }}>Resume note</button>
+      {rects.length ? '已保留划线原文的批注草稿。' : '批注草稿已保留，原选区位置暂不可用。'}
+      <button type="button" className="small-button" onClick={() => { focusRequested.current = { origin: document.activeElement }; setOpened(true) }}>继续批注</button>
     </div> : null}
   </>
 }

@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { readFileSync } from 'node:fs'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -28,7 +29,7 @@ const initialState = useAppStore.getState()
 
 /** 产品里那句拼装：`SessionPane.annotateMessage` 交给 store 的正是这一串。 */
 function reference(quote: string, note: string): string {
-  return `Regarding this message:\n> ${quote.replace(/\n/gu, '\n> ')}\n\nNote: ${note}`
+  return `Regarding this message:\n> ${quote.replace(/\n/gu, '\n> ')}\n\n批注： ${note}`
 }
 
 describe('conversation annotation contract', () => {
@@ -37,14 +38,14 @@ describe('conversation annotation contract', () => {
   it('引文与注解拼成一段可读的引用块，多行引文每一行都带引用记号', () => {
     const composed = reference('first line\nsecond line', 'Why this branch?')
     expect(composed).toBe(
-      'Regarding this message:\n> first line\n> second line\n\nNote: Why this branch?'
+      'Regarding this message:\n> first line\n> second line\n\n批注： Why this branch?'
     )
     // 产品源码里那一句必须就是这一句：拼装逻辑写在组件里，判据在这里重述，两边靠这条对齐。
     // 只钉前缀（老写法）会放过 `\n> ` 被改成 `\n`——多行引文从此和正文混在一起。
     expect(
       pane,
       'SessionPane 的引用拼装与判据不一致了；若确实要改格式，两处一起改'
-    ).toContain('`Regarding message ${JSON.stringify(annotation.messageId)}:\\n> ${annotation.quote.replace(/\\n/gu, \'\\n> \')}\\n\\nNote: ${annotation.note}`')
+    ).toContain('`Regarding message ${JSON.stringify(annotation.messageId)}:\\n> ${annotation.quote.replace(/\\n/gu, \'\\n> \')}\\n\\n批注： ${annotation.note}`')
   })
 
   it('追加进已有草稿，不覆盖用户已经写下的字', () => {
@@ -55,7 +56,7 @@ describe('conversation annotation contract', () => {
     const draft = useAppStore.getState().agentComposerDrafts['agent-1']!
     expect(draft, '用户已经写下的字被覆盖了').toContain('Already typing this')
     expect(draft, '引文没进草稿').toContain('> the worker reported back')
-    expect(draft, '注解没进草稿').toContain('Note: Check this')
+    expect(draft, '注解没进草稿').toContain('批注： Check this')
     // 空行分隔：两段之间没有空行，Agent 读到的是粘在一起的一段。
     expect(draft).toBe(`Already typing this\n\n${reference('the worker reported back', 'Check this')}`)
   })
