@@ -5,6 +5,7 @@ import type { AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot 
 import { CircleHelp, Inbox, Send, Bell, ChevronLeft, RefreshCw, Mail, Pause, Repeat2, X } from 'lucide-react'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
+import { ComposerPendingDelivery } from './ComposerPendingDelivery'
 import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
 import { useAppStore } from '../store'
 import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
@@ -95,7 +96,7 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
       messageDetails={<><dl className="composer-mailbox__record-facts">
         {!isUserMessage(selected) ? <><dt>Source</dt><dd>Captured input</dd><dt>Recorded author</dt><dd>{authorLabel(selected)}</dd></> : null}
         <dt>Time</dt><dd><MailboxTime value={time(selected)} complete /></dd>
-        <dt>Delivery</dt><dd>{isUserMessage(selected) && selected.source.kind === 'native' ? 'Recorded · not a delivery receipt' : state(selected) === 'complete' ? incoming ? 'Delivered' : 'Sent' : 'Delivery not confirmed'}</dd>
+        <dt>Delivery</dt><dd>{isUserMessage(selected) && selected.source.kind === 'native' ? 'Recorded · not a delivery receipt' : state(selected) === 'complete' ? 'Submission confirmed · CLI acceptance and reply are separate' : 'Delivery not confirmed'}</dd>
       </dl>{locationDetails}</>} />
     {!selected.content && !(isUserMessage(selected) && selected.contentParts.length) ? <MailboxEmpty title="No text recorded" /> : null}
     {state(selected) !== 'complete' && !(isUserMessage(selected) && selected.source.kind === 'native')
@@ -117,7 +118,9 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, reading, onRevealMessage, mailboxOrigin }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
+  children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
+  pendingInteraction?: boolean
   onRevealMessage?: RevealMailboxMessage | undefined
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   reading?: ConversationReadingProps | undefined
@@ -138,6 +141,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const [viewed, setViewed] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const popover = useRef<HTMLDivElement>(null)
+  const requestedFolder = useRef<Folder | null>(null)
   const preview = useRef(false)
   const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   function cancelClose() { clearTimeout(closeTimer.current) }
@@ -338,7 +342,14 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
   }, [open])
   const mailboxLabel = `Mailbox: Inbox ${unread} unread, Outbox ${pending.length} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
-  return <>
+  function showOutbox() {
+    requestedFolder.current = 'outbox'
+    pin(); chooseFolder('outbox')
+    if (open) { requestedFolder.current = null; return }
+    ;(popover.current!.showPopover as (options: { source: HTMLButtonElement }) => void)
+      .call(popover.current, { source: trigger.current! })
+  }
+  const mailbox = <>
     <button ref={trigger} type="button" className="composer__mailbox" data-unread={unread > 0} data-progress-state={progressSession ? progressStatus : undefined}
       aria-label={mailboxLabel}
       title={mailboxLabel} popoverTarget={id} popoverTargetAction="toggle"
@@ -363,7 +374,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       onToggle={(event) => {
         if (event.target !== event.currentTarget) return
         const opening = event.newState === 'open'
-        if (opening) { setFolder(openFolder()); if (!preview.current) setViewed(true) }
+        if (opening) { setFolder(requestedFolder.current ?? openFolder()); requestedFolder.current = null; if (!preview.current) setViewed(true) }
         else { cancelClose(); preview.current = false; setViewed(false); setSelection(null); focusAfter.current = null }
         setOpen(opening)
       }}>
@@ -394,7 +405,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
         {open && folder === 'outbox' ? <>
-          {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} selectedId={selectedQueue?.id ?? null}
+          {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} selectedId={selectedQueue?.id ?? null}
             onSelect={(key, event) => selectRecord(`queue:${key}`, event)} reading={reading}
             {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
             {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
@@ -430,4 +441,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onMore={showOutbox} /> : null) : mailbox
 }

@@ -776,7 +776,9 @@ export function TerminalView({
           terminal.buffer.active === buffer && buffer.type === 'normal') {
           const anchored = readingMarker ? { kind: 'line' as const, line: Math.max(0, readingMarker.line) } : reading
           const target = restoreTerminalViewport(anchored, buffer.baseY)
-          if (target.kind === 'latest') terminal.scrollToBottom()
+          // Confirm the absolute viewport even when resize already moved the buffer to its base.
+          // A zero-delta relative scroll leaves xterm's cached DOM position at the old row.
+          if (target.kind === 'latest') terminal.scrollToLine(buffer.baseY)
           else terminal.scrollToLine(target.line)
           viewportMemoryRef.current = anchored
         }
