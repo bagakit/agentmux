@@ -30,6 +30,15 @@ export function workbenchDisplayReferenceMatches(layout: WorkspaceLayout | undef
   return index.visible.has(reference.groupId) && index.groups.get(reference.groupId)?.has(reference.tabId) === true
 }
 
+/** Resolve one exact physical occurrence; a resource Workspace never guesses display. */
+export function workbenchTabDisplayWorkspaceId(layouts: Readonly<Record<string, WorkspaceLayout>>, tabId: string, groupId: string): string | null {
+  const candidates = Object.entries(layouts).filter(([, layout]) => {
+    const index = displayMembership(layout)
+    return index.visible.has(groupId) && index.groups.get(groupId)?.has(tabId) === true
+  })
+  return candidates.length === 1 ? candidates[0]![0] : null
+}
+
 export function workbenchDisplayOccurrenceAmbiguous(layout: WorkspaceLayout, groupId: string, tabId: string): boolean {
   const index = displayMembership(layout)
   return (index.occurrences.get(tabId) ?? 0) > 1 && !(layout.activeGroupId === groupId && index.active.get(groupId) === tabId)

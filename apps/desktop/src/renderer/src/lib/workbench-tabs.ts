@@ -66,6 +66,8 @@ export type LauncherWorkbenchSurface = {
   regionId: string
   kind: 'launcher'
   workspaceId: string
+  /** Explicit future Executor stays with this durable Launcher when its target changes. */
+  executorId?: string
 }
 
 export type BrowserWorkbenchSurface = BrowserSnapshot & {
@@ -223,7 +225,7 @@ export function replaceWorkbenchRegion(
   if (!tab.regions[regionId] || surface.regionId !== regionId) return tab
   return {
     ...tab,
-    workspaceId: surface.workspaceId,
+    // Replacing one resource cannot move the containing View or its sibling Regions.
     layout: focusWorkbenchRegion(tab.layout, regionId),
     regions: { ...tab.regions, [regionId]: surface }
   }

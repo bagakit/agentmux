@@ -1,5 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+// @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { createElement } from 'react'
 import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -165,7 +167,7 @@ describe('初始页上的笔记入口', () => {
     workspaceFixture()
     const markup = renderToStaticMarkup(createElement(NewTabSurface, { tabGroupId: 'pane' }))
     expect(markup).toContain(noteAction)
-    expect(markup).toContain('Create note')
+    expect(markup).toContain('Create blank note')
   })
 
   it('入口只有一处：整份 markup 里 create-note 恰好出现一次', () => {
@@ -188,7 +190,7 @@ describe('初始页上的笔记入口', () => {
   // 于是这条守卫恰好对它要防的那个缺陷失明。
   it('源码里 create-note 与 open-browser 各只有一处，任何写法都算', () => {
     const source = readFileSync(
-      new URL('../src/renderer/src/components/LauncherSecondarySurfaces.tsx', import.meta.url),
+      resolve(__dirname, '../src/renderer/src/components/LauncherSecondarySurfaces.tsx'),
       'utf8'
     )
     // 自检：这个文件确实在渲染动作属性。没有它，「每个动作只出现一次」在一个**根本不写这个属性**
@@ -219,7 +221,7 @@ describe('初始页上的笔记入口', () => {
   // 把这个前提单独钉住，坏掉时读到的就是真正的原因。
   it('quick-grid 与它外层的 stack 各只有一个，卡片不必跟着分支分身', () => {
     const source = readFileSync(
-      new URL('../src/renderer/src/components/LauncherSecondarySurfaces.tsx', import.meta.url),
+      resolve(__dirname, '../src/renderer/src/components/LauncherSecondarySurfaces.tsx'),
       'utf8'
     )
     expect(source.split('className="launch-surfaces-stack"')).toHaveLength(2)
@@ -247,7 +249,7 @@ describe('初始页上的笔记入口', () => {
 describe('launcher Workspace 判定只有一处', () => {
   const sources = ['store.ts', 'components/NewTabSurface.tsx'] as const
   const readSource = (relative: string): string =>
-    readFileSync(new URL(`../src/renderer/src/${relative}`, import.meta.url), 'utf8')
+    readFileSync(resolve(__dirname, `../src/renderer/src/${relative}`), 'utf8')
 
   /**
    * 每个收 `launcher` 形参的 store action，函数体里必须恰好调一次 `resolveLauncherWorkspaceId`。
@@ -384,11 +386,10 @@ describe('launcher Workspace 判定只有一处', () => {
     // 拿到 activeWorkspaceId，于是同一个 bug 原地重来一次而 tsc 全程沉默。
     // 判源码是因为「这个字段是不是可选的」是一个类型性质，运行期看不见。
     const helper = readFileSync(
-      new URL('../src/renderer/src/lib/launcher-workspace.ts', import.meta.url),
+      resolve(__dirname, '../src/renderer/src/lib/launcher-workspace.ts'),
       'utf8'
     )
     expect(helper).toMatch(/launcherTabWorkspaceId: string \| undefined/)
     expect(helper).not.toMatch(/launcherTabWorkspaceId\?:/)
   })
 })
-
