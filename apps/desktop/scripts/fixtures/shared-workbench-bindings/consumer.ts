@@ -5,4 +5,5 @@ export { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-contro
 export { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 export { directoryIdentity, workspaceZoneId } from '../../../src/shared/space-addresses'
 export { createWorkspaceLayout } from '@agentmux/layout'
-export { AgentMuxControlServer, parseAgentMuxControlReceipt } from '@agentmux/core'
+export { AgentMuxControlServer } from '@agentmux/core'
+export { agentMuxCliMatch } from '../../../../../packages/core/src/agentmux-cli-commands'

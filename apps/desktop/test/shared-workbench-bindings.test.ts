@@ -1,14 +1,13 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { webcrypto } from 'node:crypto'
-import { createConnection } from 'node:net'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { act, createElement } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
-import { AgentMuxControlServer, parseAgentMuxControlReceipt, type AgentMuxSpaceControlRequest } from '@agentmux/core'
+import { AgentMuxControlServer, connectAgentMuxRpc, type AgentMuxRpcClient } from '@agentmux/core'
 import { createWorkspaceLayout, type WorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { directoryIdentity, workspaceZoneId, homeZoneId } from '../src/shared/space-addresses'
@@ -39,28 +38,21 @@ const originalAgent = { id: 'original-agent', kind: 'agent', providerId: 'codex'
   label: 'Original', capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
   createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, latestOutputBytes: 0, processState: 'running', status: { state: 'running', source: 'run-process', observedAt: 1 },
   control: { kind: 'agent', agentSessionId: 'original-agent', hostId: 'remote', run: { runId: 'original-run' } } } satisfies Extract<SessionSnapshot, { kind: 'agent' }>
-let server: AgentMuxControlServer | undefined, directory: string | undefined
+let server: AgentMuxControlServer | undefined, client: AgentMuxRpcClient | undefined, directory: string | undefined
 beforeEach(async () => {
   vi.stubGlobal('crypto', webcrypto)
   useAppStore.setState({ ...initial, config, tabs: {}, layouts: { resource: first, display: createWorkspaceLayout('foreign') }, sessions: [], spaceZoneBindings: {}, spatialRequests: {}, activeWorkspaceId: 'resource' }, true)
   await initializeSpatialControlFixture(topics)
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
 })
-afterEach(async () => { await server?.stop(); if (directory) await rm(directory, { recursive: true }); server = undefined; directory = undefined; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
-async function wire(request: AgentMuxSpaceControlRequest) {
+afterEach(async () => { await client?.dispose(); client = undefined; await server?.stop(); if (directory) await rm(directory, { recursive: true }); server = undefined; directory = undefined; vi.restoreAllMocks(); useAppStore.setState(initial, true); vi.unstubAllGlobals() })
+async function rpc() {
   if (!server) { directory = await mkdtemp(join(tmpdir(), 'amx-bindings-')); server = new AgentMuxControlServer({ execute: request => useAppStore.getState().executeControl(request) }, join(directory, 'control.sock')); await server.start() }
-  const value = await new Promise<unknown>((resolve, reject) => { const socket = createConnection(server!.path); let reply = ''; socket.setEncoding('utf8');
-    socket.once('connect', () => socket.end(JSON.stringify(request) + '\n')); socket.on('data', part => reply += part); socket.once('error', reject);
-    socket.once('end', () => { try { resolve(JSON.parse(reply)) } catch (error) { reject(error) } }) })
-  const receipt = parseAgentMuxControlReceipt(value)
-  expect(receipt.ok).toBe(true)
-  if (!receipt.ok) throw new Error(receipt.error.message)
-  return receipt
+  client ??= await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  return client
 }
 async function catalog() {
-  const receipt = await wire({ schemaVersion: 5, requestId: `ls:${crypto.randomUUID()}`, operation: 'space.ls', target: {} })
-  if (receipt.operation !== 'space.ls') throw new Error('Wrong receipt')
-  return receipt.result.catalog
+  return (await (await rpc()).call('space.ls', { target: {}, operationId: `ls:${crypto.randomUUID()}` })).catalog
 }
 it('retains default and every original saved/Tab seed without replacing opaque IDs', async () => {
   const retained = { ...tab, space: { zoneId: savedZone, spaceId: topicB } }
@@ -75,8 +67,7 @@ it('retains default and every original saved/Tab seed without replacing opaque I
 it('uses one actual UI/transport owner for exact cross-host relations and zero-write repeats', async () => {
   useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { resource: first } })
   expect((await useAppStore.getState().setZoneSpaceRelation(zone, topicA, true)).outcome).toBe('linked')
-  const reply = await wire({ schemaVersion: 5, requestId: 'link-b', operation: 'space.bind', binding: { kind: 'zone-space', zoneId: zone, spaceId: topicB } })
-  expect(reply.operation).toBe('space.bind')
+  await (await rpc()).call('space.bind', { operationId: 'link-b', binding: { kind: 'zone-space', zoneId: zone, spaceId: topicB } })
   const actual = await catalog()
   expect(actual.zones.filter(item => item.zoneId === zone)).toEqual([{ zoneId: zone, workspaceId: 'resource', kind: 'directory', hostId: 'remote', directoryPath: _hygiene_fixturePath("resource"), branch: null }])
   expect(actual.bindings.filter(item => item.zoneId === zone)).toEqual([{ zoneId: zone, spaceId: folder }, { zoneId: zone, spaceId: topicA }, { zoneId: zone, spaceId: topicB }])
@@ -86,8 +77,7 @@ it('uses one actual UI/transport owner for exact cross-host relations and zero-w
   expect((await useAppStore.getState().setZoneSpaceRelation(zone, directoryIdentity('local', _hygiene_fixturePath("display")), false)).outcome).toBe('unchanged')
   expect(useAppStore.getState().spaceZoneBindings).toBe(before.spaceZoneBindings)
   expect(writes).not.toHaveBeenCalled(); expect(flush).not.toHaveBeenCalled(); unsubscribe()
-  const removed = await wire({ schemaVersion: 5, requestId: 'unlink-seed', operation: 'space.unbind', binding: { kind: 'zone-space', zoneId: zone, spaceId: folder } })
-  expect(removed.operation).toBe('space.unbind')
+  await (await rpc()).call('space.unbind', { operationId: 'unlink-seed', binding: { kind: 'zone-space', zoneId: zone, spaceId: folder } })
   expect((await catalog()).bindings.filter(item => item.zoneId === zone)).toEqual([{ zoneId: zone, spaceId: topicA }, { zoneId: zone, spaceId: topicB }])
   expect(useAppStore.getState().tabs[tab.id]).toBe(tab)
   expect(useAppStore.getState().spaceZoneBindings[zone]).toEqual({ spaceId: folder, workspaceId: 'resource', relations: { [topicA]: true, [topicB]: true, [folder]: false } })
@@ -209,11 +199,10 @@ it('rejects a shared Region move before admission even with an exact source Grou
   useAppStore.setState({ tabs: { [tab.id]: attached }, layouts, sessions })
   const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop'), resource = vi.spyOn(api.workspaces, 'createZoneResource'), flush = vi.spyOn(api.ui, 'requestStorageFlush')
   const before = useAppStore.getState()
-  const receipt = await wire({ schemaVersion: 5, requestId: 'shared-move', operation: 'space.mv', fromRegionId: 'retained-region', expectedAgentSessionId: 'original-agent',
+  const receipt = await (await rpc()).call('space.mv', { operationId: 'shared-move', fromRegionId: 'retained-region', expectedAgentSessionId: 'original-agent',
     fromLocation: { displayWorkspaceId: 'resource', groupId: 'second' }, destination: { spaceId: directoryIdentity('local', _hygiene_fixturePath("display")), newTab: true }, focus: false })
-  if (receipt.operation !== 'space.mv') throw new Error('Wrong receipt')
-  expect(receipt.result.issues.map(item => item.code)).toEqual(['SPACE_MOVE_MULTIPLE_OCCURRENCES_UNSUPPORTED'])
-  expect(receipt.result.issues[0]!.candidates!.map(item => [item.displayWorkspaceId, item.groupId])).toEqual([['resource', 'first'], ['resource', 'second'], ['display', 'foreign']])
+  expect(receipt.issues.map(item => item.code)).toEqual(['SPACE_MOVE_MULTIPLE_OCCURRENCES_UNSUPPORTED'])
+  expect(receipt.issues[0]!.candidates!.map(item => [item.displayWorkspaceId, item.groupId])).toEqual([['resource', 'first'], ['resource', 'second'], ['display', 'foreign']])
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(layouts)
   expect(useAppStore.getState().sessions).toBe(sessions); expect(useAppStore.getState().spatialRequests).toEqual({})
   expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(resource).not.toHaveBeenCalled(); expect(flush).not.toHaveBeenCalled()
@@ -240,11 +229,10 @@ it('rejects a phantom display through the typed transport before any intent, lay
   useAppStore.setState({ sessions })
   const before = useAppStore.getState(), flush = vi.spyOn(api.ui, 'requestStorageFlush'), launch = vi.spyOn(api.sessions, 'launchAgent'),
     resource = vi.spyOn(api.workspaces, 'createZoneResource'), attach = vi.spyOn(api.sessions, 'creation'), stop = vi.spyOn(api.sessions, 'stop')
-  const receipt = await wire({ schemaVersion: 5, requestId: 'phantom-display', operation: 'agent.open',
+  const receipt = await (await rpc()).call('agent.open', { operationId: 'phantom-display',
     content: { kind: 'agent-session', agentSessionId: originalAgent.id }, destination: { zoneId: zone, displayWorkspaceId: 'missing-display', newTab: true }, focus: false })
-  if (receipt.operation !== 'agent.open') throw new Error('Wrong receipt')
-  expect(receipt.result.outcome).toBe('unknown')
-  expect(receipt.result.issues.map(item => item.code)).toEqual(['SPACE_LOCATION_UNKNOWN'])
+  expect(receipt.outcome).toBe('unknown')
+  expect(receipt.issues.map(item => item.code)).toEqual(['SPACE_LOCATION_UNKNOWN'])
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   expect(useAppStore.getState().spaceZoneBindings).toBe(before.spaceZoneBindings); expect(useAppStore.getState().spatialRequests).toBe(before.spatialRequests)
   expect(useAppStore.getState().sessions).toBe(sessions)
@@ -255,16 +243,15 @@ it('opens an existing Agent presentation in a linked temporary Zone without maki
   const sessions = [originalAgent]
   useAppStore.setState({ sessions, layouts: { __scratch__: createWorkspaceLayout('scratch-group') } })
   const launch = vi.spyOn(api.sessions, 'launchAgent'), stop = vi.spyOn(api.sessions, 'stop'), resource = vi.spyOn(api.workspaces, 'createZoneResource')
-  const receipt = await wire({ schemaVersion: 5, requestId: 'temporary-topic-presentation', operation: 'agent.open',
+  const receipt = await (await rpc()).call('agent.open', { operationId: 'temporary-topic-presentation',
     content: { kind: 'agent-session', agentSessionId: originalAgent.id }, destination: { zoneId: temporary.zone.zoneId, spaceId: topicA, displayWorkspaceId: '__scratch__', groupId: 'scratch-group', newTab: true }, focus: false })
-  if (receipt.operation !== 'agent.open') throw new Error('Wrong receipt')
-  expect(receipt.result.outcome).toBe('opened')
-  expect(receipt.result.to).toMatchObject({ zoneId: temporary.zone.zoneId, spaceId: topicA, workspaceId: '__scratch__', displayWorkspaceId: '__scratch__', groupId: 'scratch-group' })
-  const placed = useAppStore.getState().tabs[receipt.result.to!.tabId]!
+  expect(receipt.outcome).toBe('opened')
+  expect(receipt.to).toMatchObject({ zoneId: temporary.zone.zoneId, spaceId: topicA, workspaceId: '__scratch__', displayWorkspaceId: '__scratch__', groupId: 'scratch-group' })
+  const placed = useAppStore.getState().tabs[receipt.to!.tabId]!
   expect(placed.topicId).toBeUndefined()
   expect(placed.space).toEqual({ zoneId: temporary.zone.zoneId, spaceId: directoryIdentity('local', _hygiene_fixturePath("topics")) })
   expect(useAppStore.getState().sessions).toBe(sessions)
-  expect(receipt.result.agent).toMatchObject({ hostId: 'remote', cwd: _hygiene_fixturePath("execution-original"), runId: 'original-run' })
+  expect(receipt.agent).toMatchObject({ hostId: 'remote', cwd: _hygiene_fixturePath("execution-original"), runId: 'original-run' })
   expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled(); expect(resource).not.toHaveBeenCalled()
 })
 it('retains the exact original home resource on empty discovery and reports contradictory contexts as unknown', async () => {

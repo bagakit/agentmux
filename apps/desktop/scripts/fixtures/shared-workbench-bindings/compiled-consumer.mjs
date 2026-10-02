@@ -16,7 +16,7 @@ globalThis.window = window; globalThis.document = window.document; globalThis.lo
 Object.defineProperty(globalThis, 'navigator', { value: window.navigator, configurable: true })
 Object.defineProperty(globalThis, 'crypto', { value: webcrypto, configurable: true })
 if (phase === 'restore') window.localStorage.setItem('agentmux-workbench-v1', await readFile(join(evidence, 'saved-workbench.json'), 'utf8'))
-const { useAppStore, api, createWorkbenchTab, spatialCatalog, directoryIdentity, workspaceZoneId, createWorkspaceLayout, AgentMuxControlServer, parseAgentMuxControlReceipt } = await import(pathToFileURL(join(compiled, 'consumer.mjs')).href)
+const { useAppStore, api, createWorkbenchTab, spatialCatalog, directoryIdentity, workspaceZoneId, createWorkspaceLayout, AgentMuxControlServer, agentMuxCliMatch } = await import(pathToFileURL(join(compiled, 'consumer.mjs')).href)
 const config = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }, { id: 'remote', kind: 'ssh', label: 'Resource', hostname: 'private.invalid' }], executors: {},
   workspaces: [{ id: 'resource', hostId: 'remote', name: 'Resource', path: _hygiene_fixturePath("resource"), kind: 'folder' }, { id: 'display', hostId: 'local', name: 'Display', path: _hygiene_fixturePath("display"), kind: 'folder' },
     { id: '__scratch__', hostId: 'local', name: 'Topics', path: _hygiene_fixturePath("topics"), kind: 'folder' }], appearance: { terminalTheme: 'graphite' },
@@ -33,13 +33,22 @@ const server = new AgentMuxControlServer({ execute: request => useAppStore.getSt
 const exec = promisify(execFile)
 async function cliOutput(...args) {
   const env = { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: privateRoot }
-  delete env.AGENTMUX_ENV
-  const reply = await exec(process.execPath, [join(compiled, 'agentmux.mjs'), ...args], { cwd: root, env, timeout: 15000 })
-  return JSON.parse(reply.stdout)
+  for (const name of ['AGENTMUX_ENV', 'AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_RUN_ID',
+    'AGENTMUX_WORKSPACE_ID', 'AGENTMUX_REGION_ID', 'AGENTMUX_TAB_ID', 'AGENTMUX_VIEW_ID']) delete env[name]
+  const reply = await exec(process.execPath, [join(compiled, 'agentmux.mjs'), '--endpoint', `unix:${server.path}`, ...args], { cwd: root, env, timeout: 15000 })
+  const lines = reply.stdout.trim().split('\n')
+  assert.equal(lines.length, 1, 'The actual CLI emits one JSON envelope')
+  const receipt = JSON.parse(lines[0])
+  const match = agentMuxCliMatch(args)
+  assert.ok(match, 'The invocation must belong to the original unique command registry')
+  assert.ok(receipt && typeof receipt === 'object' && !Array.isArray(receipt))
+  assert.deepEqual(Object.keys(receipt).sort(), ['ok', 'operation', 'result', ...(Object.hasOwn(receipt, 'operationId') ? ['operationId'] : [])].sort())
+  assert.equal(receipt.ok, true)
+  assert.equal(receipt.operation, match.command.method)
+  return receipt
 }
 async function cli(...args) {
-  const receipt = parseAgentMuxControlReceipt(await cliOutput(...args)); assert.equal(receipt.ok, true)
-  return receipt
+  return await cliOutput(...args)
 }
 const facts = () => spatialCatalog(useAppStore.getState(), topics)
 try {
@@ -54,10 +63,11 @@ try {
     assert.equal((await cli('space', 'bind', '--zone', zone, '--space', topicB)).result.outcome, 'linked')
     const otherProject = directoryIdentity('local', _hygiene_fixturePath("display"))
     assert.equal((await cli('space', 'bind', '--zone', zone, '--space', otherProject)).result.outcome, 'linked')
-    const pmo = await cliOutput('pmo', 'workspaces', '--project', otherProject)
-    assert.equal(pmo.operation, 'pmo.workspaces')
-    assert.deepEqual(pmo.result.workspaces.map(item => item.workspaceId).sort(), ['display', 'resource'])
-    assert.deepEqual(pmo.result.workspaces.find(item => item.workspaceId === 'resource').zones.map(item => item.zoneId), [zone])
+    const snapshot = await cliOutput('app', 'snapshot', '--include', 'zones', '--project', otherProject)
+    assert.equal(snapshot.operation, 'app.snapshot')
+    assert.deepEqual(snapshot.result.zones.map(item => item.workspaceId).sort(), ['display', 'resource'])
+    assert.deepEqual(snapshot.result.zones.filter(item => item.workspaceId === 'resource').map(item => item.zoneId), [zone])
+    assert.deepEqual(snapshot.result.unavailable, [])
     assert.equal((await cli('space', 'unbind', '--zone', zone, '--space', otherProject)).result.outcome, 'unlinked')
     assert.equal((await cli('space', 'bind', '--tab', tab.id, '--display-workspace', 'display', '--group', 'foreign')).result.outcome, 'linked')
     const inspected = await cli('space', 'inspect', '--tab', tab.id, '--display-workspace', 'display', '--group', 'foreign')
