@@ -69,8 +69,9 @@ describe('qualified Darwin and Linux Core package', () => {
 
   it('publishes platform dispatchers and executes the actual host binaries', async () => {
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-    expect(manifest.os).toEqual(['darwin', 'linux'])
-    expect(manifest.cpu).toEqual(['arm64', 'x64'])
+    // Portable Core APIs remain installable; native execution keeps its qualified host guard.
+    expect(manifest.os).toBeUndefined()
+    expect(manifest.cpu).toBeUndefined()
     expect(manifest.bin).toMatchObject({ ctxmux: './bin/ctxmux', ctxmuxd: './bin/ctxmuxd', 'agentmux-runtime': './bin/agentmux-runtime' })
     expect(manifest.scripts.postinstall).toBe('node bin/install-ctxmux.mjs')
     expect(supportedCtxmuxArtifactPlatform()).toBe(`${process.platform}-${process.arch}`)
