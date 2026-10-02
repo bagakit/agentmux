@@ -24,7 +24,7 @@ import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
 import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage } from './package-runtime-upgrade.mjs'
-import { prepareSemanticHostReload, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
+import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -712,8 +712,8 @@ async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelp
  * 让已装路径上正在跑的实例退出，并回报它是否存在过。
  *
  * 先 `osascript … quit` 走 Cmd+Q 那条路：桌面端在退出时 flush 布局状态（见 registerUnloadFlush），
- * 直接 SIGKILL 会丢掉用户当前的 Tab/Region 布局。请求退出后等进程真的消失，超时才升级到信号——
- * `signalProcessIds` 自己会做 SIGTERM→SIGKILL 的升级。
+ * 直接 SIGKILL 会丢掉用户当前的 Tab/Region 布局。请求退出后等 GUI 进程真的消失；超时停止安装，
+ * 不升级到信号。确证的 semantic Host 随后交给自己的 namespace shutdown，不冒充 GUI。
  *
  * `osascript` 失败**不是**错误：app 没在跑、没注册到 LaunchServices、AppleScript 被策略拦，都会让它
  * 非零退出，而这些情况下"让它退出"这个目标本来就已经达成或无从达成。判据是**进程还在不在**，不是
@@ -724,8 +724,21 @@ async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelp
  * 出来，因为一个残留的它曾经让每一次后续安装都卡住（prior observation 实测 pid 1033）。跳过而不是杀掉：安装
  * 路径不发信号是这里的既定承诺（见 package-install-restart.test.ts），交给 OS 回收更安全。
  */
-async function quitInstalledApplication(appPath, originalOwners = []) {
-  const { serving: running, crashReporter, processes } = await scopedProcesses(appPath, originalOwners)
+async function quitInstalledApplication(appPath, originalOwners = [], semanticHost = null) {
+  if (semanticHost) assert(semanticHost.currentApp === appPath, 'The prepared Semantic Host belongs to another application; its processes are retained.')
+  const semanticOwner = semanticHost ? (await inspectSemanticHostForInstall(semanticHost)).row : null
+  // Only this positively identified namespace has a separate shutdown owner.
+  // Other Main workers and unreadable modes retain their ordinary birth pins.
+  const guiOwners = scope => scope.serving.filter(pid => {
+    if (!semanticOwner || pid !== semanticOwner.pid) return true
+    const row = scope.processes.find(candidate => candidate.pid === pid)
+    const mode = scope.nodeModes.find(candidate => candidate.pid === pid)
+    return !(row?.birth === semanticOwner.birth && mode?.mode === 'node' &&
+      mode.uid === semanticOwner.uid && mode.birth === row.birth && mode.ppid === row.ppid &&
+      mode.executable === join(appPath, 'Contents/MacOS/AgentMux'))
+  })
+  const scope = await scopedProcesses(appPath, originalOwners)
+  const running = guiOwners(scope), { crashReporter, processes } = scope
   const previousOwners = processes.filter(row => running.includes(row.pid))
   if (crashReporter.length > 0) {
     process.stdout.write(`ignored_detached_crash_reporter=${crashReporter.join(',')} (orphaned Electron crash handler; serves no bundle, left for the OS to reap)\n`)
@@ -735,7 +748,7 @@ async function quitInstalledApplication(appPath, originalOwners = []) {
   assert(/^[a-zA-Z0-9.-]+$/.test(bundleId), 'Application bundle identity is invalid; no quit was requested.')
   await run('osascript', ['-e', `quit app id "${bundleId}"`], { capture: true, timeoutMs: 15_000 })
     .catch(() => undefined)
-  let remaining = await waitForProcessExit(() => processIdsForApplication(appPath, previousOwners), 20_000)
+  const remaining = await waitForProcessExit(async () => guiOwners(await scopedProcesses(appPath, previousOwners)), 20_000)
   assert(remaining.length === 0,
     `Application has not exited gracefully (pids ${remaining.join(', ')}). Installation stopped; no processes were force-killed. Finish or save current work before retrying.`)
   return { wasRunning: true, pids: running }
@@ -887,7 +900,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
     // 不该白关掉用户正在用的窗口。
     const quitOutcome = previouslyInstalled && running.length > 0
-      ? await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)))
+      ? await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)), semanticHost)
       : { wasRunning: false, pids: [] }
     try {
       if (!semanticHost && previouslyInstalled && intent === 'full') {

@@ -234,8 +234,8 @@ describe('external Node clients and Main-owned Node workers have different autho
     expect(quit).toBeGreaterThan(-1); expect(quitEnd).toBeGreaterThan(quit)
     expect(source.slice(quit, quitEnd)).toContain('const previousOwners = processes.filter(row => running.includes(row.pid))')
     expect(source.slice(quit, quitEnd)).toContain('scopedProcesses(appPath, originalOwners)')
-    expect(source.slice(quit, quitEnd)).toContain('processIdsForApplication(appPath, previousOwners)')
-    expect(source).toContain('await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)))')
+    expect(source.slice(quit, quitEnd)).toContain('guiOwners(await scopedProcesses(appPath, previousOwners))')
+    expect(source).toContain('await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)), semanticHost)')
   })
 })
 

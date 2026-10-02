@@ -90,9 +90,8 @@ export async function prepareSemanticHostReload(currentApp, candidateApp, ops = 
   return { currentApp, originalSource, candidateSource, candidateImage: await ops.bundleImage(candidateApp), identity, owner: row }
 }
 
-/** Called only after normal GUI quit. Never signals a daemon or a Run. */
-export async function stopSemanticHostForInstall(plan, ops = operations) {
-  if (!plan) return null
+/** Read the prepared namespace again; preparation is not permanent exit authority. */
+export async function inspectSemanticHostForInstall(plan, ops = operations) {
   fail(await ops.source(plan.currentApp) === plan.originalSource, 'Another installation changed the App; its current Host is retained.')
   const identity = await ops.bootstrap(plan.currentApp)
   fail(identity.hostProcessId === plan.identity.hostProcessId && identity.storePath === plan.identity.storePath,
@@ -101,6 +100,13 @@ export async function stopSemanticHostForInstall(plan, ops = operations) {
   const row = assertSemanticHostOwner(plan.currentApp, identity, await ops.processRow(identity.hostProcessId), processes.nodeModes.find(mode => mode.pid === identity.hostProcessId))
   fail(row.birth === plan.owner.birth && row.command === plan.owner.command && row.uid === plan.owner.uid,
     'The original Semantic Host process changed before activation; no process was signalled.')
+  return { processes, row }
+}
+
+/** Called only after normal GUI quit. Never signals a daemon or a Run. */
+export async function stopSemanticHostForInstall(plan, ops = operations) {
+  if (!plan) return null
+  const { processes, row } = await inspectSemanticHostForInstall(plan, ops)
   fail(processes.serving.filter(pid => pid !== row.pid).length === 0 && processes.externalNode.includes(row.pid),
     'The original GUI has not exited normally; its Semantic Host and Runs are retained.')
   ops.signal(row.pid, 'SIGTERM')
