@@ -83,7 +83,8 @@ export async function captureHostUiExecution() {
     await write(inputPath, input); await fs.copyFile(path.join(fixture, 'preload.cjs'), preload)
     const { build } = await import(pathToFileURL(require.resolve('vite')).href)
     await build({ configFile: false, root: fixture, base: './', logLevel: 'error', esbuild: { jsx: 'automatic' },
-      plugins: [candidate.capture], define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"',
+      plugins: [candidate.capture], css: { postcss: { plugins: [candidate.captureCss] } },
+      define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"',
         __TERMINAL_WHEEL_UMD_URL__: '"unused"' },
       resolve: { alias: [{ find: /^@xterm\/xterm$/, replacement: path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts') }] },
       build: { target: 'esnext', outDir: path.join(privateRoot, 'renderer'), emptyOutDir: true } })

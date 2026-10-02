@@ -9,6 +9,20 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 
+// CSS @imports are expanded inside PostCSS, outside Rollup's transform hooks. Record
+// the compiler's actual input objects, including imports whose nodes survived expansion.
+export function capturePostcssInputs(record) {
+  return { postcssPlugin: 'immutable-consumed-native-css-candidate', async OnceExit(stylesheet) {
+    const inputs = new Map()
+    const observe = node => {
+      const input = node.source?.input
+      if (input?.file && typeof input.css === 'string') inputs.set(input.file, input.css)
+    }
+    observe(stylesheet); stylesheet.walk(observe)
+    for (const [file, code] of inputs) await record(file, code, 'postcss-input')
+  } }
+}
+
 /** Snapshot the actual compiled package and capture only modules consumed by Vite. The two
  * ordinary Electron generations then use this same private candidate, without freezing peers. */
 export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) {
@@ -45,6 +59,18 @@ export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) 
     '@agentmux/demand': { directory: demand, manifest: JSON.parse(await fs.readFile(path.join(demand, 'package.json'), 'utf8')) }
   }
   const consumed = new Map()
+  const record = async (id, code, consumedVia) => {
+    const file = id.split('?')[0]
+    if (file.includes('\0') || !/\.(?:[cm]?[jt]sx?|css|json)$/.test(file) ||
+      !(file.startsWith(path.join(root, 'apps/desktop/')) || file.startsWith(path.join(root, 'apps/host/')) ||
+        file.startsWith(path.join(root, 'packages/layout/')) ||
+        file.startsWith(path.join(root, 'packages/client-ui/')) ||
+        file.startsWith(core + '/') || file.startsWith(demand + '/'))) return
+    const sourceSHA256 = digest(await fs.readFile(file))
+    const previous = consumed.get(file)
+    if (previous) assert.equal(previous.sourceSHA256, sourceSHA256, 'A consumed module changed between the two candidate builds')
+    consumed.set(file, { sourceSHA256, consumedCodeSHA256: digest(code), consumedVia })
+  }
   const capture = { name: 'immutable-consumed-native-candidate', enforce: 'pre',
     resolveId(source) {
       for (const [name, item] of Object.entries(manifests)) {
@@ -56,20 +82,9 @@ export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) 
         return path.join(item.directory, entry)
       }
     },
-    async transform(code, id) {
-      const file = id.split('?')[0]
-      if (file.includes('\0') || !/\.(?:[cm]?[jt]sx?|css|json)$/.test(file) ||
-        !(file.startsWith(path.join(root, 'apps/desktop/')) || file.startsWith(path.join(root, 'apps/host/')) ||
-          file.startsWith(path.join(root, 'packages/layout/')) ||
-          file.startsWith(path.join(root, 'packages/client-ui/')) ||
-          file.startsWith(core + '/') || file.startsWith(demand + '/'))) return
-      const sourceSHA256 = digest(await fs.readFile(file))
-      const previous = consumed.get(file)
-      if (previous) assert.equal(previous.sourceSHA256, sourceSHA256, 'A consumed module changed between the two candidate builds')
-      consumed.set(file, { sourceSHA256, consumedCodeSHA256: digest(code) })
-    }
+    async transform(code, id) { await record(id, code, 'vite-transform-input') }
   }
-  return { core, capture,
+  return { core, capture, captureCss: capturePostcssInputs(record),
     async buildHost(build) {
       // Match the production ESM Host entry next to the Main bundle. Its lifetime is
       // independent of either ordinary Electron generation that consumes it.
