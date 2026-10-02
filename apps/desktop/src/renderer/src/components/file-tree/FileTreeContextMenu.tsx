@@ -11,7 +11,7 @@ import {
   SquareTerminal,
   Trash2
 } from 'lucide-react'
-import type { ReactNode } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import {
   FILE_EXPLORER_DELETE_KEY,
   FILE_EXPLORER_RENAME_KEY,
@@ -19,6 +19,8 @@ import {
 } from '../../lib/file-explorer-move'
 import { isMacPlatform, revealInFileManagerLabel } from '../../lib/host-platform'
 import { resolveOverlayContainer } from '../WindowOverlayHost'
+
+const EMPTY_MOVE_TARGETS: readonly FileExplorerMoveTarget[] = []
 
 function stopRightButtonSelection(event: React.PointerEvent): void {
   if (event.button !== 2) return
@@ -34,7 +36,7 @@ export function FileTreeContextMenu({
   isExpanded,
   isLocal,
   selectionSize,
-  moveTargets,
+  getMoveTargets,
   onCollapse,
   onCopyPaths,
   onCreate,
@@ -54,7 +56,7 @@ export function FileTreeContextMenu({
   isExpanded: boolean
   isLocal: boolean
   selectionSize: number
-  moveTargets: readonly FileExplorerMoveTarget[]
+  getMoveTargets: () => readonly FileExplorerMoveTarget[]
   onCollapse: () => void
   onCopyPaths: (kind: 'absolute' | 'relative') => void
   onCreate: (kind: 'file' | 'directory') => void
@@ -67,10 +69,12 @@ export function FileTreeContextMenu({
   onReveal: () => void
   onViewFile: () => void
 }) {
+  const [open, setOpen] = useState(false)
+  const moveTargets = useMemo(() => open ? getMoveTargets() : EMPTY_MOVE_TARGETS, [getMoveTargets, open])
   const isMac = isMacPlatform()
   const fileManagerLabel = revealInFileManagerLabel()
   return (
-    <ContextMenu.Root onOpenChange={onOpenChange}>
+    <ContextMenu.Root onOpenChange={(nextOpen) => { setOpen(nextOpen); onOpenChange(nextOpen) }}>
       <ContextMenu.Trigger asChild>{children}</ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
         <ContextMenu.Content
