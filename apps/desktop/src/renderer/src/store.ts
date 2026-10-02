@@ -58,7 +58,6 @@ import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts } from './lib/launcher-option-draft'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
-import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { primaryMoteExecutorId } from './lib/primary-mote-executor'
 import { requestPmoTeamsTopicFloatingOpen } from './lib/pmo-teams-topic-floating'
@@ -109,6 +108,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
+import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
 import { steerEntryTargetsRun, steerQueueCanDrainNow } from './lib/agent-steer-queue-drain'
@@ -384,6 +384,8 @@ export type AgentSteerQueueEntry = {
   /** null is a new, never-dispatched intent; absence is an unknown historical intent. */
   promptCondition?: AgentPromptCondition | null
   text: string
+  /** Explicit producer context, frozen with the original user body. */
+  agentMuxNote?: string
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
@@ -472,6 +474,8 @@ type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
+  /** Launcher producer context shares the draft's durable Region owner; editing only changes body. */
+  agentComposerNotes: Record<string, string>
   agentSteerInFlight: Record<string, string>
   agentSteerQueues: Record<string, AgentSteerQueueEntry[]>
   /**
@@ -873,7 +877,8 @@ type AppState = {
      * （见 lib/display-name.ts 的优先级链）。名字在这里写而不由调用方写，是因为 sessionId
      * 与 tabId 都在本函数内部生成，从不出参。
      */
-    names?: { agentName?: string | undefined; tabName?: string | undefined }
+    names?: { agentName?: string | undefined; tabName?: string | undefined },
+    agentMuxNote?: string
   ): Promise<void>
   launchTerminal(
     tabGroupId: string,
@@ -919,12 +924,12 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
-  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual'): boolean
+  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<void>
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
-  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual'): boolean
+  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -1923,6 +1928,7 @@ type PersistedAppState = {
   agentComposerDrafts?: Record<string, string>
   launcherNameDrafts?: Record<string, LauncherNames>
   launcherOptionDrafts?: LauncherOptionDrafts
+  agentComposerNotes?: Record<string, string>
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
   dirtyDocuments?: Record<string, boolean>
@@ -2109,6 +2115,7 @@ function selectPersistedInputs(state: AppState) {
     agentComposerDrafts: state.agentComposerDrafts,
     launcherNameDrafts: state.launcherNameDrafts,
     launcherOptionDrafts: state.launcherOptionDrafts,
+    agentComposerNotes: state.agentComposerNotes,
     // 排着的消息是用户亲手敲下的字，和草稿同一档事实——草稿重启后还在、排队的却没了，是把第 12 条
     // 反过来做。恢复后可投递性照旧在消费点按 runId 判（steerEntryTargetsRun）：对不上当前 run 的
     // 显示为不可投递、交给用户处置，内容不替用户丢掉。已消失的 session 留一条队列无害——它不投影
@@ -2337,13 +2344,13 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
   return typeof candidate === 'boolean' ? candidate : fallback
 }
 
-function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual'): string | false {
-  if (!text.trim()) return false
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual', agentMuxNote?: string): string | false {
+  if (!text.trim() && !agentMuxNote?.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text.trim()) return operationId
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
     return false
   }
@@ -2351,9 +2358,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     (onRejected ?? useAppStore.getState().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
     return false
   }
-  // Core measures trimmed content. Admission must reject permanent size errors before taking
-  // ownership of the draft; retrying an identical oversized head would block every later entry.
-  if (agentPromptExceedsBudget(text.trim())) {
+  // The shared Core formatter owns byte accounting; transport still keeps body and note separate.
+  if (agentPromptExceedsBudget(composeAgentPrompt(text, agentMuxNote).text)) {
     (onRejected ?? useAppStore.getState().reportError)(new Error(
       `This message is too large to send (limit ${Math.floor(MAX_AGENT_PROMPT_BYTES / 1024)}KB). Shorten it, or put the content in a file and reference the path.`
     ))
@@ -2365,7 +2371,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     enqueuedAt: Date.now(),
     ...(session.processState === 'running' && session.status.state !== 'disconnected'
       ? { runId: session.control.run.runId } : {}),
-    text: text.trim(),
+    text,
+    ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
     status: 'queued',
     ...(origin === 'manual' ? { origin: 'manual' } : {})
   }
@@ -2397,21 +2404,19 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   const workspace = state.config?.workspaces.find((item) => item.id === SCRATCH_WORKSPACE_ID)
   if (!workspace) throw new Error('Scratch workspace is unavailable')
   const executorId = primaryMoteExecutorId(state)
-  const buildPmoPrompt = (fresh = false): string => {
-    const current = get()
-    const executionContext = executionFocusContextText(
-      current.agentFocus,
-      current.sessions,
-      (session) => current.agentNames[session.id] ?? session.label
-    )
-    return composeOutboundMessage({ amux: [
+  const body = userRequest ?? ''
+  const executionContext = executionFocusContextText(
+    state.agentFocus,
+    state.sessions,
+    (session) => state.agentNames[session.id] ?? session.label
+  )
+  const pmoNote = (fresh = false): string => [
       MOTE_COORDINATION_ROLE,
       prompt?.trim(),
       projectContext,
       executionContext,
       ...(fresh ? [`This is a fresh dedicated PMO context for Demand ${demand.id}.`, `Title: ${demand.title}`, `Description: ${demand.description || '(empty)'}`] : [])
-    ].filter(Boolean).join('\n\n'), ...(userRequest ? { user: userRequest } : {}) })
-  }
+    ].filter(Boolean).join('\n\n')
   const focusPmoTabSession = (tabId: string): void => {
     const current = get()
     if (current.mainSurface !== state.mainSurface || current.selectedDemandId !== state.selectedDemandId ||
@@ -2441,51 +2446,63 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   if (mappedTabIsUsable && mappedTab) {
     if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
       // The live recipient already has its exact owner. Topic file preparation cannot gate input.
-      if (!get().send(mappedRegion.sessionId, buildPmoPrompt())) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
+      if (!get().send(mappedRegion.sessionId, body, undefined, undefined, pmoNote())) throw new Error('The Mote task was not queued. The goal is kept; retry from its detail.')
       focusPmoTabSession(mappedTab.id)
       return mappedTab.id
     }
-    await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
     if (mappedRegion?.kind === 'launcher') {
+      const note = pmoNote(true)
+      set(current => ({
+        agentComposerDrafts: { ...current.agentComposerDrafts, [mappedTab.layout.activeRegionId]: body },
+        agentComposerNotes: { ...current.agentComposerNotes, [mappedTab.layout.activeRegionId]: note }
+      }))
+      try { await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id }) }
+      catch (cause) {
+        get().reportError(cause, { kind: 'indeterminate', summary: 'PMO Topic preparation is unconfirmed. The Goal, dedicated Tab and original request are kept; retry Start agent here.' })
+        return mappedTab.id
+      }
       const liveLayout = get().layouts[workspace.id]
       const groupId = liveLayout ? tabGroupForTab(liveLayout, mappedTab.id) : null
       if (!groupId) throw new Error('Dedicated PMO Tab is no longer placed')
-      const contextPrompt = buildPmoPrompt(true)
-      get().setAgentComposerDraft(mappedTab.layout.activeRegionId, contextPrompt)
       if (!executorId) {
         get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
         return mappedTab.id
       }
-      await get().launchAgent(executorId, contextPrompt, groupId, {
+      await get().launchAgent(executorId, body, groupId, {
         tabId: mappedTab.id,
         regionId: mappedTab.layout.activeRegionId
-      }, undefined, { tabName: `PMO · ${demand.title}` })
-    }
+      }, undefined, { tabName: `PMO · ${demand.title}` }, note)
+    } else await get().openScratchTopic(PMO_TEAMS_TOPIC_ID, workspace.id, { reveal: false, tabId: mappedTab.id })
     focusPmoTabSession(mappedTab.id)
     return mappedTab.id
   }
 
-  await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID)
   const current = get()
   const currentLayout = current.layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
   const tab = { ...newLauncherTab(workspace.id, PMO_TEAMS_TOPIC_ID), name: `PMO · ${demand.title}` }
   const nextLayout = addTabPlacement(currentLayout, currentLayout.activeGroupId, tab.id)
   if (!nextLayout) throw new Error('The Scratch Tab Group is no longer available')
-  const contextPrompt = buildPmoPrompt(true)
+  const note = pmoNote(true)
   set((next) => ({
     tabs: { ...next.tabs, [tab.id]: tab },
     layouts: { ...next.layouts, [workspace.id]: nextLayout },
     demandPmoTabIds: { ...next.demandPmoTabIds, [demandId]: tab.id },
-    agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: contextPrompt }
+    agentComposerDrafts: { ...next.agentComposerDrafts, [tab.layout.activeRegionId]: body },
+    agentComposerNotes: { ...next.agentComposerNotes, [tab.layout.activeRegionId]: note }
   }))
+  try { await api.scratch.ensureTopic(workspace.id, PMO_TEAMS_TOPIC_ID) }
+  catch (cause) {
+    get().reportError(cause, { kind: 'indeterminate', summary: 'PMO Topic preparation is unconfirmed. The Goal, dedicated Tab and original request are kept; retry Start agent here.' })
+    return tab.id
+  }
   if (!executorId) {
     get().reportError(new Error('The primary Mote Agent configuration is unconfirmed. This Goal, dedicated Tab and request are kept; choose an Agent and Start agent here.'), { kind: 'indeterminate' })
     return tab.id
   }
-  await get().launchAgent(executorId, contextPrompt, currentLayout.activeGroupId, {
+  await get().launchAgent(executorId, body, currentLayout.activeGroupId, {
     tabId: tab.id,
     regionId: tab.layout.activeRegionId
-  }, undefined, { tabName: `PMO · ${demand.title}` })
+  }, undefined, { tabName: `PMO · ${demand.title}` }, note)
   focusPmoTabSession(tab.id)
   return tab.id
 }
@@ -2549,6 +2566,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
+  agentComposerNotes: {},
   agentSteerQueues: {},
   agentSteerInFlight: {},
   launcherNameDrafts: {},
@@ -6252,7 +6270,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : undefined
     await get().launchAgent(executorId, prompt, layout.activeGroupId, launcher)
   },
-  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names) {
+  async launchAgent(executorId, prompt, tabGroupId, launcher, launchOptions, names, agentMuxNote) {
     const state = get()
     const launcherTab = launcher ? state.tabs[launcher.tabId] : undefined
     const launcherSurface = launcherTab && launcher
@@ -6297,6 +6315,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const providerId = state.config?.executors[executorId]?.providerId
     const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
     const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
+    const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
     const sessionId = mintAgentSessionId()
     const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
       ? state.errorNoticeContext : null
@@ -6321,7 +6340,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
-        [sessionId]: { events: [], overflowed: false, request: { executorId, prompt } }
+        [sessionId]: { events: [], overflowed: false, request: { executorId, prompt,
+          ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }) } }
       }
     }))
     try {
@@ -6345,6 +6365,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(scratchTopicId ? { scratchTopicId } : {}),
         ...(launchOptions && Object.keys(launchOptions).length > 0 ? { launchOptions } : {}),
         prompt,
+        ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }),
         agentSessionId: sessionId,
         createOperationId: crypto.randomUUID()
       })
@@ -6419,6 +6440,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 失败路径（下方 catch → reduceSessionLaunchFailed）绝不清：region 会翻回 launcher 且沿用同一个
       // regionId，草稿留在原地供用户直接重试。这正是用户报告"报错退回初始页、之前输入没缓存"要修的行为。
       if (submittedPrompt !== undefined) get().clearAgentComposerDraftIfUnchanged(regionId, submittedPrompt)
+      set(current => {
+        if (current.agentComposerNotes[regionId] !== launchNote) return current
+        const agentComposerNotes = { ...current.agentComposerNotes }
+        delete agentComposerNotes[regionId]
+        return { agentComposerNotes }
+      })
       // 名字草稿与 prompt 草稿同一时机、同一理由清掉：这个 region 已经从 launcher 变成 agent，
       // 那两格输入失去归属，留着会串到下一个新标签页。失败路径不清（region 翻回 launcher 且沿用
       // 同一 regionId），用户填的名字原地留着供直接重试。
@@ -7059,8 +7086,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
-  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin) {
-    return admitAgentSteer(sessionId, text, onRejected, operationId, origin) !== false
+  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote) {
+    return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote) !== false
   },
   removeAgentSteer(sessionId, operationId) {
     // A submitted request cannot be recalled by deleting its local projection.
@@ -7215,7 +7242,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               'The bound Run changed before dispatch. This message will not be sent to another Run.')
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
               explicitAttempt ? { allowUncertainTurn: true } : undefined,
-              pending.origin === 'manual')
+              pending.origin === 'manual', pending.agentMuxNote)
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
               const agentSteerQueues = { ...current.agentSteerQueues }
@@ -7278,9 +7305,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     agentSteerDrains.set(sessionId, drain)
     return drain.promise
   },
-  send(sessionId, text, onRejected, origin) {
+  send(sessionId, text, onRejected, origin, agentMuxNote) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin)
+    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin, agentMuxNote)
     if (operationId === false) return false
     void get().flushAgentSteerQueue(sessionId, operationId)
     return true

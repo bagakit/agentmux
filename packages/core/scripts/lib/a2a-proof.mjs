@@ -91,7 +91,7 @@ export async function runA2aProof({ name, tests, regressionTests = [], mutations
         await mkdir(resolve(join(copy, test), '..'), { recursive: true })
         await cp(join(root, test), join(copy, test))
       }
-      await writeFile(join(copy, 'vitest.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify(projectTests)} } })\n`)
+      await writeFile(join(copy, 'vitest.config.mts'), `import { defineConfig } from 'vitest/config'\nexport default defineConfig({ server: { fs: { allow: ${JSON.stringify([root, copy])} } }, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, test: { include: ${JSON.stringify(projectTests)} } })\n`)
     }
     for (const mutation of mutations) {
       if (!originals.has(mutation.file)) originals.set(mutation.file, await readFile(join(dist, mutation.file), 'utf8'))
