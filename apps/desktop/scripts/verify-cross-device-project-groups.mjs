@@ -75,8 +75,14 @@ async function nativeAndVisual() {
   assert.equal(proof.schema, 'agentmux.cross-device-project-groups.native.v1')
   assert.equal(proof.passed, true)
   assert.deepEqual(proof.sourceBefore, proof.sourceAfter)
-  assert.equal(proof.sourceBefore.head, git(['rev-parse', 'HEAD']))
-  assert.equal(proof.sourceBefore.tree, git(['rev-parse', 'HEAD^{tree}']))
+  const currentHead = git(['rev-parse', 'HEAD'])
+  // A peer's documentation-only commit may join Main after capture. Require exact
+  // product/fixture/SDK bytes below and disclose the entire Git delta, not a new Native claim.
+  const documentationDelta = proof.sourceBefore.head === currentHead ? []
+    : git(['diff', '--name-only', proof.sourceBefore.head, currentHead]).split('\n').filter(Boolean)
+  assert.ok(documentationDelta.every(file => file.startsWith('docs/') && file.endsWith('.md')),
+    'Changed product or proof Source requires its own qualified candidate')
+  if (!documentationDelta.length) assert.equal(proof.sourceBefore.tree, git(['rev-parse', 'HEAD^{tree}']))
   assert.equal(proof.sourceBefore.trackedStatus, '')
   assert.deepEqual(proof.sdkBefore, proof.sdkAfter)
   assert.deepEqual(proof.compiledBefore, proof.compiledAfter)
@@ -122,7 +128,8 @@ async function nativeAndVisual() {
   assert.equal(review.screenshots.length, proof.screenshots.length)
   for (const shot of proof.screenshots) assert.ok(review.screenshots.some(item => item.absolutePath === shot.absolutePath && item.sha256 === shot.sha256 && item.viewed === true))
   evidence.push({ file, sha256: sha(bytes), ordinaryPids: proof.phases.map(item => item.native.electronPid), screenshots: proof.screenshots.length,
-    reviewFile, reviewSHA256: sha(reviewBytes), conclusion: review.conclusion })
+    reviewFile, reviewSHA256: sha(reviewBytes), conclusion: review.conclusion, capturedSource: proof.sourceBefore,
+    deliverySource: currentHead, documentationDelta })
 }
 
 await sourceProof('.tmp/cross-device-project-groups/source-receipt.json', 'agentmux.cross-device-project-groups.source.v1', 6, 7)
