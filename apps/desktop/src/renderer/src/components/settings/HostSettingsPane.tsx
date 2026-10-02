@@ -1,12 +1,12 @@
 import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Monitor, Plus, RadioTower, Trash2 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
-import { SettingsResourceLibrary } from './SettingsResourceLibrary'
+import { HostConnectionLibrary, type HostConnectionPanel } from './HostConnectionLibrary'
+import { HostLinkedProjects } from './HostLinkedProjects'
 import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore, type HostCheckState } from '../../store'
 import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { DeviceManagementSettings } from './DeviceManagementSettings'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 
 const NO_SESSIONS: SessionSnapshot[] = []
@@ -27,12 +27,12 @@ export function HostSettingsPane({ config, onSave, active }: {
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const [selectedId, setSelectedId] = useState<string | null>(() => config.hosts[0]?.id ?? null)
+  const [panel, setPanel] = useState<HostConnectionPanel>('connection')
   const [view, setView] = useState<'library' | 'editor'>('library')
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
   const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
   const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({})
-  const [devicesOpen, setDevicesOpen] = useState(false)
   const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   const saveState = useSettingsSave()
@@ -41,6 +41,15 @@ export function HostSettingsPane({ config, onSave, active }: {
   const checks = useAppStore((state) => active ? state.hostChecks : NO_HOST_CHECKS)
   const checkHost = useAppStore((state) => state.checkHost)
   const sessions = useAppStore((state) => active ? state.sessions : NO_SESSIONS)
+  const projectsByHost = useMemo(() => {
+    const grouped = new Map<string, WorkspaceRecord[]>()
+    for (const workspace of config.workspaces) {
+      const projects = grouped.get(workspace.hostId)
+      if (projects) projects.push(workspace)
+      else grouped.set(workspace.hostId, [workspace])
+    }
+    return grouped
+  }, [config.workspaces])
 
   useEffect(() => {
     if (!pendingEdit || pendingEdit.id !== selectedId) return
@@ -63,6 +72,10 @@ export function HostSettingsPane({ config, onSave, active }: {
     setSelectedId(id)
     setView('editor')
     setPendingEdit({ id, select: false })
+  }
+  function selectHostPanel(id: string, panel: HostConnectionPanel): void {
+    setPanel(panel)
+    selectHost(id)
   }
   function backToLibrary(): void {
     setView('library')
@@ -94,6 +107,7 @@ export function HostSettingsPane({ config, onSave, active }: {
       hostname: ''
     }])
     setSelectedId(id)
+    setPanel('connection')
     setView('editor')
     setFilter({ query: '', snapshot: [] })
     setPendingEdit({ id, select: true })
@@ -120,6 +134,7 @@ export function HostSettingsPane({ config, onSave, active }: {
       setHosts((current) => current.filter((host) => host.id !== target.id))
       const next = nextHosts[0]?.id ?? null
       setSelectedId(next)
+      setPanel('connection')
       setFilter({ query: '', snapshot: [] })
       setView('library')
       setReturnFocus({ id: next })
@@ -134,12 +149,13 @@ export function HostSettingsPane({ config, onSave, active }: {
         <button className="small-button" disabled={saving} onClick={addHost}><Plus size={13} /> Add SSH host</button>
       </div>
       <div className="settings-resource-split">
-        <SettingsResourceLibrary label="Hosts" selectedId={selectedId} query={filter.query} onQuery={filterHosts} onSelect={selectHost} focusRequest={returnFocus}
+        <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
-            const workspaces = config.workspaces.filter((workspace) => workspace.hostId === host.id).length
+            const workspaces = projectsByHost.get(host.id)?.length ?? 0
             return {
               id: host.id, name: host.label,
+              projectCount: workspaces,
               detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local · This Mac'}${workspaces ? ` · ${workspaces} ${workspaces === 1 ? 'project' : 'projects'}` : ''}`,
               mark: host.kind === 'ssh' ? <RadioTower size={18} /> : <Monitor size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check?.state === 'ready' ? <CheckCircle2 size={13} /> : <Info size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
@@ -151,7 +167,7 @@ export function HostSettingsPane({ config, onSave, active }: {
           const check = currentHostCheck(checks[host.id], host)
           const sessionCount = sessions.filter((session) => session.hostId === host.id).length
           return (
-            <section className="host-settings-card" key={host.id} data-resource-editor={host.id} tabIndex={-1}>
+            <section className="host-settings-card" key={host.id} data-resource-editor={host.id} data-host-view={panel} tabIndex={-1}>
               <header className="settings-resource-editor__header">
                 <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
                 <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'This Mac'}</small></div>
@@ -165,13 +181,13 @@ export function HostSettingsPane({ config, onSave, active }: {
                 <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
               </header>
-              {check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
+              {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">
                   <summary>Test details <ChevronDown size={13} /></summary>
                   <p className="host-check-detail">{check.detail}</p>
                 </details>
               ) : <p className="host-check-detail">{check.detail}</p> : null}
-              {host.kind === 'ssh' ? (
+              {panel === 'projects' ? <HostLinkedProjects host={host} projects={projectsByHost.get(host.id) ?? []} /> : host.kind === 'ssh' ? (
                 <HostConnectionFields
                   host={host}
                   open={advancedOpen[host.id] ?? false}
@@ -187,10 +203,6 @@ export function HostSettingsPane({ config, onSave, active }: {
           {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty"><RadioTower size={28} aria-hidden="true" /><strong>Connect your environments</strong><p>Choose a connection, or add an SSH host to reuse across your projects.</p></div> : null}
         </div>
       </div>
-      <details className="settings-device-access" open={devicesOpen} onToggle={(event) => setDevicesOpen(event.currentTarget.open)}>
-        <summary><span><strong>Device access</strong><small>Devices authorized to access this Mac</small></span><ChevronDown size={14} /></summary>
-        <div className="settings-device-access__content"><DeviceManagementSettings active={active && devicesOpen} /></div>
-      </details>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
       <ConfirmationDialog
         open={removeRequest !== null}

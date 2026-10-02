@@ -1,0 +1,54 @@
+/* Connections use the original resource draft owner; disclosure is navigation only. */
+.settings-host-branch { margin-bottom: var(--sp-2); }
+.settings-host-branch__summary {
+  min-height: 52px; display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-2); border-radius: var(--radius);
+  color: var(--text-2); cursor: pointer; list-style: none;
+}
+.settings-host-branch__summary::-webkit-details-marker { display: none; }
+.settings-host-branch__summary:hover { color: var(--text); background: var(--surface-1); }
+.settings-host-branch__summary:focus-visible,
+.settings-host-page:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -1px; box-shadow: var(--focus-ring); }
+.settings-host-branch__chevron { flex: none; color: var(--text-3); transition: transform 140ms ease; }
+.settings-host-branch[open] > summary .settings-host-branch__chevron { transform: rotate(90deg); }
+.settings-host-branch[data-current-host='true'] > summary .settings-resource-row__mark { color: var(--green); }
+.settings-host-branch__summary .settings-resource-row__mark { width: 20px; }
+.settings-host-branch__summary .settings-resource-row__status { max-width: 84px; }
+.settings-host-branch__summary .settings-resource-row__check { overflow: hidden; text-overflow: ellipsis; }
+.settings-host-branch__pages { display: grid; gap: 2px; margin: 2px 0 var(--sp-3) 26px; }
+.settings-host-page {
+  min-height: 34px; min-width: 0; display: flex; align-items: center; gap: var(--sp-2);
+  padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius);
+  color: var(--text-3); background: transparent; text-align: left; font-size: var(--fs-body); cursor: pointer;
+}
+.settings-host-page > span { flex: 1; min-width: 0; }
+.settings-host-page > svg { flex: none; }
+.settings-host-page > small { color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.settings-host-page:hover { color: var(--text); background: var(--surface-1); }
+.settings-host-page[aria-current='page'] { color: var(--text); background: var(--surface-2); }
+.settings-host-page[aria-current='page'] > svg { color: var(--green); }
+.settings-host-projects { border-top: 1px solid var(--line-soft); padding-top: var(--sp-5); }
+.settings-host-projects > header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-2); }
+.settings-host-projects > header > strong { font-size: var(--fs-body); font-weight: 550; }
+.settings-host-projects > header > small { color: var(--text-3); font-size: var(--fs-meta); }
+.settings-host-projects > ul { list-style: none; padding: 0; margin: var(--sp-3) 0; }
+.settings-host-projects > ul > li { display: flex; align-items: flex-start; gap: var(--sp-3); padding-block: var(--sp-4); border-bottom: 1px solid var(--line-soft); }
+.settings-host-projects > ul > li > svg { flex: none; margin-top: 2px; color: var(--text-3); }
+.settings-host-projects > ul > li > div { min-width: 0; display: grid; gap: var(--sp-2); }
+.settings-host-projects li strong { font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.settings-host-projects li code { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.settings-devices-pane .settings-group > header { flex-wrap: wrap; gap: var(--sp-2); }
+.settings-devices-pane .host-settings-card > header { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.settings-devices-pane .host-settings-card > header > div { flex: 1 1 200px; min-width: 0; }
+.settings-devices-pane .host-settings-card > header > .check-pill { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.settings-devices-pane .host-settings-card > header small,
+.settings-devices-pane .host-settings-card code { white-space: normal; overflow-wrap: anywhere; }
+.settings-devices-pane .host-settings-card .small-button { max-width: 100%; white-space: normal; text-align: left; }
+.settings-devices-pane .host-edit-grid { min-width: 0; }
+.settings-devices-pane .host-edit-grid textarea { width: 100%; min-width: 0; resize: vertical; }
+@media (prefers-reduced-motion: reduce) {
+  .settings-host-branch__chevron { transition: none; }
+}
+@media (max-width: 640px) {
+  .settings-devices-pane .host-edit-grid { grid-template-columns: minmax(0, 1fr); }
+}

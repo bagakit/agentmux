@@ -68,13 +68,6 @@
 .settings-resource-editor__empty strong { color: var(--text); font-size: var(--fs-title); }
 .settings-resource-editor__empty p { max-width: 40ch; margin: 0; font-size: var(--fs-body); line-height: 1.6; }
 .settings-resource-workbench > .settings-pane-actions { flex: none; margin-top: 0; }
-.settings-device-access { flex: none; min-height: 0; border-top: 1px solid var(--line-soft); }
-.settings-device-access > summary { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); padding-block: var(--sp-3); cursor: pointer; list-style: none; }
-.settings-device-access > summary::-webkit-details-marker { display: none; }
-.settings-device-access > summary > span { display: grid; gap: var(--sp-1); font-size: var(--fs-body); }
-.settings-device-access > summary small { color: var(--text-3); font-size: var(--fs-meta); }
-.settings-device-access[open] > summary > svg { transform: rotate(180deg); }
-.settings-device-access__content { max-height: 28vh; overflow: auto; }
 
 @container settings-resource (width < 720px) {
   .settings-resource-check-tools { order: 3; width: 100%; justify-content: flex-start; }

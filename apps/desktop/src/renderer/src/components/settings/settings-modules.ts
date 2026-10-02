@@ -8,6 +8,7 @@ import { agentsSettingsModule } from './modules/agents'
 import { promptsSettingsModule } from './modules/prompts'
 import { workspacesSettingsModule } from './modules/workspaces'
 import { hostsSettingsModule } from './modules/hosts'
+import { devicesSettingsModule } from './modules/devices'
 import { toolkitSettingsModule } from './modules/toolkit'
 
 /** The only Renderer composition point. Order is the product's navigation order. */
@@ -21,7 +22,8 @@ export const settingsModules = [
   agentsSettingsModule,
   promptsSettingsModule,
   workspacesSettingsModule,
-  hostsSettingsModule
+  hostsSettingsModule,
+  devicesSettingsModule
 ] as const
 
 export type SettingsSectionId = typeof settingsModules[number]['id']
