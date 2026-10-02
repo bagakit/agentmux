@@ -1,4 +1,4 @@
-import { parseAgentMuxSpatialGraph } from './spatial-state.js'
+import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { AgentMuxError } from './errors.js'
 import { normalizeAgentSession } from './agent-session-store.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'

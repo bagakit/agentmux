@@ -1390,6 +1390,11 @@ export type WindowResizeEvent = {
 }
 
 export type AgentMuxDesktopApi = {
+  spatial: {
+    read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
+    commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
+    onChange(listener:(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void):()=>void
+  }
   config: {
     get(): Promise<AppConfig>
     save(config: AppConfig, expected: AppConfig): Promise<AppConfig>

@@ -11,12 +11,6 @@
   "engines": {
     "node": ">=24.0.0"
   },
-  "os": [
-    "darwin"
-  ],
-  "cpu": [
-    "arm64"
-  ],
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
@@ -123,6 +117,10 @@
     "./spatial-state": {
       "types": "./dist/spatial-state.d.ts",
       "import": "./dist/spatial-state.js"
+    },
+    "./spatial-graph": {
+      "types": "./dist/spatial-graph.d.ts",
+      "import": "./dist/spatial-graph.js"
     }
   },
   "bin": {

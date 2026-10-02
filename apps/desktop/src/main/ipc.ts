@@ -1,3 +1,4 @@
+import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
@@ -343,6 +344,21 @@ export async function registerIpc(args: {
   const executeControl = async (
     request: AgentMuxControlRequest
   ): Promise<AgentMuxControlResult> => {
+    if(request.operation==='space.ls' || request.operation==='space.inspect') {
+      if(!('requestId' in request.target)) {
+        const state=await spatialState.read()
+        if(state) return {operation:request.operation,catalog:spatialCatalog(state.graph,request.target)}
+      }
+    }
+    if(request.operation==='space.bind' || request.operation==='space.unbind') {
+      const state=await spatialState.read()
+      if(state) {
+        const next=await spatialState.bind(request.binding,request.operation==='space.unbind')
+        return {operation:request.operation,requestId:request.requestId,binding:request.binding,catalog:spatialCatalog(next.graph),
+          outcome:request.operation==='space.bind'?'linked':'unlinked',save:{layoutApplied:true,localStorageWritten:false,storageFlushRequested:false,diskDurability:'confirmed',reason:null},issues:[]}
+      }
+    }
+
     if (request.operation === 'inspect.client') return await inspectDesktopClient(request, {
       pid: process.pid, package: args.loadedPackage ?? null,
       renderer: () => args.window.webContents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null,
@@ -672,6 +688,12 @@ export async function registerIpc(args: {
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
+  const spatialState = new AgentMuxSpatialStateStore()
+  const disposeSpatial = spatialState.subscribe(state => {
+    if(!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('spatial:changed',state)
+  })
+  handleWithEvent('spatial:read',async event=>{requireTrustedSender('spatial:read',event);return spatialState.read()})
+  handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{requireTrustedSender('spatial:commit',event);return spatialState.commit(input)})
   handleWithEvent('ui:requestStorageFlush', async (event) => {
     requireTrustedSender('ui:requestStorageFlush', event)
     requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(args.window.webContents.session, {
@@ -1199,6 +1221,7 @@ export async function registerIpc(args: {
   const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
     execute: executeControl,
+    spatialState,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     ...(rpcHttp ? { http: rpcHttp } : {}),
@@ -1236,7 +1259,8 @@ export async function registerIpc(args: {
   await control.start()
   return async () => {
     await runOwnerDisposals([
-      async () => { acceptingControl = false; disposeToolkitIpc(); await toolkit.dispose() },
+      async () => { acceptingControl = false; disposeSpatial()
+    disposeToolkitIpc(); await toolkit.dispose() },
       () => {
         acceptingControl = false
         args.window.webContents.off('destroyed', closeMetrics)
