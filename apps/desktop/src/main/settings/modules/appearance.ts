@@ -1,6 +1,6 @@
 import type { AgentMuxControlSettingEntry } from '@agentmux/core'
 import type { AppConfig } from '../../../shared/contracts.js'
-import { APP_APPEARANCE_IDS, APP_APPEARANCE_DEFAULT, TERMINAL_THEME_IDS, TERMINAL_FONT_SIZE_DEFAULT, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX } from '../../../shared/contracts.js'
+import { APP_APPEARANCE_IDS, APP_APPEARANCE_DEFAULT, EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX, TERMINAL_THEME_IDS, TERMINAL_FONT_SIZE_DEFAULT, TERMINAL_FONT_SIZE_MIN, TERMINAL_FONT_SIZE_MAX } from '../../../shared/contracts.js'
 import { DEFAULT_CONFIG } from '../../config-store.js'
 import { enumSetting, invalid } from '../scalar-setting.js'
 import type { ScalarSetting } from '../scalar-setting.js'
@@ -24,6 +24,25 @@ export const appearanceSettings = [
       if (!/^\d+$/.test(value) || !Number.isSafeInteger(next) || next < TERMINAL_FONT_SIZE_MIN || next > TERMINAL_FONT_SIZE_MAX) throw invalid(this.key, value)
       if (this.entry(config).value === next) return config
       return { ...config, appearance: { ...config.appearance, terminalFontSize: next } }
+    }
+  },
+  {
+    key: 'appearance.editorFontSize',
+    entry(config: AppConfig): AgentMuxControlSettingEntry { return {
+      key: this.key, kind: 'string', value: String(config.appearance.editorFontSize ?? 'inherit'), default: 'inherit',
+      enum: ['inherit', ...Array.from({ length: EDITOR_FONT_SIZE_MAX - EDITOR_FONT_SIZE_MIN + 1 }, (_, index) => String(EDITOR_FONT_SIZE_MIN + index))]
+    } },
+    apply(config: AppConfig, value: string): AppConfig {
+      if (value === 'inherit') {
+        if (config.appearance.editorFontSize === undefined) return config
+        const appearance = { ...config.appearance }
+        delete appearance.editorFontSize
+        return { ...config, appearance }
+      }
+      const next = Number(value)
+      if (!/^\d+$/.test(value) || !Number.isSafeInteger(next) || next < EDITOR_FONT_SIZE_MIN || next > EDITOR_FONT_SIZE_MAX) throw invalid(this.key, value)
+      if (config.appearance.editorFontSize === next) return config
+      return { ...config, appearance: { ...config.appearance, editorFontSize: next } }
     }
   },
 ] satisfies readonly ScalarSetting[]

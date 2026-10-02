@@ -17,7 +17,7 @@
 ## Explorer 与 Editor
 
 - 用户要求「完整重新设计 Explorer」：当前项目标题与 Explorer 标题合并以节省空间，项目路径去重，名称双击就能编辑，不再依赖行右侧老式 Edit／Delete；同时检查其他交互。文件树的共用项目头在收起后仍可读、可展开；文件、Branches、Changes 与新增 Git History 共享准确的 Selected Worktree／Host 上下文，不因整理 chrome 改变原选择、Tab／Region、草稿、执行焦点、布局或健康 Run。路径表示唯一沿[《寻址与复制》](spaces-and-layout.md#寻址与复制)，视觉与液态玻璃约束唯一见密度文档[《Explorer 与快捷输入区》](../presentation/conversation-input.md#explorer-与快捷输入区)。
-- 名称单击选择、双击进入既有行内 Rename；文件图标／名称外的明确打开命中区与 Enter 打开文件，目录 disclosure 展开／收起，F2 和键盘／右键菜单继续可达。双击名称不能顺带重复打开、展开或启动拖拽；范围／切换多选仍只改选择，拖拽沿原单项 Move。移除名称右侧重复 Edit／Delete 动作，Rename／Delete 留在同一菜单与键盘入口；删除仍有准确对象与后果确认。改名开始即选中文件名主体，保留末尾扩展名；目录和无末尾扩展名文件（含 .env 这类单点前缀文件）选中全名，长名称从开头可读。改名保原 IME、Enter／Escape、取消和错误反馈，磁盘成功与原路径投影事务边界不变。
+- 名称单击选择、双击进入既有行内 Rename；文件图标／名称外的明确打开命中区与 Enter 打开文件，目录 disclosure 展开／收起，F2 和键盘／右键菜单继续可达。双击名称不能顺带重复打开、展开或启动拖拽；范围／切换多选仍只改选择，拖拽沿原单项 Move。移除名称右侧重复 Edit／Delete 动作，Rename／Delete 留在同一菜单与键盘入口；删除仍有准确对象与后果确认。改名开始即选中文件名主体，保留末尾扩展名；目录和无末尾扩展名文件（含 .env 这类单点前缀文件）选中全名，长名称从开头可读。行内名称编辑由可复用的通用输入控件承载选择、IME、Enter／Escape、失焦及等待／错误反馈，业务调用者继续持有准确对象、draft、提交与取消意图；Reusable 参考面提供实际可操作的同组件示例。Enter 与紧随的失焦只提交一次，组字确认不提交，等待中不重复写入；失败保留草稿，在仍属当前编辑意图时保留或返回输入焦点，新作用域／新意图不被旧失败抢回。通用控件不持有文件路径解析或写入，磁盘成功与原路径投影事务边界不变。
 
 - Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。Move 当前明确为单项操作：Pointer drag 在开始时收敛到被拖动项；Context Menu/`Shift+F10` 使用 `Move This Item to` 子菜单，并在执行时收敛到该项，不用多选外观暗示尚未实现的批量移动。
 - Stale response 不能覆盖新 Workspace 或新目录 revision；刷新期间保留现有内容，直到新结果原子替换。
@@ -35,6 +35,8 @@
 - Main 只有在 helper 明确成功时返回 `moved`，明确未提交时返回 `finalLocation: source`；commit 后回执缺失始终返回 `finalLocation: unknown`，不得用 source/destination pathname occupancy 猜对象身份。Renderer 对成功或 unknown 并发、去重重读恰好 source/destination 两个 parent，对确认留在 source 的失败不刷新；unknown 仍不提交路径投影。
 - 内置 Editor 保存 Topic 的 `topic.md` 后使 Topics 文件系统快照失效并重读，不建立第二份 watcher 或 Renderer Topic Registry。
 - Monaco 只声明当前真正注册的语言能力；未知或未注册语言回落 plaintext，不伪造 tokenizer。
+- 用户要求 Editor 字号可设置且默认跟 App 字号：缺省使用现有 App 正文大小；显式 override 与恢复继承在现有 Appearance 设置中完成，只由原 ConfigOwner 保存一个可选 Editor 字号值，恢复继承清除 override，不回填第二份 App 默认或新增并行偏好。Source 与只读 Diff 使用相同解析结果，修改大小就地更新现有编辑器，不重建模型、丢选择／滚动／草稿或改变保存冲突与未知结果。Terminal 字号仍属原偏好。
+- Editor 已保存事实作为安静的状态表达，原 Save 快捷键与必要保存动作保持可达；saving、dirty、冲突、读取失败与保存 unknown 仍准确可辨并沿原 owner 操作。More 菜单保原真实选项、键盘打开／导航／Escape 与焦点返回，压低正常态视觉不能把未确认写入显示为 Saved，不能隐藏可执行的恢复动作。
 
 ### Revision-aware 保存与外部冲突
 

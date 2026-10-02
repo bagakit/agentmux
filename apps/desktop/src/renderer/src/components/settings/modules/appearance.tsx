@@ -18,10 +18,10 @@ export const appearanceSettingsModule = {
   title: 'Appearance',
   description: 'Theme, typography, and terminal colors.',
   icon: Palette,
-  keywords: 'theme color palette terminal tui composer input background font size typography',
+  keywords: 'theme color palette terminal tui composer input background editor source diff font size typography',
   savedSummary(config) {
     const mode = config.appearance.appAppearance ?? APP_APPEARANCE_DEFAULT
-    return `${mode[0]!.toUpperCase()}${mode.slice(1)} · ${config.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT}px`
+    return `${mode[0]!.toUpperCase()}${mode.slice(1)} · Editor ${config.appearance.editorFontSize === undefined ? 'App size' : `${config.appearance.editorFontSize}px`} · Terminal ${config.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT}px`
   },
   Pane({ config }) {
     return <AppearanceSettingsPane appearance={config.appearance} onSave={saveAppearance} />

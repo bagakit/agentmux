@@ -6,6 +6,7 @@ import type { EditorRegionDiffState } from '../store'
 import type { MonacoThemeId } from '../lib/monaco-theme'
 import { diffEditorSides, wordWrapOption } from '../lib/editor-diff'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { useEditorTypography } from '../hooks/useEditorTypography'
 
 // Shared readonly canvas for worktree and fixed-commit diffs. Main owns the old/new sides; Monaco
 // owns diff rendering. Binary or oversized blobs never masquerade as two empty text documents.
@@ -62,10 +63,11 @@ export function GitDiffCanvas({
 function ReadonlyDiffEditor({ original, modified, wordWrap, language, theme }: {
   original: string; modified: string; wordWrap: boolean; language: string; theme: MonacoThemeId
 }) {
+  const typography = useEditorTypography()
   const instanceId = useId(), host = useRef<HTMLDivElement | null>(null)
   const widget = useRef<monaco.editor.IStandaloneDiffEditor | null>(null)
   const models = useRef<monaco.editor.IDiffEditorModel | null>(null)
-  const initial = useRef({ original, modified, wordWrap, language })
+  const initial = useRef({ original, modified, wordWrap, language, typography })
   const originalPath = `agentmux-diff:///${encodeURIComponent(instanceId)}/original`
   const modifiedPath = `agentmux-diff:///${encodeURIComponent(instanceId)}/modified`
   useEffect(() => {
@@ -80,8 +82,8 @@ function ReadonlyDiffEditor({ original, modified, wordWrap, language, theme }: {
       // Monaco chooses the appropriate side-by-side/inline layout from the available width.
       minimap: { enabled: false },
       fontFamily: '"SFMono-Regular", "Cascadia Code", monospace',
-      fontSize: 14,
-      lineHeight: 21,
+      fontSize: value.typography.fontSize,
+      lineHeight: value.typography.lineHeight,
       scrollBeyondLastLine: false,
       automaticLayout: true,
       wordWrap: wordWrapOption(value.wordWrap)
@@ -109,6 +111,7 @@ function ReadonlyDiffEditor({ original, modified, wordWrap, language, theme }: {
     }
   }, [original, modified, language])
   useEffect(() => { widget.current?.updateOptions({ wordWrap: wordWrapOption(wordWrap) }) }, [wordWrap])
+  useEffect(() => { widget.current?.updateOptions({ fontSize: typography.fontSize, lineHeight: typography.lineHeight }) }, [typography.fontSize, typography.lineHeight])
   useEffect(() => { monaco.editor.setTheme(theme) }, [theme])
   return <div ref={host} style={{ width: '100%', height: '100%', minWidth: 0, minHeight: 0 }} />
 }

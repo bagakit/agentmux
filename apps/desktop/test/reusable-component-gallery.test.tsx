@@ -39,16 +39,21 @@ describe('Workflow component gallery production reachability', () => {
 
   it('records real production consumers for existing chat primitives and keeps Activity internals private', () => {
     const sourceRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'src', 'renderer', 'src')
+    const sharedRoot = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'packages', 'client-ui', 'src')
     const read = (relative: string): string => readFileSync(join(sourceRoot, relative), 'utf8')
+    const readShared = (relative: string): string => readFileSync(join(sharedRoot, relative), 'utf8')
     const activity = read('components/ActivityView.tsx')
     const sessionPane = read('components/SessionPane.tsx')
     const consumers = [
       ['ConversationAxis', activity],
       ['ConversationMessage', activity],
       ['ConversationMessage', read('components/ObservationSurfaceGallery.tsx')],
-      ['MemoizedAgentMarkdown', read('components/ConversationMessage.tsx')],
+      ['MemoizedAgentMarkdown', readShared('components/ConversationMessage.tsx')],
       ['AgentInteractionCard', sessionPane],
-      ['InlineComposer', read('components/AgentComposer.tsx')],
+      ['InlineComposer', readShared('components/AgentComposer.tsx')],
+      ['AgentComposer', read('components/AgentSessionComposer.tsx')],
+      ['InlineRenameField', read('components/FileExplorer.tsx')],
+      ['InlineRenameField', read('components/WorkflowComponentGallery.tsx')],
       ['StatusDot', read('components/GoalExecution.tsx')],
       ['ServiceWindowNotice', sessionPane]
     ]

@@ -1,4 +1,6 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { InlineRenameField } from '@agentmux/client-ui/components/InlineRenameField'
+import { FileText, Pencil } from 'lucide-react'
 import { APP_APPEARANCE_IDS, type AppAppearanceId } from '../../../shared/contracts'
 import { applyAppAppearance } from '../lib/app-appearance'
 import { SemanticIcon } from './semantic-icons'
@@ -15,6 +17,37 @@ import {
 } from './workflow/fixtures'
 
 const APPEARANCE_LABELS = { light: '浅色', dark: '深色', system: '跟随系统' } satisfies Record<AppAppearanceId, string>
+
+function InlineRenameExample() {
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const [name, setName] = useState('README.md'), [value, setValue] = useState(name)
+  const [editing, setEditing] = useState(false), [pending, setPending] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const begin = () => { setValue(name); setError(null); setEditing(true) }
+  return <div className="wf-gallery__rename-example">
+    <div className="wf-gallery__rename-row">
+      <FileText size={14} />
+      {editing ? <InlineRenameField label="Rename example file" value={value} pending={pending} error={error}
+        selectionEnd={name.lastIndexOf('.') > 0 ? name.lastIndexOf('.') : name.length}
+        onValueChange={next => { setValue(next); setError(null) }}
+        onCancel={() => { setEditing(false); setError(null) }}
+        onCommit={async next => {
+          setPending(true)
+          await new Promise(resolve => setTimeout(resolve, 180))
+          if (!mounted.current) return
+          setPending(false)
+          if (!next.trim() || next.includes('/') || next.includes('\\')) { setError('Enter a file name without a path.'); return }
+          if (next.trim() === 'package.json') { setError('A file named package.json already exists.'); return }
+          setName(next.trim()); setEditing(false)
+        }} />
+        : <button className="wf-gallery__rename-name" onClick={begin} onDoubleClick={begin} onKeyDown={event => {
+          if (event.key === 'F2') { event.preventDefault(); begin() }
+        }}>{name}<Pencil size={12} /></button>}
+    </div>
+    <p>同一原位改名组件。Enter 保存，Esc 取消；输入 package.json 可体验冲突恢复。示例不会改动磁盘。</p>
+  </div>
+}
 
 export function WorkflowComponentGallery() {
   const [theme, setTheme] = useState<AppAppearanceId>('dark')
@@ -43,6 +76,7 @@ export function WorkflowComponentGallery() {
         <a href="#workflow-dock"><SemanticIcon name="dock" />输入框上方 dock</a>
         <a href="#existing-surfaces"><SemanticIcon name="branch" />聊天表面</a>
         <a href="#composer-details"><SemanticIcon name="message-tools" />Composer 细节</a>
+        <a href="#inline-rename"><Pencil size={13} />原位改名</a>
       </nav>
       <section id="workflow-context" className="wf-gallery__section">
         <p className="wf-gallery__caption"><SemanticIcon name="context" /><b>A · 时间线上下文</b><span>Workflow 与普通 tool 行共用低干扰的时间线语言。</span></p>
@@ -75,6 +109,10 @@ export function WorkflowComponentGallery() {
         <WorkflowDock workflow={runningWorkflow} />
       </section>
       <div id="existing-surfaces"><ObservationSurfaceGallery /></div>
+      <section id="inline-rename" className="wf-gallery__section">
+        <p className="wf-gallery__caption"><Pencil size={13} /><b>原位改名</b><span>名称、选区、等待和错误共用一套交互。</span></p>
+        <InlineRenameExample />
+      </section>
     </main>
   )
 }

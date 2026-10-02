@@ -13,6 +13,8 @@ import {
   APP_LINK_SCHEME_CHOICES,
   AGENT_AVATAR_BADGE_IDS,
   CONFIG_VERSION,
+  EDITOR_FONT_SIZE_MIN,
+  EDITOR_FONT_SIZE_MAX,
   PROJECT_RAIL_DENSITY_IDS,
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
@@ -130,6 +132,7 @@ const appearanceSchema = z.object({
   }).strict()).optional(),
   appAppearance: z.enum(APP_APPEARANCE_IDS).optional(),
   terminalTheme: z.enum(TERMINAL_THEME_IDS),
+  editorFontSize: z.number().int().min(EDITOR_FONT_SIZE_MIN).max(EDITOR_FONT_SIZE_MAX).optional(),
   terminalFontSize: z
     .number()
     .optional()

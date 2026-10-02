@@ -2,9 +2,12 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { Check, Monitor, Moon, Palette, SquareTerminal, Sun } from 'lucide-react'
 import { useId } from 'react'
 import { useSettingDraft } from './use-setting-draft'
+import { readAppEditorFontSize } from '../../hooks/useEditorTypography'
 import {
   APP_APPEARANCE_IDS,
   APP_APPEARANCE_DEFAULT,
+  EDITOR_FONT_SIZE_MIN,
+  EDITOR_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_DEFAULT,
   TERMINAL_FONT_SIZE_MAX,
   TERMINAL_FONT_SIZE_MIN,
@@ -28,13 +31,18 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
   const app = useSettingDraft<AppAppearanceId>(appearance.appAppearance ?? APP_APPEARANCE_DEFAULT)
   const terminal = useSettingDraft<TerminalThemeId>(appearance.terminalTheme)
   const font = useSettingDraft(String(appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT))
+  const editorFont = useSettingDraft(String(appearance.editorFontSize ?? 'inherit'))
   const saveState = useSettingsSave()
+  const parsedEditorFontSize = Number(editorFont.value)
+  const inheritsEditorFont = editorFont.value === 'inherit'
+  const validEditorFontSize = inheritsEditorFont || (editorFont.value.trim() !== '' && Number.isInteger(parsedEditorFontSize)
+    && parsedEditorFontSize >= EDITOR_FONT_SIZE_MIN && parsedEditorFontSize <= EDITOR_FONT_SIZE_MAX)
   const parsedFontSize = Number(font.value)
   const validFontSize = font.value.trim() !== '' && Number.isFinite(parsedFontSize) && Number.isInteger(parsedFontSize)
     && parsedFontSize >= TERMINAL_FONT_SIZE_MIN && parsedFontSize <= TERMINAL_FONT_SIZE_MAX
   const fontSize = validFontSize ? parsedFontSize : Number(font.expected)
   const appAppearance = app.value, terminalTheme = terminal.value
-  const dirty = app.dirty || terminal.dirty || font.dirty
+  const dirty = app.dirty || terminal.dirty || font.dirty || editorFont.dirty
   const setAppAppearance = app.setValue, setTerminalTheme = terminal.setValue, setFontSize = font.setValue
 
   async function save(): Promise<void> {
@@ -44,13 +52,25 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
       })
       return
     }
+    if (!validEditorFontSize) {
+      await saveState.run(async () => {
+        throw new Error(`Editor font size must be a whole number from ${EDITOR_FONT_SIZE_MIN} to ${EDITOR_FONT_SIZE_MAX} pixels, or inherit the App size.`)
+      })
+      return
+    }
     const submittedApp = app.beginSave(), submittedTerminal = terminal.beginSave(), submittedFont = font.beginSave()
+    const submittedEditorFont = editorFont.beginSave()
     const next = { ...appearance, appAppearance: submittedApp.value, terminalTheme: submittedTerminal.value, terminalFontSize: parsedFontSize }
     const expected = { ...appearance, appAppearance: submittedApp.expected, terminalTheme: submittedTerminal.expected, terminalFontSize: Number(submittedFont.expected) }
+    if (submittedEditorFont.value === 'inherit') delete next.editorFontSize
+    else next.editorFontSize = Number(submittedEditorFont.value)
+    if (submittedEditorFont.expected === 'inherit') delete expected.editorFontSize
+    else expected.editorFontSize = Number(submittedEditorFont.expected)
     const committed = await saveState.run(() => onSave(next, expected))
     submittedApp.finish(committed)
     submittedTerminal.finish(committed)
     submittedFont.finish(committed)
+    submittedEditorFont.finish(committed)
   }
 
   return (
@@ -69,6 +89,22 @@ export function AppearanceSettingsPane({ appearance, onSave }: {
             </label>
           ))}
         </div>
+      </section>
+      <section className="settings-group">
+        <header><span>Editor font size</span><small>{inheritsEditorFont ? 'App size' : validEditorFontSize ? `${parsedEditorFontSize}px` : 'Unsaved'}</small></header>
+        <label className="browser-automation-toggle">
+          <input type="checkbox" aria-label="Use App font size" checked={inheritsEditorFont}
+            onChange={event => editorFont.setValue(event.target.checked ? 'inherit' : String(Math.round(readAppEditorFontSize())))} />
+          <span><strong>Use App font size</strong></span>
+        </label>
+        <div className="terminal-font-size-control">
+          <input type="number" aria-label="Editor font size in pixels" min={EDITOR_FONT_SIZE_MIN} max={EDITOR_FONT_SIZE_MAX} step={1}
+            placeholder="App" disabled={inheritsEditorFont} value={inheritsEditorFont ? '' : editorFont.value}
+            onChange={event => editorFont.setValue(event.target.value)} />
+          <span className="terminal-font-size-control__unit">px</span>
+          <button type="button" className="small-button" disabled={inheritsEditorFont} onClick={() => editorFont.setValue('inherit')}>Reset editor size</button>
+        </div>
+        <p className="settings-hint">Applies to source and diff editors. Inherit the App size or choose {EDITOR_FONT_SIZE_MIN} to {EDITOR_FONT_SIZE_MAX} pixels.</p>
       </section>
       <section className="settings-group">
         <header><span>Terminal font size</span><small>{fontSize}px</small></header>

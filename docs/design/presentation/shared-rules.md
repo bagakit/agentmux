@@ -137,8 +137,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 | `--fs-title` | 14px | 卡片与对话框标题、区块 header |
 | `--fs-display` | 20px | 页面级标题（Board、Settings、New Tab、Welcome） |
 
-等宽内容不另设字号档：它按所在位置取对应档位，与 `--font-mono` 配对即可。Terminal 与 Editor 的
-字号由各自 owner 的原生渲染决定（见密度预算表），不走这套阶梯。
+等宽内容不另设字号档：它按所在位置取对应档位，与 `--font-mono` 配对即可。Terminal 字号仍由原 owner 原生渲染；Editor 的继承与显式 override 只见行为合同[《Explorer 与 Editor》](../behavior/files-and-git.md#explorer-与-editor)，实际字形与行距由 Monaco 原生渲染，不另设一份 App 默认值。
 
 
 约束：
