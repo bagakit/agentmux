@@ -1,3 +1,4 @@
+import { MailboxLocationContext } from './MailboxLocationContext'
 import type { MouseEvent } from 'react'
 import { ArrowUp, ArrowDown, Trash2 } from 'lucide-react'
 import { ConversationMessage, type ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
@@ -15,8 +16,9 @@ export type ComposerQueuedMessage = {
   error?: string
 }
 
-export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove, onMove, onSend, reading }: {
+export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove, onMove, onSend, reading, sessionId }: {
   reading?: ConversationReadingProps | undefined
+  sessionId?: string | undefined
   queued: readonly ComposerQueuedMessage[]
   selectedId: string | null
   onSelect: (id: string, event: MouseEvent<HTMLButtonElement>) => void
@@ -39,7 +41,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove,
     const index = queued.indexOf(selected)
     const working = selected.sending || selected.status === 'restoring'
     const needsAttention = !selected.deliverable || selected.error || selected.status === 'failed'
-    return <article className="composer-outbox composer-mailbox__detail" data-state={selected.status} data-record-key={`queue:${selected.id}`}>
+    return <MailboxLocationContext sessionId={sessionId} pending>{(_summary, executionDetails) => <article className="composer-outbox composer-mailbox__detail" data-state={selected.status} data-record-key={`queue:${selected.id}`}>
       <div className="composer-outbox__actions">
         {send(selected)}
         {onMove ? <>
@@ -57,9 +59,9 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onRemove,
         speaker={{ role: 'unknown', id: UNKNOWN_SPEAKER_ID }} content={selected.text}
         {...(selected.enqueuedAt === undefined ? {} : { createdAt: selected.enqueuedAt })}
         {...(onCopy ? { onCopy } : {})}
-        messageDetails={<dl className="composer-mailbox__record-facts"><dt>Record</dt><dd>Pending message · not a delivery receipt</dd><dt>Enqueued</dt><dd><MailboxTime value={selected.enqueuedAt} complete /></dd><dt>State</dt><dd>{selected.status}</dd><dt>Delivery</dt><dd>{meaning(selected)}</dd></dl>} />
+        messageDetails={<><dl className="composer-mailbox__record-facts"><dt>Record</dt><dd>Pending message · not a delivery receipt</dd><dt>Enqueued</dt><dd><MailboxTime value={selected.enqueuedAt} complete /></dd><dt>State</dt><dd>{selected.status}</dd><dt>Delivery</dt><dd>{meaning(selected)}</dd></dl>{executionDetails}</>} />
       <details className="composer-mailbox__explanation"><summary>About queued delivery</summary><p>Send explicitly steers only this message, including during the current turn. Restored messages wait for your explicit Send; other queued messages are not sent automatically.</p></details>
-    </article>
+    </article>}</MailboxLocationContext>
   }
   return <section className="composer-outbox" aria-label="Queued messages">
     <h3>Pending ({queued.length})</h3>
