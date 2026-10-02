@@ -11,6 +11,9 @@ function sourceFiles(root: string): string[] {
     return entry.isDirectory() ? sourceFiles(path) : /\.tsx?$/.test(path) ? [path] : []
   })
 }
+function commandLines(text: string): string[] {
+  return text.split('\n').filter(line => line.startsWith('# '))
+}
 describe('first-party cards use the same object CLI', () => {
   it.each(['roster', 'terminal'] as const)('copies real %s menu actions with canonical Session commands', async surface => {
     const copied: string[] = [], input = { sessionId: "sid'quote", writeClipboardText: async (text: string) => { copied.push(text) } }
@@ -19,21 +22,43 @@ describe('first-party cards use the same object CLI', () => {
     for (const action of actions) await action.onSelect()
     expect(copied).toHaveLength(2)
     expect(copied[0]).toBe(copied[1])
-    expect(copied[0]).toContain(`agentmux agent send --to-session='sid'"'"'quote' --text "..."`)
-    expect(copied[0]).toContain(`agentmux agent inspect --session='sid'"'"'quote'`)
+    expect(copied[0]).toBe([
+      '--- amux : IDCard ---',
+      "ID: sid'quote",
+      'Exe: ? | ? (?)',
+      `# amux agent send --to-session='sid'"'"'quote' --text "..."`,
+      '# amux --skill',
+      '-----'
+    ].join('\n'))
+    expect(commandLines(copied[0]!)).toHaveLength(2)
     expect(copied[0]).not.toContain('--region')
   })
-  it('keeps physical Tab/Region inspection distinct from semantic Session inspection', () => {
-    expect(formatRegionAddress('r')).toContain("agentmux space inspect --region='r'")
-    expect(formatTabAddress('t')).toContain("agentmux space inspect --tab='t'")
-    expect(formatSessionAddress('s')).toContain("agentmux agent inspect --session='s'")
+  it('keeps physical Tab/Region inspection distinct from semantic Session messaging', () => {
+    expect(commandLines(formatRegionAddress('r'))).toEqual([
+      "# amux space inspect --region='r'",
+      '# amux --skill'
+    ])
+    expect(commandLines(formatTabAddress('t'))).toEqual([
+      "# amux space inspect --tab='t'",
+      '# amux --skill'
+    ])
+    expect(commandLines(formatSessionAddress('s'))).toEqual([
+      '# amux agent send --to-session=\'s\' --text "..."',
+      '# amux --skill'
+    ])
   })
-  it('copies exact known placement, navigation and a clearly labeled move template', () => {
+  it('copies exact known Region context without inventing inspection, navigation or move commands', () => {
     const text = formatMessagingAddress({ agentSessionId: 's', regionId: 'r' })
-    expect(text).toContain("agentmux agent send --to-session='s'")
-    expect(text).toContain("agentmux space inspect --region='r'")
-    expect(text).toContain("agentmux space focus --region='r'")
-    expect(text).toContain("模板：agentmux space mv --from-region='r' --expect-session='s' --zone='<zone-id>' --new-tab")
+    expect(text).toBe([
+      '--- amux : IDCard ---',
+      'ID: s',
+      'Exe: ? | ? (?)',
+      'Region: r',
+      '# amux agent send --to-session=\'s\' --text "..."',
+      '# amux --skill',
+      '-----'
+    ].join('\n'))
+    expect(commandLines(text)).toHaveLength(2)
   })
   it('finds actual product consumers outside the formatter definition', () => {
     const root = new URL('../src/renderer/src/', import.meta.url).pathname
