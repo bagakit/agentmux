@@ -85,7 +85,13 @@ window.hostUiState = () => {
     activeWorkspaceId: state.activeWorkspaceId, drafts: state.agentComposerDrafts,
     names: state.launcherNameDrafts, options: state.launcherOptionDrafts,
     warm: state.warmTerminal, focus: state.agentFocus, error: state.error,
-    pendingLaunches: state.pendingAgentLaunches,
+    pendingLaunches: Object.fromEntries(Object.entries(state.pendingAgentLaunches).map(([id, pending]) => [id, {
+      request: pending.request ? { executorId: pending.request.executorId, hostId: pending.request.hostId,
+        workspacePath: pending.request.workspacePath, prompt: pending.request.prompt } : null,
+      created: pending.created ? { agentSessionId: pending.created.agentSessionId, hostId: pending.created.hostId,
+        workspacePath: pending.created.workspacePath, run: pending.created.run } : null,
+      bufferedEventCount: pending.events.length, overflowed: pending.overflowed
+    }])),
     launcherPresentation: useLauncherState.getState(),
     sessions: state.sessions.map(one => ({ id: one.id, kind: one.kind, hostId: one.hostId,
       workspacePath: one.workspacePath, state: one.state, control: one.control, executorId: one.executorId })),
