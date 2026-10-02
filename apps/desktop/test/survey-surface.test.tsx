@@ -632,6 +632,31 @@ it('creates a Scratch temporary Zone and a new Tab without inheriting another ac
   expect(useAppStore.getState().tabs[existing.id]).toBe(existing); healthy()
 })
 
+it('keeps ordinary manual browsers quiet and retains live Agent and unknown control details', async () => {
+  const zoneId = 'regular-browser-zone', id = 'regular-browser-id'
+  const manual = { ...browser, id, navigationId: 'regular-navigation', driving: false, activity: { control: 'human' as const, operation: null } }
+  const regular = { ...createWorkbenchTab('regular-tab', { ...manual, kind: 'browser' as const, browserId: id, workspaceId: workspace.id, regionId: 'regular-region' }), space: { ...mixed.space!, zoneId } }
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [regular.id]: regular }, layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, regular.id]) } }))
+  await renderApp(); await enterSurvey(); await choose(zoneId)
+  const badge = () => dom.container.querySelector<HTMLElement>('[data-survey-zone-id="regular-browser-zone"] .survey-item-activity')!
+  expect(badge()).not.toBeNull(); expect(badge().childElementCount).toBe(0)
+  const before = useAppStore.getState(), page = slot().querySelector('[data-native-browser-stage]')
+  expect(page).not.toBeNull()
+  await openItemSubmenu('Item details'); expect(document.querySelector('.survey-item-details-content')!.textContent).toContain('Human control')
+  await act(async () => document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  const operation = { id: 'regular-operation', browserId: id, operator: { id: session.id, name: 'Live operator' }, startedAt: 1, phase: 'running' as const, summary: 'Working', url: browser.url, steps: [] }
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...manual, driving: true, activity: { control: 'agent', operation } } }))
+  expect(badge().querySelector('svg')).not.toBeNull(); expect(badge().firstElementChild!.getAttribute('aria-label')).toContain('Agent operating'); expect(badge().firstElementChild!.getAttribute('title')).toContain('Live operator')
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...manual, activity: { control: 'human', operation: { ...operation, phase: 'completed', finishedAt: 2 } } } }))
+  expect(badge().childElementCount).toBe(0)
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'unavailable', id, error: 'Native owner unavailable' }))
+  expect(badge().firstElementChild!.getAttribute('title')).toContain('Control unknown')
+  expect(badge().firstElementChild!.getAttribute('title')).not.toContain('Live operator')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(slot().querySelector('[data-native-browser-stage]')).toBe(page)
+  healthy()
+})
+
 it('keeps Browser control unknown while its native owner is unavailable without retiring the Zone or reusing a completed operator', async () => {
   await renderApp(); await enterSurvey(); await choose()
   const selected = useAppStore.getState().surveyZoneSelection

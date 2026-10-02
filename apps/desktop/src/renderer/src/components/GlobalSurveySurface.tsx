@@ -3,7 +3,7 @@ import { spatialCatalog } from '../lib/space-agent-control'
 import { useLauncherState } from '../lib/launcher-state'
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceLocation, AgentMuxSpatialSave, AgentMuxZoneFact } from '@agentmux/core/control'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import { ArrowUpRight, Bot, CircleHelp, FileText, Globe2, PanelsTopLeft, PanelLeftClose, PanelLeftOpen, NotebookPen, LoaderCircle, MousePointer2, Plus, X } from 'lucide-react'
+import { ArrowUpRight, Bot, CircleHelp, FileText, Globe2, PanelsTopLeft, PanelLeftClose, PanelLeftOpen, NotebookPen, LoaderCircle, Plus, X } from 'lucide-react'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useStore } from 'zustand'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
@@ -182,8 +182,8 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const detail = labels.map((label, index) => `${browsers[index]!.regionId}: ${label}`).join('\n')
     const unknown = labels.some(label => label.startsWith('Control unknown'))
     const operating = labels.some(label => label.startsWith('Agent operating'))
-    const human = browsers.length > 0 && kinds.size === 1 && labels[0] === 'Human control' && !agents
-    const Icon = operating ? Bot : unknown ? CircleHelp : human ? MousePointer2 : null
+    // Normal manual control is availability, not activity; keep its facts in Details.
+    const Icon = operating ? Bot : unknown ? CircleHelp : null
     return { summary: Icon ? <span title={detail} aria-label={description}><Icon size={12} aria-hidden="true" /></span> : null,
       details: <span>{description}{detail ? `\n${detail}` : ''}</span> }
   }
