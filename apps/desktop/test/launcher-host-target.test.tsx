@@ -293,9 +293,11 @@ describe('the real Launcher execution target consumer', () => {
       destination: { kind: 'launcher' as const, regionId: 'input' }, ...(operation === 'open.browser' ? { url: 'https://example.com' } : {}) }
     let opened!: Awaited<ReturnType<typeof before.executeControl>>
     await act(async () => {
-      const opening = useAppStore.getState().executeControl(request as Parameters<typeof before.executeControl>[0])
-      await expect(opening).resolves.toBeDefined()
-      opened = await opening
+      const outcome: { value?: typeof opened; error?: unknown } = await useAppStore.getState()
+        .executeControl(request as Parameters<typeof before.executeControl>[0])
+        .then(value => ({ value }), error => ({ error }))
+      expect(outcome).not.toHaveProperty('error')
+      opened = outcome.value!
     })
     if (operation === 'open.terminal') expect(terminal).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ hostId: 'farm', workspacePath: remoteProject.path }))
     else expect(browser).toHaveBeenCalledWith(expect.any(String), 'https://example.com', 'flowlens')
