@@ -390,7 +390,15 @@ async function verifyThirdPartyNotices(appPath) {
   )
 }
 
-async function verifyPackagedRuntime(appPath, verificationRoot, source) {
+export async function verifyWorkspaceMoveHelper(path, expectedSha256) {
+  const info = await stat(path)
+  assert(info.isFile() && (info.mode & 0o111) !== 0,
+    'Packaged Workspace move helper is missing or not executable.')
+  assert(await sha256(path) === expectedSha256,
+    'Packaged Workspace move helper does not match the verified artifact.')
+}
+
+async function verifyPackagedRuntime(appPath, verificationRoot, source, signedWorkspaceMoveHelperSha256) {
   const appResources = join(appPath, 'Contents', 'Resources', 'app')
   const packageIdentity = await readPackageIdentity(appPath)
   assertPackageIdentity(packageIdentity, {
@@ -404,15 +412,7 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source) {
   const coreRuntime = join(appResources, 'node_modules', '@agentmux', 'core')
   const binaryRoot = join(coreRuntime, 'vendor', 'ctxmux', 'darwin-arm64', 'bin')
   const workspaceMoveHelper = join(appResources, 'resources', 'bin', 'agentmux-workspace-move')
-  const workspaceMoveHelperInfo = await stat(workspaceMoveHelper)
-  assert(
-    workspaceMoveHelperInfo.isFile() && (workspaceMoveHelperInfo.mode & 0o111) !== 0,
-    'Packaged Workspace move helper is missing or not executable.'
-  )
-  assert(
-    await sha256(workspaceMoveHelper) === await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')),
-    'Packaged Workspace move helper does not match the built source artifact.'
-  )
+  await verifyWorkspaceMoveHelper(workspaceMoveHelper, signedWorkspaceMoveHelperSha256)
   const [cli, daemon, agentmux] = await Promise.all([
     run(join(binaryRoot, 'ctxmux'), ['--version'], { capture: true }),
     run(join(binaryRoot, 'ctxmuxd'), ['--version'], { capture: true }),
@@ -685,7 +685,7 @@ async function detachCreatedImage(imagePath) {
   }
 }
 
-async function verifyDmg(dmgPath, temporaryRoot, source) {
+async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelperSha256) {
   const mountPoint = join(temporaryRoot, 'mounted-dmg')
   const verificationRoot = join(temporaryRoot, 'verification')
   const applicationsRoot = join(verificationRoot, 'Applications')
@@ -704,7 +704,7 @@ async function verifyDmg(dmgPath, temporaryRoot, source) {
   await verifyIdentity(installedApp)
   await auditBundleSymlinks(installedApp)
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', installedApp], { capture: true })
-  await verifyPackagedRuntime(installedApp, verificationRoot, source)
+  await verifyPackagedRuntime(installedApp, verificationRoot, source, signedWorkspaceMoveHelperSha256)
   await verifyLaunchServices(installedApp, verificationRoot)
 }
 
@@ -1059,11 +1059,15 @@ async function main() {
     await verifyThirdPartyNotices(stagedApp)
     await auditBundleSymlinks(stagedApp)
     await auditRuntimeReferences(stagedApp, temporaryRoot)
+    const stagedWorkspaceMoveHelper = join(stagedApp, 'Contents', 'Resources', 'app', 'resources', 'bin', 'agentmux-workspace-move')
+    await verifyWorkspaceMoveHelper(stagedWorkspaceMoveHelper,
+      await sha256(join(desktopRoot, 'resources', 'bin', 'agentmux-workspace-move')))
     await signMacosApplication(stagedApp, signingPlan)
     const signature = await verifyMacosSigning(stagedApp, signingPlan)
+    const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)
 
     await createDmg(stagedApp, stagedDmg, temporaryRoot)
-    await verifyDmg(stagedDmg, temporaryRoot, initialSource)
+    await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
     const finalSource = await sourceIdentity()
     assert(
       finalSource.commit === initialSource.commit &&
