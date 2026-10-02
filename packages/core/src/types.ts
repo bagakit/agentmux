@@ -666,6 +666,22 @@ export type AgentSessionHistoryPageOptions = {
   env?: Readonly<Record<string, string | undefined>>
 }
 
+/** A short-lived, read-only witness for a missing native locator, never Run control. */
+export type AgentProviderNativeSessionDiscoveryContext = {
+  processId: number
+  command: string
+  args: readonly string[]
+  env: Readonly<Record<string, string | undefined>>
+  workspacePath: string
+  signal: AbortSignal
+}
+
+export type AgentProviderNativeSessionDiscovery = {
+  handle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
+  /** Recheck the observed native record before accepting a late result. */
+  assertCurrent(): Promise<void>
+}
+
 export type AgentProviderSessionHistoryContext = {
   source: AgentSessionHistorySource
   /** Exact locator captured from this Session's durable native handle; never guessed from a home directory. */
