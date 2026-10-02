@@ -37,11 +37,11 @@ const variants = [
   { name: 'remote-shell-literal-argv-removed', edits: [{ key: 'ssh',
     before: `      return "'" + value.replaceAll("'", "'\\\\''") + "'"`, after: '      return value' }] },
   { name: 'startup-joins-pending-remote', edits: [{ key: 'controller',
-    before: `        return { id: config.id, executionHost, client, config,
-          warning: endpointWarning(config.id, 'Connecting to Runtime', new AgentMuxError(`,
-    after: `        await client.connect()
-        return { id: config.id, executionHost, client, config,
-          warning: endpointWarning(config.id, 'Connecting to Runtime', new AgentMuxError(` }] },
+    before: `      client = await this.connectRuntimeClient(config, store)
+      return { id: config.id, executionHost, client, config,`,
+    after: `      client = await this.connectRuntimeClient(config, store)
+      await client.connect()
+      return { id: config.id, executionHost, client, config,` }] },
   { name: 'snapshot-joins-pending-remote', edits: [{ key: 'controller',
     before: '        throw new AgentMuxError(warning.message, warning.code)',
     after: '        await client.connect()\n        throw new AgentMuxError(warning.message, warning.code)' }] },
