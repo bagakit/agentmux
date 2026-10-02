@@ -98,7 +98,7 @@ const mutations = [
     if (!displayed) return []`,
     to: `    const layout = input.layouts[tab.workspaceId]
     if (!layout || !findGroupForTab(layout, tab.id)) return []`,
-    test: targetTest, name: 'public Control.*display third' },
+    test: targetTest, name: 'public Control.*display.*third' },
   { id: 'terminal-failure-drops-executor', path: source('lib/session-state.ts'),
     from: '        ...launcher,\n        regionId,', to: '        regionId,',
     test: targetTest, name: 'a cold Terminal failure remounts' },
