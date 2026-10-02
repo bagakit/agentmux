@@ -41,10 +41,11 @@ export function noteCreationResourceMatches(config: AppConfig | null, target: No
   return workspace?.hostId === target.hostId && workspace.path === target.workspacePath
 }
 
-export function noteFilePlacement(target: NoteCreationTarget, projection?: WorkbenchProjection): FileOpenPlacement | null {
+export function noteFilePlacement(target: NoteCreationTarget, projection?: WorkbenchProjection, launcher?: NoteCreationReceipt['launcher']): FileOpenPlacement | null {
   return target.zoneId && target.sourceSpaceId && target.displayWorkspaceId ? {
     displayWorkspaceId: target.displayWorkspaceId, space: { spaceId: target.sourceSpaceId, zoneId: target.zoneId },
-    resource: { hostId: target.hostId, path: target.workspacePath }, ...(projection ? { projection } : {})
+    resource: { hostId: target.hostId, path: target.workspacePath }, ...(projection ? { projection } : {}),
+    ...(projection?.presentationId === 'survey-workbench' && launcher ? { launcher } : {})
   } : null
 }
 

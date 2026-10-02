@@ -37,15 +37,6 @@
 .survey-navigation button:focus-visible, .survey-management header button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .survey-navigation button:disabled { opacity: .5; cursor: default; }
 .survey-page-list { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-1); }
-.survey-note-capture { flex: none; min-width: 0; max-height: 52%; overflow: auto; display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border-top: 1px solid var(--line-soft); background: var(--wash-1); }
-.survey-note-capture > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
-.survey-note-capture > header strong { font-size: var(--fs-body); font-weight: 500; color: var(--text); }
-.survey-note-capture__input { min-height: 112px; max-height: 200px; overflow: auto; margin: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); background: var(--surface-0); background-image: none; border-radius: var(--radius); }
-.survey-note-capture__input:focus-within { border-color: var(--focus-line); box-shadow: var(--focus-ring); }
-.survey-note-capture > footer { display: flex; justify-content: flex-end; }
-.survey-note-capture > footer button { display: inline-flex; align-items: center; gap: var(--sp-3); min-height: 28px; padding: var(--sp-2) var(--sp-3); color: var(--text); background: var(--surface-3); border: 1px solid var(--line); border-radius: var(--radius-sm); }
-.survey-note-capture > footer button:hover:not(:disabled) { background: var(--wash-3); }
-.survey-note-capture > footer button:focus-visible { outline: 0; box-shadow: var(--focus-ring); }
 .survey-item-row { position: relative; min-width: 0; flex: none; border-radius: var(--radius-sm); }
 .survey-item-row:hover { background: var(--wash-1); }
 .survey-item-row[data-selected="true"] { background: var(--surface-3); }

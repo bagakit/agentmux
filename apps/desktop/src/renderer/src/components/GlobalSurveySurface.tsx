@@ -13,13 +13,12 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useReleasedBrowserRegionIds } from '../lib/surface-memory-budget-coordinator'
 import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, surveyZoneTopicFacts, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { workbenchSurfaces, type WorkbenchSurface } from '../lib/workbench-tabs'
+import { workbenchSurfaces } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import { SurveyZoneItem } from './SurveyZoneItem'
 import { SelectorPresence, type SelectorPresenceAgent } from './SelectorList'
-import { SurveyNoteCapture } from './SurveyNoteCapture'
 import { SurveyItemOptions } from './SurveyItemOptions'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
@@ -88,8 +87,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const currentBrowser = surveySelectedBrowser(tabs, selection)
   const [query, setQuery] = useState('')
   const [opening, setOpening] = useState(false)
-  const [noteCaptureOpen, setNoteCaptureOpen] = useState(false)
-  const noteCaptureWasCollapsed = useRef(false)
   const [error, setError] = useState<string | null>(null)
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
   const [relationStatus, setRelationStatus] = useState<{ zoneId: string; pendingSpaceId: string | null; error: string | null; notice: string | null } | null>(null)
@@ -128,7 +125,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   })
   const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
   const intent = useRef(0)
-  const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; surface: WorkbenchSurface | null; ownsPreparation: boolean; draft?: { launcherId: string; value: string } } | null>(null)
+  const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; draft?: { launcherId: string; value: string } } | null>(null)
   const [noteRecovery, setNoteRecovery] = useState(false)
   const failedCreation = useRef<SurveyBrowserPreparation | null>(null)
   useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId])
@@ -258,21 +255,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     finally { setOpening(false) }
   }
 
-  function closeNoteCapture(): void {
-    setNoteCaptureOpen(false)
-    if (noteCaptureWasCollapsed.current) setSidebarCollapsed(true)
-    noteCaptureWasCollapsed.current = false
-  }
-  function showNoteCapture(): void {
-    if (noteCaptureOpen) return
-    noteCaptureWasCollapsed.current = sidebarCollapsed
-    setSidebarCollapsed(false)
-    setNoteCaptureOpen(true)
-  }
-  async function openNote(newExploration: boolean, recover = false, draft?: { launcherId: string; value: string }): Promise<void> {
+  async function openNote(newExploration: boolean, recover = false): Promise<void> {
     if (opening) return
-    const before = useAppStore.getState(), startedIntent = intent.current
-    const heldSelection = before.surveyZoneSelection
+    const before = useAppStore.getState()
+    let heldSelection = before.surveyZoneSelection
     setOpening(true); setError(null)
     try {
       let prepared = recover ? pendingNote.current : null
@@ -286,8 +272,20 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         if (!groupId) throw new Error('The original display Group is still restoring. No note was created.')
         const zoneId = newExploration ? (await before.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })).zone.zoneId : currentZone!.zoneId
         if (!useAppStore.getState().setSurveyZoneCollected(zoneId, true)) throw new Error('The exploration resource is unconfirmed. Its original target is kept.')
-        prepared = { zoneId, workspaceId: workspace.id, displayWorkspaceId, groupId, reference: active ?? null,
-          surface: active ? before.tabs[active.tabId]?.regions[active.regionId] ?? null : null, ownsPreparation: newExploration, ...(draft ? { draft } : {}) }
+        // Adding content keeps the current exploration's visible name through later Tab changes.
+        const existingTitle = !newExploration && currentZone ? itemTitle(currentZone) : null
+        if (existingTitle && existingTitle !== 'Untitled exploration' && !before.surveyExplorationNames[zoneId]) before.setSurveyExplorationName(zoneId, existingTitle)
+        let reference = active
+        const retainedDraft = active ? useLauncherState.getState().drafts[`region:${active.regionId}`]?.note : undefined
+        if (active && before.tabs[active.tabId]?.regions[active.regionId]?.kind !== 'launcher') {
+          before.splitRegion(workspace.id, active.tabId, active.regionId, 'right')
+          const split = useAppStore.getState().tabs[active.tabId]
+          const regionId = split?.layout.activeRegionId
+          if (!regionId || regionId === active.regionId || split?.regions[regionId]?.kind !== 'launcher') throw new Error('The note pane could not open. Your page and draft are kept; try again.')
+          reference = { ...active, regionId }
+        }
+        prepared = { zoneId, workspaceId: workspace.id, displayWorkspaceId, groupId, reference: reference ?? null,
+          ...(active && retainedDraft ? { draft: { launcherId: `region:${active.regionId}`, value: retainedDraft } } : {}) }
         pendingNote.current = prepared
       }
       if (!prepared) throw new Error('The original Note preparation is unavailable. No replacement was created.')
@@ -296,7 +294,10 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         const launcher = tabId ? useAppStore.getState().tabs[tabId] : undefined
         if (!launcher) throw new Error('The original display Group is still restoring. The exploration is kept; recover this same note.')
         prepared.reference = { displayWorkspaceId: prepared.displayWorkspaceId, groupId: prepared.groupId, tabId: launcher.id, regionId: launcher.layout.activeRegionId }
-        prepared.surface = launcher.regions[prepared.reference.regionId]!
+      }
+      if (!recover && heldSelection?.zoneId === prepared.zoneId && prepared.reference) {
+        setSelection(surveySelectReference(heldSelection, prepared.reference))
+        heldSelection = useAppStore.getState().surveyZoneSelection
       }
       const { reference, zoneId } = prepared, current = useAppStore.getState()
       const freshCatalog = spatialCatalog(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, topicsWorkspace) ?? [])
@@ -304,7 +305,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       const scope: WorkbenchProjection = { entity: { kind: 'zone', zoneId }, presentationId: 'survey-workbench',
         displayWorkspaceId: reference.displayWorkspaceId, catalog: freshCatalog, selection: [reference], onSelect(next) {
           const latest = useAppStore.getState()
-          if (intent.current !== startedIntent || latest.mainSurface !== 'survey' || latest.surveyZoneSelection !== heldSelection) return
+          if (latest.mainSurface !== 'survey' || latest.surveyZoneSelection !== heldSelection) return
           const facts = spatialCatalog(latest, scratchTopicsForWorkspace(latest.scratchTopicSnapshots, topicsWorkspace) ?? [])
           const original = heldSelection?.zoneId === zoneId ? heldSelection : surveyInitialZoneSelection(facts, zoneId, latest.layouts, latest.tabs, next.displayWorkspaceId)
           displayed = true; setSelection(surveySelectReference(original, next))
@@ -320,14 +321,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       pendingNote.current = null; setNoteRecovery(false)
       if (prepared.draft && receipt.draft === prepared.draft.value && useLauncherState.getState().drafts[prepared.draft.launcherId]?.note === prepared.draft.value) {
         useLauncherState.getState().setDraft(prepared.draft.launcherId, 'note', '')
-      }
-      closeNoteCapture()
-      // Only discard this action's unchanged, empty preparation; all other content is preserved.
-      const latest = useAppStore.getState(), launcher = latest.tabs[reference.tabId]
-      const locations = spatialCatalog(latest, scratchTopicsForWorkspace(latest.scratchTopicSnapshots, topicsWorkspace) ?? []).locations.filter(location => location.tabId === reference.tabId)
-      const solePreparation = locations.length > 0 && locations.every(location => location.displayWorkspaceId === reference.displayWorkspaceId && location.groupId === reference.groupId)
-      if (prepared.ownsPreparation && prepared.surface?.kind === 'launcher' && solePreparation && !launcher?.name && launcher?.space?.zoneId === zoneId && Object.keys(launcher.regions).length === 1 && launcher.regions[reference.regionId] === prepared.surface) {
-        await latest.closeTab(reference.displayWorkspaceId, reference.groupId, reference.tabId)
       }
     } catch (cause) { if (pendingNote.current) setNoteRecovery(true); setError(`Note could not open: ${presentError(cause)}`) }
     finally { setOpening(false) }
@@ -413,8 +406,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           })}
         </div>
       </aside>
-      {noteCaptureOpen && !sidebarCollapsed && selection?.active && collected[selection.zoneId] ? <SurveyNoteCapture reference={selection.active} busy={opening}
-        onSave={(value, launcherId) => void openNote(false, false, { launcherId, value })} onClose={closeNoteCapture} /> : null}
         {organizationTarget?.zoneId === currentZone?.zoneId && currentZone ? <section className="survey-organization" aria-label="Confirm research organization">
           <strong>Organize “{itemTitle(currentZone)}” into {catalog?.spaces.find(space => space.spaceId === organizationTarget?.spaceId)?.name ?? 'the selected Topic'}?</strong>
           <p>All tabs, split panels and notes in this research.</p>
@@ -426,7 +417,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             disclosure={{ scope: JSON.stringify(['survey-topics', selection?.zoneId]), id: 'topic-state', visible: visible && !controlsCoverPage }} /> : null}
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
         {options}
-        {selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Write a note alongside this page' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={showNoteCapture}><NotebookPen size={14} /><span>Add note</span></button> : null}
+        {selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Write a note alongside this page' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
       </div>
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
         hidden={sidebarCollapsed}
