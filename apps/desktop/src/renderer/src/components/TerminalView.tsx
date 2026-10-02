@@ -1,3 +1,4 @@
+import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
@@ -76,7 +77,6 @@ import { terminalStartupPhase } from '../lib/terminal-startup'
 import { isVanishedAgentRunError } from '../lib/terminal-attach-recovery'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
-  subscribeTerminalInput,
   terminalAcceptsInput,
   terminalInputSender,
   terminalRevealDecision,
