@@ -1,3 +1,4 @@
+import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial} from './lib/desktop-spatial-state'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
@@ -1924,7 +1925,7 @@ function newLauncherTab(workspaceId: string, topicId?: string): WorkbenchTab {
 
 type PersistedAppState = {
   workbenchSpaceSelection: AgentMuxDesktopSpaceSelection | null
-  spaceZoneBindings: SpaceZoneBindings
+  spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -1935,7 +1936,7 @@ type PersistedAppState = {
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
   dirtyDocuments?: Record<string, boolean>
-  restoredWorkbench: PersistedWorkbench
+  restoredWorkbench?: PersistedWorkbench
   unclaimedTerminalSessionIds: string[]
   scratchTopicOrder?: string[]
   noticeReadReceipts?: Record<string, Record<string, string>>
@@ -2177,9 +2178,10 @@ function selectPersistedInputs(state: AppState) {
 let previousPersistedInputs: ReturnType<typeof selectPersistedInputs> | null = null
 let previousPersistedProjection: PersistedAppState | null = null
 
+let previousCoreSpatialReady=false
 function partializeAppState(state: AppState): PersistedAppState {
   const inputs = selectPersistedInputs(state)
-  if (previousPersistedInputs && previousPersistedProjection && shallow(previousPersistedInputs, inputs)) {
+  if (previousPersistedInputs && previousPersistedProjection && previousCoreSpatialReady===Boolean(coreSpatialPersistence?.ready) && shallow(previousPersistedInputs, inputs)) {
     return previousPersistedProjection
   }
   const { tabs, layouts, documents, dirtyDocuments, ...presentation } = inputs
@@ -2189,11 +2191,15 @@ function partializeAppState(state: AppState): PersistedAppState {
     dirtyDocuments: Object.fromEntries(Object.entries(dirtyDocuments).filter(([, dirty]) => dirty)),
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
   }
+  if(coreSpatialPersistence?.ready) { delete projection.restoredWorkbench;delete projection.spaceZoneBindings }
+  previousCoreSpatialReady=Boolean(coreSpatialPersistence?.ready)
   previousPersistedInputs = inputs
   previousPersistedProjection = projection
   return projection
 }
 
+let coreSpatialPersistence:DesktopSpatialPersistence|null=null
+let disposeCoreSpatial:(()=>void)|null=null
 const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
   getItem: () => null,
   setItem: () => undefined,
@@ -2234,6 +2240,7 @@ let workbenchSaveRequest = 0
 async function requestWorkbenchStorageFlush(): Promise<void> {
   const request = ++workbenchSaveRequest
   try {
+    await coreSpatialPersistence?.flush()
     await api.ui.requestStorageFlush()
     if (request === workbenchSaveRequest && useAppStore.getState().workbenchSaveWarning !== null) {
       useAppStore.setState({ workbenchSaveWarning: null })
@@ -2252,7 +2259,7 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
     await requestWorkbenchStorageFlush()
     storageFlushRequested = true
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
-  return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: 'unconfirmed', reason }
+  return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
 }
 function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
@@ -2703,6 +2710,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     runtimeSubscriptionCount += 4
     const disposeRuntimeSubscriptions = (): void => {
+      disposeCoreSpatial?.();disposeCoreSpatial=null
       if (runtimeSubscriptionCount === 0) return
       runtimeSubscriptionCount -= 4
       disposeSessions()
@@ -2727,6 +2735,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // subscriptions above intentionally start first so events arriving during this storage read
       // stay in the existing boot buffer instead of being missed.
       const persistWarning = await ensurePersistHydrated()
+      disposeCoreSpatial?.();disposeCoreSpatial=null
+      if(api.spatial) {
+        coreSpatialPersistence=new DesktopSpatialPersistence(api.spatial,error=>get().reportWorkbenchSaveFailure(error))
+        try {
+          const spatial=await coreSpatialPersistence.read()
+          if(spatial) set({restoredWorkbench:desktopWorkbenchFromSpatial(spatial.graph,id=>get().reportWorkbenchSaveFailure(new Error('Host resources are unavailable for saved Tab '+id+'. Its Core identity is retained. Restore the original Host connection.'))),spaceZoneBindings:desktopBindingsFromSpatial(spatial.graph)})
+        } catch(error) {get().reportWorkbenchSaveFailure(error)}
+      } else get().reportWorkbenchSaveFailure(new Error('Core spatial storage API is unavailable. Original work is retained; restore the Host connection to save positions.'))
       // Restored intent is readable evidence. Only an explicit Send can authorize its execution.
       set((state) => state.loading ? ({ agentSteerQueues: Object.fromEntries(Object.entries(state.agentSteerQueues)
         .map(([sessionId, entries]) => [sessionId, entries.map(entry => ({ ...entry,
@@ -2927,6 +2943,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         config,
         sessions: visibleSessions,
         persisted: persistedState.restoredWorkbench,
+        preserveEntityIds:coreSpatialPersistence?.current ? new Set(coreSpatialPersistence.current.graph.tabs.map(tab=>tab.tabId)) : undefined,
         createTabGroupId: newTabGroupId,
         retiredSessionIds: retiredAgentIds
       })
@@ -2996,6 +3013,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // The Runtime and its Agents remain usable; only the optional persisted presentation projection
       // was unavailable. Open the fence after the fallback state is installed so that this warning
       // itself cannot serialize the empty fallback over the user's last good record.
+      if(coreSpatialPersistence) {
+        const spatial=coreSpatialPersistence
+        const capture=()=>desktopSpatialGraph(get(),Object.values(get().scratchTopicSnapshots).flatMap(snapshot=>snapshot.topics??[]),spatial.current?.graph??null,spatial.removedEntities)
+        const apply=(saved:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>{
+          const current=get();if(!current.config) return
+          const unavailable=new Set<string>()
+          const persisted=desktopWorkbenchFromSpatial(saved.graph,id=>unavailable.add(id))
+          if(unavailable.size) current.reportWorkbenchSaveFailure(new Error('Host resources are unavailable for '+unavailable.size+' saved tab(s). Original identities and current content are retained. Restore their Host connection.'))
+          const restored=restorePersistedWorkbench({config:current.config,sessions:current.sessions,persisted,createTabGroupId:newTabGroupId,retiredSessionIds:new Set(),preserveEntityIds:new Set(saved.graph.tabs.map(tab=>tab.tabId))})
+          const old=projectPersistedWorkbench({tabs:current.tabs,layouts:current.layouts})
+          const tabs={...Object.fromEntries([...unavailable].flatMap(id=>current.tabs[id]?[[id,current.tabs[id]]]:[])),...Object.fromEntries(Object.entries(restored.tabs).map(([id,tab])=>{
+            const live=current.tabs[id]
+            if(live && JSON.stringify(old.tabs[id])===JSON.stringify(persisted.tabs[id])) return [id,live]
+            if(!live) return [id,tab]
+            const regions=Object.fromEntries(Object.entries(tab.regions).map(([regionId,region])=>[regionId,
+              live.regions[regionId] && JSON.stringify(old.tabs[id]?.regions[regionId])===JSON.stringify(persisted.tabs[id]?.regions[regionId]) ? live.regions[regionId] : region]))
+            return [id,{...tab,regions}]
+          }))}
+          set({tabs,layouts:saved.graph.layouts,spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
+        }
+        try {
+          await spatial.bootstrap(capture())
+          set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.
+          const offRemote=spatial.connect(apply)
+          const offLocal=useAppStore.subscribe((state,previous)=>{
+            if(state.loading || (state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
+            spatial.stage(capture())
+          })
+          disposeCoreSpatial=()=>{offLocal();offRemote()}
+        } catch(error) {get().reportWorkbenchSaveFailure(error)}
+      }
       if (!persistWarning) openPersistWrites()
       // Ordinary startup ensures the original primary identity once. Metadata failure is advisory;
       // it cannot hold up restored workfaces or reconcile a healthy Session into a replacement.
@@ -4374,6 +4422,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           workbenchSpaceSelection: desktopSpaceSelectionAfterClose(current.workbenchSpaceSelection, topology,
             { workspaceId, tabId, groupId: tabGroupId }) }
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
+        if(removedTab) coreSpatialPersistence?.removeEntity(removedTab.id)
         return committed
       })
       if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, error => get().reportError(error))
@@ -4684,6 +4733,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!liveTab || !sameWorkbenchSurfaceOwner(liveTab.regions[regionId], surface)) return state
       const nextTab = removeWorkbenchRegion(liveTab, regionId)
       if (!nextTab) return state
+      coreSpatialPersistence?.removeEntity(regionId)
       const tabs = { ...state.tabs, [tabId]: nextTab }
       return { ...(obligations.releasesDocument
         ? reconcileWorkbenchFileProjection(state, { tabs, layouts: state.layouts })

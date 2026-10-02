@@ -75,6 +75,11 @@ import type {
 } from '../shared/git-contracts.js'
 
 const api: AgentMuxPreloadApi = {
+  spatial: {
+    read:()=>ipcRenderer.invoke('spatial:read'),
+    commit:input=>ipcRenderer.invoke('spatial:commit',input),
+    onChange:listener=>{const receive=(_event:unknown,state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>listener(state);ipcRenderer.on('spatial:changed',receive);return ()=>ipcRenderer.removeListener('spatial:changed',receive)}
+  },
   config: {
     get: () => ipcRenderer.invoke('config:get'),
     save: (config: AppConfig, expected: AppConfig) => ipcRenderer.invoke('config:save', config, expected),

@@ -127,7 +127,7 @@ export function hydratePersistedTab(tab: PersistedWorkbenchTab): WorkbenchTab {
 }
 
 /** 一整张活体 Tab 的 browser 面全部缩成存盘子集，其余 Region 原样。存盘路径在投影之后调它。 */
-function reducePersistedTab(tab: WorkbenchTab): PersistedWorkbenchTab {
+export function reducePersistedTab(tab: WorkbenchTab): PersistedWorkbenchTab {
   return {
     ...tab,
     regions: Object.fromEntries(
@@ -547,7 +547,8 @@ function restoreTab(
   config: AppConfig,
   sessions: ReadonlyMap<string, SessionSnapshot>,
   tab: WorkbenchTab,
-  retiredSessionIds: ReadonlySet<string> = new Set()
+  retiredSessionIds: ReadonlySet<string> = new Set(),
+  durableEntity = false
 ): WorkbenchTab | null {
   let next: WorkbenchTab | null = tab
   for (const surface of workbenchSurfaces(tab)) {
@@ -572,9 +573,9 @@ function restoreTab(
       // survive 判据经 `persistedSurfaceSurvives`（同一张 SSOT 表），file 面额外要求其 workspace 仍在配置里。
       if (
         persistedSurfaceSurvives(surface, {
-          spatiallyBound: Boolean(tab.space),
+          spatiallyBound: Boolean(tab.space) || durableEntity,
           fileSurvives: (file) =>
-            config.workspaces.some((workspace) => workspace.id === file.workspaceId)
+            durableEntity || config.workspaces.some((workspace) => workspace.id === file.workspaceId)
         })
       ) continue
       next = next ? removeWorkbenchRegion(next, surface.regionId) : null
@@ -596,6 +597,8 @@ export function restorePersistedWorkbench(input: {
   createTabGroupId(): string
   /** Exact Core terminal dispositions, never inferred from a Session list's missing entries. */
   retiredSessionIds?: ReadonlySet<string>
+  /** Core entity registration survives missing client discovery and launching phases. */
+  preserveEntityIds?: ReadonlySet<string> | undefined
 }): RestoredWorkbench & { repairs: PersistedTabRepair[] } {
   if (!input.persisted) {
     return {
@@ -624,7 +627,8 @@ export function restorePersistedWorkbench(input: {
             input.config,
             sessions,
             reconciled,
-            input.retiredSessionIds
+            input.retiredSessionIds,
+            input.preserveEntityIds?.has(reconciled.id)
           )
         : null
       const normalized = restored ? normalizePersistedTab(restored) : null

@@ -332,7 +332,14 @@ function normalizeMockBrowserUrl(value: string): string {
   return new URL(`${local ? 'http' : 'https'}://${input}`).toString()
 }
 
+let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState|null=null
+const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
 const mockApi: AgentMuxDesktopApi = {
+  spatial:{read:async()=>structuredClone(mockSpatialState),commit:async input=>{
+    if((mockSpatialState?.revision??0)!==input.expectedRevision) throw new Error('Spatial state changed.')
+    mockSpatialState={schemaVersion:1,revision:input.expectedRevision+1,graph:structuredClone(input.graph)}
+    for(const listener of mockSpatialListeners)listener(structuredClone(mockSpatialState));return structuredClone(mockSpatialState)
+  },onChange:listener=>{mockSpatialListeners.add(listener);return ()=>{mockSpatialListeners.delete(listener)}}},
   config: {
     get: async () => structuredClone(mockConfig),
     save: async (config, expected) => {
