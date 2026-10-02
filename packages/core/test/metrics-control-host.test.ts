@@ -104,6 +104,7 @@ describe('public metrics Control owner', () => {
     const subscription = await metricsWatch(path, { onFrame: value => frames.push(value), onEnd: ended })
     await vi.waitFor(() => expect(frames).toHaveLength(2))
     expect(frames.map(frame => 'result' in frame ? 'response' : frame.params.event.type)).toEqual(['response','snapshot'])
+    expect(frames[0].result.initial.observation.observedAt).toBe(1000)
     expect(frames[1].params.event.data.observedAt).toBe(1049)
     expect(serverSocket.writableHighWaterMark).toBe(1)
     await subscription.dispose()
@@ -124,12 +125,13 @@ describe('public metrics Control owner', () => {
     const socket = await raw(path, 'metrics.watch')
     const frames: string[] = []
     socket.on('data', chunk => frames.push(chunk.toString()))
+    const response = kind === 'deadline' ? firstFrame(socket) : undefined
     await entered
     if (kind === 'FIN') socket.end()
     else if (kind === 'close') socket.destroy()
     else if (kind === 'stop') await owner.stop()
     else {
-      const frame = await firstFrame(socket)
+      const frame = await response!
       expect(frame).toMatchObject({ jsonrpc: '2.0', id: base.requestId, error: { data: { code: 'CONTROL_TIMEOUT' } } })
     }
     await flush(); await flush()
@@ -171,10 +173,11 @@ describe('public metrics Control owner', () => {
     await new Promise<void>(resolve => owner.listen(path, resolve))
     cleanups.push(async () => { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => owner.close(() => resolve())); await rm(directory, { recursive: true, force: true }) })
     const events: string[] = [], ends: string[] = []
-    await expect(metricsWatch(path, {
+    const subscription = await metricsWatch(path, {
       onFrame: frame => { events.push('result' in frame ? 'response' : frame.params.event.type); if ('result' in frame) controller.abort() },
       onEnd: error => ends.push((error as { code?: string } | undefined)?.code ?? 'end'), signal: controller.signal
-    })).rejects.toMatchObject({ code: 'CONTROL_CANCELLED' })
+    })
+    expect(subscription.subscriptionId).toBe('reader')
     await flush()
     expect(ends).toEqual(['CONTROL_CANCELLED'])
     expect(events).toEqual(['response'])
@@ -202,6 +205,41 @@ describe('public metrics Control owner', () => {
     })
     await flush()
     expect(events).toEqual(['response', 'initial', 'snapshot', 'CONTROL_CANCELLED'])
+  })
+  it.each(['abort', 'dispose', 'stop'] as const)('releases a delayed public SDK watcher after %s without delivering a late sample', async kind => {
+    let settle!: (value: { dispose(): void }) => void, enter!: () => void
+    const entered = new Promise<void>(resolve => { enter = resolve }), dispose = vi.fn()
+    const { owner, path } = await server({ subscribe() { enter(); return new Promise(resolve => { settle = resolve }) } })
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
+    cleanups.push(() => client.dispose())
+    const controller = new AbortController(), initial = vi.fn(), events = vi.fn()
+    const opening = client.subscribe('system.metrics.watch', {}, { signal: controller.signal, onInitial: initial, onEvent: events })
+      .then(() => ({ opened: true, code: null }), error => ({ opened: false, code: error.code }))
+    await entered
+    if (kind === 'abort') controller.abort(); else if (kind === 'dispose') await client.dispose(); else await owner.stop()
+    const outcome = await opening
+    expect(outcome.opened).toBe(false)
+    expect(outcome.code).toBe(kind === 'stop' ? 'CONTROL_PROTOCOL_ERROR' : 'CONTROL_CANCELLED')
+    settle({ dispose }); await vi.waitFor(() => expect(dispose).toHaveBeenCalledOnce())
+    expect(initial).not.toHaveBeenCalled(); expect(events).not.toHaveBeenCalled()
+  })
+  it('cancellation inside the initial callback suppresses all same-chunk samples after a committed opening', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'agentmux-metrics-initial-cancel-')), path = join(directory, 'control.sock')
+    const sockets = new Set<Socket>(), controller = new AbortController()
+    const owner = createServer(socket => {
+      sockets.add(socket)
+      socket.once('data', chunk => { const request = JSON.parse(chunk.toString()); socket.write([
+        opening(request.id), snapshotFrame(1), snapshotFrame(2)
+      ].map(frame => JSON.stringify(frame) + '\n').join('')) })
+    })
+    await new Promise<void>(resolve => owner.listen(path, resolve))
+    cleanups.push(async () => { for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => owner.close(() => resolve())); await rm(directory, { recursive: true, force: true }) })
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } }); cleanups.push(() => client.dispose())
+    const initial = vi.fn(() => controller.abort()), events = vi.fn(), ends = vi.fn()
+    const subscription = await client.subscribe('system.metrics.watch', {}, { signal: controller.signal, onInitial: initial, onEvent: events, onEnd: ends })
+    expect(subscription.subscriptionId).toBe('reader')
+    await flush(); expect(initial).toHaveBeenCalledOnce(); expect(events).not.toHaveBeenCalled()
+    expect(ends).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ code: 'CONTROL_CANCELLED' }))
   })
   it('bounds a complete oversized source without truncating into success', async () => {
     const tooLarge = observation()

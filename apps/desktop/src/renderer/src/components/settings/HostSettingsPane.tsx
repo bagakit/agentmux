@@ -37,7 +37,7 @@ export function HostSettingsPane({ config, onSave, active }: {
     setHosts((current) => current.map((host) => host.id === id && host.kind === 'ssh' ? { ...host, ...patch } : host))
   }
 
-  function clear(id: string, field: 'user' | 'port' | 'identityFile'): void {
+  function clear(id: string, field: 'user' | 'port' | 'identityFile' | 'remoteCommand' | 'remoteSocketPath'): void {
     setHosts((current) => current.map((host) => {
       if (host.id !== id || host.kind !== 'ssh') return host
       const next = { ...host }
@@ -143,7 +143,7 @@ export function HostSettingsPane({ config, onSave, active }: {
 function HostConnectionFields({ host, onChange, onClear }: {
   host: SshHostConfig
   onChange: (patch: Partial<SshHostConfig>) => void
-  onClear: (field: 'user' | 'port' | 'identityFile') => void
+  onClear: (field: 'user' | 'port' | 'identityFile' | 'remoteCommand' | 'remoteSocketPath') => void
 }) {
   // The keyed Host card owns this component's lifetime; field and check updates keep its choice.
   const [open, setOpen] = useState(() => !host.hostname)
@@ -156,7 +156,10 @@ function HostConnectionFields({ host, onChange, onClear }: {
         <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="optional" /></label>
         <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="22" /></label>
         <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? onChange({ identityFile: event.target.value }) : onClear('identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
-        <p className="field-hint host-edit-grid__wide">Remote sessions and saving SSH connections are unavailable. Changes stay in your draft.</p>
+        <label className="host-edit-grid__wide"><span>Service command <small>optional</small></span><input value={host.remoteCommand ?? ''} onChange={(event) => event.target.value ? onChange({ remoteCommand: event.target.value }) : onClear('remoteCommand')} placeholder="Use the installed AgentMux service" /></label>
+        <label className="host-edit-grid__wide"><span>Service socket path <small>optional; remote absolute path</small></span><input value={host.remoteSocketPath ?? ''} onChange={(event) => event.target.value ? onChange({ remoteSocketPath: event.target.value }) : onClear('remoteSocketPath')} placeholder="Use the service's default socket" /></label>
+        <label className="host-edit-grid__wide"><span>Bound Runtime ID</span><input value={host.runtimeId ?? ''} readOnly placeholder="Confirmed on the first trusted connection" /></label>
+        <p className="field-hint host-edit-grid__wide">Connects to an existing service over SSH. Changing this connection keeps its Runtime binding; a different Runtime must be added as a separate host.</p>
       </div>
     </details>
   )

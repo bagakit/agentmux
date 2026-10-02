@@ -3,9 +3,9 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
   type AgentMuxControlResult, type AgentMuxControlCaller } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
 import { AgentMuxError } from './errors.js'
+import { isToolkitRequest, assertToolkitResultTarget, type ToolkitResult } from './toolkit.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
 import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBrowserTaskControlResult, assertBrowserTaskControlTarget } from './browser-task-control.js'
-import { isToolkitRequest, assertToolkitResultTarget } from './toolkit.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-rpc.js'
 
 import { rpcRecord } from './rpc-data.js'
@@ -111,7 +111,7 @@ function operationKeys(value: Record<string, unknown>, inverse: boolean): Record
 
 export function rpcControlResult(method: AgentMuxRpcMethod, result: AgentMuxControlResult): Record<string, unknown> {
   const { operation: _operation, ...body } = result
-  const canonical = method.startsWith('goal.') ? goalKeys(body, false) : body
+  const canonical = method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, false) : body
   return operationKeys(canonical, false)
 }
 
@@ -123,6 +123,7 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     try { return resolveAgentSessionId(selector, [actual]) === actual } catch { return false }
   }
   if (request.operation !== result.operation) fail()
+  if (isToolkitRequest(request)) { assertToolkitResultTarget(request, result as ToolkitResult); return }
   if (isBrowserTaskControlOperation(request.operation)) {
     assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, result))
   }
@@ -198,13 +199,13 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
 export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_METHODS,
   value: unknown, params?: unknown): Record<string, unknown> {
   const source = rpcRecord(value, undefined, 'CONTROL_PROTOCOL_ERROR')
+  const presentation = method === 'space.inspect' ? source.presentation : undefined
   const body = { ...source }
-  const presentation = method === 'space.inspect' ? body.presentation : undefined
   if (method === 'space.inspect') delete body.presentation
   if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(body, key))) {
     throw new AgentMuxError('RPC result contains an internal Control envelope.', 'CONTROL_PROTOCOL_ERROR')
   }
-  const legacy = operationKeys(method.startsWith('goal.') ? goalKeys(body, true) : body, true)
+  const legacy = operationKeys(method.startsWith('goal.') && method !== 'goal.focus' ? goalKeys(body, true) : body, true)
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business
   // ID. JSON-RPC's correlation ID is deliberately absent from this DTO.

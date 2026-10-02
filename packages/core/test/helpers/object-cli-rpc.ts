@@ -89,7 +89,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'agent.rename': ['--session', ids.agent, '--name', '--help'], 'agent.view': ['--session', ids.agent],
     'agent.output': ['--session', ids.agent], 'agent.send': ['--to-session', ids.agent, '--text', '--help'],
     'agent.discuss': ['--agent', 'E', '--text', 'task'], 'agent.handoff': ['--to-session', ids.agent, '--task', 'T'],
-    'agent.interrupt': ['--session', ids.agent], 'agent.resume': ['--session', ids.agent], 'agent.stop': ['--session', ids.agent],
+    'agent.interrupt': ['--session', ids.agent], 'agent.resume': ['--session', ids.agent, '--text', 'continue'], 'agent.stop': ['--session', ids.agent],
     'agent.role.ls': [], 'agent.role.register': ['--role', 'writer'], 'agent.role.resolve': ['--role', 'writer'],
     'space.ls': [], 'space.inspect': ['--region', ids.region], 'space.rename': ['--tab', 'TAB', '--clear'],
     'space.mv': ['--from-region', ids.region, '--expect-session', ids.agent, '--zone', ids.zone, '--new-tab'],

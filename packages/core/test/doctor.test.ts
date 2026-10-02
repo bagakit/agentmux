@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -18,7 +18,7 @@ const runtime: AgentMuxRuntimeDiagnostics = {
   arch: 'arm64',
   supported: true,
   ctxmux: {
-    state: { configuredDirectory: upstreamFixturePath("fixture/future"), servingDirectory: null },
+    state: { configuredDirectory: fixturePath("fixture/future"), servingDirectory: null },
     serving: { buildIdentity: 'ctxmux-fixture', protocolVersion: 12, instanceId: 'daemon-fixture', sourceCommit: null },
     bundled: { version: '0.1.0', sourceCommit: 'c13ab114f6ddf0cf8eb22c6cc39bb16f7aa0dec7', artifactPlatform: 'darwin-arm64' },
     ready: true,
@@ -80,7 +80,7 @@ describe('AgentMux doctor', () => {
       await writeFile(join(current, 'state.sqlite3'), 'x'.repeat(2048))
       process.env.AGENTMUX_RUNTIME_DIRECTORY = current
       const report = await diagnoseAgentMux({ client: client({ runtimeDiagnostics: async () => ({
-        ...runtime, ctxmux: { ...runtime.ctxmux, state: { configuredDirectory: upstreamFixturePath("future/default"), servingDirectory: current } }
+        ...runtime, ctxmux: { ...runtime.ctxmux, state: { configuredDirectory: fixturePath("future/default"), servingDirectory: current } }
       }) }) })
       expect(report.runtimeStorage).toEqual({ path: current, bytes: 2048 })
       expect(report.runtimeStorageUnavailable).toBeNull()
@@ -93,7 +93,7 @@ describe('AgentMux doctor', () => {
     try {
       process.env.AGENTMUX_RUNTIME_DIRECTORY = join(root, 'missing')
       const report = await diagnoseAgentMux({ client: client({ runtimeDiagnostics: async () => ({
-        ...runtime, ctxmux: { ...runtime.ctxmux, state: { configuredDirectory: upstreamFixturePath("future/default"), servingDirectory: join(root, 'missing') } }
+        ...runtime, ctxmux: { ...runtime.ctxmux, state: { configuredDirectory: fixturePath("future/default"), servingDirectory: join(root, 'missing') } }
       }) }) })
       expect(report.runtimeStorage).toBeNull()
       expect(report.runtimeStorageUnavailable).toContain('ENOENT')
@@ -135,8 +135,8 @@ describe('AgentMux doctor', () => {
     expect(report.hosts).toEqual({
       local: { status: 'available', action: null },
       remote: {
-        status: 'unsupported',
-        action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+        status: 'not-checked',
+        action: 'Configure an SSH or Unix endpoint for an AgentMux Headless Runtime; doctor checks only the local Runtime.'
       }
     })
     // integration 只允许放**真的全局事实**——不随 provider 变化的那一类。逐-provider 事实
@@ -186,11 +186,11 @@ describe('AgentMux doctor', () => {
     expect(reported.traex).toBe('none')
   })
 
-  it('does not advertise unsupported platforms or Remote as usable', async () => {
+  it('reports unsupported local platforms and leaves unobserved remote endpoints unverified', async () => {
     const unsupported: AgentMuxRuntimeDiagnostics = {
       ...runtime,
       platform: 'linux',
-      arch: 'x64',
+      arch: 'arm64',
       supported: false
     }
     const report = await diagnoseAgentMux({
@@ -199,11 +199,11 @@ describe('AgentMux doctor', () => {
 
     expect(report.ok).toBe(false)
     expect(report.runtimeAction).toContain('macOS arm64')
-    expect(report.runtimeAction).not.toContain('Linux')
+    expect(report.runtimeAction).toContain('Linux x64')
     expect(report.hosts.local.status).toBe('unavailable')
     expect(report.hosts.remote).toEqual({
-      status: 'unsupported',
-      action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+      status: 'not-checked',
+      action: 'Configure an SSH or Unix endpoint for an AgentMux Headless Runtime; doctor checks only the local Runtime.'
     })
   })
 
@@ -227,14 +227,14 @@ describe('AgentMux doctor', () => {
       host: {
         reachable: false,
         error: 'owner receipt mismatch',
-        action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
+        action: 'Reinstall @agentmux/core with npm lifecycle scripts enabled and verify the pinned ctxmux artifacts, then rerun doctor.'
       },
       runtime: null,
       hosts: {
         local: { status: 'unavailable' },
         remote: {
-          status: 'unsupported',
-          action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+          status: 'not-checked',
+          action: 'Configure an SSH or Unix endpoint for an AgentMux Headless Runtime; doctor checks only the local Runtime.'
         }
       }
     })

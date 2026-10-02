@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
@@ -37,16 +37,12 @@ function storedSession(): AgentMuxStoredAgentSession {
     providerId: 'claude',
     executorId: 'claude',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: RUN_ID },
     retiredRuns: [],
     hookBindingId: 'binding-consumed-recovery'.padEnd(43, 'A'),
     hookToken: 'token-consumed-recovery'.padEnd(43, 'B'),
-    // 非 0：重铸时光标必须退回这个**真实持久值**，而不是编造的 0。若这里是 0，
-    // `current.outputCursorBytes` 与字面量 `0` 两个世界不可区分，断言就成了恒真
-    // （期望值不能由被测对象算出）。编造 0 会让 screenEvidence 从头扫、把上一轮
-    // 的提示符认成这一轮的，正是 client.ts:3659 拒绝的那件事。
-
+    // 已消费的旧 epoch 不能冒充新 turn 的就绪事实；新输出边界未验证时保持未知。
     createdAt: 1,
     updatedAt: 10,
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-1' },
@@ -88,7 +84,7 @@ function run(latestOutputBytes: number): CtxmuxAdapterRun {
     lifecycleOperationId: null,
     program: 'claude',
     args: [],
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     pid: 999,
     state: { type: 'running' },
     cols: 80,
@@ -99,13 +95,13 @@ function run(latestOutputBytes: number): CtxmuxAdapterRun {
   }
 }
 
-/** 一条真实的 claude Stop：normalizer 按 provider 规则投影成 turn-end。 */
+/** 一条真实的 Codex Stop：normalizer 按 provider 规则投影成 turn-end。 */
 function stopHook(receiptId: string): NativeHookEnvelope {
   return {
     receiptId,
     agentSessionId: SESSION_ID,
     runId: RUN_ID,
-    providerId: 'claude',
+    providerId: 'codex',
     eventName: 'Stop',
     payload: { session_id: 'native-1' }
   }
@@ -121,7 +117,7 @@ function midTurnHook(receiptId: string): NativeHookEnvelope {
     receiptId,
     agentSessionId: SESSION_ID,
     runId: RUN_ID,
-    providerId: 'claude',
+    providerId: 'codex',
     eventName: 'PreToolUse',
     payload: { session_id: 'native-1', tool_name: 'Bash' }
   }
@@ -155,13 +151,15 @@ type Internals = {
   acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void>
 }
 
-async function harness(): Promise<{
+async function harness(providerId: 'codex' | 'claude' = 'codex'): Promise<{
   client: AgentMuxClient
   internals: Internals
   stored: () => Promise<AgentMuxStoredAgentSession | undefined>
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, storedSession())
+  const initial = storedSession()
+  await store.compareAndSwap(null, { ...initial, providerId, executorId: providerId,
+    nativeHandle: { kind: 'provider', providerId, sessionId: 'native-1' } })
   const client = new AgentMuxClient({ store })
   const internals = client as unknown as Internals
   await internals.registry.load('local')
@@ -190,6 +188,8 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
     try {
       await internals.acceptHookEvent(stopHook('receipt-healthy'), AbortSignal.timeout(5_000))
       const session = await stored()
+      expect(session).toMatchObject({ agentSessionId: SESSION_ID, run: { runId: RUN_ID } })
+      expect(session?.terminalPromptReadiness).toMatchObject({ source: 'native-stop', id: 'receipt-healthy', run: { runId: RUN_ID } })
       expect(
         session?.terminalPromptReadiness?.consumedBySubmissionId,
         '健康内核下 turn-end 没有续期——正向控制若失败说明 harness 或断言本身坏了，不是在测红线'
@@ -207,6 +207,8 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
       await internals.acceptHookEvent(stopHook('receipt-disconnected'), AbortSignal.timeout(5_000))
 
       const session = await stored()
+      expect(session).toMatchObject({ agentSessionId: SESSION_ID, run: { runId: RUN_ID } })
+      expect(session?.terminalPromptReadiness).toMatchObject({ source: 'native-stop', id: 'receipt-disconnected', run: { runId: RUN_ID } })
       // 唯一判据：活着的 run 收到 turn-end 之后，不许还挂着上一轮那条永久消费标记。
       // 现状（反例 1 未修）会让它原样留下 'submission-turn-0'，于是此后每条 prompt 永久撞
       // AGENT_PROMPT_READINESS_CONSUMED，而 writeAgentInput 裸键入仍能打字——教科书式第 2 类被写成第 1 类。
@@ -214,13 +216,11 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
         session?.terminalPromptReadiness?.consumedBySubmissionId,
         '断线期间的 turn-end 没有重铸/清理消费标记——活着的 Agent 被我们的记账永久锁死发送面（红线违规）'
       ).toBeUndefined()
-      // 第二半：重铸出来的 epoch 必须带着**真实**光标。上面那条断言只看「消费标记没了」，
-      // 把光标换成编造的 0 它照样绿——而编造 0 会让 screenEvidence 从头扫、把上一轮的提示符
-      // 认成这一轮的，于是在 Agent 没就绪时放行 prompt。所以这一档要单独钉住。
+      // 旧消费状态已清，但当前输出边界仍未知。既不能编造 0，也不能借用旧 epoch 光标。
       expect(
         session?.terminalPromptReadiness?.outputCursorBytes,
-        '重铸的 epoch 用了编造的光标而不是会话最后一次权威 outputCursorBytes'
-      ).toBe(512)
+        '未知的当前输出边界不得由上一轮游标补成已验证'
+      ).toBeUndefined()
     } finally {
       await client.dispose()
     }
@@ -242,6 +242,7 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
       await internals.acceptHookEvent(midTurnHook('receipt-mid-turn'), AbortSignal.timeout(5_000))
 
       const session = await stored()
+      expect(session).toMatchObject({ agentSessionId: SESSION_ID, run: { runId: RUN_ID } })
       expect(
         session?.terminalPromptReadiness?.consumedBySubmissionId,
         'turn 中途的 hook 清掉了消费标记——在 Agent 还没交还控制权时解锁了发送面（会打断正在跑的 turn）'
@@ -270,10 +271,12 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
   // 与本纪元记账无关，不在本文件判据面内。
   // -------------------------------------------------------------------------
   it('内核健康：报错收尾（StopFailure）与正常收尾一样续期（证明 turn-end 的第二拼法也被认）', async () => {
-    const { client, internals, stored } = await harness()
+    const { client, internals, stored } = await harness('claude')
     try {
       await internals.acceptHookEvent(stopFailureHook('receipt-failure-healthy'), AbortSignal.timeout(5_000))
       const session = await stored()
+      expect(session).toMatchObject({ agentSessionId: SESSION_ID, run: { runId: RUN_ID } })
+      expect(session?.terminalPromptReadiness).toMatchObject({ source: 'native-stop', id: 'receipt-failure-healthy', run: { runId: RUN_ID } })
       expect(
         session?.terminalPromptReadiness?.consumedBySubmissionId,
         '报错收尾没有续期——重铸臂只认字面 Stop、对 StopFailure 失明（turn-end 第二拼法未覆盖）'
@@ -284,22 +287,24 @@ describe('活 Agent 的 readiness 被消费后，turn-end 必须留下一条可�
   })
 
   it('内核断线 + 报错收尾：活着的 Agent 报错收尾也绝不许被永久锁死发送面（P0 同族，第二拼法）', async () => {
-    const { client, internals, stored } = await harness()
+    const { client, internals, stored } = await harness('claude')
     try {
       disconnectKernel(internals)
       // 报错收尾落在断线期间同样不许抛（第 2 类：Agent 活着，坏的只有取光标那一步）。
       await internals.acceptHookEvent(stopFailureHook('receipt-failure-disconnected'), AbortSignal.timeout(5_000))
 
       const session = await stored()
+      expect(session).toMatchObject({ agentSessionId: SESSION_ID, run: { runId: RUN_ID } })
+      expect(session?.terminalPromptReadiness).toMatchObject({ source: 'native-stop', id: 'receipt-failure-disconnected', run: { runId: RUN_ID } })
       expect(
         session?.terminalPromptReadiness?.consumedBySubmissionId,
         '断线期间的报错收尾没有重铸/清理消费标记——报错后的活 Agent 被记账永久锁死发送面（红线违规）'
       ).toBeUndefined()
-      // 与正常收尾同一档：重铸的 epoch 必须带真实光标，不是编造的 0。
+      // 与正常收尾同一档：新 epoch 的光标未知，不能复用上一轮的旧光标。
       expect(
         session?.terminalPromptReadiness?.outputCursorBytes,
-        '报错收尾重铸的 epoch 用了编造的光标而不是会话最后一次权威 outputCursorBytes'
-      ).toBe(512)
+        '报错收尾未知的当前输出边界不得由上一轮游标补成已验证'
+      ).toBeUndefined()
     } finally {
       await client.dispose()
     }

@@ -331,7 +331,7 @@ describe('native successful question completion owns only an exact unclaimed que
   it('a custom declarative Provider uses its own successful event and shared default child keys', async () => {
     const base = new AgentProviderRegistry().get('codex')
     const provider = defineAgentProvider({
-      catalog: { ...base.catalog, id: 'generic-question', executable: 'synthetic' },
+      catalog: { ...base.catalog, id: 'generic-question', executable: 'synthetic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
       buildArgs: (_prompt, args) => [...args],
       hook: { rules: [{ events: ['before_question'], state: 'waiting', toolNames: ['ask_generic'] }, { events: ['after_question'], state: 'working' }],
         subagentTracking: { startEvents: ['child_start'], stopEvents: ['child_stop'], mainStopEvents: ['main_stop'] } },

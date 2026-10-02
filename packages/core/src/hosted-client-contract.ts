@@ -15,7 +15,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage',
   'respondAgentInteraction', 'setAgentPosture', 'resizeAgent', 'signalAgent', 'stopAgent',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'checkDeliveries', 'ackDeliveryBatch',
-  'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch'
+  'answerAsk', 'cancelAsk', 'startDiscussion', 'handOff', 'openDispatch', 'recordDispatchEvent', 'showDispatch'
 ] as const satisfies readonly (keyof AgentMuxClient)[]
 
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]
@@ -34,6 +34,9 @@ export type AgentMuxHostedClient = DelegatedMethods & {
   connect(): Promise<void>
   dispose(): Promise<void>
   onEvent(listener: (event: AgentMuxClientEvent) => void): () => void
+  runtimeOwnerIdentity(): AgentMuxRuntimeOwnerIdentity | null
+  forwardRpc?: AgentMuxHostedForwardRpc
+  disconnect(): void
   runtimeIdentity(): AgentMuxRuntimeIdentity
   catalog(): AgentCatalogEntry[]
   agentSessions(): AgentMuxAgentSession[]
@@ -45,7 +48,18 @@ export type AgentMuxHostedClient = DelegatedMethods & {
     options: Parameters<AgentMuxClient['observeSessionHistory']>[2]): Promise<AgentSessionHistoryObservationHandle>
 }
 
+export type AgentMuxRuntimeOwnerIdentity = {
+  runtimeId: string; ownerInstanceId: string; protocolVersion: 1; processId: number
+  ctxmux: AgentMuxRuntimeIdentity; availability: 'connected' | 'unverified'
+}
+export type AgentMuxRuntimeFence = Pick<AgentMuxRuntimeOwnerIdentity, 'runtimeId' | 'ownerInstanceId'>
+export type AgentMuxHostedForwardRpc = <M extends import('./public-rpc.js').AgentMuxRpcMethod>(
+  method: M, params: import('./public-rpc.js').AgentMuxRpcParams<M>,
+  context?: import('./public-rpc-service.js').AgentMuxRpcCallContext
+) => Promise<import('./public-rpc.js').AgentMuxRpcResult<M>>
+
 export type AgentMuxHostedBootstrap = {
+  owner: AgentMuxRuntimeOwnerIdentity
   identity: AgentMuxRuntimeIdentity
   storePath: string | null
   hostProcessId: number
@@ -53,12 +67,66 @@ export type AgentMuxHostedBootstrap = {
   sessions: AgentMuxAgentSession[]
   messageQueuePath: string
 }
+export type AgentMuxHostedTransferChunk = { transferId: string; index: number; dataBase64: string; final: boolean }
+export type AgentMuxHostedStreamValue =
+  | { kind: 'initial'; value: unknown }
+  | { kind: 'event'; event: AgentMuxClientEvent }
+  | { kind: 'history'; observation: AgentSessionHistoryObservation }
 export type AgentMuxHostedStreamEvent =
-  | { type: 'snapshot'; data: { event: AgentMuxClientEvent } }
-  | { type: 'snapshot'; data: { observation: AgentSessionHistoryObservation } }
+  | { type: 'snapshot'; data: AgentMuxHostedTransferChunk }
   | { type: 'end'; data: unknown }
   | { type: 'error'; error: { code: string; message: string } }
 export type AgentMuxHostedSubscription = { dispose(): Promise<void> }
+export type AgentMuxHostedAttachmentTarget = { kind: 'agent-session'; agentSessionId: string; runId?: string } |
+  { kind: 'terminal-run'; runId: string }
+export type AgentMuxHostedRuntimeParameterMap = {
+  'runtime.owner.identity': { expectedRuntimeId?: string }
+  'runtime.owner.shutdown': { fence: AgentMuxRuntimeFence }
+  'runtime.bootstrap': { consumerId: string; fence: AgentMuxRuntimeFence }
+  'runtime.invoke': { consumerId: string; fence: AgentMuxRuntimeFence; invocation: AgentMuxHostedInvocation }
+  'runtime.release-consumer': { consumerId: string; fence: AgentMuxRuntimeFence }
+  'runtime.events': { consumerId: string; fence: AgentMuxRuntimeFence }
+  'runtime.history-watch': { consumerId: string; fence: AgentMuxRuntimeFence; agentSessionId: string;
+    options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'> }
+  'runtime.attachment-watch': { consumerId: string; fence: AgentMuxRuntimeFence; target: AgentMuxHostedAttachmentTarget;
+    afterByte: number; view: 'raw' | 'terminal'; refresh?: boolean; operationId?: string }
+  'runtime.replay-watch': { consumerId: string; fence: AgentMuxRuntimeFence; target: AgentMuxHostedAttachmentTarget;
+    afterByte: number; view: 'raw' | 'terminal' }
+}
+export type AgentMuxHostedRuntimeResultMap = {
+  'runtime.owner.identity': { owner: AgentMuxRuntimeOwnerIdentity }
+  'runtime.owner.shutdown': { owner: AgentMuxRuntimeOwnerIdentity; accepted: true }
+  'runtime.bootstrap': AgentMuxHostedBootstrap
+  'runtime.invoke': { value: unknown }
+  'runtime.release-consumer': { released: boolean }
+  'runtime.events': never
+  'runtime.history-watch': never
+  'runtime.attachment-watch': never
+  'runtime.replay-watch': never
+}
+export type AgentMuxHostedRuntimeMethod = keyof AgentMuxHostedRuntimeParameterMap
+export type AgentMuxHostedStreamMethod = 'runtime.events' | 'runtime.history-watch' | 'runtime.attachment-watch' | 'runtime.replay-watch'
+export type AgentMuxHostedStreamInitialMap = {
+  'runtime.events': { owner: AgentMuxRuntimeOwnerIdentity; transferId: string }
+  'runtime.history-watch': { owner: AgentMuxRuntimeOwnerIdentity; source: AgentSessionHistoryObservationHandle['source'] }
+  'runtime.attachment-watch': { owner: AgentMuxRuntimeOwnerIdentity; transferId: string }
+  'runtime.replay-watch': { owner: AgentMuxRuntimeOwnerIdentity; transferId: string }
+}
+export type AgentMuxHostedStreamInitial<M extends AgentMuxHostedStreamMethod> = AgentMuxHostedStreamInitialMap[M]
+export const AGENTMUX_HOSTED_RPC_METHODS = {
+  'runtime.owner.identity': 'short', 'runtime.owner.shutdown': 'short',
+  'runtime.bootstrap': 'short', 'runtime.invoke': 'long', 'runtime.release-consumer': 'long',
+  'runtime.events': 'long', 'runtime.history-watch': 'long', 'runtime.attachment-watch': 'long', 'runtime.replay-watch': 'long'
+} as const satisfies Record<AgentMuxHostedRuntimeMethod, 'short' | 'long'>
+
+export const AGENTMUX_HOSTED_RPC_FIELDS = {
+  'runtime.owner.identity': ['expectedRuntimeId'], 'runtime.owner.shutdown': ['fence'],
+  'runtime.bootstrap': ['consumerId', 'fence'], 'runtime.invoke': ['consumerId', 'fence', 'invocation'],
+  'runtime.release-consumer': ['consumerId', 'fence'], 'runtime.events': ['consumerId', 'fence'],
+  'runtime.history-watch': ['consumerId', 'fence', 'agentSessionId', 'options'],
+  'runtime.attachment-watch': ['consumerId', 'fence', 'target', 'afterByte', 'view', 'refresh', 'operationId'],
+  'runtime.replay-watch': ['consumerId', 'fence', 'target', 'afterByte', 'view']
+} as const satisfies Record<AgentMuxHostedRuntimeMethod, readonly string[]>
 
 /** Existing public agent.output subscription; no Runtime.invoke or shared Run attachment. */
 export type AgentMuxHostedOutputRpcPort = {
@@ -66,16 +134,12 @@ export type AgentMuxHostedOutputRpcPort = {
     handlers: AgentMuxRpcSubscriptionOptions<'agent.output'>): Promise<AgentMuxHostedSubscription>
 }
 
-/** A public-RPC adapter implements this port. It has no transport implementation of its own. */
+/** The existing RPC client implements this transport-only port. */
 export type AgentMuxHostedRpcPort = AgentMuxHostedOutputRpcPort & {
-  call(method: 'runtime.bootstrap', params: { consumerId: string }): Promise<AgentMuxHostedBootstrap>
-  call(method: 'runtime.invoke', params: { consumerId: string; invocation: AgentMuxHostedInvocation }, options?: { signal?: AbortSignal }): Promise<{ value: unknown }>
-  call(method: 'runtime.release-consumer', params: { consumerId: string }): Promise<{ released: boolean }>
-  subscribe(method: 'runtime.events' | 'runtime.history-watch', params: {
-    consumerId: string; agentSessionId?: string;
-    options?: Omit<NonNullable<Parameters<AgentMuxClient['observeSessionHistory']>[2]>, 'signal'>
-  }, handlers: {
-    onInitial(value: { bootstrap?: AgentMuxHostedBootstrap; source?: AgentSessionHistoryObservationHandle['source'] }): void
+  call<M extends Exclude<AgentMuxHostedRuntimeMethod, AgentMuxHostedStreamMethod>>(method: M,
+    params: AgentMuxHostedRuntimeParameterMap[M], options?: { signal?: AbortSignal }): Promise<AgentMuxHostedRuntimeResultMap[M]>
+  subscribe<M extends AgentMuxHostedStreamMethod>(method: M, params: AgentMuxHostedRuntimeParameterMap[M], handlers: {
+    onInitial(value: AgentMuxHostedStreamInitial<M>): void
     onEvent(value: AgentMuxHostedStreamEvent): void
     onEnd?(error?: Error): void
     signal?: AbortSignal

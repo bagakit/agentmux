@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AttachedSnapshot, OutputChunk, RunEvent, RunInfo } from '@ctxmux/sdk'
 import { AgentMuxClient } from '../src/client.js'
@@ -33,7 +33,7 @@ function chunk(start: number, text: string): OutputChunk {
 }
 const stored: AgentMuxStoredAgentSession = {
   kind: 'agent', agentSessionId: 'reconnect-agent', providerId: 'codex', executorId: 'codex',
-  hostId: 'local', workspacePath: upstreamFixturePath("private/reconnect"), run: { runId: 'reconnect-run' },
+  hostId: 'local', workspacePath: fixturePath("private/reconnect"), run: { runId: 'reconnect-run' },
   retiredRuns: [], hookBindingId: 'fixture-binding', hookToken: 'fixture-token', createdAt: 1, updatedAt: 1
 }
 async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroughByte = 100) {
@@ -62,7 +62,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: false,
       fork_level_b: false, replay: 'raw_from_start' }, pid: 4321, state: { type: 'running' },
     latest_output_bytes: latest, durable_output_bytes: latest, first_available_byte: 0,
-    attachments: 1, applied_input_bytes: 0, current_size: size })
+    attachments: 1, applied_input_bytes: 0, current_size: size, native_service: null })
   const attach = (terminal: boolean) => vi.fn(async (_id: string, afterByte: number) => {
     const stream = new Stream(); streams.push(stream)
     const restore = bytes('\x1bcRESTORED')
@@ -70,6 +70,7 @@ async function fixture(view: AgentMuxRunAttachmentView, initiallyPublishedThroug
     const snapshot: AttachedSnapshot = { run: info(), resize_revision: revision,
       terminal: terminal ? { type: 'basic_vt', checkpoint: { restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0, run_id: stored.run.runId,
         through_byte: checkpointByte, resize_revision: checkpointRevision, size: checkpointSize,
+        restore_size: checkpointSize, restore_scrollback_rows: null, resize_after_restore_bytes: 0,
         restore_bytes: restore.byteLength }, resizes } : { type: 'not_requested' },
       terminal_restore: terminal ? restore : new Uint8Array(0),
       replay: { chunks: replay.filter(c => c.end_byte > start), first_available_byte: 0,

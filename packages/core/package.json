@@ -121,13 +121,22 @@
     "./spatial-graph": {
       "types": "./dist/spatial-graph.d.ts",
       "import": "./dist/spatial-graph.js"
+    },
+    "./headless-runtime": {
+      "types": "./dist/headless-runtime.d.ts",
+      "import": "./dist/headless-runtime.js"
+    },
+    "./runtime-client": {
+      "types": "./dist/runtime-client.d.ts",
+      "import": "./dist/runtime-client.js"
     }
   },
   "bin": {
     "amux": "./bin/amux",
     "agentmux": "./bin/agentmux",
-    "ctxmux": "./vendor/ctxmux/darwin-arm64/bin/ctxmux",
-    "ctxmuxd": "./vendor/ctxmux/darwin-arm64/bin/ctxmuxd"
+    "ctxmux": "./bin/ctxmux",
+    "ctxmuxd": "./bin/ctxmuxd",
+    "agentmux-runtime": "./bin/agentmux-runtime"
   },
   "files": [
     "bin",
@@ -159,7 +168,8 @@
     "test:conformance": "pnpm build && vitest run test/runtime-projection.test.ts test/agent-session-store.test.ts && vitest run --maxWorkers=1 test/package-consumer.integration.test.ts",
     "test:benchmark-smoke": "pnpm build && AGENTMUX_BENCHMARK_SMOKE=1 vitest run --maxWorkers=1 test/daemon-cutover-benchmark-smoke.integration.test.ts",
     "benchmark:daemon-cutover": "pnpm build && node scripts/run-daemon-cutover-benchmark.mjs",
-    "benchmark:daemon-cutover:smoke": "pnpm build && node scripts/run-daemon-cutover-benchmark.mjs --smoke"
+    "benchmark:daemon-cutover:smoke": "pnpm build && node scripts/run-daemon-cutover-benchmark.mjs --smoke",
+    "postinstall": "node bin/install-ctxmux.mjs"
   },
   "devDependencies": {
     "@ctxmux/sdk": "file:vendor/ctxmux/darwin-arm64/ctxmux-sdk-0.0.0.tgz",

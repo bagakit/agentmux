@@ -55,7 +55,7 @@ if (
  *
  * 挂钟/次数预算适合"对端可能永不回答"；这里对端是同一次测试自己起的进程，它一定会答，只是可能慢。
  *
- * 但**去掉上限不等于可以沉默**：实测  有一轮 `handshake race controlled composer pending`
+ * 但**去掉上限不等于可以沉默**：实测有一轮 `handshake race controlled composer pending`
  * 一路等到 80 秒被外层掐掉，而这一侧一个字都没留——因为这个假 CLI 跑在 PTY 里，stderr 不经
  * packed-consumer 转发，一次永等就是完全无痕的。所以这里跟 packed-consumer 的 `waitFor` 同一处置：
  * 不设上限，但周期性点名自己卡在哪一次投递上，让真的卡死指得到位点。
@@ -309,6 +309,13 @@ if (process.env.AGENTMUX_FAKE_OMIT_HANDLE !== '1') {
     eventName: 'SessionStart',
     payload: { session_id: `native-${agentSessionId}`, prompt }
   })
+  if (process.env.AGENTMUX_FAKE_SELF_CONTEXT === '1') {
+    const { execFile } = await import('node:child_process')
+    const { promisify } = await import('node:util')
+    const { stdout } = await promisify(execFile)(process.env.AGENTMUX_CLI, ['whoami'])
+    const context = JSON.parse(stdout)
+    process.stdout.write(`codex-whoami:${JSON.stringify(context)}\n`)
+  }
   if (publishPermissionRequest) {
     permissionPending = true
     await request({

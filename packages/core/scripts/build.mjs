@@ -4,9 +4,12 @@ import { chmod, cp, mkdir, readFile, rename, rm, stat } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import ctxmuxArtifacts from '../src/ctxmux-artifact-contract.json' with { type: 'json' }
 
 const execFileAsync = promisify(execFile)
-const expectedManifestSha256 = '0641f3e7f9330d0ee2c49f566a0b3038cc830bccf35405c9bd08d96ab4db5372'
+const artifactPlatform = `${process.platform}-${process.arch}`
+const expectedManifestSha256 = ctxmuxArtifacts.manifests[artifactPlatform]
+if (!expectedManifestSha256) throw new Error(`AgentMux has no qualified ctxmux artifacts for ${artifactPlatform}.`)
 const packageRoot = fileURLToPath(new URL('../', import.meta.url))
 const buildRoot = join(packageRoot, '.ctxmux-build')
 const artifactRoot = join(
@@ -42,11 +45,11 @@ try {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'))
   if (
     manifest.schema !== 'ctxmux.local-artifacts.v1' ||
-    manifest.source.commit !== 'b061b8d05b8553398bb5ad43bf7e81b7f42733a6' ||
-    manifest.source.tree !== '1f643ee07f48c5810e9e34ef9715c78e8024ba38' ||
+    manifest.source.commit !== ctxmuxArtifacts.source.commit ||
+    manifest.source.tree !== ctxmuxArtifacts.source.tree ||
     manifest.source.worktree_clean !== true ||
-    manifest.product.version !== '0.1.0' ||
-    manifest.product.protocol !== 21 ||
+    manifest.product.version !== ctxmuxArtifacts.version ||
+    manifest.product.protocol !== ctxmuxArtifacts.protocol ||
     manifest.support.platform !== process.platform ||
     manifest.support.architecture !== process.arch ||
     manifest.support.transport !== 'unix'

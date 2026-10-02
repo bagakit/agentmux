@@ -1,4 +1,5 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -9,10 +10,16 @@ import { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
 import { cloneSession } from '../src/agent-session-identity.js'
-import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
+import { AgentMuxHostedRuntimeService as SourceHostedService } from '../src/hosted-runtime-service.js'
+import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
 import type { AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
+const connectHostedAgentMux: typeof SourceConnectHosted = process.env.AGENTMUX_TEST_CLIENT_ENTRY
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_CLIENT_ENTRY)).connectHostedAgentMux : SourceConnectHosted
+const AgentMuxHostedRuntimeService: typeof SourceHostedService = process.env.AGENTMUX_TEST_SERVICE_ENTRY
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_SERVICE_ENTRY)).AgentMuxHostedRuntimeService : SourceHostedService
+type AgentMuxHostedRuntimeService = SourceHostedService
+
 
 async function fixture(loadRegistry = false) {
   const directory = await mkdtemp(join(tmpdir(), 'amx-hosted-retained-'))
@@ -44,13 +51,14 @@ async function fixture(loadRegistry = false) {
   const connect = vi.spyOn(core, 'connect').mockImplementation(async () => {
     if (!loadRegistry) throw new AgentMuxError('Private Runtime connection is unavailable.', 'CTXMUX_DISCONNECTED')
   })
-  const service = new AgentMuxHostedRuntimeService(core, join(directory, 'sessions.json'))
+  const service = new AgentMuxHostedRuntimeService(core, join(directory, 'sessions.json'), () => hostedTestOwner(core))
   const port = {
     call: async (method: string, params: unknown, options?: { signal?: AbortSignal }) =>
       JSON.parse(JSON.stringify(await service.call(method, JSON.parse(JSON.stringify(params)), options))),
     subscribe: async (method: string, params: unknown, handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
-      const stream = await service.subscribe(method, params, event => handlers.onEvent(JSON.parse(JSON.stringify(event))), { signal: handlers.signal })
+      const stream = await service.subscribe(method, params, event => handlers.onEvent(JSON.parse(JSON.stringify(event))), handlers.signal ? { signal: handlers.signal } : {})
       handlers.onInitial(JSON.parse(JSON.stringify(stream.initial)))
+      await stream.start?.()
       return { dispose: async () => { await stream.dispose() } }
     }
   } as AgentMuxHostedRpcPort

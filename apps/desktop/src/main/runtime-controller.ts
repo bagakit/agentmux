@@ -7,8 +7,6 @@ import {
   type AgentPromptCondition,
   type AgentMuxAgentMessageInput,
   runtimeStorageUsage,
-  loadAgentSessions,
-  loadSessionHistorySources,
   agentInteractionResponseUnavailableReason,
   type AgentCapabilities,
   type AgentCatalogEntry,
@@ -43,6 +41,7 @@ import type {
   HostConfig,
   RuntimeEvent,
   RuntimeSnapshot,
+  RuntimeEndpointWarning,
   SessionAttachResult,
   SessionReplayResult,
   SessionControl,
@@ -71,6 +70,7 @@ import {
 type RuntimeHost = {
   executionHost: ExecutionHost
   client: AgentMuxClient
+  config: HostConfig
   unsubscribe: () => void
   historyObservationDisposers: Set<() => void>
 }
@@ -79,6 +79,8 @@ type PreparedRuntimeHost = {
   id: string
   executionHost: ExecutionHost
   client: AgentMuxClient
+  config: HostConfig
+  warning?: RuntimeEndpointWarning
 }
 
 type SessionAttachmentOwner = {
@@ -98,10 +100,33 @@ export type RuntimePreparation = {
   removedHostIds: string[]
   hostSignatures: Map<string, string>
   reservedHostIds: string[]
+  runtimeBindings?: Map<string, string>
+  configs?: HostConfig[]
+}
+
+function runtimeOwner(client: AgentMuxClient) {
+  return 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity() : null
+}
+
+function endpointWarning(hostId: string, step: string, error: unknown): RuntimeEndpointWarning {
+  return {
+    hostId, step, availability: step === 'Saving Runtime binding' ? 'connected' : 'unverified',
+    code: error instanceof AgentMuxError ? error.code : 'RUNTIME_UNAVAILABLE',
+    message: error instanceof Error ? error.message : String(error),
+    recovery: 'Restore this endpoint connection and retry. Keep its original Session and work surface; inspect an unconfirmed operation before sending it again.'
+  }
+}
+
+function hostSignature({ label: _label, ...host }: HostConfig): string {
+  if (host.kind === 'ssh') {
+    const { runtimeId: _runtimeId, ...route } = host
+    return JSON.stringify(route)
+  }
+  return JSON.stringify(host)
 }
 
 function signatures(config: AppConfig): Map<string, string> {
-  return new Map(config.hosts.map((host) => [host.id, JSON.stringify(host)]))
+  return new Map(config.hosts.map(host => [host.id, hostSignature(host)]))
 }
 
 function workspaceLabel(config: AppConfig, hostId: string, path: string): string {
@@ -335,6 +360,8 @@ export class RuntimeController {
     background: '#000000'
   }
   private hostSignatures = new Map<string, string>()
+  private readonly endpointWarnings = new Map<string, RuntimeEndpointWarning>()
+  private readonly endpointConnections = new Map<AgentMuxClient, Promise<void>>()
 
   constructor(
     private readonly agentSessionStore: AgentMuxAgentSessionStore,
@@ -401,6 +428,15 @@ export class RuntimeController {
 
   async prepare(config: AppConfig): Promise<RuntimePreparation> {
     const nextSignatures = signatures(config)
+    for (const next of config.hosts) {
+      if (next.kind !== 'ssh' || !next.runtimeId) continue
+      const existing = this.hosts.get(next.id)
+      const known = (existing ? runtimeOwner(existing.client) : null)?.runtimeId ??
+        (existing?.config.kind === 'ssh' ? existing.config.runtimeId : undefined)
+      if (known && known !== next.runtimeId) {
+        throw new AgentMuxError(`Runtime binding is immutable for ${next.id}. Configure another endpoint for a different Runtime.`, 'RUNTIME_OWNER_MISMATCH')
+      }
+    }
     const changed = config.hosts.filter(
       (host) => this.hostSignatures.get(host.id) !== nextSignatures.get(host.id)
     )
@@ -433,11 +469,25 @@ export class RuntimeController {
         if (errors.length === 1) throw errors[0]
         throw new AggregateError(errors, 'Multiple Runtime hosts failed preparation.')
       }
+      const candidates = [...this.hosts.entries()].filter(([id]) => nextSignatures.has(id) &&
+        !prepared.some(host => host.id === id)).map(([id, host]) => ({ id, ...host, warning: this.endpointWarnings.get(id) }))
+      const runtimeBindings = new Map([...candidates, ...prepared].flatMap(host => {
+        const identity = runtimeOwner(host.client)
+        return host.config.kind === 'ssh' && identity?.availability === 'connected' && (!host.warning || host.warning.availability === 'connected')
+          ? [[host.id, identity.runtimeId] as const] : []
+      }))
+      const boundConfig = {
+        ...config,
+        hosts: config.hosts.map(host => host.kind === 'ssh' && runtimeBindings.has(host.id)
+          ? { ...host, runtimeId: runtimeBindings.get(host.id)! } : host)
+      }
       return {
         hosts: prepared,
         removedHostIds,
-        hostSignatures: nextSignatures,
-        reservedHostIds
+        hostSignatures: signatures(boundConfig),
+        reservedHostIds,
+        runtimeBindings,
+        configs: boundConfig.hosts
       }
     } catch (error) {
       for (const hostId of reservedHostIds) this.hostReconfigurationReservations.delete(hostId)
@@ -452,18 +502,33 @@ export class RuntimeController {
         const host = this.hosts.get(id)
         if (host) retired.set(id, host)
         this.hosts.delete(id)
+        this.endpointWarnings.delete(id)
       }
       for (const prepared of preparation.hosts) {
         const previous = this.hosts.get(prepared.id)
         if (previous) retired.set(prepared.id, previous)
-        const unsubscribe = prepared.client.onEvent((event) => this.publish(prepared.id, event))
+        const unsubscribe = prepared.client.onEvent((event) => {
+          if (this.hosts.get(prepared.id)?.client === prepared.client) this.publish(prepared.id, event)
+        })
         this.hosts.set(prepared.id, { ...prepared, unsubscribe, historyObservationDisposers: new Set() })
+        if (prepared.warning) this.endpointWarnings.set(prepared.id, prepared.warning)
+        else this.endpointWarnings.delete(prepared.id)
+      }
+      for (const config of preparation.configs ?? []) {
+        const host = this.hosts.get(config.id)
+        if (host) host.config = config
       }
       this.hostSignatures = preparation.hostSignatures
+      for (const hostId of preparation.runtimeBindings?.keys() ?? []) {
+        if (this.endpointWarnings.get(hostId)?.step === 'Saving Runtime binding') this.endpointWarnings.delete(hostId)
+      }
+      for (const prepared of preparation.hosts) {
+        if ('runtimeOwnerIdentity' in prepared.client) this.connectEndpointInBackground(prepared.id, prepared.client)
+      }
       for (const [id, host] of retired) {
         for (const release of host.historyObservationDisposers) release()
         host.unsubscribe()
-        void disposePrepared([{ id, executionHost: host.executionHost, client: host.client }]).catch((error) => {
+        void disposePrepared([{ id, executionHost: host.executionHost, client: host.client, config: host.config }]).catch((error) => {
           console.error(`Failed to dispose retired Runtime host ${id}`, error)
         })
       }
@@ -516,7 +581,10 @@ export class RuntimeController {
 
   /** Cached public identities from connected hosts only; no lifecycle or probing action. */
   connectedRuntimeIdentities() {
-    return [...this.hosts].map(([hostId, host]) => ({ hostId, identity: host.client.runtimeIdentity() }))
+    return [...this.hosts].flatMap(([hostId, host]) => {
+      try { return [{ hostId, identity: host.client.runtimeIdentity() }] }
+      catch { return [] }
+    })
   }
 
   executionHost(hostId: string): ExecutionHost {
@@ -540,10 +608,14 @@ export class RuntimeController {
   }
 
   async providerCatalog(): Promise<AgentCatalogEntry[]> {
-    const runtimeHost = this.hosts.values().next().value as RuntimeHost | undefined
-    if (!runtimeHost) throw new Error('Runtime has no configured hosts.')
-    await runtimeHost.client.connect()
-    return runtimeHost.client.providers.catalog()
+    const catalog = new Map<string, AgentCatalogEntry>()
+    for (const host of this.hosts.values()) {
+      if (!('runtimeOwnerIdentity' in host.client)) await host.client.connect()
+      for (const entry of host.client.providers.catalog()) {
+        if (!catalog.has(entry.id)) catalog.set(entry.id, entry)
+      }
+    }
+    return [...catalog.values()]
   }
 
   async detect(executorId: AgentExecutorId, hostId: string, config: AppConfig): Promise<ExecutorDetection> {
@@ -558,7 +630,7 @@ export class RuntimeController {
       host
     })
     const owner = this.hosts.get(hostId)
-    const signature = JSON.stringify(input.host)
+    const signature = hostSignature(input.host)
     let executable: string | undefined
     // Only this diagnostic requires a stable connection owner. Existing input routes keep their own contract.
     const assertOwner = (): RuntimeHost => {
@@ -584,8 +656,20 @@ export class RuntimeController {
   }
 
   async snapshot(config: AppConfig): Promise<RuntimeSnapshot> {
-    const projections = await Promise.all([...this.hosts.values()].map(async ({ client }) => {
-      await client.connect()
+    const hosts = [...this.hosts]
+    const unobservedWarnings = new Map<string, RuntimeEndpointWarning>()
+    const results = await Promise.allSettled(hosts.map(async ([hostId, { client, config: hostConfig }]) => {
+      if (hostConfig.kind === 'ssh' && runtimeOwner(client)?.availability !== 'connected') {
+        const warning = this.endpointWarnings.get(hostId) ?? endpointWarning(hostId, 'Connecting to Runtime',
+          new AgentMuxError('The endpoint has not completed its trusted Runtime connection. Other endpoints remain available.', 'RUNTIME_UNAVAILABLE'))
+        unobservedWarnings.set(hostId, warning)
+        // An established owner's lost stream already owns bounded reconnect and restoration.
+        // Only the first observation needs Main's initial connection notification.
+        if (!runtimeOwner(client)) this.connectEndpointInBackground(hostId, client)
+        throw new AgentMuxError(warning.message, warning.code)
+      }
+      await this.connectedClient(hostId)
+      if (this.hosts.get(hostId)?.client !== client) throw new Error('Runtime endpoint changed during its observation.')
       let projection = await client.runtimeProjection()
       while (true) {
         const agentSubjects = projection.subjects.filter((subject): subject is Extract<AgentMuxRuntimeSubject, { kind: 'agent' }> => (
@@ -605,7 +689,7 @@ export class RuntimeController {
         const failures = timelineResults.flatMap((result, index) => result.status === 'rejected'
           ? [{ agentSessionId: agentSubjects[index]!.agentSession.agentSessionId, reason: result.reason }]
           : [])
-        if (failures.length === 0) return { client, projection, timelineEntries }
+        if (failures.length === 0) return { hostId, client, projection, timelineEntries }
 
         const refreshed = await client.runtimeProjection()
         const refreshedAgentIds = new Set(refreshed.subjects.flatMap((subject) => (
@@ -616,19 +700,32 @@ export class RuntimeController {
         projection = refreshed
       }
     }))
-    for (const { projection } of projections) {
+    const projections = results.flatMap((result, index) => {
+      if (result.status === 'fulfilled') {
+        if (this.endpointWarnings.get(result.value.hostId)?.step !== 'Saving Runtime binding') {
+          this.endpointWarnings.delete(result.value.hostId)
+        }
+        return [result.value]
+      }
+      const hostId = hosts[index]![0]
+      if (!unobservedWarnings.has(hostId) && this.hosts.get(hostId)?.client === hosts[index]![1].client) {
+        this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Reading Runtime state', result.reason))
+      }
+      return []
+    })
+    for (const { hostId, projection } of projections) {
       for (const subject of projection.subjects) {
         if (subject.kind !== 'terminal') continue
         this.terminalInputCursors.set(
-          terminalInputKey(subject.hostId, subject.run.runId),
+          terminalInputKey(hostId, subject.run.runId),
           subject.run.acceptedInputBytes
         )
       }
     }
-    const sessions = projections.flatMap(({ client, projection }) => projection.subjects.map((subject) => (
-      projectSession(subject, config, providerCapabilitiesFrom(client))
+    const sessions = projections.flatMap(({ hostId, client, projection }) => projection.subjects.map((subject) => (
+      projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client))
     )))
-    const recoveryCandidates = projections.flatMap(({ client, projection }) => {
+    const recoveryCandidates = projections.flatMap(({ hostId, client, projection }) => {
       // 与 sessions 同一个取值口。这条出口此前自己抄了一遍那句 registry 查询——两个都在投影
       // `capabilities`、都该按 Session 自己的 providerId 取，却是两份各自可漂移的表达式。
       const capabilitiesFor = providerCapabilitiesFrom(client)
@@ -639,7 +736,7 @@ export class RuntimeController {
         if (projected.has(session.agentSessionId)) return []
         return [{
           agentSessionId: session.agentSessionId,
-          hostId: session.hostId,
+          hostId,
           workspacePath: session.workspacePath,
           providerId: session.providerId,
           executorId: session.executorId,
@@ -649,7 +746,7 @@ export class RuntimeController {
           ...(session.terminalCapability
             ? { terminalCapability: structuredClone(session.terminalCapability) }
             : {}),
-          label: agentFallbackLabel(config, session),
+          label: agentFallbackLabel(config, { ...session, hostId }),
           createdAt: session.createdAt,
           updatedAt: session.updatedAt,
           run: { ...session.run }
@@ -657,12 +754,15 @@ export class RuntimeController {
       })
     })
     const timelineEntries = projections.flatMap(({ timelineEntries: entries }) => entries)
-    const runtimeOwnershipWarnings = projections.flatMap(({ client, projection }) => (
-      client.runtimeIdentity().ownership === 'unverified' ? [projection.hostId] : []
+    const runtimeOwnershipWarnings = projections.flatMap(({ hostId, client }) => (
+      client.runtimeIdentity().ownership === 'unverified' ? [hostId] : []
     ))
     return {
       sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates,
-      ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {})
+      ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {}),
+      // A background connection can finish while another endpoint is being read. This cut still
+      // did not observe that endpoint; keep its warning until the restored event's fresh resync.
+      runtimeEndpointWarnings: [...new Map([...this.endpointWarnings, ...unobservedWarnings]).values()]
     }
   }
 
@@ -685,9 +785,12 @@ export class RuntimeController {
           throw Object.assign(new Error(`Executor “${id}” is used by an admitted launch. Keep this template until its launch completes.`), { code: 'SETTING_RESOURCE_IN_USE' })
         }
       }
-      // This store is the Core authority, including disconnected and stopped Sessions.
-      // No host connection, Timeline or busy/visible filter participates in this decision.
-      const sessions = await loadAgentSessions(this.agentSessionStore)
+      // Each original Runtime owns retained Session references, regardless of Run state.
+      // Retired History is an independent descriptor, not a current Session reference.
+      const sessions = (await Promise.all([...this.hosts].map(async ([hostId]) => {
+        const client = this.hosts.get(hostId)!.client
+        return (await client.sessionHistorySources()).flatMap(descriptor => descriptor.state === 'active' && descriptor.history ? [descriptor.history] : [])
+      }))).flat()
       for (const id of changed) {
         const references = sessions.filter((session) => session.executorId === id)
         const requested = Object.hasOwn(next.executors, id) ? next.executors[id]! : undefined
@@ -822,15 +925,18 @@ export class RuntimeController {
    * 不是异常。
    */
   async resolveSession(sessionId: string, config: AppConfig): Promise<SessionSnapshot | null> {
-    for (const { client } of this.hosts.values()) {
-      await client.connect()
-      const subject = (await client.runtimeProjection()).subjects.find((candidate) => (
-        candidate.kind === 'agent'
-          ? candidate.agentSession.agentSessionId === sessionId
-          : candidate.run.runId === sessionId
+    const results = await Promise.allSettled([...this.hosts].map(async ([hostId, { client }]) => {
+      await this.connectedClient(hostId)
+      const subject = (await client.runtimeProjection()).subjects.find(candidate => (
+        candidate.kind === 'agent' ? candidate.agentSession.agentSessionId === sessionId : candidate.run.runId === sessionId
       ))
-      if (subject) return projectSession(subject, config, providerCapabilitiesFrom(client))
-    }
+      return subject ? projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client)) : null
+    }))
+    const matches = results.flatMap(result => result.status === 'fulfilled' && result.value ? [result.value] : [])
+    if (matches.length > 1) throw new AgentMuxError('Session identity is ambiguous across configured endpoints.', 'RUNTIME_OWNER_MISMATCH')
+    if (matches[0]) return matches[0]
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
     return null
   }
 
@@ -841,13 +947,22 @@ export class RuntimeController {
   }
 
   async sessionHistorySources() {
-    return await loadSessionHistorySources(this.agentSessionStore)
+    const results = await Promise.allSettled([...this.hosts].map(async ([hostId, { client }]) => {
+      try { return (await client.sessionHistorySources()).map(descriptor => ({ ...descriptor, hostId })) }
+      catch (error) {
+        this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Reading retained History sources', error))
+        throw error
+      }
+    }))
+    const failure = results.find(result => result.status === 'rejected')
+    if (failure?.status === 'rejected') throw failure.reason
+    return results.flatMap(result => result.status === 'fulfilled' ? result.value : [])
   }
 
   async sessionTimeline(control: SessionHistoryReference) {
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const descriptor = (await this.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId)
+    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
     if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
     const timeline = await host.client.sessionTimeline(control.agentSessionId)
     if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
@@ -868,9 +983,7 @@ export class RuntimeController {
     }
     const host = this.hosts.get(control.hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
-    const descriptor = (await this.sessionHistorySources()).find((entry) => (
-      entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId
-    ))
+    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
     if (!descriptor) throw new Error(`History Agent Session is not stored on host: ${control.hostId}`)
     if (!descriptor.history) throw new Error('No native history locator was retained for this Session.')
     const executor = requireSessionExecutor(config, descriptor.history)
@@ -921,8 +1034,7 @@ export class RuntimeController {
     host.historyObservationDisposers.add(retire)
     signal.addEventListener('abort', dispose, { once: true })
     try {
-      const descriptor = (await this.sessionHistorySources()).find(entry =>
-        entry.agentSessionId === control.agentSessionId && entry.hostId === control.hostId)
+      const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
       controller.signal.throwIfAborted()
       if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
       const executor = requireSessionExecutor(config, descriptor.history)
@@ -971,7 +1083,7 @@ export class RuntimeController {
         ...(request.shellCommand === undefined
           ? {}
           : {
-              command: process.env.SHELL ?? '/bin/sh',
+              command: '/bin/sh',
               args: ['-lc', request.shellCommand]
             }),
         ...(request.cols === undefined ? {} : { cols: request.cols }),
@@ -1568,6 +1680,7 @@ export class RuntimeController {
       this.rendererGenerations.clear()
       this.hostLifecycleOperations.clear()
       this.hostSignatures.clear()
+      this.endpointWarnings.clear()
       this.terminalInputCursors.clear()
       this.terminalInputTails.clear()
       this.terminalColorQueryRemainders.clear()
@@ -1591,7 +1704,11 @@ export class RuntimeController {
     let client: AgentMuxClient | null = null
     try {
       client = await this.connectRuntimeClient(config, store)
-      return { id: config.id, executionHost, client }
+      return { id: config.id, executionHost, client, config,
+        ...('runtimeOwnerIdentity' in client && runtimeOwner(client)?.availability !== 'connected'
+          ? { warning: endpointWarning(config.id, 'Connecting to Runtime', new AgentMuxError(
+            'The endpoint is connecting. Its existing Sessions remain unverified while other endpoints are available.', 'RUNTIME_UNAVAILABLE')) }
+          : {}) }
     } catch (error) {
       const cleanup = await Promise.allSettled([
         client?.dispose() ?? Promise.resolve(),
@@ -1605,19 +1722,34 @@ export class RuntimeController {
     }
   }
 
+  private connectEndpointInBackground(hostId: string, client: AgentMuxClient): void {
+    if (this.endpointConnections.has(client) || this.hosts.get(hostId)?.client !== client) return
+    const connection = (async () => {
+      try {
+        await client.connect()
+        if (this.hosts.get(hostId)?.client !== client || runtimeOwner(client)?.availability !== 'connected') return
+        this.publish(hostId, { type: 'connection-state', state: 'restored',
+          evidence: { source: 'run-process', observedAt: Date.now() } })
+      } catch (error) {
+        if (this.hosts.get(hostId)?.client !== client) return
+        this.publish(hostId, { type: 'connection-state', state: 'unrecoverable',
+          evidence: { source: 'run-process', observedAt: Date.now() } }, endpointWarning(hostId, 'Connecting to Runtime', error))
+      }
+    })()
+    this.endpointConnections.set(client, connection)
+    void connection.finally(() => {
+      if (this.endpointConnections.get(client) === connection) this.endpointConnections.delete(client)
+    })
+  }
+
   private async assertConfigurable(nextSignatures: ReadonlyMap<string, string>): Promise<void> {
     for (const [hostId, host] of this.hosts) {
       if (nextSignatures.get(hostId) === this.hostSignatures.get(hostId)) continue
       await host.client.connect()
-      if ((await host.client.listRuns()).length > 0) {
+      if ((await host.client.listRuns()).some(run => run.state === 'running')) {
         throw new Error(`Stop sessions on ${hostId} before changing that host`)
       }
     }
-  }
-
-  /** Borrow configured Core owners; the public service never owns their lifecycle. */
-  rpcClients(): readonly { hostId: string; client: AgentMuxClient }[] {
-    return [...this.hosts].map(([hostId, host]) => ({ hostId, client: host.client }))
   }
 
   private async connectedClient(hostId: string): Promise<AgentMuxClient> {
@@ -1626,8 +1758,36 @@ export class RuntimeController {
     }
     const host = this.hosts.get(hostId)
     if (!host) throw new Error(`Runtime host is not configured: ${hostId}`)
-    await host.client.connect()
+    try {
+      await host.client.connect()
+      if (this.endpointWarnings.get(hostId)?.step !== 'Saving Runtime binding') this.endpointWarnings.delete(hostId)
+    } catch (error) {
+      this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Connecting to Runtime', error))
+      throw error
+    }
     return host.client
+  }
+
+  rpcClients(): readonly { hostId: string; client: AgentMuxClient }[] {
+    return [...this.hosts].map(([hostId, host]) => ({ hostId, client: host.client }))
+  }
+
+  runtimeBindings(): Map<string, string> {
+    return new Map([...this.hosts].flatMap(([hostId, host]) => {
+      const identity = runtimeOwner(host.client)
+      return host.config.kind === 'ssh' && identity?.availability === 'connected'
+        ? [[hostId, identity.runtimeId] as const] : []
+    }))
+  }
+
+  endpointWarningSnapshot(): RuntimeEndpointWarning[] {
+    return [...this.endpointWarnings.values()]
+  }
+
+  reportBindingSaveFailure(preparation: Pick<RuntimePreparation, 'runtimeBindings'>, error: unknown): void {
+    for (const hostId of preparation.runtimeBindings?.keys() ?? []) {
+      this.endpointWarnings.set(hostId, endpointWarning(hostId, 'Saving Runtime binding', error))
+    }
   }
 
   /** Core is the authority for managed caller capabilities; the renderer never authenticates them. */
@@ -1720,7 +1880,9 @@ export class RuntimeController {
     knownRun?: AgentMuxRun
   ): Promise<SessionSnapshot> {
     const subject = await client.runtimeSubject(target, knownRun)
-    return projectSession(subject, config, providerCapabilitiesFrom(client))
+    const hostId = [...this.hosts].find(([, host]) => host.client === client)?.[0]
+    if (!hostId) throw new AgentMuxError('Session owner is no longer configured.', 'RUNTIME_UNAVAILABLE')
+    return projectSession({ ...subject, hostId }, config, providerCapabilitiesFrom(client))
   }
 
   private async serializeSessionAttachment<T>(key: string, operation: () => Promise<T>): Promise<T> {
@@ -1756,7 +1918,7 @@ export class RuntimeController {
     this.sessionAttachmentOwners.delete(key)
   }
 
-  private publish(hostId: string, event: AgentMuxClientEvent): void {
+  private publish(hostId: string, event: AgentMuxClientEvent, connectionWarning?: RuntimeEndpointWarning): void {
     const ref = 'run' in event ? event.run : ('evidence' in event ? event.evidence?.run : undefined)
     const toolkit = ref ? this.toolkitRuns.get(terminalInputKey(hostId, ref.runId)) : undefined
     if (toolkit && (event.type === 'terminal-output' || event.type === 'terminal-snapshot')) { toolkit(event); return }
@@ -1822,7 +1984,24 @@ export class RuntimeController {
       this.resourceSampler.forgetRun(event.run.runId)
     }
     if (toolkit) { toolkit(event); return }
-    const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event }
+    let warningChange: RuntimeEndpointWarning | null | undefined
+    if (event.type === 'connection-state') {
+      if (event.state === 'restored') {
+        if (this.endpointWarnings.get(hostId)?.step !== 'Saving Runtime binding') {
+          this.endpointWarnings.delete(hostId)
+          warningChange = null
+        }
+      } else {
+        warningChange = connectionWarning ?? endpointWarning(hostId, 'Observing Runtime',
+          event.diagnostic ? new AgentMuxError(event.diagnostic.message, event.diagnostic.code) :
+          new AgentMuxError(event.state === 'lost' ? 'Runtime connection was lost.' :
+            'Automatic reconnect did not verify the Runtime. Its existing Sessions remain unverified; reconnect this endpoint.', 'RUNTIME_UNAVAILABLE'))
+        this.endpointWarnings.set(hostId, warningChange)
+      }
+    }
+    const projectedEvent = event.type === 'agent-session' ? { ...event, session: { ...event.session, hostId } } : event
+    const runtimeEvent: RuntimeEvent = { type: 'core', hostId, event: projectedEvent,
+      ...(warningChange !== undefined ? { endpointWarning: warningChange } : {}) }
     for (const client of this.clients) {
       if (client.isDestroyed()) continue
       try {

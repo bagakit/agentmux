@@ -29,7 +29,7 @@ function disclosure(index = 1) {
 }
 function hostname(details: HTMLDetailsElement) {
   const labels = [...details.querySelectorAll<HTMLLabelElement>('label')]
-  expect(labels).toHaveLength(5)
+  expect(labels).toHaveLength(8)
   const label = labels.find(node => node.querySelector('span')?.textContent === 'Hostname')
   expect(label).toBeDefined()
   return label!.querySelector<HTMLInputElement>('input')!

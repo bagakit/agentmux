@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../test/remote-runtime-recovery.integration.test.tsx", "../../../src/renderer/src/global.d.ts"],
+  "exclude": []
+}

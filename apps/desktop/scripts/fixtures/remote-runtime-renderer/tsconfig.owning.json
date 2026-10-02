@@ -1,0 +1,5 @@
+{
+  "extends": "../../../tsconfig.test.json",
+  "include": ["../../../test/runtime-endpoint-binding.integration.test.tsx", "../../../src/renderer/src/global.d.ts"],
+  "exclude": []
+}

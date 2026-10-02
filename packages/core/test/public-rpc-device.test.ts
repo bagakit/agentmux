@@ -151,7 +151,7 @@ describe('source: public device administration', () => {
     const rejected = expect(request).rejects.toMatchObject({ code: 'CONTROL_CANCELLED' })
     await ready; controller.abort(); await rejected; await ended; expect(call).toHaveBeenCalledOnce()
   })
-  it('uses the original SDK deadline to explain device read-back without inventing an operation identity or replaying an invitation', async () => {
+  it('keeps admitted device work past response deadlines and explains cancellation read-back without inventing or replaying an invitation', async () => {
     let arrived!: () => void
     const call = vi.fn(async (_method: unknown, _params: unknown, context: AgentMuxRpcCallContext) => {
       arrived(); await new Promise<void>(resolve => context.signal!.addEventListener('abort', () => resolve(), { once: true }))
@@ -163,12 +163,16 @@ describe('source: public device administration', () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     for (const method of methods) {
       const ready = new Promise<void>(resolve => { arrived = resolve })
-      const pending = client.call(method, {})
-      const failed = pending.catch(error => error as AgentMuxError)
-      await ready; await vi.advanceTimersByTimeAsync(method === 'device.ls' ? 2_000 : 60_000)
+      const controller = new AbortController()
+      let settled = false
+      const pending = client.call(method, {}, { signal: controller.signal })
+      const failed = pending.catch(error => error as AgentMuxError).finally(() => { settled = true })
+      await ready; await vi.advanceTimersByTimeAsync(method === 'device.ls' ? 2_500 : 61_000)
+      expect(settled, 'an admitted owner has no external finite response deadline').toBe(false)
+      controller.abort()
       const error = await failed
-      expect(error).toMatchObject({ code: 'CONTROL_TIMEOUT' })
-      if (!(error instanceof AgentMuxError)) throw new Error('The SDK deadline did not return its original typed error')
+      expect(error).toMatchObject({ code: 'CONTROL_CANCELLED' })
+      if (!(error instanceof AgentMuxError)) throw new Error('Explicit cancellation did not return its original typed error')
       expect(error.message).toContain('Read agentmux device ls'); expect(error.message).not.toContain('operation ID')
       if (method === 'device.invite') {
         expect(error.message).toContain('lost invitation token cannot be recovered')

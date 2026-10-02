@@ -81,7 +81,9 @@ function hook(
     runId: 'run-1',
     providerId,
     eventName,
-    payload: { hook_event_name: eventName, tool_name: 'shell', session_id: 'native-1' }
+    payload: { hook_event_name: eventName, tool_name: 'shell', session_id: 'native-1',
+      ...(providerId === 'hermes' && eventName === 'on_session_end' ? { completed: true } : {}),
+      ...(providerId === 'pi' && eventName === 'agent_settled' ? { stopReason: 'stop' } : {}) }
   }
 }
 
@@ -225,7 +227,7 @@ describe('tool events arriving after the turn already ended', () => {
     // 那一种，所以它们对「第二种重开形状」完全失明。
     const { client, feed, statuses, storedStatus } = await harness('hermes')
     try {
-      await feed('post_llm_call', 'receipt-hermes-turn-end')
+      await feed('on_session_end', 'receipt-hermes-turn-end')
       expect(statuses().at(-1), 'Hermes 的收尾照旧要落 done').toMatchObject({ state: 'done' })
 
       // 收尾之后、重开之前：迟到的工具事件仍要被压住（这是闸门本来的用途，别把它一起放开）。

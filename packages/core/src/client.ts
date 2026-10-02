@@ -79,6 +79,7 @@ import {
   type CtxmuxAdapterRun,
   type CtxmuxAdapterStopOperation
 } from './ctxmux-run-adapter.js'
+import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
@@ -101,7 +102,7 @@ import {
 } from './agent-session-continuity.js'
 import { AgentHookServer, type AgentHookBinding } from './hook-server.js'
 import { AgentManagedHookInstaller, type AgentManagedHookInspection, type AgentManagedHookPlan } from './managed-hook-installer.js'
-import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
+import { defaultAgentMuxControlSocketPath, defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory, defaultCtxmuxStateDirectory, resolveCoreBinPath } from './runtime-paths.js'
 import {
   projectAgentMuxRuntimeSubjects,
   type AgentMuxRuntimeProjection,
@@ -272,6 +273,8 @@ export type AgentMuxAgentAttachment = {
 }
 
 export type AgentMuxClientOptions = {
+  /** Exact local public owner endpoint inherited by managed CLI callers. */
+  controlSocketPath?: string
   providers?: readonly AgentProvider[]
   /** Optional plugin contributions. When providers are omitted, built-ins and these plugins share one registry. */
   plugins?: readonly AgentMuxPlugin[]
@@ -548,6 +551,7 @@ async function executorUnavailableError(
 export class AgentMuxClient {
   readonly providers: AgentProviderRegistry
   private readonly kernel: CtxmuxRunAdapter
+  private readonly controlSocketPath: string
   private readonly registry: AgentMuxAgentSessionRegistry
   private readonly store: AgentMuxAgentSessionStore
   private readonly messageQueue: DurableAgentMuxMessageQueue
@@ -642,6 +646,10 @@ export class AgentMuxClient {
   }
 
   constructor(options: AgentMuxClientOptions = {}) {
+    this.controlSocketPath = options.controlSocketPath ?? defaultAgentMuxControlSocketPath()
+    if (!isAbsolute(this.controlSocketPath) || /[\0\r\n]/u.test(this.controlSocketPath)) {
+      throw new AgentMuxError('Public owner socket must be an absolute local path.', 'INVALID_CONTROL_REQUEST')
+    }
     this.providers = options.providers
       ? new AgentProviderRegistry(options.providers)
       : createDefaultAgentMuxPluginRegistry(options.plugins).providers
@@ -1369,7 +1377,7 @@ export class AgentMuxClient {
 
   /** Durable capability validation for ingress; a long-lived client cannot cache authorization. */
   async authorizeRetainedAgentCaller(capability: string, callerAgentSessionId: string): Promise<AgentMuxAgentSession> {
-    const current = await this.currentMessageReader(callerAgentSessionId)
+    const current = await this.currentStoredAgentSession(callerAgentSessionId)
     this.resolveMessageAuthor(capability, callerAgentSessionId, current)
     return cloneSession(current)
   }
@@ -1634,7 +1642,7 @@ export class AgentMuxClient {
       nodeVersion: process.versions.node,
       platform: process.platform,
       arch: process.arch,
-      supported: process.platform === 'darwin' && process.arch === 'arm64',
+      supported: supportedCtxmuxArtifactPlatform() !== null,
       ctxmux: {
         state: {
           configuredDirectory: this.kernel.stateDirectory,
@@ -1649,7 +1657,7 @@ export class AgentMuxClient {
         bundled: {
           version: CTXMUX_VERSION,
           sourceCommit: CTXMUX_COMMIT,
-          artifactPlatform: 'darwin-arm64'
+          artifactPlatform: supportedCtxmuxArtifactPlatform() ?? `${process.platform}-${process.arch}`
         },
         ready: true,
         capabilities: {
@@ -1776,8 +1784,10 @@ export class AgentMuxClient {
 
   async statusAgent(agentSessionId: string): Promise<AgentMuxAgentRuntimeStatus> {
     this.requireConnected()
-    const session = this.requireAgentSession(agentSessionId)
-    const run = await this.requireCurrentAgentRun(session)
+    const sessions = (await this.readAgentSessions()).filter(candidate => candidate.hostId === 'local')
+    const session = sessions.find(candidate => candidate.agentSessionId === agentSessionId)
+    if (!session) throw new AgentMuxError('Agent Session is unknown.', 'UNKNOWN_AGENT_SESSION')
+    const run = await this.requireCurrentAgentRun(session, sessions)
     const projectedRun = this.projectRun(run, session)
     const capabilities = { ...this.providers.get(session.providerId).catalog.capabilities }
     // 三条轴的观察合同：语义活性优先取 Session 自己声明的 semanticStatus（它带 native-hook/acp 来源，
@@ -1796,7 +1806,7 @@ export class AgentMuxClient {
       terminalCapabilityUnverified: session.terminalCapability !== undefined
     }, Date.now())
     return {
-      session: cloneSession(session),
+      session: structuredClone(session),
       run: projectedRun,
       capabilities,
       observation
@@ -1991,7 +2001,7 @@ export class AgentMuxClient {
 
   /** Validate the caller capability and return the authoritative live Session/Run facts. */
   async authorizeAgentCaller(capability: string, callerAgentSessionId: string): Promise<AgentMuxAgentSession> {
-    const caller = await this.currentMessageReader(callerAgentSessionId)
+    const caller = await this.currentStoredAgentSession(callerAgentSessionId)
     this.resolveMessageAuthor(capability, callerAgentSessionId, caller)
     return cloneSession(caller)
   }
@@ -2006,7 +2016,7 @@ export class AgentMuxClient {
     recipientSessionId: string | null
     recipientRunId: string | null
   }): Promise<void> {
-    const sender = await this.currentMessageReader(input.callerAgentSessionId)
+    const sender = await this.currentStoredAgentSession(input.callerAgentSessionId)
     this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, sender)
     if (input.senderAgentSessionId !== sender.agentSessionId || input.senderSessionId === null || input.senderRunId === null || input.senderSessionId !== sender.agentSessionId || input.senderRunId !== sender.run.runId) {
       throw new AgentMuxError('A2A sender facts do not match the authorized Agent Session/Run.', 'MESSAGE_SENDER_MISMATCH')
@@ -2014,7 +2024,7 @@ export class AgentMuxClient {
     if (input.recipientSessionId === null || input.recipientRunId === null) {
       throw new AgentMuxError('A2A recipient Session/Run facts are required.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
-    const recipient = await this.currentMessageReader(input.recipientSessionId)
+    const recipient = await this.currentStoredAgentSession(input.recipientSessionId)
     if (input.recipientRunId !== recipient.run.runId) {
       throw new AgentMuxError('A2A recipient facts do not match the resolved Agent Session/Run.', 'MESSAGE_RECIPIENT_MISMATCH')
     }
@@ -2027,7 +2037,7 @@ export class AgentMuxClient {
     limit: number
   }): Promise<AgentMuxDeliveryBatch> {
     this.requireConnected()
-    const reader = await this.currentMessageReader(input.callerAgentSessionId)
+    const reader = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, reader)
     return await this.messageQueue.check({ consumerId, readerRun: reader.run, limit: input.limit },
       async () => { await this.assertCurrentMessageReader(input.capability, consumerId, reader.run) })
@@ -2041,7 +2051,7 @@ export class AgentMuxClient {
     generation: number
   }): Promise<AgentMuxDeliveryAcknowledgement> {
     this.requireConnected()
-    const reader = await this.currentMessageReader(input.callerAgentSessionId)
+    const reader = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const consumerId = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, reader)
     if (!sameRun(reader.run, input.readerRun)) {
       throw new AgentMuxError('The delivery reader Run changed.', 'MESSAGE_ACK_GENERATION_STALE')
@@ -2050,17 +2060,17 @@ export class AgentMuxClient {
       async () => { await this.assertCurrentMessageReader(input.capability, consumerId, input.readerRun) })
   }
 
-  private async currentMessageReader(agentSessionId: string): Promise<AgentMuxStoredAgentSession> {
+  private async currentStoredAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession> {
     // Do not mutate/reload the active registry or trust a connect-time capability cache. Session
-    // persistence is read under the queue's admission callback; no Session write/Provider probe.
+    // persistence is read at the admission boundary; no Session write/Provider probe.
     const session = (await loadAgentSessions(this.store)).find((candidate) =>
       candidate.agentSessionId === agentSessionId && candidate.hostId === 'local')
-    if (!session) throw new AgentMuxError('Message reader Session is unknown.', 'UNKNOWN_AGENT_SESSION')
+    if (!session) throw new AgentMuxError('Agent Session is unknown.', 'UNKNOWN_AGENT_SESSION')
     return session
   }
 
   private async assertCurrentMessageReader(capability: string, consumerId: string, expectedRun: AgentMuxRunRef): Promise<void> {
-    const current = await this.currentMessageReader(consumerId)
+    const current = await this.currentStoredAgentSession(consumerId)
     this.resolveMessageAuthor(capability, consumerId, current)
     if (!sameRun(current.run, expectedRun)) {
       throw new AgentMuxError('The delivery reader Run changed before mutation.', 'MESSAGE_ACK_GENERATION_STALE')
@@ -2107,7 +2117,7 @@ export class AgentMuxClient {
     sourceMessageId: string
   }): Promise<Dispatch> {
     this.requireConnected()
-    const caller = await this.currentMessageReader(input.callerAgentSessionId)
+    const caller = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
     return await this.messageQueue.openDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
       async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
@@ -2122,7 +2132,7 @@ export class AgentMuxClient {
     kind: DispatchEventKind
   }): Promise<Dispatch> {
     this.requireConnected()
-    const caller = await this.currentMessageReader(input.callerAgentSessionId)
+    const caller = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
     return await this.messageQueue.recordDispatchEvent({ callerAgentSessionId: author,
       sourceMessageId: input.sourceMessageId, replyMessageId: input.replyMessageId, kind: input.kind },
@@ -2135,7 +2145,7 @@ export class AgentMuxClient {
     sourceMessageId: string
   }): Promise<Dispatch> {
     this.requireConnected()
-    const caller = await this.currentMessageReader(input.callerAgentSessionId)
+    const caller = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const author = this.resolveMessageAuthor(input.capability, input.callerAgentSessionId, caller)
     return await this.messageQueue.showDispatch({ callerAgentSessionId: author, sourceMessageId: input.sourceMessageId },
       async (messages) => { await this.assertDispatchAdmission(input.capability, author, caller.run, messages) })
@@ -2180,7 +2190,7 @@ export class AgentMuxClient {
     operationId: string
   }): Promise<{ thread: AgentThread; session: AgentMuxAgentSession }> {
     this.requireConnected()
-    const author = await this.currentMessageReader(input.callerAgentSessionId)
+    const author = await this.currentStoredAgentSession(input.callerAgentSessionId)
     const plan = planDiscussion({
       capability: input.capability,
       binding: {
@@ -2235,7 +2245,7 @@ export class AgentMuxClient {
     let initialEnvelope: AgentMuxMessageEnvelope | undefined
     if (input.initialMessage) {
       if (!input.prompt?.trim()) throw new AgentMuxError('An initial Agent message needs a body.', 'INVALID_AGENT_PROMPT')
-      const author = await this.currentMessageReader(input.initialMessage.callerAgentSessionId)
+      const author = await this.currentStoredAgentSession(input.initialMessage.callerAgentSessionId)
       this.resolveMessageAuthor(input.initialMessage.capability, input.initialMessage.callerAgentSessionId, author)
       const messageId = input.initialMessage.threadId ? `${input.initialMessage.threadId}:0`
         : `initial-${createHash('sha256').update(createOperationId).digest('base64url').slice(0, 22)}`
@@ -3131,7 +3141,7 @@ export class AgentMuxClient {
       input.expectedRun
     )
     const handle = current?.nativeHandle
-    const canProbe = catalog?.resumeStrategy.kind === 'provider-native' &&
+    const canProbe = run?.state !== 'running' && catalog?.resumeStrategy.kind === 'provider-native' &&
       handle?.kind === 'provider' &&
       handle.providerId === current?.providerId &&
       (catalog.resumeStrategy.locator !== 'transcript-path' || Boolean(handle.transcriptPath))
@@ -3786,18 +3796,20 @@ export class AgentMuxClient {
     }
   }
 
-  private assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): void {
-    const resolved = this.registry.resolve({ kind: 'run', run: runRef(run.runId) })
+  private assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, durableSessions?: readonly AgentMuxAgentSession[]): void {
+    const matching = durableSessions?.filter(candidate => sameRun(candidate.run, runRef(run.runId)))
+    const resolved = matching ? matching.length === 1 ? matching[0] : undefined
+      : this.registry.resolve({ kind: 'run', run: runRef(run.runId) })
     if (
       !sameRun(session.run, runRef(run.runId)) ||
-      resolved.agentSessionId !== session.agentSessionId ||
+      resolved?.agentSessionId !== session.agentSessionId ||
       run.workspacePath !== session.workspacePath
     ) {
       throw new AgentMuxError('Run no longer matches the Agent Session.', 'AGENT_SESSION_RUN_MISMATCH')
     }
   }
 
-  private async requireCurrentAgentRun(session: AgentMuxAgentSession): Promise<CtxmuxAdapterRun> {
+  private async requireCurrentAgentRun(session: AgentMuxAgentSession, durableSessions?: readonly AgentMuxAgentSession[]): Promise<CtxmuxAdapterRun> {
     let run: CtxmuxAdapterRun
     try {
       run = await this.kernel.status(session.run.runId)
@@ -3807,7 +3819,7 @@ export class AgentMuxClient {
       }
       throw error
     }
-    this.assertAgentRun(session, run)
+    this.assertAgentRun(session, run, durableSessions)
     return run
   }
 
@@ -3834,6 +3846,7 @@ export class AgentMuxClient {
     const source = provider.hook.eventNameSource
     const resolved: Record<string, string> = {
       ...terminalEnvironment({ ...environment, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
+      AGENTMUX_RPC_ENDPOINT: `unix:${this.controlSocketPath}`,
       AGENTMUX_HOOK_URL: binding.endpoint.url,
       AGENTMUX_HOOK_TOKEN: binding.endpoint.token,
       AGENTMUX_AGENT_SESSION_ID: agentSessionId,

@@ -31,7 +31,7 @@ function runningAgent(id = 's') {
 }
 
 describe('steer queue operationId correlation (T-008)', () => {
-  it('(c)+(a) a rejected flush keeps the entry and the NEXT auto-flush retries it with the same id', async () => {
+  it('(c)+(a) an uncertain flush keeps the entry and an explicit retry uses the same id', async () => {
     useAppStore.setState({ sessions: [runningAgent() as never] })
     const ids: string[] = []
     const submit = vi.spyOn(api.sessions, 'submitPrompt')
@@ -49,10 +49,11 @@ describe('steer queue operationId correlation (T-008)', () => {
     // written down: a healthy Agent's message judged dead because OUR readiness probe had not completed.
     expect(useAppStore.getState().agentSteerQueues.s).toEqual([{ ...admitted, promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, status: 'deferred', error: 'busy' }])
 
-    // The whole point of `deferred`: the next runtime event retries on its own. No user action, no
-    // "Send now" click. This assertion used to read `expect(ids).toHaveLength(1)` — i.e. it pinned the
-    // queue's refusal to retry against a live Agent, which is exactly what must not happen.
+    // A generic failure cannot prove no admission. A background wake keeps the original intent;
+    // an explicit retry uses its same Core identity instead of composing another mutation.
     await useAppStore.getState().flushAgentSteerQueue('s')
+    expect(ids).toHaveLength(1)
+    await useAppStore.getState().sendQueuedAgentSteer('s', admitted.operationId)
     expect(ids).toHaveLength(2)
     expect(useAppStore.getState().agentSteerQueues.s).toBeUndefined() // drained on the retry
 
@@ -67,7 +68,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.setState({ sessions: [runningAgent() as never] })
     const sent: string[] = []
     const submit = vi.spyOn(api.sessions, 'submitPrompt')
-    submit.mockImplementationOnce(async () => { throw new Error('not ready yet') }) // 队首被拒
+    submit.mockImplementationOnce(async () => { throw Object.assign(new Error('not ready yet'), { code: 'AGENT_PROMPT_SUBMISSION_BUSY' }) }) // 明确未受理
     submit.mockImplementation(async (_c, prompt) => { sent.push(prompt) })
 
     useAppStore.getState().enqueueAgentSteer('s', 'first')
@@ -89,7 +90,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.setState({ sessions: [runningAgent() as never] })
     const sent: string[] = []
     const submit = vi.spyOn(api.sessions, 'submitPrompt')
-    submit.mockImplementationOnce(async () => { throw new Error('not ready yet') }) // 用户点 Send now，被拒
+    submit.mockImplementationOnce(async () => { throw Object.assign(new Error('not ready yet'), { code: 'AGENT_PROMPT_SUBMISSION_BUSY' }) }) // 明确未受理
     submit.mockImplementation(async (_c, prompt) => { sent.push(prompt) })
 
     useAppStore.getState().enqueueAgentSteer('s', 'hurry this')
@@ -111,7 +112,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     useAppStore.setState({ sessions: [runningAgent() as never] })
     const reported: string[] = []
     vi.spyOn(useAppStore.getState(), 'reportError').mockImplementation((e) => { reported.push(String(e)) })
-    vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(new Error('not ready yet'))
+    vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValue(Object.assign(new Error('not ready yet'), { code: 'AGENT_PROMPT_SUBMISSION_BUSY' }))
 
     useAppStore.getState().enqueueAgentSteer('s', 'steer me')
     await useAppStore.getState().flushAgentSteerQueue('s')
@@ -134,7 +135,7 @@ describe('steer queue operationId correlation (T-008)', () => {
     // 这份形状没有任何东西是靠内存引用活着的。
     const persisted = JSON.parse(JSON.stringify({
       's': [
-        { operationId: 'op-live', runId: 'r', promptCondition: { expectedRun: { runId: 'r' }, afterSubmissionId: null }, text: '重启前排的', status: 'queued' },
+        { operationId: 'op-live', runId: 'r', promptCondition: null, text: '重启前排的', status: 'queued' },
         // 对着旧 run 的那条：不许静默投进当前 run（它不是写给这个 run 的），也不许替用户删掉。
         { operationId: 'op-stale', runId: 'old-run', text: '写给上一个 run 的', status: 'queued' }
       ]

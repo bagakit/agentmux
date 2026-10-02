@@ -1,6 +1,6 @@
 import { dirname, join } from 'node:path'
-import { AgentMuxClient, AgentMuxControlServer, AgentMuxFileAgentSessionStore, AgentMuxError,
-  AgentMuxHostedRuntimeService, connectAgentMuxRpc, defaultAgentMuxControlSocketPath,
+import { AgentMuxFileAgentSessionStore, AgentMuxError,
+  startHeadlessAgentMux, connectAgentMuxRpc, defaultAgentMuxControlSocketPath,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
@@ -35,10 +35,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const privateConfigured = options.privateAccess !== undefined
   const configurationPath = isPrivateAccessConfigurationPath(options.privateAccessConfigurationPath)
     ? options.privateAccessConfigurationPath : undefined
-  let client: AgentMuxClient | undefined, hosted: AgentMuxHostedRuntimeService | undefined
-  let resolveOwner!: (owner: AgentMuxClient) => void, rejectOwner!: (error: unknown) => void
-  const ready = new Promise<AgentMuxClient>((resolve, reject) => { resolveOwner = resolve; rejectOwner = reject })
-  void ready.catch(() => {})
+  let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined, access: PrivateAccess | undefined
   let assets: Awaited<ReturnType<typeof loadPrivateMobileAssets>> | undefined, assetIssue: string | undefined
   let privateIssue = options.privateAccessIssue, tls: PrivateTlsIdentity | undefined
@@ -71,21 +68,19 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     const certificatePreparation = readCertificatePreparation()
     const sources = { ...(configurationPath ? { configurationPath } : {}),
       ...(certificatePreparation ? { certificatePreparation } : {}) }
-    const failure = privateIssue ?? server.httpUnavailable?.message
+    const failure = privateIssue ?? runtime?.server.httpUnavailable?.message
     if (failure) return { state: 'unavailable', message: failure, ...sources }
     if (!privateInitialized) return { state: 'unavailable', message: 'Private access initialization is not yet confirmed. Unix diagnostics remain available.', ...sources }
     if (!privateConfigured) return { state: 'unconfigured',
       message: 'Private mobile access is not configured. Prepare the explicit private IP/TLS manifest to enable it; Unix and Agent Sessions remain available.', ...sources }
-    if (!access || !tls || !authority || !server.httpAddress) return { state: 'unavailable',
+    if (!access || !tls || !authority || !runtime?.server.httpAddress) return { state: 'unavailable',
       message: 'The configured private listener is not confirmed. The original Unix Host and Agent Sessions remain available.', ...sources }
     return { state: 'listening', message: 'Private HTTPS is listening. Device approval and phone system trust require their own confirmation.',
       origin: access.origin, issuerHostId: authority.hostId, certificateFingerprint: tls.certificateFingerprint,
       expiresAt: tls.expiresAt, ...(assets ? { mobileBuildDigest: assets.buildDigest } : {}), ...(assetIssue ? { assetIssue } : {}), ...sources }
   }
-  const server = new AgentMuxControlServer({ socketPath: path, ...(http ? { http } : {}),
+  const service = {
     deviceAdministration: createDeviceAdministration(authorityReady, options.deviceConfirmation, privateAccessState),
-    coreClients: async () => [{ hostId: 'local', client: await ready }],
-    hostedRuntime: async () => { await ready; return hosted! },
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
       const desktop = await desktopClient(context)
       try { return await desktop.call(method, params, context.signal ? { signal: context.signal } : {}) }
@@ -104,11 +99,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         } }
       } catch (error) { await desktop.dispose(); throw error }
     }
-  })
+  }
   try {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
-    await server.start()
+    runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
+      ...(options.providers ? { providers: options.providers } : {}), ...(http ? { http } : {}), service })
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))
@@ -121,13 +117,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       rejectAuthority(new AgentMuxError('Device access requires the original durable File Store.', 'CONTROL_UNAVAILABLE'))
       if (options.privateAccess) privateIssue = 'Mobile access requires the original durable File Store. The existing Unix Host remains available.'
     }
-    client = new AgentMuxClient({ store: options.store,
-      ...(options.providers ? { providers: options.providers } : {}) })
-    await client.connect()
-    hosted = new AgentMuxHostedRuntimeService(client,
-      options.store instanceof AgentMuxFileAgentSessionStore ? options.store.path : null)
-    resolveOwner(client)
-    if (tls && authority && !privateIssue && !server.httpUnavailable) {
+    if (tls && authority && !privateIssue && !runtime?.server.httpUnavailable) {
       try {
         access = new PrivateAccess(authority, tls)
         if (options.privateAccess?.mobileBuildDirectory) {
@@ -141,19 +131,15 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     privateInitialized = true
     resolvePrivate()
   } catch (error) {
-    rejectOwner(error)
     rejectAuthority(error); resolvePrivate()
-    await server.stop()
-    await client?.dispose()
+    await runtime?.stop()
     throw error
   }
   let disposed = false
 
-  return { client, hosted, server, privateAccessState, deviceAuthority: () => authorityReady, async dispose() {
+  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, privateAccessState, deviceAuthority: () => authorityReady, async dispose() {
     if (disposed) return; disposed = true
-    await server.stop()
-    await hosted?.dispose()
-    await client?.dispose()
+    await runtime!.stop()
   } }
 }
 

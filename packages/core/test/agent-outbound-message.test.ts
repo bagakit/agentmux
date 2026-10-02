@@ -1,11 +1,11 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   composeAgentLaunchPrompt,
   composeOutboundMessage
 } from '../src/agent-outbound-message.js'
-import { AGENTMUX_SELF_CONTEXT_VERB } from '../src/agentmux-cli-help.js'
+const AGENTMUX_SELF_CONTEXT_VERB = 'whoami'
 import {
   hashAgentCapability,
   issueAgentCapability
@@ -188,7 +188,7 @@ describe('discuss 首条消息路径经同一出口', () => {
   const raw = issueAgentCapability()
   const binding = {
     agentSessionId: 'agent-a',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     runId: 'run-1',
     capabilityHash: hashAgentCapability(raw)
   }
@@ -198,7 +198,7 @@ describe('discuss 首条消息路径经同一出口', () => {
       capability: raw,
       binding,
       currentRunId: 'run-1',
-      targetWorkspacePath: upstreamFixturePath("repo"),
+      targetWorkspacePath: fixturePath("repo"),
       body: NASTY_USER,
       operationId: 'op-1',
       now: 1000

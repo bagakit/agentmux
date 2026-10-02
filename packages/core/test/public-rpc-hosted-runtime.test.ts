@@ -1,20 +1,23 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
 import { loadAgentSessions } from '../src/agent-session-store.js'
-import { AgentMuxControlServer, type AgentMuxControlServerOptions } from '../src/public-rpc-server.js'
+import { AgentMuxControlServer as SourceServer, type AgentMuxControlServerOptions } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
-import { encodeHostedValue, decodeHostedValue } from '../src/hosted-value.js'
-import type { AgentMuxHostedInvocation } from '../src/hosted-client-contract.js'
+import { encodeHostedValue, decodeHostedValue, AgentMuxHostedTransferReader } from '../src/hosted-value.js'
+import type { AgentMuxHostedInvocation, AgentMuxRuntimeOwnerIdentity, AgentMuxHostedStreamValue } from '../src/hosted-client-contract.js'
 import type { AgentMuxClientEvent, AgentProviderSessionHistoryObservationContext } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcError, type AgentMuxRpcConnection, type AgentMuxRpcFrame } from '../src/public-rpc-wire.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 
+const AgentMuxControlServer: typeof SourceServer = process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY
+  ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_SERVER_ENTRY).href)).AgentMuxControlServer : SourceServer
 const cleanups: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const catalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }
@@ -34,13 +37,16 @@ async function hostedFixture(ids = ['source-agent', 'recipient-agent']) {
   })
   core.inner.kernel.attach = vi.fn(async (runId: string) => ({ run: core.run(runId), gap: null, replay: [] }))
   core.inner.kernel.replay = vi.fn(async (runId: string) => ({ run: core.run(runId), gap: null, replay: [] }))
-  const hosted = new AgentMuxHostedRuntimeService(core.client)
+  const owner: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-hosted-runtime', ownerInstanceId: 'private-hosted-epoch',
+    protocolVersion: 1, processId: process.pid, ctxmux: core.client.runtimeIdentity(), availability: 'connected' }
+  const fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+  const hosted = new AgentMuxHostedRuntimeService(core.client, join(core.root, 'sessions.json'), () => owner)
   cleanups.push(() => hosted.dispose())
   const publisher = core.client as unknown as { publisher: { publish(event: AgentMuxClientEvent): void } }
-  return { ...core, hosted, inputs, publish: (event: AgentMuxClientEvent) => publisher.publisher.publish(event) }
+  return { ...core, hosted, owner, fence, inputs, publish: (event: AgentMuxClientEvent) => publisher.publisher.publish(event) }
 }
 async function endpoint(options: AgentMuxControlServerOptions = {}) {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-host-join-")), path = join(root, 'owner.sock')
+  const root = await mkdtemp(fixturePath("tmp/amx-host-join-")), path = join(root, 'owner.sock')
   const owner = new AgentMuxControlServer({ coreClients: () => [], execute: async () => ({ operation: 'space.ls', catalog }), ...options, socketPath: path })
   cleanups.push(async () => { await owner.stop(); await rm(root, { recursive: true, force: true }) })
   await owner.start()
@@ -138,54 +144,72 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     cleanups.push(() => controller.abort())
     const stream = await fetch(h.url(), { method: 'POST', signal: controller.signal,
       headers: { 'Content-Type': 'application/json', Cookie: 'device-A' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'runtime.events', params: { consumerId } }) })
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'runtime.events', params: { fence: f.fence, consumerId } }) })
     expect(stream.headers.get('content-type')).toContain('text/event-stream')
     const reader = stream.body!.getReader(); cleanups.push(() => reader.cancel())
     const first = new TextDecoder().decode((await reader.read()).value)
-    expect(first).toContain('"bootstrap"'); expect(first).toContain('"recipient-agent"')
+    const transfer = new AgentMuxHostedTransferReader(), decoder = new TextDecoder()
+    let buffer = first, initial: AgentMuxHostedStreamValue | undefined
+    while (!initial) {
+      let separator: number
+      while ((separator = buffer.indexOf('\n\n')) >= 0) {
+        const frame = JSON.parse(buffer.slice(0, separator).split('\n').filter(line => line.startsWith('data:')).map(line => line.slice(5).trimStart()).join('\n'))
+        buffer = buffer.slice(separator + 2)
+        if (frame.result) expect(frame.result.initial.owner).toEqual(f.owner)
+        if (frame.params?.event?.type === 'snapshot') initial = transfer.accept(frame.params.event.data) as AgentMuxHostedStreamValue | undefined
+      }
+      if (!initial) { const next = await reader.read(); expect(next.done).toBe(false); buffer += decoder.decode(next.value, { stream: true }) }
+    }
+    expect(initial).toMatchObject({ kind: 'initial', value: { sessions: [
+      { agentSessionId: 'source-agent' }, { agentSessionId: 'recipient-agent' }
+    ] } })
     let requestId = 2
     const post = async (id: string, method: string, params: unknown) => {
       const response = await fetch(h.url(), { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: id },
         body: JSON.stringify({ jsonrpc: '2.0', id: requestId++, method, params }) })
       return await response.json() as Record<string, any>
     }
-    expect(await post('device-B', 'runtime.release-consumer', { consumerId })).toMatchObject({ result: { released: false } })
+    expect(await post('device-B', 'runtime.release-consumer', { fence: f.fence, consumerId })).toMatchObject({ result: { released: false } })
     const data = Uint8Array.from([0xe4, 0xb8, 0xad, 0, 0xff])
     const input = invocation({ method: 'writeAgent', args: [{ agentSessionId: 'recipient-agent',
       expectedRun: { runId: 'run-recipient-agent' }, data, source: 'user' }] })
-    expect(await post('device-B', 'runtime.invoke', { consumerId, invocation: input })).toMatchObject({ error: { data: { code: 'CONTROL_UNAVAILABLE' } } })
-    const ack = await post('device-A', 'runtime.invoke', { consumerId, invocation: input })
+    expect(await post('device-B', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })).toMatchObject({ error: { data: { code: 'CONTROL_UNAVAILABLE' } } })
+    const ack = await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })
     expect(decodeHostedValue(ack.result.value)).toEqual({ runId: 'run-recipient-agent',
       appliedByteRange: { startByte: 0, endByte: data.length }, acceptedThroughByte: data.length })
     expect(f.inputs).toEqual([{ runId: 'run-recipient-agent', data: [...data] }])
     const stale = invocation({ method: 'writeAgent', args: [{ agentSessionId: 'recipient-agent',
       expectedRun: { runId: 'foreign-run' }, data, source: 'user' }] })
-    expect(await post('device-A', 'runtime.invoke', { consumerId, invocation: stale })).toMatchObject({ error: { data: { code: 'STALE_AGENT_SESSION' } } })
+    expect(await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: stale })).toMatchObject({ error: { data: { code: 'STALE_AGENT_SESSION' } } })
     expect(f.inputs).toHaveLength(1)
-    expect(await post('device-A', 'runtime.release-consumer', { consumerId })).toMatchObject({ result: { released: true } })
-    expect(await post('device-A', 'runtime.invoke', { consumerId, invocation: input })).toMatchObject({ error: { data: { code: 'CONTROL_UNAVAILABLE' } } })
+    expect(await post('device-A', 'runtime.release-consumer', { fence: f.fence, consumerId })).toMatchObject({ result: { released: true } })
+    expect(await post('device-A', 'runtime.invoke', { fence: f.fence, consumerId, invocation: input })).toMatchObject({ error: { data: { code: 'CONTROL_UNAVAILABLE' } } })
     expect(f.inner.kernel.stop).not.toHaveBeenCalled()
     expect(f.client.agentSession('recipient-agent').run).toEqual({ runId: 'run-recipient-agent' })
   })
-  it('rejects all five runtime methods for a managed Agent before any borrowed SDK input or forged principal can be admitted', async () => {
+  it('rejects all runtime methods for a managed Agent before any borrowed SDK input or forged principal can be admitted', async () => {
     const f = await hostedFixture(), borrowed = vi.fn(() => f.hosted), authorize = vi.spyOn(f.client, 'authorizeRetainedAgentCaller')
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: borrowed })
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path }, credentials: f.credentials })
     cleanups.push(() => client.dispose())
     const consumerId = 'managed-consumer'
-    await expect(client.call('runtime.bootstrap', { consumerId })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
-    await expect(client.call('runtime.invoke', { consumerId, invocation: invocation({ method: 'writeAgent', args: [{
+    await expect(client.call('runtime.bootstrap', { fence: f.fence, consumerId })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(client.call('runtime.invoke', { fence: f.fence, consumerId, invocation: invocation({ method: 'writeAgent', args: [{
       agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' }, data: 'forbidden', source: 'user' }] }) })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
-    await expect(client.call('runtime.release-consumer', { consumerId })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(client.call('runtime.release-consumer', { fence: f.fence, consumerId })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(client.call('runtime.owner.identity', {})).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(client.call('runtime.owner.shutdown', { fence: f.fence })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     const callbacks = { onInitial: vi.fn(), onEvent: vi.fn() }
-    await expect(client.subscribe('runtime.events', { consumerId }, callbacks)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
-    await expect(client.subscribe('runtime.history-watch', { consumerId, agentSessionId: 'recipient-agent' }, callbacks)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(client.subscribe('runtime.events', { fence: f.fence, consumerId }, callbacks)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(client.subscribe('runtime.history-watch', { fence: f.fence, consumerId, agentSessionId: 'recipient-agent' }, callbacks)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    for (const method of ['runtime.attachment-watch', 'runtime.replay-watch'] as const) await expect(client.subscribe(method, { consumerId, fence: f.fence,
+      target: { kind: 'terminal-run', runId: 'run-recipient-agent' }, afterByte: 0, view: 'raw' }, callbacks)).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     expect(borrowed).not.toHaveBeenCalled(); expect(authorize).not.toHaveBeenCalled(); expect(f.inputs).toEqual([])
     expect(callbacks.onInitial).not.toHaveBeenCalled(); expect(callbacks.onEvent).not.toHaveBeenCalled()
     const raw = new AgentMuxRpcService({ coreClients: f.coreClients, hostedRuntime: borrowed })
-    await expect(raw.call('runtime.bootstrap', { consumerId })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    await expect(raw.call('runtime.bootstrap', { fence: f.fence, consumerId })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     const user = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => user.dispose())
-    await expect(user.call('runtime.bootstrap', { consumerId, principal: { kind: 'user', id: 'forged' } } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    await expect(user.call('runtime.bootstrap', { fence: f.fence, consumerId, principal: { kind: 'user', id: 'forged' } } as never)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
     expect(borrowed).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   })
   it('keeps incremental output, resize and semantic events in exact order while the first notification is held', async () => {
@@ -203,9 +227,9 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
       cancel: async id => { const dispose = disposers.get(id); if (!dispose) return false; disposers.delete(id); await dispose(); return true }
     }
     const result = await dispatcher.receive({ jsonrpc: '2.0', id: 'original-request', method: 'runtime.events',
-      params: { consumerId: 'ordered-consumer' } }, channel)
-    expect(result).toMatchObject({ result: { initial: { bootstrap: { sessions: [expect.anything(), expect.anything()] } } } })
-    await service.call('runtime.invoke', { consumerId: 'ordered-consumer', invocation: { method: 'reattachAgent', args: ['recipient-agent'] } },
+      params: { fence: f.fence, consumerId: 'ordered-consumer' } }, channel)
+    expect(result).toMatchObject({ result: { initial: { owner: f.owner, transferId: expect.any(String) } } })
+    await service.call('runtime.invoke', { fence: f.fence, consumerId: 'ordered-consumer', invocation: { method: 'reattachAgent', args: ['recipient-agent'] } },
       { principal })
     // Ignore the original attach's process observation, then admit the explicit
     // mixed event batch before opening so snapshot-label coalescing is exposed.
@@ -217,12 +241,14 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     f.publish({ type: 'terminal-resized', run: evidence.run, cols: 90, rows: 30, throughByte: 1, resizeRevision: 7 })
     f.publish({ type: 'agent-session', session: f.client.agentSession('recipient-agent') })
     unblock(); await opening
-    await vi.waitFor(() => expect(frames).toHaveLength(4))
+    await vi.waitFor(() => expect(frames).toHaveLength(5))
     const events = frames.map(frame => (frame as any).params)
-    expect(events.map(p => p.sequence)).toEqual([1, 2, 3, 4])
-    expect(events.map(p => p.event.data.event.type)).toEqual(['process-state', 'terminal-output', 'terminal-resized', 'agent-session'])
-    expect(decodeHostedValue(events[1].event.data.event)).toMatchObject({ dataBytes: Uint8Array.from([97]) })
-    expect(events[2].event.data.event).toMatchObject({ throughByte: 1, resizeRevision: 7 })
+    expect(events.map(p => p.sequence)).toEqual([1, 2, 3, 4, 5])
+    const transfer = new AgentMuxHostedTransferReader(), values = events.map(p => transfer.accept(p.event.data) as AgentMuxHostedStreamValue)
+    expect(values[0]).toMatchObject({ kind: 'initial', value: { sessions: [expect.anything(), expect.anything()] } })
+    expect(values.slice(1).map(value => value.kind === 'event' ? value.event.type : value.kind)).toEqual(['process-state', 'terminal-output', 'terminal-resized', 'agent-session'])
+    expect(values[2]).toMatchObject({ kind: 'event', event: { dataBytes: Uint8Array.from([97]) } })
+    expect(values[3]).toMatchObject({ kind: 'event', event: { throughByte: 1, resizeRevision: 7 } })
     for (const id of [...disposers.keys()]) await channel.cancel(id)
     expect(f.inner.kernel.detach).toHaveBeenCalledTimes(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   })
@@ -241,18 +267,17 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     })
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => client.dispose())
-    const consumerId = 'original-history-consumer', events = await client.subscribe('runtime.events', { consumerId }, { onInitial: vi.fn(), onEvent: vi.fn() })
-    const observed: unknown[] = [], openings: unknown[] = []
-    const history = await client.subscribe('runtime.history-watch', { consumerId, agentSessionId: 'recipient-agent',
+    const consumerId = 'original-history-consumer', events = await client.subscribe('runtime.events', { fence: f.fence, consumerId }, { onInitial: vi.fn(), onEvent: vi.fn() })
+    const observed: unknown[] = [], openings: unknown[] = [], transfer = new AgentMuxHostedTransferReader()
+    const history = await client.subscribe('runtime.history-watch', { fence: f.fence, consumerId, agentSessionId: 'recipient-agent',
       options: { env: { signal: 'ordinary-environment-data' } } }, {
-      onInitial: value => openings.push(value), onEvent: value => observed.push(value)
+      onInitial: value => openings.push(value), onEvent: value => { if (value.type === 'snapshot') { const observation = transfer.accept(value.data) as AgentMuxHostedStreamValue | undefined; if (observation?.kind === 'history') observed.push(observation.observation) } }
     })
-    expect(openings).toEqual([{ source: { providerId: 'codex', nativeSessionId: 'original-native-history' } }])
+    expect(openings).toEqual([{ owner: f.owner, source: { providerId: 'codex', nativeSessionId: 'original-native-history' } }])
     expect(context.env.signal).toBe('ordinary-environment-data'); expect(context.signal).toBeInstanceOf(AbortSignal)
     context.onChange({ kind: 'invalidated', source: context.source })
-    await vi.waitFor(() => expect(observed).toEqual([{ type: 'snapshot', data: { observation: {
-      kind: 'invalidated', source: context.source, agentSessionId: 'recipient-agent' } } }]))
-    expect(await client.call('runtime.release-consumer', { consumerId })).toEqual({ released: true })
+    await vi.waitFor(() => expect(observed).toEqual([{ kind: 'invalidated', source: context.source, agentSessionId: 'recipient-agent' }]))
+    expect(await client.call('runtime.release-consumer', { fence: f.fence, consumerId })).toEqual({ released: true })
     await vi.waitFor(() => expect(disposed).toHaveBeenCalledTimes(1))
     await history.dispose(); await events.dispose()
     expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.client.agentSession('recipient-agent').run).toEqual(previous.run)
@@ -270,9 +295,9 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     const h = await endpoint({ coreClients: f.coreClients, hostedRuntime: () => f.hosted })
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: h.path } }); cleanups.push(() => client.dispose())
     const consumerId = 'signal-consumer'
-    const events = await client.subscribe('runtime.events', { consumerId }, { onInitial: vi.fn(), onEvent: vi.fn() })
+    const events = await client.subscribe('runtime.events', { fence: f.fence, consumerId }, { onInitial: vi.fn(), onEvent: vi.fn() })
     cleanups.push(() => events.dispose())
-    const controller = new AbortController(), pending = client.call('runtime.invoke', { consumerId,
+    const controller = new AbortController(), pending = client.call('runtime.invoke', { fence: f.fence, consumerId,
       invocation: { method: 'submitAgentPrompt', args: [{ agentSessionId: 'recipient-agent', expectedRun: { runId: 'run-recipient-agent' },
         operationId: 'original-prompt', afterSubmissionId: null, prompt: 'Original prompt', signal: 'forged-json-signal' as never }] }
     }, { signal: controller.signal })
@@ -318,6 +343,25 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
     await expect(bad.call('space.ls', { target: {} })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
     expect(contexts).toHaveLength(before); expect(f.client.agentSession('source-agent')).toEqual(observed); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   })
+  it("keeps a remote caller's original Core facts and the actual Desktop-owned self view", async () => {
+    const f = await hostedFixture()
+    const forwardRpc = vi.fn(async () => { throw new Error('The remote semantic owner must not claim the Desktop projection') })
+    const client = Object.assign(f.client, { forwardRpc })
+    const region = { kind: 'agent' as const, tabId: 'desktop-tab', regionId: 'desktop-region', workspaceId: 'desktop-workspace',
+      agentSessionId: 'source-agent', providerId: 'codex', executorId: 'codex', bounds: { x: 0, y: 0, width: 1, height: 1 },
+      neighbors: { left: { kind: 'none' as const }, right: { kind: 'none' as const }, up: { kind: 'none' as const }, down: { kind: 'none' as const } } }
+    const execute = vi.fn(async (request: import('../src/control.js').AgentMuxControlRequest) => {
+      if (request.operation !== 'inspect.region') throw new Error('Only the original Desktop view is observed')
+      expect(request.caller).toEqual(f.credentials)
+      return { operation: 'inspect.region' as const, region }
+    })
+    const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'remote', client }], execute })
+    const self = await service.call('whoami', {}, { caller: f.credentials })
+    expect(self.session.agentSessionId).toBe('source-agent'); expect(self.status!.run.state).toBe('running')
+    expect(self.view).toEqual({ attached: true, region })
+    expect(self.unavailable).toEqual([]); expect(execute).toHaveBeenCalledOnce(); expect(forwardRpc).not.toHaveBeenCalled()
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  })
   it('keeps known Host Core facts only when forwarding reports a real local transport absence', async () => {
     const f = await hostedFixture(), absent = new AgentMuxError('The private GUI socket is absent.', 'CONTROL_UNAVAILABLE')
     const service = new AgentMuxRpcService({ coreClients: f.coreClients, forwardControl: async () => { throw absent } })
@@ -335,7 +379,7 @@ describe('one public service borrowed by a long-lived Runtime Host', () => {
   it('reports an absent borrowed runtime owner without activating another SDK or inventing a bootstrap', async () => {
     const coreClients = vi.fn(() => { throw new Error('Runtime lookup must not activate a fallback SDK') })
     const service = new AgentMuxRpcService({ coreClients })
-    await expect(service.call('runtime.bootstrap', { consumerId: 'known-user-consumer' }, {
+    await expect(service.call('runtime.bootstrap', { consumerId: 'known-user-consumer', fence: { runtimeId: 'absent-owner', ownerInstanceId: 'absent-epoch' } }, {
       principal: { kind: 'user', id: 'transport-approved-user' }
     })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
     expect(coreClients).not.toHaveBeenCalled()

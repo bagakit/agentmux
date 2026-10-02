@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
@@ -40,7 +40,7 @@ async function fixture(providerId: 'codex' | 'claude') {
   const store = new AgentMuxMemoryAgentSessionStore()
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'synthetic-input-agent', providerId, executorId: providerId,
-    hostId: 'local', workspacePath: upstreamFixturePath("synthetic"), run: { runId: 'synthetic-running' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("synthetic"), run: { runId: 'synthetic-running' }, retiredRuns: [],
     hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', createdAt: 1, updatedAt: 2,
     semanticStatus: { state: 'done', source: 'native-hook', observedAt: 2, stateEnteredAt: 2 }
   }
@@ -56,7 +56,7 @@ async function fixture(providerId: 'codex' | 'claude') {
   const run = (): CtxmuxAdapterRun => ({
     nativeService: null,
     runId: stored.run.runId, lifecycleOperationId: null, program: providerId, args: [],
-    workspacePath: upstreamFixturePath("synthetic"), pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
+    workspacePath: fixturePath("synthetic"), pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: acceptedBytes
   })
   const status = vi.fn(async () => run())
@@ -208,7 +208,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
   h.inner.kernel.observeOutput = observe
   const waiter = vi.spyOn(AgentTerminalScreenEvidence.prototype, 'wait')
   const abort = new AbortController()
-  if (reason === 'timeout') vi.useFakeTimers()
+  if (reason === 'timeout') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   let settled = false
   const waiting = h.inner.screenEvidence.wait(h.client.agentSession(h.stored.agentSessionId), 0, true,
     () => false, { signal: abort.signal, timeoutMs: 25,
@@ -229,7 +229,7 @@ it.each(['cancel', 'timeout'] as const)('settles %s during attachment creation w
     const ready = h.inner.screenEvidence.wait(h.client.agentSession(h.stored.agentSessionId), 0, false,
       () => true, { timeoutMessage: 'Synthetic timeout', terminalMessage: 'Synthetic exit' })
     // Checkpoint restoration uses xterm's asynchronous write queue, which this branch's clock owns.
-    if (reason === 'timeout') await vi.advanceTimersByTimeAsync(0)
+    if (reason === 'timeout') await vi.advanceTimersByTimeAsync(1)
     expect(await ready).toBe(0)
     expect(observe).toHaveBeenCalledTimes(1)
     expect(waiter).toHaveBeenCalledTimes(1)

@@ -55,16 +55,24 @@ async function openOutbox() {
   await act(async () => mailbox.dispatchEvent(event))
   await dom.click('[role="tab"][id$="-outbox-tab"]')
 }
-function moveButton(text: string, direction: 'up' | 'down') {
+async function moveButton(text: string, direction: 'up' | 'down', activate = false) {
   const row = rows().find(value => value.querySelector('span')?.textContent === text)
   expect(row, `Missing actual pending message ${text}`).toBeDefined()
-  const button = [...row!.querySelectorAll<HTMLButtonElement>('button')]
+  const open = row!.querySelector<HTMLButtonElement>('.composer-mailbox__row')
+  expect(open).not.toBeNull()
+  await act(async () => open!.click())
+  const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.composer-outbox__actions button')]
     .find(value => value.textContent === `Move ${direction}`)
   expect(button, `Missing actual Move ${direction} action`).toBeDefined()
-  return button!
+  const observed = { disabled: button!.disabled }
+  if (activate) await act(async () => button!.click())
+  const back = dom.container.querySelector<HTMLButtonElement>('.composer-mailbox__back button')
+  expect(back).not.toBeNull()
+  await act(async () => back!.click())
+  return observed
 }
 async function move(text: string, direction: 'up' | 'down') {
-  await act(async () => moveButton(text, direction).click())
+  await moveButton(text, direction, true)
 }
 async function initialize(processState: 'running' | 'exited' = 'running') {
   const session = { ...composerSession(), processState }
@@ -111,9 +119,9 @@ it('uses the actual mailbox controls and shows immutable known time next to an u
   expect(rows().map(row => row.querySelector('time')?.getAttribute('datetime') ?? null)).toEqual([
     new Date(clock).toISOString(), null, new Date(clock + 90_000).toISOString()
   ])
-  expect(rows()[1]!.textContent).toContain('Queued time unknown')
-  expect(moveButton('first', 'up').disabled).toBe(true)
-  expect(moveButton('last', 'down').disabled).toBe(true)
+  expect(rows()[1]!.textContent).toContain('Time not recorded')
+  expect((await moveButton('first', 'up')).disabled).toBe(true)
+  expect((await moveButton('last', 'down')).disabled).toBe(true)
   await move('last', 'up')
   expect(rowTexts()).toEqual(['first', 'last', 'old'])
   expect(queue()).toEqual([first, last, old])
@@ -134,7 +142,7 @@ it.each([undefined, NaN, Infinity, -1, 9e15, 'not-a-time'])(
     useAppStore.setState({ agentSteerQueues: { [sessionId]: [old] } })
     await openOutbox()
     expect(rowTexts()).toEqual(['old'])
-    expect(rows()[0]!.textContent).toContain('Queued time unknown')
+    expect(rows()[0]!.textContent).toContain('Time not recorded')
     expect(rows()[0]!.querySelector('time')).toBeNull()
     expect(queue()).toEqual([old])
   })
@@ -152,8 +160,8 @@ it('lets the real consumer read edited tails after acknowledgement without movin
   expect(preparedHead).toMatchObject({ ...admitted[0], promptCondition: { expectedRun: { runId: `run-${sessionId}` }, afterSubmissionId: null } })
   await openOutbox()
   expect(rowTexts()).toEqual(['head', 'second', 'last'])
-  expect(moveButton('head', 'down').disabled).toBe(true)
-  expect(moveButton('second', 'up').disabled).toBe(true)
+  expect((await moveButton('head', 'down')).disabled).toBe(true)
+  expect((await moveButton('second', 'up')).disabled).toBe(true)
   await move('last', 'up')
   expect(queue()).toEqual([preparedHead, admitted[2], admitted[1]])
   expect(queue()[0]).toBe(preparedHead)
@@ -177,10 +185,10 @@ it('fences the in-flight identity at any array position and leaves invalid moves
   expect(useAppStore.getState().agentSteerInFlight[sessionId]).toBe('head')
   await openOutbox()
   expect(rowTexts()).toEqual(['old-run', 'head', 'tail', 'last'])
-  expect(moveButton('old-run', 'down').disabled).toBe(true)
-  expect(moveButton('head', 'up').disabled).toBe(true)
-  expect(moveButton('head', 'down').disabled).toBe(true)
-  expect(moveButton('tail', 'up').disabled).toBe(true)
+  expect((await moveButton('old-run', 'down')).disabled).toBe(true)
+  expect((await moveButton('head', 'up')).disabled).toBe(true)
+  expect((await moveButton('head', 'down')).disabled).toBe(true)
+  expect((await moveButton('tail', 'up')).disabled).toBe(true)
   for (const [id, direction] of [['old-run', 'up'], ['old-run', 'down'], ['head', 'up'], ['head', 'down'], ['tail', 'up'], ['last', 'down'], ['gone', 'up']] as const) {
     useAppStore.getState().moveAgentSteer(sessionId, id, direction)
   }

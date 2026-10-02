@@ -104,7 +104,7 @@ agentmux agent send --to-session '<session-id>' --text '继续验证这项修改
 
 使用创建回执返回的 Session 与空间地址，避免从名称或焦点猜目标。回执丢失时先查询原业务操作，不自动重建 Agent 或重发首任务。完整对象命令、错误与保存边界见[对象操作指南](docs/guides/agentmux-cli-object-control.md)，准确参数以执行版本的 `--help` / `--skill` 为准。
 
-服务支持 Unix socket、HTTP/SSE 和 SSH stdio 转发。HTTP 默认关闭，需要宿主显式配置 token；SSH 需要远端已有服务和 CLI。**远程访问服务与远程启动 Agent 是不同能力**：直接 SSH execution host / remote Run 启动仍未支持。连接与授权细节见 [Core 公共服务](packages/core/README.md#公共-json-rpc-服务)。
+服务支持 Unix socket、HTTP/SSE 和 SSH stdio 转发。HTTP 默认关闭，需要宿主显式配置 token；SSH 需要远端已有服务和 CLI。客户端通过 SSH 连接远端已有 Core owner，并经同一公共 API 创建和管理远端当地的 Agent／Run；连接动作不部署或启动 owner。接入与授权细节见 [Core 远程 Runtime](packages/core/README.md#远程-runtime)。
 
 ## 仓库分工
 
@@ -133,3 +133,7 @@ pnpm test:native
 ```
 
 这些命令定义在[根 package](package.json)，验证范围与实际行为验收见[测试策略](docs/testing/strategy.md)。本页描述当前源码入口；源码、构建、安装副本与运行实例分别核对，列出验证命令不代表本轮已执行。
+
+## 管理远端 Agent
+
+远端运行独立 Core 的 `agentmux-runtime serve`；Desktop 与 Node client 使用同一公共 JSON-RPC 服务，SSH 连接已有 owner。Agent 语义仍归远端 Core，Run、PTY 和字节历史仍归当地 ctxmux。连接中断保留原 Session 和工作面；连接动作不部署或重启远端服务。接入方式见 [Core 的远程 Runtime 说明](packages/core/README.md#远程-runtime)，恢复约束见 [联邦 Runtime 与远端恢复边界](docs/design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。

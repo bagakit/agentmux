@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -11,7 +11,7 @@ import type { AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/type
 it('resumes the original Agent after an old Hook times out without waiting for its stalled read', async () => {
   const current: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'review-agent', providerId: 'claude', executorId: 'claude',
-    hostId: 'local', workspacePath: upstreamFixturePath("review-fixture"), run: { runId: 'old-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("review-fixture"), run: { runId: 'old-run' }, retiredRuns: [],
     hookBindingId: 'review-binding'.padEnd(43, 'A'), hookToken: 'review-token'.padEnd(43, 'B'),
      createdAt: 1, updatedAt: 1,
     promptCompletionAdmission: { submissionId: 'old-prompt',
@@ -79,7 +79,7 @@ it('resumes the original Agent after an old Hook times out without waiting for i
   try {
     const response = fetch(binding.endpoint.url, { method: 'POST', headers: {
       authorization: `Bearer ${binding.endpoint.token}`, 'content-type': 'application/json'
-    }, body: JSON.stringify({ receiptId: 'review-stop', eventName: 'Stop', payload: { session_id: 'review-native' } }) })
+    }, body: JSON.stringify({ receiptId: 'review-stop', eventName: 'StopFailure', payload: { session_id: 'review-native' } }) })
     await started
     resume = client.resumeAgent({ agentSessionId: current.agentSessionId, operationId: 'review-resume', prompt: 'review fixture' })
       .then((value) => { resumeSettled = true; return value }, (error) => { resumeSettled = true; return error })

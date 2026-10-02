@@ -1,24 +1,28 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
-import { encodeHostedValue } from '../src/hosted-value.js'
+import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
+import { encodeHostedValue, hostedTransfer } from '../src/hosted-value.js'
 import type { AgentMuxHostedBootstrap, AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
 import type { AgentMuxRpcSubscriptionOptions } from '../src/public-rpc-client.js'
 import type { AgentMuxRpcOutputInitial, AgentMuxRpcStreamParams } from '../src/public-rpc.js'
 import type { AgentMuxClientEvent } from '../src/types.js'
+const connectHostedAgentMux: typeof SourceConnectHosted = process.env.AGENTMUX_TEST_CLIENT_ENTRY
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_CLIENT_ENTRY)).connectHostedAgentMux : SourceConnectHosted
+
 
 function fixture(fence = 0, gap: AgentMuxRpcOutputInitial['gap'] = null) {
   const session: AgentMuxRpcOutputInitial['session'] = { kind: 'agent', agentSessionId: 'a123456789012345',
-    providerId: 'codex', executorId: 'private-executor', hostId: 'local', workspacePath: upstreamFixturePath("private-workspace"),
+    providerId: 'codex', executorId: 'private-executor', hostId: 'local', workspacePath: fixturePath("private-workspace"),
     run: { runId: 'original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
   const original: AgentMuxRpcOutputInitial = { session, run: { nativeService: null, runId: session.run.runId, kind: 'agent',
     agentSessionId: session.agentSessionId, providerId: session.providerId, executorId: session.executorId,
     workspacePath: session.workspacePath, pid: 421, state: 'running', cols: 100, rows: 30,
     observedAt: 1, latestOutputBytes: fence, acceptedInputBytes: 0 }, gap,
     terminal: { type: 'not-requested' }, resizeRevision: 7 }
-  const bootstrap: AgentMuxHostedBootstrap = { identity: { instanceId: 'private-original-daemon', ownership: 'owned',
-    hostId: 'local', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 },
-    storePath: upstreamFixturePath("private-store/sessions.json"), messageQueuePath: upstreamFixturePath("private-store/messages.ndjson"),
+  const identity: AgentMuxHostedBootstrap['identity'] = { instanceId: 'private-original-daemon', ownership: 'owned',
+    hostId: 'local', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 }
+  const bootstrap: AgentMuxHostedBootstrap = { identity, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 1, processId: 123, availability: 'connected', ctxmux: identity },
+    storePath: fixturePath("private-store/sessions.json"), messageQueuePath: fixturePath("private-store/messages.ndjson"),
     hostProcessId: 123, catalog: [], sessions: [session] }
   const calls: Array<{ method: string; params: unknown }> = []
   const readers: Array<{ params: AgentMuxRpcStreamParams<'agent.output'>; handlers: AgentMuxRpcSubscriptionOptions<'agent.output'>;
@@ -29,6 +33,7 @@ function fixture(fence = 0, gap: AgentMuxRpcOutputInitial['gap'] = null) {
   const port = {
     call: async (method: string, params: unknown) => {
       calls.push({ method, params: structuredClone(params) })
+      if (method === 'runtime.owner.identity') return { owner: bootstrap.owner }
       if (method === 'runtime.bootstrap') return structuredClone(bootstrap)
       if (method === 'runtime.release-consumer') return { released: true }
       if (method === 'runtime.invoke' && (params as { invocation: { method: string } }).invocation.method === 'runtimeProjection') {
@@ -38,8 +43,9 @@ function fixture(fence = 0, gap: AgentMuxRpcOutputInitial['gap'] = null) {
     },
     subscribe: async (method: string, params: unknown, handlers: unknown) => {
       if (method === 'runtime.events') {
-        const events = handlers as { onInitial(value: unknown): void }
-        events.onInitial({ bootstrap: structuredClone(bootstrap) }); return { dispose: async () => {} }
+        const events = handlers as { onInitial(value: unknown): void; onEvent(value: unknown): void }
+        events.onInitial({ owner: bootstrap.owner, transferId: 'bootstrap-original' });
+        for (const data of hostedTransfer({ kind: 'initial', value: bootstrap }, 'bootstrap-original')) events.onEvent({ type: 'snapshot', data }); return { dispose: async () => {} }
       }
       if (method !== 'agent.output') throw new Error(`Unexpected subscription: ${method}`)
       const reader: typeof readers[number] = { params: params as AgentMuxRpcStreamParams<'agent.output'>,

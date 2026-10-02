@@ -992,7 +992,6 @@ describe('WorktreeService', () => {
       id: executionHost.id,
       kind: executionHost.kind,
       label: executionHost.label,
-      exposeLoopbackPort: async (port: number) => await executionHost.exposeLoopbackPort(port),
       dispose: async () => await executionHost.dispose(),
       run: async (command, args, options) => {
         attempted.push([...args])

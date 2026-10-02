@@ -40,7 +40,7 @@ function deferred() {
 async function fixture(singlePhase = false) {
   const template = new AgentProviderRegistry().get('codex')
   const generic = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
+    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     hook: template.hook,
     planManagedHooks: template.planManagedHooks,
     buildArgs: (_prompt, args) => [...args]

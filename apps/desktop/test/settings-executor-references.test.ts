@@ -24,7 +24,7 @@ const ipc = vi.hoisted(() => ({
   execute: undefined as ((request: AgentMuxControlRequest) => Promise<AgentMuxControlResult>) | undefined
 }))
 vi.mock('electron', () => ({
-  app: { getPath: () => _hygiene_fixturePath("private-executor-reference-ipc") },
+  app: { getPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), getAppPath: () => _hygiene_fixturePath("private-executor-reference-ipc"), isPackaged: false },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: unknown[]) => unknown) => ipc.handlers.set(channel, handler),
     removeHandler: (channel: string) => ipc.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -70,7 +70,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
   }
 
   function run(id: string, state: CtxmuxAdapterRun['state'] = { type: 'running' }): CtxmuxAdapterRun {
-    return { runId: id, lifecycleOperationId: null, program: 'reference-fixture', args: [], workspacePath: root,
+    return { nativeService: null, runId: id, lifecycleOperationId: null, program: 'reference-fixture', args: [], workspacePath: root,
       pid: 24680, state, cols: 80, rows: 24, latestOutputBytes: 12, firstAvailableByte: 0, acceptedInputBytes: 0 }
   }
 
@@ -158,7 +158,7 @@ describe('Executor identity edits use retained Core facts and bounded launch adm
     })
     vi.spyOn(kernel, 'stop').mockImplementation(async operation => { runs.delete(operation.runId) })
     runtime = new RuntimeController(store, localRuntimeConnector)
-    runtime.commit({ hosts: [{ id: 'local', client: core,
+    runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', kind: 'local', label: 'Private host' }, client: core,
       executionHost: new LocalExecutionHost({ runner: async () => { throw new Error('This proof must not execute native commands.') } }) }],
       removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     const executor = { providerId: primary.id, label: 'Private', command: primary.executable,

@@ -46,7 +46,7 @@ async function fixture() {
     const internals = owner as unknown as Internals
     await internals.registry.load('local'); internals.connected = true
     internals.kernel.isConnected = () => true
-    internals.kernel.identity = () => ({ daemonInstanceId: 'private-fixture', protocolVersion: 18, buildIdentity: 'fixture' })
+    internals.kernel.identity = () => ({ daemonInstanceId: 'private-fixture', protocolVersion: 21, buildIdentity: 'fixture' })
     internals.kernel.status = async (id: string) => run(id)
     internals.kernel.input = async (id: string, operation: { operationId: string; expectedByte: number; data: string }) => {
       const key = `${id}:${operation.operationId}`, prior = accepted.get(key)
