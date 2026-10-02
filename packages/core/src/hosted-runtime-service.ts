@@ -116,7 +116,8 @@ export class AgentMuxHostedRuntimeService {
     if (!terminal) for (const consumer of this.consumers.values()) if (!consumer.events.closed) recipients.add(consumer.events)
     if (!recipients.size) return
     let chunks: AgentMuxHostedTransferChunk[]
-    try { chunks = hostedTransfer({ kind: 'event', event }, randomUUID()) }
+    try { chunks = hostedTransfer({ kind: 'event', event,
+      ...(event.type === 'connection-state' && event.state === 'restored' ? { owner: this.owner() } : {}) }, randomUUID()) }
     catch (error) { for (const reader of recipients) reader.fail(error); return }
     for (const reader of recipients) reader.enqueue(chunks)
   }

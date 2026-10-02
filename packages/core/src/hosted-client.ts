@@ -240,6 +240,14 @@ export async function connectHostedAgentMux(options: {
                 resolveInitial()
               } else if (received.kind === 'event') {
                 if (!initialSeen) throw new AgentMuxError('Runtime mutation preceded its initial observation.', 'CONTROL_PROTOCOL_ERROR')
+                if (received.event.type === 'connection-state' && received.event.state === 'restored') {
+                  const restored = parseHostedRuntimeOwnerIdentity(received.owner)
+                  if (restored.runtimeId !== expected.runtimeId || restored.ownerInstanceId !== expected.ownerInstanceId) throw new AgentMuxError('Runtime restored facts belong to another semantic owner.', 'RUNTIME_OWNER_CHANGED')
+                  // Native may restart while this semantic Host and event lease stay
+                  // alive. Publish restored only after its current input fence is visible.
+                  bootstrap!.owner = structuredClone(restored)
+                  bootstrap!.identity = structuredClone(restored.ctxmux)
+                }
                 emit(received.event)
               }
             } catch (error) { rejectInitial(error); if (initialSeen) { ended = true; stream = undefined; loseHistories(); connectionState('lost', error); reconnect() } }
