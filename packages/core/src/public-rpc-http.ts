@@ -109,7 +109,9 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
           if (closed) break
           const remaining = value.subarray(start)
           if (remaining.byteLength) { pieces.push(remaining); size += remaining.byteLength }
-          if (size > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
+          // A partial CRLF/CRLF separator can carry three bytes across reads.
+          // The complete event above still applies the exact content budget.
+          if (size > AGENTMUX_RPC_MAX_MESSAGE_BYTES + 3) throw new AgentMuxError('SSE RPC frame exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
           tail = remaining.byteLength >= 3 ? remaining.subarray(-3)
             : Uint8Array.from([...(start === 0 ? tail : []), ...remaining]).slice(-3)
         }

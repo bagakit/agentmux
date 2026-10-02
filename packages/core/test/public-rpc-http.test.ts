@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { mkdtemp, rm, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -30,8 +30,30 @@ async function collect(url: string, options: Parameters<typeof openAgentMuxRpcHt
 }
 const sse = (frame: unknown) => `data: ${JSON.stringify(frame)}\n\n`
 
+it.each(['\n\n', '\r\n\r\n'])('preserves an exact-budget event when the separator %j arrives in separate chunks', async separator => {
+  const frame = { jsonrpc: '2.0', id: request.id, result: '' }
+  const overhead = Buffer.byteLength(`data: ${JSON.stringify(frame)}`)
+  frame.result = 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES - overhead)
+  const event = new TextEncoder().encode(`data: ${JSON.stringify(frame)}`)
+  expect(event.byteLength).toBe(AGENTMUX_RPC_MAX_MESSAGE_BYTES)
+  // The same complete event and the fragmented event must deliver the same
+  // original frame. Only transport chunk boundaries change between readers.
+  for (const fragmented of [false, true]) {
+    const chunks = fragmented
+      ? [event, ...[...separator].map(character => Uint8Array.of(character.charCodeAt(0)))]
+      : [new TextEncoder().encode(`data: ${JSON.stringify(frame)}${separator}`)]
+    const fetch: typeof globalThis.fetch = async () => new Response(new ReadableStream<Uint8Array>({
+      start(controller) { for (const chunk of chunks) controller.enqueue(chunk); controller.close() }
+    }), { headers: { 'Content-Type': 'text/event-stream' } })
+    const result = await collect('https://private.invalid/rpc', { url: 'https://private.invalid/rpc', fetch })
+    expect(result.error).toBeUndefined()
+    expect(result.frames).toEqual([frame])
+    expect(parseRpcResponse(result.frames[0]).id).toBe(request.id)
+  }
+})
+
 it.each([['source', connectSource], ['compiled', connectBuilt]] as const)('uses the shared HTTP leaf from the real %s Node client and preserves business failures', async (_name, connect) => {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-pure-http-"))
+  const root = await mkdtemp(fixturePath("tmp/amx-pure-http-"))
   let fail = false
   const owner = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [],
     http: { host: '127.0.0.1', port: 0, token: 'actual-shared-http' },
