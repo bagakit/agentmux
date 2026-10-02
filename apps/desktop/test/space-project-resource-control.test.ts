@@ -5,10 +5,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import type { ExecutionHost } from '@agentmux/core'
-import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
-import { directoryIdentity, projectResourceWorkspace } from '../src/shared/space-addresses'
+import { parseAgentMuxControlRequest, type ExecutionHost } from '@agentmux/core'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import type { AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../src/shared/contracts'
+import { directoryIdentity, homeZoneId, projectResourceWorkspace, spatialSources, workspaceZoneId } from '../src/shared/space-addresses'
 import { createSpaceZoneResource, type SpaceZoneResourcePorts } from '../src/main/space-zone-resources'
+import { executeSpatialControl, spatialCatalog, type SpatialControlPorts, type SpatialWorkbench } from '../src/renderer/src/lib/space-agent-control'
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { WorktreeService } from '../src/main/worktree-service'
 
 const exec = promisify(execFile)
@@ -93,5 +97,76 @@ describe('Project resources are independent of Space placement', () => {
     expect(result.resource).toMatchObject({ projectId: directoryIdentity('local', gitRepo), sourceWorkspaceId: repo.id, path: target, kind: 'worktree', branch: 'feat/task' })
     if (failSave) { expect(result.workspace).toBeNull(); expect(result.issue).toEqual({ code: 'WORKTREE_REGISTRATION_UNCONFIRMED', message: expect.stringContaining('Private registration unavailable') }); expect(current.workspaces).toHaveLength(2) }
     else { expect(result.workspace?.path).toBe(target); expect(result.resource.workspaceId).toBe(result.workspace?.id); expect(current.workspaces).toHaveLength(3) }
+  })
+})
+
+
+describe('Topic and Mote placement retain the explicit execution resource', () => {
+  it.each([
+    ['topic', 'directory'], ['topic', 'worktree'], ['mote', 'directory'], ['mote', 'worktree']
+  ] as const)('launches the %s-bound %s in its Project resource and preserves the real Home', async (shape, kind) => {
+    const scratch: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: repo.hostId, path: _hygiene_fixturePath("scratch"), kind: 'folder' }
+    const directory = shape === 'mote' ? 'topic--launcher--leader' : 'topic--view--resource'
+    const topic: ScratchTopicSnapshot = { id: shape === 'mote' ? PMO_TEAMS_TOPIC_ID : 'view:resource',
+      directoryPath: directory, ...(shape === 'mote' ? { identityDirectoryPath: (_hygiene_fixturePath("motes/") + directory), physicalDirectoryPath: (_hygiene_fixturePath("motes/") + directory) } : {}),
+      topicPath: `${directory}/topic.md`, title: shape, summary: '', collaborators: [] }
+    const topicPath = shape === 'mote' ? (_hygiene_fixturePath("motes/") + directory) : (_hygiene_fixturePath("scratch/") + (directory) + "")
+    const context = spatialSources(config([repo, scratch]), [topic])
+    const space = context.spaces.find(item => item.topicId === topic.id)!
+    expect(space).toMatchObject({ kind: shape, directoryPath: topicPath, hostId: repo.hostId })
+    const home = context.zones.find(item => item.zoneId === homeZoneId(space.spaceId))!
+    expect(home).toEqual({ zoneId: homeZoneId(space.spaceId), workspaceId: SCRATCH_WORKSPACE_ID,
+      kind: 'home', hostId: repo.hostId, directoryPath: topicPath, branch: null })
+    const initial = config([repo, scratch])
+    initial.executors.fixture = { label: 'Fixture', providerId: 'codex', command: 'fixture', args: [], env: {}, injectAgentMuxGuide: false }
+    const resources = { ...ports(initial), topics: async () => [topic] }
+    const state: SpatialWorkbench = { config: resources.config(), sessions: [], tabs: {},
+      layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('display-group', []) },
+      spaceZoneBindings: {}, spatialRequests: {} }
+    const launchAgent = vi.fn<SpatialControlPorts['launch']>(async input => {
+      // Core's reply is controlled; the oracle below checks the actual production launch input.
+      const session: Extract<SessionSnapshot, { kind: 'agent' }> = { id: input.agentSessionId, kind: 'agent',
+        providerId: 'codex', executorId: input.executorId, hostId: input.hostId, workspacePath: input.workspacePath, label: 'Task',
+        capabilities: { terminal: true, timeline: 'streaming', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+        createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, latestOutputBytes: 0, processState: 'running',
+        status: { state: 'running', source: 'run-process', observedAt: 1 },
+        control: { kind: 'agent', agentSessionId: input.agentSessionId, hostId: input.hostId, run: { runId: 'controlled-run' } } }
+      const result: AgentLaunchResult = { created: { ...agentCreationFixture(session),
+        creation: { createOperationId: input.createOperationId, initialPrompt: 'confirmed' } },
+        creation: { createOperationId: input.createOperationId, initialPrompt: 'confirmed' }, session,
+        timeline: { agentSessionId: input.agentSessionId, revision: 0, items: [] }, projectionFailures: [] }
+      return result
+    })
+    const createResource = vi.fn<SpatialControlPorts['createResource']>(input => createSpaceZoneResource(input, resources))
+    const originalRequestId = `resource-cwd:${shape}:${kind}`
+    const resource = kind === 'worktree'
+      ? { kind, projectId, path: _hygiene_fixturePath("new-tree"), branch: 'feat/task', createBranch: true }
+      : { kind, projectId, path: _hygiene_fixturePath("new-dir") }
+    const request = parseAgentMuxControlRequest({ schemaVersion: 5, requestId: originalRequestId, operation: 'agent.open',
+      content: { kind: 'new-agent', executorId: 'fixture', prompt: 'exact first task' },
+      destination: { spaceId: space.spaceId, displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'display-group', newZone: resource }, focus: false })
+    if (request.operation !== 'agent.open') throw new Error('The strict parser must return the original Agent open tuple')
+    const control: SpatialControlPorts = { get: () => state, patch: patch => Object.assign(state, patch), topics: async () => [topic],
+      createResource, launch: launchAgent, creation: async () => { throw new Error('No second creation reader is needed for the first launch') },
+      attach: async (_regionId, created) => { state.sessions = [...state.sessions, created.session!] },
+      save: async layoutApplied => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
+      focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
+    const result = await executeSpatialControl(control, request)
+    if (result.operation !== 'agent.open') throw new Error('The original owner must return an Agent open receipt')
+    expect(result.outcome).toBe('opened')
+    expect(createResource).toHaveBeenCalledExactlyOnceWith({ spaceId: space.spaceId, resource })
+    expect(launchAgent).toHaveBeenCalledOnce()
+    expect(launchAgent.mock.calls[0]![0]).toEqual({ executorId: 'fixture', hostId: repo.hostId, workspacePath: resource.path,
+      agentSessionId: result.agent!.agentSessionId, createOperationId: originalRequestId, prompt: 'exact first task' })
+    const resourceWorkspaceId = kind === 'worktree' ? 'worktree' : 'new-zone'
+    const zoneId = workspaceZoneId(space.spaceId, resourceWorkspaceId)
+    const catalog = spatialCatalog(state, [topic])
+    expect(catalog.zones.find(zone => zone.zoneId === zoneId)).toEqual({ zoneId, workspaceId: resourceWorkspaceId,
+      kind, hostId: repo.hostId, directoryPath: resource.path, branch: kind === 'worktree' ? 'feat/task' : null })
+    expect(catalog.zones.find(zone => zone.zoneId === home.zoneId)).toEqual(home)
+    expect(result.resource).toMatchObject({ path: resource.path, workspaceId: resourceWorkspaceId, hostId: repo.hostId, kind })
+    expect(result.to).toMatchObject({ spaceId: space.spaceId, zoneId, workspaceId: resourceWorkspaceId,
+      displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'display-group' })
+    expect(result.agent).toMatchObject({ cwd: resource.path, initialPrompt: 'confirmed', createOperationId: originalRequestId })
   })
 })

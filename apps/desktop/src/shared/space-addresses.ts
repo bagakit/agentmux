@@ -83,9 +83,9 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     try { homeContext = JSON.parse(zoneId); directoryContext = JSON.parse(spaceId) } catch { /* Unknown original context is retained. */ }
     const originalHome = Array.isArray(homeContext) && homeContext.length === 2 && homeContext[1] === 'home' &&
       typeof homeContext[0] === 'string' && homeZoneId(homeContext[0]) === zoneId
-    const resourcePath = homePath ?? topicHomes.get(spaceId) ?? (originalHome && zoneId === homeZoneId(spaceId) && workspace?.id === SCRATCH_WORKSPACE_ID &&
+    const resourcePath = homePath ?? (originalHome && zoneId === homeZoneId(spaceId) && workspace?.id === SCRATCH_WORKSPACE_ID ? topicHomes.get(spaceId) ?? (
       Array.isArray(directoryContext) && directoryContext.length === 2 && directoryContext[0] === workspace.hostId &&
-      typeof directoryContext[1] === 'string' && (directoryContext[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(directoryContext[1]) || directoryContext[1].startsWith('\\\\')) ? directoryContext[1] : undefined)
+      typeof directoryContext[1] === 'string' && (directoryContext[1].startsWith('/') || /^[A-Za-z]:[\\/]/.test(directoryContext[1]) || directoryContext[1].startsWith('\\\\')) ? directoryContext[1] : undefined) : undefined)
     const fact: AgentMuxZoneFact = workspace && (!originalHome || resourcePath) ? {
       zoneId, workspaceId, kind: resourcePath ? 'home' : workspace.kind === 'worktree' ? 'worktree' : 'directory',
       hostId: workspace.hostId, directoryPath: resourcePath ?? workspace.path, branch: workspace.branch ?? null
