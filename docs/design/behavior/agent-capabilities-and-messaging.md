@@ -54,7 +54,7 @@
 | 当前路径 | 实际 owner 与状态 |
 | --- | --- |
 | 启动 guide、Scratch Topic/Wiki/SOUL | [Core `composeAgentLaunchPrompt`](../../../packages/core/src/agent-outbound-message.ts) 将 guide 与 `agentMuxNote` 放在同一 amux 包装；[Desktop `RuntimeController`](../../../apps/desktop/src/main/runtime-controller.ts) 提供 Topic note，[Core Client](../../../packages/core/src/client.ts) 从实际 producer 保留独立 `systemContext` 记录。 |
-| Goal/PMO 任务上下文 | [Desktop `openGoalPmo`](../../../apps/desktop/src/renderer/src/store.ts) 生成 amux 后当普通 prompt 提交；它是自产文本声明，不能由标签升级为已核 System。 |
+| Goal/PMO 任务上下文 | [Desktop `openGoalPmo`](../../../apps/desktop/src/renderer/src/store.ts) 将职责、项目与执行上下文作为显式 `agentMuxNote`，与原用户请求分开交给 Core；队列与同 Region 启动器分别保留原 note 和可编辑正文，重试不重算已冻结上下文，正文中的 amux 标签不升级为平台来源。 |
 | Goals 探索与 Browser annotations | [Goals `startGoalExploration`](../../../apps/desktop/src/renderer/src/lib/goals-entry-actions.ts) 将项目上下文附加为纯文本；[Browser context formatter](../../../apps/desktop/src/renderer/src/lib/browser-annotations.ts) 输出纯文本，经 [Browser Tools Panel](../../../apps/desktop/src/renderer/src/components/BrowserToolsPanel.tsx) 加入可编辑草稿。当前没有专用 Goal、Task 或 Browser 信封。 |
 | Core 的普通提交、恢复与 Host 通路 | [Core `composeAgentPrompt`](../../../packages/core/src/agent-outbound-message.ts) 统一组合显式平台内容与原用户正文，启动引导委托同一组合 owner；独立热上下文不附加启动等待语。公开 SDK、Hosted RPC、Main 和 Preload 显式传递 `agentMuxNote`，Core 分别记录平台与原正文来源。首次 Input 的完整 wire、原来源分界与作者冻结在既有持久意图中；同一 operation 的相同 wire 不允许变更来源，缺原来源事实明确未知，保留原 Input 与健康 Run。原生 resume 保留用户空白与换行。 |
 | Mailbox Progress | [Desktop `deliverContinuousProgress`](../../../apps/desktop/src/main/continuous-progress-delivery.ts) 将用户配置的 `loop.prompt` 原样自动提交，目前不自动附加平台注入或共享消息规则。用户选择的 continuation prompt 仍是用户内容，不因自动提交升级为平台自产上下文。 |

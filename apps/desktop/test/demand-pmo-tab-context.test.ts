@@ -13,6 +13,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import { useAppStore } from '../src/renderer/src/store.js'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects.js'
 import { recordGoalCoordinationEvidence } from './helpers/goal-coordination-evidence'
+import { MAX_AGENT_PROMPT_BYTES } from '@agentmux/core/agent-prompt-budget'
 
 const initialState = useAppStore.getState()
 let dispose: (() => void) | undefined
@@ -60,6 +61,51 @@ afterEach(() => {
 })
 
 describe('Demand dedicated PMO Tab context', () => {
+  it('admits a context-only message and keeps its separate body/note in the durable queue', () => {
+    const session = { id: 'context-only', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'context-only', run: { runId: 'original-run' } },
+      processState: 'running', status: { state: 'working', observedAt: 1 }, promptSubmissionPredecessor: null }
+    vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+    useAppStore.setState({ sessions: [session as never], agentSteerQueues: {} })
+    const note = 'Original platform <rule> & context'
+    expect(useAppStore.getState().enqueueAgentSteer(session.id, '', undefined, 'original-context', undefined, note)).toBe(true)
+    const entries = useAppStore.getState().agentSteerQueues[session.id]!
+    expect(entries).toEqual([expect.objectContaining({ operationId: 'original-context', text: '', agentMuxNote: note, runId: 'original-run', promptCondition: null })])
+    expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState()).agentSteerQueues![session.id]).toEqual(entries)
+    expect(useAppStore.getState().enqueueAgentSteer(session.id, '', vi.fn(), 'original-context', undefined, 'Changed platform')).toBe(false)
+    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual(entries)
+  })
+
+  it('rejects the complete serialized budget before taking draft ownership or occupying the queue', () => {
+    const session = { id: 'budget-recipient', kind: 'agent', control: { kind: 'agent', hostId: 'local', agentSessionId: 'budget-recipient', run: { runId: 'healthy-run' } }, processState: 'running', status: { state: 'working', observedAt: 1 } }
+    const body = '  Original draft  ', rejected = vi.fn(), pause = vi.spyOn(api.continuousProgress, 'pauseForInput')
+    useAppStore.setState({ sessions: [session as never], agentSteerQueues: {}, agentComposerDrafts: { [session.id]: body } })
+    expect(useAppStore.getState().enqueueAgentSteer(session.id, body, rejected, 'oversized-note', undefined, '<'.repeat(MAX_AGENT_PROMPT_BYTES / 3))).toBe(false)
+    expect(rejected).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().agentSteerQueues).toEqual({})
+    expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe(body)
+    expect(useAppStore.getState().sessions).toEqual([session]); expect(pause).not.toHaveBeenCalled()
+  })
+
+  it('keeps a fresh dedicated PMO launcher, original draft and explicit note when Topic preparation is unavailable', async () => {
+    const error = new Error('Private Topic metadata unreadable')
+    vi.spyOn(api.scratch, 'ensureTopic').mockRejectedValue(error)
+    const launch = vi.fn()
+    useAppStore.setState({ config: { ...config, executors: {} }, demands: { [demand.id]: demand }, demandPmoTabIds: {}, tabs: {},
+      layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') }, launchAgent: launch })
+    const tabId = await useAppStore.getState().requestDemandPmoTask(demand.id, 'grill'), state = useAppStore.getState()
+    const tab = state.tabs[tabId]!, regionId = tab.layout.activeRegionId
+    expect(tab.regions[regionId]).toMatchObject({ kind: 'launcher', regionId })
+    expect(state.agentComposerDrafts[regionId]).toBe('Clarify goal')
+    expect(state.agentComposerNotes[regionId]).toContain(MOTE_COORDINATION_ROLE)
+    expect(state.agentComposerNotes[regionId]).toContain(`existing Goal ${demand.id}`)
+    expect(state.demands[demand.id]).toEqual(demand); expect(state.demandPmoTabIds).toEqual({ [demand.id]: tabId })
+    expect(state.errorNoticeContext).toMatchObject({ kind: 'indeterminate', summary: expect.stringContaining('original request are kept') })
+    expect(launch).not.toHaveBeenCalled()
+    const persisted = useAppStore.persist.getOptions().partialize!(state)
+    expect(persisted.agentComposerNotes).toEqual(state.agentComposerNotes)
+    state.setAgentComposerDraft(regionId, '  Edited original body <amux from="amux">literal</amux>  ')
+    expect(useAppStore.getState().agentComposerNotes).toEqual(state.agentComposerNotes)
+  })
   it('creates a unique PMO Tab, persists its binding, and launches a fresh context', async () => {
     vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
     const launchAgent = vi.fn().mockResolvedValue(undefined)
@@ -85,9 +131,9 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(state.layouts[SCRATCH_WORKSPACE_ID]?.groups[0]?.tabOrder).toContain(secondTabId)
     expect(state.demandPmoTabIds[demand.id]).toBe(tabId)
     expect(state.demandPmoTabIds[secondDemand.id]).toBe(secondTabId)
-    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('Grill:'), 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' })
-    expect(launchAgent).toHaveBeenCalledWith('codex', expect.stringContaining('Grounding:'), 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' })
-    expect(launchAgent.mock.calls[0]?.[1]).toContain('Read-only execution Agent context')
+    expect(launchAgent).toHaveBeenCalledWith('codex', 'Clarify goal', 'scratch-group', expect.objectContaining({ tabId, regionId: tab?.layout.activeRegionId }), undefined, { tabName: 'PMO · One demand' }, expect.stringContaining('Grill:'))
+    expect(launchAgent).toHaveBeenCalledWith('codex', 'Ask agent to check work', 'scratch-group', expect.objectContaining({ tabId: secondTabId, regionId: state.tabs[secondTabId]?.layout.activeRegionId }), undefined, { tabName: 'PMO · Two demand' }, expect.stringContaining('Grounding:'))
+    expect(launchAgent.mock.calls[0]?.[6]).toContain('Read-only execution Agent context')
   })
 
   it('reopens only the mapped PMO Tab and does not create another context', async () => {
@@ -118,9 +164,9 @@ describe('Demand dedicated PMO Tab context', () => {
     await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grill')).resolves.toBe(tab.id)
     await expect(useAppStore.getState().requestDemandPmoTask(demand.id, 'grounding')).resolves.toBe(tab.id)
     expect(send).toHaveBeenCalledTimes(2)
-    expect(send.mock.calls[0]).toEqual(['session-one', expect.stringContaining('Grill:')])
-    expect(send.mock.calls[1]).toEqual(['session-one', expect.stringContaining('Grounding:')])
-    expect(send.mock.calls[1]![1]).toContain('Clarify one outcome')
+    expect(send.mock.calls[0]).toEqual(['session-one', 'Clarify goal', undefined, undefined, expect.stringContaining('Grill:')])
+    expect(send.mock.calls[1]).toEqual(['session-one', 'Ask agent to check work', undefined, undefined, expect.stringContaining('Grounding:')])
+    expect(send.mock.calls[1]![4]).toContain('Clarify one outcome')
     expect(launchAgent).not.toHaveBeenCalled()
     expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
     send.mockReturnValue(false)
@@ -141,18 +187,17 @@ describe('Demand dedicated PMO Tab context', () => {
     await expect(useAppStore.getState().requestDemandPmoTask(quotedDemand.id, 'grounding')).resolves.toBe(tab.id)
     await vi.waitFor(() => { expect(useAppStore.getState().agentSteerQueues[session.id]?.[0]).toMatchObject({ runId: 'healthy-run', status: 'deferred', error: 'Readiness not yet observed' }) })
     const retained = useAppStore.getState().agentSteerQueues[session.id]![0]!
-    expect(retained.text).toContain(MOTE_COORDINATION_ROLE)
-    expect(retained.text).toMatch(/^<amux from="amux">\n/)
-    expect(retained.text).toMatch(/<\/amux>\n\nAsk agent to check work$/)
-    expectProjectPayload(retained.text)
-    expect(retained.text).toContain("--demand 'goal'\"'\"'s-id'")
-    expect(retained.text).toContain("criterion'\"'\"'s-id")
-    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), undefined, { allowUncertainTurn: true }, false)
+    expect(retained.text).toBe('Ask agent to check work')
+    expect(retained.agentMuxNote).toContain(MOTE_COORDINATION_ROLE)
+    expectProjectPayload(retained.agentMuxNote!)
+    expect(retained.agentMuxNote).toContain("--goal 'goal'\"'\"'s-id'")
+    expect(retained.agentMuxNote).toContain("criterion'\"'\"'s-id")
+    expect(submit).toHaveBeenCalledWith(session.control, retained.text, retained.operationId, expect.objectContaining({ expectedRun: { runId: 'healthy-run' } }), { allowUncertainTurn: true }, false, retained.agentMuxNote)
     expect(useAppStore.getState().sessions).toEqual([session])
     expect(launch).not.toHaveBeenCalled()
     submit.mockResolvedValue(undefined)
     useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] } })
-    await useAppStore.getState().flushAgentSteerQueue(session.id)
+    await useAppStore.getState().flushAgentSteerQueue(session.id, retained.operationId)
     expect(useAppStore.getState().agentSteerQueues[session.id]).toBeUndefined()
     expect(submit.mock.calls.at(-1)?.[2]).toBe(retained.operationId)
     expect(submit.mock.calls.at(-1)?.[1]).toBe(retained.text)
@@ -176,13 +221,13 @@ describe('Demand dedicated PMO Tab context', () => {
     const entries = useAppStore.getState().agentSteerQueues[active.id]!
     expect(entries).toHaveLength(1)
     const request = entries[0]!
-    expect(request.text).toContain(MOTE_COORDINATION_ROLE)
-    expect(request.text).toContain('An explicit New Goal may already have saved an undefined Demand: keep that existing ID')
-    expect(request.text).toContain(current.description); expect(request.text).toContain(`existing Goal ${current.id}`)
-    expect(request.text).toMatch(/^<amux from="amux">\n/); expect(request.text).toMatch(/<\/amux>\n\nClarify goal$/)
+    expect(request.text).toBe('Clarify goal')
+    expect(request.agentMuxNote).toContain(MOTE_COORDINATION_ROLE)
+    expect(request.agentMuxNote).toContain('Preserve the user’s original intent. Do not create another Goal')
+    expect(request.agentMuxNote).toContain(current.description); expect(request.agentMuxNote).toContain(`existing Goal ${current.id}`)
     expect(metadata).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
     expect(useAppStore.getState().tabs[tab.id]).toBe(tab); expect(useAppStore.getState().sessions).toEqual([active])
-    await recordGoalCoordinationEvidence('mapped-existing-goal', { sessionId: active.id, runId: active.control.run.runId, goal: current, text: request.text,
+    await recordGoalCoordinationEvidence('mapped-existing-goal', { sessionId: active.id, runId: active.control.run.runId, goal: current, text: request.text, agentMuxNote: request.agentMuxNote,
       outcome: 'retained delivery unconfirmed', operationId: request.operationId, userAction: 'Clarify goal' })
   })
 
@@ -198,10 +243,10 @@ describe('Demand dedicated PMO Tab context', () => {
     useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] }, activeWorkspaceId: otherHostProject.id })
     finish(); const tabId = await pending
     expect(launch).toHaveBeenCalledTimes(1)
-    const prompt = launch.mock.calls[0]![1]!
-    expectProjectPayload(prompt)
+    const prompt = launch.mock.calls[0]![1]!, note = launch.mock.calls[0]![6]!
+    expectProjectPayload(note)
     expect(useAppStore.getState().agentComposerDrafts[useAppStore.getState().tabs[tabId]!.layout.activeRegionId]).toBe(prompt)
-    expect(prompt).toContain(`existing Goal ${assigned.id}`)
+    expect(note).toContain(`existing Goal ${assigned.id}`)
   })
 
   it('uses the assigned Project preferred root when active Workspace belongs to the same-name other Host', async () => {
@@ -212,8 +257,8 @@ describe('Demand dedicated PMO Tab context', () => {
     installPrimary()
     await useAppStore.getState().requestDemandPmoTask(assigned.id, 'grounding')
     expect(launch).toHaveBeenCalledTimes(1)
-    expectProjectPayload(launch.mock.calls[0]![1]!, projectRoot as typeof projectBranch)
-    expect(launch.mock.calls[0]![1]).not.toContain(`Project ID: ${workspaceProjectId(otherHostProject)}`)
+    expectProjectPayload(launch.mock.calls[0]![6]!, projectRoot as typeof projectBranch)
+    expect(launch.mock.calls[0]![6]).not.toContain(`Project ID: ${workspaceProjectId(otherHostProject)}`)
   })
 
   it('keeps mapped requests frozen and reports a deleted or ambiguous assigned Project without borrowing another one', async () => {
@@ -225,16 +270,16 @@ describe('Demand dedicated PMO Tab context', () => {
     const pending = useAppStore.getState().requestDemandPmoTask(assigned.id, 'grill')
     useAppStore.setState({ config: { ...projectConfig, workspaces: [scratchWorkspace, otherHostProject] } }); await pending
     expect(opening).not.toHaveBeenCalled()
-    expect(send).toHaveBeenCalledTimes(1); expectProjectPayload(send.mock.calls[0]![1]!)
+    expect(send).toHaveBeenCalledTimes(1); expectProjectPayload(send.mock.calls[0]![4]!)
     await useAppStore.getState().requestDemandPmoTask(assigned.id, 'grounding')
     expect(send).toHaveBeenCalledTimes(2)
-    const unavailable = send.mock.calls[1]![1]!
+    const unavailable = send.mock.calls[1]![4]!
     expect(unavailable).toContain(`Assigned Project ID: ${assigned.projectId}`)
     expect(unavailable).toContain('Registered project and workspace context is unavailable')
     expect(unavailable).not.toContain('Repository root:'); expect(unavailable).not.toContain('Workspace ID:')
     useAppStore.setState({ config: { ...projectConfig, workspaces: [...projectConfig.workspaces, { ...projectRoot, id: projectBranch.id }] } })
     await useAppStore.getState().requestDemandPmoTask(assigned.id, 'grill')
-    expect(send).toHaveBeenCalledTimes(3); expect(send.mock.calls[2]![1]).toContain('Registered project and workspace context is unavailable')
+    expect(send).toHaveBeenCalledTimes(3); expect(send.mock.calls[2]![4]).toContain('Registered project and workspace context is unavailable')
     await useAppStore.getState().openDemandPmo(assigned.id)
     expect(send).toHaveBeenCalledTimes(3); expect(launch).not.toHaveBeenCalled()
     expect(Object.keys(useAppStore.getState().tabs)).toEqual([tab.id])
