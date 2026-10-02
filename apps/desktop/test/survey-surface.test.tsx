@@ -1132,7 +1132,7 @@ it('saves the whole research as a reference to the exact same-name Topic without
   const owner = useAppStore.getState(), change = vi.spyOn(owner, 'setZoneSpaceRelation'), zoneId = originalZoneId(), bindings = catalog().bindings
   await captureScope('research')
   expect(call).toHaveBeenCalledExactlyOnceWith('topic.ls', {})
-  expect([...captureDialog().querySelectorAll('option')].map(option => option.value)).toEqual(['', 'view:a', 'view:b'])
+  expect([...captureDialog().querySelectorAll('option')].map(option => option.value)).toEqual(['', '__new_topic__', 'view:a', 'view:b'])
   expect(call.mock.calls.some(([method]) => method === 'topic.knowledge.write')).toBe(false)
   await dialogButton(captureDialog(), 'Cancel')
   expect(change).not.toHaveBeenCalled()
