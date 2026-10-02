@@ -98,7 +98,7 @@ describe('组件那层壳没有第二处 key 判定', () => {
   const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
 
   it('自检：真的截到了这段接线', () => {
-    expect(code).toContain('launcherNameBinding(')
+    expect(code).toContain('useLauncherInputs(regionId)')
   })
 
   it('组件不自己索引草稿表，也不自己算写回的 key', () => {

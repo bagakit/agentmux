@@ -114,6 +114,13 @@ const PERSISTED_PREFERENCES = {
   // 第二组：表面偏好。
   toolDockWidth: 421,
   focusTimelineHeight: 173, // 非默认 96，且在现 owner 的 [72,480] 范围内。
+  focusTimelineNameWidth: 191,
+  focusTimelineRuler: { mode: 'uniform', timeZone: 'UTC', intervalMinutes: 60, phaseMinutes: 15 },
+  noteBlockSelections: { '["local","workspace-alpha","group-alpha","tab-alpha","note-region"]': { noteId: 'note-kept', blockId: 'block-kept' } },
+  surveyCollectedZones: { 'zone-kept': true },
+  surveySidebarCollapsed: true,
+  surveySidebarWidth: 247,
+  surveyZoneSelection: { zoneId: 'zone-kept', selection: [], active: null },
   spaceObjectIcons: { [PERSISTED_SPACE_ID]: 'compass' },
   editorWordWrap: true,
   projectRailOpen: false,
@@ -128,6 +135,8 @@ const PERSISTED_PREFERENCES = {
   explorerCollapsed: { 'workspace-alpha': true },
   pinnedItems: { 'workspace-alpha': ['topic-9', 'topic-3'] },
   agentComposerDrafts: { 'sess-1': 'unfinished prompt' },
+  launcherNameDrafts: { 'launcher-region': { agentName: 'Unsent reviewer', tabName: 'Unsent tab' } },
+  launcherOptionDrafts: { 'launcher-region': { 'provider-alpha': { mode: 'review' } } },
   // 排队的消息与草稿同一档：都是用户亲手敲下的字，跨一次版本升级都不许丢。
   // 条目整份进来（含 operationId / runId / status），因为恢复后的可投递性就是靠 runId 判的。
   agentSteerQueues: {
@@ -219,6 +228,10 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.viewModes).toEqual(PERSISTED_PREFERENCES.viewModes)
     expect(state.workbenchSpaceSelection).toEqual(PERSISTED_PREFERENCES.workbenchSpaceSelection)
     expect(state.focusTimelineHeight, 'Focus 高度丢了').toBe(PERSISTED_PREFERENCES.focusTimelineHeight)
+    for (const key of ['focusTimelineNameWidth', 'focusTimelineRuler', 'noteBlockSelections', 'surveyCollectedZones',
+      'surveySidebarCollapsed', 'surveySidebarWidth', 'surveyZoneSelection'] as const) {
+      expect(state[key]).toEqual(PERSISTED_PREFERENCES[key])
+    }
     expect(state.retainedSpatialFocus, '原精确空间焦点丢了').toEqual(PERSISTED_PREFERENCES.retainedSpatialFocus)
     expect(state.spaceObjectIcons, '原 Space 图标选择丢了').toEqual(PERSISTED_PREFERENCES.spaceObjectIcons)
     expect(state.spaceZoneBindings, '原 Zone 关联丢了').toEqual(PERSISTED_PREFERENCES.spaceZoneBindings)
@@ -238,6 +251,8 @@ describe('Workbench 持久化记录跨一次版本升级', () => {
     expect(state.agentComposerDrafts, '没写完的草稿丢了').toEqual(
       PERSISTED_PREFERENCES.agentComposerDrafts
     )
+    expect(state.launcherNameDrafts).toEqual(PERSISTED_PREFERENCES.launcherNameDrafts)
+    expect(state.launcherOptionDrafts).toEqual(PERSISTED_PREFERENCES.launcherOptionDrafts)
     expect(state.agentSteerQueues, '排着的消息丢了——用户重启后发现自己写的字没了').toEqual(
       PERSISTED_PREFERENCES.agentSteerQueues
     )

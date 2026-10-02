@@ -55,7 +55,9 @@ import {
   type AgentMuxSpaceAddress, type AgentMuxZoneFact, type AgentMuxSpaceBindingReport
 } from '@agentmux/core/control'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
-import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor, LaunchOptionSelection } from '@agentmux/core'
+import type { AgentCatalogEntry, AgentMuxInteractionResponse, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import { EMPTY_LAUNCHER_OPTIONS, updateLauncherOption, type LauncherOptionDrafts } from './lib/launcher-option-draft'
+import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { composeOutboundMessage } from '@agentmux/core/agent-outbound-message'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { primaryMoteExecutorId } from './lib/primary-mote-executor'
@@ -64,6 +66,7 @@ import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from '@agentmux/core
 import { validateAgentPromptCondition, type AgentPromptCondition } from '@agentmux/core/prompt-condition'
 import type {
   AgentLaunchResult,
+  LaunchOptionSelection,
   AgentSessionControl,
   AgentSessionRecoveryCandidate,
   AgentTimelineSnapshot,
@@ -482,6 +485,8 @@ type AppState = {
    * 那份用户报告（"报错退回初始页、之前输入没缓存"），名字这两格当时没跟上同一修法。
    */
   launcherNameDrafts: Record<string, LauncherNames>
+  /** Unsent explicit launch choices, isolated by original Region and Provider. */
+  launcherOptionDrafts: LauncherOptionDrafts
   /**
    * 用户手改的 Agent 显示名，按 Agent Session id 存。这是《显示名与身份》优先级链最高的那一档——
    * 名字只用于显示，绝不进入 id/寻址：这里的 key 是既有的 session id（寻址身份），value 只是一个
@@ -910,6 +915,7 @@ type AppState = {
    * 一格一个 setter 会让"启动成功要清掉这个 region 的名字草稿"变成两处要记得改的地方。
    */
   setLauncherNameDraft(regionId: string, field: LauncherNameField, value: string): void
+  setLauncherOptionDraft(regionId: string, providerId: string, optionId: string, choiceId: string | null): void
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
@@ -1914,6 +1920,8 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   agentComposerDrafts?: Record<string, string>
+  launcherNameDrafts?: Record<string, LauncherNames>
+  launcherOptionDrafts?: LauncherOptionDrafts
   agentSteerQueues?: Record<string, AgentSteerQueueEntry[]>
   documents?: Record<string, FileDocument>
   dirtyDocuments?: Record<string, boolean>
@@ -2098,6 +2106,8 @@ function selectPersistedInputs(state: AppState) {
     spatialRequests: state.spatialRequests,
     retainedSpatialFocus: state.retainedSpatialFocus,
     agentComposerDrafts: state.agentComposerDrafts,
+    launcherNameDrafts: state.launcherNameDrafts,
+    launcherOptionDrafts: state.launcherOptionDrafts,
     // 排着的消息是用户亲手敲下的字，和草稿同一档事实——草稿重启后还在、排队的却没了，是把第 12 条
     // 反过来做。恢复后可投递性照旧在消费点按 runId 判（steerEntryTargetsRun）：对不上当前 run 的
     // 显示为不可投递、交给用户处置，内容不替用户丢掉。已消失的 session 留一条队列无害——它不投影
@@ -2541,6 +2551,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   agentSteerQueues: {},
   agentSteerInFlight: {},
   launcherNameDrafts: {},
+  launcherOptionDrafts: {},
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
@@ -6272,6 +6283,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw new Error('Scratch Agent View has an invalid Topic identity')
     }
     const regionId = launcher?.regionId ?? targetTab.layout.activeRegionId
+    // Capture the exact unsent inputs used by this request. Contextual launches can use the
+    // same Region without consuming its other draft; late replies cannot clear newer edits.
+    const originalPrompt = state.agentComposerDrafts[regionId]
+    const submittedPrompt = originalPrompt !== undefined &&
+      (originalPrompt === prompt || expandSemanticReferences(originalPrompt) === prompt) ? originalPrompt : undefined
+    const requestedNames = { agentName: names?.agentName?.trim() || undefined, tabName: names?.tabName?.trim() || undefined }
+    const originalNames = state.launcherNameDrafts[regionId]
+    const submittedNames = originalNames &&
+      (originalNames.agentName.trim() || undefined) === requestedNames.agentName &&
+      (originalNames.tabName.trim() || undefined) === requestedNames.tabName ? originalNames : undefined
+    const providerId = state.config?.executors[executorId]?.providerId
+    const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
+    const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
     const sessionId = mintAgentSessionId()
     const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
       ? state.errorNoticeContext : null
@@ -6393,19 +6417,29 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // 只有启动成功、region 从 launcher 变成 agent 之后，才清掉这条 launcher 草稿——此刻它已失去归属。
       // 失败路径（下方 catch → reduceSessionLaunchFailed）绝不清：region 会翻回 launcher 且沿用同一个
       // regionId，草稿留在原地供用户直接重试。这正是用户报告"报错退回初始页、之前输入没缓存"要修的行为。
-      get().clearAgentComposerDraftIfUnchanged(regionId, prompt)
+      if (submittedPrompt !== undefined) get().clearAgentComposerDraftIfUnchanged(regionId, submittedPrompt)
       // 名字草稿与 prompt 草稿同一时机、同一理由清掉：这个 region 已经从 launcher 变成 agent，
       // 那两格输入失去归属，留着会串到下一个新标签页。失败路径不清（region 翻回 launcher 且沿用
       // 同一 regionId），用户填的名字原地留着供直接重试。
       set((current) => {
-        if (current.launcherNameDrafts[regionId] === undefined) return current
-        const { [regionId]: _consumed, ...rest } = current.launcherNameDrafts
-        return { launcherNameDrafts: rest }
+        const patch: Partial<AppState> = {}
+        if (submittedNames && current.launcherNameDrafts[regionId] === submittedNames) {
+          const { [regionId]: _consumed, ...rest } = current.launcherNameDrafts
+          patch.launcherNameDrafts = rest
+        }
+        if (providerId && submittedOptions && current.launcherOptionDrafts[regionId]?.[providerId] === submittedOptions) {
+          const { [providerId]: _consumed, ...remainingProviders } = current.launcherOptionDrafts[regionId]!
+          const options = { ...current.launcherOptionDrafts }
+          if (Object.keys(remainingProviders).length) options[regionId] = remainingProviders
+          else delete options[regionId]
+          patch.launcherOptionDrafts = options
+        }
+        return Object.keys(patch).length ? patch : current
       })
       // 名字与草稿同一时机落地：Agent 已经挂上，两个 id 才真正指向一个存在的东西。失败路径不写，
       // 否则会留下一个指向已消失 session 的孤儿名字。留空即不写，显示名交还派生链。
-      if (names?.agentName) get().renameAgent(sessionId, names.agentName)
-      if (names?.tabName) get().renameTab(tabId, names.tabName)
+      if (requestedNames.agentName) get().renameAgent(sessionId, requestedNames.agentName)
+      if (requestedNames.tabName) get().renameTab(tabId, requestedNames.tabName)
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
       if (priorFailure && get().errorNoticeContext === priorFailure) {
         set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
@@ -6994,9 +7028,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   setLauncherNameDraft(regionId, field, value) {
     set((state) => {
       const current = state.launcherNameDrafts[regionId] ?? EMPTY_LAUNCHER_NAMES
+      if (current[field] === value) return state
       return {
         launcherNameDrafts: { ...state.launcherNameDrafts, [regionId]: { ...current, [field]: value } }
       }
+    })
+  },
+  setLauncherOptionDraft(regionId, providerId, optionId, choiceId) {
+    set(state => {
+      const current = state.launcherOptionDrafts[regionId] ?? EMPTY_LAUNCHER_OPTIONS
+      const next = updateLauncherOption(current, providerId, optionId, choiceId)
+      if (next === current) return state
+      const drafts = { ...state.launcherOptionDrafts }
+      if (Object.keys(next).length) drafts[regionId] = next
+      else delete drafts[regionId]
+      return { launcherOptionDrafts: drafts }
     })
   },
   appendAgentComposerDraft(sessionId, text) {
