@@ -16,7 +16,8 @@ const repositoryRoot = resolve(process.env.AGENTMUX_VERIFY_REPOSITORY_ROOT ?? re
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const ts = require('typescript')
-const { requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')))
 const { listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
 const exec = promisify(execFile), digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
@@ -46,8 +47,8 @@ async function waitFor(label, read, budget=25_000) {
  throw new Error('Terminal continuation timed out: '+label)
 }
 async function connectCdp(url) {
-  const socket = new WebSocket(url), pending = new Map(), pauses = []
-  const cdp = { pauses, close: () => socket.close() }
+  const socket = new WebSocket(url), pending = new Map(), pauses = [], scripts = new Map()
+  const cdp = { pauses, scripts, close: () => socket.close() }
   connections.add(cdp)
   let serial = 0
   await new Promise((done, fail) => {
@@ -58,6 +59,7 @@ async function connectCdp(url) {
   socket.addEventListener('message', ({ data }) => {
     const message = JSON.parse(data)
     if (message.method === 'Debugger.paused') pauses.push(message.params)
+    if (message.method === 'Debugger.scriptParsed') scripts.set(message.params.url, message.params)
     const request = pending.get(message.id)
     if (!request) return
     pending.delete(message.id); clearTimeout(request.timer)
@@ -83,7 +85,7 @@ async function launch(label) {
   const readyFile = join(root, `ready-${label}.json`)
   const child = spawn(require('electron'), ['--inspect-brk=0', join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
     cwd: desktopRoot, detached: true, stdio: ['ignore', 'ignore', 'pipe'],
-    env: { ...process.env, ...fixtureEnvironment, AGENTMUX_DESKTOP_READY_FILE: readyFile }
+    env: { ...process.env, ...fixtureEnvironment, NODE_OPTIONS:[process.env.NODE_OPTIONS,'--inspect=0'].filter(Boolean).join(' '), AGENTMUX_DESKTOP_READY_FILE: readyFile }
   })
   children.add(child)
   const launchRecord={pid:child.pid,readyFile,startedAt:Date.now()}
@@ -160,12 +162,26 @@ async function normalQuit(probe) {
  children.delete(probe.child)
  return {exitCode:0,signal:null,inspectorReplyFailure:inspectorReplyFailure??null}
 }
-async function control(operation, fields={}) {
- const reply=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation,...fields},join(runtimeDirectory,'control.sock'))
- assert.equal(reply.ok,true,JSON.stringify(reply));return reply.result
+/**
+ * @template {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcMethod} M
+ * @param {M} method
+ * @param {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcParams<M>} params
+ * @returns {Promise<import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcResult<M>>}
+ */
+async function control(method, params) {
+ const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(runtimeDirectory,'control.sock')}})
+ const observed={method,params,startedAt:Date.now()};(receipt.control??=[]).push(observed)
+ try {const result=await rpc.call(method,params);observed.result=result;return result}
+ catch(error){observed.error={name:error.name,code:error.code??null,message:error.message,detail:error.detail??null};throw error}
+ finally {observed.elapsedMs=Date.now()-observed.startedAt;await rpc.dispose()}
 }
-async function inspected(regionId){return (await control('inspect.region',{target:{kind:'region',regionId}})).region}
+async function inspected(regionId){
+ const result=await control('space.inspect',{target:{regionId}})
+ assert.ok(result.presentation?.region,JSON.stringify(result.presentation))
+ return result.presentation.region
+}
 async function localState(cdp){return cdp.evaluate(`(() => {const record=localStorage.getItem('agentmux-workbench-v1');return record?JSON.parse(record).state:null})()`)}
+async function spatialState(){const result=await control('space.state',{});assert.ok(result.state,'The original Core spatial document must exist');return result.state}
 async function click(cdp, selector) {
  const point=await waitFor('visible private control',()=>cdp.evaluate(`(() => {const items=Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'&&!e.closest('[inert]')&&!e.disabled);if(items.length!==1)return null;const r=items[0].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`))
  await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point})
@@ -256,15 +272,22 @@ function retainedReading(value) {
  const reading=value.viewportY===value.baseY?{kind:'latest'}:{kind:'line',line:value.viewportY}
  return {cols:value.cols,type:value.type,reading,mouse:value.mouse,selection:value.selection,lines}
 }
-async function selectVisibleWord(cdp,regionId){
- const point=await cdp.evaluate(`(() => {const e=document.querySelector('[data-workbench-region-id="${regionId}"] .xterm-screen');const r=e.getBoundingClientRect();return {x:r.x+24,y:r.y+9}})()`)
- await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:2,...point})
- await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:2,...point})
+async function selectVisibleWord(cdp,regionId,handle){
+ const before=await buffer(cdp,handle)
+ const visibleRows=before.lines.slice(before.viewportY,before.viewportY+before.rows).flatMap((text,row)=>text.startsWith('ROW')?[{row,text}]:[])
+ assert.ok(visibleRows.length>0,'Actual visible history words must be nonempty')
+ const observation=await cdp.evaluate(`(() => {const e=document.querySelector('[data-workbench-region-id="${regionId}"] .xterm-screen');const r=e.getBoundingClientRect();const cell={width:r.width/${before.cols},height:r.height/${before.rows}};for(const word of ${JSON.stringify(visibleRows)}){const x=r.x+cell.width*3.5,y=r.y+cell.height*(word.row+0.5),hit=document.elementFromPoint(x,y);if(e.contains(hit)&&hit.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId===${JSON.stringify(regionId)})return {point:{x,y},word,cell,rect:{x:r.x,y:r.y,width:r.width,height:r.height},containsHit:true,hit:{tag:hit.tagName,className:hit.className},documentFocused:document.hasFocus()}}return null})()`)
+ assert.ok(observation,'Trusted selection must target a real unobscured history cell in the exact Region')
+ receipt.selectionObservation={regionId,before:{cols:before.cols,rows:before.rows,baseY:before.baseY,viewportY:before.viewportY,selection:before.selection,visibleLines:before.lines.slice(before.viewportY,before.viewportY+before.rows)},...observation}
+ await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:2,...observation.point})
+ await cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:2,...observation.point})
+ receipt.selectionObservation.after=await buffer(cdp,handle)
 }
+
 async function identity() {
  const vendor='packages/core/vendor/ctxmux/'+process.platform+'-'+process.arch
  const manifestPath=vendor+'/manifest.json',manifest=JSON.parse(await readFile(join(repositoryRoot,manifestPath),'utf8'))
- assert.equal(manifest.product.protocol,18,'This gate requires the actual release18 artifact')
+ assert.equal(manifest.product.protocol,21,'This gate requires the actual release21 artifact')
  assert.equal(manifest.source.worktree_clean,true)
  assert.equal(manifest.build.profile,'release')
  assert.equal(manifest.build.locked,true)
@@ -291,36 +314,75 @@ async function identity() {
  // The SDK deliberately exposes import only; CJS require.resolve is a different contract.
  const {stdout:sdkUrl}=await exec(process.execPath,['--input-type=module','-e',"process.stdout.write(import.meta.resolve('@ctxmux/sdk'))"],{cwd:join(repositoryRoot,'packages/core'),timeout:5000,maxBuffer:4096})
  const sdkPath=new URL(sdkUrl),sdkBytes=await readFile(sdkPath);assert.ok(sdkBytes.length>0)
- const sdk=await import(sdkPath);assert.equal(sdk.PROTOCOL_VERSION,18,'The actual Core SDK must be protocol18')
+ const sdk=await import(sdkPath);assert.equal(sdk.PROTOCOL_VERSION,21,'The actual Core SDK must be protocol21')
  for(const binary of manifest.binaries)assert.equal(hashes[vendor+'/'+binary.path],binary.sha256)
  assert.equal(hashes[vendor+'/'+manifest.sdk.archive.path],manifest.sdk.archive.sha256)
  return {nodeVersion:process.version,manifest:manifest.product,hashes,xtermHashes,electronSha:digest(await readFile(require('electron'))),sdkResolved:{url:sdkPath.href,protocolVersion:sdk.PROTOCOL_VERSION,sha256:digest(sdkBytes)},typescriptSha:digest(await readFile(require.resolve('typescript')))}
 }
+// Desktop owns the Hosted projection and leases; the naturally spawned Host owns Core's
+// actual retained SDK attachment. Inspector observation follows those two real owners.
 async function captureDesktopCore(probe, trigger) {
- const path=join(repositoryRoot,'packages/core/dist/client.js'),source=await readFile(path,'utf8')
- const ast=ts.createSourceFile(path,source,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS),found=[]
- function visit(node){if(ts.isMethodDeclaration(node)&&node.name.getText(ast)==='reattachAgent')found.push(node);ts.forEachChild(node,visit)}visit(ast)
+ const hostLog=join(userData,'agentmux-host.log')
+ const urls=[...(await readFile(hostLog,'utf8')).matchAll(/Debugger listening on (ws:\/\/\S+)/g)].map(match=>match[1])
+ assert.equal(urls.length,1,'Exactly one naturally spawned private Host inspector must exist')
+ const host=await connectCdp(urls[0]);await host.call('Runtime.enable');await host.call('Debugger.enable')
+ const identity=await host.evaluate('({pid:process.pid,storePath:process.env.AGENTMUX_AGENT_SESSION_STORE})')
+ assert.equal(identity.storePath,join(userData,'agent-sessions.json'))
+ const {stdout:birth}=await exec('/bin/ps',['-p',String(identity.pid),'-o','pid=,uid=,lstart=,command='],{timeout:2000,maxBuffer:4096})
+ assert.ok(birth.includes(identity.storePath));assert.ok(birth.includes('agentmux-host.js'))
+ const originalPath=join(repositoryRoot,'packages/core/dist/client.js'),original=await readFile(originalPath,'utf8')
+ const loaded=host.scripts.get(pathToFileURL(originalPath).href);assert.ok(loaded,'The actual Host must load this exact compiled Core')
+ const loadedSource=await host.call('Debugger.getScriptSource',{scriptId:loaded.scriptId})
+ assert.equal(digest(loadedSource.scriptSource),digest(original),'The loaded Host Core must match the original compiled Source')
+ const ast=ts.createSourceFile(originalPath,original,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS),found=[]
+ function visit(node){if(ts.isMethodDeclaration(node)&&node.name.getText(ast)==='refreshRunAttachment')found.push(node);ts.forEachChild(node,visit)}visit(ast)
  assert.equal(found.length,1,'One actual public Core attachment method must be collected')
  const at=ast.getLineAndCharacterOfPosition(found[0].body.statements[0].getStart(ast))
- const bp=await probe.main.call('Debugger.setBreakpointByUrl',{url:pathToFileURL(path).href,lineNumber:at.line,columnNumber:at.character})
- const request=trigger();let paused
+ const hostBreakpoint=await host.call('Debugger.setBreakpointByUrl',{url:pathToFileURL(originalPath).href,lineNumber:at.line,columnNumber:at.character})
+ const hostedPath=join(repositoryRoot,'packages/core/dist/hosted-client.js'),hosted=await readFile(hostedPath,'utf8')
+ const hostedAst=ts.createSourceFile(hostedPath,hosted,ts.ScriptTarget.Latest,true,ts.ScriptKind.JS),wrappers=[]
+ function visitHosted(node){if(ts.isArrowFunction(node)&&ts.isBinaryExpression(node.parent)&&ts.isElementAccessExpression(node.parent.left)&&node.parent.left.expression.getText(hostedAst)==='client'&&node.parent.left.argumentExpression.getText(hostedAst)==='method')wrappers.push(node);ts.forEachChild(node,visitHosted)}visitHosted(hostedAst)
+ assert.equal(wrappers.length,1,'The sole SDK-derived Hosted method wrapper must be nonempty and unique')
+ const hostedLoaded=probe.main.scripts.get(pathToFileURL(hostedPath).href);assert.ok(hostedLoaded)
+ assert.equal(digest((await probe.main.call('Debugger.getScriptSource',{scriptId:hostedLoaded.scriptId})).scriptSource),digest(hosted))
+ const hostedAt=hostedAst.getLineAndCharacterOfPosition(wrappers[0].body.statements[0].getStart(hostedAst))
+ const mainBreakpoint=await probe.main.call('Debugger.setBreakpointByUrl',{url:pathToFileURL(hostedPath).href,lineNumber:hostedAt.line,columnNumber:hostedAt.character,condition:"method === 'reattachAgent'"})
+ let mainPaused,hostPaused
+ const request=trigger()
  try {
-  paused=await waitFor('actual Desktop Core attach boundary',()=>probe.main.pauses.shift())
-  assert.ok(paused.hitBreakpoints.includes(bp.breakpointId))
-  const core=await probe.main.call('Debugger.evaluateOnCallFrame',{callFrameId:paused.callFrames[0].callFrameId,expression:'this',returnByValue:false})
-  assert.equal(core.exceptionDetails,undefined);assert.ok(core.result.objectId)
+  mainPaused=await waitFor('actual Desktop Hosted attachment tuple',()=>probe.main.pauses.shift())
+  assert.ok(mainPaused.hitBreakpoints.includes(mainBreakpoint.breakpointId))
+  const tuple=await probe.main.call('Debugger.evaluateOnCallFrame',{callFrameId:mainPaused.callFrames[0].callFrameId,expression:'({method,args})',returnByValue:true})
+  assert.equal(tuple.exceptionDetails,undefined);assert.equal(tuple.result.value.method,'reattachAgent')
+  assert.equal(tuple.result.value.args[0],session.agentSessionId);assert.equal(tuple.result.value.args[2],'terminal')
   let controller
-  for(const frame of paused.callFrames.slice(1)){
+  for(const frame of mainPaused.callFrames.slice(1)){
    const candidate=await probe.main.call('Debugger.evaluateOnCallFrame',{callFrameId:frame.callFrameId,
     expression:'typeof this?.resourceOwnerCounts === "function" ? this : null',returnByValue:false})
    if(candidate.result?.objectId){controller=candidate.result.objectId;break}
   }
   assert.ok(controller,'The actual Main attachment owner must be in the product call stack')
-  return {core:core.result.objectId,controller,request}
- } finally {await probe.main.call('Debugger.removeBreakpoint',{breakpointId:bp.breakpointId});if(paused)await probe.main.call('Debugger.resume')}
+  await probe.main.call('Debugger.removeBreakpoint',{breakpointId:mainBreakpoint.breakpointId});await probe.main.call('Debugger.resume');mainPaused=undefined
+  hostPaused=await waitFor('actual Host Core attachment boundary',()=>host.pauses.shift())
+  assert.ok(hostPaused.hitBreakpoints.includes(hostBreakpoint.breakpointId))
+  const hostTuple=await host.call('Debugger.evaluateOnCallFrame',{callFrameId:hostPaused.callFrames[0].callFrameId,expression:'({ref,afterByte,view,operationId})',returnByValue:true})
+  assert.equal(hostTuple.exceptionDetails,undefined)
+  assert.equal(hostTuple.result.value.ref.runId,session.run.runId)
+  assert.deepEqual([hostTuple.result.value.afterByte,hostTuple.result.value.view],tuple.result.value.args.slice(1))
+  const core=await host.call('Debugger.evaluateOnCallFrame',{callFrameId:hostPaused.callFrames[0].callFrameId,expression:'this',returnByValue:false})
+  assert.equal(core.exceptionDetails,undefined);assert.ok(core.result.objectId)
+  receipt.hostObservation={identity,birth:birth.trim(),inspectorUrl:urls[0],compiledCoreSha:digest(original),compiledHostedSha:digest(hosted),tuple:tuple.result.value,hostMethod:'refreshRunAttachment',hostTuple:hostTuple.result.value}
+  probe.host=host
+  return {core:core.result.objectId,controller,request,host}
+ } finally {
+  await probe.main.call('Debugger.removeBreakpoint',{breakpointId:mainBreakpoint.breakpointId})
+  if(mainPaused)await probe.main.call('Debugger.resume')
+  await host.call('Debugger.removeBreakpoint',{breakpointId:hostBreakpoint.breakpointId})
+  if(hostPaused)await host.call('Debugger.resume')
+ }
 }
 async function attachmentHandle(probe,core,runId){
- const result=await probe.main.call('Runtime.callFunctionOn',{objectId:core,arguments:[{value:runId}],returnByValue:false,
+ const result=await probe.host.call('Runtime.callFunctionOn',{objectId:core,arguments:[{value:runId}],returnByValue:false,
   functionDeclaration:'function(runId){return this.kernel.attachments.get(runId)?.attachment}'});
  assert.equal(result.exceptionDetails,undefined);assert.ok(result.result.objectId,'One actual retained SDK attachment must exist');return result.result.objectId
 }
@@ -329,15 +391,15 @@ async function ownerCounts(probe,controller){
   functionDeclaration:'function(){return this.resourceOwnerCounts()}'});assert.equal(result.exceptionDetails,undefined);return result.result.value
 }
 async function refresh(probe,regionId){
- const button=await probe.cdp.evaluate(`(() => {const e=document.querySelector('[data-workbench-region-id="${regionId}"]');const b=[...e.querySelectorAll('.terminal-service-window button')].find(b=>b.textContent==='Refresh observation');if(!b||b.disabled)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
- if(button){await probe.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...button});await probe.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...button});return}
  await click(probe.cdp,`[data-workbench-region-id="${regionId}"] .agent-region-header__more`)
- const point=await waitFor('actual Region refresh menu action',()=>probe.cdp.evaluate(`(() => {const e=document.querySelector('.agent-region-menu[data-owner-region-id="${regionId}"]');const b=[...e?.querySelectorAll('[role="menuitem"]')??[]].find(b=>b.textContent==='Refresh observation');if(!b)return null;const r=b.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`))
- await probe.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point});await probe.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point})
+ const point=await waitFor('actual Region refresh menu action',()=>probe.cdp.evaluate(`(() => {const e=document.querySelector('.agent-region-menu[data-owner-region-id="${regionId}"]');const matches=[...e?.querySelectorAll('[role="menuitem"]')??[]].filter(b=>b.textContent==='Refresh observation');if(matches.length!==1)return null;const b=matches[0],r=b.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;if(b.disabled||r.width===0||r.height===0||!b.contains(document.elementFromPoint(x,y)))return null;return {x,y}})()`))
+ ;(receipt.refreshActions??=[]).push({regionId,entry:'same-region-header-menu',point})
+ await probe.cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point})
+ await probe.cdp.call('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point})
 }
 async function sameWorkbench(probe,durable,draft){
- const state=await waitFor('actual restored durable Region workbench',async()=>{const state=await localState(probe.cdp);return state?.restoredWorkbench?.tabs?.[durable.tabId]?state:null})
- assert.deepEqual(state.restoredWorkbench,durable.workbench);assert.equal(state.agentComposerDrafts[session.agentSessionId],draft)
+ const state=await waitFor('actual restored durable Region workbench',async()=>{const state=await spatialState();return state.graph.tabs.some(tab=>tab.tabId===durable.tabId)?state:null})
+ assert.deepEqual(state,durable.workbench);assert.equal((await localState(probe.cdp)).agentComposerDrafts[session.agentSessionId],draft)
  for(const id of durable.regionIds){const region=await waitFor('same Session Region actually attached',async()=>{const r=await inspected(id);return r.terminalView?.liveReady?r:null});assert.equal(region.agentSessionId,session.agentSessionId);assert.equal(region.terminalView.runId,session.run.runId)
   await colorCells(probe.cdp,await terminalHandle(probe.cdp,id))}
  return state
@@ -399,18 +461,20 @@ try {
  const rightReport=await control('agent.open',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},
   destination:{regionId:left.regionId,split:'right'},focus:false});assert.equal(rightReport.outcome,'opened');const right=rightReport.to;assert.ok(right)
  await waitFor('second shared Region',async()=> (await inspected(right.regionId)).terminalView?.liveReady)
- await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:left.regionId}})
+ await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:left.regionId}})
  const draft='Unsent exact Region draft survives failed observation and two restarts'
  await click(first.cdp,`[data-workbench-region-id="${left.regionId}"] .composer [role="textbox"]`)
  await first.cdp.call('Input.insertText',{text:draft})
  const state=await waitFor('actual draft persisted by product',async()=>{const state=await localState(first.cdp);return state?.agentComposerDrafts?.[session.agentSessionId]===draft?state:null})
- const durable={tabId:left.tabId,workbench:state.restoredWorkbench,regionIds:[left.regionId,right.regionId]}
- assert.equal(durable.workbench.tabs[left.tabId].layout.activeRegionId,left.regionId)
+ const workbench=await waitFor('actual durable Core workbench',async()=>{const state=await spatialState();return state.graph.tabLayouts[left.tabId]?.activeRegionId===left.regionId&&state.graph.regions.some(r=>r.regionId===left.regionId&&r.agentSessionId===session.agentSessionId&&r.runId===item.runId)&&state.graph.regions.some(r=>r.regionId===right.regionId&&r.agentSessionId===session.agentSessionId&&r.runId===item.runId)?state:null})
+ const durable={tabId:left.tabId,workbench,regionIds:[left.regionId,right.regionId]}
+ receipt.durableWorkbench=workbench
+ assert.equal(durable.workbench.graph.tabLayouts[left.tabId].activeRegionId,left.regionId)
  assert.deepEqual(await ownerCounts(first,captured.controller),{sessionAttachmentOwners:1,sessionAttachmentLeases:2})
  const handles=await freshLive(first,durable,item)
  await wheel(first.cdp,left.regionId,-3000)
  await waitFor('actual history viewport moved by trusted wheel',async()=>{const value=await buffer(first.cdp,handles[0]);return value.viewportY<value.baseY?value:null})
- await selectVisibleWord(first.cdp,left.regionId)
+ await selectVisibleWord(first.cdp,left.regionId,handles[0])
  await waitFor('actual nonempty selected history word',async()=> (await buffer(first.cdp,handles[0])).selection.startsWith('ROW'))
  const before=await Promise.all(handles.map(handle=>buffer(first.cdp,handle)))
  receipt.initialColorCells=await colorCells(first.cdp,handles[0])
@@ -420,8 +484,8 @@ try {
  await rename(socket,hiddenSocket)
  phase='actual-private-observation-failure'
  await refresh(first,left.regionId)
- const failureText=await waitFor('persistent same Region actual cause',()=>first.cdp.evaluate(`(() => {const t=document.querySelector('[data-workbench-region-id="${left.regionId}"] .terminal-service-window')?.textContent;return t?.includes('ctxmux.sock')&&t.includes('input delivery are unconfirmed')?t:null})()`))
- const afterFailure=await localState(first.cdp);assert.deepEqual(afterFailure.restoredWorkbench,durable.workbench);assert.equal(afterFailure.agentComposerDrafts[session.agentSessionId],draft)
+ const failureText=await waitFor('persistent same Region actual cause',async()=>{const notices=await first.cdp.evaluate(`({left:document.querySelector('[data-workbench-region-id="${left.regionId}"] .terminal-service-window')?.textContent??null,right:document.querySelector('[data-workbench-region-id="${right.regionId}"] .terminal-service-window')?.textContent??null})`);receipt.failureNotices=notices;return notices.left?.includes('ctxmux.sock')&&notices.left.includes('input delivery are unconfirmed')?notices.left:null})
+ const afterFailure=await localState(first.cdp);assert.deepEqual(await spatialState(),durable.workbench);assert.equal(afterFailure.agentComposerDrafts[session.agentSessionId],draft)
  assert.equal((await status(item)).z,1);assert.deepEqual(await ownerCounts(first,captured.controller),{sessionAttachmentOwners:1,sessionAttachmentLeases:2})
  const failedBuffers=await Promise.all(handles.map(handle=>buffer(first.cdp,handle)))
  assert.deepEqual(failedBuffers.map(retainedReading),before.map(retainedReading))
@@ -433,7 +497,7 @@ try {
  await refresh(first,left.regionId)
  await waitFor('actual scoped failure cleared after attachment',()=>first.cdp.evaluate(`!document.querySelector('[data-workbench-region-id="${left.regionId}"] .terminal-service-window')?.textContent.includes('ctxmux.sock')`))
  const newPump=await attachmentHandle(first,captured.core,item.runId)
- const same=await first.main.call('Runtime.callFunctionOn',{objectId:oldPump,arguments:[{objectId:newPump}],returnByValue:true,functionDeclaration:'function(other){return this===other}'})
+ const same=await captured.host.call('Runtime.callFunctionOn',{objectId:oldPump,arguments:[{objectId:newPump}],returnByValue:true,functionDeclaration:'function(other){return this===other}'})
  assert.equal(same.result.value,false,'A metadata/snapshot RPC must not be signed as actual pump replacement')
  assert.deepEqual(await ownerCounts(first,captured.controller),{sessionAttachmentOwners:1,sessionAttachmentLeases:2})
  assert.equal((await exactRun(item)).acceptedInputBytes,accepted,'Observation refresh must not dispatch Input')

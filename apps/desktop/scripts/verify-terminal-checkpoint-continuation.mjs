@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
 import assert from 'node:assert/strict'
 import { spawn, execFile } from 'node:child_process'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { join, resolve } from 'node:path'
@@ -16,7 +16,8 @@ const repositoryRoot = resolve(process.env.AGENTMUX_VERIFY_REPOSITORY_ROOT ?? re
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const ts = require('typescript')
-const { requestAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/public-rpc-client.js')))
 const { listProbeProcesses, stopProbeProcesses } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
 const exec = promisify(execFile), digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
@@ -26,13 +27,13 @@ const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA:userData, AGENTMUX_RUNTI
 const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
 const connections = new Set(), children = new Set(), runs = [], phases = []
 const receipt = { schema:'agentmux.terminal-checkpoint-desktop.v1',passed:false,cleanup:{},phases,limitations:[
- 'Actual release18 Generic private PTY and production Desktop path; no user Run, model call or native Agent CLI behavior is implied.',
+ 'Actual release21 Generic private PTY and production Desktop path; no user Run, model call or native Agent CLI behavior is implied.',
  'Ordinary product quit/restart, not sudden-exit durability or physical fsync evidence.',
  'Known-origin normal and alternate Basic VT continuation; an existing unknown-origin Run remains unknown.',
  'Trusted CDP delivery to this private page, not physical macOS trackpad or measured production latency.'
 ] }
 const deadline = Date.now()+150_000
-let phase='prepare',client,first,second,failure,interrupted
+let phase='prepare',client,first,second,failure,interrupted,activation
 const abort = signal => {
  interrupted=new Error('Private continuation probe interrupted: '+signal)
  for(const child of children){try{process.kill(-child.pid,'SIGKILL')}catch(error){if(error.code!=='ESRCH')receipt.cleanup.interruptError=error.message}}
@@ -159,12 +160,25 @@ async function normalQuit(probe) {
  children.delete(probe.child)
  return {exitCode:0,signal:null,inspectorReplyFailure:inspectorReplyFailure??null}
 }
-async function control(operation, fields={}) {
- const reply=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation,...fields},join(runtimeDirectory,'control.sock'))
- assert.equal(reply.ok,true,JSON.stringify(reply));return reply.result
+/**
+ * @template {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcMethod} M
+ * @param {M} method
+ * @param {import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcParams<M>} params
+ * @returns {Promise<import('../../../packages/core/dist/public-rpc.js').AgentMuxRpcResult<M>>}
+ */
+async function control(method, params) {
+ const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(runtimeDirectory,'control.sock')}})
+ const observed={method,params,startedAt:Date.now()};(receipt.control??=[]).push(observed)
+ try {const result=await rpc.call(method,params);observed.result=result;return result}
+ catch(error){observed.error={name:error.name,code:error.code??null,message:error.message,detail:error.detail??null};throw error}
+ finally {observed.elapsedMs=Date.now()-observed.startedAt;await rpc.dispose()}
 }
-async function inspected(regionId){return (await control('inspect.region',{target:{kind:'region',regionId}})).region}
-async function localState(cdp){return cdp.evaluate(`(() => {const record=localStorage.getItem('agentmux-workbench-v1');return record?JSON.parse(record).state:null})()`)}
+async function inspected(regionId){
+ const result=await control('space.inspect',{target:{regionId}})
+ assert.ok(result.presentation?.region,JSON.stringify(result.presentation))
+ return result.presentation.region
+}
+async function spatialState(){const result=await control('space.state',{});assert.ok(result.state,'The original Core spatial document must exist');return result.state}
 async function click(cdp, selector) {
  const point=await waitFor('visible private control',()=>cdp.evaluate(`(() => {const items=Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e=>e.getClientRects().length&&getComputedStyle(e).visibility!=='hidden'&&!e.closest('[inert]')&&!e.disabled);if(items.length!==1)return null;const r=items[0].getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`))
  await cdp.call('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point})
@@ -264,22 +278,29 @@ while True:
 async function opened(cdp, mode, destination) {
  const statusPath=join(root,mode+'-status.json'), programPath=join(root,'terminal-program.py')
  const quote=value=>"'"+value.replace(/'/g,"'\\''")+"'"
- const answer=await control('open.terminal',{shellCommand:['/usr/bin/python3',programPath,mode,statusPath].map(quote).join(' '),destination})
+ const answer=await control('terminal.open',{shellCommand:['/usr/bin/python3',programPath,mode,statusPath].map(quote).join(' '),destination})
  assert.equal(answer.region.kind,'terminal')
  const item={region:answer.region,statusPath}
  await waitFor(mode+' actual program output',()=>status(item).catch(error=>{if(error.code==='ENOENT')return null;throw error}))
  const run=(await client.listRuns()).find(run=>run.runId===item.region.runId);assert.ok(run?.pid);item.pid=run.pid
  runs.push(item)
  await waitFor(mode+' actual live view',async()=>{const observation=(await inspected(item.region.regionId)).terminalView;return observation?.liveReady&&observation.acceptsInput?observation:null})
- const raw=await client.readRunReplay({runId:item.region.runId},0,'raw')
+ const raw=await waitFor(mode+' actual original-prefix eviction',async()=>{const snapshot=await client.readRunReplay({runId:item.region.runId},0,'raw');return snapshot.gap?.firstAvailableByte>0?snapshot:null})
+ const observedRun=await activation.client.status(item.region.runId)
+ const nativeStatus={id:observedRun.id,pid:observedRun.pid,state:observedRun.state,latestOutputBytes:observedRun.latest_output_bytes,durableOutputBytes:observedRun.durable_output_bytes,firstAvailableByte:observedRun.first_available_byte,attachments:observedRun.attachments,currentSize:observedRun.current_size}
+ assert.equal(client.runtimeIdentity().instanceId,activation.runtime.daemonInstanceId)
+ ;(receipt.rawReplay??=[]).push({mode,runId:item.region.runId,pid:item.pid,run:raw.run,gap:raw.gap??null,resizeRevision:raw.resizeRevision,terminal:raw.terminal,replay:raw.replay.map(chunk=>({runId:chunk.runId,startByte:chunk.startByte,endByte:chunk.endByte,bytes:chunk.dataBytes.byteLength})),status:await status(item),nativeStatus,coreIdentity:client.runtimeIdentity()})
  assert.ok(raw.gap?.firstAvailableByte>0,'The real Runtime must have evicted an original prefix')
  assert.ok(raw.run.latestOutputBytes>4*1024*1024)
+ let cursor=raw.gap.firstAvailableByte
+ for(const chunk of raw.replay){assert.equal(chunk.startByte,cursor);assert.equal(chunk.endByte-chunk.startByte,chunk.dataBytes.byteLength);cursor=chunk.endByte}
+ assert.equal(cursor,raw.run.latestOutputBytes,'Ordered replay must end at the exact same snapshot output fence')
  phases.push({phase:mode+'-original-prefix-evicted',runId:item.region.runId,pid:item.pid,latest:raw.run.latestOutputBytes,head:raw.gap.firstAvailableByte})
  return item
 }
 async function verifyNormal(probe,item) {
  phase='normal-restored-reader'
- await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:item.region.regionId}})
+ await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:item.region.regionId}})
  const handle=await terminalHandle(probe.cdp,item.region.regionId)
  const before=await buffer(probe.cdp,handle);assert.equal(before.type,'normal');assert.equal(before.mouse,'none')
  assert.ok(before.lines.includes('ROW000'),'Normal origin history must survive actual raw prefix eviction and app restart')
@@ -297,7 +318,7 @@ async function verifyNormal(probe,item) {
 }
 async function verifyAlternate(probe,item) {
  phase='alternate-mouse-restored'
- await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:item.region.regionId}})
+ await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:item.region.regionId}})
  const handle=await terminalHandle(probe.cdp,item.region.regionId)
  const before=await buffer(probe.cdp,handle);assert.equal(before.type,'alternate');assert.equal(before.mouse,'any');assert.ok(before.lines.some(line=>line.includes('READY500')))
  const start=await status(item),firstRun=await exactRun(item)
@@ -315,7 +336,7 @@ async function verifyAlternate(probe,item) {
 async function identity() {
  const vendor='packages/core/vendor/ctxmux/'+process.platform+'-'+process.arch
  const manifestPath=vendor+'/manifest.json',manifest=JSON.parse(await readFile(join(repositoryRoot,manifestPath),'utf8'))
- assert.equal(manifest.product.protocol,18,'This gate requires the actual release18 artifact')
+ assert.equal(manifest.product.protocol,21,'This gate requires the actual release21 artifact')
  assert.equal(manifest.source.worktree_clean,true)
  assert.equal(manifest.build.profile,'release')
  assert.equal(manifest.build.locked,true)
@@ -333,7 +354,7 @@ async function identity() {
  // The SDK deliberately exposes import only; CJS require.resolve is a different contract.
  const {stdout:sdkUrl}=await exec(process.execPath,['--input-type=module','-e',"process.stdout.write(import.meta.resolve('@ctxmux/sdk'))"],{cwd:join(repositoryRoot,'packages/core'),timeout:5000,maxBuffer:4096})
  const sdkPath=new URL(sdkUrl),sdkBytes=await readFile(sdkPath);assert.ok(sdkBytes.length>0)
- const sdk=await import(sdkPath);assert.equal(sdk.PROTOCOL_VERSION,18,'The actual Core SDK must be protocol18')
+ const sdk=await import(sdkPath);assert.equal(sdk.PROTOCOL_VERSION,21,'The actual Core SDK must be protocol21')
  for(const binary of manifest.binaries)assert.equal(hashes[vendor+'/'+binary.path],binary.sha256)
  assert.equal(hashes[vendor+'/'+manifest.sdk.archive.path],manifest.sdk.archive.sha256)
  return {nodeVersion:process.version,manifest:manifest.product,hashes,electronSha:digest(await readFile(require('electron'))),sdkResolved:{url:sdkPath.href,protocolVersion:sdk.PROTOCOL_VERSION,sha256:digest(sdkBytes)},typescriptSha:digest(await readFile(require.resolve('typescript')))}
@@ -342,6 +363,21 @@ try {
  receipt.before=await identity()
  await Promise.all([userData,privateHome,runtimeDirectory,workspacePath,codexHome].map(path=>mkdir(path,{recursive:true,mode:0o700})))
  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+ // Deterministic private sample: configure the original protocol21 SDK startup policy,
+ // then let the unmodified Core/Desktop select that exact Runtime. Default budgets are
+ // intentionally not inferred from output size; no production Runtime is configured.
+ const sdk=await import(receipt.before.sdkResolved.url)
+ /** @type {import('../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js').RuntimeResourceLimits} */
+ const resourceLimits={run_output_bytes:4*1024*1024,durable_run_output_bytes:4*1024*1024}
+ const stateDir=join(fixtureEnvironment.AGENTMUX_STATE_DIRECTORY,'ctxmux')
+ await mkdir(stateDir,{recursive:true,mode:0o700})
+ activation=await sdk.activateRuntime({executable:join(repositoryRoot,'packages/core/vendor/ctxmux',process.platform+'-'+process.arch,'bin/ctxmuxd'),socketPath:join(runtimeDirectory,'ctxmux.sock'),stateDir,resourceLimits})
+ assert.equal(activation.spawned,true,'Only this unique private fixture may choose its startup policy')
+ assert.ok(activation.childPid>1);assert.deepEqual(await activation.client.list(),[])
+ const {stdout:runtimeProcess}=await exec('/bin/ps',['-p',String(activation.childPid),'-o','pid=,uid=,lstart=,command='],{timeout:2000,maxBuffer:8192})
+ assert.ok(runtimeProcess.includes(join(runtimeDirectory,'ctxmux.sock')));assert.ok(runtimeProcess.includes(stateDir))
+ assert.ok(runtimeProcess.includes('--resource-limits '+JSON.stringify(resourceLimits)),'The actual serving daemon must receive this exact original SDK policy')
+ receipt.fixturePolicy={resourceLimits,spawned:activation.spawned,pid:activation.childPid,runtime:activation.runtime,process:runtimeProcess.trim()}
  await writeFile(join(root,'terminal-program.py'),python,{mode:0o700})
  await writeFile(join(userData,'agentmux.config.json'),JSON.stringify({version:9,hosts:[{id:'local',kind:'local',label:'Private Runtime'}],executors:{},
  workspaces:[{id:'checkpoint-fixture',name:'Private checkpoint fixture',hostId:'local',path:workspacePath,kind:'folder'}],appearance:{terminalTheme:'graphite'},browser:{agentAutomation:false,toolbar:{selectElement:true,screenshot:true,devTools:true,viewport:true,saveBookmark:true,more:true}}}))
@@ -357,9 +393,11 @@ try {
  const launcher=await waitFor('actual new workspace launcher',()=>first.cdp.evaluate("document.querySelector('[data-workbench-region-id]:has(.launch-surface)')?.dataset.workbenchRegionId ?? null"))
  const normal=await opened(first.cdp,'normal',{kind:'launcher',regionId:launcher})
  const alternate=await opened(first.cdp,'alternate',{kind:'split',region:{kind:'region',regionId:normal.region.regionId},direction:'right'})
- await control('focus',{inputPolicy:'preserve',target:{kind:'space',regionId:normal.region.regionId}})
- const durable=await waitFor('actual durable workface',async()=>{const state=await localState(first.cdp);const tab=state?.restoredWorkbench?.tabs?.[normal.region.tabId];return tab?.layout.activeRegionId===normal.region.regionId&&Object.values(tab.regions).some(r=>r.sessionId===normal.region.runId)&&Object.values(tab.regions).some(r=>r.sessionId===alternate.region.runId)?state.restoredWorkbench:null})
- const native=client.runtimeIdentity();assert.equal(native.protocolVersion,18);receipt.runtimeBefore=native
+ await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:normal.region.regionId}})
+ const durable=await waitFor('actual durable workface',async()=>{const state=await spatialState();const graph=state.graph;return graph.tabLayouts[normal.region.tabId]?.activeRegionId===normal.region.regionId&&graph.regions.some(r=>r.regionId===normal.region.regionId&&r.runId===normal.region.runId)&&graph.regions.some(r=>r.regionId===alternate.region.regionId&&r.runId===alternate.region.runId)?state:null})
+ receipt.durableWorkbench=durable
+ const native=client.runtimeIdentity();assert.equal(native.protocolVersion,21);receipt.runtimeBefore=native
+ assert.equal(native.instanceId,activation.runtime.daemonInstanceId,'The original Core must use the same policy-configured Runtime instance')
  const before=await Promise.all(runs.map(exactRun));assert.equal(before.length,2)
  // This join uses the product's ordinary quit/restart. Renderer localStorage alone is
  // not a physical disk-commit oracle; crash durability is proved by its separate owning gate.
@@ -368,12 +406,12 @@ try {
  for(const item of runs)await exactRun(item)
  phases.push({phase:'first-process-exited',quit,restartBoundary:'ordinary-quit-not-crash',runtime:native.instanceId,runIds:runs.map(item=>item.region.runId),pids:runs.map(item=>item.pid)})
  second=await launch('second')
- const restored=await waitFor('same durable workface after actual second process',async()=>{const state=await localState(second.cdp);return state?.restoredWorkbench?.tabs?.[normal.region.tabId]?state.restoredWorkbench:null})
+ const restored=await waitFor('same durable workface after actual second process',async()=>{const state=await spatialState();return state.graph.tabs.some(tab=>tab.tabId===normal.region.tabId)?state:null})
  assert.deepEqual(restored,durable)
  // The long-lived parent's runtimeIdentity is handshake-cached. Bind this restart
  // to a new public Core handshake instead of treating that cached value as fresh.
  const verifier=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
- try {receipt.runtimeAfter=verifier.runtimeIdentity();assert.equal(receipt.runtimeAfter.instanceId,native.instanceId);assert.equal(receipt.runtimeAfter.protocolVersion,18)}
+ try {receipt.runtimeAfter=verifier.runtimeIdentity();assert.equal(receipt.runtimeAfter.instanceId,native.instanceId);assert.equal(receipt.runtimeAfter.protocolVersion,21)}
  finally {await verifier.dispose()}
  for(const item of runs)await waitFor('restored same Run input ready',async()=>{const region=await inspected(item.region.regionId);assert.equal(region.runId,item.region.runId);return region.terminalView?.liveReady&&region.terminalView.acceptsInput?region:null})
  await verifyNormal(second,normal);await verifyAlternate(second,alternate)
@@ -385,6 +423,7 @@ try {
  for(const cdp of connections){try{await cdp.call('Debugger.resume')}catch{};try{cdp.close()}catch{}}
  if(client){for(const item of runs){try{await client.stopTerminal({runId:item.region.runId})}catch(error){receipt.cleanup.stopError=error.message;failure??=error}};try{await client.dispose()}catch(error){failure??=error}}
  for(const child of children){try{await stopProbeProcesses(child.pid,root)}catch(error){failure??=error;receipt.cleanup.processError=error.message}}
+ if(activation){try{await activation.dispose({shutdown:true});receipt.cleanup.fixtureRuntimeDisposed=true}catch(error){failure??=error;receipt.cleanup.processError=error.message}}
  // Includes detached daemon/helpers identified exclusively by this invocation's private root.
  try{
   let remaining=await listProbeProcesses(-1,root)
