@@ -3482,7 +3482,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             [input.agentSessionId]: { ...current.pendingAgentLaunches[input.agentSessionId],
               events: current.pendingAgentLaunches[input.agentSessionId]?.events ?? [],
               overflowed: current.pendingAgentLaunches[input.agentSessionId]?.overflowed ?? false,
-              request: { executorId: input.executorId, ...(input.prompt === undefined ? {} : { prompt: input.prompt }) } }
+              request: { executorId: input.executorId, hostId: input.hostId, workspacePath: input.workspacePath,
+                ...(input.prompt === undefined ? {} : { prompt: input.prompt }) } }
           } }))
           return api.sessions.launchAgent(input)
         },
@@ -6485,7 +6486,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
-        [sessionId]: { events: [], overflowed: false, request: { executorId, prompt,
+        [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, prompt,
           ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }) } }
       }
     }))
