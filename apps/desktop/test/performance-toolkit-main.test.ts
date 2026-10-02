@@ -1,14 +1,15 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { mainFixtureState, children, cleanups, cli, nativeMain, until, oneCli, record, processes, executionGroup, alive, terminalMetadata, storage } from './toolkit-main.fixture.js'
 import { describe, expect, it, vi } from 'vitest'
-import { mkdtemp, mkdir, readFile, rm, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, copyFile, rm, symlink } from 'node:fs/promises'
 import { resolve, join } from 'node:path'
-import { subscribeAgentMuxToolkit, subscribeAgentMuxMetrics } from '@agentmux/core'
+import { createConnection } from 'node:net'
+import { PROTOCOL_VERSION } from '../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
 import type { ToolkitMetricsSnapshot as ToolkitSnapshot } from '@agentmux/core/control'
 import * as assets from '../src/main/toolkit-asset.js'
 import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts.js'
 import * as terminalQueries from '../src/shared/terminal-osc-color-query.js'
-import { mainFixtureState, children, cleanups, cli, nativeMain, until, oneCli, record, processes, executionGroup, alive, terminalMetadata, storage } from './toolkit-main.fixture.js'
-import { execFile } from 'node:child_process'
+import { execFile, spawn } from 'node:child_process'
 import { promisify } from 'node:util'
 const exec = promisify(execFile)
 const fixture = mainFixtureState()
@@ -17,18 +18,37 @@ describe('registered Main official Performance vertical slice',()=>{
     const directory=await mkdtemp(_hygiene_fixturePath("tmp/amx-toolkit-package-")),root=join(directory,'Contents','Resources','app')
     cleanups.push(()=>rm(directory,{recursive:true,force:true}))
     await mkdir(join(root,'resources','toolkit'),{recursive:true});await mkdir(join(root,'node_modules','@agentmux','core','dist'),{recursive:true})
-    await symlink(resolve('apps/desktop/resources/toolkit/performance.mjs'),join(root,'resources','toolkit','performance.mjs'))
+    await copyFile(resolve('apps/desktop/resources/toolkit/performance.mjs'),join(root,'resources','toolkit','performance.mjs'))
+    const core=resolve('packages/core'),packagedCore=join(root,'node_modules','@agentmux','core')
+    await symlink(join(core,'package.json'),join(packagedCore,'package.json'))
+    await symlink(join(core,'node_modules'),join(packagedCore,'node_modules'),'dir')
+    for(const entry of await readdir(join(core,'dist'))) {
+      if(entry !== 'agentmux.js')await symlink(join(core,'dist',entry),join(packagedCore,'dist',entry))
+    }
+    const productionLaunch=assets.performanceLaunch,m=await nativeMain()
     await symlink(process.env.AGENTMUX_TOOLKIT_CLI!,join(root,'node_modules','@agentmux','core','dist','agentmux.js'))
     fixture.packaged=true;fixture.appPath=root
-    const launch=assets.performanceLaunch()
+    const launch=productionLaunch()
     expect(launch.script).toBe(join(root,'resources','toolkit','performance.mjs'))
     expect(launch.cli).toBe(join(root,'node_modules','@agentmux','core','dist','agentmux.js'))
     const script=await assets.readPerformanceScript(launch)
     expect(script.text).toBe(await readFile(resolve('apps/desktop/resources/toolkit/performance.mjs'),'utf8'))
     expect(script.sha256).toMatch(/^[a-f0-9]{64}$/u)
-    const help=await exec(launch.runner,[launch.cli,'toolkit','watch','--help'],{env:{...process.env,...launch.env}})
+    const help=await exec(launch.runner,[launch.cli,'--help','toolkit','watch'],{env:{...process.env,...launch.env}})
     expect(help.stdout.trim().length).toBeGreaterThan(30)
-    await record('packaged-topology',{root,launch,sha256:script.sha256,help:help.stdout})
+    const child=spawn(launch.runner,[launch.script,launch.cli],{cwd:launch.cwd,env:{...process.env,...launch.env},stdio:['ignore','pipe','pipe']})
+    children.push(child)
+    let stdout='',stderr='',code:number|null|undefined
+    child.stdout!.on('data',bytes=>{stdout+=bytes});child.stderr!.on('data',bytes=>{stderr+=bytes});child.once('close',value=>{code=value})
+    const frames=()=>stdout.split('\n').filter(Boolean).map(line=>JSON.parse(line))
+    await until(()=>{expect(code,stderr).toBeUndefined();expect(frames().length).toBeGreaterThanOrEqual(2)},15000)
+    expect(frames()).toEqual(expect.arrayContaining([expect.objectContaining({schema:'agentmux.toolkit.result.v1',event:'result',sequence:1,
+      payload:expect.objectContaining({schema:'agentmux.metrics.v1'})})]))
+    expect(frames().map(frame=>frame.sequence)).toEqual(frames().map((_,index)=>index+1))
+    child.kill('SIGTERM');await until(()=>expect(code,stderr).not.toBeUndefined())
+    expect(frames().every(frame=>frame.event==='result')).toBe(true)
+    await until(()=>expect((m.sampler as any).subscribers.size).toBe(0))
+    await record('packaged-topology',{root,launch,sha256:script.sha256,help:help.stdout,frames:frames(),exitCode:code})
   })
   it('actual CLI/help/asset, shared consumers and ten native closed/reopen retirements preserve an external metrics observer and healthy Run',async()=>{
     const m=await nativeMain()
@@ -45,20 +65,23 @@ describe('registered Main official Performance vertical slice',()=>{
     expect(baselineMetadata.runPids.map(([id])=>id)).toContain(healthyRef.runId)
     const runningRemoval=await m.core.removeTerminal(healthyRef).then(()=>({accepted:true}),error=>({accepted:false,code:error.code}))
     expect(runningRemoval).toMatchObject({accepted:false,code:expect.stringMatching(/^CTXMUX_/u)})
-    for(const verb of ['list','get','script','run','stop','watch']) {
-      const h=cli('toolkit',verb,'--help');await until(()=>expect(h.code).not.toBeUndefined());expect(h.code,h.stderr).toBe(0);expect(h.stdout.trim().length).toBeGreaterThan(30)
+    for(const verb of ['ls','inspect','script','run','stop','watch']) {
+      const h=cli('--help','toolkit',verb);await until(()=>expect(h.code).not.toBeUndefined());expect(h.code,h.stderr).toBe(0);expect(h.stdout.trim().length).toBeGreaterThan(30)
     }
-    expect((await oneCli('toolkit','list')).result.tools).toEqual([{kind:'metrics',toolId:'performance',name:'Performance',readonly:true}])
+    expect((await oneCli('toolkit','ls')).result.tools).toEqual([{kind:'metrics',toolId:'performance',name:'Performance',readonly:true}])
     const script=(await oneCli('toolkit','script','performance')).result.script
     expect(script.text).toBe(await readFile(process.env.AGENTMUX_TOOLKIT_ASSET ?? resolve('apps/desktop/resources/toolkit/performance.mjs'),'utf8'))
     expect(script.sha256).toMatch(/^[a-f0-9]{64}$/u)
     const external:unknown[]=[]
-    const metric=await subscribeAgentMuxMetrics({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:'external',operation:'metrics.watch'},{
-      onFrame:frame=>{if(frame.event==='snapshot')external.push(frame.result.observation)},onEnd:()=>{}
-    },{path:m.controlPath})
+    const metric=await m.rpc.subscribe('system.metrics.watch',{}, {
+      onInitial:initial=>external.push(initial.observation),
+      onEvent:event=>{if(event.type==='snapshot')external.push(event.data)},onEnd:()=>{}
+    })
     cleanups.push(async()=>metric.dispose())
     let snapshots:ToolkitSnapshot[]=[], endError:Error|undefined
-    const establishment=await subscribeAgentMuxToolkit(m.request('toolkit.watch') as any,{onFrame:f=>{if(f.event==='snapshot')snapshots.push(f.result.snapshot)},onEnd:e=>{endError=e}},{path:m.controlPath})
+    const establishment=await m.rpc.subscribe('toolkit.watch',{toolId:'performance'},{onInitial:()=>{},onEvent:event=>{
+      if(event.type==='snapshot'){if(event.data.kind!=='metrics')throw new Error('Performance requires its metrics snapshot');snapshots.push(event.data)}
+    },onEnd:e=>{endError=e}})
       .then(watcher=>({watcher,error:null}),error=>({watcher:null,error}))
     expect(establishment.error,'Actual owned RawRun Toolkit observation must establish before consumer reads').toBeNull()
     expect(establishment.watcher,'Actual Toolkit observation must return its own disposer').toHaveProperty('dispose',expect.any(Function))
@@ -68,10 +91,10 @@ describe('registered Main official Performance vertical slice',()=>{
     expect(scan).not.toHaveBeenCalled()
     const execution=snapshots.at(-1)!.executionId,ref=snapshots.at(-1)!.run!
     expect(ref.runId).not.toBe(healthyRef.runId);expect((await m.core.listRuns()).length).toBe(baseline.length+1)
-    await m.invoke('toolkit:observe','actual-ui-lease')
-    expect((await m.call('toolkit.get')).result).toMatchObject({snapshot:{executionId:execution,consumerCount:2}})
+    await m.invoke('toolkit:observe','performance','actual-ui-lease')
+    expect((await m.rpc.call('toolkit.inspect',{toolId:'performance'}))).toMatchObject({snapshot:{executionId:execution,consumerCount:2}})
     await m.invoke('toolkit:release','actual-ui-lease')
-    expect((await m.call('toolkit.get')).result).toMatchObject({snapshot:{executionId:execution,consumerCount:1}})
+    expect((await m.rpc.call('toolkit.inspect',{toolId:'performance'}))).toMatchObject({snapshot:{executionId:execution,consumerCount:1}})
     expect(snapshots.at(-1)!.observation!.process.data!.length).toBeGreaterThan(0)
     const manual=(await oneCli('toolkit','run','performance')).result.snapshot
     expect(manual.executionId).toBe(execution)
@@ -79,14 +102,17 @@ describe('registered Main official Performance vertical slice',()=>{
     const group=await executionGroup(ownPid)
     expect(group.length).toBeGreaterThanOrEqual(2)
     expect(group.some(p=>p.command.includes('metrics watch'))).toBe(true)
-    watcher.dispose()
+    await watcher.dispose()
     await until(()=>expect((m.sampler as any).subscribers.size).toBe(2))
-    expect((await m.call('toolkit.get')).result).toMatchObject({snapshot:{manual:true,consumerCount:0,state:'observing'}})
+    expect((await m.rpc.call('toolkit.inspect',{toolId:'performance'}))).toMatchObject({snapshot:{manual:true,consumerCount:0,state:'observing'}})
     let sequence=manual.sequence
     for(let n=0;n<3;n++){
       let current!:ToolkitSnapshot
       for(let attempt=0;attempt<150;attempt++){
-        current=(await m.call('toolkit.get') as any).result.snapshot
+        const snapshot=(await m.rpc.call('toolkit.inspect',{toolId:'performance'})).snapshot
+        expect(snapshot.kind).toBe('metrics')
+        if(snapshot.kind!=='metrics')throw new Error('Performance requires its own metrics snapshot')
+        current=snapshot
         if(current.sequence>sequence)break
         await new Promise(resolve=>setTimeout(resolve,20))
       }
@@ -102,16 +128,18 @@ describe('registered Main official Performance vertical slice',()=>{
     await record('execution-group',{phase:'explicit-stop',group,allExited:true})
     for(let n=0;n<10;n++){
       const seen:ToolkitSnapshot[]=[]
-      const lease=await subscribeAgentMuxToolkit(m.request('toolkit.watch') as any,{onFrame:f=>{if(f.event==='snapshot')seen.push(f.result.snapshot)},onEnd:e=>{endError=e}},{path:m.controlPath})
+      const lease=await m.rpc.subscribe('toolkit.watch',{toolId:'performance'},{onInitial:()=>{},onEvent:event=>{
+        if(event.type==='snapshot'){if(event.data.kind!=='metrics')throw new Error('Performance requires its metrics snapshot');seen.push(event.data)}
+      },onEnd:e=>{endError=e}})
       await until(()=>{expect(endError).toBeUndefined();expect(seen.some(v=>v.sequence>0)).toBe(true)},15000)
       const own=seen.at(-1)!.run!;expect(own.runId).toBeTruthy()
       const ownProcess=(await m.core.listRuns()).find(run=>run.runId===own.runId);expect(ownProcess?.pid).toBeGreaterThan(0)
       const closedGroup=await executionGroup(ownProcess!.pid!)
       expect(closedGroup.length).toBeGreaterThanOrEqual(2)
-      lease.dispose()
+      await lease.dispose()
       await until(()=>expect((m.sampler as any).subscribers.size).toBe(1))
       try {await until(async()=>expect((await m.core.listRuns()).map(run=>run.runId).sort()).toEqual([...baseline].sort()))}
-      catch(error){await record('cleanup-failure',{list:await m.core.listRuns(),snapshot:(await m.call('toolkit.get') as any).result});throw error}
+      catch(error){await record('cleanup-failure',{list:await m.core.listRuns(),snapshot:(await m.rpc.call('toolkit.inspect',{toolId:'performance'}))});throw error}
       expect((await m.core.listRuns()).find(run=>run.runId===healthyRef.runId)?.pid).toBe(original?.pid)
       await until(()=>expect(closedGroup.filter(p=>alive(p.pid))).toEqual([]))
       // Removal plus an event-loop turn settle the real Attachment pump.
@@ -123,7 +151,7 @@ describe('registered Main official Performance vertical slice',()=>{
         metadata:terminalMetadata(m.core),baselineMetadata})
     }
     expect(external.length).toBeGreaterThan(2)
-    metric.dispose()
+    await metric.dispose()
     await until(()=>expect((m.sampler as any).subscribers.size).toBe(0))
     expect((m.sampler as any).timer).toBeNull()
     expect(await readFile(join(m.directory,'config.json'))).toEqual(before)
@@ -148,7 +176,10 @@ describe('registered Main official Performance vertical slice',()=>{
     expect(snapshot.manual).toBe(true);expect(snapshot.run?.runId).toBeTruthy()
     let current!:ToolkitSnapshot
     for(let attempt=0;attempt<150;attempt++){
-      current=(await m.call('toolkit.get') as any).result.snapshot
+      const snapshot=(await m.rpc.call('toolkit.inspect',{toolId:'performance'})).snapshot
+        expect(snapshot.kind).toBe('metrics')
+        if(snapshot.kind!=='metrics')throw new Error('Performance requires its own metrics snapshot')
+        current=snapshot
       if(current.sequence>=2)break
       await new Promise(resolve=>setTimeout(resolve,20))
     }

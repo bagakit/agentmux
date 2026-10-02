@@ -295,6 +295,20 @@ export class AgentMuxRpcService {
         }
         body = input
       }
+      if ((method === 'toolkit.run' || method === 'toolkit.stop') && body.toolId !== 'performance' && body.input === undefined) {
+        const baselineParams = rpcRecord(body, ['toolId', 'input', 'operationId'])
+        const baseline = rpcControlRequest('toolkit.inspect', { toolId: baselineParams.toolId,
+          ...(baselineParams.operationId === undefined ? {} : { operationId: baselineParams.operationId }) })
+        const current = await this.toolkit(baseline, context.signal)
+        if (current.operation !== 'toolkit.get' || current.snapshot.kind !== 'script' || current.snapshot.toolId !== baselineParams.toolId) {
+          throw new AgentMuxError('Toolkit baseline belongs to another tool.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        const snapshot = current.snapshot
+        body = { ...body, operationId: baseline.requestId, input: method === 'toolkit.run'
+          ? { invocationId: baseline.requestId, expectedRevision: snapshot.definition.revision,
+            expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null }
+          : { executionId: snapshot.admission?.executionId ?? null } }
+      }
       const internalCaller: AgentMuxControlCaller | undefined = caller
         ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined
       const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, body, internalCaller)
@@ -303,19 +317,6 @@ export class AgentMuxRpcService {
       }
       if (request.operation === 'demand.start' && request.sessionId !== undefined) {
         request.sessionId = (await this.owner(request.sessionId)).agentSessionId
-      }
-      if (request.operation === 'toolkit.run' || request.operation === 'toolkit.stop') {
-        if (request.toolId !== 'performance' && (request.operation === 'toolkit.run' ? !request.input : request.executionId === undefined)) {
-          const current = await this.toolkit(this.request('toolkit.get', { toolId: request.toolId }), context.signal)
-          if (current.operation !== 'toolkit.get' || current.snapshot.kind !== 'script' || current.snapshot.toolId !== request.toolId) {
-            throw new AgentMuxError('Toolkit baseline belongs to another tool.', 'CONTROL_PROTOCOL_ERROR')
-          }
-          const snapshot = current.snapshot
-          if (request.operation === 'toolkit.run') request.input = { invocationId: request.requestId,
-            expectedRevision: snapshot.definition.revision,
-            expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null }
-          else request.executionId = snapshot.admission?.executionId ?? null
-        }
       }
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal)
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }

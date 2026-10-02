@@ -28,10 +28,10 @@ vi.mock('../src/main/browser-view-manager.js', () => ({ BrowserViewManager: clas
 } }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
-import { AgentMuxMemoryAgentSessionStore, AgentMuxClient, requestAgentMuxControl, subscribeAgentMuxToolkit, subscribeAgentMuxMetrics } from '@agentmux/core'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, type ToolkitSnapshot } from '@agentmux/core/control'
+import { AgentMuxMemoryAgentSessionStore, AgentMuxClient, connectAgentMuxRpc, type AgentMuxRpcClient } from '@agentmux/core'
 import { registerIpc } from '../src/main/ipc.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
+import { desktopBusinessSocketPath } from '../src/main/desktop-host.js'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 import * as assets from '../src/main/toolkit-asset.js'
@@ -53,7 +53,7 @@ export async function until(check: () => void | Promise<void>, ms = 10000) {
 }
 export function cli(...args: string[]) {
   expect(process.env.AGENTMUX_TOOLKIT_CLI).toBeTruthy()
-  const child = spawn(process.execPath, [process.env.AGENTMUX_TOOLKIT_CLI!,...args], { env:process.env, stdio:['ignore','pipe','pipe'] })
+  const child = spawn(process.execPath, [process.env.AGENTMUX_TOOLKIT_CLI!, '--endpoint', process.env.AGENTMUX_RPC_ENDPOINT!, ...args], { env:process.env, stdio:['ignore','pipe','pipe'] })
   children.push(child)
   let stdout = '', stderr = '', code: number | null | undefined
   child.stdout!.on('data', b => { stdout += b }); child.stderr!.on('data', b => { stderr += b }); child.once('close', value => { code = value })
@@ -68,10 +68,12 @@ export async function nativeMain() {
   const directory = await mkdtemp(_hygiene_fixturePath("tmp/amx-tk-"))
   fixture.directory = directory
   fixture.handlers.clear();fixture.ipc.listeners.clear()
-  const names=['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE'] as const
+  const names=['AGENTMUX_RUNTIME_DIRECTORY','AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','AGENTMUX_AGENT_SESSION_STORE','AGENTMUX_AGENT_SESSION_ID','AGENTMUX_AGENT_CAPABILITY','AGENTMUX_RPC_ENDPOINT'] as const
   const old=Object.fromEntries(names.map(n=>[n,process.env[n]]))
   process.env.AGENTMUX_RUNTIME_DIRECTORY=directory;process.env.AGENTMUX_STATE_DIRECTORY=join(directory,'state')
   process.env.AGENTMUX_MESSAGE_QUEUE_PATH=join(directory,'queue.ndjson');process.env.AGENTMUX_AGENT_SESSION_STORE=join(directory,'agent-sessions.json')
+  delete process.env.AGENTMUX_AGENT_SESSION_ID;delete process.env.AGENTMUX_AGENT_CAPABILITY
+  const controlPath=desktopBusinessSocketPath();process.env.AGENTMUX_RPC_ENDPOINT='unix:'+controlPath
   cleanups.push(async()=>{for(const n of names) if(old[n]===undefined)delete process.env[n];else process.env[n]=old[n]})
   await mkdir(join(directory,'work'))
   vi.spyOn(assets,'performanceLaunch').mockReturnValue({ runner:process.execPath, cli:process.env.AGENTMUX_TOOLKIT_CLI!,
@@ -86,9 +88,10 @@ export async function nativeMain() {
   }()
   let sender=makeSender(), detachRenderer=runtime.attach(sender as any)
   const sdk=new CtxmuxClient({socketPath:join(directory,'ctxmux.sock')})
-  let dispose: (()=>Promise<void>) | undefined
+  let dispose: (()=>Promise<void>) | undefined, rpc: AgentMuxRpcClient | undefined
   await record('fixture-startup',{directory,phase:'before-registerIpc'})
   cleanups.push(async()=>{
+    await rpc?.dispose()
     await dispose?.()
     // Exact private fixture cleanup uses the public SDK, independently of any Source mutant.
     // Its corrective actions are recorded, never counted as the product oracle.
@@ -121,22 +124,21 @@ export async function nativeMain() {
     daemon:{...daemon,sha256:createHash('sha256').update(await readFile(executable)).digest('hex')},
     runner:{path:process.execPath,sha256:await (runnerDigest??=readFile(process.execPath).then(bytes=>createHash('sha256').update(bytes).digest('hex')))}})
   const core=()=>(runtime as any).hosts.get('local').client as AgentMuxClient
-  const controlPath=join(directory,'control.sock')
-  const request=(operation:any)=>({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:crypto.randomUUID(),operation,toolId:'performance'})
-  const call=(operation:any)=>requestAgentMuxControl(request(operation) as any,controlPath)
+  rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
   const invoke=(channel:string,...args:any[])=>fixture.handlers.get(channel)!({sender},...args)
   const restart=async()=>{
-    await dispose!();detachRenderer();await runtime.dispose();sampler.dispose()
+    await rpc!.dispose();await dispose!();detachRenderer();await runtime.dispose();sampler.dispose()
     fixture.handlers.clear();fixture.ipc.listeners.clear()
     sampler=new ProcessResourceSampler();runtime=new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector,undefined,sampler)
     // Reopen the actual durable stores and same private Native. Never recreate defaults or the daemon.
     store=new ConfigStore(join(directory,'config.json'));config=await store.get();sender=makeSender();detachRenderer=runtime.attach(sender as any)
     dispose=await registerIpc({window:{id:7,isDestroyed:()=>false,webContents:sender} as any,runtime,configStore:store,
       progressLoops:{subscribe:()=>()=>{}} as any,scratchTopics:{} as any,workspaceFiles:{dispose:async()=>{}} as any})
+    rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:controlPath}})
     await record('fixture-restart',{directory,phase:'registered',runtimeInstance:await sdk.daemonInstance()})
   }
   return {directory,get runtime(){return runtime},get sampler(){return sampler},get store(){return store},get config(){return config},
-    get sender(){return sender},dispose:()=>dispose!(),get core(){return core()},sdk,controlPath,request,call,invoke,restart}
+    get sender(){return sender},dispose:()=>dispose!(),get core(){return core()},sdk,controlPath,get rpc(){return rpc!},invoke,restart}
 }
 export async function record(name:string,value:unknown) {
   if(process.env.AGENTMUX_TOOLKIT_EVIDENCE)await appendFile(join(process.env.AGENTMUX_TOOLKIT_EVIDENCE!,name+'.jsonl'),JSON.stringify(value)+'\n')

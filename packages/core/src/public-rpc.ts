@@ -53,10 +53,12 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
 type ControlMethod = keyof typeof AGENTMUX_RPC_CONTROL_METHODS
 type Owner<M extends ControlMethod> = typeof AGENTMUX_RPC_CONTROL_METHODS[M]
 type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never
-type BusinessParams<M extends ControlMethod> = OmitEach<Extract<AgentMuxControlRequest,
-  { operation: Owner<M> }>, 'schemaVersion' | 'requestId' | 'operation' | 'caller' | 'resource'>
-type BusinessResult<M extends ControlMethod> = OmitEach<Extract<AgentMuxControlResult,
-  { operation: Owner<M> }>, 'operation'>
+type OperationOwner<T, O> = T extends { operation: infer Operation }
+  ? O extends Operation ? T : never : never
+type BusinessParams<M extends ControlMethod> = OmitEach<OperationOwner<AgentMuxControlRequest,
+  Owner<M>>, 'schemaVersion' | 'requestId' | 'operation' | 'caller' | 'resource'>
+type BusinessResult<M extends ControlMethod> = OmitEach<OperationOwner<AgentMuxControlResult,
+  Owner<M>>, 'operation'>
 type GoalKeys<T> = T extends readonly (infer E)[] ? GoalKeys<E>[] : T extends object ? {
   [K in keyof T as K extends 'demandId' ? 'goalId' : K extends 'parentDemandId' ? 'parentGoalId' : K extends 'demand' ? 'goal' : K extends 'demands' ? 'goals' : K]:
     K extends 'receipt' | 'goal' | 'demand' | 'goals' | 'demands' | 'decisions' | 'patch' ? GoalKeys<T[K]> : T[K]
