@@ -8,7 +8,7 @@ import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 
 // The actual Toolbar and Radix focus scopes are mounted. Only the external
 // action owners are mocked; this suite does not assert Core/Run authority.
-const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), selectWorkspace: vi.fn(async () => {}), focusRegion: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {} }))
+const owners = vi.hoisted(() => ({ renameAgent: vi.fn(), renameTab: vi.fn(), setMainSurface: vi.fn(), selectWorkspace: vi.fn(async () => {}), focusRegion: vi.fn(), focusExecutionSession: vi.fn(), sessions: [], agentNames: {}, timelines: {}, workspaceFileRevisions: {}, scratchTopicSnapshots: {}, refreshScratchTopics: vi.fn(async () => {}), spaceObjectIcons: {} }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof owners) => unknown) => selector(owners), { getState: () => ({ ...owners, activeWorkspaceId: null, layouts: { 'original-workspace': { groups: [{ id: 'original-group', tabOrder: ['original-tab'] }] } }, tabs: { [tab.id]: tab } }) }) }))
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 

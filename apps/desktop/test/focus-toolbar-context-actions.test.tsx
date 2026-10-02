@@ -68,7 +68,7 @@ it('creates one exact complete-Tab discussion through the original primary Mote 
   expect(tab.topicId).toBe(PMO_TEAMS_TOPIC_ID)
   expect(prompt).toContain(formatTabAddress(sourceId)); expect(prompt).not.toContain(formatTabAddress('ordinary-decoy'))
   expect(prompt).not.toContain('original-run-'); expect(prompt).not.toContain('source-file')
-  expect(launch).toHaveBeenCalledExactlyOnceWith('fixture', prompt, 'mote-group', { tabId: tab.id, regionId: tab.layout.activeRegionId })
+  expect(launch).toHaveBeenCalledExactlyOnceWith('fixture', prompt, 'mote-group', { tabId: tab.id, regionId: tab.layout.activeRegionId }, undefined, undefined, undefined)
   for (const [key, value] of Object.entries(drafts)) expect(useAppStore.getState().agentComposerDrafts[key]).toBe(value)
   expect(useAppStore.getState().tabs[sourceId]).toBe(before.tabs[sourceId]); expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId); expect(useAppStore.getState().mainSurface).toBe('agents')
@@ -77,6 +77,7 @@ it('captures the existing custom Mote identity, rejects duplicate pending clicks
   let release!: (value: typeof moteTopics[number]) => void
   vi.mocked(api.scratch.ensureMote).mockImplementation(() => new Promise(resolve => { release = resolve }))
   await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: customMoteId, targetTabId: 'custom-tab' })); await settle()
+  expect(button('Choose Chat Mote').dataset.focusChatTopic).toBe(customMoteId)
   await act(async () => { button('Chat about this tab with Mote').click(); button('Chat about this tab with Mote').click() })
   expect(discussions()).toHaveLength(1); expect(api.scratch.ensureMote).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, customMoteId)
   expect(button('Chat about this tab with Mote').disabled).toBe(true)
@@ -88,7 +89,7 @@ it('captures the existing custom Mote identity, rejects duplicate pending clicks
   expect(readPmoTeamsTopicFloatingState()?.open).toBe(false); expect(document.activeElement).toBe(laterInput)
   expect(useAppStore.getState().mainSurface).toBe('board'); expect(useAppStore.getState().activeWorkspaceId).toBe('project')
   expect(useAppStore.getState().agentComposerDrafts[customAgent.id]).toBe('Analyst unsent')
-  expect(launch).toHaveBeenCalledExactlyOnceWith('fixture', prompt, 'mote-group', { tabId: born.id, regionId: born.layout.activeRegionId }); laterInput.remove()
+  expect(launch).toHaveBeenCalledExactlyOnceWith('fixture', prompt, 'mote-group', { tabId: born.id, regionId: born.layout.activeRegionId }, undefined, undefined, undefined); laterInput.remove()
 })
 it('keeps the same newborn discussion and request when Mote preparation rejects or configuration is unconfirmed', async () => {
   await act(async () => useAppStore.setState({ config: { ...useAppStore.getState().config!, executors: {} } }))
