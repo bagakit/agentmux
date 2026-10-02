@@ -8,6 +8,7 @@ const [html, privateRoot, phase, preload, evidence, inputPath, coreSpatialPath] 
 assert.ok(html && privateRoot && ['seed', 'restore'].includes(phase) && preload && evidence && inputPath && coreSpatialPath)
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
+app.on('window-all-closed', () => {}) // The awaited receipt, then finally's app.exit, owns this private process exit.
 const json = value => JSON.parse(JSON.stringify(value))
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
@@ -83,6 +84,10 @@ app.whenReady().then(async () => {
       do { const value = typeof expression === 'string' ? await read(expression) : await expression(); if (value) return value; await delay(35) } while (Date.now() < deadline)
       throw new Error(`Project groups did not settle: ${expression}`)
     }
+    const fileReady = async () => {
+      await until('(() => { const regions=window.projectGroupsState().visibleRegions; return regions.length>0 && regions.every(region=>region.text.replaceAll("\u00a0"," ").includes("Project groups organize navigation.")) })()')
+      result.operations.push({ observation: 'actual-visible-file-content-ready', regionIds: (await state()).visibleRegions.map(region => region.id) })
+    }
     const flush = () => read('window.projectGroupsFlush()')
     const capture = async (name, scene) => {
       await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
@@ -125,6 +130,7 @@ app.whenReady().then(async () => {
     if (await exists('[aria-label="Hide Space tools"]')) await click('[aria-label="Hide Space tools"]')
     if (phase === 'seed') await click(`[data-space-folder] [data-workspace-id="${local.id}"]`)
     await until('window.projectGroupsState().mainSurface === "workbench" && window.projectGroupsState().visibleRegions.length > 0')
+    await fileReady()
     result.initialState = await state(); result.originalDurable = await flush()
     assert.equal(result.initialState.projectGroups.some(one => one.groupId === retainedGroupId && one.projectIds.includes(unknownProjectId)), true)
     const originalTopology = topology(result.originalDurable.graph)
@@ -170,6 +176,7 @@ app.whenReady().then(async () => {
       await dispatch('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13, text: '\r', unmodifiedText: '\r' })
       await dispatch('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 })
       await until(`window.projectGroupsState().activeWorkspaceId===${JSON.stringify(remote.id)}`)
+      await fileReady()
       result.remoteSelection = await checkPreserved('remote member keyboard activation + Core ACK')
       assert.deepEqual(result.remoteSelection.current.selectedMembers, [remoteId])
       await capture('remote-member', 'Exact remote member selected; original remote directory and file Region remain in place')
