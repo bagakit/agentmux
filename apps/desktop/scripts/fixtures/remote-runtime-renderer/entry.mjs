@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App } from '../../../src/renderer/src/App'
+import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { useAppStore, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
@@ -73,9 +74,48 @@ if (setup.phase === 'seed') {
   } }))
 }
 
+const inVisibleViewport = node => {
+  if (!node?.isConnected || node.closest('[hidden], [inert], [aria-hidden="true"]')) return false
+  if (!node.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true })) return false
+  const bounds = node.getBoundingClientRect()
+  return bounds.width > 0 && bounds.height > 0 && bounds.right > 0 && bounds.bottom > 0 &&
+    bounds.left < innerWidth && bounds.top < innerHeight
+}
+const visibleEditor = () => [...document.querySelectorAll('[contenteditable="true"]')].find(inVisibleViewport)
+window.remotePaintObservation = () => {
+  const editor = visibleEditor()
+  const ancestors = []
+  for (let node = editor; node; node = node.parentElement) {
+    const { x, y, width, height } = node.getBoundingClientRect(), style = getComputedStyle(node)
+    ancestors.push({ tag: node.tagName, class: node.className, x, y, width, height,
+      overflow: style.overflow, position: style.position, display: style.display, visibility: style.visibility })
+  }
+  const bounds = editor?.getBoundingClientRect()
+  const hit = bounds ? document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2) : null
+  return { ancestors, hit: hit ? { tag: hit.tagName, class: hit.className, belongsToEditor: editor === hit || editor.contains(hit) } : null }
+}
+window.remoteNoticeObservation = () => {
+  const panel = document.querySelector('.global-system-notices__details')
+  const bounds = node => {
+    const { x, y, width, height, top, bottom, left, right } = node.getBoundingClientRect()
+    return { x, y, width, height, top, bottom, left, right }
+  }
+  const inputs = [...document.querySelectorAll('.agent-input-stack')].filter(inVisibleViewport).map(bounds)
+  const expanded = panel?.matches(':popover-open') && inVisibleViewport(panel)
+  const popup = expanded ? bounds(panel) : null
+  const notice = [...document.querySelectorAll('.error-notice')].find(inVisibleViewport)
+  const noticeStyle = notice ? getComputedStyle(notice) : null
+  const panelStyle = panel ? getComputedStyle(panel) : null
+  return { expanded, popup, inputs,
+    inputClear: Boolean(popup) && inputs.length > 0 && inputs.every(input => popup.bottom <= input.top),
+    notice: notice ? { kind: useAppStore.getState().errorNoticeContext?.kind ?? 'indeterminate',
+      ariaLive: notice.getAttribute('aria-live'), color: noticeStyle.color, background: noticeStyle.backgroundColor,
+      quiet: notice.getAttribute('aria-live') === 'polite' && noticeStyle.color === panelStyle.color &&
+        noticeStyle.backgroundColor === panelStyle.backgroundColor } : null }
+}
 window.remoteState = () => {
   const state = useAppStore.getState(), workbench = projectPersistedWorkbench(state)
-  const editor = [...document.querySelectorAll('[contenteditable="true"]')].find(node => node.getClientRects().length)
+  const editor = visibleEditor()
   const selection = getSelection()
   return { loading: state.loading, tabs: workbench.tabs, layouts: workbench.layouts, drafts: state.agentComposerDrafts,
     activeWorkspaceId: state.activeWorkspaceId, focus: state.agentFocus, warnings: state.runtimeEndpointWarnings,
@@ -135,7 +175,7 @@ window.remoteResync = () => useAppStore.getState().applyEvent({ type: 'core', ho
   type: 'agent-status', agentSessionId: 'controlled-membership-gap', state: 'working', evidence: { source: 'agentmux', observedAt: Date.now() }
 } })
 window.remoteSetCaret = () => {
-  const editor = [...document.querySelectorAll('[contenteditable="true"]')].find(node => node.getClientRects().length)
+  const editor = visibleEditor()
   if (!editor) throw Error('One actual visible Agent editor is required')
   window.originalEditor = editor
   editor.focus()
@@ -145,5 +185,5 @@ window.remoteSetCaret = () => {
   const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range)
   return window.remoteState().editor
 }
-createRoot(document.getElementById('root')).render(createElement(App))
+createRoot(document.getElementById('root')).render(createElement(DesktopClientUiProvider, null, createElement(App)))
 window.remoteReady = true

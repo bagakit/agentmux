@@ -42,10 +42,10 @@ export function TransientErrorNotice({
   onReopen: () => void
   kind?: Parameters<typeof serviceNoticeAriaLive>[0]
 }) {
+  const ariaLive = serviceNoticeAriaLive(kind)
   if (error && !dismissed) {
-    const ariaLive = serviceNoticeAriaLive(kind)
     return (
-      <aside className="error-notice" role={ariaLive === 'assertive' ? 'alert' : 'status'} aria-live={ariaLive}>
+      <aside className="error-notice" data-volume={ariaLive} role={ariaLive === 'assertive' ? 'alert' : 'status'} aria-live={ariaLive}>
         <AlertTriangle size={14} aria-hidden="true" />
         {summary ? (
           <div className="error-notice__body">
@@ -64,7 +64,7 @@ export function TransientErrorNotice({
   }
   if (dismissed && lastError) {
     return (
-      <button className="error-notice__reopen" type="button" onClick={onReopen}>
+      <button className="error-notice__reopen" data-volume={ariaLive} type="button" onClick={onReopen}>
         <AlertTriangle size={12} aria-hidden="true" /> Show last error
       </button>
     )

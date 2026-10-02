@@ -139,6 +139,10 @@ app.whenReady().then(async () => {
     runtime.attach(win.webContents)
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer: ${message}\n`) })
     await win.loadFile(html)
+    // A hidden macOS window can report a fully laid-out DOM while capturing an
+    // unpainted workbench. Exercise the native surface without stealing focus.
+    win.showInactive()
+    assert.equal(win.isVisible(), true, 'The private workbench must actually be painted')
     await stage('mounted-app')
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -237,10 +241,29 @@ app.whenReady().then(async () => {
       await capture(`${phase}-owner-restored.png`)
       await win.webContents.executeJavaScript('window.remoteRemoveUnconfirmed(); true')
     }
+    result.workbenchPaint = await win.webContents.executeJavaScript('window.remotePaintObservation()')
     await capture(`${phase}-workbench.png`)
+    assert.equal(result.workbenchPaint.hit?.belongsToEditor, true,
+      'The original draft must be visible through its actual painted workbench, not clipped behind a zero-height ancestor')
+    const beforeNotice = await state()
+    const inputBeforeNotice = await win.webContents.executeJavaScript('window.remoteNoticeObservation()')
+    const resizesBeforeNotice = calls.filter(call => call.operation === 'resize').length
     await win.webContents.executeJavaScript('document.querySelector(".global-system-notices__trigger").click(); true')
     await until('document.querySelector(".global-system-notices__details")?.matches(":popover-open")')
     await capture(`${phase}-endpoint-notice.png`)
+    result.expandedNotice = await win.webContents.executeJavaScript('window.remoteNoticeObservation()')
+    const afterNotice = await state()
+    assert.ok(result.expandedNotice.expanded && result.expandedNotice.inputs.length > 0,
+      'The actual expanded system inbox and original visible input must be observed')
+    assert.deepEqual(result.expandedNotice.inputs, inputBeforeNotice.inputs, 'Reading system notices cannot resize the original input')
+    assert.equal(calls.filter(call => call.operation === 'resize').length, resizesBeforeNotice,
+      'Opening notice details cannot resize the original terminal grid')
+    for (const field of ['tabs', 'layouts', 'drafts', 'editor']) assert.deepEqual(afterNotice[field], beforeNotice[field], `${field} changed while reading system notices`)
+    if (!recoveryInput) {
+      assert.equal(result.expandedNotice.notice?.kind, 'indeterminate', 'Saved references without Runtime facts remain unknown')
+      assert.deepEqual({ inputClear: result.expandedNotice.inputClear, unknownQuiet: result.expandedNotice.notice?.quiet },
+        { inputClear: true, unknownQuiet: true }, 'Actual notice details clear the original input and unknown facts use quiet paint')
+    } else assert.equal(result.expandedNotice.inputClear, true, 'Notice details cannot cover the original Agent input')
     await win.webContents.executeJavaScript('document.querySelector(".global-system-notices__trigger").click(); true')
     // Open the actual App Settings route and existing Hosts pane, rather than drawing a mock page.
     await win.webContents.executeJavaScript('document.querySelector("button[aria-label=Settings]").click(); true')
