@@ -11,6 +11,7 @@ import type { AppConfig, SessionControl } from '../../../src/shared/contracts'
 import { inspectFarmOs, observeProtected, originalSessionId } from './farm-proof.mjs'
 
 const [html, privateRoot, phase, preload, evidence, inputPath] = process.argv.slice(2)
+assert.ok(html && privateRoot && phase && preload && evidence && inputPath, 'The complete private Native invocation is required')
 const input = JSON.parse(await fs.readFile(inputPath, 'utf8'))
 const config: AppConfig = input.config
 const runtimeConfig = { ...config, hosts: config.hosts.filter(host => host.id !== 'host-ui-empty'),
@@ -102,7 +103,7 @@ ipcMain.handle('host-ui:request', async (_event, operation, ...args) => {
     case 'refresh': return runtime.refresh(args[0], runtimeConfig)
     case 'write': requireOwned(args[0]); return runtime.write(args[0], args[1], args[2])
     case 'paste': requireOwned(args[0]); return runtime.paste(args[0], args[1], args[2])
-    case 'stop': requireOwned(args[0]); return runtime.stop(args[0])
+    case 'stop': requireOwned(args[0]); return runtime.stopSession(args[0])
     case 'submit-prompt': requireOwned(args[0]); return runtime.submitPrompt(args[0], args[1], args[2], args[3], undefined, args[4], args[5])
     case 'submit-message': requireOwned(args[0]); return runtime.submitMessage(args[0], args[1])
     case 'file-readDirectory': return files.readDirectory(workspace(args[0]), args[1])
@@ -211,10 +212,11 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 1560, height: 1120, show: false,
       webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload } })
     runtime.attach(win.webContents)
-    unsubscribeSpatial = spatial.onChange(value => { if (!win.isDestroyed()) win.webContents.send('host-ui:spatial-change', value) })
+    unsubscribeSpatial = spatial.subscribe(value => { if (!win.isDestroyed()) win.webContents.send('host-ui:spatial-change', value) })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer:${message.slice(0, 1800)}\n`) })
     await stage('load-window-start')
     await win.loadFile(html)
+    result.windowLoaded = true
     await stage('load-window-complete')
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -329,11 +331,11 @@ app.whenReady().then(async () => {
     result.passed = true
   } catch (error: any) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
-    if (win && !win.isDestroyed()) await capture('failure-workbench').catch(captureError => { result.failurePaintError = String(captureError) })
     process.stderr.write(`host_ui_probe_failed=${error.message}\n`)
+    if (result.windowLoaded && win && !win.isDestroyed()) await capture('failure-workbench').catch(captureError => { result.failurePaintError = String(captureError) })
   } finally {
     result.calls = calls; result.owned = owned
-    if (win && !win.isDestroyed()) result.final = await state().catch(() => null)
+    if (result.windowLoaded && win && !win.isDestroyed()) result.final = await state().catch(() => null)
     unsubscribeSpatial?.()
     const errors: string[] = []
     await files.dispose().catch(error => errors.push(String(error)))
