@@ -7,7 +7,7 @@ import { DesktopClientUiProvider } from '../../../src/renderer/src/components/De
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
-import type { AppConfig, SessionSnapshot } from '../../../src/shared/contracts'
+import type { AppConfig, SessionSnapshot, AgentLaunchResult } from '../../../src/shared/contracts'
 
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', label: 'This Mac', kind: 'local' }],
   executors: { codex: { label: 'Code reviewer', providerId: 'codex', command: 'private-fixture', args: [], env: {}, injectAgentMuxGuide: false }, claude: { label: 'Writing partner', providerId: 'claude', command: 'private-fixture', args: [], env: {}, injectAgentMuxGuide: false } },
@@ -17,7 +17,7 @@ const originalId = 'retained-original-session-7B2a', moteId = 'selected-review-m
 function session(id: string): Extract<SessionSnapshot, { kind: 'agent' }> {
   return { id, kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("private-fixture/project"), label: 'Code reviewer',
     promptSubmissionPredecessor: null, agentSessionUpdatedAt: 1, createdAt: Date.now() - 7200000, updatedAt: Date.now() - 3600000, latestOutputBytes: 0, processState: 'running',
-    status: { state: 'idle', source: 'hook', observedAt: 1 }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
+    status: { state: 'waiting', source: 'native-hook', observedAt: 1 }, capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' },
     control: { kind: 'agent', hostId: 'local', agentSessionId: id, run: { runId: 'private-run:' + id } } }
 }
 export async function initializeRecoveryScene() {
@@ -42,3 +42,15 @@ export async function initializeRecoveryScene() {
     scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: JSON.stringify(['local', _hygiene_fixturePath("private-fixture/scratch")]), revision: 0, reading: false, error: null, topics: await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) } } })
 }
 export function recoveryScene() { return <DesktopClientUiProvider><SessionPane sessionId={originalId} surfaceKind="agent" visible interactiveResize={false} linkOrigin={{ workspaceId: 'project', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }} /></DesktopClientUiProvider> }
+
+/** The new branches retain an exact original reference and reuse the qualified dialogs. */
+export function setUnobservedRecoveryScene(mode: 'connecting' | 'created') {
+  const original = session(originalId)
+  const created: AgentLaunchResult['created'] = { kind: 'agent', hostId: 'local', agentSessionId: originalId, run: original.control.run,
+    providerId: original.providerId, executorId: original.executorId, workspacePath: original.workspacePath, retiredRuns: [], createdAt: original.createdAt, updatedAt: original.updatedAt,
+    creation: { createOperationId: 'original-create-operation', initialPrompt: 'confirmed' } }
+  useAppStore.setState(state => ({ sessions: state.sessions.filter(item => item.id !== originalId),
+    recoveryCandidates: mode === 'connecting' ? [{ agentSessionId: originalId, hostId: 'local', workspacePath: original.workspacePath, providerId: original.providerId, executorId: original.executorId, capabilities: original.capabilities, label: original.label, createdAt: original.createdAt, updatedAt: original.updatedAt, run: original.control.run }] : [],
+    pendingAgentLaunches: mode === 'created' ? { [originalId]: { request: { executorId: 'codex', hostId: 'local', workspacePath: original.workspacePath, prompt: 'Original submitted request' }, events: [], overflowed: false, created,
+      projectionFailures: [{ step: 'session', message: 'The original Host did not return current Session facts.' }] } } : {} }))
+}
