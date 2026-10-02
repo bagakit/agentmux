@@ -657,6 +657,49 @@ it('keeps ordinary manual browsers quiet and retains live Agent and unknown cont
   healthy()
 })
 
+it('uses the shared avatar roster for actual operators, deduplicates Sessions and preserves overflow and unknown facts', async () => {
+  const extra = Array.from({ length: 4 }, (_, index) => ({ ...session, id: `operator-${index}`, executorId: `executor-${index}`, label: `Operator ${index}` }))
+  const actors = [session, ...extra]
+  let tab = mixed
+  for (let index = 0; index < 4; index += 1) {
+    const id = `extra-browser-${index}`
+    tab = addWorkbenchRegion(tab, pageA.regionId, 'right', { ...browser, id, browserId: id, navigationId: `navigation-${index}`, regionId: id, kind: 'browser', workspaceId: workspace.id })
+  }
+  useAppStore.setState(state => ({ sessions: actors, tabs: { ...state.tabs, [tab.id]: tab }, config: { ...state.config!, executors: {
+    ...state.config!.executors, ...Object.fromEntries(extra.map(actor => [actor.executorId, { ...state.config!.executors[session.executorId]!, id: actor.executorId, avatar: { badge: 'bolt' } }]))
+  } } }))
+  await renderApp(); await enterSurvey(); await choose()
+  const before = useAppStore.getState(), page = slot().querySelector('[data-native-browser-stage]')
+  const ids = [browser.id, pageB.browserId, ...extra.map((_, index) => `extra-browser-${index}`)]
+  const publish = async (id: string, actor: typeof session, live = true, operationBrowserId = id) => {
+    const operation = { id: `operation-${id}`, browserId: operationBrowserId, operator: { id: actor.id, name: actor.label, providerId: actor.providerId }, startedAt: 1,
+      phase: live ? 'running' as const : 'completed' as const, ...(live ? {} : { finishedAt: 2 }), summary: 'Research', url: browser.url, steps: [] }
+    await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: { ...browser, id, driving: live, activity: { control: live ? 'agent' : 'human', operation } } }))
+  }
+  await publish(ids[0]!, session); await publish(ids[1]!, session)
+  for (let index = 0; index < extra.length; index += 1) await publish(ids[index + 2]!, extra[index]!)
+  const badge = () => dom.container.querySelector<HTMLElement>('[data-survey-zone-id] .survey-item-activity')!
+  const roster = () => badge().querySelector<HTMLElement>('.selector-presence')!
+  expect(roster()).not.toBeNull(); expect(roster().querySelectorAll('.selector-presence__slot')).toHaveLength(4)
+  expect(roster().querySelector('em')!.textContent).toBe('+1')
+  expect(roster().getAttribute('aria-label')).toBe(`Agents: ${actors.map(actor => actor.label).join(', ')}`)
+  const faces = [...roster().querySelectorAll<HTMLElement>('.agent-avatar')]
+  expect(faces.map(face => face.dataset.executorId)).toEqual(actors.slice(0, 4).map(actor => actor.executorId))
+  expect(faces[1]!.querySelector('[data-avatar-badge="bolt"]')).not.toBeNull()
+  // A different Browser's operation does not establish this page's operator.
+  await publish(ids[2]!, extra[0]!, true, 'foreign-browser')
+  expect(roster().getAttribute('aria-label')).not.toContain(extra[0]!.label)
+  await act(async () => useAppStore.getState().applyBrowserEvent({ type: 'unavailable', id: ids[3]!, error: 'Unconfirmed owner' }))
+  expect(roster().getAttribute('aria-label')).not.toContain(extra[1]!.label)
+  expect(badge().firstElementChild!.getAttribute('title')).toContain('Control unknown')
+  for (const id of ids) await publish(id, session, false)
+  expect(badge().childElementCount).toBe(0)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(slot().querySelector('[data-native-browser-stage]')).toBe(page)
+})
+
 it('keeps Browser control unknown while its native owner is unavailable without retiring the Zone or reusing a completed operator', async () => {
   await renderApp(); await enterSurvey(); await choose()
   const selected = useAppStore.getState().surveyZoneSelection

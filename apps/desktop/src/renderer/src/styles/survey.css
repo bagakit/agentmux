@@ -57,6 +57,7 @@
 .survey-item-meta { flex: none; min-width: 0; display: flex; align-items: center; }
 .survey-item-meta:has(.survey-item-activity:empty) { display: none; }
 .survey-item-activity, .survey-item-activity > span { display: flex; align-items: center; color: var(--text-2); }
+.survey-item-activity > span { gap: var(--sp-1); }
 .survey-item-details-content { display: grid; gap: var(--sp-4); padding: var(--sp-3) var(--sp-4); font-size: var(--fs-meta); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
 .survey-view-controls { display: flex; flex-wrap: wrap; align-items: center; flex: none; gap: var(--sp-3); min-height: 32px; padding: var(--sp-1) var(--sp-3); }
 .survey-view-controls[hidden] { display: none; }

@@ -37,7 +37,8 @@ export type SelectorPresenceAgent = {
   // 恰好都是 `.map()`。所以多写一个 attention 键，tsc 从头到尾 exit 0。买到的是「多写的键不再有
   // 消费者」：组件读不到它，它只是一坨死数据。真正把「不许再写」钉住的是 selector-presence-shape
   // 的 AST 守卫（按属性名扫每个构造点），不是类型系统。
-  state: AgentDisplayState
+  /** A known Session supplies its actual state; an absent observation stays unknown. */
+  state?: AgentDisplayState | undefined
   /** 同一个 executor 归并了几个 Session；1 时不显示角标。 */
   count?: number
   onOpen?: () => void
