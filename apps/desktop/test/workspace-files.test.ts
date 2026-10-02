@@ -1060,8 +1060,8 @@ describe('WorkspaceFiles root confinement', () => {
       if (command === 'realpath') {
         return { stdout: `${String(args.at(-1))}\n`, stderr: '', exitCode: 0 }
       }
-      if (command === 'find') {
-        return { stdout: 'src\0d\0README.md\0f\0link\0l\0', stderr: '', exitCode: 0 }
+      if (command === 'sh' && args[2] === 'agentmux-directory') {
+        return { stdout: _hygiene_fixturePath("srv/project\u0000src\u0000d\u0000README.md\u0000f\u0000link\u0000lf\u0000"), stderr: '', exitCode: 0 }
       }
       return { stdout: '', stderr: '', exitCode: 0 }
     })
@@ -1099,9 +1099,9 @@ describe('WorkspaceFiles root confinement', () => {
     await files.delete(workspace, 'src/new.ts')
 
     expect(run).toHaveBeenCalledWith(
-      'find',
-      expect.arrayContaining([_hygiene_fixturePath("srv/project"), '-exec', 'sh', '-c']),
-      expect.objectContaining({ timeoutMs: 15_000 })
+      'sh',
+      ['-c', expect.stringContaining('exec find'), 'agentmux-directory', expect.stringContaining('for path do'), _hygiene_fixturePath("srv/project")],
+      expect.objectContaining({ timeoutMs: 30_000, maxOutputBytes: 2 * 1024 * 1024 })
     )
     expect(run).toHaveBeenCalledWith(
       'sh',

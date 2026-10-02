@@ -21,6 +21,7 @@
 
 - Explorer 以 Selected Worktree 为根，使用层级目录、文件夹优先排序、多选、键盘导航、Reveal、刷新和受 Workspace Root 约束的文件操作。Move 当前明确为单项操作：Pointer drag 在开始时收敛到被拖动项；Context Menu/`Shift+F10` 使用 `Move This Item to` 子菜单，并在执行时收敛到该项，不用多选外观暗示尚未实现的批量移动。
 - Stale response 不能覆盖新 Workspace 或新目录 revision；刷新期间保留现有内容，直到新结果原子替换。
+- 远端目录浏览沿原 Workspace 的 ExecutionHost，以有界读取容纳连接与目录暂时变慢，避免按目录深度重复 SSH 握手；同一原 Host、根和目录的在途读取共享工作。失败保留已读内容，明确原资源、失败步骤与可执行的原目标重试，不把超时当空目录或远端 Agent 已结束。Launcher 文件引用与 Explorer 同样保持同资源刷新前的列表；换 Host、根或目录不能借旧结果。读取恢复不自动重放写入、不更换资源、不停止或重建健康 Session；路径、链接循环、权限和输出预算仍按原文件 owner 的真实边界拒绝。
 - **打不开的文件必须给出一个能落地的出口，而不是只说"打不开"**。Editor 的失败态除文案外提供一个 Reveal 动作，经**既有**的揭示通路落地，不新增第二条 IPC 或第二套路径解析。揭示目标对**已删除的文件回退到最近的存在的祖先目录**——文件已被删除正是"打不开"最常见的成因，揭示父目录仍然回答了用户的问题（它不在那儿了），而报一个二次错误没有回答任何问题；回退的每一步仍做根内约束校验，不得借符号链接逃出 Workspace 根。远端（非 local host）Workspace 下不提供该动作：那条通路对非 local host 必然失败，**以缺席表达而非画一个禁用的假按钮**。揭示失败经既有 reportError 浮现，不静默吞掉，也不把编辑器面板替换成第二个错误态。
 - Desktop Main 是 Workspace 文件与磁盘版本的唯一事实 Owner；`packages/core` 不承载文件服务，
   Renderer 不直接读写磁盘，也不维护第二份文件 revision 或 watcher truth。
