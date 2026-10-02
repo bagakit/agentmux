@@ -31,6 +31,8 @@ import type {
   AgentPromptInputPlan,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
+  AgentProviderNativeSessionDiscovery,
+  AgentProviderNativeSessionDiscoveryContext,
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryPage,
   AgentProviderSessionHistoryObservationContext,
@@ -81,6 +83,7 @@ export type AgentProvider = {
   readonly terminalHandshake?: AgentTerminalHandshake
   readonly terminalPromptRender?: AgentTerminalPromptRenderMatcher
   /** This contribution is the native history capability; its absence is explicitly unsupported. */
+  discoverNativeSession?(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null>
   readSessionHistoryPage?(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage>
   observeSessionHistory?(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle>
   /** Managed configuration is contributed by this object; null means the exact context is unavailable. */
@@ -111,6 +114,7 @@ export type AgentProviderDefinition = {
   launchOptions?: readonly LaunchOptionDeclaration[]
   terminalHandshake?: AgentTerminalHandshake
   terminalPromptRender?: AgentTerminalPromptRenderMatcher
+  discoverNativeSession?: (context: AgentProviderNativeSessionDiscoveryContext) => Promise<AgentProviderNativeSessionDiscovery | null>
   readSessionHistoryPage?: (context: AgentProviderSessionHistoryContext) => Promise<AgentProviderSessionHistoryPage>
   observeSessionHistory?: (context: AgentProviderSessionHistoryObservationContext) => Promise<AgentSessionHistoryObservationHandle>
   planManagedHooks?: (context: AgentManagedHookPlanContext) => AgentManagedHookPlan | null
@@ -252,6 +256,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     hook: definition.hook,
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
+    ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
     ...(definition.planManagedHooks ? { planManagedHooks: definition.planManagedHooks } : {}),
