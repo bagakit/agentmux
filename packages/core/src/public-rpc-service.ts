@@ -1,3 +1,5 @@
+import { inspectNotebook } from './notebook-catalog.js'
+import { AgentMuxNotebookStore } from './notebook-store.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentMuxClient } from './client.js'
@@ -45,6 +47,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  notebookStore?: AgentMuxNotebookStore
   spatialState?: AgentMuxSpatialStateStore
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
@@ -70,6 +73,7 @@ export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = A
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 const NATIVE_FIELDS = {
+  'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval'],
   'space.resolve': ['tabId','regionId','direction'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
@@ -113,9 +117,10 @@ function validateFilters(p: Record<string, unknown>): void {
 
 /** All business orchestration lives here; transports carry messages, clients parse argv. */
 export class AgentMuxRpcService {
+  private readonly notebooks: AgentMuxNotebookStore
   private readonly spatial: AgentMuxSpatialStateStore
   private local: Promise<AgentMuxClient> | undefined
-  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore() }
+  constructor(private readonly ports: AgentMuxRpcServiceOptions = {}) { this.spatial = ports.spatialState ?? new AgentMuxSpatialStateStore(); this.notebooks = ports.notebookStore ?? new AgentMuxNotebookStore() }
 
   private async hosted(method: AgentMuxRpcMethod, params: unknown, context: AgentMuxRpcCallContext) {
     // Native SDK writes are authorized as a user/device by the transport. An
@@ -374,6 +379,13 @@ export class AgentMuxRpcService {
     if (!fields) throw new AgentMuxError('Unknown RPC method.', 'RPC_METHOD_NOT_FOUND')
     rpcRecord(p, fields)
     switch (method) {
+      case 'notebook.ls': result = {state:await this.notebooks.read()}; break
+      case 'notebook.inspect': result = inspectNotebook(await this.notebooks.read(), p); break
+      case 'notebook.apply': {
+        const actor:import('./notebook-catalog.js').NotebookActor|undefined=caller?{kind:'agent',id:caller.agentSessionId}:context.principal?{kind:context.principal.kind,id:context.principal.id}:undefined
+        if(!actor)throw new AgentMuxError('Notebook writing requires the authenticated original user, device or Agent. Knowledge and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
+        result={state:await this.notebooks.apply(p as unknown as import('./notebook-catalog.js').NotebookWrite,actor)};break
+      }
       case 'space.state': result = {state:await this.spatial.read()}; break
       case 'space.commit': {
         if (p.allowEntityRemoval !== undefined && typeof p.allowEntityRemoval !== 'boolean') throw new AgentMuxError('Explicit entity removal must be boolean.', 'INVALID_CONTROL_REQUEST')

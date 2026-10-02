@@ -1,3 +1,4 @@
+import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
@@ -199,6 +200,23 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
             if (w.updatedAt !== null && (typeof w.updatedAt !== 'number' || !Number.isFinite(w.updatedAt) || w.updatedAt < 0)) fail() }
           if (t.moteArchive !== undefined) { const a = record(t.moteArchive); member(a.state, ['active', 'archived', 'unknown']); if (a.state === 'unknown') text(a.issue); else string(a.version) } }
         array(p.topics, topic); array(p.motes, topic); break
+      }
+      case 'notebook.ls': case 'notebook.apply': {
+        record(p, ['state'])
+        const state = parseNotebookState(p.state)
+        if (method === 'notebook.apply') {
+          string(input.operationId)
+          const operation = state.operations[input.operationId as string]
+          if (!operation || operation.fingerprint !== notebookFingerprint(input.change) ||
+            credentials && (operation.actor.kind !== 'agent' || operation.actor.id !== credentials.agentSessionId)) fail()
+        }
+        break
+      }
+      case 'notebook.inspect': {
+        record(p, ['state', 'notebook', 'pages', 'trail', 'recordedOperation'])
+        const state = parseNotebookState(p.state)
+        if (notebookFingerprint(p) !== notebookFingerprint(inspectNotebook(state, input))) fail()
+        break
       }
       case 'space.state':
       case 'space.commit': {

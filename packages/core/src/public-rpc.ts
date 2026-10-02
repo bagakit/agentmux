@@ -142,6 +142,9 @@ export type AgentMuxRpcOutputInitial = {
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
 type NativeParams = AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+  'notebook.ls': Record<string, never>
+  'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string }
+  'notebook.apply': import('./notebook-catalog.js').NotebookWrite
   'space.state': Record<string, never>
   'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
   'space.resolve': import('./spatial-state.js').AgentMuxSpatialResolve
@@ -171,6 +174,9 @@ type NativeParams = AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParamet
   'system.subscription.cancel': { subscriptionId: string }
 }
 type NativeResult = AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+  'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
+  'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null }
+  'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
   'space.resolve': ReturnType<typeof import('./spatial-state.js').resolveSpatialRegion>
@@ -220,6 +226,7 @@ export type AgentMuxRpcSpacePresentation = {
 export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
+  'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.history': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',

@@ -129,6 +129,14 @@
     "./runtime-client": {
       "types": "./dist/runtime-client.d.ts",
       "import": "./dist/runtime-client.js"
+    },
+    "./notebook-catalog": {
+      "types": "./dist/notebook-catalog.d.ts",
+      "import": "./dist/notebook-catalog.js"
+    },
+    "./notebook-store": {
+      "types": "./dist/notebook-store.d.ts",
+      "import": "./dist/notebook-store.js"
     }
   },
   "bin": {

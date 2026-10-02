@@ -132,6 +132,16 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  empty('notebook.ls', 'Read the durable Notebook and Note directory without opening an App or a page.'),
+  command('notebook.inspect', '(--notebook ID|--note ID|--operation-id ID)', 'Read an exact Notebook, Note source/history or original knowledge operation.',
+    { '--notebook':'data','--note':'data',...OP }, f => { const selected=one(f,['--notebook','--note','--operation-id'],'Inspect');return {[selected==='--notebook'?'notebookId':selected==='--note'?'noteId':'operationId']:id(f,selected)} }),
+  command('notebook.apply', '--revision N --operation-id ID --change-json JSON', 'Apply one typed knowledge change; preserve original Note bodies and reconcile the same operation after a lost response.',
+    { '--revision':'value','--change-json':'data',...OP }, f => {
+      const expectedRevision=Number(value(f,'--revision',true));if(!Number.isSafeInteger(expectedRevision)||expectedRevision<0)invalid('Revision must be a nonnegative integer.')
+      let change:unknown;try{change=JSON.parse(value(f,'--change-json',true)!)}catch{invalid('--change-json requires valid JSON.')}
+      return {expectedRevision,...operation(f),change}
+    },SAVE_NOTICE),
+
   empty('space.state', 'Read the Core durable spatial graph and revision without a graphical frontend.'),
   command('space.commit', '--revision N [--allow-entity-removal] < graph.json', 'Commit a spatial graph from JSON stdin using an exact revision; stale writes are refused.',
     {'--revision':'value','--allow-entity-removal':'boolean'}, f => {
