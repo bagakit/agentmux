@@ -69,3 +69,5 @@
 @import './agent-avatar.css';
 @import './full-page-loading.css';
 @import './session-recap.css';
+
+@import "./conversation-ruler.css";

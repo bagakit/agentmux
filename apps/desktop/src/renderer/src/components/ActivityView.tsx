@@ -27,6 +27,11 @@ import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import type { ReadPastedImage } from '@agentmux/client-ui/components/ConversationImage'
+import { Ruler } from './ConversationRuler'
+export { Ruler } from './ConversationRuler'
+import { ConversationRulerControls } from './ConversationRulerControls'
+import { conversationRulerRecords, conversationRulerWindow, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
+import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
@@ -152,301 +157,6 @@ function buildActivityEntries(
   return { unifiedItems, segments }
 }
 
-/** The client-space rectangle the readout must stay clear of and inside — the whole ruler track. */
-function readoutAnchor(
-  trackRect: DOMRect,
-  feedRect: DOMRect,
-  pointerX: number
-): { left: number; top: number; placement: 'above' | 'below' } {
-  // Reuse the exact anchoring the terminal link preview established: clear a full "cell" (here, half
-  // the track height from its centre) plus the gap so the readout never covers the segment it
-  // describes, and flip below when there is no room above. Keeping one implementation means the two
-  // hovering surfaces can never drift apart on where "not covering the thing" lands.
-  return terminalLinkPreviewAnchor({
-    pointer: { x: pointerX, y: trackRect.top + trackRect.height / 2 },
-    cellHeight: trackRect.height / 2,
-    viewport: {
-      left: feedRect.left,
-      top: feedRect.top,
-      right: feedRect.right,
-      bottom: feedRect.bottom
-    }
-  })
-}
-
-/**
- * 面板要显示的内容。**一个面板、两种内容源**，不是两个面板。
- *
- * 主刻度悬停给的是「什么时候」（`RulerReadoutText`）；轴上的头像标记给的是「说了什么」（原话）。
- * 两者共用同一个浮层、同一套锚定几何、同一条关闭路径——因为它们回答的是同一个问题的两半，而且
- * 在屏幕上占的是同一个位置：两个各自管自己显隐的浮层会在标记与刻度都被指到时同时浮出来，互相
- * 叠住。用一个可辨别联合类型而不是两个可选字段：「既有时间又有原话」和「两者都没有」都不是合法
- * 状态，让类型直接说出这件事，而不是靠渲染时的 if 去防。
- */
-type ReadoutBody =
-  | { kind: 'moment'; text: RulerReadoutText }
-  | { kind: 'quote'; name: string; quote: string }
-
-type Readout = {
-  body: ReadoutBody
-  left: number
-  top: number
-  placement: 'above' | 'below'
-}
-
-/**
- * The interactive temporal axis. Ticks sit at their real elapsed fraction (or even ordinal spacing
- * when there is no spread to map). It is one focusable slider: click or keyboard both resolve a
- * position to a real event through the shared {@link RulerScale} and ask the log to scroll there;
- * hover and focus read the same scale for the moment (or ordinal) at a position without ever moving
- * the selection.
- */
-/**
- * 导出**只为可判**：`renderToStaticMarkup` 不输出任何 handler，所以「hover 出面板 / Escape 关面板 /
- * 空引文不开面板」这三条接线在标记流上完全不可见。测试把这个组件当函数求值、从 element 树上取到那些
- * handler 并真的调用（先例：`ConversationAxis` 的点击接线就是这么判的）。
- * 生产调用者只有本文件的 {@link ActivityView}。
- */
-export function Ruler({
-  items,
-  scale,
-  selectedIndex,
-  band,
-  onSelect,
-  axes
-}: {
-  items: readonly ConversationAxisItem[]
-  scale: RulerScale
-  selectedIndex: number | null
-  band: ReturnType<typeof rulerBand>
-  onSelect: (index: number) => void
-  /**
-   * 与 track 共用一个坐标盒的那些轴，摆在 track 之上。见 render 里的注释。
-   *
-   * 是个函数而不是一个现成元素：轴需要接到**这一层**的面板出口上（`Ruler` 才持有面板状态与那个
-   * 共享坐标盒），而轴本身需要身份解析（`describe`），那只有 ActivityView 有。于是这一层把出口
-   * 递出去，调用方把身份补上——两边各给自己知道的那一半，谁都不必知道对方的。
-   */
-  axes?: (peek: {
-    width: number
-    onPeek: (peek: { rect: DOMRect; mark: ConversationAxisMark; name: string }) => void
-    onPeekEnd: () => boolean
-  }) => JSX.Element | null
-}) {
-  const trackRef = useRef<HTMLDivElement>(null)
-  const [readout, setReadout] = useState<Readout | null>(null)
-  const [trackWidth, setTrackWidth] = useState(0)
-  useLayoutEffect(() => {
-    const track = trackRef.current
-    if (!track) return
-    const measure = (): void => setTrackWidth(track.getBoundingClientRect().width)
-    measure()
-    const observer = new ResizeObserver(measure)
-    observer.observe(track)
-    return () => observer.disconnect()
-  }, [])
-  const axisLabel = describeRulerAxis(scale)
-  const span = describeSpan(scale)
-
-  const feedRect = (): DOMRect | null =>
-    trackRef.current?.closest('.activity-feed')?.getBoundingClientRect() ?? null
-
-  const showReadout = (index: number, pointerX: number): void => {
-    const track = trackRef.current
-    const feed = feedRect()
-    if (!track || !feed) return
-    const trackRect = track.getBoundingClientRect()
-    const anchor = readoutAnchor(trackRect, feed, pointerX)
-    setReadout({ body: { kind: 'moment', text: describeReadout(scale.readoutOf(index), scale.count) }, ...anchor })
-  }
-
-  /**
-   * 轴上一枚标记要展示的原话。走的是与 {@link showReadout} 同一个 setter、同一个锚定函数、同一条
-   * 关闭路径——面板只有一个，这里只是换了内容源。
-   *
-   * 锚定用**标记自己的矩形**而不是指针位置：标记是个 24px 的圆形命中区，按指针锚定会让面板随指针
-   * 在标记内部漂移；按标记中心锚定，面板与它所描述的那枚头像是固定关系。`cellHeight` 取标记高的
-   * 一半（与主刻度取 track 半高同一个算法），于是「让开它所描述的东西」这句话在两处是同一个几何。
-   *
-   * 没有话的 item 不开面板（`conversationQuote` 返回 null）：一个空面板会让「这条没内容」与「面板
-   * 坏了」看起来是同一件事。
-   */
-  const showQuote = ({
-    rect,
-    mark,
-    name
-  }: {
-    rect: DOMRect
-    mark: ConversationAxisMark
-    name: string
-  }): void => {
-    const feed = feedRect()
-    if (!feed) return
-    const quote = conversationQuote(mark.item)
-    if (quote === null) return
-    const anchor = terminalLinkPreviewAnchor({
-      pointer: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
-      cellHeight: rect.height / 2,
-      viewport: { left: feed.left, top: feed.top, right: feed.right, bottom: feed.bottom }
-    })
-    setReadout({ body: { kind: 'quote', name, quote }, ...anchor })
-  }
-
-  /**
-   * 关面板，并回答「刚才真的关掉了一个开着的面板吗」。
-   *
-   * 这个返回值只为 Escape 存在：轴不持有面板状态，所以「该不该吃掉那个键」只能由持有状态的这一层
-   * 回答。无条件吞掉会让 Escape 在面板关着时也被静默吃掉，而外层可能正等着用它关一个更大的东西
-   * （Region、对话框）。
-   *
-   * 直接读闭包里的 `readout` 就够：Escape 是一次**独立的后续事件**，触发它的那一轮渲染早已带上了
-   * 开面板之后的新值。这里曾经另存一份 ref，理由写的是"同一帧内按 Escape 会读到过期值"——那个理由
-   * 是错的（同一帧内不存在第二个键盘事件），而它换来的是两份必须同步的状态。删掉了。
-   */
-  const closeReadout = (): boolean => {
-    const wasOpen = readout !== null
-    setReadout(null)
-    return wasOpen
-  }
-
-  const fractionFromClientX = (clientX: number): number => {
-    const rect = trackRef.current?.getBoundingClientRect()
-    if (!rect || rect.width === 0) return 0
-    return (clientX - rect.left) / rect.width
-  }
-
-  const handleClick = (event: React.MouseEvent<HTMLDivElement>): void => {
-    const readoutAt = scale.readoutAtFraction(fractionFromClientX(event.clientX))
-    if (readoutAt) onSelect(readoutAt.index)
-  }
-
-  const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
-    const at = scale.readoutAtFraction(fractionFromClientX(event.clientX))
-    if (at) showReadout(at.index, event.clientX)
-  }
-
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
-    const next = stepRulerSelection(selectedIndex, event.key, scale.count)
-    if (next === null || next === selectedIndex) {
-      // Home/End with an existing selection can equal current; still consume the navigation keys so
-      // the surrounding scroll container does not also act on them.
-      if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) {
-        event.preventDefault()
-      }
-      return
-    }
-    event.preventDefault()
-    onSelect(next)
-    // Focus keeps the same readout the pointer would show, anchored over the newly selected tick.
-    const track = trackRef.current
-    if (track) {
-      const rect = track.getBoundingClientRect()
-      showReadout(next, rect.left + scale.fractionOf(next) * rect.width)
-    }
-  }
-
-  const handleFocus = (): void => {
-    if (selectedIndex === null) return
-    const track = trackRef.current
-    if (track) {
-      const rect = track.getBoundingClientRect()
-      showReadout(selectedIndex, rect.left + scale.fractionOf(selectedIndex) * rect.width)
-    }
-  }
-
-  const selectedText =
-    selectedIndex === null ? undefined : describeReadout(scale.readoutOf(selectedIndex), scale.count).summary
-
-  return (
-    <div className="activity-ruler">
-      {/* Summary sits above one full-width coordinate box shared by axes and ticks. */}
-      <div className="activity-ruler__stack">
-        {axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })}
-        <div
-          ref={trackRef}
-          className="activity-ruler__track"
-        data-axis={scale.axis}
-        role="slider"
-        tabIndex={0}
-        aria-label={axisLabel}
-        aria-valuemin={1}
-        aria-valuemax={scale.count}
-        aria-valuenow={(selectedIndex ?? 0) + 1}
-        aria-valuetext={selectedText ?? axisLabel}
-        onClick={handleClick}
-        onPointerMove={handlePointerMove}
-        onPointerLeave={closeReadout}
-        onKeyDown={handleKeyDown}
-        onFocus={handleFocus}
-        onBlur={closeReadout}
-      >
-        <span className="activity-ruler__rail" />
-        {band ? (
-          <span
-            className="activity-ruler__band"
-            data-axis={scale.axis}
-            style={{ left: `${band.startFraction * 100}%`, right: `${(1 - band.endFraction) * 100}%` }}
-            aria-hidden="true"
-          />
-        ) : null}
-        {items.map((item, index) => {
-          const kind = 'kind' in item ? item.kind : 'user_message'
-          const status = 'status' in item ? item.status : ('deliveryStatus' in item ? item.deliveryStatus : undefined)
-          return (
-            <span
-              key={item.id}
-              className={`activity-ruler__tick activity-ruler__tick--${kind}`}
-              data-status={status}
-              data-selected={index === selectedIndex ? '' : undefined}
-              style={{ left: `${scale.fractionOf(index) * 100}%` }}
-            />
-          )
-        })}
-        </div>
-      </div>
-      <div className="activity-ruler__summary">
-        {span ? <span className="activity-ruler__span" title={`${span.from} → ${span.to} · ${span.elapsed} elapsed`}>
-          <span className="activity-ruler__span-range"><span>{span.from}</span><span className="activity-ruler__span-arrow" aria-hidden="true">→</span><span>{span.to}</span></span>
-          <span className="activity-ruler__span-elapsed">{span.elapsed}</span>
-        </span> : <span className="activity-ruler__span">Record order</span>}
-        <span className="activity-ruler__count">{scale.count} records</span>
-      </div>
-      <span
-        className="activity-ruler__note"
-        title="Structured Session activity only · never Terminal output or private chain-of-thought"
-      >
-        <Info size={12} />
-      </span>
-      {readout ? (
-        <div
-          className="activity-ruler__readout"
-          data-placement={readout.placement}
-          data-body={readout.body.kind}
-          role="status"
-          style={{ left: readout.left, top: readout.top }}
-        >
-          {readout.body.kind === 'quote' ? (
-            <Fragment>
-              <span className="activity-ruler__readout-speaker">{readout.body.name}</span>
-              <span className="activity-ruler__readout-quote">{readout.body.quote}</span>
-            </Fragment>
-          ) : readout.body.text.axis === 'temporal' ? (
-            <Fragment>
-              <span className="activity-ruler__readout-time">
-                {formatClock(readout.body.text.at)}
-              </span>
-              <span className="activity-ruler__readout-offset">{readout.body.text.offsetText} from start</span>
-            </Fragment>
-          ) : (
-            <span className="activity-ruler__readout-ordinal">
-              Event {readout.body.text.ordinal} of {readout.body.text.total}
-            </span>
-          )}
-        </div>
-      ) : null}
-    </div>
-  )
-}
 
 function Row({
   item,
@@ -709,20 +419,21 @@ export function ActivityView({
     }
     return 0
   }, [unifiedItems])
-  // The scale is the single source both the ruler and the log read from — width is irrelevant to it
-  // because every position is expressed as a 0..1 fraction and rendered as a percentage.
-  const scale = useMemo(
-    () =>
-      createRulerScale(
-        unifiedItems.map((item) => ('createdAt' in item ? item.createdAt : item.recordedAt)),
-        1
-      ),
-    [unifiedItems]
-  )
-
-  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
-  const [visible, setVisible] = useState<{ from: number; to: number } | null>(null)
-  const band = useMemo(() => rulerBand(scale, visible), [scale, visible])
+  const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems),
+    [sessionId, nativeHistoryPage, unifiedItems])
+  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('1h')
+  const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow), [rulerRecords, rulerWindow])
+  const activity = useMemo(() => projectAgentActivityHistory(items), [items])
+  const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
+  const selectedRecord = rulerRecords.find(record => record.id === selectedRecordId)
+  const selectedIndex = selectedRecord?.target.kind === 'observed' ? selectedRecord.target.index : null
+  const rulerSelectedIndex = ruler.items.findIndex(record => record.id === selectedRecordId)
+  const [visible, setVisible] = useState<Set<string>>(new Set())
+  const scale = ruler.scale
+  const band = useMemo(() => {
+    const indices = ruler.items.flatMap((record, index) => visible.has(record.id) ? [index] : [])
+    return rulerBand(scale, indices.length ? { from: Math.min(...indices), to: Math.max(...indices) } : null)
+  }, [ruler.items, scale, visible])
 
   const logRef = useRef<HTMLDivElement>(null)
   const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
@@ -829,7 +540,7 @@ export function ActivityView({
     placed.find((entry) => index >= entry.from && index <= entry.to)
 
   const selectEvent = (index: number): void => {
-    setSelectedIndex(index)
+    setSelectedRecordId(rulerRecords.find(record => record.target.kind === 'observed' && record.target.index === index)?.id ?? null)
     const host = segmentForIndex(index)
     const el = host ? segmentEls.current.get(host.key) : undefined
     // Reuse the same scroll primitive the rest of the app uses to bring a row into view; there is no
@@ -837,42 +548,75 @@ export function ActivityView({
     el?.scrollIntoView({ block: 'nearest' })
   }
 
-  // The visible-range band is driven by an IntersectionObserver, not by a scroll handler: the browser
-  // reports crossings when they happen instead of us recomputing layout on every scroll frame. This is
-  // what keeps a reading decoration out of the scroll hot path.
+  // Register committed shells once. Disclosure registers only added descendants, never a scroll-frame scan.
   useEffect(() => {
-    const root = logRef.current?.closest('.activity-feed')
-    if (!(root instanceof HTMLElement)) return
-    const onscreen = new Set<string>()
-    const ranges = new Map(placed.map((entry) => [entry.key, { from: entry.from, to: entry.to }]))
-    const recompute = (): void => {
-      let from = Infinity
-      let to = -Infinity
-      for (const key of onscreen) {
-        const range = ranges.get(key)
-        if (!range) continue
-        from = Math.min(from, range.from)
-        to = Math.max(to, range.to)
-      }
-      setVisible(to >= from ? { from, to } : null)
+    if (!feedEl) return
+    const expected = new Map<string, string[]>()
+    const segmentsByIndex = new Map<number, string>()
+    for (const segment of placed) for (let index = segment.from; index <= segment.to; index++) segmentsByIndex.set(index, segment.key)
+    for (const record of rulerRecords) {
+      const target = record.target
+      const key = target.kind === 'native' ? JSON.stringify([target.source, target.recordId]) : segmentsByIndex.get(target.index)
+      if (key) { const ids = expected.get(key) ?? []; ids.push(record.id); expected.set(key, ids) }
     }
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          const key = (entry.target as HTMLElement).dataset.segmentKey
-          if (!key) continue
-          if (entry.isIntersecting) onscreen.add(key)
-          else onscreen.delete(key)
+    const mapping = new Map<Element, readonly string[]>()
+    const onscreen = new Set<Element>()
+    const recompute = (): void => setVisible(new Set([...onscreen].flatMap(el => mapping.get(el) ?? [])))
+    const observer = new IntersectionObserver(entries => {
+      for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
+      recompute()
+    }, { root: feedEl, rootMargin: '-64px 0px 0px 0px', threshold: 0 })
+    function register(node: HTMLElement): void {
+      const id = node.dataset.nativeRecordId ?? node.dataset.nativeStepId
+      const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource
+      const key = id && source ? JSON.stringify([source, id]) : node.dataset.segmentKey
+      const records = key ? expected.get(key) : undefined
+      if (records && !mapping.has(node)) { mapping.set(node, records); observer.observe(node) }
+    }
+    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key]'
+    feedEl.querySelectorAll<HTMLElement>(selector).forEach(register)
+    const mutations = new MutationObserver(entries => {
+      for (const entry of entries) {
+        for (const added of entry.addedNodes) if (added instanceof HTMLElement) {
+          if (added.matches(selector)) register(added)
+          added.querySelectorAll<HTMLElement>(selector).forEach(register)
         }
-        recompute()
-      },
-      // The sticky ruler occupies the top of the scroll port; discount it so a row hidden behind the
-      // ruler is not counted as visible.
-      { root, rootMargin: '-34px 0px 0px 0px', threshold: 0 }
-    )
-    for (const el of segmentEls.current.values()) observer.observe(el)
-    return () => observer.disconnect()
-  }, [placed])
+        for (const removed of entry.removedNodes) if (removed instanceof HTMLElement) {
+          const unregister = (node: Element): void => { observer.unobserve(node); mapping.delete(node); onscreen.delete(node) }
+          if (removed.matches(selector)) unregister(removed)
+          removed.querySelectorAll(selector).forEach(unregister)
+        }
+      }
+      recompute()
+    })
+    mutations.observe(feedEl, { childList: true, subtree: true })
+    return () => { mutations.disconnect(); observer.disconnect() }
+  }, [rulerRecords, placed, feedEl])
+
+  const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
+  locateRef.current.source = nativeHistoryPage
+  useEffect(() => () => { if (locateRef.current.frame !== null) cancelAnimationFrame(locateRef.current.frame) }, [sessionId])
+  function selectRulerRecord(record: RulerRecord): void {
+    if (locateRef.current.frame !== null) cancelAnimationFrame(locateRef.current.frame)
+    setSelectedRecordId(record.id)
+    if (record.target.kind === 'observed') { selectEvent(record.target.index); return }
+    const target = record.target
+    const page = nativeHistoryPage
+    const thread = [...(feedEl?.querySelectorAll<HTMLElement>('[data-native-source]') ?? [])]
+      .find(node => node.dataset.nativeSource === target.source)
+    if (!thread) return
+    const group = [...thread.querySelectorAll<HTMLElement>('[data-native-record-ids]')]
+      .find(node => (JSON.parse(node.dataset.nativeRecordIds ?? '[]') as string[]).includes(target.recordId))
+    const toggle = group?.querySelector<HTMLButtonElement>('.wf-head[aria-expanded="false"]')
+    toggle?.click()
+    locateRef.current.frame = requestAnimationFrame(() => {
+      locateRef.current.frame = null
+      if (locateRef.current.source !== page || !thread.isConnected) return
+      const node = [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
+        .find(node => node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId)
+      node?.scrollIntoView({ block: 'nearest' })
+    })
+  }
 
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
@@ -931,6 +675,27 @@ export function ActivityView({
           This executor does not provide structured activity. Terminal remains available.
         </div>
       ) : null}
+      {ruler.items.length > 0 ? <Ruler
+        items={ruler.items}
+        scale={scale}
+        selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
+        band={band}
+        recentFraction={ruler.recentFraction}
+        activity={activity.segments}
+        controls={close => <ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
+          untimed={ruler.untimed} onSelect={selectRulerRecord} describe={describeSpeaker ?? (() => ({ name: 'Recorded input' }))}
+          onOpen={() => { close() }} />}
+        onSelect={index => selectRulerRecord(ruler.items[index]!)}
+        axes={({ width, onPeek, onPeekEnd }) =>
+          describeSpeaker ? (
+            <ConversationAxis items={ruler.items} belongs={() => true} width={width}
+              label="Participants" size={16} describe={describeSpeaker}
+              conversationSessionId={sessionId} recentFraction={ruler.recentFraction}
+              selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
+              onSelect={index => selectRulerRecord(ruler.items[index]!)} onPeek={onPeek} onPeekEnd={onPeekEnd} />
+          ) : null
+        }
+      /> : null}
       {nativeHistoryPage ? <ConversationNativeThread
         page={nativeHistoryPage}
         renderProcess={(props) => <NativeProcessObservation {...props} />}
@@ -946,43 +711,7 @@ export function ActivityView({
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
       {placed.length > 0 ? <div className="activity-feed__observation-source">Submitted messages &amp; Hook observations · Separate recorded source</div> : null}
-      {unifiedItems.length > 0 ? <Ruler
-        items={unifiedItems}
-        scale={scale}
-        selectedIndex={selectedIndex}
-        band={band}
-        onSelect={selectEvent}
-        axes={({ width, onPeek, onPeekEnd }) =>
-          describeSpeaker ? (
-            <Fragment>
-              <ConversationAxis
-                items={unifiedItems}
-                belongs={(speaker) => speaker.id !== sessionId || !speaksAsAgent(speaker)}
-                width={width}
-                label="Speakers"
-                size={16}
-                describe={describeSpeaker}
-                selectedIndex={selectedIndex}
-                onSelect={selectEvent}
-                onPeek={onPeek}
-                onPeekEnd={onPeekEnd}
-              />
-              <ConversationAxis
-                items={unifiedItems}
-                belongs={(speaker) => speaksAsAgent(speaker) && speaker.id === sessionId}
-                width={width}
-                label="This agent"
-                size={16}
-                describe={describeSpeaker}
-                selectedIndex={selectedIndex}
-                onSelect={selectEvent}
-                onPeek={onPeek}
-                onPeekEnd={onPeekEnd}
-              />
-            </Fragment>
-          ) : null
-        }
-      /> : null}
+
       <div className="activity-log" ref={logRef}>
         {placed.map(({ entry, key, from }) => {
           // Identity is resolved once here; the shared message only renders that verdict.

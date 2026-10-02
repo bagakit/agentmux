@@ -44,7 +44,7 @@ export function ConversationRecordSequence({
     usedGroups.add(id)
     for (const item of process) groups.set(item.id, id)
     rows.push(renderProcess
-      ? <div key={id} className="conversation-record-process">{renderProcess({ id, items: process, renderRecord })}</div>
+      ? <div key={id} className="conversation-record-process" data-native-record-ids={JSON.stringify(process.map(item => item.id))}>{renderProcess({ id, items: process, renderRecord })}</div>
       : process.map(item => renderRecord(item)))
     process = []
     knownTurn = undefined
