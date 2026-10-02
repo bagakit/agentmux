@@ -3,14 +3,12 @@ import { ArrowUpRight, Check, ChevronRight, MoreHorizontal, Pencil, PanelsTopLef
 import { useEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../../../shared/contracts'
-import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { SurveyTopicRelations } from './SurveyTopicRelations'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 /** The selected Item's actions read the original owners; Radix owns disclosure and focus. */
-export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedTopics, activityDetails, panels, relations, tabViewControl, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onOrganize }: {
+export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedTopics, activityDetails, relations, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onOrganize }: {
   visible: boolean
   title: string
   zone: AgentMuxZoneFact | null
@@ -18,9 +16,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
   collected: boolean
   relatedTopics: readonly AgentMuxSpaceFact[] | null
   activityDetails: ReactNode
-  panels: Pick<ComponentProps<typeof SurveyPanelChoices<WorkbenchProjectionSelection>>, 'choices' | 'facts' | 'onSelect'> | null
   relations: ComponentProps<typeof SurveyTopicRelations> | null
-  tabViewControl?: { active: boolean; available: boolean; onToggle(): void }
   onRename?: () => void
   onOrganize?: (spaceId: string) => void
   onCollectedChange(collected: boolean): void
@@ -42,10 +38,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
         onSelect={event => event.preventDefault()} onCheckedChange={value => { if (value === false) onCollectedChange(false) }}>
         <span className="survey-topic-menu__indicator"><Menu.ItemIndicator><Check size={13} aria-hidden="true" /></Menu.ItemIndicator></span><span>Keep in Survey</span>
       </Menu.CheckboxItem> : null}
-      {zone && tabViewControl ? <Menu.Item className="tab-context-menu__item" aria-label={tabViewControl.active ? 'Show full Survey item' : 'View current Survey Tab'}
-        title={tabViewControl.active ? 'Return to all original Tabs and Groups' : tabViewControl.available ? 'View this exact Tab without changing the Item layout' : 'Choose a confirmed panel to view its Tab'}
-        disabled={!tabViewControl.active && !tabViewControl.available} onSelect={tabViewControl.onToggle}><PanelsTopLeft size={14} /><span>{tabViewControl.active ? 'All tabs' : 'Only this tab'}</span></Menu.Item> : null}
-      {panels ? <SurveyPanelChoices {...panels} mode="submenu" visible={visible} /> : null}
+
       {relations && onOrganize ? <Menu.Sub><Menu.SubTrigger className="tab-context-menu__item" aria-label="Organize into Topic"><ArrowUpRight size={14} /><span>Organize into Topic…</span><ChevronRight size={12} /></Menu.SubTrigger>
         <Menu.Portal container={resolveOverlayContainer()}><Menu.SubContent className="tab-context-menu survey-topic-menu" collisionPadding={8} sideOffset={4}>
           <Menu.Label className="survey-topic-menu__label">Choose a destination</Menu.Label>

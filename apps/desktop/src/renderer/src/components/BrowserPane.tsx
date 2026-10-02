@@ -143,16 +143,17 @@ export function BrowserPane({
       // Keep the existing Space Group initialization for its visible Browser siblings.
       if (target.surface === 'space') return state.mainSurface === 'workbench' &&
         state.layouts[location.displayWorkspaceId]?.activeGroupId === location.groupId
-      if (reference.regionId !== location.regionId) return false
       if (target.surface === 'survey') {
-        const current = state.surveyZoneSelection?.active
-        return state.mainSurface === 'survey' && current?.displayWorkspaceId === location.displayWorkspaceId &&
-          current.groupId === location.groupId && current.tabId === location.tabId && current.regionId === location.regionId
+        return state.mainSurface === 'survey'
       }
+      if (reference.regionId !== location.regionId) return false
       if (target.surface === 'focus') return state.mainSurface === 'agents'
       return false
     })
-    return selected.length === 1 ? selected[0]!.occurrence.presentationId : null
+    const current = state.mainSurface === 'survey' ? state.surveyZoneSelection?.active : null
+    const explicit = current ? selected.filter(presentation => presentation.target.surface === 'survey' &&
+      presentation.occurrence.location.tabId === current.tabId) : []
+    return explicit.length === 1 ? explicit[0]!.occurrence.presentationId : selected.length === 1 ? selected[0]!.occurrence.presentationId : null
   })
   const media = useBrowserPresentationCapture(tab.browserId)
   const [presentationHosts, setPresentationHosts] = useState<ReadonlyMap<string, HTMLElement>>(() => new Map())
@@ -885,7 +886,7 @@ export function BrowserPane({
             <strong>Page could not be loaded</strong>
             <span>{tab.error}</span>
             <button className="small-button" type="button" onClick={() => void run(async () => {
-              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId)
+              const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId, tab.profileId || undefined)
               return browser.error ? await api.browser.reload(tab.browserId) : browser
             })}><RefreshCw size={12} /> Retry</button>
           </div>

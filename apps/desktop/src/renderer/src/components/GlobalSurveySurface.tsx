@@ -10,7 +10,7 @@ import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useReleasedBrowserRegionIds } from '../lib/surface-memory-budget-coordinator'
-import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, surveyZoneTopicFacts, type SurveyZoneSelection } from '../lib/survey-workface'
+import { surveyInitialZoneSelection, surveySelectReference, surveySelectedBrowser, surveyZoneItems, surveyZoneTopicFacts, type ResolvedSurveyZoneSelection } from '../lib/survey-workface'
 import { workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { workbenchSurfaces, type WorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -22,6 +22,7 @@ import { SurveyItemOptions } from './SurveyItemOptions'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { SurveyPanelChoices } from './SurveyPanelChoices'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
+import { WorkbenchZone } from './WorkbenchZone'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
@@ -32,21 +33,20 @@ function saveNotice(save: AgentMuxSpatialSave): string {
   return `${confirmed ? 'Saved on this device; final disk confirmation is pending.' : 'Local changes are kept. Saving is not confirmed; retry saving in Space.'}${save.reason ? ` ${save.reason}` : ''}`
 }
 
-export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, viewTargets, tabViewControl }: {
+export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, viewTargets }: {
   visible?: boolean
   controlsCoverPage?: boolean
   unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined
   catalog: AgentMuxSpaceCatalog | null
   projection: WorkbenchProjection | null
+  selection: ResolvedSurveyZoneSelection | null
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
-  tabViewControl?: { active: boolean; available: boolean; onToggle: () => void }
 }) {
   const config = useAppStore(state => state.config)
   const browserInput = useRef<BrowserAddressInputHandle>(null)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
   const activeWorkspaceId = useAppStore(state => state.activeWorkspaceId)
   const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null)
-  const selection = useAppStore(state => state.surveyZoneSelection)
   const explorationNames = useAppStore(state => state.surveyExplorationNames)
   const [renamingZoneId, setRenamingZoneId] = useState<string | null>(null)
   const collected = useAppStore(state => state.surveyCollectedZones)
@@ -123,11 +123,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const { containerRef: sidebarRef, isResizing, onResizeStart } = useSidebarResize<HTMLElement>({
     isOpen: !sidebarCollapsed, width: sidebarWidth, setWidth: setSidebarWidth, deltaSign: 1, minWidth, maxWidth, onDraftWidthChange: reportDraftWidth
   })
+  const selectionKey = selection ? JSON.stringify([selection.zoneId, selection.active]) : null
   const intent = useRef(0)
   const pendingNote = useRef<{ zoneId: string; workspaceId: string; displayWorkspaceId: string; groupId: string; reference: WorkbenchProjectionSelection | null; surface: WorkbenchSurface | null; ownsPreparation: boolean; draft?: { launcherId: string; value: string } } | null>(null)
   const [noteRecovery, setNoteRecovery] = useState(false)
   const failedCreation = useRef<SurveyBrowserPreparation | null>(null)
-  useLayoutEffect(() => { intent.current += 1 }, [visible, selection, activeWorkspaceId])
+  useLayoutEffect(() => { intent.current += 1 }, [visible, selectionKey, activeWorkspaceId])
   useEffect(() => { if (toolsOpen) setToolsVisited(true) }, [toolsOpen])
   useEffect(() => {
     if (visible) void useAppStore.getState().refreshScratchTopics(SCRATCH_WORKSPACE_ID)
@@ -159,7 +160,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     })
     observer.observe(surface, { childList: true, subtree: true })
     return () => observer.disconnect()
-  }, [visible, selection, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation, projection?.presentationId, projection?.entity.kind])
+  }, [visible, selectionKey, toolsOpen, currentBrowser?.browserId, currentBrowser?.url === 'about:blank', controlNavigation])
 
   function itemTitle(zone: AgentMuxZoneFact): string {
     return surveyExplorationName(explorationNames[zone.zoneId], (tabsByZone.get(zone.zoneId) ?? []).flatMap(id => tabs[id] ? [tabs[id]!] : []))
@@ -202,11 +203,6 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     if (held?.zoneId !== zoneId) setSelection(surveyInitialZoneSelection(catalog, zoneId, layouts, tabs, activeWorkspaceId))
     setError(null); setNavigationChoices([])
   }
-  function chooseReference(reference: WorkbenchProjectionSelection): void {
-    const current = useAppStore.getState().surveyZoneSelection
-    if (!current) return
-    intent.current += 1; setSelection(surveySelectReference(current, reference)); setNavigationChoices([])
-  }
 
   async function openBrowser(input = 'about:blank', newItem = false): Promise<void> {
     if (opening) return
@@ -224,15 +220,20 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     finally { setOpening(false) }
   }
 
-  async function newBrowserTab(groupId: string): Promise<void> {
-    if (opening || !projection || !currentZone || !selection) return
+  async function newBrowserTab(displayWorkspaceId: string, groupId: string): Promise<void> {
+    if (opening || !currentZone || !selection) return
     const before = useAppStore.getState(), held = before.surveyZoneSelection, startedIntent = intent.current
+    // Direct entity display does not pretend to be an original durable placement.
+    if (!before.layouts[displayWorkspaceId]?.groups.some(group => group.id === groupId)) {
+      displayWorkspaceId = currentZone.workspaceId
+      groupId = before.layouts[displayWorkspaceId]?.activeGroupId ?? ''
+    }
     setOpening(true); setError(null)
     try {
-      const tabId = before.openLauncher({ workspaceId: currentZone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, tabGroupId: groupId, zoneId: currentZone.zoneId, reveal: false })
+      const tabId = before.openLauncher({ workspaceId: currentZone.workspaceId, displayWorkspaceId, tabGroupId: groupId, zoneId: currentZone.zoneId, reveal: false })
       const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
       if (!tab) throw new Error('This exact display Group is still restoring. Existing pages are kept.')
-      const reference = { displayWorkspaceId: projection.displayWorkspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId }
+      const reference = { displayWorkspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId }
       failedCreation.current = { zone: currentZone, reference, surface: tab.regions[reference.regionId]! }
       await before.createSurveyBrowser({ workspaceId: currentZone.workspaceId, url: 'about:blank', preparation: failedCreation.current, onPrepared(value) { failedCreation.current = value } })
       failedCreation.current = null
@@ -261,11 +262,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       let prepared = recover ? pendingNote.current : null
       if (!prepared) {
         if (!workspace) throw new Error('Choose a resource workspace in Space to start a note.')
-        const active = !newExploration ? heldSelection?.active : null
-        if (!newExploration && (!active || !currentZone || !catalog?.locations.some(location => location.zoneId === currentZone.zoneId &&
-          location.displayWorkspaceId === active.displayWorkspaceId && location.groupId === active.groupId && location.tabId === active.tabId && location.regionId === active.regionId))) {
-          throw new Error('Choose the original location for this exploration before adding a note. Its content is kept.')
-        }
+        const selected = !newExploration ? selection?.active : null
+        if (!newExploration && !currentZone) throw new Error('This research is unavailable. Your note draft is kept.')
+        const active = selected && before.layouts[selected.displayWorkspaceId]?.groups.some(group => group.id === selected.groupId && group.tabOrder.includes(selected.tabId)) ? selected : null
         const displayWorkspaceId = active?.displayWorkspaceId ?? workspace.id
         const groupId = active?.groupId ?? before.layouts[displayWorkspaceId]?.activeGroupId
         if (!groupId) throw new Error('The original display Group is still restoring. No note was created.')
@@ -359,31 +358,20 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }
 
   const selectedStatus = relationStatus?.zoneId === currentZone?.zoneId ? relationStatus : null
-  const retainedLocations = useMemo(() => {
-    const byReference = new Map<string, WorkbenchProjectionSelection>()
-    for (const reference of selection?.selection ?? []) byReference.set(JSON.stringify(reference), reference)
-    for (const location of catalog?.locations ?? []) if (location.zoneId === selection?.zoneId) {
-      const reference = { displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId }
-      byReference.set(JSON.stringify(reference), reference)
-    }
-    return [...byReference.values()]
-  }, [catalog, selection])
 
   const options = <SurveyItemOptions key={String(sidebarCollapsed)} visible={visible && !controlsCoverPage} title={currentZone ? itemTitle(currentZone) : selection ? 'Retained exploration' : 'New exploration'}
     zone={currentZone ?? null} workspace={workspace ?? null} collected={!!selection && collected[selection.zoneId] === true} relatedTopics={related.relatedTopics}
-    activityDetails={currentZone ? activity(currentZone).details : null} panels={selection && retainedLocations.length ? { choices: retainedLocations, facts: { config, layouts, tabs }, onSelect: chooseReference } : null}
+    activityDetails={currentZone ? activity(currentZone).details : null}
     relations={currentZone ? { zone: currentZone, topics, relatedTopics: related.relatedTopics, unknownRelatedSpaces: related.unknownRelatedSpaces,
       pendingSpaceId: selectedStatus?.pendingSpaceId ?? null, error: selectedStatus?.error,
       notice: selectedStatus?.notice || topicSnapshot?.error ? <>{selectedStatus?.notice}{topicSnapshot?.error}</> : null,
       onLinkChange: (spaceId, linked) => void changeRelation(spaceId, linked), onOpenTopic: openTopic } : null}
     {...(currentZone && collected[currentZone.zoneId] ? { onOrganize: (spaceId: string) => { setSidebarCollapsed(false); setOrganized(null); setOrganizationTarget({ zoneId: currentZone.zoneId, spaceId }) } } : {})}
-    {...(selection && tabViewControl ? { tabViewControl } : {})}
     {...(currentZone ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
     onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
     onManageBrowsers={() => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
-  const panelUnconfirmed = !!selection && !selection.active && retainedLocations.length > 0
   const relationMessage = [selectedStatus?.error, selectedStatus?.notice, topicSnapshot?.error].filter(Boolean).join('\n')
-  const contentControlsVisible = Boolean(tabViewControl?.active || navigationChoices.length || panelUnconfirmed)
+  const contentControlsVisible = Boolean(navigationChoices.length)
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -437,13 +425,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       <div className="survey-page-content" inert={controlsCoverPage} aria-hidden={controlsCoverPage}>
         <header className="survey-view-controls" hidden={!contentControlsVisible}>
           {windowControlsInset}
-          {tabViewControl?.active ? <button type="button" className="survey-tab-view" aria-label="Show full Survey item" title="Return to all original Tabs and Groups" onClick={tabViewControl.onToggle}><PanelsTopLeft size={14} /><span>All tabs</span></button> : null}
+
           {navigationChoices.length ? <SurveyPanelChoices choices={navigationChoices} facts={{ config, layouts, tabs }} mode="button" visible={visible && !controlsCoverPage} topic open onOpenChange={open => { if (!open) setNavigationChoices([]) }} onSelect={location => void openLocation(location)} /> : null}
-          {panelUnconfirmed ? <div className="survey-panel-status"><span role="status">Panel not confirmed</span>
-            <SurveyPanelChoices choices={retainedLocations} facts={{ config, layouts, tabs }} mode="button" visible={visible && !controlsCoverPage} onSelect={chooseReference} />
-            <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'The active panel is not confirmed.', mode: 'Original references and content are kept.', restore: 'Choose an original panel, or continue recovery in Space. Technical references are available in the panel menu.' } }}
-              title="Details" disclosure={{ scope: JSON.stringify(['survey-panel', selection?.zoneId]), id: 'active-panel', occurrence: JSON.stringify(selection?.selection), visible: visible && !controlsCoverPage }} />
-          </div> : null}
+
 
         </header>
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
@@ -457,8 +441,9 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           {currentZone && !items.some(item => item.zoneId === currentZone.zoneId) ? <div className="survey-relation-notice" role="status">
             This work surface is outside the Survey list. Its content and selection are kept. Start an independent research from the page’s Research in Survey action.
           </div> : null}
-          {projection ? <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection} onCreateTab={groupId => void newBrowserTab(groupId)} viewOwnership="projection" viewTargets={viewTargets} leadingChrome={contentControlsVisible ? undefined : windowControlsInset} visible={visible && !controlsCoverPage} />
-            : <div role="status" className="survey-restore-notice">The original work surface and precise references are kept. Choose an available location, or continue recovery in Space.</div>}
+          <WorkbenchZone zoneId={selection.zoneId} catalog={catalog} projection={projection} viewTargets={viewTargets}
+            onCreateTab={(displayWorkspaceId, groupId) => void newBrowserTab(displayWorkspaceId, groupId)}
+            onStartBrowsing={() => void openBrowser('about:blank', true)} leadingChrome={contentControlsVisible ? undefined : windowControlsInset} visible={visible && !controlsCoverPage} />
         </>}
       </div>
       {workspace && (toolsVisited || toolsOpen) ? <aside ref={managementRef} id="survey-management" className="survey-management" aria-label="Browser management controls" hidden={!toolsOpen} inert={!toolsOpen || !visible} aria-hidden={!toolsOpen || !visible}>

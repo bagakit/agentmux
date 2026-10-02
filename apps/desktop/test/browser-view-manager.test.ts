@@ -250,6 +250,19 @@ function fakeWindow() {
 }
 
 describe('BrowserViewManager', () => {
+  it('opens a restored Browser directly in its saved Profile without switching a healthy owner', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    try {
+      const restored = await manager.create('saved-profile', 'https://example.test/original', null, 'work')
+      expect(restored.profileId).toBe('work')
+      const original = fixture.children[0]!, load = vi.spyOn(original.webContents, 'loadURL')
+      expect(await manager.create('saved-profile', 'https://stale.test/', null, 'personal')).toMatchObject({ profileId: 'work', url: restored.url })
+      expect(fixture.children).toEqual([original]); expect(load).not.toHaveBeenCalled()
+      await expect(manager.create('unknown-profile', 'https://example.test/', null, 'missing')).rejects.toThrow()
+      expect(fixture.children).toEqual([original])
+    } finally { manager.dispose() }
+  })
+
   it('ensures an existing identity without navigating or replacing its Profile, including released owners', async () => {
     const fixture = fakeWindow()
     const manager = browserManager(fixture.window)

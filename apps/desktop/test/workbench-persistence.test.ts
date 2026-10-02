@@ -90,12 +90,12 @@ describe('durable Workbench presentation', () => {
     const projected = JSON.parse(JSON.stringify(projectPersistedWorkbench({ tabs: { [tab.id]: tab }, layouts: { workspace: layout } })))
     expect(projected.tabs[tab.id].regions['bookmark-region']).toEqual({
       regionId: 'bookmark-region', kind: 'browser', workspaceId: 'workspace', browserId: 'original-browser',
-      url: 'https://example.invalid/original?a=1&b=2', title: 'Saved link', bookmarkOrigin: { path: 'links/Saved.webloc', binary }
+      url: 'https://example.invalid/original?a=1&b=2', title: 'Saved link', profileId: 'transient-profile', bookmarkOrigin: { path: 'links/Saved.webloc', binary }
     })
     const restored = restorePersistedWorkbench({ config, sessions: [session('neighbor')], persisted: projected, createTabGroupId: () => 'unwanted-new-group' })
     expect(Object.keys(restored.tabs)).toEqual([tab.id])
     expect(restored.tabs[tab.id]!.regions['bookmark-region']).toMatchObject({
-      bookmarkOrigin: { path: 'links/Saved.webloc', binary }, navigationId: '', profileId: '', loading: false, error: null, driving: false
+      bookmarkOrigin: { path: 'links/Saved.webloc', binary }, navigationId: '', profileId: 'transient-profile', loading: false, error: null, driving: false
     })
     expect(restored.tabs[tab.id]!.regions['healthy-neighbor']).toEqual(tab.regions['healthy-neighbor'])
     expect(restored.tabs[tab.id]!.layout).toEqual(tab.layout)
@@ -364,7 +364,7 @@ describe('durable Workbench file/browser projection', () => {
     const projectedTab = projected.tabs[viewId]!
     // 三侧守卫，缺一条都会放过一种真实回退：
     //  1. browser 面**活下来**且带着 url —— 冷启动要靠它 `api.browser.create` 复活成原页；
-    //  2. 瞬时运行时位**不进盘** —— 直接断言 navigationId/profileId 这两个字段名不在产物里，
+    //  2. 瞬时运行时位**不进盘** —— 直接断言 navigationId 这类瞬时字段不在产物里，Profile 资源身份保留，
     //     所以「有人把整个活体 BrowserSnapshot 存回去」会立刻变红，而不是只要 url 在就放行；
     //  3. 同一分屏里的 agent 兄弟结构上存活 —— 只判 browser 那一侧的话，整张 tab 塌掉也照样过，
     //     而那正是「分屏没了」那半个 bug。
@@ -377,14 +377,15 @@ describe('durable Workbench file/browser projection', () => {
       workspaceId: 'workspace',
       browserId: 'ab-browser',
       url: 'https://secret.example.com/x',
-      title: 'Secret'
+      title: 'Secret',
+      profileId: 'profile-1'
     })
     expect(projectedTab.regions[left]!.kind).toBe('agent')
     const serialized = JSON.stringify(projected)
     expect(serialized).toContain('secret.example.com')
     expect(serialized).not.toContain('nav-secret')
     expect(serialized).not.toContain('navigationId')
-    expect(serialized).not.toContain('profileId')
+    expect(persistedBrowser).toHaveProperty('profileId', 'profile-1')
   })
 
   it('G7b: a browser Region survives the same JSON round trip and comes back hydrated with its url', () => {

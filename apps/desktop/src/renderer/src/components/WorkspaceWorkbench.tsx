@@ -1527,7 +1527,7 @@ export function WorkspaceWorkbench({
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
-  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(residentLayout, tabs, projection, projectionActiveGroupId) : null,
+  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(projection.composition ?? residentLayout, tabs, projection, projectionActiveGroupId) : null,
     [residentLayout, tabs, projection, projectionActiveGroupId])
   const projectionContext = useMemo(() => projection && zoneLayout
     ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => {
@@ -1680,7 +1680,7 @@ export function WorkspaceWorkbench({
         original={original} targetTabId={projectionTabId} viewHostPrefix={viewHostPrefix} />
     </DndContext>
   }
-  const projectionNotice = zoneLayout?.issues.length ? <ServiceWindowNotice
+  const projectionNotice = projection?.entity.kind !== 'zone' && zoneLayout?.issues.length ? <ServiceWindowNotice
     notice={{ kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: zoneLayout.issues.join(' '),
       restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }} /> : null
   if (!layout && viewOwnership !== 'owner') return projection ? <div className="workspace-workbench" data-workbench-pending-owner>{projectionNotice}</div> : null
