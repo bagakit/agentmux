@@ -42,7 +42,7 @@ export async function verifyFontDraft({ probe, entries, command, section, saved,
   })()`)
   const publications = () => probe.cdp.evaluate('window.__settingsCliProof.configEvents.length')
   const cliValue = async () => {
-    const result = await command(['settings', 'get', 'appearance.terminalFontSize'])
+    const result = await command(['settings', 'inspect', 'appearance.terminalFontSize'])
     assert.equal(result.result.entries.length, 1)
     const entry = result.result.entries[0]
     assert.equal(entry.key, 'appearance.terminalFontSize'); assert.equal(entry.kind, 'number'); assert.equal(typeof entry.value, 'number')
