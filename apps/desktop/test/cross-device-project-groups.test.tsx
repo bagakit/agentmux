@@ -14,6 +14,7 @@ afterEach(async () => { await act(async () => root?.unmount()); root = undefined
 async function mount() {
   const owner = await fixture()
   vi.spyOn(api.git, 'projectIdentity').mockImplementation(async workspaceId => ({ kind: 'known', hostId: workspaceId === 'local-project' ? 'local' : 'farm', repoPath: workspaceId === 'local-project' ? _hygiene_fixturePath("local/shared") : _hygiene_fixturePath("remote/shared"), identities: ['git.example/team/shared'] }))
+  vi.spyOn(api.workspaces, 'appearance').mockImplementation(async id => ({ kind: 'directory', icon: `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><text y="12">${id === 'local-project' ? 'L' : 'R'}</text></svg>`)}` }))
   useAppStore.setState({ mainSurface: 'workbench', activeWorkspaceId: 'local-project', collapsedProjectGroups: {}, projectRailOpen: true })
   container = document.createElement('div'); document.body.append(container)
   root = createRoot(container)
@@ -79,6 +80,47 @@ describe('actual Space cross-device group interaction', () => {
     expect(member.textContent).toContain('Unavailable')
     expect(useAppStore.getState().projectGroups).toEqual([group])
   })
+  it('separates host folders, keeps independent disclosure and renders original member icons in overlapping groups', async () => {
+    await mount()
+    expect(document.querySelector('[aria-label="Project groups"]')).toBeNull()
+    expect(document.querySelectorAll('[data-folder-host]')).toHaveLength(2)
+    const local = document.querySelector('[data-folder-host="local"]')!
+    const remote = document.querySelector('[data-folder-host="farm"]')!
+    expect(local.textContent).toContain('This Mac')
+    expect(remote.textContent).toContain('Farm machine')
+    expect(local.querySelectorAll('[data-space-folder]')).toHaveLength(1)
+    expect(remote.querySelectorAll('[data-space-folder]')).toHaveLength(1)
+    await click(button('Collapse This Mac'))
+    expect(local.querySelectorAll('[data-space-folder]')).toHaveLength(0)
+    expect(remote.querySelectorAll('[data-space-folder]')).toHaveLength(1)
+    await act(async () => {
+      await useAppStore.getState().saveProjectGroup(group)
+      await useAppStore.getState().saveProjectGroup({ ...group, groupId: 'second-purpose', name: 'Review queue' })
+    })
+    expect(document.querySelectorAll('[data-project-group-member]')).toHaveLength(4)
+    expect(document.querySelectorAll('[data-project-group-member] .project-rail-row__icon')).toHaveLength(4)
+    await click(button('Edit Review queue'))
+    expect(document.querySelectorAll('.project-group-dialog__member input:disabled')).toHaveLength(0)
+    expect(document.querySelectorAll('.project-group-dialog__member input:checked')).toHaveLength(2)
+    expect(document.querySelector('.project-group-dialog')?.textContent).toContain('Also in Shared project')
+  })
+  it('opens remote folders on the exact host and retains the path after a registration failure', async () => {
+    await mount()
+    const add = vi.spyOn(api.workspaces, 'add').mockRejectedValueOnce(new Error('Remote temporarily unavailable'))
+      .mockResolvedValueOnce({ id: 'new-remote', hostId: 'farm', name: 'new', path: _hygiene_fixturePath("remote/new"), kind: 'folder' })
+    await click(button('Open Folder on Farm machine'))
+    const input = document.querySelector<HTMLInputElement>('.project-group-dialog__name input')!
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, _hygiene_fixturePath("remote/new")); input.dispatchEvent(new Event('input', { bubbles: true })) })
+    await click(button('Open Folder'))
+    await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain('temporarily unavailable'))
+    expect(input.value).toBe(_hygiene_fixturePath("remote/new"))
+    expect(useAppStore.getState().activeWorkspaceId).toBe('local-project')
+    await click(button('Open Folder'))
+    await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')).toBeNull())
+    expect(add).toHaveBeenLastCalledWith({ hostId: 'farm', path: _hygiene_fixturePath("remote/new") })
+    expect(useAppStore.getState().activeWorkspaceId).toBe('new-remote')
+    expect(document.querySelector('[data-folder-host="farm"] [data-workspace-id="new-remote"]')).toBeTruthy()
+  })
   it('keeps the existing remote worktree selected when its group is renamed or its member is selected again', async () => {
     await mount()
     await act(async () => {
@@ -98,7 +140,7 @@ describe('actual Space cross-device group interaction', () => {
   it('keeps the group editor open when a save resolves with unconfirmed durability and no reason', async () => {
     await mount()
     vi.spyOn(useAppStore.getState(), 'saveProjectGroup').mockResolvedValue({ layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null })
-    await click(button('Create project group'))
+    await click(button('Related projects for Shared project'))
     await click(button('Create group'))
     await vi.waitFor(() => expect(document.querySelector('[role="alert"]')?.textContent).toContain('Saving is unconfirmed'))
     expect(document.querySelector('[role="dialog"]')).toBeTruthy()

@@ -14,8 +14,8 @@ localStorage. Only the initial Core graph is seeded, using `desktopSpatialGraph`
 and the product's original file Tab/Region and split-layout constructors.
 
 The first ordinary Electron process creates a group through the actual name,
-checkbox and submit controls, renames the same identity, uses a directory alias
-to select and focus its exact member, then uses ArrowDown/Enter to activate the
+checkbox and submit controls, renames the same identity, creates a second purpose group with overlapping members, then uses an original Folder
+to select its workface without moving focus to any group, then uses ArrowDown/Enter to activate the
 remote member. Durable ACKs must preserve every original space, zone, Tab,
 Region, binding, layout, resource and execution directory. The unknown original
 member remains visible and selected in its separate retained group's editor.
@@ -23,7 +23,7 @@ member remains visible and selected in its separate retained group's editor.
 The second ordinary Electron process reads the same Core revision, graph and
 private Chromium preferences. It verifies the original remote selection and
 complete workface, checks that an unavailable member does not redirect to
-another device, then dissolves only the newly created group through the actual
+another device, then dissolves only the first newly created group while the second overlapping membership survives through the actual
 neutral confirmation. Core's explicit original group-ID removal receipt is required.
 
 Full-frame wide/narrow dialogs and workfaces, directory alias focus, remote

@@ -18,9 +18,9 @@ const desktopGlobals = renderer + 'global.d.ts'
 const sources = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, 'packages/core/src/space-control.ts',
   renderer + 'components/WorkspaceRowContextMenu.tsx', renderer + 'hooks/useGitProjectAssociations.ts', renderer + 'lib/api.ts',
   renderer + 'lib/workspace-projects.ts', renderer + 'lib/workbench-persistence.ts', renderer + 'lib/workbench-tabs.ts',
-  renderer + 'styles/project-groups.css', renderer + 'styles/index.css', 'apps/desktop/src/shared/space-addresses.ts',
+  renderer + 'components/SpaceCreateMenu.tsx', renderer + 'components/SpaceSectionHeader.tsx', renderer + 'components/HostFolderDialog.tsx', renderer + 'styles/project-groups.css', renderer + 'styles/index.css', 'apps/desktop/src/shared/space-addresses.ts',
   'apps/desktop/src/shared/contracts.ts', desktopGlobals]
-const captured = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, ...tests, testHelper]
+const captured = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, renderer + 'components/SpaceCreateMenu.tsx', renderer + 'components/HostFolderDialog.tsx', ...tests, testHelper]
 const inputs = [...sources, ...tests, testHelper, 'apps/desktop/scripts/verify-space-project-groups-source.mjs',
   'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts', 'tsconfig.base.json', 'apps/desktop/tsconfig.json', 'pnpm-lock.yaml']
 const dependencies = ['packages/core/package.json', 'packages/core/dist/index.js', 'packages/core/dist/index.d.ts',
@@ -113,7 +113,13 @@ try {
     { id: 'reject-overlapping-core-members', target: graph,
       before: "    facts(g.projectGroups, 'groupId', group => {",
       after: "    const members = new Set<string>(); facts(g.projectGroups, 'groupId', group => { if (Array.isArray(group.projectIds)) for (const member of group.projectIds) { if (members.has(member)) invalid('exclusive group mutant'); members.add(member); }",
-      testcase: 'persists overlapping groups and dissolves only the exact group without losing the workface' }
+      testcase: 'persists overlapping groups and dissolves only the exact group without losing the workface' },
+    { id: 'mix-host-folder-buckets', target: sidebar,
+      before: 'groups: shownGroups.filter(group => group.hostId === hostId)', after: 'groups: shownGroups',
+      testcase: 'separates host folders, keeps independent disclosure and renders original member icons in overlapping groups' },
+    { id: 'hide-git-hint-when-grouped', target: sidebar,
+      before: 'related.length > 0 ? <button', after: '!memberships.length && related.length > 0 ? <button',
+      testcase: 'shows Git associations through the real API consumer and creates a manually chosen group' }
 
   ]
   const phases = [{ id: 'baseline', target: mutations[0].target, before: mutations[0].before, after: mutations[0].before }]

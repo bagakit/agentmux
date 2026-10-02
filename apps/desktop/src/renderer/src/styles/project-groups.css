@@ -1,5 +1,10 @@
 .project-groups { min-width: 0; grid-template-columns: minmax(0, 1fr); }
-.project-group { min-width: 0; }
+.project-group { min-width: 0; margin: 3px 0 7px; padding: 3px 0; border-radius: var(--radius-lg, 8px); background: color-mix(in srgb, var(--surface-2) 65%, transparent); }
+.project-group__member-shell { display: flex; align-items: center; min-width: 0; }
+.project-group__member-shell > .project-rail-row { flex: 1; min-width: 0; }
+.project-group__heading .project-rail-row__identity > strong { font-weight: 550; }
+.project-group__count { font-size: var(--fs-micro); font-weight: 450; }
+.project-group .project-activity { font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
 .project-group__heading { position: relative; }
 .project-group__count { flex: none; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .project-group__actions { display: flex; flex: none; gap: 2px; opacity: 0; }
@@ -7,8 +12,6 @@
 .project-group__heading:focus-within .project-group__actions { opacity: 1; }
 .project-group__actions .icon-button { width: 24px; height: 24px; }
 .project-group__member[aria-disabled="true"] { color: var(--text-3); }
-.project-rail-row--group-reference .project-rail-row__identity > strong { color: var(--text-3); }
-.project-rail-row--group-reference .project-rail-row__identity > small { display: flex; gap: 4px; align-items: center; }
 .project-association { flex: none; width: 24px; height: 24px; color: var(--text-3); }
 .project-group-dialog { width: min(480px, calc(100vw - 32px)); }
 .project-group-dialog .confirmation-dialog__heading > svg { color: var(--text-3); }
@@ -26,3 +29,5 @@
 .project-group-dialog__member small { font-size: 11px; color: var(--text-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-group-dialog__note { opacity: .8; }
 .project-group-dialog__issue { font-size: 12px; color: var(--text); line-height: 1.5; }
+
+.project-group .project-activity__metric > strong { font-weight: 500; }
