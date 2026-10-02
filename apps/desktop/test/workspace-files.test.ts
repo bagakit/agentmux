@@ -97,7 +97,6 @@ async function localFixture(label: string): Promise<{
       kind: 'local',
       label: 'Local',
       run: vi.fn(),
-      exposeLoopbackPort: async (port) => port,
       dispose: async () => {}
     }
   }
@@ -277,7 +276,6 @@ describe('WorkspaceFiles root confinement', () => {
       kind: 'local',
       label: 'Local',
       run: vi.fn(),
-      exposeLoopbackPort: async (port) => port,
       dispose: async () => {}
     }
     const files = new WorkspaceFiles(() => localHost)
@@ -346,7 +344,6 @@ describe('WorkspaceFiles root confinement', () => {
       kind: 'ssh',
       label: 'Remote',
       run,
-      exposeLoopbackPort: async (port) => port,
       dispose: async () => {}
     }
     const workspace: WorkspaceRecord = {
@@ -665,7 +662,6 @@ describe('WorkspaceFiles root confinement', () => {
       kind: 'local',
       label: 'Local',
       run: vi.fn(),
-      exposeLoopbackPort: async (port) => port,
       dispose: async () => {}
     }
     const files = new WorkspaceFiles(() => localHost)
@@ -1027,7 +1023,6 @@ describe('WorkspaceFiles root confinement', () => {
       kind: 'ssh',
       label: 'Remote',
       run,
-      exposeLoopbackPort: async (port) => port,
       dispose: async () => {}
     }
     const workspace: WorkspaceRecord = {
@@ -1070,7 +1065,6 @@ describe('WorkspaceFiles root confinement', () => {
       kind: 'ssh',
       label: 'Remote',
       run,
-      exposeLoopbackPort: async (port) => port,
       dispose: async () => {}
     }
     const workspace: WorkspaceRecord = {
