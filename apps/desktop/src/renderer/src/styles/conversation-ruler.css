@@ -4,7 +4,8 @@
 .activity-ruler__span-range { row-gap:0; }
 .activity-ruler__stack { gap:0; }
 .activity-ruler__track { height:14px; }
-.activity-ruler__band { height:6px; border-radius:3px; box-shadow:none; opacity:.75; }
+.activity-ruler__band { height:14px; min-width:3px; border-radius:3px; background:color-mix(in oklab,var(--green) 8%,transparent); box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--green) 65%,transparent); opacity:1; }
+.activity-ruler__band[data-axis='ordinal'] { background:color-mix(in oklab,var(--text-2) 7%,transparent); box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--text-2) 55%,transparent); }
 .conversation-ruler__controls { grid-row:1; display:inline-flex; align-items:center; gap:3px; }
 .conversation-ruler__window { display:inline-flex; align-items:center; gap:3px; border:0; border-radius:4px; background:transparent; padding:3px 4px; color:var(--text-2); font:var(--fs-micro)/1.2 var(--font-sans); white-space:nowrap; }
 .conversation-ruler__window:hover { background:var(--surface-2); }
