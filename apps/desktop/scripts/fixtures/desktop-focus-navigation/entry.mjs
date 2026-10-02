@@ -6,6 +6,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { createRendererControlApi } from '../../../src/renderer/src/lib/control-api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
+import { desktopWorkbenchFromSpatial } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { readTerminalViewObservation } from '../../../src/renderer/src/lib/terminal-view-observation'
 import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { bindingById, chordForPlatform } from '../../../src/renderer/src/lib/shortcut-registry'
@@ -93,6 +94,11 @@ for (const type of ['focusin', 'focusout', 'compositionstart', 'compositionupdat
 }
 const request = window.focusProofBoundary.request
 const setup = await request('setup')
+api.spatial = {
+  read: () => request('spatial-read'),
+  commit: input => request('spatial-commit', input),
+  onChange: listener => window.focusProofBoundary.onSpatialChange(listener)
+}
 api.config.get = async () => setup.config
 api.providers.list = async () => []
 api.demands.list = async () => request('demands')
@@ -164,6 +170,14 @@ window.focusProofState = () => {
     retainedSpatialFocus: state.retainedSpatialFocus,
     floating: readPmoTeamsTopicFloatingState(), caret: caret(), events: window.focusProofEvents, error: state.error }
 }
+window.focusProofDurableWorkbench = async () => {
+  const spatialState = await api.spatial.read()
+  if (!spatialState) throw new Error('The private Core spatial document has not been established.')
+  const workbench = desktopWorkbenchFromSpatial(spatialState.graph, tabId => {
+    throw new Error(`The Core Tab ${tabId} lacks its original host descriptor.`)
+  })
+  return { spatialState, workbench }
+}
 window.focusProofPersistedModes = () => {
   const state = useAppStore.getState()
   const projection = useAppStore.persist.getOptions().partialize(state)
@@ -184,12 +198,17 @@ window.focusProofCaptureMoteRegions = (leftId, rightId) => {
     const region = panel?.querySelector(`[data-workbench-region-id=${CSS.escape(regionId)}]`)
     const input = region?.querySelector('.composer__editor [contenteditable="true"]')
     if (!region || !input) throw new Error(`Actual Mote projection absent: ${regionId}`)
-    return { regionId, region, input, value: input.textContent }
+    const view = input.closest('[data-workbench-view-reference]')
+    return { regionId, region, input, value: input.textContent, view, parent: view?.parentElement }
   }
-  window.focusProofMoteRegionRefs = { left: read(leftId), right: read(rightId) }
+  const tabId = panel?.dataset.moteTargetTab
+  const primaries = [...document.querySelectorAll('[data-workbench-primary-tab-id]')].filter(view => view.dataset.workbenchPrimaryTabId === tabId)
+  window.focusProofMoteRegionRefs = { left: read(leftId), right: read(rightId),
+    primaries: primaries.map(view => ({ view, parent: view.parentElement })) }
   const rect = window.focusProofMoteRegionRefs.right.input.getBoundingClientRect()
   return { leftId, rightId, rightValue: window.focusProofMoteRegionRefs.right.value,
-    box: { x: rect.left + Math.min(12, rect.width / 2), y: rect.top + Math.min(9, rect.height / 2), width: rect.width, height: rect.height } }
+    box: { x: rect.left + Math.min(12, rect.width / 2), y: rect.top + Math.min(9, rect.height / 2), width: rect.width, height: rect.height },
+    committed: window.focusProofCheckMoteRegions() }
 }
 window.focusProofCheckMoteRegions = () => {
   const { left, right } = window.focusProofMoteRegionRefs
@@ -200,7 +219,21 @@ window.focusProofCheckMoteRegions = () => {
   return { leftSame: same(left), rightSame: same(right), leftActive: left.region.classList.contains(REGION_FOCUS_CLASS),
     rightActive: right.region.classList.contains(REGION_FOCUS_CLASS), rightCaret: document.activeElement === right.input,
     rightSelection: right.input.contains(selection?.anchorNode) && right.input.contains(selection?.focusNode),
-    rightValueSame: right.input.textContent === right.value, leftValueSame: left.input.textContent === left.value }
+    rightValueSame: right.input.textContent === right.value, leftValueSame: left.input.textContent === left.value,
+    regions: [left, right].map(one => ({ regionId: one.regionId, regionConnected: one.region.isConnected,
+      inputConnected: one.input.isConnected, originalValue: one.value, inputValue: one.input.textContent,
+      viewConnected: Boolean(one.view?.isConnected), viewParentSame: one.view?.parentElement === one.parent,
+      viewParentId: one.view?.parentElement?.id ?? null, committedReference: one.view?.dataset.workbenchViewReference ?? null,
+      primaryTabId: one.view?.dataset.workbenchPrimaryTabId ?? null,
+      current: [...(panel?.querySelectorAll(`[data-workbench-region-id=${CSS.escape(one.regionId)}]`) ?? [])].map(region => {
+        const input = region.querySelector('.composer__editor [contenteditable="true"]'), view = region.closest('[data-workbench-view-reference]')
+        return { sameRegion: region === one.region, sameInput: input === one.input, value: input?.textContent ?? null,
+          committedReference: view?.dataset.workbenchViewReference ?? null, primaryTabId: view?.dataset.workbenchPrimaryTabId ?? null }
+      }) })),
+    primaries: window.focusProofMoteRegionRefs.primaries.map(one => ({ connected: one.view.isConnected,
+      parentSame: one.view.parentElement === one.parent, parentId: one.view.parentElement?.id ?? null,
+      tabId: one.view.dataset.workbenchPrimaryTabId, committedReference: one.view.dataset.workbenchPrimaryReference,
+      inMote: Boolean(panel?.contains(one.view)) })) }
 }
 function inputSelectionFacts(element, selection) {
   const endpoint = (node, offset) => {
@@ -295,7 +328,8 @@ window.focusProofCapturedInputState = () => {
   const captured = window.focusProofOriginalInput?.element
   const active = document.activeElement
   const focusInput = document.querySelector('[aria-label="Search contexts"]')
-  return { capturedExists: Boolean(captured), capturedIsFocusInput: Boolean(captured && focusInput && captured === focusInput),
+  return { capturedExists: Boolean(captured), capturedWasFocusInput: Boolean(captured?.matches('[aria-label="Search contexts"]')),
+    currentFocusInputCount: document.querySelectorAll('[aria-label="Search contexts"]').length, capturedIsFocusInput: Boolean(captured && focusInput && captured === focusInput),
     capturedConnected: Boolean(captured?.isConnected), capturedHidden: Boolean(captured?.closest('[hidden], [aria-hidden="true"]')),
     capturedInert: Boolean(captured?.closest('[inert]')), activeSameCaptured: Boolean(captured && active === captured),
     activeConnected: Boolean(active?.isConnected), activeBody: active === document.body,
@@ -314,9 +348,9 @@ window.focusProofFocusMoteInput = () => {
   selection.addRange(range)
 }
 window.focusProofHumanNavigate = () => {
-  const button = document.querySelector('[aria-label="Focus: show execution contexts"]')
-  if (!button) throw new Error('The original human Focus navigation control is absent')
-  button.click()
+  const buttons = document.querySelectorAll('nav[aria-label="Primary surfaces"] button.surface-navigation__focus')
+  if (buttons.length !== 1 || buttons[0].disabled) throw new Error('The original human Focus navigation control is not unique or enabled')
+  buttons[0].click()
 }
 window.focusProofHoldTargetInput = regionId => {
   const region = document.querySelector(`[data-workbench-region-id=${CSS.escape(regionId)}]`)
@@ -354,6 +388,6 @@ window.focusProofRefreshDemands = async () => {
   const demands = await request('demands')
   useAppStore.setState({ demands: Object.fromEntries(demands.map(demand => [demand.id, demand])) })
 }
-window.focusProofFlush = async () => { prepareRendererUpdate(); await request('flush') }
+window.focusProofFlush = async () => { await prepareRendererUpdate(); await request('flush') }
 window.focusProofReady = true
 createRoot(document.getElementById('root')).render(createElement(App))

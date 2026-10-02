@@ -164,16 +164,29 @@ function DesktopApp() {
       state.reportError(new Error('This exact discussion location is no longer confirmed. Its original content is kept; choose its current location.'))
       return
     }
+    state.focusRegion(reference.displayWorkspaceId, reference.tabId, reference.regionId, 'floating-pointer', reference.groupId)
     setMoteFloating({ targetTabId: reference.tabId, reference })
   }, [setMoteFloating, moteFloating])
   const moteProjection = useMemo(() => {
     const id = pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId)
     return moteWorkbenchProjection(surveyCatalog, id ? tabs[id] : undefined, moteFloating, selectMoteReference, layouts)
   }, [surveyCatalog, moteFloating.targetTabId, moteFloating.targetTopicId, moteFloating.reference, tabs, layouts, agentFocus.pmo.sessionId, selectMoteReference])
-  const moteViewTargets = useMemo(() => pmoTeamsTopicFloatingViewTargets(
-    moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection.projection
-  ), [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId,
-    tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection])
+  const moteViewTargets = useMemo(() => {
+    const targets = pmoTeamsTopicFloatingViewTargets(
+      moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection.projection)
+    const held = moteFloating.reference, tab = held ? tabs[held.tabId] : undefined
+    // A stale Region does not invalidate its still-confirmed exact parent. Only an
+    // actual local selection supplies the new Region; an unknown parent stays unconfirmed.
+    if (!moteProjection.projection && held && tab && targets?.[tab.id]?.length === 1 &&
+      held.tabId === pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId) &&
+      tab.topicId === pmoTeamsTopicFloatingTargetTopicId(moteFloating, tabs) &&
+      workbenchDisplayReferenceMatches(layouts[held.displayWorkspaceId], held)) {
+      return { ...targets, [tab.id]: targets[tab.id]!.map(target => ({ ...target,
+        onSelectRegion: (regionId: string) => selectMoteReference({ ...held, regionId }) })) }
+    }
+    return targets
+  }, [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId, moteFloating.reference,
+    tabs, layouts, agentFocus.pmo.sessionId, moteProjection, selectMoteReference])
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     useAppStore.getState().selectExecutionFocusReference(reference, agentFocus.execution)
   }, [agentFocus.execution])

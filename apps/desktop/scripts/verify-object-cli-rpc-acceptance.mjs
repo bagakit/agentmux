@@ -2,14 +2,51 @@ import assert from 'node:assert/strict'
 import { readFile, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import path from 'node:path'
-import { verifyIntegration, checkInputs, readProof, proofDirectory } from './verify-object-cli-rpc-integration.mjs'
+import { verifyIntegration, checkInputs, checkInputs as checkCurrentInputs, readProof, readPinnedProof, proofDirectory } from './verify-object-cli-rpc-integration.mjs'
 
 const integration = await verifyIntegration()
-const owners = await Promise.all(['.tmp/public-rpc-owner/receipt.json', '.tmp/object-cli-quality/receipt.r4.json',
-  ".tmp/object-first-cli-jsonrpc-fixture/root-owning.json"].map(readProof))
-for (const owner of owners) {
+const continuation = await readProof(integration.continuation)
+assert.equal(continuation.historicalOwners.length, 3)
+const owners = []
+for (const scope of continuation.historicalOwners) {
+  const owner = await readPinnedProof(scope.owner)
+  owners.push(owner)
+  // Historical execution keeps its recorded inputs. Only its exact saved caller/mutant
+  // Source is read here; the current candidate and compiled inputs were checked above.
+  assert.ok(owner.sourceInputs && Object.keys(owner.sourceInputs).length > 0)
+  for (const [relative, expected] of Object.entries(owner.sourceInputs)) {
+    assert.ok(!path.isAbsolute(relative) && !relative.split(/[\\/]/u).includes('..'))
+    assert.match(expected, /^[a-f\d]{64}$/u)
+  }
+  const expectedSources = { ...owner.sourceInputs }
+  if (owner.schema === 'agentmux.public-rpc-owner.private.v1') {
+    for (const caller of Object.values(owner.callerChecks)) {
+      for (const reference of caller.nonDefinitionNonImportProductionCalls) {
+        if (Object.hasOwn(expectedSources, reference.path)) assert.equal(expectedSources[reference.path], reference.sourceSha256)
+        expectedSources[reference.path] = reference.sourceSha256
+      }
+    }
+  }
+  const readProof = async relative => {
+    assert.ok(Object.hasOwn(scope.artifacts, relative), `Historical report has no exact backing: ${relative}`)
+    return readPinnedProof(scope.artifacts[relative])
+  }
+  const checkInputs = async inputs => {
+    assert.ok(inputs && Object.keys(inputs).length > 0)
+    for (const [relative, expected] of Object.entries(inputs)) {
+      assert.equal(expectedSources[relative], expected, 'Source must belong to its original recorded inputs or caller checks')
+      assert.ok(Object.hasOwn(scope.sources, relative), `Historical Source has no exact backing: ${relative}`)
+      assert.equal(scope.sources[relative].sha256, expected)
+      await checkCurrentInputs({ [scope.sources[relative].path]: expected })
+    }
+  }
+  const readSource = async relative => {
+    await checkInputs({ [relative]: expectedSources[relative] })
+    return readFile(path.resolve(proofDirectory, '../../', scope.sources[relative].path), 'utf8')
+  }
   assert.equal(owner.passed, true)
-  await checkInputs(owner.sourceInputs)
+  assert.ok(Object.keys(scope.sources).length > 0, 'Historical Source backing cannot be empty')
+  for (const relative of Object.keys(scope.sources)) await checkInputs({ [relative]: expectedSources[relative] })
   if (owner.schema === 'agentmux.public-rpc-owner.private.v1') {
     assert.deepEqual(owner.sourceInputsAfter, owner.sourceInputs)
     assert.equal(owner.build.exitCode, 0)
@@ -58,7 +95,7 @@ for (const owner of owners) {
       for (const reference of caller.nonDefinitionNonImportProductionCalls) {
         assert.ok(!/(?:^|\/)test(?:s)?\//u.test(reference.path))
         await checkInputs({ [reference.path]: reference.sourceSha256 })
-        const source = await readFile(path.resolve(proofDirectory, '../../', reference.path), 'utf8')
+        const source = await readSource(reference.path)
         assert.ok(source.split('\n')[reference.line - 1]?.includes(reference.call))
       }
     }
@@ -93,7 +130,7 @@ for (const owner of owners) {
         assert.notEqual(reference.path, caller.definition)
         assert.ok(!/(?:^|\/)test(?:s)?\//u.test(reference.path))
         assert.ok(Object.hasOwn(owner.sourceInputs, reference.path))
-        const source = await readFile(path.resolve(proofDirectory, '../../', reference.path), 'utf8')
+        const source = await readSource(reference.path)
         assert.equal(source.split('\n')[reference.line - 1]?.trim(), reference.text.trim())
       }
     }
@@ -111,16 +148,43 @@ for (const owner of owners) {
   for (const caller of owner.callers) {
     assert.ok(caller.references.length > 0)
     assert.ok(caller.references.every(reference => reference !== caller.definition && !/(?:^|\/)test(?:s)?\//u.test(reference)))
-    for (const reference of caller.references) assert.ok(Object.hasOwn(owner.sourceInputs, reference), 'Caller must belong to reviewed inputs')
+    for (const reference of caller.references) {
+      assert.ok(Object.hasOwn(owner.sourceInputs, reference), 'Caller must belong to reviewed inputs')
+      await checkInputs({ [reference]: owner.sourceInputs[reference] })
+    }
   }
 }
-const review = await readProof(".tmp/object-first-cli-jsonrpc-fixture/independent-review.json")
+assert.deepEqual(owners.map(owner => owner.schema), ['agentmux.public-rpc-owner.private.v1',
+  'agentmux.cli-quality.v1', 'agentmux.object-cli-rpc.root-owning.v1'])
+const historicalReview = await readPinnedProof(continuation.historicalReview)
+assert.equal(historicalReview.accepted, true)
+assert.deepEqual(historicalReview.unresolved, [])
+assert.equal(historicalReview.visual.accepted, true)
+const historicalSupplement = await readPinnedProof(continuation.historicalSupplement)
+assert.equal(historicalSupplement.root.manifest.sha256, continuation.historicalOwners[2].owner.sha256)
+assert.equal(historicalSupplement.root.allSourceExact, true)
+assert.equal(historicalSupplement.root.sourceCount, Object.keys(owners[2].sourceInputs).length)
+const checkHistoricalArtifact = async (relative, expected) => {
+  assert.ok(Object.hasOwn(continuation.historicalArtifacts, relative), `Historical artifact has no exact backing: ${relative}`)
+  const backing = continuation.historicalArtifacts[relative]
+  assert.equal(backing.sha256, expected)
+  await checkCurrentInputs({ [backing.path]: expected })
+  return readFile(path.resolve(proofDirectory, '../../', backing.path))
+}
+await checkHistoricalArtifact(historicalReview.artifact, historicalReview.artifactSha256)
+assert.ok(historicalReview.visual.artifacts.length > 0)
+for (const artifact of historicalReview.visual.artifacts) {
+  const png = await checkHistoricalArtifact(artifact.path, artifact.sha256)
+  assert.equal(png.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+}
+const review = await readPinnedProof(continuation.review)
 assert.equal(review.accepted, true)
 assert.deepEqual(review.unresolved, [])
 assert.ok(review.artifact.length > 0)
 assert.ok(!path.isAbsolute(review.artifact) && !review.artifact.split(/[\\/]/u).includes('..'))
 assert.match(review.artifactSha256, /^[a-f\d]{64}$/u)
 assert.equal(createHash('sha256').update(await readFile(path.resolve(proofDirectory, '../../', review.artifact))).digest('hex'), review.artifactSha256)
+assert.deepEqual(review.inputs, integration.inputs, 'Final independent review must cover the complete current candidate')
 await checkInputs(review.inputs)
 assert.equal(review.visual.accepted, true)
 assert.ok(review.visual.artifacts.length > 0)
@@ -132,8 +196,11 @@ for (const artifact of review.visual.artifacts) {
   assert.equal(createHash('sha256').update(png).digest('hex'), artifact.sha256)
 }
 const receipt = { schema: 'agentmux.object-cli-rpc.acceptance.v1', passed: true,
-  integration: 'integration.json', inputs: integration.inputs,
+  integration: 'integration.continuation.json', inputs: integration.inputs,
+  historicalOwners: continuation.historicalOwners.map(scope => scope.owner),
+  history: { review: continuation.historicalReview, supplement: continuation.historicalSupplement,
+    recordedInputs: historicalReview.inputs },
   review: review.artifact, visual: review.visual, ownerChecks: owners.map(owner => owner.schema === 'agentmux.cli-quality.v1'
     ? owner.runs : owner.schema === 'agentmux.public-rpc-owner.private.v1' ? [owner.owning] : owner.checks) }
-await writeFile(path.join(proofDirectory, 'acceptance.json'), JSON.stringify(receipt, null, 2) + '\n')
-console.log(JSON.stringify({ passed: true, proof: 'acceptance.json' }))
+await writeFile(path.join(proofDirectory, 'acceptance.continuation.json'), JSON.stringify(receipt, null, 2) + '\n')
+console.log(JSON.stringify({ passed: true, proof: 'acceptance.continuation.json' }))

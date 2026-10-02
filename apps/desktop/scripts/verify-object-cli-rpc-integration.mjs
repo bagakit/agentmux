@@ -7,6 +7,14 @@ import { pathToFileURL } from 'node:url'
 const root = path.resolve(import.meta.dirname, '../../..')
 export const proofDirectory = path.join(root, ".tmp/object-first-cli-jsonrpc-fixture")
 export const readProof = async relative => JSON.parse(await readFile(path.join(root, relative), 'utf8'))
+export async function readPinnedProof(reference) {
+  assert.ok(reference && typeof reference.path === 'string' && !path.isAbsolute(reference.path) &&
+    !reference.path.split(/[\\/]/u).includes('..'), 'Proof reference must be inside the candidate')
+  assert.match(reference.sha256, /^[a-f\d]{64}$/u)
+  const bytes = await readFile(path.join(root, reference.path))
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), reference.sha256, `Recorded proof changed: ${reference.path}`)
+  return JSON.parse(bytes.toString('utf8'))
+}
 export async function checkInputs(inputs) {
   assert.ok(inputs && Object.keys(inputs).length > 0, 'Proof must name nonempty Source and compiled inputs')
   for (const [relative, expected] of Object.entries(inputs)) {
@@ -16,30 +24,26 @@ export async function checkInputs(inputs) {
     assert.equal(actual, expected, `Candidate changed: ${relative}`)
   }
 }
-export async function checkRecordedInputs(inputs) {
-  const review = await readProof(".tmp/object-first-cli-jsonrpc-fixture/independent-review.json")
-  const continuation = review.typingContinuation
-  assert.equal(review.accepted, true)
-  assert.equal(continuation.accepted, true)
-  const typeBytes = await readFile(path.join(root, continuation.publicTypes.report))
-  assert.equal(createHash('sha256').update(typeBytes).digest('hex'), continuation.publicTypes.sha256)
-  const types = JSON.parse(typeBytes)
-  assert.equal(types.success, true)
-  assert.equal(types.numFailedTests, 0)
-  assert.ok(types.numPassedTests > 0)
-  await checkInputs(continuation.addedInputs)
-  const current = { ...inputs }
-  for (const [relative, delta] of Object.entries(continuation.inputDelta)) {
-    if (!Object.hasOwn(inputs, relative)) continue
-    assert.equal(inputs[relative], delta.before, 'Recorded evidence must retain its original Source identity')
-    assert.equal(review.inputs[relative], delta.after, 'The typing change must belong to the independent review')
-    current[relative] = delta.after
-  }
-  await checkInputs(current)
-  return current
-}
 export async function verifyIntegration() {
-  const native = await readProof('.tmp/space-agent-cli/last/receipt.json')
+  const continuation = await readProof(".tmp/object-first-cli-jsonrpc-fixture/continuation.json")
+  const taskState = await readPinnedProof(continuation.taskState)
+  assert.equal(taskState.feat_id, 'f-2j28fqcvt')
+  const completedTasks = ['T-001', 'T-002', 'T-003']
+  assert.deepEqual(Object.keys(continuation.taskReviews), completedTasks)
+  for (const taskId of completedTasks) {
+    const task = taskState.tasks.find(task => task.id === taskId)
+    assert.equal(task?.status, 'done', `Original ${taskId} must be closed`)
+    assert.equal(task.gate_result, 'pass')
+    assert.equal(task.last_gate_commands.length, 2, 'Each original Task has two verification commands')
+    assert.deepEqual(task.last_gate_commands.map(command => command.command), task.verification.map(command => command.ref))
+    assert.ok(task.last_gate_commands.every(command => command.status === 'pass' && command.exit_code === 0 && command.command.length > 0))
+    const review = await readPinnedProof(continuation.taskReviews[taskId])
+    assert.equal(review.feature, 'f-2j28fqcvt')
+    assert.equal(review.task, taskId)
+    assert.equal(review.status, 'approved-scoped')
+  }
+  await checkInputs(continuation.inputs)
+  const native = await readPinnedProof(continuation.native)
   assert.equal(native.passed, true, 'Private production-shaped Desktop proof must pass')
   assert.deepEqual(native.phases.map(item => item.phase), ['seed', 'restore', 'empty-restore', 'admission', 'after-admission'])
   assert.equal(new Set(native.phases.map(item => item.native.pid)).size, 5, 'Restoration requires independent process generations')
@@ -50,7 +54,7 @@ export async function verifyIntegration() {
     assert.ok(phase.native.cli.length > 0, 'Every process must observe the real compiled CLI')
   }
   assert.deepEqual(native.inputsAfter, native.inputs)
-  const nativeCurrentInputs = await checkRecordedInputs(native.inputs)
+  await checkInputs(native.inputs)
   assert.deepEqual(Object.keys(native.tools), ['electron'])
   assert.deepEqual(native.toolsAfter, native.tools)
   const electron = native.tools.electron
@@ -58,7 +62,7 @@ export async function verifyIntegration() {
   assert.deepEqual(native.cleanup.errors, [])
   assert.deepEqual(native.cleanup.remaining, [])
   assert.equal(native.cleanup.temporaryRootRemoved, true)
-  const transport = await readProof('.tmp/public-rpc-transports/last/receipt.json')
+  const transport = await readPinnedProof(continuation.transport)
   assert.equal(transport.passed, true, 'Actual Unix, HTTP and SSH proof must pass')
   assert.equal(transport.schema, 'agentmux.public-rpc-transports.private.v1')
   assert.deepEqual(transport.records.map(record => record.transport), ['unix', 'http', 'ssh'])
@@ -86,18 +90,25 @@ export async function verifyIntegration() {
   assert.equal(transport.sourceUnchanged, true)
   assert.equal(transport.executionFailure, null)
   assert.equal(transport.failure, null)
-  const transportCurrentInputs = await checkRecordedInputs(transport.inputs)
+  await checkInputs(transport.inputs)
   assert.deepEqual(transport.inputsAfter, transport.inputs)
+  for (const inputs of [native.inputs, transport.inputs]) {
+    for (const [relative, expected] of Object.entries(inputs)) {
+      assert.equal(continuation.inputs[relative], expected, `Current candidate must include every proof input: ${relative}`)
+    }
+  }
   const receipt = { schema: 'agentmux.object-cli-rpc.integration.v1', passed: true,
-    native: '.tmp/space-agent-cli/last/receipt.json', transport: '.tmp/public-rpc-transports/last/receipt.json',
-    inputs: { ...transportCurrentInputs, ...nativeCurrentInputs },
-    continuation: ".tmp/object-first-cli-jsonrpc-fixture/independent-review.json",
+    native: continuation.native, transport: continuation.transport,
+    inputs: continuation.inputs,
+    recordedInputs: { native: native.inputs, transport: transport.inputs },
+    taskState: continuation.taskState, taskReviews: continuation.taskReviews,
+    continuation: ".tmp/object-first-cli-jsonrpc-fixture/continuation.json",
     limitations: native.limitations }
   await mkdir(proofDirectory, { recursive: true })
-  await writeFile(path.join(proofDirectory, 'integration.json'), JSON.stringify(receipt, null, 2) + '\n')
+  await writeFile(path.join(proofDirectory, 'integration.continuation.json'), JSON.stringify(receipt, null, 2) + '\n')
   return receipt
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
   const receipt = await verifyIntegration()
-  console.log(JSON.stringify({ passed: receipt.passed, proof: path.relative(root, path.join(proofDirectory, 'integration.json')) }))
+  console.log(JSON.stringify({ passed: receipt.passed, proof: path.relative(root, path.join(proofDirectory, 'integration.continuation.json')) }))
 }

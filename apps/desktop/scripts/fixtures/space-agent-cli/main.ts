@@ -6,6 +6,7 @@ import { execFile as execFileCallback } from 'node:child_process'
 import { promisify } from 'node:util'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxControlServer, AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { DesktopControlIpcBridge } from '../../../src/main/control-ipc-bridge'
 import { ConfigOwner } from '../../../src/main/config-owner'
@@ -23,6 +24,7 @@ app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
 process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime', 'state')
+process.env.AGENTMUX_SPATIAL_STATE_STORE = path.join(privateRoot!, 'runtime', 'state', 'spatial-state.json')
 process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Private proof' }],
   executors: { fixture: { label: 'Private fixture', providerId: 'codex', command: nodeExecutable,
@@ -34,6 +36,7 @@ const initialConfig: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'loc
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 let config: AppConfig = phase === 'seed' ? initialConfig : JSON.parse(await fs.readFile(path.join(privateRoot, 'config.json'), 'utf8'))
 const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-sessions.json'))
+const spatialState = new AgentMuxSpatialStateStore(process.env.AGENTMUX_SPATIAL_STATE_STORE)
 const topics = new ScratchTopics()
 const runtime = new RuntimeController(store, localRuntimeConnector, topics)
 let registrationFault = false
@@ -46,6 +49,9 @@ const calls: { operation: string; args: unknown[] }[] = []
 const result: Record<string, any> = { schema: 'agentmux.space-agent-cli.phase.v1', passed: false, phase, pid: process.pid, cli: [] }
 let win: BrowserWindow
 let server: AgentMuxControlServer
+const disposeSpatial = spatialState.subscribe(state => {
+  if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('space-proof:spatial-changed', state)
+})
 let admissionArmed = false
 let admissionCutting = false
 let emptySnapshot = phase === 'empty-restore'
@@ -59,6 +65,8 @@ ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
   calls.push({ operation, args })
   switch (operation) {
     case 'setup': return { phase, config }
+    case 'spatial-read': return spatialState.read()
+    case 'spatial-commit': return spatialState.commit(args[0])
     case 'topics': return topics.list(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!)
     case 'create-resource': return createSpaceZoneResource(args[0], { config: () => config, topics: () => topics.list(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!),
       host: id => runtime.executionHost(id), worktrees, register: fields => registerWorkspace(fields, owner, id => runtime.executionHost(id)) })
@@ -85,13 +93,14 @@ ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
         // Block every armed flush so a second request cannot let placement pass the cut.
         if (admissionCutting) return await new Promise(() => {})
         admissionCutting = true
-        const state = await win.webContents.executeJavaScript('window.spaceState()')
+        const state = await win.webContents.executeJavaScript('window.spaceDurableState()')
         const binding = state.spatialRequests['private:admission-only']
         assert.ok(binding, 'The real admission must precede the private shutdown')
         result.admission = { binding, state }
         await fs.writeFile(path.join(privateRoot, 'admission.json'), JSON.stringify(binding))
         await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(durable(state)))
-        // Stop the private Electron owner after its real sync localStorage write and before placement.
+        await fs.writeFile(path.join(privateRoot!, 'spatial-expected.json'), JSON.stringify(state.spatialState))
+        // Core has acknowledged its durable graph; the original UI request association is written before placement.
         // Return a permanently pending IPC promise so the production pipeline cannot continue.
         void finish(true)
         return await new Promise(() => {})
@@ -102,7 +111,7 @@ ipcMain.handle('space-proof:request', async (_event, operation, ...args) => {
   }
 })
 
-const state = () => win.webContents.executeJavaScript('window.spaceState()')
+const state = () => win.webContents.executeJavaScript('window.spaceDurableState()')
 const durable = (value: any) => ({ tabs: value.tabs, layouts: value.layouts, activeWorkspaceId: value.activeWorkspaceId,
   agentFocus: value.agentFocus, retainedSpatialFocus: value.retainedSpatialFocus, spaceZoneBindings: value.spaceZoneBindings, spatialRequests: value.spatialRequests })
 const until = async (expression: string, budget = 15000) => {
@@ -118,6 +127,7 @@ async function cli(args: string[], expectedExit = 0) {
   for (const name of ['AGENTMUX_ENV', 'AGENTMUX_AGENT_SESSION_ID', 'AGENTMUX_AGENT_CAPABILITY', 'AGENTMUX_RUN_ID',
     'AGENTMUX_WORKSPACE_ID', 'AGENTMUX_REGION_ID', 'AGENTMUX_TAB_ID', 'AGENTMUX_VIEW_ID']) delete env[name]
   env.AGENTMUX_AGENT_SESSION_STORE = path.join(privateRoot, 'agent-sessions.json')
+  env.AGENTMUX_RPC_ENDPOINT = `unix:${server.path}`
   try { const value = await execFile(nodeExecutable, [cliPath, ...args], { env, timeout: 25000, maxBuffer: 1024 * 1024 }); stdout = value.stdout; stderr = value.stderr }
   catch (error: any) { stdout = error.stdout; stderr = error.stderr; exitCode = typeof error.code === 'number' ? error.code : -1 }
   assert.ok(stdout.trim(), `${args.join(' ')}: no success receipt; exit=${exitCode}\n${stderr}`)
@@ -141,6 +151,7 @@ async function finish(passed: boolean) {
     nativeHandle: one.nativeHandle, workspacePath: one.workspacePath, creation: one.creation }))
   await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
   bridge.dispose()
+  disposeSpatial()
   // Server.stop waits for this deliberately abandoned request; app exit owns its private socket.
   if (!result.admission) await server?.stop().catch(error => { result.cleanupFailure = String(error); result.passed = false })
   await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
@@ -156,6 +167,8 @@ app.whenReady().then(async () => {
       await topics.ensureMote(config.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)!, PMO_TEAMS_TOPIC_ID)
     }
     runtime.commit(await runtime.prepare(config))
+    // Read the original complete document before Renderer initialization may add the new empty resource layout.
+    result.spatialBeforeRenderer = await spatialState.read()
     win = new BrowserWindow({ width: 1250, height: 880, show: false,
       webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload } })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer: ${message}\n`) })
@@ -166,7 +179,8 @@ app.whenReady().then(async () => {
     await until('window.spaceReady === true && !window.spaceState().loading')
     if (phase === 'seed') await win.webContents.executeJavaScript('window.spaceSelectCaller()')
     server = new AgentMuxControlServer({ execute: request => bridge.execute(request), coreClients: () => runtime.rpcClients(),
-      snapshot: params => observeClientRpcSnapshot(config, topics, params) })
+      snapshot: params => observeClientRpcSnapshot(config, topics, params), spatialState,
+      socketPath: path.join(privateRoot!, 'runtime', 'control.sock') })
     await server.start()
     result.initial = await state()
     // Keep the deliberate startup outage active until its visible state is observed.
@@ -199,7 +213,7 @@ app.whenReady().then(async () => {
       assert.equal(opened.resource.sourceWorkspaceId, 'repo')
       assert.equal(opened.to.spaceId, mote.spaceId)
       assert.notEqual(project.projectId, mote.spaceId, 'Execution Project and display Space are different identities')
-      assert.equal(opened.save.diskDurability, 'unconfirmed')
+      assert.equal(opened.save.diskDurability, 'confirmed')
       assert.equal(opened.save.localStorageWritten, true)
       assert.equal(opened.to.zoneId, (await cli(['space', 'inspect', '--operation-id', 'private:git-open'])).request.report.to.zoneId)
       const count = calls.filter(one => one.operation === 'launch').length
@@ -363,6 +377,7 @@ app.whenReady().then(async () => {
       assert.equal(primaryMoved.agent.cwd, opened.agent.cwd)
       await win.webContents.executeJavaScript('window.spaceFlush()')
       await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(durable(await state())))
+      await fs.writeFile(path.join(privateRoot!, 'spatial-expected.json'), JSON.stringify(await spatialState.read()))
       await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify({ opened, moved, primaryMoved, caller, other, first, second, directoryOpened }))
       result.backgroundCommands = commands
       result.created = { opened, topicOpened, moteOpened, directoryOpened, moved }
@@ -370,6 +385,9 @@ app.whenReady().then(async () => {
       const expected = JSON.parse(await fs.readFile(path.join(privateRoot, 'expected.json'), 'utf8'))
       const ids = JSON.parse(await fs.readFile(path.join(privateRoot, 'ids.json'), 'utf8'))
       const restored = durable(result.initial)
+      const expectedSpatial = JSON.parse(await fs.readFile(path.join(privateRoot!, 'spatial-expected.json'), 'utf8'))
+      assert.ok(result.initial.spatialState.revision >= expectedSpatial.revision)
+      assert.deepEqual(result.spatialBeforeRenderer, expectedSpatial, 'Before Renderer initialization, the same Core owner retains the complete original revision and graph')
       const addedLayoutIds = Object.keys(restored.layouts).filter(id => !Object.hasOwn(expected.layouts, id))
       for (const id of addedLayoutIds) {
         assert.equal(id, ids.directoryOpened.resource.workspaceId, 'Only the newly registered resource may initialize an empty layout')
@@ -413,6 +431,7 @@ app.whenReady().then(async () => {
         await until(`window.spaceState().activeWorkspaceId === ${JSON.stringify(ids.primaryMoved.to.workspaceId)} && window.spaceState().focusedSessionId === ${JSON.stringify(ids.opened.agent.agentSessionId)}`)
         await win.webContents.executeJavaScript('window.spaceCloseObservation(); true')
         await until(`window.spaceNativeReady(${JSON.stringify(ids.primaryMoved.to.regionId)}, ${JSON.stringify(ids.opened.agent.agentSessionId)}, ${JSON.stringify(ids.opened.agent.runId)})`)
+        await until(`window.spaceDurableState().then(state => state.tabs[${JSON.stringify(ids.primaryMoved.to.tabId)}]?.layout.activeRegionId === ${JSON.stringify(ids.primaryMoved.to.regionId)})`)
         const afterNavigation = await state()
         const placementGraph = (value: any) => Object.entries(value.layouts).flatMap(([workspaceId, layout]: any) =>
           layout.groups.flatMap((group: any) => group.tabOrder.map((tabId: string) => ({ workspaceId, groupId: group.id, tabId }))))
@@ -474,6 +493,7 @@ app.whenReady().then(async () => {
         ids.moved = moved
         await win.webContents.executeJavaScript('window.spaceFlush()')
         await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(durable(await state())))
+        await fs.writeFile(path.join(privateRoot!, 'spatial-expected.json'), JSON.stringify(await spatialState.read()))
         await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(ids))
       } else if (phase === 'admission') {
         admissionArmed = true

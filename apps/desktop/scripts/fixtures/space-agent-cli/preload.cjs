@@ -7,6 +7,7 @@ const subscribe = channel => listener => {
 contextBridge.exposeInMainWorld('spaceBoundary', {
   request: (operation, ...args) => ipcRenderer.invoke('space-proof:request', operation, ...args),
   onEvent: subscribe('agentmux:session-event'),
+  onSpatialChange: subscribe('space-proof:spatial-changed'),
   control: {
     onRequest: subscribe('agentmux:control-request'),
     onCancellation: subscribe('agentmux:control-cancel'),

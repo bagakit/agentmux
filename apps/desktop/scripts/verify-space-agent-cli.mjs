@@ -26,7 +26,7 @@ const receipt = { schema: 'agentmux.space-agent-cli.native.v1', passed: false, p
     'The native Provider process is the repository fake Codex CLI; it emits authenticated hooks and a real native handle. No upstream Provider version is claimed.',
     'Optional warm shell creation is excluded at the private API boundary; all four task Agents and their terminal consumers are real.',
     'A successful empty first startup snapshot and an owner exit after real localStorage intent admission are private boundary faults. No production outage is claimed.',
-    'Electron flushStorageData has no disk ACK. Receipts continue to say diskDurability=unconfirmed; the later independent process read is separately observed.',
+    'Electron flushStorageData has no disk ACK. The original Core spatial commit acknowledges durableWriteFile/directory sync; Core graph facts and UI request/preferences remain separately observed.',
     'No user App, profile, Session, Run, config or shared Runtime is accessed.'] }
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
@@ -37,10 +37,11 @@ const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scri
   path.join(root, 'packages/core/package.json'), path.join(root, 'packages/core/scripts/build.mjs'),
   path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml')]
 const hashes = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
+const previousEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_SPATIAL_STATE_STORE'].map(name => [name, process.env[name]]))
 let client
 await fs.mkdir(evidence, { recursive: true })
 try {
+  process.env.AGENTMUX_SPATIAL_STATE_STORE = path.join(privateRoot, 'runtime', 'state', 'spatial-state.json')
   receipt.inputs = await hashes()
   receipt.tools = { electron: { path: electron, sha256: hash(await fs.readFile(electron)) } }
   for (const directory of ['repo', 'caller', 'other', 'topics', 'directory']) await fs.mkdir(path.join(privateRoot, directory))
@@ -60,6 +61,11 @@ try {
     build: { ssr: path.join(fixture, 'main.ts'), target: 'node22', outDir: path.join(privateRoot, 'main'), emptyOutDir: true,
       rollupOptions: { external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format: 'es', entryFileNames: 'main.mjs' } } } })
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  for (const name of Object.keys(env)) if (name.startsWith('AGENTMUX_') || name.startsWith('CTXMUX_')) delete env[name]
+  Object.assign(env, { AGENTMUX_RUNTIME_DIRECTORY: path.join(privateRoot, 'runtime'),
+    AGENTMUX_STATE_DIRECTORY: path.join(privateRoot, 'runtime', 'state'),
+    AGENTMUX_SPATIAL_STATE_STORE: path.join(privateRoot, 'runtime', 'state', 'spatial-state.json'),
+    AGENTMUX_MESSAGE_QUEUE_PATH: path.join(privateRoot, 'messages.ndjson') })
   for (const phase of ['seed', 'restore', 'empty-restore', 'admission', 'after-admission']) {
     const phaseRoot = path.join(privateRoot, `phase-${phase}`)
     await fs.mkdir(phaseRoot)

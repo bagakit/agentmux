@@ -7,6 +7,7 @@ const subscribe = channel => listener => {
 contextBridge.exposeInMainWorld('focusProofBoundary', {
   request: (operation, ...args) => ipcRenderer.invoke('focus-proof:request', operation, ...args),
   onEvent: subscribe('agentmux:session-event'),
+  onSpatialChange: subscribe('focus-proof:spatial-changed'),
   control: {
     onRequest: subscribe('agentmux:control-request'),
     onCancellation: subscribe('agentmux:control-cancel'),
