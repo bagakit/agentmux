@@ -27,7 +27,7 @@ import type { ConversationAnnotation } from '@agentmux/client-ui/components/Conv
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
-import { errorIdentity } from '@agentmux/client-ui/error-presentation'
+import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { ActivityView } from './ActivityView'
@@ -510,6 +510,23 @@ export function SessionPane({
     setObservationMounted(refresh !== null)
   }, [])
   const [recovering, setRecovering] = useState(false)
+  const reopenRetiredSession = useAppStore(state => state.reopenRetiredSession)
+  const retainedReopenRef = useRef<object | null>(null)
+  const retainedUnconfirmedIntent = useRef<string | null>(null)
+  const clearedRetainedIntent = useRef<string | null>(null)
+  const [retainedReopenError, setRetainedReopenError] = useState<string | null>(null)
+  const [retainedReopenUnconfirmed, setRetainedReopenUnconfirmed] = useState(false)
+  const pendingReopen = retainedHistory?.pendingReopen &&
+    retainedHistory.pendingReopen.operationId !== clearedRetainedIntent.current ? retainedHistory.pendingReopen : undefined
+  const continuationUnconfirmed = retainedReopenUnconfirmed || Boolean(pendingReopen)
+  useEffect(() => {
+    if (retainedReopenRef.current) setRecovering(false)
+    retainedReopenRef.current = null
+    retainedUnconfirmedIntent.current = null
+    clearedRetainedIntent.current = null
+    setRetainedReopenError(null)
+    setRetainedReopenUnconfirmed(false)
+  }, [sessionId, historyHostId, retainedHistory?.retiredAt])
   // daemon_restart auto-recovery fires at most once per dead session id, so a flapping
   // daemon can't spin us into a relaunch loop. Keyed by the session id we last recovered from.
   const autoRecoveredRef = useRef<string | null>(null)
@@ -532,6 +549,54 @@ export function SessionPane({
     setRecovering(true)
     try { await recoverSession(sessionId) }
     finally { setRecovering(false) }
+  }
+
+  async function reopenRetained(): Promise<void> {
+    const source = retainedHistory
+    if (!projectionPolicy.allowsRecovery || !source || retainedReopenRef.current) return
+    const attempt = {}
+    const retainedOperationId = retainedUnconfirmedIntent.current ?? pendingReopen?.operationId
+    if ((pendingReopen && !retainedOperationId) || historyCatalogue.error) {
+      setRetainedReopenError(historyCatalogue.error ?? 'Core retains an original continue operation, but its correlation is unavailable. Its result remains unknown.')
+      setRetainedReopenUnconfirmed(true)
+      historyCatalogue.refresh()
+      return
+    }
+    const observeOnly = retainedOperationId !== undefined
+    const operationId = retainedOperationId ?? crypto.randomUUID()
+    retainedUnconfirmedIntent.current = operationId
+    retainedReopenRef.current = attempt
+    setRecovering(true)
+    try {
+      const reopened = await reopenRetiredSession(source, operationId, observeOnly)
+      if (retainedReopenRef.current !== attempt) return
+      if (reopened) {
+        setHistoryOpen(false)
+        setRetainedReopenError(null)
+        retainedUnconfirmedIntent.current = null
+        setRetainedReopenUnconfirmed(false)
+      }
+    } catch (error) {
+      if (retainedReopenRef.current === attempt) {
+        // Electron transport failure cannot prove a native launch was not applied. Only the
+        // Core's structured disposition authorizes a later, new explicit launch intent.
+        const notApplied = error instanceof Error &&
+          'controlFailure' in error &&
+          (error.controlFailure as { disposition?: unknown } | undefined)?.disposition === 'not_applied'
+        if (notApplied) {
+          retainedUnconfirmedIntent.current = null
+          clearedRetainedIntent.current = operationId
+          historyCatalogue.refresh()
+        }
+        setRetainedReopenUnconfirmed(!notApplied)
+        setRetainedReopenError(presentError(error))
+      }
+    } finally {
+      if (retainedReopenRef.current === attempt) {
+        retainedReopenRef.current = null
+        setRecovering(false)
+      }
+    }
   }
 
   // Terminals whose backend restarted (daemon_restart) can never come back by refreshing —
@@ -592,27 +657,53 @@ export function SessionPane({
     const reference = { hostId: retainedHistory.hostId, agentSessionId: retainedHistory.agentSessionId }
     const metadata = retainedHistory.history
     const label = userName ?? tabName ?? metadata?.executorId ?? sessionId
+    const providerLabel = metadata ? agentProviderLabel(metadata.providerId) : null
+    const executorLabel = metadata ? connectingExecutor?.label ?? metadata.executorId : null
+    const identityLabel = providerLabel && executorLabel && providerLabel.toLowerCase() !== executorLabel.toLowerCase()
+      ? `${providerLabel} · ${executorLabel}` : providerLabel
+    const resumeAction = projectionPolicy.allowsRecovery ? <button type="button" className="small-button"
+      disabled={recovering} onClick={() => void reopenRetained()}>
+      {recovering ? <LoaderCircle size={12} className="spin" /> : <RotateCcw size={12} />}
+      {recovering ? continuationUnconfirmed ? 'Checking…' : 'Resuming…' : continuationUnconfirmed ? 'Check again' : 'Continue session'}
+    </button> : null
+    const reopenCause = retainedReopenError ?? (pendingReopen
+      ? pendingReopen.operationId ? 'Core retains the original continue operation. Its result is not yet confirmed.'
+        : 'Core retains the original continue operation, but its correlation is unavailable. Its result remains unknown.' : null)
+    const reopenNotice = reopenCause ? <ServiceWindowNotice disclosure={{
+      scope: JSON.stringify(['retained-reopen', reference.hostId, reference.agentSessionId, retainedHistory.retiredAt]),
+      id: 'reopen', cause: reopenCause, visible
+    }} title={continuationUnconfirmed ? 'Continuation unconfirmed' : 'Conversation could not be continued'} notice={{ kind: 'indeterminate', notice: {
+      step: `Continuing this conversation was not confirmed: ${reopenCause}`,
+      mode: 'The original conversation and Region are kept. Its saved history remains readable.',
+      restore: continuationUnconfirmed
+        ? pendingReopen && !pendingReopen.operationId && !retainedUnconfirmedIntent.current
+          ? 'Check again refreshes the Core correlation. Keep reading the original history while its result is unknown.'
+          : 'Check again reads the original Core Session and Run. The unconfirmed operation is not resent.'
+        : 'Check the Host and current Executor configuration, then explicitly try again. No new message is sent.'
+    } }} /> : null
     return <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
       <div className="agent-body"><div className="agent-terminal-stage">
         {historyOpen ? <SessionHistoryView
           key={JSON.stringify([reference.hostId, reference.agentSessionId])}
           control={reference} label={label} onClose={closeHistory} visible={visible && !parked}
           returnLabel="Session" themeId={terminalThemeId} fontSize={terminalFontSize}
+          primaryAction={resumeAction} serviceNotice={reopenNotice}
           workspaceRoot={metadata?.workspacePath ?? ''} openWorkspaceFile={openWorkspaceFile}
           openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker}
         /> : <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Retained conversation"
           title="Session closed"
-          detail={metadata ? `${agentProviderLabel(metadata.providerId)} · ${connectingExecutor?.label ?? metadata.executorId}. The original conversation is retained for reading.`
+          detail={metadata ? `${identityLabel}. Read the original conversation or continue it with the current Executor configuration.`
             : 'Core confirmed this Session was closed. Its saved identity is retained.'}
-          actions={<button type="button" className="small-button" onClick={event => openHistory(event.currentTarget)}>
+          actions={<>{resumeAction}<button type="button" className="small-button" onClick={event => openHistory(event.currentTarget)}>
             Read conversation history
-          </button>}
+          </button></>}
           details={{ summary: label, content: <dl>
             <dt>Session ID</dt><dd>{reference.agentSessionId}</dd>
             {metadata ? <><dt>Provider</dt><dd>{agentProviderLabel(metadata.providerId)}</dd>
               <dt>Executor</dt><dd>{connectingExecutor?.label ?? metadata.executorId}</dd>
               <dt>Native Session</dt><dd>{metadata.nativeHandle?.sessionId ?? 'Not recorded'}</dd></> : null}
           </dl> }} />}
+        {!historyOpen ? reopenNotice : null}
       </div></div>
     </section>
   }
@@ -788,6 +879,7 @@ export function SessionPane({
             {...(!inlineHistory ? { onClose: closeHistory } : {})}
             visible={visible && (historyOpen || inlineHistory)}
             returnLabel={pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity'}
+            primaryAction={pendingAgentRestore ? agentRecoveryAction : undefined}
             themeId={terminalThemeId}
             fontSize={terminalFontSize}
             workspaceRoot={activeWorkspaceRoot}
@@ -805,7 +897,7 @@ export function SessionPane({
               })
             }}
             {...(pendingAgentRestore ? {
-              serviceNotice: <><span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>{agentRecoveryAction}</>
+              serviceNotice: <span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>
             } : {})}
           /> : null}
           {(disconnected || missing || exited) && !pendingAgentRestore ? (

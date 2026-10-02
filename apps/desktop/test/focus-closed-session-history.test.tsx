@@ -15,17 +15,31 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionHistoryReference } from '../src/shared/contracts'
 
-const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }))
+const bridge = vi.hoisted(() => {
+  vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
+  return { api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }
+})
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; window.agentmux = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => _hygiene_fixturePath("private-focus-closed-renderer") },
+  app: { getPath: () => _hygiene_fixturePath("private-focus-closed-renderer"), getAppPath: () => resolve('apps/desktop') },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
+vi.mock('../src/renderer/src/lib/api', async importOriginal => {
+  await import('../src/preload/index')
+  return importOriginal()
+})
 // Isolate the Electron service shell and PTY painting only. Core/private Run,
 // lifecycle, FileStore, built-in Reader, IPC/preload, Workbench/modal and Focus are real.
-vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(), AgentMuxControlServer: class { async start() {} async stop() {} } }))
+vi.mock('@agentmux/core', async () => {
+  const { createRequire } = await import('node:module')
+  const { resolve } = await import('node:path')
+  // Node loads the actual built Core. Vite's browser asset transform rewrites
+  // the native artifact URL into an empty glob result in this DOM fixture.
+  const core = createRequire(import.meta.url)(resolve('packages/core/dist/index.js')) as typeof import('@agentmux/core')
+  return { ...core, AgentMuxControlServer: class { async start() {} async stop() {} } }
+})
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({}) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-closed-journal.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))

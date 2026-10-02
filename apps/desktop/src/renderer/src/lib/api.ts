@@ -959,6 +959,8 @@ const mockApi: AgentMuxDesktopApi = {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
       if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
     },
+    reconcileReopen: async () => { throw new Error('Confirming native continuation requires the original Host. This browser preview does not change Sessions.') },
+    reopen: async () => { throw new Error('Continuing retired history requires the original native Host. This browser preview does not start a Run.') },
     resume: async (control, prompt) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
       if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)

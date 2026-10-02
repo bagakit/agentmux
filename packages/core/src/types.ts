@@ -629,6 +629,8 @@ export type AgentSessionHistoryDescriptor = {
   hostId: string
   state: 'active' | 'retired'
   retiredAt?: number
+  /** Original durable intent; absent operationId means its correlation is unavailable, not no attempt. */
+  pendingReopen?: { operationId?: string }
   /** Absence means no retained locator, not an invitation to infer one. */
   history?: AgentSessionHistoryMetadata
 }
@@ -733,6 +735,8 @@ export type AgentMuxAgentSession = {
   updatedAt: number
   /** Same creation's correlation and protocol delivery fact; never task acceptance or execution. */
   creation?: AgentMuxAgentCreationFact
+  /** Exact user retirement from which this Run explicitly continued; not a guessed reason. */
+  reopenedFrom?: { run: AgentMuxRunRef; source: 'user'; observedAt: number }
   /**
    * The chosen launch-option ids that fixed this Agent's security posture at spawn (sandbox, approval,
    * permission-mode — see agent-launch-option.ts). Persisted so a stop/resume re-resolves the SAME argv

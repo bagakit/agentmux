@@ -74,8 +74,10 @@ function region() {
   expect(node, 'real target Region mounted').not.toBeNull(); return node!
 }
 function toolbar() {
-  const node = container.querySelector<HTMLElement>('.focus-toolbar')
-  expect(node, 'real Focus Header presentation').not.toBeNull(); return node!
+  const node = useAppStore.getState().mainSurface === 'agents'
+    ? container.querySelector<HTMLElement>('.focus-toolbar')
+    : region().querySelector<HTMLElement>('.agent-region-header')
+  expect(node, 'real original Header in its current presentation').not.toBeNull(); return node!
 }
 function stateIdentity() {
   const state = useAppStore.getState()
@@ -121,6 +123,9 @@ function readerReturn(reader: HTMLElement, label: string) {
   return node!
 }
 async function activity() {
+  // Focus Activity uses an observation presentation whose Header owns no History
+  // action. These reader-retention cases exercise the original SessionPane owner.
+  await act(async () => useAppStore.getState().setMainSurface('workbench'))
   const toggle = region().querySelector<HTMLButtonElement>('.composer-tool--view-toggle')
   expect(toggle?.getAttribute('aria-label')).toBe('Show Activity')
   await act(async () => toggle!.click())
@@ -155,7 +160,7 @@ it('Terminal retains nonempty reader, terminal instance, original page and draft
   expect(recover).not.toHaveBeenCalled()
 })
 
-it('Activity original Header opens nonempty History and returns to its exact instance, page, selection and drafts', async () => {
+it('Space Activity original Header opens nonempty History and returns to its exact instance, page, selection and drafts', async () => {
   await mount()
   const feed = await activity(), before = stateIdentity(), originalHeader = more()
   feed.scrollTop = 47
@@ -267,7 +272,10 @@ it('original cold inline and pending Session return remain nonempty and readonly
   await mount()
   expect(visibleReader().classList.contains('session-history--inline')).toBe(true)
   expect(visibleReader().textContent).toContain('Actual native History content')
-  expect(visibleReader().querySelector('.session-history__toolbar button')?.textContent?.trim()).toBe('Latest')
+  const latest = [...visibleReader().querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')]
+    .find(node => node.textContent?.trim() === 'Latest')
+  expect(latest, 'explicit read refresh remains available beside Resume').toBeDefined()
+  expect(latest!.disabled).toBe(false)
   expect(writes).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
   expect(original.kind).toBe('agent')
 })

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm } from 'node:fs/promises'
@@ -31,7 +31,7 @@ function session(providerId = 'codex'): AgentMuxAgentSession {
     providerId,
     executorId: providerId,
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
 
@@ -49,7 +49,7 @@ function run(state: AgentMuxRun['state'] = 'running'): AgentMuxRun {
     providerId: 'codex',
     executorId: 'codex',
     agentSessionId: 'agent-1',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     pid: state === 'running' ? 42 : null,
     state,
     cols: 80,
@@ -675,7 +675,7 @@ function promptStoredSession(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/prompt-agent"),
+    workspacePath: fixturePath("tmp/prompt-agent"),
     run: { runId: 'prompt-run' },
     retiredRuns: [],
     hookBindingId: 'binding-prompt',
@@ -702,7 +702,7 @@ function promptRun(
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: upstreamFixturePath("tmp/prompt-agent"),
+    workspacePath: fixturePath("tmp/prompt-agent"),
     pid: 321,
     state,
     cols: 80,
@@ -932,16 +932,15 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
   })
 
   it('Run 已退出：仍 fail-closed，不发提交键也不立降级告示', async () => {
-    let statusCalls = 0
+    let acceptedPayload: string[] = []
     const { client, inputs, events } = await promptClient({
       observeOutput: truncatedReplayObservation,
-      status: () => {
-        statusCalls += 1
-        return statusCalls === 1
-          ? promptRun()
-          : promptRun({ type: 'exited', code: 1, signal: null })
-      }
+      // Exit is a physical event after payload ACK, not an assumption about status-call count.
+      status: () => acceptedPayload.length === 0
+        ? promptRun()
+        : promptRun({ type: 'exited', code: 1, signal: null })
     })
+    acceptedPayload = inputs
     await expect(client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
       agentSessionId: 'prompt-agent',
       operationId: 'op-exited',
@@ -955,7 +954,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
     await client.dispose()
   })
 
-  it('payload 未被接受：仍 fail-closed，从不进入降级路径', async () => {
+  it('Input ACK 未确认：不重发 payload，保留具体服务窗', async () => {
     const { client, inputs, events, observeCalls } = await promptClient({
       input: 'reject'
     })
@@ -966,8 +965,11 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
     })).rejects.toThrow('fixture daemon rejected the Input write')
     expect(inputs).toEqual([])
     expect(observeCalls()).toBe(0)
-    expect(client.agentSession('prompt-agent').terminalPromptDelivery).toBeUndefined()
-    expect(deliveryMarkers(events)).toEqual([])
+    // fixture rejection contains no not_applied receipt. A local failure is not proof of zero native input.
+    expect(client.agentSession('prompt-agent').terminalPromptDelivery).toMatchObject({
+      state: 'unverified', mode: 'degraded', reason: 'input-unconfirmed', submissionId: 'op-rejected'
+    })
+    expect(deliveryMarkers(events)).toHaveLength(1)
     await client.dispose()
   })
 

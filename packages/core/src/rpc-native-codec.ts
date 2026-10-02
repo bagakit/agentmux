@@ -137,6 +137,14 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         break
       }
+      case 'agent.reopen': case 'agent.reopen.check': {
+        record(p, ['session'])
+        const session = parseRpcAgentSession(p.session)
+        if (session.agentSessionId !== input.agentSessionId || !session.reopenedFrom ||
+          session.reopenedFrom.observedAt !== input.expectedRetiredAt ||
+          session.run.runId === session.reopenedFrom.run.runId) fail()
+        break
+      }
       case 'agent.ls': record(p, ['sessions', 'errors']); array(p.sessions, item => status(item)); array(p.errors, item => { const error = record(item, ['agentSessionId', 'hostId', 'code', 'message']); string(error.agentSessionId, true); if (error.agentSessionId === null || error.hostId !== undefined) string(error.hostId); string(error.code); text(error.message) }); break
       case 'agent.role.ls': record(p, ['bindings']); array(p.bindings, item => role(item)); break
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)

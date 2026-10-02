@@ -133,6 +133,7 @@ describe('semantic session registry concurrency', () => {
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
+      async loadReopenCorrelations() { return await memory.loadReopenCorrelations() },
       async compareAndSwap(expected, next) {
         if (next?.run.runId === 'run-2') {
           enteredTransition()
@@ -177,6 +178,7 @@ describe('semantic session registry concurrency', () => {
       async load() { return await memory.load() },
       async loadRetiredRuns() { return await memory.loadRetiredRuns() },
       async loadRetiredAgentSessions() { return await memory.loadRetiredAgentSessions() },
+      async loadReopenCorrelations() { return await memory.loadReopenCorrelations() },
       async compareAndSwap(expected, next, signal) {
         compareCalls += 1
         if (block) {

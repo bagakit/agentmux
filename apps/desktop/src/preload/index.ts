@@ -4,6 +4,7 @@ import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERL
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
+import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionInputWriteResult } from '../shared/session-input-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
@@ -324,6 +325,10 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.invoke('sessions:respondInteraction', session, response),
     setPosture: (session: AgentSessionControl, modeId: string) =>
       ipcRenderer.invoke('sessions:setPosture', session, modeId),
+    reconcileReopen: async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
+      unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reconcile-reopen', reference, expectedRetiredAt, operationId)),
+    reopen: async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
+      unwrapSessionReopenResult(await ipcRenderer.invoke('sessions:reopen', reference, expectedRetiredAt, operationId)),
     resume: (session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) =>
       ipcRenderer.invoke('sessions:resume', session, prompt, operationId, agentMuxNote),
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),

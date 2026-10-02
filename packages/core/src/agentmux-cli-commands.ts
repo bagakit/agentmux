@@ -142,6 +142,24 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('device.revoke', '--device ID', 'Request revocation of one exact device with actual local OS confirmation.',
     { '--device': 'data' }, f => ({ deviceId: id(f, '--device') } satisfies AgentMuxRpcParams<'device.revoke'>)),
   command('agent.ls', '[--session ID] [--executor ID] [--status VALUE] [--since N] [--limit N]', 'List actual Core Agent Sessions; retain unavailable item facts.', { '--session': 'data', '--executor': 'data', '--status': 'value', '--since': 'value', '--limit': 'value' }, filters),
+  command('agent.reopen', '--session ID --retired-at MS [--launch-json JSON] [--operation-id ID]',
+    'Explicitly continue the same retired native conversation without sending a prompt.',
+    { '--session': 'data', '--retired-at': 'value', '--launch-json': 'data', ...OP }, f => {
+      if (!f.values.has('--retired-at')) invalid('--retired-at is required.')
+      let launch: Record<string, unknown> = {}
+      if (f.values.has('--launch-json')) {
+        try { launch = JSON.parse(value(f, '--launch-json', true)!) } catch { invalid('--launch-json requires valid JSON.') }
+        if (!launch || typeof launch !== 'object' || Array.isArray(launch) ||
+          Object.keys(launch).some(key => !['args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'].includes(key))) invalid('--launch-json requires current launch configuration only.')
+      }
+      return { ...launch, ...operation(f), agentSessionId: id(f, '--session', true), ...numbers(f, { '--retired-at': 'expectedRetiredAt' }) }
+    }),
+  command('agent.reopen.check', '--session ID --retired-at MS --operation-id ID',
+    'Confirm the original continue operation without starting or stopping a Run.',
+    { '--session': 'data', '--retired-at': 'value', ...OP }, f => {
+      if (!f.values.has('--operation-id') || !f.values.has('--retired-at')) invalid('--operation-id and --retired-at are required.')
+      return { agentSessionId: id(f, '--session', true), operationId: value(f, '--operation-id', true)!, ...numbers(f, { '--retired-at': 'expectedRetiredAt' }) }
+    }),
   command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect Core identity and current Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) })),
   command('agent.open', '(--executor ID|--session ID) <destination> [--prompt TEXT] [--focus] [--operation-id ID]', 'Open an Agent at an explicit Space/Zone/Tab/Region; default is background.',
