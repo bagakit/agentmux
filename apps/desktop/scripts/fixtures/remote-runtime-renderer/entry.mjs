@@ -15,6 +15,12 @@ window.terminals = []
 const request = window.remoteProof.request
 const setup = await request('setup')
 api.config.get = async () => setup.config
+// Use the real Core filesystem owner across ordinary Electron generations.
+api.spatial = {
+  read: async () => request('spatial-read'),
+  commit: async input => request('spatial-commit', input),
+  onChange: listener => window.remoteProof.onSpatialChange(listener)
+}
 api.providers.list = async () => []
 api.demands.list = async () => []
 api.files.readDirectory = async () => []
@@ -162,7 +168,7 @@ window.remoteFocusReadingTerminal = () => {
   if (observed.visibleTerminals !== 1) throw Error('Exactly the original reading terminal must receive input')
   window.terminals[observed.terminalId].focus()
 }
-window.remoteFlush = async () => { prepareRendererUpdate(); await request('flush') }
+window.remoteFlush = async () => { await prepareRendererUpdate(); await request('flush') }
 window.remoteSeedUnconfirmed = () => {
   const session = useAppStore.getState().sessions.find(item => item.id === identity.sessionId)
   if (!session || session.kind !== 'agent') throw Error('The actual original Agent is required')
