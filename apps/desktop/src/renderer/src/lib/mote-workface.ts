@@ -9,8 +9,6 @@ import { scratchTopicKind } from './scratch-topic-snapshots'
 export type MoteWorkfaceScope = { topic: ScratchTopicSnapshot; workspace: WorkspaceRecord; rootPath: string }
 export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
   floating: boolean
-  materials(): void
-  persona(): void
   selectTab(tabId: string, groupId: string): void
 }) | null>(null)
 

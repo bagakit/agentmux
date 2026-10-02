@@ -91,7 +91,7 @@ it('local receipt survives diagnostics, unavailable projection, remount and dura
   try {
     useAppStore.setState({ noticeReadReceipts: {} })
     await show(); expect(unread()).toBe('true'); expect(document.activeElement).toBe(input)
-    expect(container.querySelector('.service-disclosure__details')!.getAttribute('popover')).toBe('auto')
+    expect(container.querySelector('.service-disclosure__details')!.getAttribute('popover')).toBe('hint')
     expect(container.querySelector('.service-disclosure__details')!.textContent).toContain(DEGRADED.notice.restore)
     await act(async () => container.querySelector<HTMLButtonElement>('.service-disclosure__close')!.click())
     expect(unread()).toBe('false')

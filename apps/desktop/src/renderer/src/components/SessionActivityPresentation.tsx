@@ -96,7 +96,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   }
   const hostId = workbenchSessionStageHostId(target, regionId)
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
-    active={target.active} retainedRegionId={regionId} reference={{ ...reference, regionId }}
+    active={target.active} visible={visible} retainedRegionId={regionId} reference={{ ...reference, regionId }}
     onSelectRegion={() => selectRegion()}>
     {renderFrame(<SessionRegionHost arrangement="columns" className="workbench-session-region-host">
       <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="activity"

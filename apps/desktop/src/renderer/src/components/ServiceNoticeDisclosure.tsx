@@ -43,15 +43,22 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, visi
   function positionDetails() {
     const button = trigger.current, details = panel.current
     const surface = button?.closest<HTMLElement>('[data-workbench-region-id]') ??
-      button?.closest<HTMLElement>('.agent-surface, .browser-surface, .terminal-view, .pane-group') ?? document.documentElement
+      button?.closest<HTMLElement>('.agent-surface, .browser-surface, .terminal-view, .pane-group, .workspace-workbench') ?? document.documentElement
     if (!button || !details) return
     const bounds = surface.getBoundingClientRect()
     const content = surface.querySelector<HTMLElement>('.agent-body, .browser-body, .terminal-view__xterm, .pane-body')
     const composer = surface.querySelector<HTMLElement>('.agent-input-stack')
     const terminal = surface.querySelector<HTMLElement>('.terminal-view__xterm')
-    const top = Math.max(bounds.top + 32, content?.getBoundingClientRect().top ?? bounds.top + 32)
-    const bottom = Math.min(bounds.top + bounds.height * 0.6, composer?.getBoundingClientRect().top ?? bounds.bottom,
+    let top = Math.max(bounds.top + 32, content?.getBoundingClientRect().top ?? bounds.top + 32)
+    let bottom = Math.min(bounds.top + bounds.height * 0.6, composer?.getBoundingClientRect().top ?? bounds.bottom,
       (terminal?.getBoundingClientRect().bottom ?? bounds.bottom) - 32)
+    // Prefer the reading area above the input. When it cannot hold even a
+    // heading and readable content, use the original surface for the details
+    // explicitly opened by the user; keep them scrollable and dismissible.
+    if (bottom - top < 128) {
+      top = Math.max(8, bounds.top + 8)
+      bottom = Math.min(document.documentElement.clientHeight || window.innerHeight, bounds.bottom) - 8
+    }
     details.style.left = `${bounds.left + 8}px`
     details.style.top = `${top}px`
     details.style.width = `${Math.max(0, Math.min(440, bounds.width - 16))}px`
@@ -60,7 +67,7 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, visi
   useEffect(() => {
     if (!open) return
     positionDetails()
-    const surface = trigger.current?.closest<HTMLElement>('[data-workbench-region-id], .agent-surface, .browser-surface, .terminal-view, .pane-group')
+    const surface = trigger.current?.closest<HTMLElement>('[data-workbench-region-id], .agent-surface, .browser-surface, .terminal-view, .pane-group, .workspace-workbench')
     if (!surface) return
     const observer = new ResizeObserver(positionDetails)
     observer.observe(surface)
@@ -91,7 +98,8 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, visi
     </button>
     {inbox.unread.length ? <button type="button" className="service-disclosure__close" aria-label={`Collapse service notice: ${heading}`}
       title="Collapse service notice" onPointerDown={rememberFocus} onClick={collapse}><X size={14} /></button> : null}
-    <div ref={panel} id={id} popover="auto" className="service-disclosure__details" aria-label={heading}
+    {/* Details accompany the original workface and its existing auto-popover. */}
+    <div ref={panel} id={id} popover="hint" className="service-disclosure__details" aria-label={heading}
       onToggle={event => {
         const next = event.newState === 'open'; setOpen(next)
         if (next) openedIdentity.current = identity

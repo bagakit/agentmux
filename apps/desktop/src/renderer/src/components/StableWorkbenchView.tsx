@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 
 type ReadingRange = { start: Node; startOffset: number; end: Node; endOffset: number }
-type ReadingSnapshot = { ranges: ReadingRange[]; activeElement: Element | null }
+type ReadingSnapshot = { ranges: ReadingRange[]; activeElement: Element | null; parent: Element | null; interrupted: boolean; dispose(): void }
 function captureReadingRanges(host: HTMLElement): ReadingRange[] {
   const selection = document.getSelection()
   return selection ? Array.from({ length: selection.rangeCount }, (_, index) => {
@@ -13,13 +13,13 @@ function captureReadingRanges(host: HTMLElement): ReadingRange[] {
       : null
   }).filter((range): range is ReadingRange => range !== null) : []
 }
-function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeElement: Element | null): void {
+function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeElement: Element | null, active: boolean, reparentedWithoutInput = false): void {
   const selection = document.getSelection()
   if (!selection || ranges.length === 0 || !host.isConnected) return
   if (!ranges.every(endpoints => host.contains(endpoints.start) && host.contains(endpoints.end))) return
   const currentInput = document.activeElement
   if (currentInput !== activeElement && currentInput instanceof HTMLElement &&
-    (currentInput.matches('input, textarea') || currentInput.isContentEditable)) return
+    currentInput !== document.body) return
   // A later selection is the user's current intent. Only repair a DOM-induced
   // collapse, or preserve the exact same already-restored endpoints.
   let unchanged = selection.rangeCount === ranges.length
@@ -30,8 +30,13 @@ function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeE
     const same = current.startContainer === original.start && current.startOffset === original.startOffset &&
       current.endContainer === original.end && current.endOffset === original.endOffset
     if (!same) unchanged = false
-    if (!same && (!current.collapsed || current.startContainer.nodeType === Node.TEXT_NODE)) return
+    if (!same && (!current.collapsed || current.startContainer.nodeType === Node.TEXT_NODE && !reparentedWithoutInput)) return
   }
+  // Reparenting can blur a live editor to body. Restore only that exact input
+  // in an active presentation; a later focused control remains the user's intent.
+  if (active && currentInput === document.body && activeElement instanceof HTMLElement && host.contains(activeElement) &&
+    (activeElement.isContentEditable || activeElement.matches('input, textarea, [contenteditable="true"]')) &&
+    !activeElement.closest('[hidden], [inert], [aria-hidden="true"]')) activeElement.focus({ preventScroll: true })
   if (unchanged) return
   selection.removeAllRanges()
   for (const endpoints of ranges) {
@@ -43,23 +48,43 @@ function restoreReadingRanges(host: HTMLElement, ranges: ReadingRange[], activeE
 }
 // Capture before React removes an old destination slot. A layout effect is too
 // late: Chromium has already collapsed the live Range when that slot detaches.
-class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; children: ReactNode }> {
-  getSnapshotBeforeUpdate(): ReadingSnapshot { return { ranges: captureReadingRanges(this.props.host), activeElement: document.activeElement } }
-  componentDidUpdate(_previous: Readonly<{ host: HTMLElement; children: ReactNode }>, _state: unknown, snapshot: ReadingSnapshot): void {
+class WorkbenchReadingSnapshot extends Component<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }> {
+  private pending = new Set<ReadingSnapshot>()
+  getSnapshotBeforeUpdate(): ReadingSnapshot {
+    const snapshot: ReadingSnapshot = { ranges: captureReadingRanges(this.props.host), activeElement: document.activeElement,
+      parent: this.props.host.parentElement, interrupted: false, dispose() {} }
+    if (snapshot.ranges.length) {
+      const interrupt = () => { snapshot.interrupted = true }
+      const events = ['pointerdown', 'keydown', 'beforeinput'] as const
+      for (const event of events) document.addEventListener(event, interrupt, true)
+      snapshot.dispose = () => { for (const event of events) document.removeEventListener(event, interrupt, true) }
+      this.pending.add(snapshot)
+    }
+    return snapshot
+  }
+  componentDidUpdate(_previous: Readonly<{ host: HTMLElement; active: boolean; visible: boolean; children: ReactNode }>, _state: unknown, snapshot: ReadingSnapshot): void {
     if (snapshot.ranges.length === 0) return
     const host = this.props.host
     // The parent layout effect reattaches this same host during this commit.
-    queueMicrotask(() => restoreReadingRanges(host, snapshot.ranges, snapshot.activeElement))
+    queueMicrotask(() => {
+      try {
+        const reparentedWithoutInput = host.parentElement !== snapshot.parent && document.activeElement === snapshot.activeElement
+        if (this.props.visible && !snapshot.interrupted)
+          restoreReadingRanges(host, snapshot.ranges, snapshot.activeElement, this.props.active, reparentedWithoutInput)
+      } finally { snapshot.dispose(); this.pending.delete(snapshot) }
+    })
   }
+  componentWillUnmount(): void { for (const snapshot of this.pending) snapshot.dispose(); this.pending.clear() }
   render(): ReactNode { return this.props.children }
 }
 
 /** One React/terminal tree; only its existing DOM host changes spatial parent. */
-export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
+export function StableWorkbenchView({ homeId, targetId, active, visible = true, retainedRegionId, homeNotice, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference, kind = 'tab', children }: {
   homeId: string
   kind?: 'tab' | 'region'
   targetId: string | null
   active: boolean
+  visible?: boolean
   retainedRegionId: string | null
   surface?: import('../lib/workbench-presentation').WorkbenchViewTarget['surface']
   survey?: boolean | undefined
@@ -77,23 +102,32 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     element.className = kind === 'region' ? 'retained-workbench-region' : 'retained-workbench-view'
     return element
   })
-  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: targetId ?? homeId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference }),
-    [active, retainedRegionId, targetId, homeId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference])
+  const [placedHostId, setPlacedHostId] = useState(homeId)
+  const presentation = useMemo(() => ({ active, retainedRegionId, tabHostId: placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference }),
+    [active, retainedRegionId, placedHostId, surface, survey, controlsOpen, onBrowserControlConfirmation, onSelectRegion, projection, reference])
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
   useLayoutEffect(() => {
     const destinationId = targetId ?? homeId
     const attach = () => {
-      const destination = document.getElementById(destinationId)
+      // A Region's exact home is its sibling slot, including while its parent
+      // View is being reparented. It need not wait in inert parking for body lookup.
+      const siblingHome = kind === 'region' && targetId === null
+        ? Array.from(parking.current?.parentElement?.children ?? []).find(element => element.id === destinationId) : undefined
+      const destination = siblingHome ?? document.getElementById(destinationId)
       if (!destination) return false
       if (host.parentElement !== destination) {
         // Reparenting an existing DOM host collapses Chromium's live Range.
         // Snapshot node endpoints, not cloned live Ranges, for this one move.
         const ranges = captureReadingRanges(host), activeElement = document.activeElement
-        destination.append(host)
-        restoreReadingRanges(host, ranges, activeElement)
+        // Connected moves preserve the existing editor focus and browser state.
+        // A detached slot still needs insertion before its parent can attach.
+        if (host.isConnected && destination.isConnected) destination.moveBefore(host, null)
+        else destination.append(host)
+        if (visible) restoreReadingRanges(host, ranges, activeElement, active)
       }
+      setPlacedHostId(destinationId)
       // Confirm the actual placement before describing it. Pending targets retain
       // the original View; a destination hint alone does not prove it moved.
       setNoticeHome(showHomeNotice && targetId !== null ? document.getElementById(homeId) : null)
@@ -108,7 +142,7 @@ export function StableWorkbenchView({ homeId, targetId, active, retainedRegionId
     return () => observer.disconnect()
   }) // The original layout can replace a slot without changing its exact address.
   useLayoutEffect(() => () => host.remove(), [host])
-  return <WorkbenchReadingSnapshot host={host}><WorkbenchPresentationContext.Provider value={presentation}>
+  return <WorkbenchReadingSnapshot host={host} active={active} visible={visible}><WorkbenchPresentationContext.Provider value={presentation}>
     <div ref={parking} className="retained-workbench-parking" aria-hidden="true" inert />{createPortal(children, host)}
     {targetId !== null && noticeHome && homeNotice ? createPortal(homeNotice, noticeHome) : null}
   </WorkbenchPresentationContext.Provider></WorkbenchReadingSnapshot>

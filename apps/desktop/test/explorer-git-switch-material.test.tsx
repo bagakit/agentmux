@@ -3,6 +3,7 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 import { act } from 'react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
+import { URL as NodeURL } from 'node:url'
 import { resolve } from 'node:path'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('../src/renderer/src/hooks/useWorkspaceBranches', () => ({ useWorkspaceBranches: () => ({ snapshot: null, loading: false, error: null, refresh: async () => true }) }))
@@ -92,7 +93,7 @@ describe('actual Explorer Git switch material', () => {
 
   it('connects the compact material, transparent selected foreground and system contrast alternatives', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
-    const css = readFileSync(resolve('apps/desktop/src/renderer/src/styles/source-control.css'), 'utf8')
+    const css = readFileSync(new NodeURL('../src/renderer/src/styles/source-control.css', import.meta.url), 'utf8')
     const sheet = new CSSStyleSheet(); sheet.replaceSync(css)
     expect(sheet.cssRules.length).toBeGreaterThan(20)
     const rule = (selector: string) => [...sheet.cssRules].find(item => item instanceof CSSStyleRule && item.selectorText === selector) as CSSStyleRule

@@ -12,7 +12,8 @@ import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopic
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { workbenchProjectionSlotId } from '../src/renderer/src/lib/workbench-projection'
+import { workbenchProjectionSlotId, type WorkbenchProjection } from '../src/renderer/src/lib/workbench-projection'
+import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { useAppStore } from '../src/renderer/src/store'
 import { installNativePopover } from './fixtures/mote-workface'
 
@@ -33,12 +34,29 @@ afterEach(async () => {
   vi.restoreAllMocks(); useAppStore.setState(baseline, true)
 })
 
+const firstReference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'group', tabId: first.id, regionId: 'first-region' }
+const secondReference = { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'group', tabId: second.id, regionId: 'second-region' }
+function publicProjection(onSelect = vi.fn()): WorkbenchProjection {
+  useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {},
+    workspaces: [{ id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: _hygiene_fixturePath("topics"), name: 'Topics', kind: 'folder' }],
+    appearance: { terminalTheme: 'graphite' },
+    browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } } })
+  const topic = { id: PMO_TEAMS_TOPIC_ID, directoryPath: _hygiene_fixturePath("topics/topic--launcher--leader"), topicPath: _hygiene_fixturePath("topics/topic--launcher--leader/topic.md"),
+    title: 'Mote', summary: '', collaborators: [] }
+  const catalog = spatialCatalog(useAppStore.getState(), [topic])
+  const zoneId = catalog.tabs.find(tab => tab.tabId === first.id)!.zoneId
+  expect(zoneId).not.toBeNull()
+  return { entity: { kind: 'zone', zoneId: zoneId! }, presentationId: 'projection', displayWorkspaceId: SCRATCH_WORKSPACE_ID,
+    catalog, selection: [firstReference], onSelect }
+}
+
 it.each(['board', 'agents'] as const)('lets only the window workbench own global chrome above %s', async (mainSurface) => {
   useAppStore.setState({ mainSurface })
+  const projectionState = publicProjection()
   await act(async () => root.render(createElement(Fragment, null,
     createElement('div', { 'data-owner': true }, createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, visible: false })),
     createElement('div', { 'data-projection': true }, createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID,
-      topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projectionTabId: first.id, viewHostPrefix: 'projection-slot' }))
+      topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projection: projectionState }))
   )))
   const owner = container.querySelector('[data-owner]')!, projection = container.querySelector('[data-projection]')!
   expect(owner.querySelector('.top-row-leading-chrome')).not.toBeNull()
@@ -52,25 +70,30 @@ it.each(['board', 'agents'] as const)('lets only the window workbench own global
 
 it('retains only the missing projection target slot while other Tabs are available', async () => {
   await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID,
-    topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projectionTabId: 'restoring-tab', viewHostPrefix: 'projection-slot' })))
+    topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', retainedTabId: 'restoring-tab', viewHostPrefix: 'projection-slot' })))
   expect(container.querySelector('[role="status"]')?.textContent).toContain('Original Tab retained')
-  expect(container.querySelector('[data-mote-retained-reference="restoring-tab"]')).not.toBeNull()
+  expect(container.querySelector('[data-workbench-retained-reference="restoring-tab"]')).not.toBeNull()
   // An absent entity retains its exact reference, without minting a content slot.
   expect(container.querySelector('[data-workbench-tab-id="restoring-tab"]')).toBeNull()
-  expect(container.querySelectorAll('.workbench-tab')).toHaveLength(0)
-  expect(container.textContent).not.toContain('First context')
+  // Explicit recovery navigation keeps both original choices without selecting
+  // either one or guessing a replacement for the absent content owner.
+  expect(container.querySelectorAll('.workbench-tab')).toHaveLength(2)
+  expect(container.querySelector('.workbench-tab--active')).toBeNull()
+  expect(container.querySelector('.workbench-tab-slot')).toBeNull()
+  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(first.id)
   expect(useAppStore.getState().tabs).toEqual({ [first.id]: first, [second.id]: second })
 })
 
 it('reports actual Tab clicks and native focus in retained content through the visible projection', async () => {
-  const selected = vi.fn()
+  const selected = vi.fn(), projection = publicProjection(selected)
+  const originalLayout = useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]
   await act(async () => root.render(createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID,
-    topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projectionTabId: first.id, viewHostPrefix: 'projection-slot', onTabSelect: selected })))
+    topicId: PMO_TEAMS_TOPIC_ID, viewOwnership: 'projection', projection })))
   const button = container.querySelector<HTMLButtonElement>(`button[data-workbench-tab-id="${second.id}"]`)!
   expect(button).not.toBeNull()
   await act(async () => button.click())
-  expect(selected).toHaveBeenCalledWith(second.id)
-  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(second.id)
+  expect(selected).toHaveBeenCalledExactlyOnceWith(secondReference)
+  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]).toBe(originalLayout)
   selected.mockClear()
   // The retained portal's DOM enters this host even though its React owner is
   // elsewhere. Native focus must therefore identify the visible slot's exact Tab.
@@ -79,7 +102,24 @@ it('reports actual Tab clicks and native focus in retained content through the v
   expect(slot).not.toBeNull()
   const input = document.createElement('input'); slot.append(input)
   await act(async () => input.focus())
-  expect(selected).toHaveBeenCalledWith(first.id)
+  expect(selected).toHaveBeenCalledExactlyOnceWith(firstReference)
+  expect(document.activeElement).toBe(input)
+  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]).toBe(originalLayout)
+  selected.mockClear()
+  // A queued retained focus cannot overtake a later explicitly focused control.
+  const later = document.createElement('input'); container.append(later)
+  await act(async () => { later.focus(); input.focus(); later.focus() })
+  expect(selected).not.toHaveBeenCalled()
+  expect(document.activeElement).toBe(later)
+  // An unconfirmed physical occurrence refuses only that selection. The input
+  // and all original entities remain available; no current Group is borrowed.
+  slot.dataset.workbenchGroupId = 'unconfirmed-group'
+  await act(async () => input.focus())
+  expect(selected).not.toHaveBeenCalled()
+  expect(document.activeElement).toBe(input)
+  expect(input.isConnected).toBe(true)
+  expect(useAppStore.getState().tabs).toEqual({ [first.id]: first, [second.id]: second })
+  expect(useAppStore.getState().layouts[SCRATCH_WORKSPACE_ID]).toBe(originalLayout)
 })
 
 it.each([

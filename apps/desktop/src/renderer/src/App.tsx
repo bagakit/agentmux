@@ -18,11 +18,13 @@ import { WindowOverlayHost } from './components/WindowOverlayHost'
 import { QuickSwitcher } from './components/QuickSwitcher'
 import { isEditableChordTarget, windowShortcutHandlers } from './lib/workbench-shortcuts'
 import { routeWindowShortcut } from './lib/shortcut-registry'
-import { SurfaceSwitch, TopRowLeadingChrome } from './components/TopRowChrome'
+import { SurfaceSwitch, TopRowLeadingChrome, WindowSidebarLayoutContext, useWindowSidebarLayout } from './components/TopRowChrome'
 import { GlobalBoardSurface } from './components/GlobalBoardSurface'
 import { GlobalFocusSurface } from './components/GlobalFocusSurface'
 import { GlobalSurveySurface } from './components/GlobalSurveySurface'
 import { PmoTeamsTopicFloatingPanel } from './components/PmoTeamsTopicFloatingPanel'
+import { MoteWorkface } from './components/MoteWorkface'
+import { moteWorkbenchProjection } from './lib/mote-workbench-projection'
 import { pmoTeamsTopicFloatingViewTargets, pmoTeamsTopicFloatingTargetTabId, pmoTeamsTopicFloatingTargetTopicId, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from './lib/pmo-teams-topic-floating'
 import { desktopSurface } from './lib/desktop-focus-navigation'
 import { installDesktopPresentationOwner, desktopPresentationCommitted, type DesktopAppPresentationOwner } from './lib/desktop-presentation'
@@ -49,7 +51,7 @@ import { scratchTopicsForWorkspace } from './lib/scratch-topic-snapshots'
 import { resolveWorkbenchZone, sameWorkbenchProjectionSelection, projectWorkbenchProjection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, type WorkbenchProjection, type WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-presentation'
-import { ordinaryWorkbenchViewTargets, workbenchResourceTabs } from './lib/workbench-resource-display'
+import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './lib/scratch-topic-layout'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
@@ -91,10 +93,7 @@ function DesktopApp() {
   const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
-  const moteViewTargets = useMemo(() => pmoTeamsTopicFloatingViewTargets(
-    moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId
-  ), [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId,
-    tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId])
+
   const mainSurface = useAppStore((state) => state.mainSurface)
   const presentationRef = useRef<DesktopAppPresentationOwner>({ loading: true,
     overlays: { settings: false, quickSwitcher: false },
@@ -120,9 +119,10 @@ function DesktopApp() {
       return next
     })
   }, [])
-  const [narrowControls, setNarrowControls] = useState(() => window.innerWidth <= 1100)
+  const [windowWidth, setWindowWidth] = useState(() => window.innerWidth)
+  const narrowControls = windowWidth <= 1100
   useEffect(() => {
-    const resized = () => setNarrowControls(window.innerWidth <= 1100)
+    const resized = () => setWindowWidth(window.innerWidth)
     window.addEventListener('resize', resized)
     return () => window.removeEventListener('resize', resized)
   }, [])
@@ -134,7 +134,7 @@ function DesktopApp() {
     Object.values(tab.regions).flatMap(surface => isSessionSurface(surface) ? [surface.sessionId] : [])))], [tabs])
   // The spatial directory reads execution identity, never status/output clocks.
   const surveySessions = useAppStore(useShallow(state => {
-    if ((!surveyVisible && !focusVisible) || surveySessionIds.length === 0) return []
+    if ((!surveyVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) || surveySessionIds.length === 0) return []
     const byId = sessionPresentationById(state.sessions)
     return surveySessionIds.flatMap(id => {
       const session = byId.get(id)
@@ -145,7 +145,7 @@ function DesktopApp() {
   const surveyTopics = scratchTopicsForWorkspace(surveyTopicSnapshots, topicsWorkspace)
   const retainedSurveyCatalog = useRef<AgentMuxSpaceCatalog | null>(null)
   const spatialDirectory = useMemo(() => {
-    if (!surveyVisible && !focusVisible) return { catalog: retainedSurveyCatalog.current, issue: null }
+    if (!surveyVisible && !focusVisible && !moteFloating.open && !moteFloating.preview) return { catalog: retainedSurveyCatalog.current, issue: null }
     try {
       const catalog = spatialCatalog(useAppStore.getState(), surveyTopics ?? [])
       retainedSurveyCatalog.current = catalog
@@ -154,8 +154,26 @@ function DesktopApp() {
       // Directory validation is a presentation failure, never a reason to stop a healthy Session.
       return { catalog: retainedSurveyCatalog.current, issue: `The work surface directory could not be confirmed: ${error instanceof Error ? error.message : String(error)}` }
     }
-  }, [surveyVisible, focusVisible, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
+  }, [surveyVisible, focusVisible, moteFloating.open, moteFloating.preview, config, tabs, layouts, surveyBindings, surveySessions, surveyTopics])
   const surveyCatalog = spatialDirectory.catalog
+  const selectMoteReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
+    const state = useAppStore.getState(), current = readPmoTeamsTopicFloatingState(), tab = state.tabs[reference.tabId]
+    const topicId = pmoTeamsTopicFloatingTargetTopicId(current ?? moteFloating, state.tabs)
+    if (!tab?.regions[reference.regionId] || tab.topicId !== topicId ||
+      !workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
+      state.reportError(new Error('This exact discussion location is no longer confirmed. Its original content is kept; choose its current location.'))
+      return
+    }
+    setMoteFloating({ targetTabId: reference.tabId, reference })
+  }, [setMoteFloating, moteFloating])
+  const moteProjection = useMemo(() => {
+    const id = pmoTeamsTopicFloatingTargetTabId(moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId)
+    return moteWorkbenchProjection(surveyCatalog, id ? tabs[id] : undefined, moteFloating, selectMoteReference, layouts)
+  }, [surveyCatalog, moteFloating.targetTabId, moteFloating.targetTopicId, moteFloating.reference, tabs, layouts, agentFocus.pmo.sessionId, selectMoteReference])
+  const moteViewTargets = useMemo(() => pmoTeamsTopicFloatingViewTargets(
+    moteFloating, tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection.projection
+  ), [moteFloating.open, moteFloating.preview, moteFloating.targetTopicId, moteFloating.targetTabId,
+    tabs, layouts[SCRATCH_WORKSPACE_ID], agentFocus.pmo.sessionId, moteProjection])
   const selectFocusReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     useAppStore.getState().selectExecutionFocusReference(reference, agentFocus.execution)
   }, [agentFocus.execution])
@@ -233,9 +251,10 @@ function DesktopApp() {
   useEffect(() => {
     if (mainSurface === 'survey') setSurveyVisited(true)
   }, [mainSurface])
-  const projectRailOpen = useAppStore((state) => state.projectRailOpen)
+  const compactSidebars = windowWidth <= 760 && mainSurface === 'workbench' && Boolean(config?.workspaces.some(item => item.id === activeWorkspaceId))
+  const windowSidebars = useWindowSidebarLayout(compactSidebars)
+  const { projectRailOpen, toolsOpen } = windowSidebars
   const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey'
-  const toolsOpen = useAppStore((state) => state.toolsOpen)
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
   const acquireNativeSurfaceOverlay = useAppStore((state) => state.acquireNativeSurfaceOverlay)
@@ -302,7 +321,8 @@ function DesktopApp() {
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
   const toolsVisible = toolsAvailable && toolsOpen
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
-  const renderedToolDockWidth = getRenderedToolDockWidth(toolDockWidth, projectRailOpen)
+  const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
+  const renderedToolDockWidth = Math.min(toolDockMaximumWidth, getRenderedToolDockWidth(toolDockWidth, projectRailOpen))
   // MERGE：workbench + workspace 时顶行下沉进 pane（root tabbar / chromeline），
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || (mainSurface === 'workbench' && Boolean(workspace))
@@ -313,7 +333,7 @@ function DesktopApp() {
     isOpen: toolsVisible,
     width: toolDockWidth,
     minWidth: toolDockMinimumWidth,
-    maxWidth: TOOL_DOCK_MAX_WIDTH,
+    maxWidth: toolDockMaximumWidth,
     deltaSign: 1,
     setWidth: setToolDockWidth
   })
@@ -390,6 +410,7 @@ function DesktopApp() {
 
   return (
     <SettingsNavigation.Provider value={settingsNavigation}>
+    <WindowSidebarLayoutContext.Provider value={windowSidebars}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
       <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={terminalParkingMeasurement}>
       <div
@@ -421,7 +442,7 @@ function DesktopApp() {
                   aria-label="Resize surface tools"
                   aria-orientation="vertical"
                   aria-valuemin={toolDockMinimumWidth}
-                  aria-valuemax={TOOL_DOCK_MAX_WIDTH}
+                  aria-valuemax={toolDockMaximumWidth}
                   aria-valuenow={renderedToolDockWidth}
                   tabIndex={0}
                   onMouseDown={onResizeStart}
@@ -429,7 +450,7 @@ function DesktopApp() {
                     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
                     event.preventDefault()
                     setToolDockWidth(
-                      renderedToolDockWidth + (event.key === 'ArrowRight' ? 16 : -16)
+                      Math.min(toolDockMaximumWidth, Math.max(toolDockMinimumWidth, renderedToolDockWidth + (event.key === 'ArrowRight' ? 16 : -16)))
                     )
                   }}
                 />
@@ -469,6 +490,8 @@ function DesktopApp() {
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >
+                        <MoteWorkface workspaceId={candidate.id} visible={visible}
+                          topicId={candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
                         <WorkspaceWorkbench
                           workspaceId={candidate.id}
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
@@ -478,6 +501,7 @@ function DesktopApp() {
                           onBrowserControlConfirmation={onBrowserControlConfirmation}
                           interactiveResize={windowResizeActive || isResizing}
                         />
+                        </MoteWorkface>
                       </div>
                     )
                   })}
@@ -498,7 +522,7 @@ function DesktopApp() {
         </div>
       </main>
       </div>
-      <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} />
+      <PmoTeamsTopicFloatingPanel floating={moteFloating} setFloating={setMoteFloating} projectionState={moteProjection} />
       {settingsRoute ? (
         <SettingsPanel
           navigationRequest={settingsRoute}
@@ -520,6 +544,7 @@ function DesktopApp() {
       <WindowOverlayHost />
       </RendererResourceOwners>
     </ExecutorIdentityContext.Provider>
+    </WindowSidebarLayoutContext.Provider>
     </SettingsNavigation.Provider>
   )
 }

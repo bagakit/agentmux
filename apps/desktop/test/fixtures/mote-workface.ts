@@ -4,6 +4,9 @@ import type { AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../../src
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../src/shared/scratch-topics'
 import { createWorkbenchTab } from '../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../src/renderer/src/lib/scratch-topic-snapshots'
+import { moteWorkbenchProjection } from '../../src/renderer/src/lib/mote-workbench-projection'
+import { spatialCatalog } from '../../src/renderer/src/lib/space-agent-control'
+import { pmoTeamsTopicFloatingTargetTabId } from '../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { useAppStore } from '../../src/renderer/src/store'
 
 export const savedMoteKey = 'agentmux.leader-topic-floating.v1'
@@ -80,4 +83,12 @@ export function installNativePopover(): () => void {
     return selector === ':popover-open' ? visible.has(this) : matches.call(this, selector)
   } })
   return () => { for (const [key, descriptor] of descriptors) { if (descriptor) Object.defineProperty(proto, key, descriptor); else delete (proto as unknown as Record<string, unknown>)[key] } }
+}
+
+/** Standalone host fixtures consume the same full catalog/projector as production App. */
+export function fixtureMoteProjection(floating: import('../../src/renderer/src/lib/pmo-teams-topic-floating').PmoTeamsTopicFloatingState,
+  onSelect: import('../../src/renderer/src/lib/workbench-projection').WorkbenchProjection['onSelect']) {
+  const state = useAppStore.getState()
+  const id = pmoTeamsTopicFloatingTargetTabId(floating, state.tabs, state.layouts[SCRATCH_WORKSPACE_ID], state.agentFocus.pmo.sessionId)
+  return moteWorkbenchProjection(spatialCatalog(state, moteTopics), id ? state.tabs[id] : undefined, floating, onSelect, state.layouts)
 }

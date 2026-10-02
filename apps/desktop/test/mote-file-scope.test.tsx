@@ -21,7 +21,7 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 let app: MoteAppFixture
 const home = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), other = scratchTopicDirectoryName(customMoteId)
 function entry(path: string) { return { path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false } }
-beforeEach(() => { app = createMoteApp() })
+beforeEach(() => { app = createMoteApp(); useAppStore.setState({ explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } }) })
 afterEach(async () => { await app.dispose() })
 
 describe('original scoped Mote files consumer', () => {
@@ -40,7 +40,7 @@ describe('original scoped Mote files consumer', () => {
     await app.mount()
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
     await settleMoteApp()
-    await moteClick(app.panel().querySelector<HTMLButtonElement>('.mote-conversations__secondary button')!)
+    await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Mote files"]')!)
     await moteClick(app.panel().querySelector<HTMLElement>('[data-tree-path="' + path + '"]')!)
     expect(read.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, path]])
     return { id, path, finish: async () => {
@@ -55,18 +55,18 @@ describe('original scoped Mote files consumer', () => {
     if (intent === 'A→B→A') {
       await moteClick(app.panel().querySelector<HTMLButtonElement>('[data-mote-topic-id="' + customMoteId + '"]')!)
       await moteClick(app.panel().querySelector<HTMLButtonElement>('[data-mote-topic-id="' + PMO_TEAMS_TOPIC_ID + '"]')!)
-      await moteClick(app.panel().querySelector<HTMLButtonElement>('.mote-conversations__secondary button')!)
+      await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Mote files"]')!)
     }
     if (intent === 'later input') await moteType(app.panel().querySelector<HTMLElement>('[aria-label="Message Agent"]')!, 'My newer unsent intent')
     if (intent === 'later Region') await act(async () => useAppStore.getState().focusRegion(SCRATCH_WORKSPACE_ID, neighborTab.id, neighborTab.layout.activeRegionId, 'pointer', 'mote-group'))
     const afterIntent = useAppStore.getState(), target = app.panel().dataset.moteTargetTab, active = document.activeElement
-    expect(app.panel().querySelector('.mote-materials')).not.toBeNull()
+    expect(app.panel().querySelector('.mote-workface__files')).not.toBeNull()
     await file.finish()
     const state = useAppStore.getState()
     expect(state.documents[documentKey(SCRATCH_WORKSPACE_ID, file.path)]?.content).toBe('# Original persona')
     expect(state.tabs[file.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
     expect(app.panel().dataset.moteTargetTab).toBe(target)
-    expect(app.panel().querySelector('.mote-materials')).not.toBeNull()
+    expect(app.panel().querySelector('.mote-workface__files')).not.toBeNull()
     expect(document.activeElement).toBe(active)
     expect(state.agentFocus).toBe(afterIntent.agentFocus)
     expect(state.activeWorkspaceId).toBe('project'); expect(state.mainSurface).toBe('board')
@@ -80,7 +80,7 @@ describe('original scoped Mote files consumer', () => {
     const file = await delayedFile()
     await file.finish()
     expect(app.panel().dataset.moteTargetTab).toBe(file.id)
-    expect(app.panel().querySelector('.mote-materials')).toBeNull()
+    expect(app.panel().querySelector('.mote-workface__files')).toBeNull()
     expect(useAppStore.getState().tabs[file.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
   })
 
@@ -91,7 +91,7 @@ describe('original scoped Mote files consumer', () => {
     expect(useAppStore.getState().tabs[file.id]?.space).toBeUndefined()
     expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, file.path)]?.content).toBe('# Original persona')
     expect(app.panel().dataset.moteTargetTab).toBe(late ? defaultTab.id : file.id)
-    expect(app.panel().querySelector('.mote-materials') !== null).toBe(late)
+    expect(app.panel().querySelector('.mote-workface__files') !== null).toBe(late)
     expect(useAppStore.getState().activeWorkspaceId).toBe('project')
   })
   it('shows the exact original Mote root while Float is over another project, then changes scope only explicitly', async () => {
@@ -100,14 +100,14 @@ describe('original scoped Mote files consumer', () => {
     await app.mount()
     await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id }))
     await settleMoteApp()
-    await moteClick(app.panel().querySelector<HTMLButtonElement>('.mote-conversations__secondary button')!)
+    await moteClick(app.panel().querySelector<HTMLButtonElement>('[aria-label="Mote files"]')!)
     expect(reads.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, home]])
     const explorer = app.panel().querySelector<HTMLElement>('.file-explorer')!
     expect(explorer.dataset.fileWorkspace).toBe(SCRATCH_WORKSPACE_ID)
     expect(explorer.dataset.fileRoot).toBe(home)
     expect([...explorer.querySelectorAll('[data-tree-path]')].map(node => node.getAttribute('data-tree-path'))).toEqual([home + '/SOUL.md'])
     expect(app.panel().querySelector('.workspace-topics-panel')).toBeNull()
-    await moteClick(app.panel().querySelector<HTMLButtonElement>('.mote-materials__scope')!)
+    await moteClick(app.panel().querySelector<HTMLButtonElement>('.workspace-files-scope')!)
     expect(app.panel().querySelector<HTMLElement>('.file-explorer')!.dataset.fileRoot).toBe('')
     expect(reads.mock.calls).toEqual([[SCRATCH_WORKSPACE_ID, home], [SCRATCH_WORKSPACE_ID, '']])
     expect(useAppStore.getState().activeWorkspaceId).toBe('project')
