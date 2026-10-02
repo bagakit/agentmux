@@ -3,6 +3,7 @@ import type { AgentMuxBrowserTarget, AgentMuxExternalBrowserPairing } from '@age
 import type { AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { ToolkitDesktopApi } from './toolkit.js'
 import type { BrowserTaskControlPayload, BrowserTaskControlResult } from '@agentmux/core'
+export type { LaunchOptionSelection } from '@agentmux/core'
 import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './browser-outcome-criteria'
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'

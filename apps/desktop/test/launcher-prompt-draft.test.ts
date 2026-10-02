@@ -92,7 +92,7 @@ describe('组件那层壳没有第二处 key 判定', () => {
   it('自检：真的截到了这段接线', () => {
     // 挡板：正则把整段注释连代码一起吃掉、或这段接线被改名，下面两条就会在"什么都没有"上
     // 静默通过。
-    expect(code).toContain('launcherPromptBinding(')
+    expect(code).toContain('useLauncherInputs(regionId)')
   })
 
   it('组件不自己索引草稿表，也不自己算写回的 key', () => {

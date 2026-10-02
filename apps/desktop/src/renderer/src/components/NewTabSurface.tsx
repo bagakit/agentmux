@@ -2,7 +2,6 @@ import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { Check, ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { LaunchOptionSelection } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
@@ -11,8 +10,8 @@ import { applyCopyPathStyle } from '../lib/copy-path-display'
 import { configuredExecutors } from '../lib/executors'
 import { currentExecutorDetection, executorDetectionLabel } from '../lib/executor-detection'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { EMPTY_LAUNCHER_NAMES, launcherNameBinding } from '../lib/launcher-name-draft'
-import { launcherPromptBinding } from '../lib/launcher-prompt-draft'
+import { useLauncherInputs } from '../lib/launcher-inputs'
+import { EMPTY_LAUNCH_OPTION_SELECTION } from '../lib/launcher-option-draft'
 import { appendFileReferences } from '../lib/composer-file-reference'
 import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-reference'
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
@@ -63,47 +62,7 @@ export function NewTabSurface({
   const [executorId, setExecutorId] = useState('codex')
   const [manualChoice, setManualChoice] = useState<{ regionId: string | undefined; executorId: string } | null>(null)
   const insertionRef = useRef<ComposerInsertionHandle>(null)
-  // 草稿存进 store，按 regionId 归属。启动的一瞬间本组件就被换成 pending agent surface 而卸载，
-  // 若草稿只活在组件里，启动失败翻回 launcher（reduceSessionLaunchFailed 沿用同一 regionId）就会
-  // 重挂一个空的新实例——正是用户报告的"报错退回初始页、之前输入没缓存"。store 是唯一数据源，
-  // 复用 Agent Composer 同一套 agentComposerDrafts，不另起第二套草稿机制。
-  const promptDrafts = useAppStore((state) => state.agentComposerDrafts)
-  const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
-  // 空分组占位（无 regionId）没有可跨卸载存活的稳定键，且它启动后由 store 新建带 region 的 Tab、
-  // 失败时重挂的是另一个组件，天然无法保草稿；退回本地 state 保持原行为，不引入伪键污染共享表。
-  const [localPrompt, setLocalPrompt] = useState('')
-  // 读与写的 key 由 launcherPromptBinding 判一次，与名字那两格同一范式。分开算两次会漂移，而
-  // 漂移的症状是 textarea 静默不响应——实测只改写侧那处 key，18 条全绿地存活（读侧则有 1 条红）。
-  const { prompt, set: writePrompt } = launcherPromptBinding({
-    regionId,
-    drafts: promptDrafts,
-    writeShared: setAgentComposerDraft,
-    local: localPrompt,
-    writeLocal: setLocalPrompt
-  })
-  function setPrompt(value: string) {
-    writePrompt(value)
-  }
-  const [launchOptionSelection, setLaunchOptionSelection] = useState<LaunchOptionSelection>({})
-  // 启动时给名字是可选的。两个都留空是最常见的情况，此时一个字都不写，显示名交还派生链
-  // （lib/display-name.ts）。名字只在启动成功后由 store 落地——它自己才握有 sessionId 与 tabId。
-  //
-  // 与 prompt 同一机制、同一理由存进 store：启动的一瞬间本组件就被换成 pending agent surface 而卸载，
-  // 若名字只活在组件里，启动失败翻回 launcher 就会重挂一个空的新实例，用户填的名字丢掉——prompt
-  // 当初正是为这个搬进 store 的，名字这两格当时没跟上。
-  const storedNames = useAppStore((state) => state.launcherNameDrafts)
-  const setLauncherNameDraft = useAppStore((state) => state.setLauncherNameDraft)
-  // 空分组占位（无 regionId）没有可跨卸载存活的稳定键，与 prompt 那格同一处理：退回本地 state。
-  const [localNames, setLocalNames] = useState(EMPTY_LAUNCHER_NAMES)
-  // 读与写的 key 由 launcherNameBinding 判一次。分开算两次就会漂移，而漂移的症状是输入框静默不
-  // 响应（写 A 键读 B 键，用户敲什么都看不见，且不报错）——实测把写回那处 key 换掉，14 条全绿。
-  const { names, set: setName } = launcherNameBinding({
-    regionId,
-    drafts: storedNames,
-    writeShared: setLauncherNameDraft,
-    local: localNames,
-    writeLocal: (field, value) => setLocalNames((current) => ({ ...current, [field]: value }))
-  })
+  const { prompt, setPrompt, names, setName, optionsByProvider, selectOption } = useLauncherInputs(regionId)
   const [optionsExpanded, setOptionsExpanded] = useState(false)
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
@@ -196,21 +155,18 @@ export function NewTabSurface({
   // Launch options are read purely from the selected Provider's catalog declaration — no branch on
   // providerId. A Provider that declares none yields [], so LaunchRefine renders nothing.
   const selectedProviderId = selectedExecutor?.providerId
+  const launchOptionSelection = selectedProviderId ? optionsByProvider[selectedProviderId] ?? EMPTY_LAUNCH_OPTION_SELECTION : EMPTY_LAUNCH_OPTION_SELECTION
   const toolsScope = JSON.stringify([regionId, workspace?.id, selectedProviderId])
   const feedback = useComposerFeedback(toolsScope)
   const launchOptions = useMemo(
     () => providerCatalog.find((entry) => entry.id === selectedProviderId)?.launchOptions ?? [],
     [providerCatalog, selectedProviderId]
   )
-  // Clear the picked choices whenever the target Provider changes, so a choice picked for one Provider can
-  // never launch another. Every option starts unset, leaving the Provider's own default untouched until the
-  // user picks.
+  // Each Provider keeps its own explicit choices. Changing the target closes the disclosure,
+  // while returning to the original Provider restores its unsent selection.
   useEffect(() => {
-    setLaunchOptionSelection({})
-    // Switching Provider re-collapses the disclosure so an untouched agent shows no options noise, and the
-    // freshly-reset choices are never revealed mid-flight against the previous Provider's expanded panel.
     setOptionsExpanded(false)
-  }, [launchOptions])
+  }, [selectedProviderId])
 
   useEffect(() => {
     // The create page owns the prewarm trigger.
@@ -358,7 +314,7 @@ export function NewTabSurface({
           <ComposerReferenceTool disabled={busy !== null || !workspace} onSelect={() => { void feedback.run(chooseComposerFiles) }} label="Reference files for the Agent" />
         </div><LaunchRefine options={launchOptions} selection={launchOptionSelection} expanded={optionsExpanded} active={motionActive}
           onToggle={() => setOptionsExpanded(value => !value)} disabled={busy !== null} names={names} onNameChange={setName}
-          onSelect={(optionId, choiceId) => setLaunchOptionSelection(current => { if (choiceId === null) { const { [optionId]: _cleared, ...rest } = current; return rest }; return { ...current, [optionId]: choiceId } })} /></div>
+          onSelect={(optionId, choiceId) => { if (selectedProviderId) selectOption(selectedProviderId, optionId, choiceId) }} /></div>
         <ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />
       </> : null}
       {sections.agents === 'expanded' ? <div className="launch-surface__footer">

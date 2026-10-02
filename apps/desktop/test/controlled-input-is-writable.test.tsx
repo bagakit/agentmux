@@ -227,7 +227,7 @@ function writesEventValue(body: string): boolean {
   // 参数里解构出了 value/checked：绑定名不再是 `e.target.value`，按解构在场放行。
   const arrow = /^\(([^)]*)\)\s*=>/.exec(trimmed) ?? /^([\w$]+)\s*=>/.exec(trimmed)
   if (arrow && /\b(?:value|checked)\b/.test(arrow[1]!)) return true
-  for (const match of body.matchAll(/\b[\w$]+\.target\.(?:value|checked)\b/g)) {
+  for (const match of body.matchAll(/\b[\w$]+\.(?:target|currentTarget)\.(?:value|checked)\b/g)) {
     if (consumedByWrite(body, match.index)) return true
   }
   return false
@@ -251,7 +251,13 @@ function hasWriteBack(props: string): boolean {
   // 无条件只读：裸 `readOnly` / `disabled`，或显式写死 `={true}`。带表达式的一概不算。
   if (/(^|\s)(readOnly|disabled)(\s*=\s*\{\s*true\s*\})?(\s|$|\/)/.test(props)) return true
   const handler = eventHandler(props)
-  return handler !== null && writesEventValue(handler)
+  if (handler === null) return false
+  if (writesEventValue(handler)) return true
+  // Radio handlers often write the declared choice directly rather than reread the DOM value.
+  const radioValue = /(^|\s)type="radio"/.test(props) ? /(^|\s)value=\{([\w$]+(?:\.[\w$]+)*)\}/.exec(props)?.[2] : undefined
+  if (!radioValue) return false
+  const escaped = radioValue.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return writesEventValue(handler.replace(new RegExp(`(?<![\\w$.])${escaped}(?![\\w$])`, 'g'), 'event.target.value'))
 }
 
 describe('受控表单控件必须有写回口', () => {
@@ -326,6 +332,7 @@ describe('受控表单控件必须有写回口', () => {
   it('自检：真的把值写回去的处理器不被误判', () => {
     // 守卫误伤合法代码比没有守卫更糟——它会被删掉。这一侧证明它不会。
     expect(writesEventValue('(e) => setX(e.target.value)')).toBe(true)
+    expect(writesEventValue('(e) => setX(e.currentTarget.value)')).toBe(true)
     // 先变换再写：取值落在内层调用的实参位。
     expect(writesEventValue('(e) => setX(Number(e.target.value))')).toBe(true)
     // 对象右值位。
@@ -334,6 +341,15 @@ describe('受控表单控件必须有写回口', () => {
     expect(writesEventValue('({ target: { value } }) => setX(value)')).toBe(true)
     // 具名回调透传：写回口在那个函数里，静态读不到。
     expect(writesEventValue('handleChange')).toBe(true)
+  })
+
+  it('radio 的已声明选项必须真正写入，不能只读或丢弃', () => {
+    expect(hasWriteBack('type="radio" value={mode} checked={selected} onChange={() => setMode(mode)}')).toBe(true)
+    expect(hasWriteBack('type="radio" value={definition.id} checked={selected} onChange={() => setMode(definition.id)}')).toBe(true)
+    expect(hasWriteBack('type="radio" value={mode} checked={selected} onChange={() => console.log(mode)}')).toBe(false)
+    expect(hasWriteBack('type="radio" value={mode} checked={selected} onChange={() => void mode}')).toBe(false)
+    expect(hasWriteBack('type="radio" value={mode} checked={selected}')).toBe(false)
+    expect(writesEventValue('(e) => console.log(e.currentTarget.value)')).toBe(false)
   })
 
   /**
@@ -434,10 +450,10 @@ describe('判据就是 React 运行时自己的规则', () => {
     // 事故现场本身：#120 的变异删的就是这两个 onChange。这里不重复渲染整个 NewTabSurface
     //（它要一整套 store mock），而是拿它那两格的真实属性文本过判据——源码变了这条就跟着变。
     const source = readFileSync(
-      new URL('../src/renderer/src/components/NewTabSurface.tsx', import.meta.url),
+      new URL('../src/renderer/src/components/LaunchOptionControls.tsx', import.meta.url),
       'utf8'
     )
-    const names = controls(source, 'NewTabSurface.tsx').filter((item) =>
+    const names = controls(source, 'LaunchOptionControls.tsx').filter((item) =>
       /aria-label="(Agent|Tab) name"/.test(item.props)
     )
     expect(names).toHaveLength(2)
