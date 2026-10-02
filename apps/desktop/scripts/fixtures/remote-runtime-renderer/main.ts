@@ -110,6 +110,12 @@ app.whenReady().then(async () => {
     do { const value = await win.webContents.executeJavaScript(expression); if (value) return value; await delay(35) } while (Date.now() < end)
     throw Error(`Private native observation timed out: ${expression}`)
   }
+  const readerAssertion = async (expression: string, message: string) => {
+    const end = Date.now() + 6000
+    let confirmed = false
+    do { confirmed = Boolean(await win.webContents.executeJavaScript(expression)); if (confirmed) break; await delay(35) } while (Date.now() < end)
+    assert.equal(confirmed, true, message)
+  }
   // Capture the same JSON facts stored in receipts and the Core graph resource metadata.
   // Optional absent fields must not differ solely because structured-clone retains undefined.
   const state = async () => JSON.parse(JSON.stringify(await win.webContents.executeJavaScript('window.remoteState()')))
@@ -202,6 +208,17 @@ app.whenReady().then(async () => {
       result.stoppedOwner = await win.webContents.executeJavaScript('window.remoteSeedUnconfirmed(); window.remoteProof.request("owner-stop")')
       await until('window.remoteState().warnings.some(warning => warning.availability !== "connected") && window.remoteState().session.status.state === "disconnected"')
       result.offline = await state()
+      if (recoveryInput.splitTerminal) {
+        await readerAssertion('window.remoteAttachmentNotices().some(notice => notice.unavailable && notice.recoveryAvailable)',
+          'The original reader failure must have its Region service window and available observation recovery')
+        const notice = (await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')).find(item => item.unavailable)
+        await win.webContents.executeJavaScript(`window.remoteOpenAttachmentNotice(${JSON.stringify(notice.regionId)}); true`)
+        await readerAssertion('window.remoteAttachmentNotices().some(notice => notice.unavailable && notice.recoveryPainted && notice.recoveryAvailable)',
+          'The original reader recovery action must actually be painted and enabled')
+        result.offlineAttachmentNotices = await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')
+        assert.deepEqual(result.offlineAttachmentNotices.map(item => [item.regionId, item.regionPresent]),
+          [recoveryInput.identity.regionId, recoveryInput.splitTerminal.regionId].map(regionId => [regionId, true]))
+      }
       assert.deepEqual(result.offline.tabs, result.initial.tabs)
       assert.deepEqual(result.offline.layouts, result.initial.layouts)
       assert.deepEqual(result.offline.drafts, result.initial.drafts)
@@ -226,6 +243,9 @@ app.whenReady().then(async () => {
       await stage('owner-restored-await-canonical-cut')
       await until('window.remoteState().warnings.length === 0 && window.remoteState().session.status.state !== "disconnected" && window.remoteState().queue[0]?.error?.includes("unconfirmed after reconnect")')
       result.restored = await state()
+      await readerAssertion('window.remoteAttachmentNotices().length > 0 && window.remoteAttachmentNotices().every(notice => notice.regionPresent && !notice.unavailable)',
+        'Validated original reader restoration must settle its own Region service window')
+      result.restoredAttachmentNotices = await win.webContents.executeJavaScript('window.remoteAttachmentNotices()')
       assert.equal(result.restored.error, null, 'A recovered transport workflow must not leave a generic Agent error')
       assert.equal(result.restored.lastError, null, 'Recovered endpoint diagnostics belong to their service window')
       assert.deepEqual(result.restored.tabs, result.initial.tabs)

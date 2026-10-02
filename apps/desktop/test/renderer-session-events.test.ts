@@ -87,6 +87,24 @@ it('keeps resize and byte event order for every matching view without extra brid
   expect(subscribe).toHaveBeenCalledTimes(1)
 })
 
+it('routes reader loss and confirmed reread only to the original Host and Run without changing semantic subscriptions', () => {
+  const received: RuntimeEvent[][] = [[], [], []], global: RuntimeEvent[] = []
+  ;[control(), control('old-run'), control('target-run', 'other-host')].forEach((scope, index) =>
+    onEvent(event => received[index]!.push(event), scope))
+  onEvent(event => global.push(event))
+  const common = { run: { runId: 'target-run' }, afterByte: 42,
+    evidence: { source: 'agentmux' as const, observedAt: 1, run: { runId: 'target-run' } } }
+  const lost: RuntimeEvent = { type: 'core', hostId: 'target-host', event: {
+    type: 'attachment-state', ...common, state: 'unavailable', diagnostic: { code: 'CONTROL_PROTOCOL_ERROR', message: 'Invalid output frame.' }
+  } }
+  const restored: RuntimeEvent = { type: 'core', hostId: 'target-host', event: { type: 'attachment-state', ...common, state: 'restored' } }
+  ;[output(), lost, restored, output(42)].forEach(emit)
+  expect(received[0]).toEqual([expect.objectContaining({ event: expect.objectContaining({ type: 'terminal-output' }) }), lost, restored,
+    expect.objectContaining({ event: expect.objectContaining({ type: 'terminal-output' }) })])
+  expect(received.slice(1)).toEqual([[], []]); expect(global).toEqual([])
+  expect(subscribe).toHaveBeenCalledTimes(1)
+})
+
 it('owns duplicate function registrations independently and releases the native owner only after the last one', () => {
   const receive = vi.fn()
   const first = onEvent(receive, control()), second = onEvent(receive, control())

@@ -133,6 +133,23 @@ window.remoteState = () => {
       originalNode: editor === window.originalEditor, anchor: selection?.anchorOffset, focus: selection?.focusOffset } : null }
 }
 window.remoteTerminalObservation = () => readTerminalViewObservation({ regionId: identity.regionId, sessionId: identity.sessionId, runId: identity.run.runId })
+window.remoteAttachmentNotices = () => [identity.regionId, (setup.terminalReading ?? setup.splitTerminal)?.regionId]
+  .filter(Boolean).map(regionId => {
+    const region = document.querySelector(`[data-workbench-region-id="${regionId}"]`)
+    const notice = [...(region?.querySelectorAll('.terminal-service-window') ?? [])].find(item =>
+      [...item.querySelectorAll('.service-window__step')].some(step => step.textContent === 'Observing this Region’s output'))
+    const recovery = notice?.querySelector('.service-disclosure__actions button')
+    return { regionId, regionPresent: Boolean(region), unavailable: Boolean(notice),
+      recoveryAvailable: recovery?.textContent === 'Refresh observation' && !recovery.disabled,
+      recoveryPainted: Boolean(recovery?.getClientRects().length) }
+  })
+window.remoteOpenAttachmentNotice = regionId => {
+  const region = document.querySelector(`[data-workbench-region-id="${regionId}"]`)
+  const notice = [...(region?.querySelectorAll('.terminal-service-window') ?? [])].find(item =>
+    [...item.querySelectorAll('.service-window__step')].some(step => step.textContent === 'Observing this Region’s output'))
+  if (!notice) throw Error('The original reader notice must be present before it is opened')
+  notice.querySelector('.service-disclosure__trigger').click()
+}
 window.remoteLiveReady = () => window.remoteTerminalObservation()?.liveReady === true
 window.remoteFocusAgentTerminal = () => {
   const candidates = window.terminals.filter(item => item.element?.getClientRects().length &&
