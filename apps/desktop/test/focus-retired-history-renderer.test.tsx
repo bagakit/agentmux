@@ -1,6 +1,7 @@
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
+import '../src/preload/index'
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -15,8 +16,8 @@ import type { AgentMuxPreloadApi, AppConfig, SessionHistoryReference } from '../
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(), handlers: new Map<string, Function>() }))
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api; window.agentmux = api } },
-  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => _hygiene_fixturePath("private-focus-retired-renderer") },
+  ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), removeListener: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
+  app: { getPath: () => _hygiene_fixturePath("private-focus-retired-renderer"), getAppPath: () => process.cwd() + '/apps/desktop', isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
@@ -29,7 +30,6 @@ vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOUR
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -81,7 +81,7 @@ async function fixture(records: Input[] = [{ id: 'one', body: BODY, at: NOW - HO
   const dispose = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime: controller,
     configStore: { get: async () => config } as never, progressLoops: { subscribe: () => () => {} } as never,
     scratchTopics: {} as never, workspaceFiles: { dispose: async () => {} } as never })
-  bridge.invoke.mockImplementation((channel: string, ...args: unknown[]) => {
+  bridge.invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
     return handler!({ sender } as unknown as IpcMainInvokeEvent, ...args)
   })
@@ -260,10 +260,13 @@ it('stops new pages and discards a late actually-read page when hidden, preservi
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve }); let actualRead = false
   h.calls.page.mockImplementation(async (reference, options) => { const result = await realPage(reference, options); actualRead = true; await gate; return result })
   await h.render(); await h.selectSource(); await h.wait(() => expect(actualRead).toBe(true))
+  await h.wait(() => expect(h.markers().map(node => node.dataset.messageId)).toEqual(['captured:captured']))
+  const acceptedInputs = h.inputs(), acceptedMarkers = h.markers()
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   await act(async () => { release(); await gate })
-  expect(h.calls.page.mock.calls).toHaveLength(1); expect(h.inputs()).toEqual([]); expect(h.markers()).toEqual([])
+  expect(h.calls.page.mock.calls).toHaveLength(1); expect(h.inputs()).toEqual(acceptedInputs); expect(h.markers()).toEqual(acceptedMarkers)
+  expect(h.element.querySelector('.recent-focus')!.getAttribute('data-read-source-count')).toBe('1')
   expect((await h.client.sessionHistorySources()).map(source => source.agentSessionId)).toEqual(['archived-0'])
   h.noRuntime()
 })

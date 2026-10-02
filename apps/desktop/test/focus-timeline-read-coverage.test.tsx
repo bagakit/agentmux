@@ -104,16 +104,21 @@ it('retains valid accepted A but discards an actually read late B page after ret
   h.noRuntime()
 })
 
-it('releases hidden scopes and ignores a real late page without disposing the healthy public client', async () => {
+it('pauses hidden scopes while retaining accepted A and ignores a real late B page without disposing the healthy public client', async () => {
   const h = await fixture(undefined, 2); await h.render(); await h.selectSource(); await h.wait(() => expect(h.inputs()).toHaveLength(4))
   let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve }); let read = false
   h.calls.page.mockImplementation(async (reference, options) => { const page = await h.realPage(reference, options); read = true; await gate; return page })
+  const originalTimeline = h.calls.timeline.getMockImplementation()!
+  h.calls.timeline.mockImplementation(async reference => { const timeline = await originalTimeline(reference); if (reference.agentSessionId === 'archived-1') await gate; return timeline })
   await h.selectSource('archived-1'); await h.wait(() => expect(read).toBe(true))
+  const accepted = h.markers(), reads = h.calls.page.mock.calls.length
   vi.spyOn(document, 'visibilityState', 'get').mockReturnValue('hidden')
   await act(async () => document.dispatchEvent(new Event('visibilitychange')))
   await act(async () => { release(); await gate })
-  expect(h.markers()).toEqual([])
-  expect(h.element.querySelector('.recent-focus')!.getAttribute('data-read-source-count')).toBe('0')
+  expect(h.markers()).toEqual(accepted)
+  expect(h.markers().map(node => node.dataset.messageId)).toEqual(['native:claude:native-archived-0:one', 'captured:captured'])
+  expect(h.element.querySelector('.recent-focus')!.getAttribute('data-read-source-count')).toBe('1')
+  expect(h.calls.page.mock.calls).toHaveLength(reads)
   expect((await h.client.sessionHistorySources()).map(source => source.agentSessionId)).toEqual(['archived-0', 'archived-1'])
   h.noRuntime()
 })
@@ -126,7 +131,9 @@ it('counts successful empty reads but not a source whose native and captured rea
   await h.selectSource('archived-0')
   await h.wait(() => expect(document.querySelector('.recent-focus__input-error')?.textContent).toMatch(/unknown|not stored|unavailable|retained/i))
   expect(h.element.querySelector('.recent-focus')!.getAttribute('data-read-source-count')).toBe('1')
-  await h.selectSource('archived-1'); await h.button('Refresh source')
+  await h.selectSource('archived-1')
+  await h.wait(() => expect([...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Refresh source')!.disabled).toBe(false))
+  await h.button('Refresh source')
   await h.wait(() => expect(document.querySelector('.recent-focus__input-error')?.textContent).toMatch(/unknown|not stored|unavailable|retained/i))
   expect(h.element.querySelector('.recent-focus')!.getAttribute('data-read-source-count')).toBe('1')
   h.noRuntime()

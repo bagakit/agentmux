@@ -1,0 +1,242 @@
+{
+  "history": {
+    "agentSessionId": "ordinary-history-agent",
+    "revision": 14,
+    "items": [
+      {
+        "id": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-round-one\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003640865",
+        "updatedAt": "relative-time:24003640865",
+        "title": "Agent state: working",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "state": "working",
+          "stateEnteredAt": "relative-time:24003640865"
+        }
+      },
+      {
+        "id": "ordinary-first-run:native-round-one:0",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003640865",
+        "updatedAt": "relative-time:24003640865",
+        "title": "work",
+        "eventName": "work"
+      },
+      {
+        "id": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-wait-one\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003641047",
+        "updatedAt": "relative-time:24003641047",
+        "title": "Agent state: waiting",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-round-one\"]",
+          "state": "waiting",
+          "stateEnteredAt": "relative-time:24003641047"
+        }
+      },
+      {
+        "id": "ordinary-first-run:native-wait-one:0",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003641047",
+        "updatedAt": "relative-time:24003641047",
+        "title": "wait",
+        "eventName": "wait"
+      },
+      {
+        "id": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-round-two\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003641148",
+        "updatedAt": "relative-time:24003641148",
+        "title": "Agent state: working",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-wait-one\"]",
+          "state": "working",
+          "stateEnteredAt": "relative-time:24003641148"
+        }
+      },
+      {
+        "id": "ordinary-first-run:native-round-two:0",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003641148",
+        "updatedAt": "relative-time:24003641148",
+        "title": "work",
+        "eventName": "work"
+      },
+      {
+        "id": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-done-two\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003641217",
+        "updatedAt": "relative-time:24003641217",
+        "title": "Agent state: done",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-round-two\"]",
+          "state": "done",
+          "stateEnteredAt": "relative-time:24003641217"
+        }
+      },
+      {
+        "id": "ordinary-first-run:native-done-two:0",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "native-hook",
+        "createdAt": "relative-time:24003641217",
+        "updatedAt": "relative-time:24003641217",
+        "title": "done",
+        "eventName": "done"
+      },
+      {
+        "id": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"601f5692-9fdd-47d4-ad4d-2aad7e304565\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "acp",
+        "createdAt": "relative-time:24003641514",
+        "updatedAt": "relative-time:24003641514",
+        "title": "Agent state: working",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"native-hook\",\"ordinary-first-run\",\"native-done-two\"]",
+          "state": "working",
+          "stateEnteredAt": "relative-time:24003641514"
+        }
+      },
+      {
+        "id": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"8a8200fd-7e75-4d0f-adef-d2c1124721d3\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "acp",
+        "createdAt": "relative-time:24003641611",
+        "updatedAt": "relative-time:24003641611",
+        "title": "Agent state: waiting",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"601f5692-9fdd-47d4-ad4d-2aad7e304565\"]",
+          "state": "waiting",
+          "stateEnteredAt": "relative-time:24003641611"
+        }
+      },
+      {
+        "id": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"594a32e6-f76a-47aa-9ccb-f11f7a971b2a\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "acp",
+        "createdAt": "relative-time:24003641659",
+        "updatedAt": "relative-time:24003641659",
+        "title": "Agent state: working",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"8a8200fd-7e75-4d0f-adef-d2c1124721d3\"]",
+          "state": "working",
+          "stateEnteredAt": "relative-time:24003641659"
+        }
+      },
+      {
+        "id": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"40603ae4-222f-486e-bf6e-95368181e84b\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "acp",
+        "createdAt": "relative-time:24003641725",
+        "updatedAt": "relative-time:24003641725",
+        "title": "Agent state: done",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-first-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"594a32e6-f76a-47aa-9ccb-f11f7a971b2a\"]",
+          "state": "done",
+          "stateEnteredAt": "relative-time:24003641725"
+        }
+      },
+      {
+        "id": "[\"activity-state\",\"acp\",\"ordinary-second-run\",\"d20288ca-addb-4d79-a4ca-ddccdacbfe4f\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "acp",
+        "createdAt": "relative-time:24003641810",
+        "updatedAt": "relative-time:24003641810",
+        "title": "Agent state: working",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-second-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"acp\",\"ordinary-first-run\",\"40603ae4-222f-486e-bf6e-95368181e84b\"]",
+          "state": "working",
+          "stateEnteredAt": "relative-time:24003641810"
+        }
+      },
+      {
+        "id": "[\"activity-state\",\"run-process\",\"ordinary-second-run\",\"91494878-a8c0-4ede-a3aa-217544fc4cc5\"]",
+        "agentSessionId": "ordinary-history-agent",
+        "kind": "lifecycle",
+        "status": "complete",
+        "source": "run-process",
+        "createdAt": "relative-time:24003641851",
+        "updatedAt": "relative-time:24003641851",
+        "title": "Run observation: interrupted",
+        "activityState": {
+          "run": {
+            "runId": "ordinary-second-run"
+          },
+          "previousObservationId": "[\"activity-state\",\"acp\",\"ordinary-second-run\",\"d20288ca-addb-4d79-a4ca-ddccdacbfe4f\"]",
+          "boundary": "interrupted"
+        }
+      }
+    ]
+  },
+  "descriptor": {
+    "agentSessionId": "ordinary-history-agent",
+    "hostId": "local",
+    "state": "retired"
+  },
+  "provenance": {
+    "producerSHA256": "0db2e39ff3833e9436d9442c60fca10ef13f855a3695a1991cf61b566d56002d",
+    "producer": "T001 ordinary native HTTP + ACP accepted transitions; public sessionTimeline after FileStore retirement",
+    "seedCount": 1,
+    "runtimeConnected": false,
+    "qualificationBoundary": "Accepted Core facts, no Vendor Writer or user Runtime qualification."
+  }
+}
