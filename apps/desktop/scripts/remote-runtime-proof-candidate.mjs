@@ -61,6 +61,7 @@ export async function prepareRemoteProofCandidate({ root, privateRoot, proof }) 
       if (file.includes('\0') || !/\.(?:[cm]?[jt]sx?|css|json)$/.test(file) ||
         !(file.startsWith(path.join(root, 'apps/desktop/')) || file.startsWith(path.join(root, 'apps/host/')) ||
           file.startsWith(path.join(root, 'packages/layout/')) ||
+          file.startsWith(path.join(root, 'packages/client-ui/')) ||
           file.startsWith(core + '/') || file.startsWith(demand + '/'))) return
       const sourceSHA256 = digest(await fs.readFile(file))
       const previous = consumed.get(file)
