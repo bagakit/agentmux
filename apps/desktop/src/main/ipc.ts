@@ -1,4 +1,5 @@
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
+import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
@@ -883,6 +884,10 @@ export async function registerIpc(args: {
   handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string) => {
     await args.runtime.setPosture(session, modeId)
   })
+  handle('sessions:reconcile-reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
+    sessionReopenResult(() => args.runtime.reconcileRetiredSession(reference, expectedRetiredAt, operationId, config)))
+  handle('sessions:reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
+    sessionReopenResult(() => args.runtime.reopenRetiredSession(reference, expectedRetiredAt, operationId, config)))
   handleWithEvent('sessions:resume', async (event, session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string) => {
     if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     return await args.runtime.resumeSession(session, prompt, operationId, config, agentMuxNote)

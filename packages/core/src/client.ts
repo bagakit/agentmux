@@ -85,8 +85,10 @@ import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {
   AgentMuxFileAgentSessionStore,
   loadAgentSessions,
+  agentLifecycleOperationIdentity,
   loadSessionHistorySources,
-  type AgentMuxAgentSessionStore
+  type AgentMuxAgentSessionStore,
+  type AgentMuxLifecycleReservation
 } from './agent-session-store.js'
 import {
   AgentMuxAgentSessionRegistry,
@@ -210,6 +212,11 @@ export type AgentMuxAgentResumeInput = {
   rows?: number
 }
 
+export type AgentMuxAgentReopenInput = Omit<AgentMuxAgentResumeInput, 'prompt' | 'agentMuxNote'> & {
+  expectedRetiredAt: number
+  launchOptions?: LaunchOptionSelection
+}
+
 type AgentMuxAgentResumeOperationInput = Omit<AgentMuxAgentResumeInput, 'prompt'> & {
   prompt?: string
 }
@@ -323,16 +330,6 @@ function safeId(value: string, name: string): string {
 
 function hookBindingIdentity(operationId: string): string {
   return createHash('sha256').update(operationId).digest('base64url')
-}
-
-function agentLifecycleOperationIdentity(
-  kind: 'create' | 'resume' | 'stop',
-  agentSessionId: string,
-  requestedOperationId: string
-): string {
-  return createHash('sha256')
-    .update(JSON.stringify(['agentmux-agent-lifecycle-v1', kind, agentSessionId, requestedOperationId]))
-    .digest('base64url')
 }
 
 function terminalHandshakeOperationIdentity(
@@ -575,6 +572,10 @@ export class AgentMuxClient {
   private connectionHealthySince = 0
   private readonly runPids = new Map<string, number | null>()
   private readonly hookBindings = new Map<string, AgentHookBinding>()
+  private readonly pendingReopenBindings = new Map<string, AgentHookBinding>()
+  private readonly executingReopens = new Set<string>()
+  private readonly reopenSettlements = new Map<string, Promise<void>>()
+  private reopensDisposed = false
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, {
     tail: Promise<void>
@@ -1263,15 +1264,19 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    this.reopensDisposed = true
     this.providerReadsDisposed = true
     this.cancelProviderReads()
     for (const controller of this.historyObservationControllers) {
       controller.abort(new AgentMuxError('History observer client was disposed.', 'AGENT_SESSION_HISTORY_CANCELLED'))
     }
+    await Promise.allSettled([...this.reopenSettlements.values()])
     await this.hookServer.stop()
     this.disconnect()
+    await this.registry.releaseReopenOwner()
     await Promise.allSettled([...this.hookBindings.values()].map(async (binding) => await binding.close()))
     this.hookBindings.clear()
+    this.pendingReopenBindings.clear()
     await this.acp.dispose()
     this.publisher.dispose()
   }
@@ -2624,18 +2629,124 @@ export class AgentMuxClient {
     return await this.resumeAgentRun(input)
   }
 
+  /** Explicitly continue an exact retired native conversation; reading history never calls this. */
+  async reopenAgent(input: AgentMuxAgentReopenInput): Promise<AgentMuxAgentSession> {
+    if (this.reopensDisposed) throw new AgentMuxError('This continue owner has been disposed. Use the current Core client.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    const fields = ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows']
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !fields.includes(key)) ||
+      !Number.isSafeInteger(input.expectedRetiredAt) || input.expectedRetiredAt < 0 ||
+      typeof input.agentSessionId !== 'string' || !input.agentSessionId || input.agentSessionId === 'self' ||
+      (input.args !== undefined && (!Array.isArray(input.args) || input.args.some(arg => typeof arg !== 'string'))) ||
+      (input.env !== undefined && (!input.env || typeof input.env !== 'object' || Array.isArray(input.env) || Object.values(input.env).some(value => typeof value !== 'string'))) ||
+      (input.commandOverride !== undefined && (typeof input.commandOverride !== 'string' || !input.commandOverride))) {
+      throw new AgentMuxError('Explicit continue requires the exact retired Session and valid current launch configuration.', 'INVALID_AGENT_REOPEN', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    }
+    const operation = agentLifecycleOperationIdentity('reopen', input.agentSessionId, safeId(input.operationId, 'Agent reopen operation id'))
+    if (this.executingReopens.has(operation)) throw this.reopenUnconfirmed('The original continue operation is still executing.')
+    this.executingReopens.add(operation)
+    let settle!: () => void
+    this.reopenSettlements.set(operation, new Promise<void>(resolve => { settle = resolve }))
+    try { return await this.resumeAgentRun(input, undefined, undefined, input) }
+    catch (error) {
+      if (error instanceof AgentMuxError && !error.controlFailure &&
+        ['STALE_AGENT_SESSION', 'CTXMUX_DISCONNECTED', 'INVALID_AGENT_SESSION_ID'].includes(error.code)) {
+        throw new AgentMuxError(error.message, error.code, error.detail, { disposition: 'not_applied', confirmedInputBytes: null })
+      }
+      throw error
+    } finally { this.executingReopens.delete(operation); this.reopenSettlements.delete(operation); settle() }
+  }
+
+  /** Complete an explicitly requested original operation; never launches, inputs or stops a Run. */
+  async reconcileAgentReopen(input: Pick<AgentMuxAgentReopenInput, 'agentSessionId' | 'expectedRetiredAt' | 'operationId'>): Promise<AgentMuxAgentSession> {
+    if (this.reopensDisposed) throw this.reopenUnconfirmed('This continue owner has been disposed. Confirm the original operation through the current Core client.')
+    this.requireConnected()
+    if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['agentSessionId', 'expectedRetiredAt', 'operationId'].includes(key)) ||
+      typeof input.agentSessionId !== 'string' || !input.agentSessionId || !Number.isSafeInteger(input.expectedRetiredAt) || input.expectedRetiredAt < 0) {
+      throw new AgentMuxError('Original continue confirmation requires its exact identity.', 'INVALID_AGENT_REOPEN', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    }
+    const operationId = agentLifecycleOperationIdentity('reopen', input.agentSessionId, safeId(input.operationId, 'Agent reopen operation id'))
+    if (this.executingReopens.has(operationId)) throw this.reopenUnconfirmed('The original continue operation is still executing.')
+    this.executingReopens.add(operationId)
+    let settle!: () => void
+    this.reopenSettlements.set(operationId, new Promise<void>(resolve => { settle = resolve }))
+    try {
+      const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === input.agentSessionId)
+      if (canonical) {
+        const run = await this.kernel.status(canonical.run.runId)
+        if (canonical.reopenedFrom?.observedAt !== input.expectedRetiredAt || run.lifecycleOperationId !== operationId) {
+          throw this.reopenUnconfirmed('The Session has a different current lifecycle operation. Read its actual state.')
+        }
+        await this.registry.load('local')
+        await this.restoreReopenObservation(canonical, run, operationId)
+        return cloneSession(this.registry.get(canonical.agentSessionId))
+      }
+      const reservation = await this.registry.claimReopen(input.agentSessionId, operationId, input.expectedRetiredAt)
+      if (!reservation) throw this.reopenUnconfirmed('The original continue result has not been confirmed.')
+      return cloneSession(await this.completePreparedReopen(reservation, await this.kernel.list()))
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.controlFailure) throw error
+      throw this.reopenUnconfirmed(error instanceof Error ? error.message : String(error))
+    } finally { this.executingReopens.delete(operationId); this.reopenSettlements.delete(operationId); settle() }
+  }
+
+  private reopenUnconfirmed(message: string): AgentMuxError {
+    return new AgentMuxError(message, 'AGENT_REOPEN_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+  }
+
+  private async completePreparedReopen(
+    reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, runs: readonly CtxmuxAdapterRun[]
+  ): Promise<AgentMuxStoredAgentSession> {
+    const prepared = reservation.preparedSession
+    const candidates = runs.filter(run => run.lifecycleOperationId === reservation.operationId)
+    if (!prepared || candidates.length !== 1 || candidates[0]!.workspacePath !== prepared.workspacePath ||
+      candidates[0]!.runId === reservation.expectedRetirement.run.runId) {
+      throw this.reopenUnconfirmed('The original continue has no single confirmed matching Run. Keep its history and check again.')
+    }
+    const run = candidates[0]!, retirement = reservation.expectedRetirement
+    const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [retirement.run],
+      reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }, updatedAt: Date.now() }
+    try { await this.registry.commitLifecycle(reservation, next) }
+    catch (error) {
+      const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === prepared.agentSessionId)
+      if (!canonical || canonical.run.runId !== run.runId || JSON.stringify(canonical.reopenedFrom) !== JSON.stringify(next.reopenedFrom)) throw error
+      await this.registry.load('local')
+    }
+    await this.restoreReopenObservation(this.registry.get(next.agentSessionId), run, reservation.operationId)
+    return this.registry.get(next.agentSessionId)
+  }
+
+  private async restoreReopenObservation(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun, operationId: string): Promise<void> {
+    try {
+      if (!this.hookBindings.has(run.runId)) {
+        await this.requireHookIngressOwner()
+        const binding = this.pendingReopenBindings.get(operationId) ?? this.hookServer.createBinding(
+          session.agentSessionId, session.providerId, session.hookBindingId, session.hookToken)
+        this.pendingReopenBindings.set(operationId, binding)
+        await binding.bindRun(run.runId)
+        this.hookBindings.set(run.runId, binding)
+        this.pendingReopenBindings.delete(operationId)
+      }
+    } catch (error) {
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: 'AGENT_REOPEN_OBSERVATION_UNCONFIRMED',
+        message: `The original conversation has Run ${run.runId}; its Hook observation is unconfirmed. Keep this Run and check again. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+    }
+    this.runPids.set(run.runId, run.pid)
+    this.publisher.publish({ type: 'agent-session', session: cloneSession(this.registry.get(session.agentSessionId)) })
+    this.publisher.publishRunState(this.projectRun(run, this.registry.get(session.agentSessionId)), session.agentSessionId)
+  }
+
   private async resumeAgentRun(
     input: AgentMuxAgentResumeOperationInput,
     expectedRun?: AgentMuxRunRef,
-    knownCapability?: AgentCapabilitySnapshot
+    knownCapability?: AgentCapabilitySnapshot,
+    reopening?: AgentMuxAgentReopenInput
   ): Promise<AgentMuxAgentSession> {
     this.requireConnected()
-    const current = this.requireAgentSession(input.agentSessionId)
-    if (expectedRun && !sameRun(current.run, expectedRun)) {
-      throw new AgentMuxError(
-        'Agent Session changed before native resume.',
-        'STALE_AGENT_SESSION'
-      )
+    const previous = reopening ? undefined : this.requireAgentSession(input.agentSessionId)
+    if (expectedRun && previous && !sameRun(previous.run, expectedRun)) {
+      throw new AgentMuxError('Agent Session changed before native resume.', 'STALE_AGENT_SESSION')
     }
     const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
     assertAgentPromptSize(composed.text)
@@ -2645,28 +2756,42 @@ export class AgentMuxClient {
       ...(input.prompt?.trim() ? { userContent: input.prompt } : {})
     }
     const lifecycleOperationId = agentLifecycleOperationIdentity(
-      'resume',
-      current.agentSessionId,
+      reopening ? 'reopen' : 'resume', input.agentSessionId,
       safeId(input.operationId, 'Agent resume operation id')
     )
-    const reservation = await this.registry.reserveExisting(
-      'resume',
-      current.agentSessionId,
-      current.run,
-      lifecycleOperationId
-    )
+    let reservation = reopening
+      ? await this.registry.reserveReopen(input.agentSessionId, reopening.expectedRetiredAt, lifecycleOperationId, input.operationId)
+      : await this.registry.reserveExisting('resume', previous!.agentSessionId, previous!.run, lifecycleOperationId)
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null
     let abandonedRun: AgentMuxRunRef | null = null
     let operationError: unknown = null
+    let preserveUnconfirmedRun = false
+    let launchAttempted = false
+    let hookBound = false
     try {
+      const retirement = reservation.kind === 'reopen' ? reservation.expectedRetirement : undefined
+      if (retirement && (!retirement.history || retirement.hostId !== 'local')) {
+        throw new AgentMuxError('The original retired native identity is unavailable on this Host.', 'AGENT_RESUME_UNAVAILABLE')
+      }
+      const current = previous ?? {
+        ...retirement!.history!, kind: 'agent' as const, agentSessionId: retirement!.agentSessionId,
+        hostId: retirement!.hostId, run: retirement!.run, retiredRuns: [],
+        updatedAt: retirement!.observedAt,
+        ...(retirement!.activityCommit === undefined ? {} : { activityCommit: structuredClone(retirement!.activityCommit) }),
+        ...(reopening?.launchOptions === undefined ? {} : { launchOptions: reopening.launchOptions })
+      }
       if (!current.nativeHandle || current.nativeHandle.kind !== 'provider') {
         throw new AgentMuxError('Provider-native resume requires a verified provider session handle.', 'AGENT_RESUME_UNAVAILABLE')
       }
       let oldRun: CtxmuxAdapterRun | null = null
       try {
         oldRun = await this.kernel.status(current.run.runId)
-        this.assertAgentRun(current, oldRun)
+        if (retirement) {
+          if (oldRun.runId !== retirement.run.runId || oldRun.workspacePath !== current.workspacePath) {
+            throw new AgentMuxError('The retired Run no longer matches its original native Session.', 'AGENT_SESSION_RUN_MISMATCH')
+          }
+        } else this.assertAgentRun(current, oldRun)
       } catch (error) {
         if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw error
       }
@@ -2674,6 +2799,9 @@ export class AgentMuxClient {
         throw new AgentMuxError('Cannot resume while the original Run is still running.', 'AGENT_SESSION_STILL_RUNNING')
       }
       const provider = this.providers.get(current.providerId)
+      if (reopening && provider.catalog.resumeStrategy.kind !== 'provider-native') {
+        throw new AgentMuxError('This Provider does not support continuing its retired native conversation.', 'AGENT_RESUME_UNAVAILABLE')
+      }
       // resume 换了 Run，就换一枚凭证——旧 Run 的那枚随之作废，不能再以此 Agent 名义说话。
       const invocationCapability = issueAgentCapability()
       const capability = knownCapability ?? await this.probeAgent(current.providerId, input.commandOverride)
@@ -2722,6 +2850,15 @@ export class AgentMuxClient {
         input.env ?? {},
         hookBinding.endpoint
       )
+      if (reservation.kind === 'reopen') {
+        const preparedSession: AgentMuxStoredAgentSession = { ...current, kind: 'agent', run: current.run, retiredRuns: [],
+          hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
+          capabilityHash: hashAgentCapability(invocationCapability), updatedAt: Date.now(), nativeHandle: structuredClone(current.nativeHandle) }
+        reservation = await this.registry.prepareReopen(reservation, preparedSession)
+        this.pendingReopenBindings.set(lifecycleOperationId, hookBinding)
+      }
+      if (reopening && this.reopensDisposed) throw new AgentMuxError('Continue owner was disposed before dispatch.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      launchAttempted = true
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
         program: plan.command,
@@ -2738,9 +2875,19 @@ export class AgentMuxClient {
         ),
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
+      }).catch(error => {
+        if (reopening && !(error instanceof AgentMuxError && error.controlFailure?.disposition === 'not_applied')) {
+          // A lost start ACK may already own a Run. Keep the one reservation until authoritative reconciliation.
+          preserveUnconfirmedRun = true
+          throw new AgentMuxError(`Continue start is unconfirmed. Read the original Session; no operation was resent. ${error instanceof Error ? error.message : String(error)}`,
+            'AGENT_REOPEN_UNCONFIRMED', undefined, { disposition: 'unknown', confirmedInputBytes: null })
+        }
+        throw error
       })
       const next: AgentMuxStoredAgentSession = {
         ...current,
+        kind: 'agent',
+        ...(retirement ? { reopenedFrom: { run: { ...retirement.run }, source: retirement.source, observedAt: retirement.observedAt } } : {}),
         run: runRef(run.runId),
         retiredRuns: [...current.retiredRuns, current.run].slice(-16),
         hookBindingId: hookBinding.bindingId,
@@ -2782,9 +2929,55 @@ export class AgentMuxClient {
       try {
         persisted = await this.registry.commitLifecycle(reservation, next)
         await hookBinding.bindRun(run.runId)
+        hookBound = true
         // 同 launch：超时降级，只有 run 退出才回滚。
-        readySession = await this.ensureTerminalHandshakeOrDegrade(next, run)
+        readySession = await this.ensureTerminalHandshakeOrDegrade(
+          retirement ? this.registry.get(current.agentSessionId) : next, run)
       } catch (error) {
+        if (reopening) {
+          const recoveredCommit = !persisted
+          if (!persisted) {
+            try {
+              const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === current.agentSessionId)
+              if (canonical?.run.runId === run.runId && canonical.reopenedFrom && canonical.reopenedFrom.observedAt === retirement!.observedAt &&
+                canonical.reopenedFrom.run.runId === retirement!.run.runId) {
+                await this.registry.load('local')
+                persisted = this.registry.get(current.agentSessionId)
+              }
+            } catch (readError) {
+              // Unknown commit acknowledgement cannot authorize stopping a possibly committed healthy Run.
+              preserveUnconfirmedRun = true
+              this.pendingReopenBindings.set(lifecycleOperationId, hookBinding)
+              throw new AggregateError([error, readError], 'Continue result is unconfirmed. Read the same Session; no operation was resent.')
+            }
+          }
+          if (persisted) {
+            if (hookBound) this.hookBindings.set(run.runId, hookBinding)
+            else this.pendingReopenBindings.set(lifecycleOperationId, hookBinding)
+            readySession = this.registry.get(current.agentSessionId)
+            let observationError: unknown = error
+            if (recoveredCommit) {
+              try {
+                await hookBinding.bindRun(run.runId)
+                hookBound = true
+                this.hookBindings.set(run.runId, hookBinding)
+                this.pendingReopenBindings.delete(lifecycleOperationId)
+                readySession = await this.ensureTerminalHandshakeOrDegrade(readySession, run)
+                observationError = null
+              } catch (readError) { observationError = readError }
+            }
+            if (observationError !== null) this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
+              code: 'AGENT_REOPEN_OBSERVATION_UNCONFIRMED',
+              message: `The original conversation continued on Run ${run.runId}, but its Hook or terminal observation is unconfirmed. Keep this Run and refresh its observation. ${observationError instanceof Error ? observationError.message : String(observationError)}`,
+              evidence: { source: 'agentmux', observedAt: Date.now() } })
+          } else {
+            const failures: unknown[] = [error]
+            try { await hookBinding.close(); await this.retireUncommittedRun(run.runId); abandonedRun = runRef(run.runId) }
+            catch (cleanupError) { preserveUnconfirmedRun = true; failures.push(cleanupError) }
+            if (failures.length > 1) throw new AggregateError(failures, 'Continue preparation and cleanup are unconfirmed. Retained history is kept.')
+            throw error
+          }
+        } else {
         const rollbackErrors: unknown[] = [error]
         try {
           await hookBinding.close()
@@ -2792,11 +2985,11 @@ export class AgentMuxClient {
           abandonedRun = runRef(run.runId)
         }
         catch (cleanupError) { rollbackErrors.push(cleanupError) }
-        if (persisted) {
+        if (persisted && previous) {
           try {
             const restored = await this.registry.update(current.agentSessionId, next.run, failed => ({
-              ...current,
-              retiredRuns: [...current.retiredRuns, next.run].slice(-16),
+              ...previous,
+              retiredRuns: [...previous.retiredRuns, next.run].slice(-16),
               // Renderer Run fences require a strictly newer canonical transition, even within
               // one clock tick or after a concurrent update of the failed binding.
               updatedAt: Math.max(Date.now(), failed.updatedAt + 1, next.updatedAt + 1)
@@ -2812,8 +3005,9 @@ export class AgentMuxClient {
           throw new AggregateError(rollbackErrors, 'Resume persistence and Run rollback failed.')
         }
         throw error
+        }
       }
-      this.hookBindings.set(run.runId, hookBinding)
+      if (hookBound) this.hookBindings.set(run.runId, hookBinding)
       this.runPids.delete(current.run.runId)
       this.runPids.set(run.runId, run.pid)
       this.publisher.publish({ type: 'agent-session', session: cloneSession(readySession) })
@@ -2828,10 +3022,17 @@ export class AgentMuxClient {
       return cloneSession(readySession)
     } catch (error) {
       operationError = error
+      if (reopening && !preserveUnconfirmedRun && !persisted && (!launchAttempted || abandonedRun)) {
+        throw new AgentMuxError(error instanceof Error ? error.message : String(error),
+          error instanceof AgentMuxError ? error.code : 'AGENT_REOPEN_NOT_APPLIED',
+          error instanceof AgentMuxError ? error.detail : undefined,
+          { disposition: 'not_applied', confirmedInputBytes: null })
+      }
       throw error
     } finally {
       const cleanupErrors: unknown[] = []
-      if (hookBinding && ![...this.hookBindings.values()].includes(hookBinding)) {
+      if (hookBinding && !preserveUnconfirmedRun && ![...this.hookBindings.values()].includes(hookBinding) &&
+        !(persisted && this.pendingReopenBindings.get(lifecycleOperationId) === hookBinding)) {
         try {
           await hookBinding.close()
         } catch (error) {
@@ -2839,7 +3040,10 @@ export class AgentMuxClient {
         }
       }
       try {
-        await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
+        if (!preserveUnconfirmedRun) {
+          if (!persisted || hookBound) this.pendingReopenBindings.delete(lifecycleOperationId)
+          await this.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
+        }
       } catch (error) {
         cleanupErrors.push(error)
       }
@@ -3359,6 +3563,13 @@ export class AgentMuxClient {
     if (reservations.length === 0) return
     const runs = await this.kernel.list()
     for (const reservation of reservations) {
+      if (reservation.kind === 'reopen') {
+        try { await this.completePreparedReopen(reservation, runs) }
+        catch (error) { this.publisher.publish({ type: 'agent-error', agentSessionId: reservation.agentSessionId,
+          code: 'AGENT_REOPEN_UNCONFIRMED', message: error instanceof Error ? error.message : String(error),
+          evidence: { source: 'agentmux', observedAt: Date.now() } }) }
+        continue
+      }
       if (reservation.kind === 'stop') {
         let run: CtxmuxAdapterRun | null = null
         try {
@@ -4736,6 +4947,10 @@ export class AgentMuxClient {
     // 而**那时**这里的顺序才开始承重。仍写成先读后推，是因为它读起来就是判据本身要说的话。
     const turnPhase = this.hookTurnPhases.get(envelope.runId) ??
       (agentTurnEndEvidence(session) ? 'turn-ended' : undefined)
+    if (session.reopenedFrom && normalized.nativeHandle &&
+      JSON.stringify(normalized.nativeHandle) !== JSON.stringify(session.nativeHandle)) {
+      throw new AgentMuxError('Continued native identity is unconfirmed. The original stored conversation and current Run are retained.', 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
+    }
     const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
     // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。

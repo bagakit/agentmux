@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -21,7 +21,7 @@ function session(index: number) {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/work"),
+    workspacePath: fixturePath("tmp/work"),
     run: { runId: `run-${index}` },
     retiredRuns: [],
     hookBindingId: `hook-${index}`,
@@ -38,6 +38,7 @@ function store(values: readonly unknown[]): AgentMuxAgentSessionStore {
     async loadRetiredRuns() { return [] },
     async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
   async loadRetiredAgentSessions() { return [] },
+  async loadReopenCorrelations() { return [] },
     async compareAndSwap() {},
     async reserveLifecycle() {},
     async claimStaleLifecycles() { return [] },
@@ -65,7 +66,7 @@ describe('Agent Session Store resource limits', () => {
   })
 
   it('rejects an oversized persisted document before JSON parsing', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-store-limit-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-store-limit-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     await writeFile(path, ' '.repeat(1024 * 1024 + 1), { mode: 0o600 })

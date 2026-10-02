@@ -1325,6 +1325,51 @@ export class RuntimeController {
     })
   }
 
+  async reopenRetiredSession(
+    reference: SessionHistoryReference,
+    expectedRetiredAt: number,
+    operationId: string,
+    config: AppConfig
+  ): Promise<SessionSnapshot> {
+    return await this.trackHostLifecycleOperation(reference.hostId, async () => {
+      let dispatched = false
+      try {
+      const client = await this.connectedClient(reference.hostId)
+      const descriptor = (await this.sessionHistorySources()).find(entry =>
+        entry.agentSessionId === reference.agentSessionId && entry.hostId === reference.hostId)
+      if (!descriptor || descriptor.state !== 'retired' || descriptor.retiredAt !== expectedRetiredAt || !descriptor.history) {
+        throw new AgentMuxError('The original Session retirement changed. Read its history again before continuing.', 'STALE_AGENT_SESSION')
+      }
+      const executor = requireSessionExecutor(config, descriptor.history)
+      dispatched = true
+      const canonical = await client.reopenAgent({ agentSessionId: reference.agentSessionId, expectedRetiredAt, operationId,
+        args: executor.args, env: executor.env, commandOverride: executor.command })
+      if (canonical.agentSessionId !== reference.agentSessionId || canonical.providerId !== descriptor.history.providerId ||
+        canonical.executorId !== descriptor.history.executorId || canonical.workspacePath !== descriptor.history.workspacePath ||
+        JSON.stringify(canonical.nativeHandle) !== JSON.stringify(descriptor.history.nativeHandle)) {
+        throw new AgentMuxError('Continued Session identity is unconfirmed. Read the original Session; no operation was resent.', 'STALE_AGENT_SESSION')
+      }
+      return await this.sessionByTarget(client, { kind: 'agent-session', agentSessionId: canonical.agentSessionId }, config)
+      } catch (error) {
+        if (!dispatched) throw new AgentMuxError(error instanceof Error ? error.message : String(error),
+          error instanceof AgentMuxError ? error.code : 'SESSION_REOPEN_NOT_APPLIED', undefined,
+          { disposition: 'not_applied', confirmedInputBytes: null })
+        throw error
+      }
+    })
+  }
+
+  async reconcileRetiredSession(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string, config: AppConfig): Promise<SessionSnapshot> {
+    return await this.trackHostLifecycleOperation(reference.hostId, async () => {
+      const client = await this.connectedClient(reference.hostId)
+      const canonical = await client.reconcileAgentReopen({ agentSessionId: reference.agentSessionId, expectedRetiredAt, operationId })
+      if (canonical.agentSessionId !== reference.agentSessionId || canonical.hostId !== 'local' || canonical.reopenedFrom?.observedAt !== expectedRetiredAt) {
+        throw new AgentMuxError('The original continue result belongs to another Session.', 'STALE_AGENT_SESSION')
+      }
+      return await this.sessionByTarget(client, { kind: 'agent-session', agentSessionId: canonical.agentSessionId }, config)
+    })
+  }
+
   async resumeSession(
     control: Extract<SessionControl, { kind: 'agent' }>,
     prompt: string,

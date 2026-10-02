@@ -294,6 +294,7 @@ const store: AgentMuxAgentSessionStore = {
   async loadRetiredRuns() { return [] },
   async withPromptSubmission() { throw new Error('Read-only Store fixture cannot deliver prompts') },
   async loadRetiredAgentSessions() { return [] },
+  async loadReopenCorrelations() { return [] },
   async compareAndSwap() {},
   async reserveLifecycle() {},
   async claimStaleLifecycles() { return [] },

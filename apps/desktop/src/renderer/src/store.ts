@@ -929,6 +929,7 @@ type AppState = {
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
+  reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
   recoverSession(sessionId: string, operationId?: string): Promise<SessionSnapshot | undefined>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>
@@ -7351,6 +7352,66 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return session
       } catch (error) { get().reportError(error); throw error }
     }
+  },
+  async reopenRetiredSession(source, operationId = crypto.randomUUID(), observeOnly = false) {
+    if (source.state !== 'retired' || source.retiredAt === undefined) {
+      throw new Error('This conversation has no confirmed closed Session identity. Read its current state before continuing.')
+    }
+    const reference = { hostId: source.hostId, agentSessionId: source.agentSessionId }
+    const before = get()
+    if (!workbenchViewCloseAllowsSession(before.closingWorkbenchViews, reference.agentSessionId) ||
+      !hasAttachedSessionView(before.tabs, reference.agentSessionId)) {
+      throw new Error('The original conversation Region is no longer open. No Session was started.')
+    }
+    const matches = (session: SessionSnapshot): boolean => session.kind === 'agent' &&
+      session.id === reference.agentSessionId && session.hostId === reference.hostId && session.control.hostId === reference.hostId &&
+      session.control.agentSessionId === reference.agentSessionId &&
+      (!source.history || session.providerId === source.history.providerId &&
+        session.executorId === source.history.executorId && session.workspacePath === source.history.workspacePath) &&
+      (!source.history?.nativeHandle || session.nativeSessionId === source.history.nativeHandle.sessionId)
+    let reopened: SessionSnapshot | undefined
+    let actionError: unknown
+    try {
+      // Only an explicit Check again reconciles the original intent. Core may bind its
+      // already-started Run; reconciliation never starts another native process.
+      reopened = observeOnly
+        ? await api.sessions.reconcileReopen(reference, source.retiredAt, operationId)
+        : await api.sessions.reopen(reference, source.retiredAt, operationId)
+      if (!matches(reopened)) {
+        reopened = undefined
+        throw new Error('The continued Session returned another conversation identity.')
+      }
+    } catch (error) { actionError = error }
+    if (!reopened) {
+      // A missing reply or display read never authorizes another native launch. Read the original
+      // Core identity first, then use its actual Run for the existing projection reader.
+      try {
+        const canonical = await api.sessions.creation(reference.hostId, reference.agentSessionId)
+        if (canonical.agentSessionId !== reference.agentSessionId || canonical.hostId !== reference.hostId ||
+          (source.history && (canonical.providerId !== source.history.providerId ||
+            canonical.executorId !== source.history.executorId || canonical.workspacePath !== source.history.workspacePath)) ||
+          (source.history?.nativeHandle && canonical.nativeHandle?.sessionId !== source.history.nativeHandle.sessionId)) {
+          throw new Error('The current Core Session belongs to another conversation.')
+        }
+        reopened = await api.sessions.refresh({ kind: 'agent', hostId: reference.hostId,
+          agentSessionId: canonical.agentSessionId, run: canonical.run })
+        if (!matches(reopened)) throw new Error('The current Session display belongs to another conversation.')
+      } catch (error) {
+        throw actionError ?? error
+      }
+    }
+    const session = reopened
+    let attached = false
+    set(state => {
+      if (!workbenchViewCloseAllowsSession(state.closingWorkbenchViews, reference.agentSessionId) ||
+        !hasAttachedSessionView(state.tabs, reference.agentSessionId)) return state
+      attached = true
+      return { ...projectRecoveredSession(state, reference.agentSessionId, session),
+        viewModes: { ...state.viewModes, [reference.agentSessionId]: 'terminal' as const } }
+    })
+    // Closing the display while Core works does not authorize stopping the new healthy Run or
+    // inventing a replacement Tab. Navigation and drafts remain owned by the original workbench.
+    return attached ? session : undefined
   },
   async recoverSession(sessionId, operationId) {
     const before = get()

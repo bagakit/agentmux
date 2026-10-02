@@ -1571,6 +1571,8 @@ export type AgentMuxDesktopApi = {
     // Set the Agent's live security posture in-band. The renderer sends the picked mode id; Core resolves
     // the Provider's declared keystroke and writes it over the PTY-input transport (bytes never cross IPC).
     setPosture(session: AgentSessionControl, modeId: string): Promise<void>
+    reopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
+    reconcileReopen(reference: SessionHistoryReference, expectedRetiredAt: number, operationId: string): Promise<SessionSnapshot>
     resume(session: AgentSessionControl, prompt: string, operationId: string, agentMuxNote?: string): Promise<SessionSnapshot>
     interrupt(session: SessionControl): Promise<void>
     resize(

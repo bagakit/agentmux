@@ -82,7 +82,7 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
-  control, readingKey, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, describeSpeaker,
+  control, readingKey, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, primaryAction, describeSpeaker,
   expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation
 }: {
   control: SessionHistoryReference
@@ -96,6 +96,8 @@ export function SessionHistoryView({
   fontSize: number
   returnLabel?: string
   serviceNotice?: ReactNode
+  /** An explicit Session action supplied by its owner; reading itself never starts a Run. */
+  primaryAction?: ReactNode
   workspaceRoot: string
   openWorkspaceFile: OpenWorkspaceFile
   openHttpLink(url: string, event: LinkClickModifiers): void
@@ -396,7 +398,10 @@ export function SessionHistoryView({
     <div className="session-history__toolbar">
       {onClose ? <button ref={returnRef} type="button" className="small-button" onClick={onClose}><ArrowLeft size={12} /> {returnLabel}</button> : null}
       <span><History size={12} /> Conversation history</span>
-      <button type="button" className="small-button" disabled={reading.loading && retryDirectionRef.current === 'latest'} onClick={() => void readPage('latest')}><ArrowDown size={12} /> Latest</button>
+      <div className="session-history__actions">
+        {primaryAction}
+        <button type="button" className="small-button" disabled={reading.loading && retryDirectionRef.current === 'latest'} onClick={() => void readPage('latest')}><ArrowDown size={12} /> Latest</button>
+      </div>
     </div>
     {serviceNotice ? <div className="session-history__notice" role="status">{serviceNotice}</div> : null}
     <div className="session-history__source" title={reading.source ? `${reading.source.providerId} · ${reading.source.nativeSessionId}` : undefined}>

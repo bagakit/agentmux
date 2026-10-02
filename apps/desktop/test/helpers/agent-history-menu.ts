@@ -11,8 +11,15 @@ export async function agentHistoryMenuEntry(scope: ParentNode = document): Promi
       trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }))
     })
   }
-  await act(async () => await vi.waitFor(() => expect(document.querySelectorAll('.agent-region-menu [role="menuitem"]').length).toBeGreaterThan(0)))
-  const entries = [...document.querySelectorAll<HTMLElement>('.agent-region-menu [role="menuitem"]')]
+  let entries: HTMLElement[] = []
+  await act(async () => await vi.waitFor(() => {
+    const menuId = trigger!.getAttribute('aria-controls')
+    const menu = menuId ? document.getElementById(menuId) : null
+    expect(menu, 'actual menu of the original Header').not.toBeNull()
+    entries = [...menu!.querySelectorAll<HTMLElement>('[role="menuitem"]')]
+    expect(entries.some(entry => entry.textContent?.trim() === 'Conversation history'),
+      `History action mounted in the original menu: ${entries.map(entry => entry.textContent?.trim()).join(' | ')}`).toBe(true)
+  }))
   expect(entries.length, 'actual nonempty More menu').toBeGreaterThan(0)
   const item = entries.find(entry => entry.textContent?.trim() === 'Conversation history')
   expect(item, 'single History action from SessionPane').toBeDefined()

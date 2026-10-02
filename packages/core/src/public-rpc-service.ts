@@ -29,7 +29,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'readAgentSessions' | 'sessionHistorySources' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'readAgentSessions' | 'sessionHistorySources' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
@@ -67,7 +67,8 @@ const NATIVE_FIELDS = {
   'runtime.release-consumer': ['consumerId'], 'runtime.events': ['consumerId'],
   'runtime.history-watch': ['consumerId', 'agentSessionId', 'options'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
-  'agent.inspect': ['target'], 'agent.role.ls': ['workspacePath'],
+  'agent.inspect': ['target'],
+  'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
@@ -209,6 +210,26 @@ export class AgentMuxRpcService {
     if (method === 'runtime.bootstrap' || method === 'runtime.invoke' || method === 'runtime.release-consumer') {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.call(method, hosted.params, { ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+    }
+    if (method === 'agent.reopen' || method === 'agent.reopen.check') {
+      if (context.caller !== undefined || !context.principal ||
+        !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {
+        throw new AgentMuxError('Continuing a retired conversation requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = rpcRecord(params, method === 'agent.reopen' ? NATIVE_FIELDS['agent.reopen'] : NATIVE_FIELDS['agent.reopen.check']), agentSessionId = rpcString(input.agentSessionId, 'Exact retired Session ID')
+      if (agentSessionId === 'self') throw new AgentMuxError('Continue requires the exact retired Session ID.', 'INVALID_CONTROL_REQUEST')
+      const clients = await this.clients()
+      const owners = await Promise.all(clients.map(async entry => ({ ...entry,
+        sources: await entry.client.sessionHistorySources() })))
+      const matches = owners.filter(entry => entry.sources.some(source => source.agentSessionId === agentSessionId &&
+        source.hostId === entry.hostId && (source.state === 'retired' || method === 'agent.reopen.check')))
+      if (matches.length !== 1) throw new AgentMuxError('The exact retired Session does not have one confirmed Host owner.', matches.length ? 'AMBIGUOUS_AGENT_SESSION' : 'STALE_AGENT_SESSION')
+      const client = matches[0]!.client
+      context.signal?.throwIfAborted()
+      await client.connect()
+      return { session: method === 'agent.reopen'
+        ? await client.reopenAgent(input as unknown as Parameters<AgentMuxClient['reopenAgent']>[0])
+        : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
     }
     if (method === 'runtime.events' || method === 'runtime.history-watch') throw new AgentMuxError('Runtime observations require a subscription.', 'INVALID_CONTROL_REQUEST')
     const caller = await this.authenticated(context)

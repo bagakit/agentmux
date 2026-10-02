@@ -124,6 +124,27 @@ export class AgentMuxAgentSessionRegistry {
     return session
   }
 
+  async reserveReopen(
+    agentSessionId: string,
+    expectedRetiredAt: number,
+    operationId: string,
+    callerOperationId: string
+  ): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>> {
+    const retirement = (await this.store.loadRetiredAgentSessions()).find(
+      session => session.agentSessionId === agentSessionId
+    )
+    if (!retirement || retirement.observedAt !== expectedRetiredAt) {
+      throw new AgentMuxError('Agent Session retirement changed before explicit continue.', 'STALE_AGENT_SESSION')
+    }
+    const reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> = {
+      reservationId: randomUUID(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid,
+      agentSessionId, operationId, expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
+      kind: 'reopen', expectedRetirement: structuredClone(retirement), callerOperationId
+    }
+    await this.store.reserveLifecycle(reservation)
+    return reservation
+  }
+
   async reserveNew(
     agentSessionId: string,
     operationId: string
@@ -167,10 +188,25 @@ export class AgentMuxAgentSessionRegistry {
           expectedRun,
           stopOperation: stopOperation!
         })
-    if (reservation.kind === 'create') {
+    if (reservation.kind === 'create' || reservation.kind === 'reopen') {
       throw new AgentMuxError('Existing lifecycle reservation changed kind.', 'INVALID_AGENT_SESSION_STORE')
     }
     return reservation
+  }
+
+  async prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession) {
+    return await this.store.prepareReopen(reservation, session)
+  }
+
+  async releaseReopenOwner(): Promise<void> {
+    await this.store.releaseReopenOwner(this.lifecycleOwnerId)
+  }
+
+  async claimReopen(agentSessionId: string, operationId: string, expectedRetiredAt: number) {
+    return await this.store.claimReopen(agentSessionId, operationId, expectedRetiredAt, {
+      ownerId: this.lifecycleOwnerId, ownerPid: process.pid, now: Date.now(),
+      expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs
+    })
   }
 
   async claimStaleLifecycles(now = Date.now()): Promise<AgentMuxLifecycleReservation[]> {
@@ -221,6 +257,10 @@ export class AgentMuxAgentSessionRegistry {
       }
       this.sessions.delete(reservation.agentSessionId)
       return null
+    }
+    if (reservation.kind === 'reopen') {
+      this.retiredAgentSessions.delete(normalized.agentSessionId)
+      this.unboundRetiredRuns.delete(reservation.expectedRetirement.run.runId)
     }
     this.remember(normalized)
     return this.get(normalized.agentSessionId)
