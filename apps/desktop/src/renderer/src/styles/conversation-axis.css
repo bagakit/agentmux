@@ -1,36 +1,6 @@
-/**
- * Conversation axes: the speaker axis and this-agent axis that sit above the ruler.
- *
- * These are TRACKS OF IDENTITY, not a second ruler. The ruler below answers "when, and how long";
- * these answer "who".
- *
- * ## The shared coordinate box
- *
- * A mark's `left: N%` and a ruler tick's `left: N%` must resolve against the SAME width, or the two
- * rows only agree on the fraction and disagree on the pixel. They do not agree by default: the ruler
- * row is `.activity-ruler` (12px side padding) laying out `__track` as `flex: 1` NEXT TO the span
- * readout and the info note, so the track's box is inset on the left by the padding and on the right
- * by ~90-110px of siblings. An axis that spanned the feed would drift further right the later the
- * event — the last avatar floating a timestamp's width away from the tick it points at.
- *
- * So the axes are not siblings of the ruler; they live INSIDE the same `.activity-ruler` row, in the
- * same `.activity-ruler__track` column (`.activity-ruler__stack` is that column). One box, one
- * percentage basis, three rows that line up column-for-column — and that alignment is the whole
- * reason the axes are worth having.
- *
- * ## The declared height
- *
- * Each track's height IS declared, and has to be: every mark is absolutely positioned, so the track
- * has no content to take its height from. It is therefore a number that must be kept equal to the
- * avatar `size` the component passes (16px today) — the marks are centred on the track's midline, so
- * a track shorter than the avatar clips it and a taller one adds dead space above the ruler.
- */
-
-/* The column that holds the two axes and the ruler track, so all three share one width. It replaces
-   the track as the ruler row's flex child; the span readout and info note stay outside it, which is
-   exactly why the track alone could not be that shared box. */
+/* Identity axes and ticks share one full-width coordinate box.
+   Each row contains the complete pointer target rather than only its glyph. */
 .activity-ruler__stack {
-  flex: 1;
   display: flex;
   flex-direction: column;
   /* `gap` rather than per-axis margins so an axis that renders nothing (no marks) contributes no
@@ -44,14 +14,10 @@
   flex: none;
 }
 
-/* One axis. `position: relative` is the coordinate space every mark's `left: N%` resolves against —
-   and because this element is a block inside the shared stack, that space is byte-identical to the
-   ruler track's below it.
-   `height` equals the avatar size the component renders (see the file header) — not a spacing value
-   that happens to be 16, but the same number as the mark it seats. */
+/* Absolute marks keep their original time positions; the row contains the full hit height. */
 .conversation-axis {
   position: relative;
-  height: 16px;
+  height: 24px;
 }
 
 /* A mark.
@@ -122,14 +88,7 @@
   z-index: 1;
 }
 
-/* Marks crowd whenever two turns land close in time. At 320px the track is only ~190px wide once the
-   row padding and the span/note siblings are taken out, so two turns 5% apart put two 24px hit areas
-   about 14px into each other. Hovering one lifts it clear: raise the stack order and scale it up so
-   the neighbours do not move. The scale goes on the AVATAR, not on the button — the button's own
-   transform is what centres it on its position, and overwriting that would slide the mark off the tick
-   it points at. (`selector.css`'s presence cluster raises and scales on hover for the same reason; its
-   own `translateY` lift is deliberately NOT copied here — these marks sit 2px from the next axis row,
-   so a vertical lift would push one row's avatar into the other's.) */
+/* Hover scales the glyph without moving the shared time coordinate. */
 .conversation-axis__mark:hover,
 .conversation-axis__mark:focus-visible {
   z-index: 2;
@@ -154,3 +113,15 @@
     transition: none;
   }
 }
+
+/* Clusters represent records, never a new author or a substituted timestamp. */
+.conversation-axis__cluster { width:36px; border-radius:var(--radius-sm); }
+.conversation-axis__cluster .conversation-axis__glyph { position:relative; width:32px; height:16px; }
+.conversation-axis__count { position:absolute; right:0; bottom:-2px; min-width:14px; padding:0 2px; border-radius:5px; background:var(--surface-2); box-shadow:0 0 0 2px var(--surface-0); color:var(--text-2); font:600 var(--fs-micro)/14px var(--font-sans); text-align:center; }
+.conversation-axis__cluster-menu { width:min(320px, calc(100vw - 24px)); max-height:min(360px, var(--radix-dropdown-menu-content-available-height)); overflow-y:auto; }
+.conversation-axis__menu-heading { padding:6px 8px; color:var(--text-3); font-size:var(--fs-micro); }
+.conversation-axis__entry { align-items:start; gap:8px; padding:7px 8px; }
+.conversation-axis__cluster-menu .conversation-axis__entry > .conversation-axis__entry-text { min-width:0; flex:1; white-space:normal; }
+.conversation-axis__entry-name { display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:2px 8px; overflow-wrap:anywhere; font-size:var(--fs-meta); }
+.conversation-axis__entry-name small { flex:none; color:var(--text-3); font-size:var(--fs-micro); }
+.conversation-axis__entry-quote { display:-webkit-box; -webkit-box-orient:vertical; -webkit-line-clamp:2; overflow:hidden; overflow-wrap:anywhere; color:var(--text-2); font-size:var(--fs-meta); line-height:1.5; margin-top:2px; }

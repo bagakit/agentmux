@@ -1,6 +1,8 @@
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
-import { conversationAxis, type ConversationAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
+import { conversationAxis, clusterConversationAxis, type ConversationAxisCluster, type ConversationAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import * as Menu from './HoverDropdownMenu'
+import { conversationQuote } from '../lib/conversation-quote'
 
 export type { DescribeSpeaker }
 
@@ -43,10 +45,13 @@ export function ConversationAxis({
   selectedIndex,
   onSelect,
   onPeek,
-  onPeekEnd
+  onPeekEnd,
+  width = 0
 }: {
   /** 全量 items。scale 在全量上建，位置按原始下标取——两条轴因此与主刻度时间基准同源。 */
   items: readonly ConversationAxisItem[]
+  /** Actual width of the shared ruler track. */
+  width?: number
   /** 轴语义：哪些身份在这条轴上留标记。两条轴只有这个参数不同。 */
   belongs: SpeakerPredicate
   /** 这条轴是什么的可读名，作为轨道的可访问名。 */
@@ -81,6 +86,7 @@ export function ConversationAxis({
   // 空轴不画空槽：一条还没有人说话的 Session 上，说话人轴什么也不表达。
   if (marks.length === 0) return null
 
+  const clusters = clusterConversationAxis(marks, width)
   return (
     <div
       className="conversation-axis"
@@ -98,13 +104,17 @@ export function ConversationAxis({
         if (onPeekEnd?.() === true) event.stopPropagation()
       }}
     >
-      {marks.map((mark) => (
+      {clusters.map((cluster) => cluster.members.length > 1 ? (
+        <AxisCluster key={cluster.members[0]!.item.id} cluster={cluster} size={size}
+          describe={describe} selected={cluster.members.some(mark => mark.index === selectedIndex)}
+          onSelect={onSelect} {...(onPeekEnd === undefined ? {} : { onPeekEnd })} />
+      ) : (
         <AxisMark
-          key={mark.item.id}
-          mark={mark}
+          key={cluster.members[0]!.item.id}
+          mark={cluster.members[0]!}
           size={size}
           describe={describe}
-          selected={mark.index === selectedIndex}
+          selected={cluster.members[0]!.index === selectedIndex}
           onSelect={onSelect}
           {...(onPeek === undefined ? {} : { onPeek })}
           {...(onPeekEnd === undefined ? {} : { onPeekEnd })}
@@ -176,5 +186,66 @@ function AxisMark({
       />
       </span>
     </button>
+  )
+}
+
+function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd }: {
+  cluster: ConversationAxisCluster
+  size: number
+  describe: DescribeSpeaker
+  selected: boolean
+  onSelect: (index: number) => void
+  onPeekEnd?: () => boolean
+}) {
+  const first = speakerForDisplay(cluster.members[0]!.speaker)
+  const identity = describe(first)
+  return <Menu.Root modal={false} onOpenChange={open => { if (open) onPeekEnd?.() }}>
+    <Menu.Trigger asChild>
+      <button type="button" className="conversation-axis__mark conversation-axis__cluster"
+        style={{ left: `${cluster.fraction * 100}%` }} data-selected={selected ? '' : undefined}
+        aria-label={`${cluster.members.length} messages; choose a record`}>
+        <span className="conversation-axis__glyph" aria-hidden="true">
+          <ConversationSpeakerAvatar speaker={first} name={identity.name} size={size}
+            {...(identity.providerId === undefined ? {} : { providerId: identity.providerId })} />
+          <span className="conversation-axis__count">{cluster.members.length > 99 ? '99+' : cluster.members.length}</span>
+        </span>
+      </button>
+    </Menu.Trigger>
+    <Menu.Portal>
+      <Menu.Content className="tab-context-menu conversation-axis__cluster-menu" side="bottom" sideOffset={6} align="start">
+        <Menu.Label className="conversation-axis__menu-heading">{cluster.members.length} messages · Original excerpts</Menu.Label>
+        <ClusterEntries members={cluster.members} describe={describe} onSelect={onSelect} />
+      </Menu.Content>
+    </Menu.Portal>
+  </Menu.Root>
+}
+
+/** Render excerpts only while the shared menu mounts its content. */
+function ClusterEntries({ members, describe, onSelect }: {
+  members: readonly ConversationAxisMark[]
+  describe: DescribeSpeaker
+  onSelect: (index: number) => void
+}) {
+  return (
+    <>
+      {members.map(mark => {
+        const speaker = speakerForDisplay(mark.speaker)
+        const { name, providerId } = describe(speaker)
+        const quote = conversationQuote(mark.item)
+        return (
+          <Menu.Item key={mark.item.id} className="tab-context-menu__item conversation-axis__entry"
+            onSelect={() => onSelect(mark.index)}>
+            <span aria-hidden="true">
+              <ConversationSpeakerAvatar speaker={speaker} name={name} size={16}
+                {...(providerId === undefined ? {} : { providerId })} />
+            </span>
+            <span className="conversation-axis__entry-text">
+              <span className="conversation-axis__entry-name">{name}<small>Record {mark.index + 1}</small></span>
+              {quote ? <span className="conversation-axis__entry-quote">{quote}</span> : null}
+            </span>
+          </Menu.Item>
+        )
+      })}
+    </>
   )
 }

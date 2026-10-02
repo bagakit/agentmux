@@ -15,14 +15,18 @@
   position: sticky;
   top: 0;
   z-index: 2;
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap:var(--sp-4);
-  padding:var(--sp-3) var(--sp-5) var(--sp-3);
+  gap:var(--sp-2) var(--sp-3);
+  padding:var(--sp-3) 18px;
   background: var(--surface-0);
   box-shadow: inset 0 -1px var(--line-soft), 0 8px 28px color-mix(in oklab, var(--bg) 24%, transparent);
   backdrop-filter: blur(14px);
 }
+.activity-ruler__summary { grid-row:1; min-width:0; display:flex; align-items:baseline; flex-wrap:wrap; gap:var(--sp-2) var(--sp-4); }
+.activity-ruler__stack { grid-row:2; grid-column:1 / -1; min-width:0; }
+.activity-ruler__count { color:var(--text-3); font:var(--fs-micro)/1.4 var(--font-sans); white-space:nowrap; }
 .activity-ruler__track { position: relative; flex: 1; height: 18px; }
 .activity-ruler__rail { position: absolute; top: 50%; left: 0; right: 0; height: 2px; border-radius: 1px; background: var(--line-soft); }
 /* An ordinal axis spaces events evenly because their timestamps carry no spread; the dashed rail says
@@ -47,21 +51,20 @@
 /* 跨度读数：起 → 止 · 耗时。等宽 + tabular 让它在滚动中不左右跳动（数字位宽一致），而三个事实
    排成一行是因为它们回答的是同一个问题的三段——分成两处摆会让读者自己去拼。 */
 .activity-ruler__span {
-  display: inline-flex;
-  align-items: baseline;
-  gap:var(--sp-3);
+  display: contents;
   color: var(--text-3);
   font: var(--fs-micro)/1 var(--font-mono);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  line-height: 1.4;
 }
 /* 起止那一对读数自成一组，与耗时之间靠 gap 分开——两者是不同性质的事实（观测到的时刻 vs 算出来
    的时长），挨在一起但不混成一串数字。 */
-.activity-ruler__span-range { display: inline-flex; align-items: baseline; }
+.activity-ruler__span-range { display:inline-flex; align-items:baseline; flex-wrap:wrap; row-gap:var(--sp-1); }
+.activity-ruler__span-range > span { white-space:nowrap; }
 .activity-ruler__span-arrow { margin:0 var(--sp-1); opacity: .55; }
 /* 耗时是这一行里唯一"被算出来"的数，给它一档更亮的字色，让扫视先落在它上面。 */
 .activity-ruler__span-elapsed { color: var(--text-2); }
-.activity-ruler__note { display: inline-flex; color: var(--text-3); cursor: help; }
+.activity-ruler__note { grid-row:1; display: inline-flex; color: var(--text-3); cursor: help; }
 /* The whole track is one focusable slider (click + keyboard both resolve to an event). Its focus ring
    must be visible like every other interactive control in the surface. */
 .activity-ruler__track { outline: none; cursor: pointer; }
@@ -331,9 +334,3 @@
 }
 
 .log-row__time[tabindex]:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
-@media (max-width: 620px) {
-  .activity-ruler { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .activity-ruler__stack { grid-column: 1 / -1; min-width: 0; }
-  .activity-ruler__span { min-width: 0; flex-wrap: wrap; white-space: normal; line-height: 1.4; }
-  .activity-ruler__span-range { flex-wrap: wrap; row-gap: var(--sp-1); }
-}

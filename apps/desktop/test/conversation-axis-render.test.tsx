@@ -242,7 +242,7 @@ describe('对话轴的渲染', () => {
     // 轴自己那三层，各自允许出现的属性名。头像是共享组件，它的 role/aria-label/title 是正文那一路
     // 唯一的名字来源，不能在这里要求它消失。
     const AXIS_NODES = ['conversation-axis__mark', 'conversation-axis__glyph', 'conversation-avatar']
-    const MARK_ATTRS = new Set(['type', 'class', 'style', 'data-selected', 'aria-label', 'aria-hidden', 'role', 'title'])
+    const MARK_ATTRS = new Set(['type', 'class', 'style', 'data-selected', 'aria-label', 'aria-hidden', 'role', 'title', 'data-speaker-id'])
     // style 里允许出现的声明：`left` 是标记的位置，`width`/`height` 是头像边长（size 那条验收的可观测
     // 信号），`--speaker-hue` 是 id 派生的身份色相。这四条之外多一条声明就红，无论它装的是什么——
     // 「塞进一个无单位自定义属性」正是逃过所有"像不像时间"判据的那条路。
@@ -279,6 +279,11 @@ describe('对话轴的渲染', () => {
               const property = declaration.slice(0, declaration.indexOf(':')).trim()
               expect(STYLE_PROPS, `<${tag}> 的 style 里多了一条声明：${declaration.trim()}`).toContain(property)
             }
+            continue
+          }
+          // The shared avatar's identity can contain digits; it is not a clock channel.
+          if (name === 'data-speaker-id') {
+            expect(['human', 'agent-1']).toContain(value)
             continue
           }
           expect(value, `<${tag} ${name}="${value}"> 里有数字——标记上没有该带数字的东西`).not.toMatch(/\d/)
