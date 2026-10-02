@@ -389,11 +389,11 @@ export function SessionPane({
       },
       ...(session?.kind === 'agent' ? { currentSession: session } : {})
     })
-    return (speaker: Parameters<typeof original>[0]) => {
+    return (speaker: Parameters<typeof original>[0], avatarSize?: number) => {
       const described = original(speaker)
       const mote = speaker.role === 'agent' ? moteConversationIdentity(moteOwner,
         sessionPresentationById(useAppStore.getState().sessions).get(speaker.id)) : undefined
-      return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} /> } : described
+      return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} {...(avatarSize === undefined ? {} : { size: avatarSize })} /> } : described
     }
   }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
   )

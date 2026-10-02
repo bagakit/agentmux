@@ -64,7 +64,7 @@ export type ConversationSenderDetails = {
 /**
  * 把一个身份解析成「叫什么、画哪个 provider」。
  */
-export type DescribeSpeaker = (speaker: ConversationSpeaker) => {
+export type DescribeSpeaker = (speaker: ConversationSpeaker, avatarSize?: number) => {
   name: string
   avatar?: ReactNode
   project?: ConversationSenderDetails['project']

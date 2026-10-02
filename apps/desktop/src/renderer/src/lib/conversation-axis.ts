@@ -32,7 +32,9 @@ import { createRulerScale } from './activity-ruler'
 import { speakerOf } from './conversation-speaker'
 import { type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
+import type { RulerRecord } from './conversation-ruler'
 export type ConversationAxisItem = AgentTimelineItem | AgentSessionUserMessage
+export type RulerAxisItem = ConversationAxisItem | RulerRecord
 
 /**
  * 轴语义：一个说话人是否属于这条轴。作用在已判定的身份上，而不是 item——所以它无从按 kind 反推。
@@ -54,14 +56,14 @@ export type ConversationAxisMark = {
   index: number
   fraction: number
   speaker: ConversationSpeaker
-  item: ConversationAxisItem
+  item: RulerAxisItem
 }
 
 /**
  * 求一条轴的标记。`belongs` 是轴语义；两条轴只是这个参数不同，定位逻辑在此只此一份。
  */
 export function conversationAxis(
-  items: readonly ConversationAxisItem[],
+  items: readonly RulerAxisItem[],
   belongs: SpeakerPredicate
 ): ConversationAxisMark[] {
   const timestamps = items.map((item) => ('createdAt' in item ? item.createdAt : item.recordedAt))
@@ -69,7 +71,7 @@ export function conversationAxis(
   const marks: ConversationAxisMark[] = []
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index]!
-    const speaker = speakerOf(item)
+    const speaker = 'kind' in item && item.kind === 'ruler-record' ? item.speaker : speakerOf(item)
     // 机器上报在这里被挡住：speakerOf 对 tool_call/permission/lifecycle 返回 null，两条轴都不吞它。
     if (!speaker) continue
     // 轴语义：只有属于这条轴的身份才留下标记。谓词看不到 kind，无从反推身份。
@@ -90,7 +92,7 @@ export function clusterConversationAxis(marks: readonly ConversationAxisMark[], 
   for (const mark of sorted) {
     const group = groups[groups.length - 1]
     // Include the count and full pointer target, rather than only the 16px avatar.
-    if (group && (mark.fraction - group[group.length - 1]!.fraction) * width < 36) group.push(mark)
+    if (group && (mark.fraction - group[group.length - 1]!.fraction) * width < 64) group.push(mark)
     else groups.push([mark])
   }
   return groups.map(members => ({

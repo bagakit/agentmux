@@ -77,7 +77,7 @@ function NativeProcessStep({ item, origin, children }: {
     if (!expanded) setReadOnce(true)
     setExpanded(value => !value)
   }
-  return <div className="wf-native-process">
+  return <div className="wf-native-process" data-native-step-id={item.id}>
     <WorkflowToolRow observation={{ id: item.id, title, source: 'Native', persistentSource: true,
       ...(status ? { status } : {}), ...(time ? { recordedTime: time } : {}) }}
       className="log-row" icon={collaboration ? <GitBranch size={12} /> : <Terminal size={12} />}

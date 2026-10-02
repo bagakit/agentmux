@@ -56,7 +56,7 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
 
   }
   return <section className="conversation-native-thread" aria-label="Native conversation"
-    data-native-provider={page.source.providerId}>
+    data-native-provider={page.source.providerId} data-native-source={JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
       <span>{page.source.providerId} · Native conversation</span>
       <span>{records.length} {records.length === 1 ? 'record' : 'records'} · Current window</span>

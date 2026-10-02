@@ -1,8 +1,8 @@
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
-import { conversationAxis, clusterConversationAxis, type ConversationAxisCluster, type ConversationAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
-import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
+import { conversationAxis, clusterConversationAxis, type ConversationAxisCluster, type RulerAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
+import { ConversationMessageAvatar } from './ConversationMessageAvatar'
+import { rulerRecordQuote } from '../lib/conversation-ruler'
 import * as Menu from './HoverDropdownMenu'
-import { conversationQuote } from '../lib/conversation-quote'
 
 export type { DescribeSpeaker }
 
@@ -46,12 +46,16 @@ export function ConversationAxis({
   onSelect,
   onPeek,
   onPeekEnd,
-  width = 0
+  width = 0,
+  conversationSessionId,
+  recentFraction = 0
 }: {
   /** 全量 items。scale 在全量上建，位置按原始下标取——两条轴因此与主刻度时间基准同源。 */
-  items: readonly ConversationAxisItem[]
+  items: readonly RulerAxisItem[]
   /** Actual width of the shared ruler track. */
   width?: number
+  recentFraction?: number
+  conversationSessionId?: string | undefined
   /** 轴语义：哪些身份在这条轴上留标记。两条轴只有这个参数不同。 */
   belongs: SpeakerPredicate
   /** 这条轴是什么的可读名，作为轨道的可访问名。 */
@@ -106,7 +110,7 @@ export function ConversationAxis({
     >
       {clusters.map((cluster) => cluster.members.length > 1 ? (
         <AxisCluster key={cluster.members[0]!.item.id} cluster={cluster} size={size}
-          describe={describe} selected={cluster.members.some(mark => mark.index === selectedIndex)}
+          describe={describe} conversationSessionId={conversationSessionId} recentFraction={recentFraction} selected={cluster.members.some(mark => mark.index === selectedIndex)}
           onSelect={onSelect} {...(onPeekEnd === undefined ? {} : { onPeekEnd })} />
       ) : (
         <AxisMark
@@ -114,6 +118,7 @@ export function ConversationAxis({
           mark={cluster.members[0]!}
           size={size}
           describe={describe}
+          recentFraction={recentFraction}
           selected={cluster.members[0]!.index === selectedIndex}
           onSelect={onSelect}
           {...(onPeek === undefined ? {} : { onPeek })}
@@ -138,9 +143,11 @@ function AxisMark({
   selected,
   onSelect,
   onPeek,
-  onPeekEnd
+  onPeekEnd,
+  recentFraction = 0
 }: {
   mark: ConversationAxisMark
+  recentFraction?: number
   size: number
   describe: DescribeSpeaker
   selected: boolean
@@ -149,7 +156,8 @@ function AxisMark({
   onPeekEnd?: () => boolean
 }) {
   const displaySpeaker = speakerForDisplay(mark.speaker)
-  const { name, providerId } = describe(displaySpeaker)
+  const identity = describe(displaySpeaker, size)
+  const { name } = identity
   // hover 与 focus 走**同一个** peek，pointerleave 与 blur 走同一个 peekEnd：触屏上没有 hover，
   // 键盘上没有指针，若两条通路各写一份，移动端与键盘就成了两套要各自维护的实现。这里让四个事件
   // 收敛到一对出口上，于是「不存在只能靠鼠标 hover 才能获得的信息」是结构性的，不靠自觉。
@@ -160,6 +168,7 @@ function AxisMark({
     <button
       type="button"
       className="conversation-axis__mark"
+      data-era={mark.fraction < recentFraction ? 'history' : 'recent'}
       // 位置来自全量 scale 的 fraction，与主刻度同一条时间基准。
       style={{ left: `${mark.fraction * 100}%` }}
       data-selected={selected ? '' : undefined}
@@ -178,69 +187,73 @@ function AxisMark({
           正文里外层是纯 span，那里那份 aria-label 正是唯一的名字来源，删掉它会让正文的头像变成只有
           视觉能识别的身份。 */}
       <span className="conversation-axis__glyph" aria-hidden="true">
-      <ConversationSpeakerAvatar
-        speaker={displaySpeaker}
-        name={name}
-        size={size}
-        {...(providerId === undefined ? {} : { providerId })}
-      />
+        <AxisAvatar speaker={displaySpeaker} identity={identity} size={size} />
       </span>
     </button>
   )
 }
 
-function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd }: {
+function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, conversationSessionId, recentFraction = 0 }: {
   cluster: ConversationAxisCluster
+  recentFraction?: number
+  conversationSessionId?: string | undefined
   size: number
   describe: DescribeSpeaker
   selected: boolean
   onSelect: (index: number) => void
   onPeekEnd?: () => boolean
 }) {
-  const first = speakerForDisplay(cluster.members[0]!.speaker)
-  const identity = describe(first)
+  const speakers = new Map<string, ConversationSpeaker>()
+  for (const mark of cluster.members) {
+    const speaker = speakerForDisplay(mark.speaker)
+    speakers.set(JSON.stringify([speaker.role, speaker.id]), speaker)
+  }
+  const participants = [...speakers.values()]
   return <Menu.Root modal={false} onOpenChange={open => { if (open) onPeekEnd?.() }}>
     <Menu.Trigger asChild>
       <button type="button" className="conversation-axis__mark conversation-axis__cluster"
-        style={{ left: `${cluster.fraction * 100}%` }} data-selected={selected ? '' : undefined}
+        style={{ left: `clamp(32px, ${cluster.fraction * 100}%, calc(100% - 32px))` }} data-selected={selected ? '' : undefined}
+        data-era={cluster.members.every(mark => mark.fraction < recentFraction) ? 'history' : cluster.members.every(mark => mark.fraction >= recentFraction) ? 'recent' : 'mixed'}
         aria-label={`${cluster.members.length} messages; choose a record`}>
-        <span className="conversation-axis__glyph" aria-hidden="true">
-          <ConversationSpeakerAvatar speaker={first} name={identity.name} size={size}
-            {...(identity.providerId === undefined ? {} : { providerId: identity.providerId })} />
-          <span className="conversation-axis__count">{cluster.members.length > 99 ? '99+' : cluster.members.length}</span>
+        <span className="conversation-axis__participants" aria-hidden="true">
+          {participants.slice(0, 3).map(speaker => <AxisAvatar key={JSON.stringify([speaker.role, speaker.id])}
+            speaker={speaker} identity={describe(speaker, size)} size={size} />)}
+          {participants.length > 3 ? <span className="conversation-axis__more">+{participants.length - 3 > 99 ? '99+' : participants.length - 3}</span> : null}
+          {participants.length <= 3 ? <span className="conversation-axis__count">{cluster.members.length > 99 ? '99+' : cluster.members.length}</span> : null}
         </span>
       </button>
     </Menu.Trigger>
     <Menu.Portal>
       <Menu.Content className="tab-context-menu conversation-axis__cluster-menu" side="bottom" sideOffset={6} align="start">
         <Menu.Label className="conversation-axis__menu-heading">{cluster.members.length} messages · Original excerpts</Menu.Label>
-        <ClusterEntries members={cluster.members} describe={describe} onSelect={onSelect} />
+        <ClusterEntries members={cluster.members} describe={describe} onSelect={onSelect} conversationSessionId={conversationSessionId} />
       </Menu.Content>
     </Menu.Portal>
   </Menu.Root>
 }
 
 /** Render excerpts only while the shared menu mounts its content. */
-function ClusterEntries({ members, describe, onSelect }: {
-  members: readonly ConversationAxisMark[]
+export function ClusterEntries({ members, describe, onSelect, conversationSessionId }: {
+  conversationSessionId?: string | undefined
+  members: readonly (Pick<ConversationAxisMark, 'index' | 'item'> & { speaker: ConversationSpeaker | null })[]
   describe: DescribeSpeaker
   onSelect: (index: number) => void
 }) {
   return (
     <>
       {members.map(mark => {
-        const speaker = speakerForDisplay(mark.speaker)
-        const { name, providerId } = describe(speaker)
-        const quote = conversationQuote(mark.item)
+        const speaker = mark.speaker ? speakerForDisplay(mark.speaker) : null
+        const identity = speaker ? describe(speaker, 16) : { name: 'Recorded activity' }
+        const { name } = identity
+        const quote = rulerRecordQuote(mark.item)
         return (
           <Menu.Item key={mark.item.id} className="tab-context-menu__item conversation-axis__entry"
             onSelect={() => onSelect(mark.index)}>
             <span aria-hidden="true">
-              <ConversationSpeakerAvatar speaker={speaker} name={name} size={16}
-                {...(providerId === undefined ? {} : { providerId })} />
+              {speaker ? <AxisAvatar speaker={speaker} identity={identity} size={16} /> : <span className="conversation-axis__activity" aria-hidden="true">·</span>}
             </span>
             <span className="conversation-axis__entry-text">
-              <span className="conversation-axis__entry-name">{name}<small>Record {mark.index + 1}</small></span>
+              <span className="conversation-axis__entry-name">{name}<small>{speaker?.role === 'agent' ? speaker.id === conversationSessionId ? 'This agent · ' : 'Sender · ' : ''}Record {mark.index + 1}</small></span>
               {quote ? <span className="conversation-axis__entry-quote">{quote}</span> : null}
             </span>
           </Menu.Item>
@@ -248,4 +261,13 @@ function ClusterEntries({ members, describe, onSelect }: {
       })}
     </>
   )
+}
+
+function AxisAvatar({ speaker, identity, size }: {
+  speaker: ConversationSpeaker; identity: ReturnType<DescribeSpeaker>; size: number
+}) {
+  return <span className="conversation-axis__avatar">
+    {identity.avatar ?? <ConversationMessageAvatar speaker={speaker} name={identity.name} size={size}
+      providerId={identity.providerId} project={identity.project} />}
+  </span>
 }
