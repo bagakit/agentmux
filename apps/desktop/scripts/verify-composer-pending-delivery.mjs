@@ -10,7 +10,7 @@ import { promisify } from 'node:util'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop'),require=createRequire(import.meta.url),exec=promisify(execFile)
 const mode=process.argv[2],base='4b38c4cf540de04f9de2ea70793a965b2e96c30d'
-assert.ok(['--mutations','--source','--native'].includes(mode))
+assert.ok(['--mutations','--source','--native','--card-mutations'].includes(mode))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const typedPaths=['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/ComposerOutbox.tsx','apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx','apps/desktop/src/renderer/src/store.ts','packages/client-ui/src/components/AgentComposer.tsx','apps/desktop/src/renderer/src/components/TerminalView.tsx']
 const styles=['packages/client-ui/src/styles/composer.css','packages/client-ui/src/styles/conversation-message.css'],dependencyPaths=['patches/@xterm__xterm@6.1.0-beta.303.patch','pnpm-lock.yaml'], originals=Object.fromEntries(await Promise.all([...typedPaths,...styles,...dependencyPaths].map(async p=>[p,await readFile(join(root,p),'utf8')])))
@@ -60,7 +60,7 @@ async function mounted(label,red){
  if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.match(output,/AssertionError:/)}else assert.equal(code,0,label+': all owning tests pass')
  return{code,assertionRed:red,discovery,log:label+'.log'}
 }
-async function nativeMutation(label,red){
+async function nativeMutation(label,red,expectedFailure=/actual original terminal cursor remains in its viewport/){
  const d=await prepareXterm();let code=0,output='';try{const r=await exec(process.execPath,[join(privateRoot,'apps/desktop/scripts/verify-composer-pending-delivery.mjs'),'--native'],{cwd:privateRoot,env:{...process.env,AGENTMUX_PENDING_PRISTINE:d.pristine,AGENTMUX_PENDING_BASE_PATCH:d.baselinePatchPath},timeout:120000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'')}
  await writeFile(join(evidence,label+'.log'),output)
  const summaries=output.trim().split('\n').filter(line=>line.startsWith('{"mode":"--native"'));assert.equal(summaries.length,1)
@@ -68,8 +68,27 @@ async function nativeMutation(label,red){
  await cp(proofDirectory,join(evidence,label),{recursive:true})
  const rendered=JSON.parse(await readFile(join(proofDirectory,'candidate/render.json'),'utf8'))
  assert.equal(receipt.privateRootRemoved,true);assert.equal(receipt.userRunTouched,false);assert.ok(rendered.frames.length)
- if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,/actual original terminal cursor remains in its viewport/)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,32);assert.deepEqual(rendered.rendererErrors,[])}
+ if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,56);assert.deepEqual(rendered.rendererErrors,[])}
  return{code,assertionRed:red,frames:rendered.frames.length,evidence:label,receipt}
+}
+async function cardMutations(){
+ for(const dir of ['apps/desktop/src','apps/desktop/test/helpers','apps/desktop/scripts','apps/desktop/resources','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
+ for(const p of ['package.json','pnpm-workspace.yaml','pnpm-lock.yaml','tsconfig.base.json','apps/desktop/package.json','apps/desktop/tsconfig.json',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/package.json')])await cp(join(root,p),join(privateRoot,p))
+ for(const p of ['node_modules','apps/desktop/node_modules',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/node_modules')])await symlink(join(root,p),join(privateRoot,p),'dir')
+ const cases=[
+  {name:'card-intrinsic-width-removed',from:'width: fit-content; max-width: min(360px, calc(100% - 2px));',to:'width: 100%; max-width: min(360px, calc(100% - 2px));',failure:/Short pending card sizes to its content/},
+  {name:'card-right-alignment-removed',from:'margin: 9px 1px 4px auto;',to:'margin: 9px auto 4px 1px;',failure:/Pending card aligns with the original right-hand Mailbox control group/},
+  {name:'card-depth-edge-removed',from:".composer-pending[data-depth='1']::before, .composer-pending[data-depth='2']::before { content: ''; }",to:".composer-pending[data-depth='1']::before, .composer-pending[data-depth='2']::before { content: none; }",failure:/Queue depth has exactly the bounded noninteractive edges/},
+  {name:'card-focus-emphasis-removed',from:'.composer-pending:is(:hover, :focus-within) { border-color: var(--line); box-shadow: 0 3px 10px rgb(0 0 0 / 14%); }',to:'.composer-pending:is(:hover, :focus-within) { border-color: var(--line); box-shadow: 0 2px 6px rgb(0 0 0 / 7%); }',failure:/Hover emphasizes the real card surface/},
+  {name:'copy-feedback-can-wrap',file:styles[1],from:'flex-shrink: 0; white-space: nowrap; gap:',to:'gap:',failure:/Copied feedback remains on one visible line/}
+ ]
+ for(const item of cases){const file=item.file??styles[0],original=originals[file];assert.equal(original.split(item.from).length,2);const changed=original.replace(item.from,item.to)
+  await writeFile(join(privateRoot,file),changed);const red=await nativeMutation(item.name,true,item.failure)
+  await writeFile(join(privateRoot,file),original);assert.equal(hash(await readFile(join(privateRoot,file))),hash(original))
+  result.mutations.push({name:item.name,file,originalSha256:hash(original),mutatedSha256:hash(changed),red,exactRestoration:true})
+ }
+ result.restored=await nativeMutation('card-original-restored',false)
+ assert.equal(result.mutations.length,5)
 }
 async function mutations(){
  for(const dir of ['apps/desktop/src','apps/desktop/test','apps/desktop/scripts','apps/desktop/resources','apps/desktop/browser-extension','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
@@ -146,6 +165,6 @@ async function native(){
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const lines=[]
  const outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,'capture'],{temporaryRoot:processRoot,cwd:root,env,timeoutMs:60000,onLine:l=>lines.push(l)})
  await writeFile(join(directory,'process.log'),lines.join('\n'));const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'));assert.equal(outcome.timedOut,false);assert.equal(outcome.exitCode,0,rendered.failure?.message);assert.equal(rendered.passed,true);assert.ok(rendered.frames.length)
- assert.equal(rendered.frames.length,32);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
+ assert.equal(rendered.frames.length,56);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
 }
-try{if(mode==='--mutations')await mutations();else if(mode==='--source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{for(const [p,b]of Object.entries(originals))assert.equal(hash(await readFile(join(root,p))),hash(b),'Shared Source unchanged during proof');if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}
+try{if(mode==='--card-mutations')await cardMutations();else if(mode==='--mutations')await mutations();else if(mode==='--source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{for(const [p,b]of Object.entries(originals))assert.equal(hash(await readFile(join(root,p))),hash(b),'Shared Source unchanged during proof');if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}

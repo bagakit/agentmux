@@ -17,6 +17,7 @@ const discovery: Reporter = { onFinished(files = []) {
   assert.ok(passed,'Every explicit owning suite executes nonempty tests')
 } }
 export default defineConfig({...source, esbuild:{jsx:'automatic'},cacheDir:resolve(root,'.tmp/composer-pending-delivery/cache'),resolve:{alias:[
+  {find:/^ws$/,replacement:resolve(root,'node_modules/.pnpm/node_modules/ws/index.js')},
   {find:/^@agentmux\/client-ui\/components\/(.+)$/,replacement:resolve(root,'packages/client-ui/src/components/$1.tsx')},
   {find:/^@agentmux\/client-ui\/platform$/,replacement:resolve(root,'packages/client-ui/src/platform.tsx')},
   {find:/^@agentmux\/client-ui\/(.+)$/,replacement:resolve(root,'packages/client-ui/src/lib/$1.ts')},

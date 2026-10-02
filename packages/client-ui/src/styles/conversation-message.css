@@ -55,7 +55,7 @@
   .log-turn__actions { opacity: 1; }
 }
 .log-turn__copy-error { display: inline-flex; align-items: center; color: var(--red-text); font-size: var(--fs-micro); }
-.log-turn__action { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
+.log-turn__action { display: inline-flex; align-items: center; flex-shrink: 0; white-space: nowrap; gap: var(--sp-1); min-height: 24px; padding: 0 var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font: inherit; font-size: var(--fs-micro); cursor: pointer; }
 .log-turn__action:hover { color: var(--text); background: var(--surface-3); }
 .log-turn__action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .log-turn__who { flex: 1 1 140px; min-width: min(140px, 100%); overflow-wrap: anywhere; color: var(--text); font-size: var(--fs-body); font-weight: 620; }
