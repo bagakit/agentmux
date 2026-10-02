@@ -52,7 +52,7 @@ export async function verifyRadioKeyboard({ probe, section, command, saved, wait
     return result
   }
   for (const definition of groups) {
-    const baseline = (await command(['settings', 'get', definition.key])).result.entries
+    const baseline = (await command(['settings', 'inspect', definition.key])).result.entries
     assert.equal(baseline.length, 1)
     const before = await state(definition), original = before.values.indexOf(baseline[0].value)
     assert.ok(original >= 0); assert.deepEqual(before.checked, [original])
@@ -82,7 +82,7 @@ export async function verifyRadioKeyboard({ probe, section, command, saved, wait
     await key(' ')
     const spaceAfter = await state(definition)
     assert.equal(spaceAfter.focus, desired); assert.deepEqual(spaceAfter.checked, [desired]); assert.deepEqual(spaceAfter.draft, [desired])
-    assert.equal((await command(['settings', 'get', definition.key])).result.entries[0].value, baseline[0].value, 'Keyboard edits remain uncommitted drafts')
+    assert.equal((await command(['settings', 'inspect', definition.key])).result.entries[0].value, baseline[0].value, 'Keyboard edits remain uncommitted drafts')
     facts.groups.push({ ...definition, before, arrows, spaceBefore, spaceAfter, expectedValue: before.values[desired], baselineValue: baseline[0].value })
   }
   async function tab(from, to, shift = false) {
@@ -95,14 +95,16 @@ export async function verifyRadioKeyboard({ probe, section, command, saved, wait
     assert.equal(exact, true, `Native ${shift ? 'Shift+Tab' : 'Tab'} must reach the exact adjacent control`)
     facts.tabs.push({ from, to, shift, exact })
   }
-  const application = checked(groups[0].label), terminal = checked(groups[1].label), close = '.settings-content__close', font = `${pane} input[type="range"]`
+  const application = checked(groups[0].label), terminal = checked(groups[1].label), close = '.settings-content__close'
+  const font = `${pane} input[type="range"]`, numeric = `${pane} input[aria-label="Terminal font size in pixels"]`
   await tab(close, application); await tab(application, close, true)
-  await tab(application, terminal); await tab(terminal, application, true)
-  await tab(terminal, font); await tab(font, terminal, true)
+  await tab(application, font); await tab(font, application, true)
+  await tab(font, numeric); await tab(numeric, font, true)
+  await tab(numeric, terminal); await tab(terminal, numeric, true)
   await activate(cdp, `Array.from(document.querySelectorAll(${JSON.stringify(pane + ' button')})).filter(node=>node.textContent.trim()==='Save appearance')`)
   await saved(probe)
   for (const definition of facts.groups) {
-    const entry = (await command(['settings', 'get', definition.key])).result.entries
+    const entry = (await command(['settings', 'inspect', definition.key])).result.entries
     assert.equal(entry.length, 1); assert.equal(entry[0].value, definition.expectedValue)
   }
   await waitFor('clean appearance after actual radio Save', () => cdp.evaluate(`document.querySelector(${JSON.stringify(pane + ' .settings-pane-actions button')}).disabled`))
@@ -115,7 +117,7 @@ export async function verifyRadioKeyboard({ probe, section, command, saved, wait
   await activate(cdp, `Array.from(document.querySelectorAll(${JSON.stringify(pane + ' button')})).filter(node=>node.textContent.trim()==='Save appearance')`)
   await saved(probe)
   for (const definition of facts.groups) {
-    const entry = (await command(['settings', 'get', definition.key])).result.entries
+    const entry = (await command(['settings', 'inspect', definition.key])).result.entries
     assert.equal(entry.length, 1); assert.equal(entry[0].value, definition.baselineValue)
   }
   facts.restoredThroughUi = true
@@ -147,7 +149,7 @@ export async function verifyRadioKeyboard({ probe, section, command, saved, wait
         assert.equal(frame.outline.width, '2px'); assert.equal(frame.outline.style, 'solid')
         assert.notEqual(frame.outline.color, 'rgba(0, 0, 0, 0)')
         assert.ok(frame.card.left >= 0 && frame.card.right <= width, 'Focused card is inside the viewport')
-        assert.equal(frame.status.height, 32); assert.equal(frame.status.bottom, frame.height)
+        assert.equal(frame.status.height, 24); assert.equal(frame.status.bottom, frame.height)
         assert.equal(frame.points.length, 5); assert.deepEqual(frame.points.map(point=>point.hit), [true,true,true,true,true])
         const { data } = await cdp.call('Page.captureScreenshot'), bytes = Buffer.from(data, 'base64')
         frame.screenshot = `radio-${width}-${appearance}.png`
@@ -178,6 +180,6 @@ export async function verifyRadioKeyboard({ probe, section, command, saved, wait
   assert.equal(facts.frames.length, 6)
   facts.events = await cdp.evaluate('window.__settingsRadioEvents')
   assert.ok(facts.events.length > 0); assert.equal(facts.events.filter(event => !event.trusted).length, 0)
-  assert.equal(facts.groups.length, 2); assert.equal(facts.tabs.length, 6)
+  assert.equal(facts.groups.length, 2); assert.equal(facts.tabs.length, 8)
   return facts
 }

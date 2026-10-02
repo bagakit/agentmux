@@ -9,12 +9,29 @@ import { replaceFontText } from './font.mjs'
 // product API; these modules contain only vocabulary and pure presentation functions.
 export async function preferenceVocabulary(repositoryRoot) {
   const ts = createRequire(import.meta.url)('typescript')
-  const load = async path => {
+  const moduleUrl = async (path, dependencies = {}) => {
     const source = await readFile(join(repositoryRoot, path), 'utf8')
-    const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText
+    let output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText
     assert.ok(output.length > 0)
-    return import(`data:text/javascript;base64,${Buffer.from(output).toString('base64')}`)
+    for (const [specifier, url] of Object.entries(dependencies)) {
+      const parsed = ts.createSourceFile(path, output, ts.ScriptTarget.Latest, true)
+      const imports = parsed.statements.filter(statement => ts.isImportDeclaration(statement) && statement.moduleSpecifier.text === specifier)
+      assert.equal(imports.length, 1, `Exact pure module dependency: ${specifier}`)
+      const literal = imports[0].moduleSpecifier
+      output = output.slice(0, literal.getStart(parsed)) + JSON.stringify(url) + output.slice(literal.end)
+    }
+    return `data:text/javascript;base64,${Buffer.from(output).toString('base64')}`
   }
+  const load = async path => import(await moduleUrl(path))
+  const toolkitVocabulary = await moduleUrl('apps/desktop/src/shared/toolkit-preferences.ts')
+  const scalarSetting = await moduleUrl('apps/desktop/src/main/settings/scalar-setting.ts')
+  const toolkitCatalog = await import(await moduleUrl('apps/desktop/src/main/settings/modules/toolkit.ts', {
+    '../../../shared/toolkit-preferences.js': toolkitVocabulary,
+    '../scalar-setting.js': scalarSetting
+  }))
+  const toolkitEntries = toolkitCatalog.toolkitSettings.map(setting => setting.entry({}))
+  assert.equal(toolkitEntries.length, 2)
+  assert.equal(new Set(toolkitEntries.map(entry => entry.key)).size, toolkitEntries.length)
   const [toolbar, labels, notifications] = await Promise.all([
     load('apps/desktop/src/shared/browser-toolbar.ts'),
     load('apps/desktop/src/renderer/src/lib/browser-toolbar.ts'),
@@ -42,7 +59,7 @@ export async function preferenceVocabulary(repositoryRoot) {
     return { id: text('id'), label: text('label') }
   })
   return { toolbarOrder: toolbar.BROWSER_TOOLBAR_ITEM_ORDER, toolbarLabels: labels.BROWSER_TOOLBAR_ITEM_LABELS,
-    notificationTiers: notifications.NOTIFICATION_TIERS, terminalThemes }
+    notificationTiers: notifications.NOTIFICATION_TIERS, terminalThemes, toolkitEntries }
 }
 
 const nodes = selector => `Array.from(document.querySelectorAll(${JSON.stringify(selector)}))`
@@ -102,14 +119,57 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
   }
   const showToolbar = async () => {
     await showSettings(false)
-    if (!(await probe.cdp.evaluate('Boolean(document.querySelector("[data-surface-tool-dock]"))'))) {
-      await activate(probe.cdp, nodes('[data-surface-tools-toggle][aria-label="Show Space tools"]'))
+    const rendererRequests = () => probe.cdp.evaluate('window.__settingsCliProof.controlRequests')
+    const before = await rendererRequests()
+    assert.deepEqual(before, [], 'Settings data never uses the Renderer Control bridge')
+    const controls = []
+    const observeNavigation = async (previous, payload) => {
+      const current = await rendererRequests()
+      assert.deepEqual(current.slice(0, previous.length), previous)
+      const added = current.slice(previous.length)
+      assert.equal(added.length, 1, 'Exactly one Renderer request belongs to this explicit navigation')
+      const request = added[0]
+      assert.equal(request.operation, 'focus')
+      assert.deepEqual(request.target, payload.result.navigation.requested)
+      assert.equal(request.inputPolicy, payload.result.input.policy)
+      assert.equal(request.requestId, payload.operationId)
+      controls.push({ operation: payload.operation, operationId: payload.operationId, request })
+      return current
     }
-    await activate(probe.cdp, nodes('.surface-tool-activitybar button[aria-label="Browser Tools"]'))
-    await waitFor('actual Browser bar preferences', () => probe.cdp.evaluate('Boolean(document.querySelector(".browser-tools-preferences"))'))
+    const originalTarget = await probe.cdp.evaluate(`(() => {
+      const visible = selector => Array.from(document.querySelectorAll(selector)).filter(node => node.getClientRects().length)
+      return { tabs: visible('.workbench-tab--active[data-workbench-tab-id]').map(node => node.dataset.workbenchTabId),
+        regions: visible('.workbench-region--active[data-workbench-region-id]').map(node => node.dataset.workbenchRegionId) }
+    })()`)
+    assert.equal(originalTarget.tabs.length, 1); assert.equal(originalTarget.regions.length, 1)
+    const navigation = await command(['app', 'focus', '--surface', 'survey', '--input', 'preserve'], [0, 1], undefined, true)
+    assert.equal(navigation.result.navigation.state, 'applied')
+    assert.equal(navigation.result.navigation.selection.surface, 'survey')
+    assert.equal(navigation.result.presentation.state, 'main-visible')
+    const afterNavigation = await observeNavigation(before, navigation)
+    facts.ui.toolbarNavigation = navigation.result
+    await activate(probe.cdp, nodes('button[aria-label="Exploration options"]'))
+    await activate(probe.cdp, nodes('[role="menuitem"][aria-label="Browser management"]'))
+    await waitFor('actual Browser bar preferences', () => probe.cdp.evaluate('Boolean(document.querySelector("#survey-management:not([hidden]) .browser-tools-preferences"))'))
+    if (!(await probe.cdp.evaluate('document.querySelector("#survey-management .browser-tools-preferences details").open'))) {
+      await activate(probe.cdp, nodes('#survey-management summary[aria-label="Browser bar settings"]'))
+    }
     const actual = (await toolbarUI()).items
     assert.deepEqual(actual.map(item => item.label), vocabulary.toolbarOrder.map(name => vocabulary.toolbarLabels[name]))
     assert.ok(actual.length > 0)
+    return async () => {
+      await activate(probe.cdp, nodes('button[aria-label="Close browser management"]'))
+      assert.deepEqual(await rendererRequests(), afterNavigation, 'Toolbar preferences do not dispatch Settings data through Renderer Control')
+      const restored = await command(['space', 'focus', '--tab', originalTarget.tabs[0], '--region', originalTarget.regions[0], '--input', 'target'], [0, 1], undefined, true)
+      assert.equal(restored.result.navigation.state, 'applied')
+      assert.equal(restored.result.navigation.selection.space.tabId, originalTarget.tabs[0])
+      assert.equal(restored.result.navigation.selection.space.regionId, originalTarget.regions[0])
+      facts.ui.toolbarReturn = restored.result
+      await observeNavigation(afterNavigation, restored)
+      assert.deepEqual(controls.map(call => call.operation), ['app.focus', 'space.focus'])
+      facts.ui.toolbarControls ??= []
+      facts.ui.toolbarControls.push(...controls)
+    }
   }
   const saveToolbar = async () => {
     await activate(probe.cdp, `${nodes('.browser-tools-preferences button')}.filter(e=>e.textContent.trim()==='Save Browser bar')`)
@@ -177,7 +237,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
       const bytes = await readFile(configPath), count = await publications()
       const rejected = await command(['settings', 'set', name, 'true'], 1)
       assert.equal(rejected.error.code, 'UNSUPPORTED_SETTING')
-      const unreadable = await command(['settings', 'get', name], 1)
+      const unreadable = await command(['settings', 'inspect', name], 1)
       assert.equal(unreadable.error.code, 'UNSUPPORTED_SETTING')
       assert.deepEqual(await readFile(configPath), bytes); assert.equal(await publications(), count)
     }
@@ -237,7 +297,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     facts.ui.notifications = await notificationUI()
 
     phase('ordinary-toolbar-ui')
-    await showToolbar()
+    const restoreToolbarSpace = await showToolbar()
     for (const entry of toolbarEntries) {
       const name = entry.key.slice('browser.toolbar.'.length)
       await set(entry.key, 'true')
@@ -261,6 +321,7 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     facts.ui.toolbarMatchingSave = { key: first.key, before: matchingDraft, after: await toolbarUI(), configUnchanged: true,
       publicationsBefore: matchingPublications, publicationsAfter: await publications() }
     facts.ui.toolbar = await toolbarUI()
+    await restoreToolbarSpace()
 
     phase('ordinary-rail-ui')
     const rail = await one('projectRailDensity'), nextRail = rail.enum.find(value => value !== rail.value)
@@ -290,9 +351,10 @@ export function preferenceProof({ probe, vocabulary, entries, set, command, conf
     const notification = await notificationUI()
     assert.equal(notification.index, vocabulary.notificationTiers.findIndex(tier => tier.id === facts.restartValues['notifications.mode']))
     assert.equal(notification.sound, facts.restartValues['notifications.sound']); assert.equal(notification.soundDisabled, true)
-    await showToolbar()
+    const restoreToolbarSpace = await showToolbar()
     const actualToolbar = await toolbarUI()
     assert.deepEqual(actualToolbar.items, vocabulary.toolbarOrder.map(name => ({ label: vocabulary.toolbarLabels[name], checked: facts.restartValues[`browser.toolbar.${name}`] })))
+    await restoreToolbarSpace()
     assert.equal(await railUI(), facts.restartValues.projectRailDensity)
     assert.deepEqual(await permissions(), expectedPermissions)
     facts.restored = { values: await allValues(), notification, toolbar: actualToolbar, rail: await railUI() }

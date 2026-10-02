@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { promisify } from 'node:util'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import { agentMuxCliMatch } from '../../../packages/core/dist/agentmux-cli-commands.js'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { activate, click, desktopFixture } from './fixtures/settings-cli/desktop.mjs'
 import { preferenceProof, preferenceVocabulary } from './fixtures/settings-cli/preferences.mjs'
@@ -80,33 +81,59 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     entries.push([require('electron'), digest(await readFile(require('electron')))])
     return { ...Object.fromEntries(entries), ...dependencies }
   }
-  async function command(args, expectedCode = 0, input) {
+  async function command(args, expectedCode = 0, input, expectedOk = expectedCode === 0) {
     const startedAt = Date.now()
     let result
     try {
-      const execution = exec(process.execPath, [cli, ...args], { timeout: 10_000,
-        env: { ...process.env, ...environment, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined } })
+      const execution = exec(process.execPath, [cli, '--endpoint', `unix:${join(runtimeDirectory, 'control.sock')}`, ...args], { timeout: 10_000,
+        env: { ...process.env, ...environment, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } })
       if (input !== undefined) execution.child.stdin.end(input)
       result = { code: 0, ...await execution }
     }
     catch (error) { result = { code: error.code, stdout: error.stdout ?? '', stderr: error.stderr ?? '' } }
-    const payload = JSON.parse(result.code === 0 ? result.stdout : result.stderr)
-    receipt.cli.push({ phase, args, ...(input === undefined ? {} : { input }), code: result.code, receipt: payload,
-      startedAt, elapsedMs: Date.now() - startedAt })
-    assert.equal(result.code, expectedCode, JSON.stringify(payload))
-    assert.equal(payload.ok, expectedCode === 0); assert.equal(typeof payload.requestId, 'string')
+    const captured = { phase, args, ...(input === undefined ? {} : { input }), code: result.code,
+      stdout: result.stdout, stderr: result.stderr, startedAt, elapsedMs: Date.now() - startedAt }
+    receipt.cli.push(captured)
+    const outputs = [result.stdout, result.stderr].map(output => output.trim()).filter(Boolean)
+    assert.equal(outputs.length, 1, 'CLI must return one canonical envelope; raw outputs are preserved')
+    const payload = JSON.parse(outputs[0])
+    captured.receipt = payload
+    const expectedCodes = Array.isArray(expectedCode) ? expectedCode : [expectedCode]
+    assert.ok(expectedCodes.includes(result.code), JSON.stringify(payload))
+    assert.equal(payload.ok, expectedOk)
+    assert.equal(Boolean(result.stdout.trim()), payload.ok, 'Successful and partial replies use stdout; business failures use stderr')
+    assert.equal(payload.operation, agentMuxCliMatch(args)?.command.method ?? null, 'Reply must belong to the actual public command')
+    assert.deepEqual(Object.keys(payload).sort(), [
+      ...(payload.ok ? ['ok', 'operation', 'result'] : ['error', 'ok', 'operation']),
+      ...(payload.operationId === undefined ? [] : ['operationId'])
+    ].sort())
+    if (payload.operationId !== undefined) { assert.equal(typeof payload.operationId, 'string'); assert.ok(payload.operationId.length > 0) }
     return payload
   }
   async function entries(target) {
-    const payload = await command(['settings', 'get', ...(target === undefined ? [] : [target])])
-    assert.equal(payload.operation, 'settings.get'); assert.equal(payload.result.partial, true)
+    const payload = await command(['settings', 'inspect', ...(target === undefined ? [] : [target])])
+    assert.equal(payload.operation, 'settings.inspect'); assert.equal(payload.result.partial, true)
     const result = payload.result.entries
     assert.ok(result.length > 0); assert.equal(new Set(result.map(entry => entry.key)).size, result.length)
-    if (target === undefined) assert.equal(result.length, 14, 'The complete approved scalar slice must remain present')
+    if (target === undefined) {
+      const toolkitKeys = vocabulary.toolkitEntries.map(entry => entry.key)
+      const ordinary = result.filter(entry => !toolkitKeys.includes(entry.key))
+      const additional = result.filter(entry => toolkitKeys.includes(entry.key))
+      assert.equal(ordinary.length, 14, 'The complete approved scalar slice must remain present')
+      assert.equal(result.length, 16, 'The full public catalog also includes its two existing Toolkit preferences')
+      assert.deepEqual(additional.map(entry => entry.key).sort(), [...toolkitKeys].sort())
+      for (const expected of vocabulary.toolkitEntries) {
+        const actual = additional.find(entry => entry.key === expected.key)
+        assert.equal(actual.kind, expected.kind); assert.equal(actual.default, expected.default)
+        assert.deepEqual(actual.enum, expected.enum); assert.equal(typeof actual.value, expected.kind)
+        if (expected.enum) assert.ok(expected.enum.includes(actual.value))
+      }
+      receipt.facts.toolkitCatalog = additional
+    }
     return result
   }
   async function ordinaryEntries(target) {
-    return (await entries(target)).filter(entry => entry.key !== 'browser.agentAutomation')
+    return (await entries(target)).filter(entry => entry.key !== 'browser.agentAutomation' && !vocabulary.toolkitEntries.some(additional => additional.key === entry.key))
   }
   async function settings() {
     const legacy = (await entries()).filter(entry => entry.key === appearanceKey || entry.key === copyKey)
@@ -153,7 +180,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     await probe.cdp.evaluate(`(() => {
       window.__settingsCliProof={configEvents:[],controlRequests:[],keys:[]}
       window.agentmux.config.onChange(config=>window.__settingsCliProof.configEvents.push({app:config.appearance.appAppearance,copy:config.copyPathsAsAbsolute,font:config.appearance.terminalFontSize,automation:config.browser.agentAutomation,schemes:config.browser.appLinkSchemes,notifications:config.notifications,rail:config.projectRailDensity,toolbar:config.browser.toolbar}))
-      window.agentmux.control.onRequest(request=>window.__settingsCliProof.controlRequests.push(request.operation))
+      window.agentmux.control.onRequest(request=>window.__settingsCliProof.controlRequests.push(request))
       document.addEventListener('keydown',event=>window.__settingsCliProof.keys.push({key:event.key,trusted:event.isTrusted}))
       return true
     })()`)
@@ -166,7 +193,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     const servers = lines.flatMap(line => [...line.matchAll(/const ([A-Za-z_$][\w$]*) = new AgentMuxControlServer\(/g)].map(match => match[1]))
     assert.equal(servers.length, 1, 'One actual compiled public Control server owner')
     const point = await probe.main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: found[0] })
-    const pending = command(['settings', 'get', copyKey])
+    const pending = command(['settings', 'inspect', copyKey])
     pending.catch(() => {}) // Always await the original result after removing the owned breakpoint.
     try {
       const paused = await waitFor('Main diagnostics at real settings dispatch', () => probe.main.pauses.shift())
@@ -211,7 +238,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       const panel=document.querySelector('.workbench-region-split > [data-panel]')
       return {activeWorkspaceId:state.activeWorkspaceId,mainSurface:state.mainSurface,
         workbench:state.restoredWorkbench,focus:state.agentFocus,draft:state.agentComposerDrafts[${JSON.stringify(session.agentSessionId)}],
-        tabs:ids('[data-workbench-tab-id]'),regions:ids('[data-workbench-region-id]'),activeRegions:ids('.workbench-region--active[data-workbench-region-id]'),
+        tabs:ids('.workbench-tab[data-workbench-tab-id]'),regions:ids('[data-workbench-region-id]'),activeRegions:ids('.workbench-region--active[data-workbench-region-id]'),
         splitPercent:panel?Number(panel.getAttribute('data-panel-size')):null}
     })()`)
   }
@@ -267,7 +294,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       appearance:{terminalTheme:'graphite',appAppearance:'dark'},copyPathsAsAbsolute:false,notifications:{mode:'off'},
       browser:{agentAutomation:false,appLinkSchemes:browser ? { 'proof-alpha':'deny', 'proof-neighbor':'allow', 'proof-\u0000-key':'deny', '':'deny', '  ':'deny', 'literal:':'deny', '--help':'deny', '--input':'deny', ['__proto__']:'deny', constructor:'allow' } : {privatesettings:'deny'},toolbar:Object.fromEntries(vocabulary.toolbarOrder.map(name=>[name,true]))}}))
     const seed={version:1,state:{activeWorkspaceId:workspaceId,mainSurface:'workbench',
-      agentFocus:{execution:{sessionId:session.agentSessionId,history:[{sessionId:session.agentSessionId,focusedAt:1}]},pmo:{sessionId:null}},
+      agentFocus:{execution:{sessionId:session.agentSessionId,reference:{displayWorkspaceId:workspaceId,groupId,tabId,regionId:agentRegionId},history:[{sessionId:session.agentSessionId,focusedAt:1}]},pmo:{sessionId:null}},
       agentComposerDrafts:{[session.agentSessionId]:'Unsent private draft'},restoredWorkbench:{
         tabs:{[tabId]:{id:tabId,workspaceId,titleRegionId:agentRegionId,
           layout:{root:{type:'split',direction:'horizontal',ratio:0.7,first:{type:'leaf',regionId:agentRegionId},second:{type:'leaf',regionId:fileRegionId}},activeRegionId:agentRegionId},
@@ -393,7 +420,8 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
       receipt.facts.executorRefresh=refreshProof.facts
       await refreshProof.exercise()
     }
-    assert.deepEqual((await ui(first)).controlRequests,[],'Settings never use the Renderer Control bridge')
+    assert.deepEqual(preferences.facts.ui.toolbarControls.map(call=>call.operation),['app.focus','space.focus'])
+    assert.deepEqual((await ui(first)).controlRequests,preferences.facts.ui.toolbarControls.map(call=>call.request),'Only the two exact Toolbar navigation requests use the Renderer Control bridge; Settings data stays in Main')
     const trustedKeys=await first.cdp.evaluate('window.__settingsCliProof.keys')
     assert.ok(trustedKeys.length>0); assert.ok(trustedKeys.every(event=>event.trusted===true))
     receipt.facts.trustedKeys=trustedKeys
@@ -405,6 +433,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     phase='actual-desktop-restart'
     await terminate(first); second=await launch('second')
     await waitFor('restored same split',()=>second.cdp.evaluate(`Boolean(document.querySelector('[data-workbench-region-id="${agentRegionId}"] .composer [role="textbox"]') && document.querySelector('[data-workbench-region-id="${fileRegionId}"]'))`))
+    await observe(second)
     assert.notEqual(first.child.pid,second.child.pid); assert.deepEqual(second.origin,first.origin)
     const restored=await surface(second); assert.deepEqual(restored,beforeRestart,'Exact Tab/group/Region/focus/split/draft restoration')
     assert.deepEqual(await settings(),{[appearanceKey]:'light',[copyKey]:true})
@@ -414,6 +443,8 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     await preferences.verifyRestart(second,browserProof ? {
       automation:browserProof.facts.final.agentAutomation,schemes:browserProof.facts.final.appLinkSchemes
     } : undefined)
+    assert.deepEqual(preferences.facts.ui.toolbarControls.slice(2).map(call=>call.operation),['app.focus','space.focus'])
+    assert.deepEqual((await ui(second)).controlRequests,preferences.facts.ui.toolbarControls.slice(2).map(call=>call.request),'The second Desktop independently observes exactly its two Toolbar navigation requests; Settings data stays in Main')
     if (browserProof) await browserProof.verifyRestart(second)
     if (workspaceProof) await workspaceProof.verifyRestart(second)
     if (hostsProof) await hostsProof.verifyRestart(second)
@@ -432,7 +463,7 @@ export async function verifySettingsCli({ browser = false, workspaces = false, h
     assert.deepEqual(await settings(),{[appearanceKey]:'dark',[copyKey]:false})
     const noViewConfig=JSON.parse(await readFile(configPath,'utf8'))
     assert.equal(noViewConfig.appearance.appAppearance,'dark'); assert.equal(noViewConfig.copyPathsAsAbsolute,false)
-    const noViewInspect=await command(['inspect','--tab',tabId],1)
+    const noViewInspect=await command(['space','inspect','--tab',tabId],1)
     assert.equal(noViewInspect.error.code,'CONTROL_UNAVAILABLE','The unavailable Renderer path must remain unavailable')
     receipt.facts.noView={windows:0,settings:await settings(),rendererControlError:noViewInspect.error.code}
     if (browserProof) await browserProof.verifyNoView()

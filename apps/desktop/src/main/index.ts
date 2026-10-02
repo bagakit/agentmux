@@ -335,7 +335,7 @@ function startPrimaryInstance(): void {
           .filter((element) => element.getClientRects().length > 0)
           .map((element) => element.getAttribute(attribute)).filter(Boolean).sort()
         return {
-          tabIds: ids('[data-workbench-tab-id]', 'data-workbench-tab-id'),
+          tabIds: ids('.workbench-tab[data-workbench-tab-id]', 'data-workbench-tab-id'),
           regionIds: ids('[data-workbench-region-id]', 'data-workbench-region-id'),
           activeRegionIds: ids('.workbench-region--active[data-workbench-region-id]', 'data-workbench-region-id')
         }
