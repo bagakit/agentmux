@@ -1,4 +1,3 @@
-import { fixtureCivil as _hygiene_fixtureCivil } from "../scripts/lib/fixture-values.mjs"
 import { readFile } from 'node:fs/promises'
 import { describe, expect, it } from 'vitest'
 import ts from 'typescript'
@@ -133,7 +132,7 @@ describe('installing must hand over a process running the new bundle', () => {
     const body = functionBody(SOURCE, 'installApplication')
     const calls: ts.CallExpression[] = []
     const visit = (node: ts.Node): void => {
-      if (ts.isCallExpression(node) && node.expression.getText() === 'assertApplicationActivationOwnership') calls.push(node)
+      if (ts.isCallExpression(node) && node.expression.getText() === 'confirmApplicationActivation') calls.push(node)
       ts.forEachChild(node, visit)
     }
     visit(body)
@@ -145,10 +144,32 @@ describe('installing must hand over a process running the new bundle', () => {
     expect(ts.isObjectLiteralExpression(argument)).toBe(true)
     if (!ts.isObjectLiteralExpression(argument)) throw new Error('Actual process facts must bind the activation check')
     const bindings = Object.fromEntries(argument.properties.flatMap(property => ts.isPropertyAssignment(property)
-      ? [[property.name.getText(), property.initializer.getText()]] : []))
+      ? [[property.name.getText(), property.initializer.getText()]]
+      : ts.isShorthandPropertyAssignment(property) ? [[property.name.getText(), property.name.getText()]] : []))
     expect(bindings).toEqual({ previous: 'previousScope.processes.filter(row => running.includes(row.pid))',
-      beforeLaunch: 'launchBaseline.processes', current: 'activatedScope.processes', serving: 'activatedScope.serving',
-      mainPid: 'observed.main.pid' })
+      beforeLaunch: 'launchBaseline.processes', scope: 'activatedScope', main: 'observed.main',
+      intent: 'intent', native: 'native', path: 'destination' })
+    const wrapper = functionBody(SOURCE, 'confirmApplicationActivation')
+    const assertions: ts.CallExpression[] = []
+    const inspect = (node: ts.Node): void => {
+      if (ts.isCallExpression(node) && node.expression.getText() === 'assertApplicationActivationOwnership') assertions.push(node)
+      ts.forEachChild(node, inspect)
+    }
+    inspect(wrapper)
+    expect(assertions).toHaveLength(1)
+    const actual = assertions[0]!.arguments[0]!
+    expect(ts.isObjectLiteralExpression(actual)).toBe(true)
+    if (!ts.isObjectLiteralExpression(actual)) throw new Error('The wrapper must bind the actual current and original process facts')
+    expect(Object.fromEntries(actual.properties.flatMap(property => ts.isPropertyAssignment(property)
+      ? [[property.name.getText(), property.initializer.getText()]]
+      : ts.isShorthandPropertyAssignment(property) ? [[property.name.getText(), property.name.getText()]] : [])))
+      .toEqual({ previous: 'previous', beforeLaunch: 'beforeLaunch', current: 'scope.processes',
+        serving: 'scope.serving', mainPid: 'main.pid', observation: 'scope.ownershipObservation' })
+    expect(ts.isReturnStatement(assertions[0]!.parent)).toBe(true)
+    const guarded = wrapper.statements.find(ts.isTryStatement)
+    expect(guarded?.catchClause).toBeDefined()
+    expect(guarded?.catchClause?.block.statements.some(statement => ts.isThrowStatement(statement) && statement.expression?.getText() === 'error')).toBe(true)
+    expect(guarded?.catchClause?.block.getText()).toContain("error.transaction = { intent, ui: { status: 'unknown'")
   })
 
   it('waits for the previous instance to actually disappear instead of trusting the quit request', () => {
@@ -191,7 +212,7 @@ describe('installing must hand over a process running the new bundle', () => {
       new URL('../../../docs/casestudy/stale-package-feature-disappearance.md', import.meta.url),
       'utf8'
     )
-    const heading = ("## 复发（" + _hygiene_fixtureCivil(9, 1) + "）：磁盘是新的，进程是旧的")
+    const heading = '## 复发：磁盘是新的，进程是旧的'
     const start = caseStudy.indexOf(heading)
     expect(start, `case study 必须有《${heading}》这一节`).toBeGreaterThanOrEqual(0)
     const rest = caseStudy.slice(start + heading.length)
