@@ -85,6 +85,7 @@ window.hostUiState = () => {
     activeWorkspaceId: state.activeWorkspaceId, drafts: state.agentComposerDrafts,
     names: state.launcherNameDrafts, options: state.launcherOptionDrafts,
     warm: state.warmTerminal, focus: state.agentFocus, error: state.error,
+    pendingLaunches: state.pendingAgentLaunches,
     launcherPresentation: useLauncherState.getState(),
     sessions: state.sessions.map(one => ({ id: one.id, kind: one.kind, hostId: one.hostId,
       workspacePath: one.workspacePath, state: one.state, control: one.control, executorId: one.executorId })),
