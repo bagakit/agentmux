@@ -11,7 +11,7 @@ const { configGet, addWorkspace, writeClipboard, listTopics, tree, defaultChildr
     { path: 'packages/core', name: 'core', isDirectory: true, isSymlink: false, ignored: false, depth: 0 },
     { path: 'README.md', name: 'README.md', isDirectory: false, isSymlink: false, ignored: false, depth: 0 }
   ]
-  return { configGet: vi.fn(), addWorkspace: vi.fn(), writeClipboard: vi.fn(), listTopics: vi.fn(), tree: { children: defaultChildren }, defaultChildren }
+  return { configGet: vi.fn(), addWorkspace: vi.fn(), writeClipboard: vi.fn(), listTopics: vi.fn(), tree: { children: defaultChildren, dirCache: { '': { children: defaultChildren } } }, defaultChildren }
 })
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: {
@@ -30,7 +30,7 @@ vi.mock('../src/renderer/src/hooks/useGitStatus.js', () => ({
 vi.mock('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js', () => ({
   flattenFileTree: (children: readonly unknown[]) => children,
   useWorkspaceFileTree: () => ({
-    dirCache: {},
+    dirCache: tree.dirCache,
     rootCache: {
       // 目录节点在前、文件节点在后：flattenFileTree 直通保序，(a) 依赖目录行仍是第一行。
       children: tree.children
@@ -43,6 +43,7 @@ vi.mock('../src/renderer/src/components/file-tree/useWorkspaceFileTree.js', () =
   })
 }))
 
+import * as moveModel from '../src/renderer/src/lib/file-explorer-move.js'
 import { FileExplorer } from '../src/renderer/src/components/FileExplorer.js'
 import { CONFIG_VERSION, type AppConfig, type WorkspaceRecord } from '../src/shared/contracts.js'
 import { useAppStore } from '../src/renderer/src/store.js'
@@ -71,11 +72,61 @@ function config(workspaces: WorkspaceRecord[] = [workspace]): AppConfig {
 afterEach(() => {
   vi.clearAllMocks()
   tree.children = defaultChildren
+  tree.dirCache = { '': { children: defaultChildren } }
+  vi.restoreAllMocks()
   useAppStore.setState(initialStore, true)
   document.body.replaceChildren()
 })
 
 describe('FileExplorer directory context menu', () => {
+  it('keeps 500 actual closed row menus free of target enumeration and opens only the selected item against one current tree index', async () => {
+    tree.children = Array.from({ length: 500 }, (_, i) => ({ ...defaultChildren[1]!,
+      path: i < 100 ? `dir-${i}` : `file-${i}.txt`, name: i < 100 ? `dir-${i}` : `file-${i}.txt`, isDirectory: i < 100 }))
+    tree.dirCache = { '': { children: tree.children } }
+    const targets = vi.spyOn(moveModel, 'fileExplorerMoveTargets'), index = vi.spyOn(moveModel, 'createFileExplorerMoveIndex')
+    const rename = vi.fn(async () => {}), drafts = { original: 'Keep original draft' }, dirty = { original: true }
+    useAppStore.setState({ config: config(), activeWorkspaceId: workspace.id, loading: false,
+      layouts: { [workspace.id]: createWorkspaceLayout('files-group') }, renamePath: rename,
+      agentComposerDrafts: drafts, dirtyDocuments: dirty })
+    const before = useAppStore.getState(), host = document.createElement('div'); document.body.append(host)
+    const root = createRoot(host)
+    try {
+    await act(async () => root.render(<FileExplorer />))
+    expect(host.querySelectorAll('[data-tree-path]')).toHaveLength(500)
+    expect(targets).not.toHaveBeenCalled()
+    expect(index).toHaveBeenCalledTimes(1)
+    await act(async () => root.render(<FileExplorer />))
+    expect(index).toHaveBeenCalledTimes(1)
+    expect(targets).not.toHaveBeenCalled()
+    const row = host.querySelector<HTMLElement>('[data-tree-path="file-100.txt"]')!
+    await act(async () => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2 })))
+    expect(targets.mock.calls.length).toBeGreaterThan(0)
+    expect(targets.mock.calls.every(([, path]) => path === 'file-100.txt')).toBe(true)
+    expect(index).toHaveBeenCalledTimes(1)
+    const trigger = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el => el.textContent?.includes('Move This Item to'))!
+    expect(trigger, 'actual Move submenu must be reachable').toBeDefined()
+    expect(trigger.getAttribute('data-disabled')).toBeNull()
+    await act(async () => { trigger.click() })
+    const destination = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(el => el.textContent === 'dir-0')
+    expect(destination, 'open Move submenu must contain actual indexed destinations').toBeDefined()
+    await act(async () => destination!.click())
+    expect(rename).toHaveBeenCalledExactlyOnceWith('file-100.txt', 'dir-0/file-100.txt', workspace.id)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().tabs).toBe(before.tabs)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+    expect(useAppStore.getState().dirtyDocuments).toBe(dirty)
+    targets.mockClear()
+    tree.dirCache = { ...tree.dirCache, 'dir-0': { children: [{ ...defaultChildren[1]!, path: 'dir-0/file-100.txt' }] } }
+    await act(async () => root.render(<FileExplorer />))
+    expect(index).toHaveBeenCalledTimes(2)
+    expect(targets).not.toHaveBeenCalled()
+    await act(async () => { row.focus(); row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true })) })
+    expect(targets.mock.calls.length, 'Shift+F10 must open the same actual row menu').toBeGreaterThan(0)
+    expect(targets.mock.results.at(-1)!.value.map((target: { path: string }) => target.path)).not.toContain('dir-0')
+    expect(targets.mock.results.at(-1)!.value.length).toBeGreaterThan(0)
+    } finally { await act(async () => root.unmount()) }
+  })
+
   it.each(['topics', 'motes'] as const)('uses the physical %s directory for original copy/terminal/project actions while relative file keys stay unchanged', async kind => {
     const id = 'launcher:physical-' + kind, logical = scratchTopicDirectoryName(id)
     const owner = { ...workspace, id: SCRATCH_WORKSPACE_ID, path: _hygiene_fixturePath("data/scratch") }

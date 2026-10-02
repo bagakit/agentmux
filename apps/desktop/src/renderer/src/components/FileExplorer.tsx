@@ -79,6 +79,7 @@ import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 import { isMacPlatform } from '../lib/host-platform'
 import { createDirectoryProjectInput } from '../lib/open-directory-as-project'
 import {
+  createFileExplorerMoveIndex,
   fileExplorerDropDirectory,
   fileExplorerMoveTargets,
   isFileExplorerMenuKey,
@@ -177,7 +178,7 @@ function FileTreeRow({
   onReveal,
   onViewFile,
   onMove,
-  moveTargets,
+  getMoveTargets,
   canOpenTerminal,
   canMove,
   dropDisabled,
@@ -217,7 +218,7 @@ function FileTreeRow({
   onReveal: () => void
   onViewFile: () => void
   onMove: (directoryPath: string) => void
-  moveTargets: readonly FileExplorerMoveTarget[]
+  getMoveTargets: () => readonly FileExplorerMoveTarget[]
   canOpenTerminal: boolean
   canMove: boolean
   dropDisabled: boolean
@@ -259,7 +260,7 @@ function FileTreeRow({
       isExpanded={expanded}
       isLocal={isLocal}
       selectionSize={selectionSize}
-      moveTargets={moveTargets}
+      getMoveTargets={getMoveTargets}
       onOpenChange={(open) => {
         if (open) onContextMenuOpen()
       }}
@@ -606,6 +607,10 @@ export function FileExplorer({
     [tree.dirCache]
   )
 
+  const moveIndex = useMemo(() => createFileExplorerMoveIndex(
+    rootPath ? [{ path: rootPath, isDirectory: true }, ...loadedTreeNodes] : loadedTreeNodes
+  ), [loadedTreeNodes, rootPath])
+
   function clearHoverExpand(): void {
     const pending = hoverExpandRef.current
     if (pending) window.clearTimeout(pending.timer)
@@ -614,7 +619,7 @@ export function FileExplorer({
 
   function isMoveDropDisabled(directoryPath: string): boolean {
     return !fileExplorerContains(rootPath, directoryPath) || (activeDrag !== null &&
-      planFileExplorerMove(loadedTreeNodes, activeDrag.path, directoryPath).status === 'blocked')
+      planFileExplorerMove(moveIndex, activeDrag.path, directoryPath).status === 'blocked')
   }
 
   async function movePath(sourcePath: string, destinationPath: string): Promise<void> {
@@ -628,7 +633,7 @@ export function FileExplorer({
   }
 
   async function movePathToDirectory(sourcePath: string, directoryPath: string): Promise<void> {
-    const plan = planFileExplorerMove(loadedTreeNodes, sourcePath, directoryPath)
+    const plan = planFileExplorerMove(moveIndex, sourcePath, directoryPath)
     if (plan.status === 'blocked') return
     await movePath(plan.sourcePath, plan.destinationPath)
   }
@@ -650,7 +655,7 @@ export function FileExplorer({
       drag?.kind !== 'file-explorer-path' ||
       activeDragScopeRef.current?.workspaceId !== workspaceId || activeDragScopeRef.current.rootPath !== rootPath ||
       directoryPath === null || !fileExplorerContains(rootPath, directoryPath) ||
-      planFileExplorerMove(loadedTreeNodes, drag.path, directoryPath).status === 'blocked' ||
+      planFileExplorerMove(moveIndex, drag.path, directoryPath).status === 'blocked' ||
       !directoryPath ||
       expanded.has(directoryPath)
     ) {
@@ -1051,8 +1056,8 @@ export function FileExplorer({
               setSelection(createSingleFileExplorerSelection(node.path))
               void movePathToDirectory(node.path, directoryPath).catch(() => {})
             }}
-            moveTargets={canRenameFileExplorerNode(workspaceId, node)
-              ? fileExplorerMoveTargets(rootPath ? [{ path: rootPath, isDirectory: true }, ...loadedTreeNodes] : loadedTreeNodes, node.path).filter(target => fileExplorerContains(rootPath, target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
+            getMoveTargets={() => canRenameFileExplorerNode(workspaceId, node)
+              ? fileExplorerMoveTargets(moveIndex, node.path).filter(target => fileExplorerContains(rootPath, target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
               : []}
             onCollapse={() => setExpanded((current) => {
               const next = new Set(current)
