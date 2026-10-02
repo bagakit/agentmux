@@ -1,10 +1,11 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { expect, it, vi } from 'vitest'
-import { observeAgent, AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
+import { AGENTMUX_AGENT_MESSAGING_GUIDANCE, observeAgent, AgentMuxError, type ContinuousProgressLoop } from '@agentmux/core'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
 const signal = new AbortController().signal
 const loop: ContinuousProgressLoop = { loopId: 'l', hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), intervalMs: 10, prompt: 'next',
-  nextCheckAt: 0, status: 'active', pendingCompletion: { inputByte: 0, id: '["r",1]', operationId: 'same-operation', condition: { expectedRun: { runId: 'r' }, afterSubmissionId: null } } }
+  nextCheckAt: 0, status: 'active', pendingCompletion: { prompt: 'next', agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE,
+    inputByte: 0, id: '["r",1]', operationId: 'same-operation', condition: { expectedRun: { runId: 'r' }, afterSubmissionId: null } } }
 function fixture(state: 'done' | 'working' = 'done', runId = 'r', observedAt = 1) {
   return { observeContinuousProgress: vi.fn(async () => ({ session: {
     kind: 'agent' as const, executorId: 'codex', retiredRuns: [],  createdAt: 1, updatedAt: 1,
@@ -21,7 +22,8 @@ it('passes the original operation and completion condition across the actual inp
   const runtime = fixture(); const active = () => true
   expect(await deliverContinuousProgress(runtime, loop, 'same-operation', active, signal)).toBe('sent')
   expect(runtime.submitPrompt).toHaveBeenCalledWith({ kind: 'agent', agentSessionId: 'a', hostId: 'local', run: { runId: 'r' } },
-    'next', 'same-operation', loop.pendingCompletion!.condition, { completionId: '["r",1]', inputByte: 0, isCurrent: active, signal })
+    'next', 'same-operation', loop.pendingCompletion!.condition, { completionId: '["r",1]', inputByte: 0, isCurrent: active, signal },
+    undefined, undefined, AGENTMUX_AGENT_MESSAGING_GUIDANCE)
   runtime.submitPrompt.mockRejectedValueOnce(new AgentMuxError('changed', 'AGENT_COMPLETION_CHANGED'))
   expect(await deliverContinuousProgress(runtime, loop, 'same-operation', active, signal)).toBe('skipped')
 })
@@ -30,4 +32,12 @@ it('reconciles an unknown operation even when the Agent has already started work
   const runtime = fixture('working')
   expect(await deliverContinuousProgress(runtime, { ...loop, lastOutcome: 'unknown' }, 'same-operation', () => true, signal)).toBe('sent')
   expect(runtime.submitPrompt).toHaveBeenCalledOnce()
+})
+
+it('does not replace missing original content facts with the current configuration', async () => {
+  const runtime = fixture()
+  const { prompt: _, agentMuxNote: __, ...pendingCompletion } = loop.pendingCompletion!
+  await expect(deliverContinuousProgress(runtime, { ...loop, lastOutcome: 'unknown', pendingCompletion },
+    'same-operation', () => true, signal)).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
+  expect(runtime.submitPrompt).not.toHaveBeenCalled()
 })

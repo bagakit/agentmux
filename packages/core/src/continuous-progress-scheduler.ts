@@ -18,7 +18,15 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   prompt: string
   nextCheckAt: number
   status: 'active' | 'paused' | 'stopped'
-  pendingCompletion?: { id: string; operationId: string; condition?: AgentPromptCondition; inputByte?: number }
+  pendingCompletion?: {
+    id: string
+    operationId: string
+    condition?: AgentPromptCondition
+    inputByte?: number
+    /** First-claim content, kept with the operation through unknown delivery and cold resume. */
+    prompt?: string
+    agentMuxNote?: string
+  }
   lastCompletionId?: string
   lastTickId?: string
   lastOutcome?: 'sent' | 'skipped' | 'unknown'
