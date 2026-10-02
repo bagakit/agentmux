@@ -41,12 +41,12 @@ describe('Provider-owned immediate evidence',()=>{
    const start={ordinal:1,type:'event_msg',payload:{type:'task_started',turn_id:'native-turn'}},end={ordinal:2,type:'event_msg',payload:{type:'turn_aborted',turn_id:'native-turn',reason:'interrupted'}}
    const write=async(items:unknown[])=>writeFile(path,items.map(v=>JSON.stringify(v)).join('\n')+'\n')
    await write([head,start]);const before=await readCodexPromptExecutionEvidence(c);expect(before).toMatchObject({state:'working',nativeTurnId:'native-turn'})
-   expect(await verifyCodexPromptExecutionTransport(c)).toBe(true);await write([head,start,end]);const after=await readCodexPromptExecutionEvidence(c)
+   expect(await verifyCodexPromptExecutionTransport(c)).toBe(false);await write([head,start,end]);const after=await readCodexPromptExecutionEvidence(c)
    expect(after).toMatchObject({sourceId:before?.sourceId,state:'ended',endReason:'interrupted',nativeTurnId:'native-turn'});expect(after?.id).not.toBe(before?.id)
    expect(await readCodexPromptExecutionEvidence({...c,nativeHandle:{...c.nativeHandle,sessionId:'different'}})).toBe(null)
    expect(await verifyCodexPromptExecutionTransport({...c,args:['--remote','ws://private.invalid']})).toBe(false)
    await mkdir(join(root,'app-server-control'));await writeFile(join(root,'app-server-control','app-server-control.sock'),'existing')
-   expect(await verifyCodexPromptExecutionTransport(c)).toBe(false);expect(await verifyCodexPromptExecutionTransport({...c,args:['--no-daemon']})).toBe(true)
+   expect(await verifyCodexPromptExecutionTransport(c)).toBe(false);expect(await verifyCodexPromptExecutionTransport({...c,args:['--no-daemon']})).toBe(false)
    const large={type:'response_item',payload:{text:'z'.repeat(600*1024)}}
    await write([head,start,large]);expect(await readCodexPromptExecutionEvidence(c)).toBe(null)
    const context={ordinal:3,type:'turn_context',payload:{turn_id:'native-turn'}}

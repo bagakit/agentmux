@@ -73,6 +73,10 @@ export type AgentProviderHookNormalizationContext = Readonly<{
 }>
 
 export type AgentProviderPromptExecutionContext = {
+  /** Present only for the executing Core Host's local Runtime-owned process. */
+  processId?: number
+  /** Exact Provider source being authorized; diagnostics must bind this source. */
+  nativeSourceId?: string
   args: readonly string[]
   workspacePath: string
   nativeHandle?: Readonly<AgentNativeSessionHandle>

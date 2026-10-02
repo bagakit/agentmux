@@ -387,11 +387,14 @@ export class AgentPromptSubmissionCoordinator {
     }
     const provider = this.deps.providers.get(session.providerId)
     const nativeContext = { args: run.args, workspacePath: session.workspacePath,
+      ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
     if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {
       try {
-        if (provider.verifyPromptExecutionTransport && !await provider.verifyPromptExecutionTransport(nativeContext)) {
+        const transportEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
+        if (provider.verifyPromptExecutionTransport && !await provider.verifyPromptExecutionTransport({ ...nativeContext,
+          ...(transportEvidence ? { nativeSourceId: transportEvidence.sourceId } : {}) })) {
           throw new AgentMuxError('The native input transport can receive unowned pending input.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
         }
         const observation: { context: 'idle' | 'interruptible' | 'unavailable' } = { context: 'unavailable' }
@@ -406,6 +409,9 @@ export class AgentPromptSubmissionCoordinator {
         // A busy native turn must be identified by the Provider's authenticated hook,
         // not by the visible timer or a previous turn's completion.
         const nativeEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
+        if (provider.verifyPromptExecutionTransport && transportEvidence?.sourceId !== nativeEvidence?.sourceId) {
+          throw new AgentMuxError('Native execution source changed during transport authorization.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+        }
         const nativeTurnId = nativeEvidence?.nativeTurnId ?? observed.hookReceipt?.nativeTurnId
         if (context === 'interruptible' && (!nativeTurnId || (provider.readPromptExecutionEvidence
           ? nativeEvidence?.state !== 'working' : observed.hookReceipt?.lifecycleEvent === 'turn-end'))) {
