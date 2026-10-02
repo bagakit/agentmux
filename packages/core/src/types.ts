@@ -660,6 +660,8 @@ export type AgentSessionHistoryPage = {
 export type AgentSessionHistoryPageOptions = {
   cursor?: string
   limit?: number
+  /** Explicitly confirm this healthy Run's current native source; never combines with an earlier cursor. */
+  refreshNativeSource?: boolean
   /** The host supplies its configured Executor invocation, as for create/resume. */
   commandOverride?: string
   args?: readonly string[]

@@ -32,7 +32,7 @@ export async function nativeProcessFiles(processId: number, signal: AbortSignal)
   if (group.exitCode !== 0 || group.stderr || group.stdout.trim() !== String(processId)) {
     throw unavailable('The original Run process group could not be confirmed. Its input remains available.')
   }
-  const output = await observe('lsof', ['-a', '-g', String(processId), '-F0pgftnDi'])
+  const output = await observe('lsof', ['-nP', '-a', '-g', String(processId), '-F0pgftnDi'])
   if (output.exitCode !== 0 || output.stderr || !output.stdout.endsWith('\0\n')) {
     throw unavailable('Open native records could not be fully observed. Refresh can retry; the Run is kept.')
   }
