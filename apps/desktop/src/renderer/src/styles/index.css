@@ -37,6 +37,7 @@
 @import './browser-structured-fields.css';
 @import './browser-task-assets.css';
 @import './agent.css';
+@import './settings-resource-library.css';
 @import '@agentmux/client-ui/styles/interaction.css';
 @import './settings-prompts.css';
 @import './settings-materials.css';

@@ -1,6 +1,7 @@
-import { CheckCircle2, ChevronDown, Info, LoaderCircle, Monitor, Plus, RadioTower, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Monitor, Plus, RadioTower, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
+import { SettingsResourceLibrary } from './SettingsResourceLibrary'
 import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore, type HostCheckState } from '../../store'
 import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
@@ -25,6 +26,14 @@ export function HostSettingsPane({ config, onSave, active }: {
   const hosts = orderedHosts(resource.value)
   const setHosts = (update: (current: HostConfig[]) => HostConfig[]) => resource.setValue((current) =>
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
+  const [selectedId, setSelectedId] = useState<string | null>(() => config.hosts[0]?.id ?? null)
+  const [view, setView] = useState<'library' | 'editor'>('library')
+  const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
+  const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
+  const [returnFocus, setReturnFocus] = useState<{ id: string | null } | null>(null)
+  const [advancedOpen, setAdvancedOpen] = useState<Record<string, boolean>>({})
+  const [devicesOpen, setDevicesOpen] = useState(false)
+  const editor = useRef<HTMLDivElement>(null)
   const [removeRequest, setRemoveRequest] = useState<SshHostConfig | null>(null)
   const saveState = useSettingsSave()
   const { saving } = saveState
@@ -32,6 +41,36 @@ export function HostSettingsPane({ config, onSave, active }: {
   const checks = useAppStore((state) => active ? state.hostChecks : NO_HOST_CHECKS)
   const checkHost = useAppStore((state) => state.checkHost)
   const sessions = useAppStore((state) => active ? state.sessions : NO_SESSIONS)
+
+  useEffect(() => {
+    if (!pendingEdit || pendingEdit.id !== selectedId) return
+    const name = editor.current?.querySelector<HTMLInputElement>('[data-host-name]')
+    const target = name ?? editor.current?.querySelector<HTMLElement>('[data-resource-editor]')
+    if (!target) return
+    target.focus()
+    if (name && pendingEdit.select) name.select()
+    setPendingEdit(null)
+  }, [pendingEdit, selectedId])
+
+  const matches = (id: string) => !filter.query.trim() || filter.snapshot.includes(id)
+  function filterHosts(query: string): void {
+    const normalized = query.trim().toLowerCase()
+    setFilter({ query, snapshot: hosts.filter((host) =>
+      `${host.label} ${host.id} ${host.kind === 'ssh' ? `${host.hostname} ${host.user ?? ''}` : 'local this mac'}`.toLowerCase().includes(normalized)
+    ).map((host) => host.id) })
+  }
+  function selectHost(id: string): void {
+    setSelectedId(id)
+    setView('editor')
+    setPendingEdit({ id, select: false })
+  }
+  function backToLibrary(): void {
+    setView('library')
+    if (selectedId) {
+      if (!matches(selectedId)) setFilter({ query: '', snapshot: [] })
+      setReturnFocus({ id: selectedId })
+    }
+  }
 
   function update(id: string, patch: Partial<SshHostConfig>): void {
     setHosts((current) => current.map((host) => host.id === id && host.kind === 'ssh' ? { ...host, ...patch } : host))
@@ -54,6 +93,10 @@ export function HostSettingsPane({ config, onSave, active }: {
       label: 'Remote host',
       hostname: ''
     }])
+    setSelectedId(id)
+    setView('editor')
+    setFilter({ query: '', snapshot: [] })
+    setPendingEdit({ id, select: true })
   }
 
   async function save(nextHosts = hosts, nextWorkspaces = config.workspaces): Promise<boolean> {
@@ -75,23 +118,41 @@ export function HostSettingsPane({ config, onSave, active }: {
     const nextWorkspaces = config.workspaces.filter((workspace) => workspace.hostId !== target.id)
     if (await save(nextHosts, nextWorkspaces)) {
       setHosts((current) => current.filter((host) => host.id !== target.id))
+      const next = nextHosts[0]?.id ?? null
+      setSelectedId(next)
+      setFilter({ query: '', snapshot: [] })
+      setView('library')
+      setReturnFocus({ id: next })
       setRemoveRequest(null)
     }
   }
 
   return (
-    <div className="settings-pane-stack">
+    <div className="settings-pane-stack settings-resource-workbench" data-resource-view={view}>
       <div className="settings-pane-toolbar">
-        <span className="settings-resource-count">{hosts.length} {hosts.length === 1 ? 'host' : 'hosts'}</span>
-        <button className="small-button" onClick={addHost}><Plus size={13} /> Add SSH host</button>
+        <span className="settings-resource-count">{filter.query.trim() ? `${hosts.filter((host) => matches(host.id)).length} of ` : ''}{hosts.length} {hosts.length === 1 ? 'connection' : 'connections'}</span>
+        <button className="small-button" disabled={saving} onClick={addHost}><Plus size={13} /> Add SSH host</button>
       </div>
-      <div className="host-settings-list">
-        {hosts.map((host) => {
+      <div className="settings-resource-split">
+        <SettingsResourceLibrary label="Hosts" selectedId={selectedId} query={filter.query} onQuery={filterHosts} onSelect={selectHost} focusRequest={returnFocus}
+          items={hosts.filter((host) => matches(host.id)).map((host) => {
+            const check = currentHostCheck(checks[host.id], host)
+            const workspaces = config.workspaces.filter((workspace) => workspace.hostId === host.id).length
+            return {
+              id: host.id, name: host.label,
+              detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local · This Mac'}${workspaces ? ` · ${workspaces} ${workspaces === 1 ? 'project' : 'projects'}` : ''}`,
+              mark: host.kind === 'ssh' ? <RadioTower size={18} /> : <Monitor size={18} />,
+              status: <span className={`settings-resource-row__check check-pill--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check?.state === 'ready' ? <CheckCircle2 size={13} /> : <Info size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
+            }
+          })} />
+        <div ref={editor} className="settings-resource-editor">
+          <button type="button" className="settings-resource-back small-button" onClick={backToLibrary}><ArrowLeft size={14} /> All connections</button>
+        {hosts.filter((host) => host.id === selectedId).map((host) => {
           const check = currentHostCheck(checks[host.id], host)
           const sessionCount = sessions.filter((session) => session.hostId === host.id).length
           return (
-            <section className="host-settings-card" key={host.id}>
-              <header>
+            <section className="host-settings-card" key={host.id} data-resource-editor={host.id} tabIndex={-1}>
+              <header className="settings-resource-editor__header">
                 <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
                 <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'This Mac'}</small></div>
                 {check ? (
@@ -102,7 +163,7 @@ export function HostSettingsPane({ config, onSave, active }: {
                   </span>
                 ) : null}
                 <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>
-                {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
+                {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
               </header>
               {check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
                 <details className="host-check-details">
@@ -113,17 +174,24 @@ export function HostSettingsPane({ config, onSave, active }: {
               {host.kind === 'ssh' ? (
                 <HostConnectionFields
                   host={host}
+                  open={advancedOpen[host.id] ?? false}
+                  onOpenChange={(open) => setAdvancedOpen((current) => current[host.id] === open ? current : { ...current, [host.id]: open })}
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : null}
-              {sessionCount > 0 ? <p className="field-hint">{sessionCount} running session{sessionCount === 1 ? '' : 's'} must be stopped before this host can be changed or removed.</p> : null}
+              ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this Mac’s installed agents and registered projects. No SSH configuration needed.</p></div>}
+              {sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
         })}
+          {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty"><RadioTower size={28} aria-hidden="true" /><strong>Connect your environments</strong><p>Choose a connection, or add an SSH host to reuse across your projects.</p></div> : null}
+        </div>
       </div>
+      <details className="settings-device-access" open={devicesOpen} onToggle={(event) => setDevicesOpen(event.currentTarget.open)}>
+        <summary><span><strong>Device access</strong><small>Devices authorized to access this Mac</small></span><ChevronDown size={14} /></summary>
+        <div className="settings-device-access__content"><DeviceManagementSettings active={active && devicesOpen} /></div>
+      </details>
       <SettingsSaveBar save={saveState} dirty={dirty} label="Save hosts" onSave={() => void save()} />
-      <DeviceManagementSettings active={active} />
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove SSH host?"
@@ -140,27 +208,32 @@ export function HostSettingsPane({ config, onSave, active }: {
   )
 }
 
-function HostConnectionFields({ host, onChange, onClear }: {
+function HostConnectionFields({ host, open, onOpenChange, onChange, onClear }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
   host: SshHostConfig
   onChange: (patch: Partial<SshHostConfig>) => void
   onClear: (field: 'user' | 'port' | 'identityFile' | 'remoteCommand' | 'remoteSocketPath') => void
 }) {
-  // The keyed Host card owns this component's lifetime; field and check updates keep its choice.
-  const [open, setOpen] = useState(() => !host.hostname)
   return (
-    <details className="host-edit-disclosure" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
-      <summary>Edit connection <ChevronDown size={13} /></summary>
-      <div className="host-edit-grid">
-        <label><span>Label</span><input value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
-        <label><span>Hostname</span><input value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="dev.example.com" /></label>
-        <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="optional" /></label>
-        <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="22" /></label>
+    <div className="host-connection-fields">
+      <div className="host-edit-grid host-edit-grid--basic">
+        <label><span>Name</span><input data-host-name value={host.label} onChange={(event) => onChange({ label: event.target.value })} /></label>
+        <label><span>Host or SSH alias</span><input value={host.hostname} onChange={(event) => onChange({ hostname: event.target.value })} placeholder="devbox or dev.example.com" /></label>
+      </div>
+      <p className="settings-group-note">Use an alias from your SSH config, or a hostname. Connects to an existing AgentMux service; Test verifies this connection.</p>
+      <details className="host-edit-disclosure" open={open} onToggle={(event) => onOpenChange(event.currentTarget.open)}>
+        <summary><span><strong>Connection options</strong><small>User, key, and service overrides</small></span><ChevronDown size={13} /></summary>
+        <div className="host-edit-grid">
+        <label><span>User</span><input value={host.user ?? ''} onChange={(event) => event.target.value ? onChange({ user: event.target.value }) : onClear('user')} placeholder="From SSH config" /></label>
+        <label><span>Port</span><input type="number" min={1} max={65535} value={host.port ?? ''} onChange={(event) => event.target.value ? onChange({ port: Number(event.target.value) }) : onClear('port')} placeholder="From SSH config" /></label>
         <label className="host-edit-grid__wide"><span>Identity file path <small>optional; key contents are never stored</small></span><input value={host.identityFile ?? ''} onChange={(event) => event.target.value ? onChange({ identityFile: event.target.value }) : onClear('identityFile')} placeholder="~/.ssh/id_ed25519" /></label>
         <label className="host-edit-grid__wide"><span>Service command <small>optional</small></span><input value={host.remoteCommand ?? ''} onChange={(event) => event.target.value ? onChange({ remoteCommand: event.target.value }) : onClear('remoteCommand')} placeholder="Use the installed AgentMux service" /></label>
         <label className="host-edit-grid__wide"><span>Service socket path <small>optional; remote absolute path</small></span><input value={host.remoteSocketPath ?? ''} onChange={(event) => event.target.value ? onChange({ remoteSocketPath: event.target.value }) : onClear('remoteSocketPath')} placeholder="Use the service's default socket" /></label>
         <label className="host-edit-grid__wide"><span>Bound Runtime ID</span><input value={host.runtimeId ?? ''} readOnly placeholder="Confirmed on the first trusted connection" /></label>
         <p className="field-hint host-edit-grid__wide">Connects to an existing service over SSH. Changing this connection keeps its Runtime binding; a different Runtime must be added as a separate host.</p>
-      </div>
-    </details>
+        </div>
+      </details>
+    </div>
   )
 }

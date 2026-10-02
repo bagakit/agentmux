@@ -26,7 +26,7 @@ export const agentsSettingsModule = {
     const count = Object.keys(config.executors).length
     return `${count} ${count === 1 ? 'executor' : 'executors'}`
   },
-  Pane({ config, active, executorId }) {
-    return <AgentSettingsPane config={config} onSave={saveExecutors} executorId={active ? executorId : undefined} />
+  Pane({ config, active, executorId, navigationRequest }) {
+    return <AgentSettingsPane config={config} onSave={saveExecutors} active={active} executorId={executorId} navigationRequest={navigationRequest} />
   }
 } as const satisfies SettingsModule
