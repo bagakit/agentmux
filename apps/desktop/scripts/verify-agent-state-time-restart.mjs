@@ -23,8 +23,8 @@ const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-state-time-"))
 const userData=join(root,'user-data'), privateHome=join(root,'home'), runtimeDirectory=join(root,'runtime')
 const workspacePath=join(root,'workspace'), codexHome=join(privateHome,'codex')
 const workspaceId='private-state-time', workspaceName='Private state time'
-const fixtureEnvironment={AGENTMUX_DESKTOP_USER_DATA:userData,AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:join(userData,'messages.ndjson'),CODEX_HOME:codexHome}
-const initialEnvironment=new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
+const fixtureEnvironment={AGENTMUX_DESKTOP_USER_DATA:userData,AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_SPATIAL_STATE_STORE:join(runtimeDirectory,'state','spatial-state.json'),AGENTMUX_MESSAGE_QUEUE_PATH:join(userData,'messages.ndjson'),CODEX_HOME:codexHome}
+const initialEnvironment=new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY','AGENTMUX_SPATIAL_STATE_STORE','AGENTMUX_MESSAGE_QUEUE_PATH','CODEX_HOME'].map(name=>[name,process.env[name]]))
 const children=new Set(),childIdentities=new Map(),connections=new Set(),runIdentities=new Map(),sessions=new Map()
 const deadline=Date.now()+180_000
 const receipt={schema:'agentmux.agent-state-time-restart.v1',completeGate:false,syntheticProducer:true,executedSlices:[],cleanup:{}}
@@ -196,9 +196,27 @@ async function inspectedTab(tabId) {
   return reply.presentation.tab
 }
 
+/** @returns {Promise<import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState>} */
+async function spatialState() {
+  const reply = await control('space.state', {})
+  assert.ok(reply.state, 'The complete original Core spatial document must be available')
+  return reply.state
+}
+
 async function uiSnapshot(cdp) {return cdp.evaluate('window.agentmux.sessions.snapshot()')}
+/**
+ * @param {import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState} spatial
+ * @param {string} agentSessionId
+ */
+function regionForAgent(spatial, agentSessionId) {
+  const matches = spatial.graph.regions.filter(region => region.kind === 'agent' && region.agentSessionId === agentSessionId)
+  assert.ok(matches.length <= 1, 'The original fixture Agent must identify at most one exact Region; no first-location guess')
+  return matches[0] ?? null
+}
+
 async function durableLayout(cdp) {
-  return cdp.evaluate(`(()=>{const raw=localStorage.getItem('agentmux-workbench-v1');if(!raw)return null;const s=JSON.parse(raw).state;return {workbench:s.restoredWorkbench,activeWorkspaceId:s.activeWorkspaceId,focus:s.agentFocus}})()`)
+  const ui = await cdp.evaluate(`(()=>{const raw=localStorage.getItem('agentmux-workbench-v1');if(!raw)return null;const s=JSON.parse(raw).state;return {activeWorkspaceId:s.activeWorkspaceId,focus:s.agentFocus}})()`)
+  return { ...ui, workbench: await spatialState() }
 }
 async function actualGeometry(cdp) {
   const value=await cdp.evaluate(`(()=>Array.from(document.querySelectorAll('[data-workbench-region-id]')).filter(e=>e.getClientRects().length).map(e=>{const r=e.getBoundingClientRect();return {id:e.dataset.workbenchRegionId,x:r.x,y:r.y,width:r.width,height:r.height}}).sort((a,b)=>a.id.localeCompare(b.id)))()`)
@@ -237,7 +255,7 @@ async function sameRuns(cdp) {
 try {
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true}),mkdir(privateHome,{recursive:true})])
   receipt.identityBefore=await identity();receipt.sourceCommit=(await exec('git',['rev-parse','HEAD'],{cwd:repositoryRoot})).stdout.trim()
-  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_SPATIAL_STATE_STORE:join(runtimeDirectory,'state','spatial-state.json'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
   const executable=join(root,'private-cat.sh')
   await writeFile(executable,`#!/bin/sh\numask 077\nprintf '{"url":"%s","token":"%s","agentSessionId":"%s"}\\n' "$AGENTMUX_HOOK_URL" "$AGENTMUX_HOOK_TOKEN" "$AGENTMUX_AGENT_SESSION_ID" > '${root}/binding-'"$AGENTMUX_AGENT_SESSION_ID".json\nstty -echo -icanon\nprintf 'Private state time cat ready\\n'\nexec /bin/cat\n`,{mode:0o700})
   receipt.fixture={executableSha256:digest(await readFile(executable)),syntheticPty:true,syntheticNativeHook:true}
@@ -260,7 +278,7 @@ try {
   // Session through the actual Activity row, then use its real durable Region identity.
   await openActivity(first.cdp)
   await click(first.cdp,`${selectors('.project-activity-menu__item')}.filter(e=>e.querySelector('strong')?.textContent.startsWith('Known clock'))`)
-  const opened=await waitFor('real Activity navigation opens exact Session',async()=>{const value=await durableLayout(first.cdp);return Object.values(value?.workbench?.tabs??{}).flatMap(t=>Object.values(t.regions)).find(r=>r.kind==='agent'&&r.sessionId===known.agentSessionId)})
+  const opened=await waitFor('real Activity navigation opens exact Session',async()=>{const value=await durableLayout(first.cdp);return regionForAgent(value.workbench,known.agentSessionId)})
   const region=await inspectedRegion(opened.regionId);assert.equal(region.agentSessionId,known.agentSessionId)
   const split=await control('agent.open',{content:{kind:'agent-session',agentSessionId:unknown.agentSessionId},destination:{regionId:region.regionId,split:'right'},focus:true})
   assert.equal(split.outcome,'opened');assert.ok(split.to);assert.equal(split.agent.agentSessionId,unknown.agentSessionId)
@@ -292,7 +310,7 @@ try {
   receipt.firstUi={beforeMenuGeometry,working,repeated,repeatedUi,waiting,repeatedWaiting,waitingUi,unknownUi:activity.rows.find(r=>r.label.startsWith('Unknown clock'))}
   await first.cdp.call('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
   await first.cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27})
-  const layout=await waitFor('ordinary durable split/focus',async()=>{const s=await durableLayout(first.cdp);const tabs=Object.values(s?.workbench?.tabs??{});return tabs.length===1&&Object.values(tabs[0].regions).length===2&&tabs[0].layout.activeRegionId===region.regionId?s:null})
+  const layout=await waitFor('ordinary durable split/focus',async()=>{const s=await durableLayout(first.cdp);const graph=s.workbench.graph;return graph.tabs.length===1&&graph.tabs[0].regionIds.length===2&&graph.tabLayouts[graph.tabs[0].tabId].activeRegionId===region.regionId?s:null})
   receipt.layoutBefore=layout;receipt.firstExit=await normalQuit(first)
   second=await launch('second');phase='normal-restart'
   const snapshot=await sameRuns(second.cdp),persisted=await waitFor('same normal durable workbench',()=>durableLayout(second.cdp))
@@ -304,7 +322,7 @@ try {
   assert.deepEqual(restoredGeometry,beforeMenuGeometry,'Actual restored Region identities and geometry must match')
   const activeRegions=await second.cdp.evaluate(`${selectors('.workbench-region--active[data-workbench-region-id]')}.map(e=>e.dataset.workbenchRegionId)`)
   assert.deepEqual(activeRegions,[region.regionId],'Actual UI focus must restore before any focus operation')
-  const restoredTab=await inspectedTab(Object.values(layout.workbench.tabs)[0].id)
+  const restoredTab=await inspectedTab(layout.workbench.graph.tabs[0].tabId)
   assert.deepEqual(restoredTab.regions.map(r=>({id:r.regionId,kind:r.kind,session:r.agentSessionId})).sort((a,b)=>a.id.localeCompare(b.id)),
     [{id:region.regionId,kind:'agent',session:known.agentSessionId},{id:split.to.regionId,kind:'agent',session:unknown.agentSessionId}].sort((a,b)=>a.id.localeCompare(b.id)))
   const restartUi=await openActivity(second.cdp);verifyAge(restartUi,'Known clock','waiting',waiting.stateEnteredAt)

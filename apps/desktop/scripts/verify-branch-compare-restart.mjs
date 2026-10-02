@@ -28,10 +28,10 @@ const children = new Set(), connections = new Set()
 const deadline = Date.now() + 240_000
 const receipt = { schema: 'agentmux.branch-compare-restart.v1', completeGate: false, executedSlices: [], cleanup: {} }
 let phase = 'prepare', failure, first, second, client, session, runIdentity
-const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'CODEX_HOME'].map(name => [name, process.env[name]]))
+const initialEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_SPATIAL_STATE_STORE', 'CODEX_HOME'].map(name => [name, process.env[name]]))
 const dirtyContent = 'Unsaved Monaco body must survive branch comparison and normal restart\n'
 const fixtureEnvironment = { AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
-  AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), CODEX_HOME: codexHome }
+  AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'private-messages.ndjson'), AGENTMUX_SPATIAL_STATE_STORE: join(runtimeDirectory, 'state', 'spatial-state.json'), CODEX_HOME: codexHome }
 const gitEnv = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null', GIT_TERMINAL_PROMPT: '0', GIT_OPTIONAL_LOCKS: '0' }
 async function git(...args) { return (await exec('git', ['-C', workspacePath, ...args], { env: gitEnv, timeout: 20_000, maxBuffer: 2 * 1024 * 1024 })).stdout }
 async function waitFor(label, read, budget = 25_000) {
@@ -154,7 +154,47 @@ async function select(cdp, label, value) {
   const result = await cdp.evaluate(`(() => { const e = document.querySelector('select[aria-label=${JSON.stringify(label)}]'); if (!e || !Array.from(e.options).some(o => o.value === ${JSON.stringify(value)})) return false; Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(e, ${JSON.stringify(value)}); e.dispatchEvent(new Event('change',{bubbles:true})); return true })()`)
   assert.equal(result, true, `Actual selection ${label}/${value}`)
 }
-async function state(cdp) { return cdp.evaluate(`(() => { const raw = localStorage.getItem('agentmux-workbench-v1'); if (!raw) return null; const s = JSON.parse(raw).state; return {workbench:s.restoredWorkbench,documents:s.documents,dirtyDocuments:s.dirtyDocuments,activeWorkspaceId:s.activeWorkspaceId} })()`) }
+/** @returns {Promise<import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState>} */
+async function spatialState() {
+  const reply = await control('space.state', {})
+  assert.ok(reply.state, 'The complete original Core spatial document must be available')
+  return reply.state
+}
+
+async function state(cdp) {
+  const ui = await cdp.evaluate(`(() => { const raw = localStorage.getItem('agentmux-workbench-v1'); if (!raw) return null; const s = JSON.parse(raw).state; return {documents:s.documents,dirtyDocuments:s.dirtyDocuments,activeWorkspaceId:s.activeWorkspaceId} })()`)
+  return { ...ui, workbench: await spatialState() }
+}
+
+// Observe original facts and host resource metadata separately, never rebuild a legacy Tab.
+/** @param {{workbench:import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState}} value */
+function spatialEntries(value) {
+  const graph = value.workbench.graph
+  return graph.regions.map(surface => {
+    const tab = graph.tabs.find(tab => tab.tabId === surface.tabId)
+    const resource = graph.resources['region:' + surface.regionId]
+    assert.ok(tab && resource && typeof resource === 'object' && !Array.isArray(resource), 'The exact original Tab and host Region resource must be available')
+    return { tab, surface, resource }
+  })
+}
+
+/**
+ * @param {import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState} current
+ * @param {import('../../../packages/core/dist/spatial-state.js').AgentMuxSpatialState} original
+ * @param {string} tabId
+ */
+function assertSameTabFacts(current, original, tabId) {
+  assert.deepEqual(current.graph.tabs.find(tab => tab.tabId === tabId), original.graph.tabs.find(tab => tab.tabId === tabId))
+  assert.deepEqual(current.graph.tabLayouts[tabId], original.graph.tabLayouts[tabId])
+  assert.deepEqual(current.graph.resources['tab:' + tabId], original.graph.resources['tab:' + tabId])
+  const originalRegions = original.graph.regions.filter(region => region.tabId === tabId)
+  assert.equal(current.graph.regions.filter(region => region.tabId === tabId).length, originalRegions.length)
+  for (const region of originalRegions) {
+    assert.deepEqual(current.graph.regions.find(next => next.regionId === region.regionId), region)
+    assert.deepEqual(current.graph.resources['region:' + region.regionId], original.graph.resources['region:' + region.regionId])
+  }
+}
+
 async function agentIds(cdp) { return cdp.evaluate('(async () => (await window.agentmux.sessions.snapshot()).sessions.filter(s => s.kind === "agent").map(s => s.id).sort())()') }
 async function compare(cdp, mode, expectedTargetOid = receipt.fixture.targetOid) {
   await select(cdp, 'Base branch A', 'base-A'); await select(cdp, 'Target branch B', 'target-B'); await select(cdp, 'Comparison mode', mode)
@@ -165,8 +205,8 @@ async function compare(cdp, mode, expectedTargetOid = receipt.fixture.targetOid)
   await click(cdp, `${selectors('.branch-comparison__file')}.filter(e => e.title === 'shared.txt')`)
   return await waitFor(`${mode} durable actual result`, async () => {
     const s = await state(cdp); if (!s) return null
-    const surfaces = Object.values(s.workbench.tabs).flatMap(tab => Object.values(tab.regions).map(surface => ({tab,surface})))
-    return surfaces.find(({surface}) => surface.kind === 'git-diff' && surface.comparison.snapshot.mode === mode && surface.comparison.snapshot.targetOid === expectedTargetOid && surface.comparison.file.path === 'shared.txt')
+    const surfaces = spatialEntries(s)
+    return surfaces.find(({surface,resource}) => surface.kind === 'git-diff' && resource.comparison.snapshot.mode === mode && resource.comparison.snapshot.targetOid === expectedTargetOid && resource.comparison.file.path === 'shared.txt')
   })
 }
 async function monaco(cdp, original, modified, regionId) {
@@ -199,13 +239,13 @@ async function inspectedTab(tabId) {
 
 async function inspectView(opened) {
   const { tab, surface } = opened
-  assert.ok(tab.id.length <= 512 && surface.regionId.length <= 512)
-  const inspected = await inspectedTab(tab.id)
+  assert.ok(tab.tabId.length <= 512 && surface.regionId.length <= 512)
+  const inspected = await inspectedTab(tab.tabId)
   assert.ok(inspected.regions.length > 0)
   assert.equal(inspected.regions.find(region => region.regionId === surface.regionId)?.kind, 'view')
   const region = await inspectedRegion(surface.regionId); assert.equal(region.kind,'view')
   await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:surface.regionId}})
-  return {tabId:tab.id,regionId:surface.regionId,inspection:inspected}
+  return {tabId:tab.tabId,regionId:surface.regionId,inspection:inspected}
 }
 async function normalQuit(probe) {
   phase = 'normal-quit'
@@ -224,8 +264,8 @@ async function key(cdp, key, code, modifiers = 0) {
   await cdp.call('Input.dispatchKeyEvent',{type:'keyUp',key,code,modifiers,windowsVirtualKeyCode})
 }
 function focusedAt(s, opened) {
-  const layout=s?.workbench?.layouts[workspaceId], tab=s?.workbench?.tabs[opened.tab.id]
-  return layout && layout.groups.find(group=>group.id===layout.activeGroupId)?.activeTabId===opened.tab.id && tab?.layout.activeRegionId===opened.surface.regionId
+  const graph=s?.workbench?.graph,layout=graph?.layouts[workspaceId],tabLayout=graph?.tabLayouts[opened.tab.tabId]
+  return layout && layout.groups.find(group=>group.id===layout.activeGroupId)?.activeTabId===opened.tab.tabId && tabLayout?.activeRegionId===opened.surface.regionId
 }
 async function settleFocused(cdp,opened) {
   return waitFor('actual persisted focused view',async()=>{const s=await state(cdp);return focusedAt(s,opened)?s:null})
@@ -242,7 +282,7 @@ async function dirtyFile(cdp) {
   const saved=await waitFor('actual dirty document persisted',async()=>{
     const s=await state(cdp);if(!s)return null
     const record=Object.entries(s.documents).find(([id,document])=>document.path==='shared.txt'&&document.content===dirtyContent&&s.dirtyDocuments[id])
-    const opened=Object.values(s.workbench.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='file'&&x.surface.workspaceId===workspaceId&&x.surface.path==='shared.txt')
+    const opened=spatialEntries(s).find(x=>x.surface.kind==='file'&&x.tab.workspaceId===workspaceId&&x.resource.path==='shared.txt')
     return record&&opened?{record,opened}:null
   })
   assert.equal(await cdp.evaluate('window.__agentmuxFileEditingProbe.value()'),dirtyContent)
@@ -257,24 +297,24 @@ async function splitAndGroup(cdp,opened) {
   await click(cdp,selectors(`[data-pane-group-id="${group}"] [aria-label="Split current tab to the right"]`))
   // A blank launcher is deliberately transient outside a Topic. Fill the actual newly split
   // Region with the already healthy fixture Session using the existing public Control operation.
-  const live=await inspectedTab(opened.tab.id)
+  const live=await inspectedTab(opened.tab.tabId)
   assert.equal(live.regions.length,2)
   const launcher=live.regions.find(region=>region.kind==='launcher');assert.ok(launcher)
   const openedAgent=await control('agent.open',{content:{kind:'agent-session',agentSessionId:session.agentSessionId},destination:{regionId:launcher.regionId},focus:true})
   assert.equal(openedAgent.outcome,'opened');assert.ok(openedAgent.to);assert.equal(openedAgent.agent.agentSessionId,session.agentSessionId)
-  const mixed=await inspectedTab(opened.tab.id);assert.deepEqual(mixed.regions.map(region=>region.kind),['view','agent'])
+  const mixed=await inspectedTab(opened.tab.tabId);assert.deepEqual(mixed.regions.map(region=>region.kind),['view','agent'])
   receipt.mixedViewAgent=mixed
-  await waitFor('real split topology',async()=>{const s=await state(cdp);const tab=s?.workbench.tabs[opened.tab.id];return tab?.layout.root.type==='split'&&Object.keys(tab.regions).length===2?tab:null})
+  await waitFor('real split topology',async()=>{const s=await state(cdp);const graph=s.workbench.graph,tab=graph.tabs.find(tab=>tab.tabId===opened.tab.tabId);return graph.tabLayouts[opened.tab.tabId]?.root.type==='split'&&tab?.regionIds.length===2?tab:null})
   await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.surface.regionId}})
   const focused=await cdp.evaluate(`(() => { const handle=document.querySelector('[data-workbench-region-id="${opened.surface.regionId}"]').closest('.workbench-region-split').querySelector('.workbench-region-resize-handle');handle.focus();return document.activeElement===handle })()`)
   assert.equal(focused,true);await key(cdp,'ArrowLeft','ArrowLeft')
-  await waitFor('actual split ratio committed',async()=>{const s=await state(cdp);return Math.abs(s.workbench.tabs[opened.tab.id].layout.root.ratio-0.4)<0.001})
-  await click(cdp,selectors(`[data-workbench-tab-id="${opened.tab.id}"]`),'right')
+  await waitFor('actual split ratio committed',async()=>{const s=await state(cdp);const root=s.workbench.graph.tabLayouts[opened.tab.tabId].root;return root.type==='split'&&Math.abs(root.ratio-0.4)<0.001})
+  await click(cdp,selectors(`[data-workbench-tab-id="${opened.tab.tabId}"]`),'right')
   const trigger=await waitFor('actual group submenu',()=>cdp.evaluate(`(() => { const items=${selectors('[role="menuitem"]')}.filter(e=>e.textContent.includes('Move Tab to New Group'));if(items.length!==1)return null;items[0].focus();return document.activeElement===items[0] })()`))
   assert.equal(trigger,true);await key(cdp,'ArrowRight','ArrowRight')
   await click(cdp,`${selectors('[role="menuitem"]')}.filter(e=>e.textContent==='New Group Right')`)
-  const grouped=await waitFor('actual second group persisted',async()=>{const s=await state(cdp);return s.workbench.layouts[workspaceId].groups.length===2?s:null})
-  assert.equal(grouped.workbench.layouts[workspaceId].root.type,'split')
+  const grouped=await waitFor('actual second group persisted',async()=>{const s=await state(cdp);return s.workbench.graph.layouts[workspaceId].groups.length===2?s:null})
+  assert.equal(grouped.workbench.graph.layouts[workspaceId].root.type,'split')
   await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:opened.surface.regionId}});await settleFocused(cdp,opened)
   return geometry(cdp,opened)
 }
@@ -321,7 +361,7 @@ try {
   receipt.fixture={ancestor,baseOid,targetOid,nextOid,longPath}; receipt.gitBeforeAgentSetup=await gitFacts()
   const executable=join(root,'private-cat.sh')
   await writeFile(executable,'#!/bin/sh\numask 077\nstty -echo -icanon\nprintf "Private branch isolation cat ready\\n"\nexec /bin/cat\n',{mode:0o700})
-  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
+  Object.assign(process.env,{AGENTMUX_RUNTIME_DIRECTORY:runtimeDirectory, AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),AGENTMUX_SPATIAL_STATE_STORE:join(runtimeDirectory,'state','spatial-state.json'),AGENTMUX_MESSAGE_QUEUE_PATH:fixtureEnvironment.AGENTMUX_MESSAGE_QUEUE_PATH,CODEX_HOME:codexHome})
   client=await connectLocalAgentMux({store:new AgentMuxFileAgentSessionStore(join(userData,'agent-sessions.json'))})
   session=await client.createAgent({createOperationId:randomUUID(),executorId:'probe',providerId:'codex',commandOverride:executable,workspacePath,env:{CODEX_HOME:codexHome},injectAgentMuxGuide:false,cols:100,rows:30})
   const originalRun=(await client.listRuns()).find(run=>run.runId===session.run.runId);assert.equal(originalRun?.state,'running');assert.ok(Number.isFinite(originalRun.acceptedInputBytes));runIdentity=await processIdentity(originalRun.pid);assert.ok(runIdentity?.group>1)
@@ -336,19 +376,19 @@ try {
   await click(first.cdp,selectors('[aria-label="Compare two local branches"]'))
   const beforeAgents=await agentIds(first.cdp)
   assert.deepEqual(beforeAgents,[session.agentSessionId]);await sameHealthyRun(first.cdp,originalRun.acceptedInputBytes)
-  const merge=await compare(first.cdp,'merge-base'); assert.equal(merge.surface.comparison.snapshot.comparisonBaseOid,ancestor); assert.equal(merge.surface.comparison.snapshot.targetOid,targetOid)
+  const merge=await compare(first.cdp,'merge-base'); assert.equal(merge.resource.comparison.snapshot.comparisonBaseOid,ancestor); assert.equal(merge.resource.comparison.snapshot.targetOid,targetOid)
   const mergeCanvas=await monaco(first.cdp,'ancestor','target B'); const mergeControl=await inspectView(merge)
-  const point=await compare(first.cdp,'two-point'); assert.equal(point.surface.comparison.snapshot.comparisonBaseOid,baseOid)
+  const point=await compare(first.cdp,'two-point'); assert.equal(point.resource.comparison.snapshot.comparisonBaseOid,baseOid)
   const pointCanvas=await monaco(first.cdp,'base A','target B'); const pointControl=await inspectView(point)
   await click(first.cdp,`${selectors('.branch-comparison__file')}.filter(e => e.title === 'old.txt → renamed.txt')`)
-  const renamed=await waitFor('rename descriptor with original path',async()=>{const s=await state(first.cdp);return Object.values(s.workbench.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='git-diff'&&x.surface.comparison.file.path==='renamed.txt'&&x.surface.comparison.file.origPath==='old.txt')})
+  const renamed=await waitFor('rename descriptor with original path',async()=>{const s=await state(first.cdp);return spatialEntries(s).find(x=>x.surface.kind==='git-diff'&&x.resource.comparison.file.path==='renamed.txt'&&x.resource.comparison.file.origPath==='old.txt')})
   const renameCanvas=await monaco(first.cdp,'rename retained body','rename retained body',renamed.surface.regionId);const renameControl=await inspectView(renamed)
   await click(first.cdp,`${selectors('.branch-comparison__file')}.filter(e => e.title === ${JSON.stringify(longPath)})`)
-  const long=await waitFor('long path descriptor',async()=>{const s=await state(first.cdp);return Object.values(s.workbench.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='git-diff'&&x.surface.comparison.file.path===longPath)})
-  assert.ok(JSON.stringify(long.surface.comparison).length>512); const longControl=await inspectView(long)
+  const long=await waitFor('long path descriptor',async()=>{const s=await state(first.cdp);return spatialEntries(s).find(x=>x.surface.kind==='git-diff'&&x.resource.comparison.file.path===longPath)})
+  assert.ok(JSON.stringify(long.resource.comparison).length>512); const longControl=await inspectView(long)
   const firstGeometry=await splitAndGroup(first.cdp,point)
   await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:point.surface.regionId}}); await monaco(first.cdp,'base A','target B',point.surface.regionId)
-  const persisted=await settleFocused(first.cdp,point); assert.ok(Object.keys(persisted.workbench.tabs).length>=4)
+  const persisted=await settleFocused(first.cdp,point); assert.ok(persisted.workbench.graph.tabs.length>=4)
   assert.deepEqual(await agentIds(first.cdp),beforeAgents); assert.deepEqual(await gitFacts(),receipt.gitBefore)
   await sameHealthyRun(first.cdp,originalRun.acceptedInputBytes)
   receipt.firstUi={mergeCanvas,pointCanvas,renameCanvas,mergeControl,pointControl,renameControl,longControl,firstGeometry,dirty,persisted,agentIds:beforeAgents,publicExistingAgentAttach:{agentSessionId:session.agentSessionId,run:session.run,newAgentRuns:0,acceptedInputBytes:originalRun.acceptedInputBytes}}; receipt.executedSlices.push('actual-ui-monaco-two-modes-control-long-path','actual-dirty-input-region-split-group-geometry')
@@ -365,14 +405,14 @@ try {
     assert.deepEqual(restored.documents,persisted.documents);assert.deepEqual(restored.dirtyDocuments,persisted.dirtyDocuments)
     await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:point.surface.regionId}}); const oldCanvas=await monaco(second.cdp,'base A','target B',point.surface.regionId)
     const secondGeometry=await geometry(second.cdp,point);assert.deepEqual(secondGeometry.regionPanels,firstGeometry.regionPanels);assert.deepEqual(secondGeometry.groups,firstGeometry.groups);assert.ok(Math.abs(secondGeometry.width-firstGeometry.width)<2);assert.ok(Math.abs(secondGeometry.height-firstGeometry.height)<2)
-    const restoredMixed=await inspectedTab(point.tab.id)
+    const restoredMixed=await inspectedTab(point.tab.tabId)
     assert.deepEqual(restoredMixed.regions.map(region=>({regionId:region.regionId,kind:region.kind})),receipt.mixedViewAgent.regions.map(region=>({regionId:region.regionId,kind:region.kind})))
     const restoredAgent=restoredMixed.regions.find(region=>region.kind==='agent');assert.equal(restoredAgent.agentSessionId,session.agentSessionId)
     const agentRegionVisible=await second.cdp.evaluate(`(() => {const e=document.querySelector('[data-workbench-region-id="${restoredAgent.regionId}"]');const r=e?.getBoundingClientRect();return Boolean(r?.width>0&&r?.height>0&&getComputedStyle(e).visibility!=='hidden')})()`);assert.equal(agentRegionVisible,true)
     await sameHealthyRun(second.cdp,originalRun.acceptedInputBytes)
     receipt.secondRestored={restored,restoredViews,restoredRename,oldCanvas,secondGeometry,restoredMixed,agentRegionVisible}
     await click(second.cdp,selectors('[aria-label="Compare two local branches"]'))
-    const refreshed=await compare(second.cdp,'two-point',nextOid); assert.equal(refreshed.surface.comparison.snapshot.targetOid,nextOid); assert.notEqual(refreshed.tab.id,point.tab.id)
+    const refreshed=await compare(second.cdp,'two-point',nextOid); assert.equal(refreshed.resource.comparison.snapshot.targetOid,nextOid); assert.notEqual(refreshed.tab.tabId,point.tab.tabId)
     const newCanvas=await monaco(second.cdp,'base A','target B next',refreshed.surface.regionId)
     phase='local-blob-failure-isolation'
     await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:point.surface.regionId}});await monaco(second.cdp,'base A','target B',point.surface.regionId)
@@ -382,7 +422,7 @@ try {
     await click(second.cdp,selectors(`[data-git-diff-region="${point.surface.regionId}"] [title="Reread these fixed commits"]`))
     const error=await waitFor('real native object failure visible',()=>second.cdp.evaluate(`document.querySelector('[data-git-diff-region="${point.surface.regionId}"] .branches-inline-error[role="alert"]')?.textContent`));assert.ok(error.trim().length>0)
     const retainedCanvas=await monaco(second.cdp,'base A','target B',point.surface.regionId)
-    const failedState=await state(second.cdp);assert.deepEqual(failedState.workbench.tabs[point.tab.id],persisted.workbench.tabs[point.tab.id])
+    const failedState=await state(second.cdp);assertSameTabFacts(failedState.workbench,persisted.workbench,point.tab.tabId)
     await sameHealthyRun(second.cdp,originalRun.acceptedInputBytes)
     const marker=`private-healthy-after-git-failure-${randomUUID()}`
     const ack=await client.writeAgent({agentSessionId:session.agentSessionId,expectedRun:session.run,data:`${marker}\r`,source:"user"});assert.equal(ack.runId,session.run.runId);assert.equal(ack.appliedByteRange.startByte,originalRun.acceptedInputBytes);assert.ok(ack.appliedByteRange.endByte>ack.appliedByteRange.startByte)
@@ -391,11 +431,11 @@ try {
     await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:long.surface.regionId}});const goodCanvas=await monaco(second.cdp,'long ancestor','long target B',long.surface.regionId)
     await control('space.focus',{inputPolicy:'preserve',target:{kind:'space',regionId:refreshed.surface.regionId}});await monaco(second.cdp,'base A','target B next',refreshed.surface.regionId)
     await click(second.cdp,`${selectors('.branch-comparison__file')}.filter(e=>e.title==='binary.bin')`)
-    const binary=await waitFor('actual binary fixed descriptor',async()=>{const s=await state(second.cdp);return Object.values(s.workbench.tabs).flatMap(tab=>Object.values(tab.regions).map(surface=>({tab,surface}))).find(x=>x.surface.kind==='git-diff'&&x.surface.comparison.file.path==='binary.bin')})
+    const binary=await waitFor('actual binary fixed descriptor',async()=>{const s=await state(second.cdp);return spatialEntries(s).find(x=>x.surface.kind==='git-diff'&&x.resource.comparison.file.path==='binary.bin')})
     const binaryReason=await waitFor('honest binary-or-large display',()=>second.cdp.evaluate(`(() => {const p=document.querySelector('[data-git-diff-region="${binary.surface.regionId}"] .pane-state > span');return p?.textContent==='Binary file or too large for textual diff.'?p.textContent:null})()`));assert.equal(await second.cdp.evaluate(`document.querySelector('[data-git-diff-region="${binary.surface.regionId}"]').querySelectorAll('.monaco-diff-editor').length`),0)
     assert.deepEqual(await agentIds(second.cdp),beforeAgents); assert.deepEqual(await gitFacts(),receipt.gitBefore)
     await sameHealthyRun(second.cdp,ack.acceptedThroughByte)
-    receipt.secondUi={restored,restoredViews,restoredRename,oldCanvas,newCanvas,secondGeometry,refreshed:refreshed.surface.comparison,localFailure:{blob,blobDigest:digest(blobBytes),error,retainedCanvas,goodCanvas,ack,output,binaryReason}}; receipt.secondExit=await normalQuit(second)
+    receipt.secondUi={restored,restoredViews,restoredRename,oldCanvas,newCanvas,secondGeometry,refreshed:refreshed.resource.comparison,localFailure:{blob,blobDigest:digest(blobBytes),error,retainedCanvas,goodCanvas,ack,output,binaryReason}}; receipt.secondExit=await normalQuit(second)
     receipt.executedSlices.push('normal-second-process-fixed-old-oid-explicit-refresh-new-oid','real-blob-failure-binary-healthy-Agent-ACK-output-isolation')
     receipt.completeGate=true
   }
