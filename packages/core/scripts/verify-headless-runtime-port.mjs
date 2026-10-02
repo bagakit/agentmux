@@ -144,7 +144,7 @@ const run = async (label, selected = testFiles) => {
   }
   const count = selected.reduce((total, file) => total + baselineCases.get(resolve(shadow, file)).length, 0)
   assert.equal(report.numTotalTests, count)
-  if (selected.length === testFiles.length) assert.equal(count, 56, `${label}: all fifty-six owning product behaviors must execute.`)
+  if (selected.length === testFiles.length) assert.equal(count, 58, `${label}: all fifty-eight owning product behaviors must execute.`)
   assert.equal(report.numPendingTests, 0)
   result.failures = report.testResults.flatMap(file => file.assertionResults.filter(item => item.status === 'failed').map(item => ({ file: file.name, name: item.fullName, messages: item.failureMessages })))
   return result

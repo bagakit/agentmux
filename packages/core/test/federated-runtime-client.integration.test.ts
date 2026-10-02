@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { headlessFixture, testRuntimeService, until } from './helpers/headless-runtime-fixture.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
@@ -81,12 +81,18 @@ describe('Federated Runtime client with real owner and official ctxmux', () => {
     readers[0]!.onEnd?.(new Error('Only this reader ended before its owner observation.'))
     expect(client.runtimeOwnerIdentity()?.availability, 'reader failure keeps the semantic endpoint connected').toBe('connected')
     expect(observed.filter(event => event.type === 'connection-state')).toEqual([])
-    const notices = observed.filter(event => event.type === 'agent-error')
+    const notices = observed.filter(event => event.type === 'attachment-state' && event.state === 'unavailable')
     expect(notices).toHaveLength(1)
-    expect(notices[0]).toMatchObject({ code: 'RUNTIME_ATTACHMENT_UNAVAILABLE', evidence: { run: { runId: first.runId } } })
-    expect(notices[0]!.message).toContain(`byte ${initial.run.latestOutputBytes}`)
+    expect(notices[0]).toMatchObject({ run: { runId: first.runId }, afterByte: initial.run.latestOutputBytes,
+      diagnostic: { code: 'RUNTIME_ATTACHMENT_UNAVAILABLE' }, evidence: { run: { runId: first.runId } } })
+    expect(notices[0]!.diagnostic.message).toContain(`byte ${initial.run.latestOutputBytes}`)
     const restored = until(() => observed.filter(event => event.type === 'terminal-snapshot'), values => values.length === 1, 'independent original reader reread')
     expect(await restored.then(value => ({ value }), error => ({ error })), 'failed reader receives its independent original Run snapshot').toMatchObject({ value: [{ run: { runId: first.runId, pid: first.pid } }] })
+    expect(observed.filter(event => event.type === 'attachment-state').map(event => ({ state: event.state, run: event.run })),
+      'only this reader receives its validated recovery receipt').toEqual([
+      { state: 'unavailable', run: { runId: first.runId } }, { state: 'restored', run: { runId: first.runId } }
+    ])
+    expect(observed.filter(event => event.type === 'agent-error')).toEqual([])
     const input = async (runId: string, operationId: string, text: string) => {
       const current = (await client.listRuns()).find(value => value.runId === runId)!
       if (current.acceptedInputBytes === null) throw new Error('The original Native input cursor must be observed before a write')
@@ -113,12 +119,18 @@ describe('Federated Runtime client with real owner and official ctxmux', () => {
     readers[1]!.onEvent({ type: 'error', error: { code: 'CONTROL_PROTOCOL_ERROR', message: 'Only this reader received an invalid transfer.' } })
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(readers, 'a reader failure cannot produce an endless automatic replay loop').toHaveLength(2)
-    expect(observed.filter(event => event.type === 'agent-error')).toHaveLength(2)
+    expect(observed.filter(event => event.type === 'attachment-state' && event.state === 'unavailable')).toHaveLength(2)
+    expect(observed.filter(event => event.type === 'attachment-state').at(-1)).toMatchObject({ state: 'unavailable',
+      run: { runId: first.runId }, diagnostic: { code: 'CONTROL_PROTOCOL_ERROR' } })
     await client.refreshRunAttachment({ runId: first.runId }, initial.run.latestOutputBytes, 'terminal', 'manual-reader-refresh')
     expect(readers).toHaveLength(3)
-    const count = observed.filter(event => event.type === 'agent-error').length
+    expect(observed.filter(event => event.type === 'attachment-state').map(event => event.state)).toEqual([
+      'unavailable', 'restored', 'unavailable', 'restored'
+    ])
+    const count = observed.filter(event => event.type === 'attachment-state').length
     await client.releaseRunAttachment({ runId: first.runId }); await client.releaseRunAttachment({ runId: other.runId })
-    expect(observed.filter(event => event.type === 'agent-error')).toHaveLength(count)
+    expect(observed.filter(event => event.type === 'attachment-state')).toHaveLength(count)
+    expect(observed.filter(event => event.type === 'agent-error')).toEqual([])
     expect((await client.listRuns()).map(value => ({ runId: value.runId, pid: value.pid, state: value.state })).sort((a, b) => a.runId.localeCompare(b.runId))).toEqual([
       { runId: first.runId, pid: first.pid, state: 'running' }, { runId: other.runId, pid: other.pid, state: 'running' }
     ].sort((a, b) => a.runId.localeCompare(b.runId)))
@@ -160,7 +172,7 @@ describe('Runtime dispatch index and ordered initial cut', () => {
     let publish!: (event: AgentMuxClientEvent) => void
     const released: string[] = [], outputs: Record<string, Array<{ type: string; error?: { code: string } }>> = { first: [], other: [], semantic: [] }
     const core = { onEvent(listener: typeof publish) { publish = listener; return () => {} }, catalog: () => [], agentSessions: () => [],
-      runtimeIdentity: () => owner.ctxmux, agentMessageQueuePath: () => upstreamFixturePath("original/messages"),
+      runtimeIdentity: () => owner.ctxmux, agentMessageQueuePath: () => fixturePath("original/messages"),
       refreshRunAttachment: async (run: { runId: string }) => ({ run, replay: [], gap: null }),
       releaseRunAttachment: async ({ runId }: { runId: string }) => { released.push(runId) } }
     const owner = { runtimeId: 'semantic-owner', ownerInstanceId: 'semantic-epoch', protocolVersion: 1, processId: process.pid, availability: 'connected',
@@ -196,7 +208,7 @@ describe('Runtime dispatch index and ordered initial cut', () => {
     const attachment = (runId: string) => ({ run: { runId, latestOutputBytes: 0 }, replay: [], gap: null })
     const core = { onEvent(listener: typeof publish) { listeners++; publish = listener; return () => {} },
       catalog: () => [{ id: 'fixture-provider' }], agentSessions: () => [],
-      runtimeIdentity: () => owner.ctxmux, agentMessageQueuePath: () => upstreamFixturePath("original/messages"),
+      runtimeIdentity: () => owner.ctxmux, agentMessageQueuePath: () => fixturePath("original/messages"),
       refreshRunAttachment: async (run: { runId: string }) => attachment(run.runId), readRunReplay: async (run: { runId: string }) => attachment(run.runId),
       releaseRunAttachment: async (run: { runId: string }) => { released.push(run.runId) } }
     const owner = { runtimeId: 'semantic-owner', ownerInstanceId: 'semantic-epoch', protocolVersion: 1, processId: process.pid, availability: 'connected',
@@ -245,10 +257,10 @@ describe('Runtime dispatch index and ordered initial cut', () => {
   it('keeps snapshot and a mutation before stream start in one ordered cut', async () => {
     const { AgentMuxHostedRuntimeService } = await testRuntimeService()
     let publish!: (event: AgentMuxClientEvent) => void
-    const session = { agentSessionId: 'session', run: { runId: 'original' }, workspacePath: upstreamFixturePath("original"), updatedAt: 1 }
+    const session = { agentSessionId: 'session', run: { runId: 'original' }, workspacePath: fixturePath("original"), updatedAt: 1 }
     const core = { onEvent(listener: typeof publish) { publish = listener; return () => {} },
       catalog: () => [{ id: 'fixture-provider' }], agentSessions: () => [session],
-      runtimeIdentity: () => owner.ctxmux, agentMessageQueuePath: () => upstreamFixturePath("original/messages") }
+      runtimeIdentity: () => owner.ctxmux, agentMessageQueuePath: () => fixturePath("original/messages") }
     const owner = { runtimeId: 'semantic-owner', ownerInstanceId: 'semantic-epoch', protocolVersion: 1, processId: process.pid, availability: 'connected',
       ctxmux: { hostId: 'local', instanceId: 'ctxmux-epoch', processId: process.pid, buildIdentity: 'fixture-sdk', protocolVersion: 1 } } satisfies AgentMuxRuntimeOwnerIdentity
     const service = new AgentMuxHostedRuntimeService(core as unknown as import('../src/client.js').AgentMuxClient, null, () => owner)
@@ -256,13 +268,13 @@ describe('Runtime dispatch index and ordered initial cut', () => {
     const sub = await service.subscribe('runtime.events', { consumerId: 'snapshot-consumer', fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } }, event => {
       if (event.type === 'snapshot') { const value = transfer.accept(event.data); if (value) values.push(value) }
     }, {})
-    session.workspacePath = upstreamFixturePath("mutated"); session.updatedAt = 2
+    session.workspacePath = fixturePath("mutated"); session.updatedAt = 2
     publish({ type: 'agent-session', session: session as import('../src/types.js').AgentMuxAgentSession })
     expect(values).toEqual([])
     await sub.start?.()
     expect(values).toHaveLength(2)
-    expect(values[0]).toMatchObject({ kind: 'initial', value: { sessions: [{ workspacePath: upstreamFixturePath("original"), updatedAt: 1 }] } })
-    expect(values[1]).toMatchObject({ kind: 'event', event: { type: 'agent-session', session: { workspacePath: upstreamFixturePath("mutated"), updatedAt: 2 } } })
+    expect(values[0]).toMatchObject({ kind: 'initial', value: { sessions: [{ workspacePath: fixturePath("original"), updatedAt: 1 }] } })
+    expect(values[1]).toMatchObject({ kind: 'event', event: { type: 'agent-session', session: { workspacePath: fixturePath("mutated"), updatedAt: 2 } } })
     await sub.dispose(); await service.dispose()
   })
 })

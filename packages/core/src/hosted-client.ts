@@ -33,7 +33,8 @@ export async function connectHostedAgentMux(options: {
   }
   const histories = new Set<HistoryRead>()
   const outputs = new Set<ReturnType<typeof createHostedOutputObservation>>()
-  type Reading = { run: AgentMuxRunRef; afterByte: number; view: 'raw' | 'terminal'; target: AgentMuxHostedAttachmentTarget; stream: AgentMuxHostedSubscription; automaticRecoveryAttempted?: boolean }
+  type Reading = { run: AgentMuxRunRef; afterByte: number; view: 'raw' | 'terminal'; target: AgentMuxHostedAttachmentTarget;
+    stream: AgentMuxHostedSubscription; automaticRecoveryAttempted?: boolean; unavailable?: { code: string; message: string } }
   const attached = new Map<string, Reading>()
   const fence = (): AgentMuxRuntimeFence => {
     if (!stream || !bootstrap) throw new AgentMuxError('Reconnect the original semantic owner before another Runtime intent.', 'RUNTIME_UNAVAILABLE')
@@ -70,6 +71,14 @@ export async function connectHostedAgentMux(options: {
       evidence: { source: 'run-process', observedAt: Date.now() } })
   }
   const connectionFailure = (error: unknown): void => connectionState(reconnectAttempts >= 8 ? 'unrecoverable' : 'lost', error)
+  const attachmentUnavailable = (reading: Reading, error: unknown, step: string): void => {
+    reading.unavailable = { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_ATTACHMENT_UNAVAILABLE',
+      message: `${step}: ${error instanceof Error ? error.message : String(error)} This reader stopped after byte ${reading.afterByte}; the original Run is retained. Refresh this observation if independent reread does not recover it.` }
+    emit({ type: 'attachment-state', state: 'unavailable', run: reading.run, afterByte: reading.afterByte,
+      diagnostic: reading.unavailable,
+      ...(reading.target.kind === 'agent-session' ? { agentSessionId: reading.target.agentSessionId } : {}),
+      evidence: { source: 'agentmux', observedAt: Date.now(), run: reading.run } })
+  }
   const requireBootstrap = (): AgentMuxHostedBootstrap => {
     if (!bootstrap) throw new AgentMuxError('The semantic Host identity is not confirmed.', 'CONTROL_UNAVAILABLE')
     return bootstrap
@@ -296,9 +305,7 @@ export async function connectHostedAgentMux(options: {
               ...('session' in value ? { agentSessionId: value.session.agentSessionId } : {}) })
           } catch (error) {
             if (attached.get(reading.run.runId) !== reading) continue
-            emit({ type: 'agent-error', code: error instanceof AgentMuxError ? error.code : 'CONTROL_UNAVAILABLE',
-              message: `Original Run observation could not be restored: ${error instanceof Error ? error.message : String(error)}`,
-              evidence: { source: 'run-process', observedAt: Date.now(), run: reading.run } })
+            attachmentUnavailable(reading, error, 'Restoring the original Run observation did not complete')
           }
         }
         for (const read of histories) {
@@ -335,10 +342,7 @@ export async function connectHostedAgentMux(options: {
       failure = error; reject(error)
       const reading = attached.get(key)
       if (!initialSeen || replayOnly || !reading || reading.stream !== subscription || disposed || epoch !== eventEpoch) return
-      emit({ type: 'agent-error', code: error instanceof AgentMuxError ? error.code : 'RUNTIME_ATTACHMENT_UNAVAILABLE',
-        message: `${error instanceof Error ? error.message : String(error)} This reader stopped after byte ${reading.afterByte}; the original Run is retained. Refresh its observation if independent reread does not recover it.`,
-        ...(reading.target.kind === 'agent-session' ? { agentSessionId: reading.target.agentSessionId } : {}),
-        evidence: { source: 'run-process', observedAt: Date.now(), run: reading.run } })
+      attachmentUnavailable(reading, error, 'Attachment observation failed')
       if (reading.automaticRecoveryAttempted || !stream) return
       reading.automaticRecoveryAttempted = true
       void (async () => {
@@ -348,10 +352,8 @@ export async function connectHostedAgentMux(options: {
         const restored = 'attachment' in recovered ? recovered.attachment : recovered
         emit({ type: 'terminal-snapshot', ...restored, afterByte: reading.afterByte,
           ...('session' in recovered ? { agentSessionId: recovered.session.agentSessionId } : {}) })
-      })().catch(error => { if (attached.get(key) === reading && !disposed) emit({ type: 'agent-error',
-        code: error instanceof AgentMuxError ? error.code : 'RUNTIME_ATTACHMENT_UNAVAILABLE',
-        message: `The independent reread did not complete. The original Run is retained; refresh this observation. ${error instanceof Error ? error.message : String(error)}`,
-        evidence: { source: 'run-process', observedAt: Date.now(), run: reading.run } }) })
+      })().catch(error => { if (attached.get(key) === reading && !disposed && epoch === eventEpoch)
+        attachmentUnavailable(reading, error, 'The independent reread did not complete') })
     }
     const timer = setTimeout(() => failed(new AgentMuxError('Attachment transfer did not complete; its Run remains live.', 'CONTROL_TIMEOUT')), 60_000)
     try {
@@ -406,6 +408,13 @@ export async function connectHostedAgentMux(options: {
       attached.set(key, { run: { runId }, afterByte: cursor, view, target: { ...target, runId }, stream: subscription,
         ...(previous?.automaticRecoveryAttempted ? { automaticRecoveryAttempted: true } : {}) })
       await replaced?.stream.dispose()
+      // A valid initial cut cannot confirm a lease which ended while its predecessor released.
+      if (failure !== undefined) throw failure
+      if (replaced?.unavailable && attached.get(key)?.stream === subscription && !disposed && epoch === eventEpoch) {
+        emit({ type: 'attachment-state', state: 'restored', run: { runId }, afterByte: cursor,
+          ...(target.kind === 'agent-session' ? { agentSessionId: target.agentSessionId } : {}),
+          evidence: { source: 'agentmux', observedAt: Date.now(), run: { runId } } })
+      }
       return result
     } catch (error) { await subscription?.dispose(); throw error }
     finally { clearTimeout(timer); if (openingReaders.get(key) === admission) openingReaders.delete(key) }
