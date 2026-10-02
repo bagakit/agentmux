@@ -1,4 +1,4 @@
-import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
+import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../../lib/fixture-values.mjs"
 import { createElement, Fragment } from 'react'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { App } from '../../../src/renderer/src/App'
@@ -8,9 +8,11 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { spatialCatalog } from '../../../src/renderer/src/lib/space-agent-control'
 import { desktopWorkbenchFromSpatial } from '../../../src/renderer/src/lib/desktop-spatial-state'
+import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState, usePmoTeamsTopicFloatingState } from '../../../src/renderer/src/lib/pmo-teams-topic-floating'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
 import '../../../src/renderer/src/styles/index.css'
 
 const phase = new URLSearchParams(location.search).get('phase')
@@ -58,7 +60,7 @@ const topic = (id, title) => {
     soul: { path: directoryPath + '/SOUL.md', content: '# Coordinate this original Topic', version: 'private-original-v1' } }
 }
 const ordinary = topic(ordinaryId, 'Ordinary Topic'); delete ordinary.soul
-const topics = [topic(PMO_TEAMS_TOPIC_ID, 'Mote'), topic(customId, 'Review the next step'), ordinary]
+const topics = [topic(PMO_TEAMS_TOPIC_ID, 'Mote'), topic(customId, 'Review the next step with the original project team'), ordinary]
 // These controlled public records exercise the original message owners. They
 // are Renderer evidence, never a claim that a real Agent produced this text.
 const timelines = { 'mote-primary': { agentSessionId: 'mote-primary', revision: 1, items: [
@@ -128,7 +130,12 @@ let noteReadFailure = false
 const fileData = storedFiles ?? Object.fromEntries(topics.flatMap(one => {
   const root = scratchTopicDirectoryName(one.id)
   return [[root + '/topic.md', '# ' + one.title], ...(one.soul ? [[root + '/SOUL.md', one.soul.content]] : []),
-    [root + '/next-step.md', '# A useful next step\n\nCapture a concrete thought, then continue the original discussion.']]
+    [root + '/next-step.md', '# A useful next step\n\nCapture a concrete thought, then continue the original discussion.'],
+    [root + '/earlier-idea.md', '# An earlier recorded idea'], [root + '/undated-idea.md', '# An undated recorded idea']]
+}))
+const fileTimes = Object.fromEntries(topics.flatMap(one => {
+  const root = scratchTopicDirectoryName(one.id)
+  return [[root + '/next-step.md', _hygiene_fixtureTime(13474400000)], [root + '/earlier-idea.md', 0]]
 }))
 const saveFiles = () => localStorage.setItem(dataKey, JSON.stringify(fileData))
 api.files.readDirectory = async (workspaceId, root) => {
@@ -136,7 +143,9 @@ api.files.readDirectory = async (workspaceId, root) => {
   if (workspaceId !== scratch.id) return []
   return Object.keys(fileData).filter(file => file.startsWith(root ? root + '/' : '')).map(file => {
     const tail = root ? file.slice(root.length + 1) : file, first = tail.split('/')[0]
-    return { name: first, path: (root ? root + '/' : '') + first, isDirectory: tail.includes('/'), isSymlink: false }
+    const path = (root ? root + '/' : '') + first, isDirectory = tail.includes('/')
+    return { name: first, path, isDirectory, isSymlink: false,
+      ...(!isDirectory && Object.hasOwn(fileTimes, path) ? { mtimeMs: fileTimes[path] } : {}) }
   }).filter((entry, index, all) => all.findIndex(other => other.path === entry.path) === index)
 }
 api.files.read = async (workspaceId, file) => {
@@ -166,6 +175,7 @@ function seedOriginalOnce() {
   const first = createWorkspaceLayout('original-mote-first', [targetId, neighborId, customTabId, ordinaryTab.id])
   const second = createWorkspaceLayout('original-mote-second', [targetId])
   useAppStore.setState({ mainSurface: 'workbench', activeWorkspaceId: project.id, projectRailOpen: false, toolsOpen: false,
+    spaceObjectIcons: { [topicSpaceIconTarget(scratch, topics.find(one => one.id === customId)).key]: { ...DEFAULT_MOTE_FACE } },
     tabs: Object.fromEntries([projectTab, primary, neighbor, custom, ordinaryTab].map(tab => [tab.id, tab])),
     layouts: { [project.id]: createWorkspaceLayout('original-project-group', [projectTab.id]),
       [scratch.id]: { root: { type: 'split', direction: 'horizontal', ratio: 0.54, first: first.root, second: second.root }, groups: [...first.groups, ...second.groups], activeGroupId: 'original-mote-second' } },
@@ -202,6 +212,23 @@ function ProofBridge() {
 }
 window.sharedFrameProof = { ready: false, facts, ids: { targetId, neighborId, customId, customTabId },
   persistence: () => ({ spatial: JSON.parse(localStorage.getItem(spatialKey) ?? 'null'), workbench: spatialState ? desktopWorkbenchFromSpatial(spatialState.graph) : null }),
+  // Controlled config facts enter the original App appearance owner. The proof
+  // never writes a DOM theme, stylesheet or product appearance implementation.
+  setProfileAppearance: mode => {
+    if (!['dark', 'light'].includes(mode)) throw new Error('Bounded Profile appearance requires dark or light')
+    const state = useAppStore.getState()
+    if (!state.config) throw new Error('Original configuration is not available')
+    useAppStore.setState({ config: { ...state.config, appearance: { ...state.config.appearance, appAppearance: mode } } })
+  },
+  profileControlsFacts: () => ({ icons: structuredClone(useAppStore.getState().spaceObjectIcons), topics: structuredClone(topics) }),
+  setProfileMoteStatus: status => {
+    if (!['working', 'done'].includes(status)) throw new Error('Bounded Mote motion requires the original working or done public fact')
+    const original = sessions.find(session => session.id === 'mote-primary')
+    original.status = { ...original.status, state: status }
+    original.semanticStatus = { ...original.semanticStatus, state: status }
+    useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === original.id
+      ? { ...session, status: { ...original.status }, semanticStatus: { ...original.semanticStatus } } : session) }))
+  },
   setNoteReadFailure: value => { noteReadFailure = value === true },
   prepareSpace: () => useAppStore.setState({ mainSurface: 'workbench', projectRailOpen: true, toolsOpen: true }),
   prepareOriginalSurvey: () => {

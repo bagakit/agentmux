@@ -50,7 +50,7 @@ function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: S
   }, [workspaceId, topicId, choice, fileName, identity, objectKey])
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image"
     data-space-avatar={fileName} title={issue ?? 'Mote avatar'} aria-hidden="true">
-    {image?.identity === identity ? <img className="space-object-icon__avatar" src={image.url} alt="" draggable={false} /> : <MoteIcon size={14} />}
+    <span className="mote-image-follow">{image?.identity === identity ? <img className="space-object-icon__avatar" src={image.url} alt="" draggable={false} /> : <MoteIcon size={14} />}</span>
   </span>
 }
 
@@ -88,6 +88,6 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
   const monogram = kind === 'topic' && !topicGlyph ? projectMonogram(name) : ''
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="automatic"
     {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : 'Topic'} aria-hidden="true">
-    {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" /> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <NotebookText size={14} />}
+    {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <span className="mote-image-follow"><img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" draggable={false} /></span> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <NotebookText size={14} />}
   </span>
 }

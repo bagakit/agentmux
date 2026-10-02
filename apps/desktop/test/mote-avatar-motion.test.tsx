@@ -1,7 +1,6 @@
 // @vitest-environment happy-dom
 import { act, Profiler } from 'react'
 import { readFileSync } from 'node:fs'
-import { createRequire } from 'node:module'
 import { resolve } from 'node:path'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -18,10 +17,9 @@ import * as expressionAuthority from '../src/renderer/src/lib/mote-expression'
 let root: Root, container: HTMLDivElement, sheet: HTMLStyleElement, reduced = false, commits = 0
 let intersections: Map<Element, (visible: boolean) => void>, changes: Set<() => void>, frames: Map<number, FrameRequestCallback>
 const baseline = useAppStore.getState()
-const require = createRequire(import.meta.url)
 const cssSources = [
   ...['tokens', 'chrome'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css')),
-  ...['conversation-avatar', 'conversation-input-details'].map(name => require.resolve('@agentmux/client-ui/styles/' + name + '.css')),
+  ...['conversation-avatar', 'conversation-input-details'].map(name => resolve(import.meta.dirname, '../../../packages/client-ui/src/styles', name + '.css')),
   ...['mote-workface', 'space-object-appearance'].map(name => resolve(import.meta.dirname, '../src/renderer/src/styles', name + '.css'))
 ]
 beforeEach(() => {
@@ -42,10 +40,57 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); sheet.remove(); expect(frames.size).toBe(0); expect(changes.size).toBe(0); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const rect = { x: 180, y: 180, left: 180, top: 180, right: 212, bottom: 212, width: 32, height: 32, toJSON() {} }
-async function mount(node: React.ReactNode) { await act(async () => root.render(<Profiler id="real-face" onRender={() => commits++}>{node}</Profiler>)); for (const svg of container.querySelectorAll<SVGSVGElement>('.mote-face')) vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue(rect) }
+async function mount(node: React.ReactNode) { await act(async () => root.render(<Profiler id="real-face" onRender={() => commits++}>{node}</Profiler>)); for (const rig of container.querySelectorAll<SVGSVGElement | HTMLElement>('.mote-face, .mote-image-follow')) vi.spyOn(rig, 'getBoundingClientRect').mockReturnValue(rect) }
 function face() { const node = container.querySelector<HTMLElement>('[data-mote-expression]'); expect(node).not.toBeNull(); return node! }
 function move(x: number, y = 196) { document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: x, clientY: y })); const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(10)) }
 const image = { kind: 'image' as const, fileName: 'c'.repeat(64) + '.png' }
+it('the default dragon and loaded original image share near-left near-right and far native-owner gaze without React frame work', async () => {
+  const add = vi.spyOn(document, 'addEventListener')
+  await mount(<><SpaceObjectIcon kind="mote" name="Original dragon" manualIcon={null} avatarTopicId={PMO_TEAMS_TOPIC_ID} avatarObjectKey="original-dragon" />
+    <SpaceObjectIcon kind="mote" name="Original saved image" manualIcon={image} avatarWorkspaceId="scratch" avatarTopicId="custom" avatarObjectKey="original-image" /></>)
+  const identities = [...container.querySelectorAll<HTMLElement>('[data-mote-expression]')], paints = [...container.querySelectorAll<HTMLImageElement>('.mote-image-follow img')]
+  expect(identities).toHaveLength(2); expect(paints).toHaveLength(2); expect(paints[1]!.src).toContain('ORIGINAL')
+  const urls = paints.map(node => node.src), count = commits
+  expect(add.mock.calls.filter(([event]) => event === 'pointermove')).toHaveLength(1)
+  for (const x of [145, 245]) {
+    move(x)
+    for (const identity of identities) {
+      expect(identity.dataset.moteGaze).toBe('near')
+      expect(Math.sign(parseFloat(identity.style.getPropertyValue('--mote-head-turn')))).toBe(x < rect.left ? -1 : 1)
+      expect(identity.dataset.moteExpression).toBe('identity')
+    }
+  }
+  move(700)
+  for (const identity of identities) { expect(identity.dataset.moteGaze).toBe('far'); expect(identity.style.getPropertyValue('--mote-head-turn')).toBe('') }
+  for (const paint of paints) expect(getComputedStyle(paint).animation).toBe('mote-presence 14s ease-in-out infinite')
+  expect(paints.map(node => node.src)).toEqual(urls); expect(commits).toBe(count)
+})
+it('image pointer work excludes hidden offscreen reduced and page-hidden instances while ordinary Topic remains static', async () => {
+  const add = vi.spyOn(document, 'addEventListener')
+  await mount(<><SpaceObjectIcon kind="mote" name="Visible dragon" manualIcon={null} avatarTopicId={PMO_TEAMS_TOPIC_ID} />
+    {Array.from({ length: 40 }, (_, index) => <SpaceObjectIcon key={index} kind="mote" name="Hidden dragon" manualIcon={null} avatarTopicId={PMO_TEAMS_TOPIC_ID} visible={false} />)}
+    <SpaceObjectIcon kind="topic" name="Ordinary Topic" manualIcon="book" /></>)
+  expect(intersections.size).toBe(1); expect(changes.size).toBe(1); expect(add.mock.calls.filter(([event]) => event === 'pointermove')).toHaveLength(1)
+  const identity = face(), rig = identity.querySelector<HTMLElement>('.mote-image-follow')!, read = vi.mocked(rig.getBoundingClientRect)
+  move(245); expect(identity.dataset.moteGaze).toBe('near')
+  const hidden = [...container.querySelectorAll<HTMLElement>('.mote-image-follow')].slice(1)
+  expect(hidden).toHaveLength(40); for (const node of hidden) expect(node.getBoundingClientRect).not.toHaveBeenCalled()
+  expect(container.querySelector('[data-space-icon-kind="topic"]')?.closest('[data-mote-expression]')).toBeNull()
+  document.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'mouse', clientX: 145, clientY: 196 })); expect(frames.size).toBe(1)
+  intersections.get(identity)!(false); expect(frames.size).toBe(0); const before = read.mock.calls.length
+  move(245); expect(read).toHaveBeenCalledTimes(before); expect(identity.dataset.moteGaze).toBe('far')
+  intersections.get(identity)!(true); reduced = true; changes.forEach(change => change()); move(245)
+  expect(read).toHaveBeenCalledTimes(before); expect(identity.dataset.moteMotion).toBe('off'); expect(identity.dataset.moteGaze).toBe('far')
+  reduced = false; changes.forEach(change => change())
+  const descriptor = Object.getOwnPropertyDescriptor(document, 'hidden')
+  try {
+    Object.defineProperty(document, 'hidden', { configurable: true, value: true }); document.dispatchEvent(new Event('visibilitychange')); move(245)
+    expect(read).toHaveBeenCalledTimes(before); expect(identity.dataset.moteMotion).toBe('off'); expect(identity.dataset.moteGaze).toBe('far')
+  } finally {
+    if (descriptor) Object.defineProperty(document, 'hidden', descriptor); else delete (document as unknown as Record<string, unknown>).hidden
+    document.dispatchEvent(new Event('visibilitychange'))
+  }
+})
 it('all static image, dragon, seed, manual and face consumers join one native owner without Session selectors or synchronized object phases', async () => {
   const expression = vi.spyOn(expressionAuthority, 'moteExpression')
   const choices = [image, null, null, 'book', DEFAULT_MOTE_FACE] as const
@@ -145,6 +190,10 @@ it('nearby sleeping, waiting and unknown faces keep their exact semantic facts w
     await mount(<SpaceObjectIcon kind="mote" name="Original Mote" manualIcon={DEFAULT_MOTE_FACE} moteAvailability={availability} />)
     move(245); expect(face().dataset.moteGaze).toBe('near'); expect(face().dataset.moteExpression).toBe(expected)
     expect(face().querySelector('.mote-face__awake-eyes')).not.toBeNull()
+    if (expected === 'sleep') {
+      expect(getComputedStyle(face().querySelector('.mote-face__awake-eyes')!).display).toBe('none')
+      expect(getComputedStyle(face().querySelector('.mote-face__sleep-eyes')!).display).not.toBe('none')
+    }
   }
   useAppStore.setState({ sessions: [{ ...defaultAgent, status: { state: 'waiting', source: 'native-hook', observedAt: 2 } }] })
   await mount(<SpaceObjectIcon kind="mote" name="Original Mote" manualIcon={DEFAULT_MOTE_FACE} moteSessionId={defaultAgent.id} moteHostId="local" />)

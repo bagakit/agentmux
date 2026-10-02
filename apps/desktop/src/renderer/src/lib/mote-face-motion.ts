@@ -6,7 +6,7 @@ let owner: ReturnType<typeof createMotionOwner> | undefined
 
 /** One event-driven native rig owner for the currently visible identities. No React frame clock. */
 function createMotionOwner() {
-  const identities = new Map<Element, Identity>(), faces = new Set<Identity>()
+  const identities = new Map<Element, Identity>(), rigs = new Set<Identity>()
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
   let pointing = false, frame: number | null = null, point: { x: number; y: number } | null = null
   const reset = (identity: Identity) => {
@@ -14,13 +14,13 @@ function createMotionOwner() {
     identity.near = false; identity.node.dataset.moteGaze = 'far'
     for (const name of ['--mote-gaze-x', '--mote-gaze-y', '--mote-head-turn', '--mote-brow-lift', '--mote-mouth-shift']) identity.node.style.removeProperty(name)
   }
-  const clear = () => { point = null; if (frame !== null) cancelAnimationFrame(frame); frame = null; for (const identity of faces) reset(identity) }
+  const clear = () => { point = null; if (frame !== null) cancelAnimationFrame(frame); frame = null; for (const identity of rigs) reset(identity) }
   const paint = () => {
     frame = null
     if (!point) return
-    // The set contains only native-visible faces. Hidden instances are never laid out on pointer input.
-    for (const identity of faces) {
-      const svg = identity.node.querySelector('.mote-face'), rect = svg?.getBoundingClientRect()
+    // The set contains only native-visible avatar rigs. Hidden instances are never laid out on pointer input.
+    for (const identity of rigs) {
+      const rig = identity.node.querySelector('.mote-face, .mote-image-follow'), rect = rig?.getBoundingClientRect()
       if (!rect || rect.width <= 0 || rect.height <= 0) { reset(identity); continue }
       const dx = point.x - (rect.left + rect.width / 2), dy = point.y - (rect.top + rect.height / 2)
       const reach = Math.max(110, rect.width * 1.65), distance = Math.hypot(dx, dy)
@@ -42,7 +42,7 @@ function createMotionOwner() {
     if (frame === null) frame = requestAnimationFrame(paint)
   }
   const syncPointer = () => {
-    const next = faces.size > 0
+    const next = rigs.size > 0
     if (next === pointing) return
     pointing = next
     if (next) { document.addEventListener('pointermove', pointer, { passive: true }); document.addEventListener('pointerleave', clear); window.addEventListener('blur', clear) }
@@ -52,8 +52,8 @@ function createMotionOwner() {
     const enabled = identity.visible && identity.inView && !document.hidden && !reduced.matches
     identity.node.dataset.moteVisible = enabled ? 'on' : 'off'
     identity.node.dataset.moteMotion = enabled && ambient.has(identity.expression) ? 'on' : 'off'
-    if (enabled && identity.node.querySelector('.mote-face')) faces.add(identity)
-    else { reset(identity); faces.delete(identity) }
+    if (enabled && identity.node.querySelector('.mote-face, .mote-image-follow')) rigs.add(identity)
+    else { reset(identity); rigs.delete(identity) }
   }
   const syncAll = () => { for (const identity of identities.values()) sync(identity); syncPointer() }
   const observer = new IntersectionObserver(entries => {
@@ -79,7 +79,7 @@ function createMotionOwner() {
           sync(identity); syncPointer()
         },
         dispose() {
-          reset(identity); faces.delete(identity); identities.delete(node); observer.unobserve(node); syncPointer()
+          reset(identity); rigs.delete(identity); identities.delete(node); observer.unobserve(node); syncPointer()
           if (identities.size === 0) {
             observer.disconnect(); reduced.removeEventListener('change', syncAll); document.removeEventListener('visibilitychange', syncAll); owner = undefined
           }
