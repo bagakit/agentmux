@@ -1103,7 +1103,10 @@ export class WorkspaceFiles {
         }))
         const directory = await localReadablePath(workspace.path, '.')
         const oldEntries = JSON.parse((await runLocalWorker(directory.target, directory.root, { action: 'list' })).toString('utf8')) as WorkspaceDirectoryEntry[]
-        return sortDirectoryEntries([...oldEntries.filter(entry => !scratchTopicIdFromDirectoryName(entry.name)), ...entities])
+        const rootEntries = oldEntries
+          .filter(entry => !scratchTopicIdFromDirectoryName(entry.name))
+          .map(entry => ({ ...entry, path: entry.name }))
+        return sortDirectoryEntries([...rootEntries, ...entities])
       }
       const directory = await localReadablePath(workspace, requestedPath || '.')
       const entries = JSON.parse((await runLocalWorker(
