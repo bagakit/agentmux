@@ -131,11 +131,19 @@ export async function confirmSemanticHostReload(plan, app, ops = operations) {
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv[2] === '--bootstrap') {
   const { connectAgentMuxRpc } = await import(pathToFileURL(process.argv[3]).href)
+  // Observe the installed App through the public contract it actually ships. A new owner
+  // requires its exact semantic fence; observing the outgoing App cannot upgrade its API.
+  const { AGENTMUX_RPC_NATIVE_METHODS } = await import(new URL('./public-rpc.js', pathToFileURL(process.argv[3])))
   const rpc = await connectAgentMuxRpc(), consumerId = `package-host-${randomUUID()}`
+  let fence
   try {
-    const value = await rpc.call('runtime.bootstrap', { consumerId })
+    if (Object.hasOwn(AGENTMUX_RPC_NATIVE_METHODS, 'runtime.owner.identity')) {
+      const { owner } = await rpc.call('runtime.owner.identity', {})
+      fence = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    }
+    const value = await rpc.call('runtime.bootstrap', { consumerId, ...(fence ? { fence } : {}) })
     process.stdout.write(JSON.stringify({ hostProcessId: value.hostProcessId, storePath: value.storePath }))
   } finally {
-    try { await rpc.call('runtime.release-consumer', { consumerId }) } finally { await rpc.dispose() }
+    try { await rpc.call('runtime.release-consumer', { consumerId, ...(fence ? { fence } : {}) }) } finally { await rpc.dispose() }
   }
 }
