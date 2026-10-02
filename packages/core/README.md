@@ -6,7 +6,7 @@
 
 当前 Local Run 只由随包 [Darwin manifest](vendor/ctxmux/darwin-arm64/manifest.json) 与 [Linux manifest](vendor/ctxmux/linux-x64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、同一 SDK tarball 和 darwin-arm64 / linux-x64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
 
-Node 24+ 支持 macOS arm64 与 Linux x64。`ctxmux` / `ctxmuxd` 的 npm bin 按宿主选择固定原生产物；正常 npm 安装的 `postinstall` 先校验 manifest、字节数与 SHA-256，再恢复原生文件的执行位。`--ignore-scripts` 会跳过这个必要安装步骤，Runtime 无法执行；请启用 lifecycle scripts 重新安装。安装脚本只处理包内固定产物，不访问网络、宿主配置或已有 Run。
+Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；随包原生 Runtime 支持 macOS arm64 与 Linux x64。`ctxmux` / `ctxmuxd` 的 npm bin 按宿主选择固定原生产物；正常 npm 安装的 `postinstall` 先校验 manifest、字节数与 SHA-256，再恢复原生文件的执行位。`--ignore-scripts` 会跳过这个必要安装步骤，Runtime 无法执行；请启用 lifecycle scripts 重新安装。安装脚本只处理包内固定产物，不访问网络、宿主配置或已有 Run。
 
 `connectLocalAgentMux` 不提供逐调用 socket/state 参数。[runtime-paths.ts](src/runtime-paths.ts) 持有进程级路径策略：默认 Endpoint 与持久状态使用稳定宿主 namespace，持久状态在用户目录；`AGENTMUX_RUNTIME_DIRECTORY` 与 `AGENTMUX_STATE_DIRECTORY` 可指定绝对路径。产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
 
