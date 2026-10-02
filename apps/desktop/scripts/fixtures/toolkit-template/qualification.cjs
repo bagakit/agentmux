@@ -54,7 +54,7 @@ module.exports = async function qualify(c) {
   const get = async id => (await toolkit.execute({ operation: 'toolkit.get', toolId: id }, signal())).snapshot
   const cliCall = (...args) => {
     const record = { args, stdout: '', stderr: '', code: null }; raw.cli.push(record)
-    const child = spawn(process.execPath, [cli, ...args], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [cli, '--endpoint', `unix:${path.join(privateRoot, 'runtime', 'control.sock')}`, ...args], { env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }, stdio: ['ignore', 'pipe', 'pipe'] })
     child.stdout.on('data', value => record.stdout += value); child.stderr.on('data', value => record.stderr += value)
     return new Promise((resolve, reject) => { child.once('error', reject); child.once('close', code => { record.code = code; try { assert.equal(code, 0, record.stderr); const frames = record.stdout.split('\n').filter(Boolean).map(JSON.parse); assert.equal(frames.length, 1); resolve(frames[0]) } catch (error) { reject(error) } }) })
   }
@@ -88,7 +88,7 @@ module.exports = async function qualify(c) {
     raw.restartEditorMounted = await read('window.toolkitScene.models()')
     await until(`window.toolkitScene.scriptValue().then(value=>value===${JSON.stringify(saved.script)})`)
     assert.equal(await read('document.querySelector(".toolkit-editor__name input").value'), saved.name)
-    assert.deepEqual((await cliCall('toolkit', 'get', saved.id)).result.snapshot.definition, saved)
+    assert.deepEqual((await cliCall('toolkit', 'inspect', saved.id)).result.snapshot.definition, saved)
     await hideSettings(); await openResult(saved.id)
     const restored = await get(saved.id); assert.ok(restored.latestConfirmed?.text.includes('Available reset cards: 3')); assert.equal(restored.latestConfirmed.state, 'succeeded')
     await picture('restart-1480-dark-result.png', { theme: 'dark', settingsExpanded: 'false' }, 'succeeded')
@@ -129,7 +129,7 @@ module.exports = async function qualify(c) {
   await click('.toolkit-editor__arguments > summary')
   const args = [process.execPath, 'account:target', query, 'json', ledger, modeFile]
   for (let index = 0; index < args.length; index++) { if (index >= 2) await click('.toolkit-editor__arguments > button'); await text(`.toolkit-argument:nth-of-type(${index + 1}) input`, args[index]) }
-  await save(); const disabled = (await cliCall('toolkit', 'get', id)).result.snapshot
+  await save(); const disabled = (await cliCall('toolkit', 'inspect', id)).result.snapshot
   assert.equal(disabled.definition.enabled, false); assert.deepEqual(disabled.definition.actions, []); assert.deepEqual(disabled.definition.args, args)
   assert.equal(disabled.definition.workspacePath, usageWork); assert.equal(disabled.definition.script, source); assert.equal(disabled.latestConfirmed, null); assert.equal(disabled.admission, null)
   assert.equal(await read('document.querySelector(".toolkit-editor__run").disabled'), true)
@@ -138,7 +138,7 @@ module.exports = async function qualify(c) {
   await click('.toolkit-editor .toolkit-settings__choices label:has(input[value="label"])')
   await click('.toolkit-editor__toggle input'); await save()
   await picture('320-light-editable.png', { theme: 'light', view: 'editor', editor: id, settingsExpanded: 'true', libraryVisible: false })
-  const enabled = (await cliCall('toolkit', 'get', id)).result.snapshot.definition; assert.equal(enabled.enabled, true); assert.equal(enabled.icon, 'key-round'); assert.equal(enabled.statusBar, 'label')
+  const enabled = (await cliCall('toolkit', 'inspect', id)).result.snapshot.definition; assert.equal(enabled.enabled, true); assert.equal(enabled.icon, 'key-round'); assert.equal(enabled.statusBar, 'label')
   await hideSettings(); win.setContentSize(1480, 900); await read('window.toolkitScene.theme("dark")'); await openResult(id)
   assert.deepEqual(await calls(), [], 'Showing and watching an enabled unrun tool still do not execute')
   await click('.toolkit-result__actions > button:first-child'); const first = await finish(id, 'succeeded')
@@ -157,7 +157,7 @@ module.exports = async function qualify(c) {
   assert.ok(failed.latestConfirmed.text.includes('Account query failed: exit 2')); assert.ok(!failed.latestConfirmed.text.includes('Available reset cards: 3')); assert.equal((await calls()).length, 3)
   await picture('320-light-failed-result.png', { theme: 'light', settingsExpanded: 'false' }, 'failed'); raw.authoritativeFailure = failed
   await closeResult(); win.setContentSize(1480, 900); await read('window.toolkitScene.theme("dark")'); await showSettings(); await click(`[data-tool-id="${id}"]`)
-  await replaceScriptLine(anchor, replacement, edited); await until('document.querySelector(".toolkit-editor__status").textContent==="Unsaved"'); await save(); const fromCli = (await cliCall('toolkit', 'get', id)).result.snapshot.definition
+  await replaceScriptLine(anchor, replacement, edited); await until('document.querySelector(".toolkit-editor__status").textContent==="Unsaved"'); await save(); const fromCli = (await cliCall('toolkit', 'inspect', id)).result.snapshot.definition
   assert.equal(fromCli.script, edited); assert.deepEqual(fromCli, owner.current.toolkit.tools.find(tool => tool.id === id)); assert.deepEqual((await store.get()).toolkit.tools, owner.current.toolkit.tools)
   await fs.writeFile(modeFile, 'lines'); await hideSettings(); await openResult(id); await click('.toolkit-result__actions > button:first-child')
   const second = await finish(id, 'succeeded', failed.latestConfirmed.executionId); assert.ok(second.latestConfirmed.text.includes('Available reset cards: 3')); assert.equal(second.latestConfirmed.definition.script, edited); assert.equal((await calls()).length, 4)

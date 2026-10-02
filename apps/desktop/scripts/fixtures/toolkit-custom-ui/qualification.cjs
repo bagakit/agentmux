@@ -21,7 +21,7 @@ module.exports = async function qualify(c) {
   const update=async(id,changes)=>{const before=owner.current.toolkit.tools.find(t=>t.id===id);assert.ok(before);return (await toolkit.execute({operation:'toolkit.update',toolId:id,changes,expected:Object.fromEntries(Object.keys(changes).map(key=>[key,before[key]]))},signal())).definition}
   const cliCall=(...args)=>{
     const record={args,startedAt:Date.now(),stdout:'',stderr:'',code:null};raw.cli.push(record)
-    const child=spawn(process.execPath,[cli,...args],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},stdio:['ignore','pipe','pipe']})
+    const child=spawn(process.execPath,[cli,'--endpoint',`unix:${path.join(privateRoot,'runtime','control.sock')}`,...args],{env:{...process.env,ELECTRON_RUN_AS_NODE:'1',AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined},stdio:['ignore','pipe','pipe']})
     child.stdout.on('data',b=>record.stdout+=b);child.stderr.on('data',b=>record.stderr+=b)
     return new Promise((resolve,reject)=>{child.once('error',reject);child.once('close',code=>{record.code=code;record.endedAt=Date.now();try{assert.equal(code,0,record.stderr);const frames=record.stdout.split('\n').filter(Boolean).map(JSON.parse);assert.equal(frames.length,1,'Actual compiled CLI has one complete frame');resolve(frames[0])}catch(error){reject(error)}})})
   }
@@ -68,14 +68,14 @@ module.exports = async function qualify(c) {
   await text('.toolkit-editor__action-heading input','Refresh identity from result')
   await script("console.log('Native action edit accepted')")
   await save()
-  const editedAction=(await cliCall('toolkit','get','summary')).result.snapshot.definition.actions[0]
+  const editedAction=(await cliCall('toolkit','inspect','summary')).result.snapshot.definition.actions[0]
   assert.equal(editedAction.label,'Refresh identity from result');assert.equal(editedAction.script,"console.log('Native action edit accepted')")
   await text('.toolkit-editor__action-heading input',initialSummary.actions[0].label)
   await script(initialSummary.actions[0].script);await save()
   await click('.toolkit-editor__action-heading > button')
   await text('.toolkit-editor__name input','Authored workspace check')
   await save()
-  const saved=await cliCall('toolkit','get','summary')
+  const saved=await cliCall('toolkit','inspect','summary')
   assert.equal(saved.result.snapshot.definition.name,'Authored workspace check')
   assert.deepEqual((await store.get()).toolkit.tools,owner.current.toolkit.tools,'Actual durable ConfigStore and CLI use the same definition')
   assert.equal(saved.result.snapshot.latestConfirmed,null,'Saving does not execute')
@@ -94,7 +94,7 @@ module.exports = async function qualify(c) {
   await click('.toolkit-editor__arguments > summary');await click('.toolkit-editor__arguments > button')
   await text('.toolkit-argument input','literal argument')
   await save()
-  const created=(await cliCall('toolkit','get',createdId)).result.snapshot
+  const created=(await cliCall('toolkit','inspect',createdId)).result.snapshot
   assert.deepEqual({...created.definition,id:undefined,revision:undefined},{id:undefined,revision:undefined,name:'Created in the real Settings UI',icon:'key-round',enabled:true,statusBar:'label',workspacePath:work,script:createdScript,args:['literal argument'],actions:[]})
   assert.equal(created.admission,null);assert.equal(created.latestConfirmed,null)
   raw.createdViaSettings=created
@@ -160,7 +160,7 @@ module.exports = async function qualify(c) {
   // Passive hover never creates a Run or steals original Terminal input.
   await click('.xterm-screen')
   const inputBefore=await read('document.activeElement.className')
-  const beforeHover=await cliCall('toolkit','get','summary')
+  const beforeHover=await cliCall('toolkit','inspect','summary')
   const hover=await read(`(()=>{const n=document.querySelector(${JSON.stringify(trigger('summary'))}),b=n.getBoundingClientRect();return{x:Math.round(b.x+b.width/2),y:Math.round(b.y+b.height/2)}})()`)
   win.webContents.sendInputEvent({type:'mouseMove',...hover})
   await until(`document.querySelector(${JSON.stringify(result)})?.getAttribute('aria-label')==='Workspace summary'`)
@@ -198,7 +198,7 @@ module.exports = async function qualify(c) {
   assert.equal(action.latestConfirmed.action.id,'refresh');assert.equal(action.latestConfirmed.action.sourceExecutionId,source.latestConfirmed.executionId)
   assert.equal(action.latestConfirmed.definition.revision,source.latestConfirmed.definition.revision);assert.equal(action.latestConfirmed.target.workspacePath,work)
   assert.notEqual(action.latestConfirmed.executionId,source.latestConfirmed.executionId);assert.ok(action.latestConfirmed.run.runId)
-  assert.deepEqual((await cliCall('toolkit','get','summary')).result.snapshot.latestConfirmed,action.latestConfirmed)
+  assert.deepEqual((await cliCall('toolkit','inspect','summary')).result.snapshot.latestConfirmed,action.latestConfirmed)
   raw.capturedAction={source:source.latestConfirmed,result:action.latestConfirmed};raw.desktop.capturedAction=true
   await picture('1480-dark-action-result.png',{theme:'dark',settingsExpanded:'false'},'succeeded')
   await click('.toolkit-result__actions > button:nth-last-child(2)');await until('document.querySelector(".toolkit-result__script")?.checkVisibility()')
@@ -227,7 +227,7 @@ module.exports = async function qualify(c) {
   await run('identity');await until('document.querySelector(".performance-status")?.dataset.state==="running"')
   const live=await get('identity');assert.ok(live.admission?.run?.runId)
   await picture('1480-dark-running.png',{theme:'dark',settingsExpanded:'false'},'running')
-  await close();const still=await cliCall('toolkit','get','identity')
+  await close();const still=await cliCall('toolkit','inspect','identity')
   assert.equal(still.result.snapshot.admission.executionId,live.admission.executionId,'Closing only disposes this reader, not the script')
   assert.equal(still.result.snapshot.consumerCount,0)
   await finish('identity');await open('identity');await picture('1480-dark-long-result.png',{theme:'dark',settingsExpanded:'false'},'succeeded')
@@ -264,7 +264,7 @@ module.exports = async function qualify(c) {
   assert.notEqual(recovered.latestConfirmed.executionId,empty.latestConfirmed.executionId,'Recovery confirms this execution instead of substituting the old result')
   const rejectedStops=raw.runPortStops.filter(value=>value.runId===recovered.latestConfirmed.run.runId)
   assert.equal(rejectedStops.length,1);assert.equal(rejectedStops[0].accepted,false);assert.ok(rejectedStops[0].error,'The actual Core stop rejection is observed, never inferred from the final result')
-  assert.deepEqual((await cliCall('toolkit','get','identity')).result.snapshot.latestConfirmed,recovered.latestConfirmed)
+  assert.deepEqual((await cliCall('toolkit','inspect','identity')).result.snapshot.latestConfirmed,recovered.latestConfirmed)
   raw.stopRecovery={before:raw.unknown.snapshot,confirmed:recovered,stop:rejectedStops[0],oldConfirmed:empty.latestConfirmed}
   await close()
 
