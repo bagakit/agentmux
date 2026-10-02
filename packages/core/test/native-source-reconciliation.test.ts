@@ -336,3 +336,131 @@ it('invalidates the original temporary observation after durable B then durable 
   expect(changes.some(event => event.kind === 'unavailable' && event.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')).toBe(true)
   temporaryB.dispose(); durableB.dispose(); currentA.dispose()
 })
+
+async function sharedFixture(provider?: AgentProvider) {
+  const f = await fixture(provider)
+  const owner: AgentMuxStoredAgentSession = { ...f.session, agentSessionId: 'original-native-owner',
+    run: { runId: 'original-owner-run' }, hookBindingId: 'original-owner-binding', hookToken: 'original-owner-token',
+    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: NATIVE, transcriptPath: f.files[0]! } }
+  await f.store.compareAndSwap(null, owner)
+  const registry = Reflect.get(f.client, 'registry') as { load(host: string): Promise<void>; resolve: (lookup: unknown) => AgentMuxStoredAgentSession }
+  await registry.load('local')
+  const bytes = await readFile(join(f.root, 'sessions.json'))
+  const actualSave = f.store.compareAndSwap.bind(f.store)
+  const writes = vi.spyOn(f.store, 'compareAndSwap')
+  return { ...f, owner, registry, bytes, actualSave, writes }
+}
+
+it('reads shared current native records through the existing observation without taking either durable identity', async () => {
+  const f = await sharedFixture(), changes: Array<{ kind: string }> = []
+  const observer = await succeeds(f.client.observeSessionHistory(SID, value => changes.push(value), f.options))
+  const page = await succeeds(f.read())
+  expect(page.source).toEqual(observer.source)
+  expect(page.source.nativeSessionId).toBe(NATIVE)
+  expect(page.items.map(item => item.id)).toEqual(['user-1', 'progress-1', 'final-1', 'user-2'])
+  expect(page.items[2]!.contentParts).toEqual([{ kind: 'text', text: BODY }])
+  expect(f.writes).not.toHaveBeenCalled()
+  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(f.bytes)
+  expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe('retained-old')
+  expect(f.client.agentSession(f.owner.agentSessionId).nativeHandle?.sessionId).toBe(NATIVE)
+  expect(f.status.mock.calls.every(([id]) => id === RUN)).toBe(true)
+  expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED')).toBe(true)
+  await appendFile(f.files[0]!, '{"type":"event_msg"}\n')
+  await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0))
+  expect(changes[0]!.kind).toBe('invalidated')
+  expect((await succeeds(f.read())).source).toEqual(observer.source)
+  observer.dispose()
+  expect((await succeeds(f.read())).items[0]!.id).toBe('old-final')
+  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(f.bytes)
+})
+
+it('reads an explicitly current shared Page without registering or persisting another identity', async () => {
+  const f = await sharedFixture()
+  const page = await succeeds(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
+  expect(page.source.nativeSessionId).toBe(NATIVE)
+  expect(page.items[2]!.id).toBe('final-1')
+  expect(f.writes).not.toHaveBeenCalled()
+  expect(await readFile(join(f.root, 'sessions.json'))).toEqual(f.bytes)
+})
+
+it('cross-checks an indexed shared owner against its exact durable identity', async () => {
+  const f = await sharedFixture(), resolve = f.registry.resolve.bind(f.registry)
+  vi.spyOn(f.registry, 'resolve').mockImplementation(lookup => ({ ...resolve(lookup), agentSessionId: 'different-index-owner' }))
+  await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
+    .rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  expect(f.writes).not.toHaveBeenCalled()
+})
+
+for (const change of ['foreign-run', 'foreign-handle', 'own-run', 'own-handle'] as const) {
+  it(`rejects shared reading after ${change} changes without clearing either Session`, async () => {
+    const f = await sharedFixture(), observer = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
+    const id = change.startsWith('foreign') ? f.owner.agentSessionId : SID
+    const old = (await loadAgentSessions(f.store)).find(item => item.agentSessionId === id)!
+    await f.actualSave(old, { ...old, ...(change.endsWith('run') ? { run: { runId: 'changed-run' } }
+      : { nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'changed-native', transcriptPath: f.oldFile } }) })
+    await expect(f.read()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+    expect((await loadAgentSessions(f.store)).map(item => item.agentSessionId).sort()).toEqual([SID, f.owner.agentSessionId].sort())
+    observer.dispose()
+  })
+}
+
+it('does not promote a borrowed source when another operation moves durable bindings to that same handle', async () => {
+  const f = await sharedFixture(), observer = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
+  await f.actualSave(f.owner, { ...f.owner, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'owner-moved-away', transcriptPath: f.oldFile } })
+  const own = (await loadAgentSessions(f.store)).find(item => item.agentSessionId === SID)!
+  await f.actualSave(own, { ...own, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: NATIVE, transcriptPath: f.files[0]! } })
+  await expect(f.read()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })
+  observer.dispose()
+})
+
+async function sharedManualObservation() {
+  const codex = new AgentProviderRegistry().get('codex')
+  let changed: NonNullable<Parameters<NonNullable<AgentProvider['observeSessionHistory']>>[0]['onChange']> | undefined
+  let source: { providerId: string; nativeSessionId: string } | undefined
+  const provider: AgentProvider = { ...codex, async observeSessionHistory(context) {
+    changed = context.onChange; source = context.source
+    return { source: context.source, dispose() {} }
+  } }
+  const f = await sharedFixture(provider)
+  const changes: Array<{ kind: string; code?: string }> = []
+  const observer = await succeeds(f.client.observeSessionHistory(SID, value => changes.push(value), f.options))
+  return { ...f, changes, observer, invalidate: () => changed!({ kind: 'invalidated', source: source! }) }
+}
+
+it('verifies the current Run before publishing a shared-source invalidation', async () => {
+  const f = await sharedManualObservation()
+  f.status.mockResolvedValue({ ...f.run, pid: f.processId + 1 } as Awaited<ReturnType<CtxmuxRunAdapter['status']>>)
+  f.invalidate()
+  await vi.waitFor(() => expect(f.changes.length).toBeGreaterThan(0))
+  expect(f.changes).toEqual([expect.objectContaining({ kind: 'unavailable', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' })])
+  f.observer.dispose()
+})
+
+it('drops an invalidation whose source validation finishes after its Consumer releases the observation', async () => {
+  const f = await sharedManualObservation()
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  f.status.mockImplementation(async () => { await gate; return f.run as Awaited<ReturnType<CtxmuxRunAdapter['status']>> })
+  try {
+    f.invalidate()
+    await new Promise(resolve => setImmediate(resolve))
+    expect(f.changes).toEqual([])
+    f.observer.dispose()
+  } finally { release() }
+  await new Promise(resolve => setTimeout(resolve, 30))
+  expect(f.changes).toEqual([])
+})
+
+it('coalesces a burst into one pending shared-source validation and preserves the acquisition notification', async () => {
+  const codex = new AgentProviderRegistry().get('codex')
+  const provider: AgentProvider = { ...codex, async observeSessionHistory(context) {
+    for (let i = 0; i < 12; i++) context.onChange({ kind: 'invalidated', source: context.source })
+    return { source: context.source, dispose() {} }
+  } }
+  const f = await sharedFixture(provider), changes: Array<{ kind: string }> = []
+  const observer = await succeeds(f.client.observeSessionHistory(SID, value => changes.push(value), f.options))
+  await vi.waitFor(() => expect(changes.length).toBeGreaterThan(0))
+  expect(changes).toEqual([{ kind: 'invalidated', source: observer.source, agentSessionId: SID }])
+  expect(f.writes).not.toHaveBeenCalled()
+  observer.dispose()
+})
