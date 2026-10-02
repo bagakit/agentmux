@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it } from 'vitest'
 import { resolve } from 'node:path'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
@@ -10,10 +10,16 @@ const scopes: Array<Awaited<ReturnType<typeof headlessFixture>>> = []
 afterEach(async () => { for (const scope of scopes.splice(0)) await scope.cleanup() })
 describe('Headless semantic owner ordinary process continuity', () => {
   it('refreshes the original Hosted native identity after its private daemon restarts without replacing the semantic owner or RPC stream', async () => {
-    // No Run is created before the restart. This private daemon cannot own a healthy user process.
+    // This fixture owns a separate daemon and Node probe. No existing user Run is touched.
     const scope = await headlessFixture(); scopes.push(scope)
     const client = await scope.client(), original = client.runtimeOwnerIdentity()!, events: AgentMuxClientEvent[] = []
     client.onEvent(event => events.push(event))
+    // Core receives Native disconnect from its actual output observation. An idle
+    // daemon has no event channel; a cached identity read cannot manufacture one.
+    const probe = await client.createTerminal({ createOperationId: 'private-native-observation-probe', workspacePath: scope.root,
+      command: process.execPath, args: ['-e', 'process.stdout.write("probe");setInterval(()=>{},1000)'] })
+    await until(() => client.listRuns(), values => values.some(value => value.runId === probe.runId && value.latestOutputBytes === 5), 'private Native observation probe ready')
+    await client.attachTerminal(probe.runId, 0, 'raw')
     const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: scope.socketPath } })
     try {
       await scope.restartNativeDaemon()
@@ -51,7 +57,7 @@ describe('Headless semantic owner ordinary process continuity', () => {
       operationId: 'live-probe-failed', commandOverride: command, env: {} })
     const continuityOutcome = await continuing.then(value => ({ value }), error => ({ error }))
     expect(continuityOutcome, 'healthy Run remains reattachable through failed Provider probe').toMatchObject({ value: { kind: 'reattachable' } })
-    const cloned = client.agentSessions(); cloned[0]!.workspacePath = upstreamFixturePath("mutated-projection")
+    const cloned = client.agentSessions(); cloned[0]!.workspacePath = fixturePath("mutated-projection")
     expect(client.agentSession(session.agentSessionId).workspacePath).toBe(scope.root)
     const owner = scope.owner
     await scope.stopOwner()

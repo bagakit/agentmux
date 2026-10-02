@@ -114,7 +114,10 @@ const mutants = [
     original: 'if (connectionPhase === state)', changed: 'if (false)', assertion: 'one endpoint loss has one state transition even when its retry fails', test: testFiles[5] },
   { name: 'initial-endpoint-confirmation-does-not-settle-service-window', file: 'hosted-client.js',
     original: 'else if (connectionPhase !== undefined)', changed: 'else if (false)',
-    assertion: 'first confirmation settles its original endpoint service window', test: testFiles[5] }
+    assertion: 'first confirmation settles its original endpoint service window', test: testFiles[5] },
+  { name: 'native-restored-event-leaves-a-stale-input-fence', file: 'hosted-client.js',
+    original: 'bootstrap.identity = structuredClone(restored.ctxmux);', changed: 'void restored.ctxmux;',
+    assertion: 'the same Hosted stream carries the current Native identity before a new input fence', test: testFiles[2] }
 
 ]
 const results = []
@@ -141,7 +144,7 @@ const run = async (label, selected = testFiles) => {
   }
   const count = selected.reduce((total, file) => total + baselineCases.get(resolve(shadow, file)).length, 0)
   assert.equal(report.numTotalTests, count)
-  if (selected.length === testFiles.length) assert.equal(count, 55, `${label}: all fifty-five owning product behaviors must execute.`)
+  if (selected.length === testFiles.length) assert.equal(count, 56, `${label}: all fifty-six owning product behaviors must execute.`)
   assert.equal(report.numPendingTests, 0)
   result.failures = report.testResults.flatMap(file => file.assertionResults.filter(item => item.status === 'failed').map(item => ({ file: file.name, name: item.fullName, messages: item.failureMessages })))
   return result
@@ -188,7 +191,7 @@ try {
       redExitCode: red.exitCode, restoredExitCode: restored.exitCode, targetAssertions,
       owningFile: mutant.test, owningCases: baselineCases.get(resolve(shadow, mutant.test)) })
   }
-  assert.equal((await run('final-restored')).exitCode, 0, 'All fifty-five product behaviors must remain green after every emitted block is restored.')
+  assert.equal((await run('final-restored')).exitCode, 0, 'All fifty-six product behaviors must remain green after every emitted block is restored.')
   // Product consumers are taken from real source references, excluding each definition and all tests.
   const callerSpecs = [
     ['connectHostedAgentMux', 'packages/core/src/hosted-client.ts'],

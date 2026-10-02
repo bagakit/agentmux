@@ -70,7 +70,8 @@ export type AgentMuxHostedBootstrap = {
 export type AgentMuxHostedTransferChunk = { transferId: string; index: number; dataBase64: string; final: boolean }
 export type AgentMuxHostedStreamValue =
   | { kind: 'initial'; value: unknown }
-  | { kind: 'event'; event: AgentMuxClientEvent }
+  // A Native restored transition carries the current owner facts on the same ordered stream.
+  | { kind: 'event'; event: AgentMuxClientEvent; owner?: AgentMuxRuntimeOwnerIdentity }
   | { kind: 'history'; observation: AgentSessionHistoryObservation }
 export type AgentMuxHostedStreamEvent =
   | { type: 'snapshot'; data: AgentMuxHostedTransferChunk }

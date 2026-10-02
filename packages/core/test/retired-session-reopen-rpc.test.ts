@@ -7,13 +7,16 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import type { AgentMuxRuntimeOwnerIdentity } from '../src/hosted-client-contract.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
 const close: Array<() => Promise<void>> = []
 afterEach(async () => { for (const cleanup of close.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })
 async function endpoint(transport: 'unix' | 'http') {
   const f = await retiredReopenFixture(); close.push(f.close)
-  const hosted = new AgentMuxHostedRuntimeService(f.client); close.push(() => hosted.dispose())
+  const identity: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-reopen-runtime', ownerInstanceId: 'private-reopen-owner',
+    protocolVersion: 1, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }
+  const hosted = new AgentMuxHostedRuntimeService(f.client, f.storePath, () => identity); close.push(() => hosted.dispose())
   const owner = new AgentMuxControlServer({ socketPath: join(f.root, 'public.sock'),
     coreClients: () => [{ hostId: 'local', client: f.client }], hostedRuntime: () => hosted,
     ...(transport === 'http' ? { http: { host: '127.0.0.1', port: 0, token: 'private-reopen' } } : {}) })
