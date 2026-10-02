@@ -42,7 +42,10 @@ describe('running 与 working 在字形与动势上都可分', () => {
     expect(strip(running)).not.toBe(strip(working))
   })
 
-  it('动势轴：working 挂 semantic-icon--working，running 不挂', () => {
+  it('动势轴：working 的 HTML carrier 保留 SVG props，running 不创建动画载体', () => {
+    expect(working).toContain('<span class="semantic-icon-motion semantic-icon-motion--working"><svg')
+    expect(running).not.toContain('semantic-icon-motion')
+    expect(working).toContain('width="13"')
     expect(working).toContain('semantic-icon--working')
     expect(running).not.toContain('semantic-icon--working')
     // 两者都还带共享基类，证明差异只在那枚 working 标记上，不是整条 class 拼错。
@@ -51,17 +54,17 @@ describe('running 与 working 在字形与动势上都可分', () => {
   })
 })
 
-describe('semantic-icon--working 的动势规则与 reduced-motion 退化（从样式表反推）', () => {
+describe('semantic-icon-motion--working 的动势规则与 reduced-motion 退化（从样式表反推）', () => {
   const css = allStyles()
 
   it('自检：扫到了东西', () => {
     expect(css.length).toBeGreaterThan(100_000)
     // 锚点必须真的存在于样式表里，否则下面每条切片都在空串上恒真。
-    expect(css.indexOf('.semantic-icon--working')).toBeGreaterThan(-1)
+    expect(css.indexOf('.semantic-icon-motion--working')).toBeGreaterThan(-1)
   })
 
   // 该选择器的每一处规则体（正常上下文一条 + reduced-motion 里一条）。
-  const bodies = [...css.matchAll(/\.semantic-icon--working\s*\{([^}]*)\}/g)].map((m) => m[1]!)
+  const bodies = [...css.matchAll(/\.semantic-icon-motion--working\s*\{([^}]*)\}/g)].map((m) => m[1]!)
 
   it('恰好两处规则：一处带节奏动画，一处（reduced-motion 下）退化为静态', () => {
     // 两处都在，才谈得上"正常动、reduced-motion 静"。少一处就漏掉一半合同。
