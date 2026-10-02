@@ -102,7 +102,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 主题系统采用“运行时 CSS 真值 + 类型化语义边界 + 可选适配层”的三层结构：
 
 - `styles/tokens.css` 是全站主题值的唯一真值。颜色、字号、间距、圆角、阴影和动效都在这里定义；
-  其他样式表只能引用 token，不得再声明第二个 `:root` 或复制一套主题值。
+  其他样式表只能消费既有 token，不得定义第二套全局主题值。用 `:root[data-appearance]` 等选择器读取已有外观，是消费既有主题，不是声明新的主题真值。
 - 组件只依赖语义角色（例如 surface、text、line、success、danger、focus），不依赖具体色号或某个
   页面名称。组件自己的几何规则留在所属 surface 文件，不能把业务状态写进主题 token。
 - `data-appearance="dark|light"` 是浏览器运行时的主题切换入口。React 状态、持久化配置和系统偏好只
@@ -118,7 +118,7 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
   的“以后可能用到” token 应删除。
 
 这套规则吸收了现有 CSS 的单一入口、语义映射与类型边界这三条成熟实践，但不把任何宿主 UI 框架
-引入核心包。未来若把 primitives 抽到共享 UI 包，包只允许消费这组语义契约，不能拥有第二套主题值。
+引入核心包。共享 UI 包只消费这组语义契约，不能拥有第二套主题值；Gallery 与产品使用同一外观解析和系统偏好监听，不能把缺少外观属性当作跟随系统。
 
 设计语言要能被执行，前提是它在代码里**有一个可引用的名字**。散落的字面值不是"细微调整"，是把设计决策
 藏进 2000 多行样式表里：改一档字号要靠 grep，改错一处没人发现。因此三类尺度全部收进 token，
@@ -240,6 +240,22 @@ Agent CLI 导航桌面主画面、保留 Mote 对话输入及选择／呈现／c
 
 ## 控件语言
 
+| 层级 | 视觉语言 | 用途 |
+| --- | --- | --- |
+| Primary | 实心品牌绿渐变、深色文字、顶部高光 | 页面唯一主操作 |
+| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认。**落地类名只有 `.small-button` 一个**，见下「一档控件只有一个类名」 |
+| Ghost / Icon | 透明底，hover 才提升 Surface | 图标按钮与工具栏动作 |
+| Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态 |
+| Danger | 实心红色变体、深色文字、顶部高光 | 删除、移除等破坏性主操作 |
+
+补充规则：
+
+- 同一语义在不同容器中使用同一控件层级。
+- **一档控件只有一个类名。** 上表五档各自只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。**不得按表里的档位名另造一个类名**——那个名字读起来像"就该存在"，于是没人会去查它有没有规则。实证：`.secondary-button` 被这样写出来过一次（启动页 Resume），全仓零规则，而 `base.css` 的全局 `button` 只重置 `font`/`color`、**不重置 `background`**，于是它落到 macOS 原生按钮样式——一颗浅灰实心药丸，在深色主题里比紧邻的品牌绿主操作还重，恰好推翻上表"Primary＝页面唯一主操作"。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住：它的扫描面除 BEM 记号外**还收 `-button` 结尾的扁平类名**，渲染了却没有规则即红。扁平名此前整族在扫描面之外（判据只认 `__`/`--`），这不是漏登记而是结构性缺席，所以修的是判据形状而不是加一条豁免。
+- **`justify-content: space-between` 是一份「有几簇」的契约，不是"把东西摊开"的通用手法。** 它把自由空间**摊在子元素之间**，所以结果是子元素**个数**的纯函数：两簇时各抱一端（这才是它的用途），三个以上松散子元素则被甩向两极、中间留出大洞。这份"应该有几簇"的期待写在 CSS 里，而供给子元素的是另一个文件里的 JSX，两边没有任何东西对齐它们——**供错形状不报错，只是默默排错**，而本仓测试跑在 happy-dom 下不算布局，没有任何 gate 会红。因此：**space-between 只用于子元素集合固定且已知的容器**；凡是"一个留在左缘、其余聚到右缘"的工具栏与页脚，一律用 `justify-content: flex-end` 配首元素 `margin-right:auto`——它对 2、3、4 个子元素都成立，**契约本身被删掉了**，而不是被记在文档里等人遵守。这套写法本仓已有多处（`surfaces.css` 的 `.settings-pane-actions`、`dock.css` 的 `.workspace-composer > footer`、`board.css` 的 `.discussion-canvas__footer`）。实证：`.composer__toolbar` 与 `.settings-pane-toolbar` 都配了 `> div` 的两簇写法，各自有一个调用方老实给两簇、另一个调用方给四个松散子元素，于是同一条规则在两个界面上同时排错。
+- **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 与 `border-left: <n>px ...`（含 `border-inline-start`）这两种拼法都不得用于表达选中——它们在屏幕上是同一根线，禁的是那根线而不是某一种画法。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出两种拼法的所有左缘竖条并在选中态类名上断言其不存在，加回一条会红；两个形状判定各自带一条自证（拿合法的容器分隔线与内容引用条当样本），因为一个认不出竖条的检查会因"没找到"而全绿。
+- **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（重复的 Topic 类型图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（对象的手动或自动身份、状态、Provider 身份）或干脆留白；Space 的共用对象身份槽遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)。
+
 用户要求替换 Mote 和项目中制式的 AI 星芒图标。Mote 默认类型图形使用原创 SVG 标记，以克制的不对称实体轮廓与留白表达微小但稳定的身份；在 12–24px 保持清楚，跟随当前文字颜色，无渐变、阴影、滤镜、装饰性星芒或动画。相同 Mote 类型入口共用同一标记；对象可按[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)的共用身份规则选择手动图标。项目自己的通用 AI 星芒（Lucide Sparkles / WandSparkles）退场：新建工作面用创建语义、技能用技能语义、跳过权限提示用明确权限语义；现头像 spark 徽标保留原数据含义而更换其字形。保留 Provider 官方品牌资产，不能把它们当成制式 AI 图标替换。产品身份边界见 interaction[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
 
 ## 身份归属
@@ -316,7 +332,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 ## 响应式与可访问性
 
 - Tool Dock 变为覆盖层时仍消费同一宽度和开合 truth，不复制移动端状态。
-- 每个图标按钮必须有 tooltip、`aria-label` 和可见键盘 focus。
+- 每个图标按钮必须有 tooltip、`aria-label` 和可见键盘 focus。正常、禁用与忙碌状态由同一公共控件表达；禁用时不响应 hover 或按下效果，不用可点击指针暗示仍能执行。业务动作是否可用仍由原 owner 决定。
 - Tab 名称始终单行；过长省略，空间不足时由 Pane 内横向 overflow 解决。
 - Surface 明度和状态色必须保持足够对比；不可只靠颜色区分选中、危险或不可用。
 - 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Attention Bar 的 StatusCount 同源复用）中，"需要你"（`waiting`/`blocked`）必须带**形状**而非仅靠颜色：琥珀圆点内嵌 `?` 字形，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下字形也无需字形——颜色加角落位置已足够区分，字形只在全尺寸状态点上浮现。
@@ -346,17 +362,17 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 - Rail 与 Tool Dock 的四种开关组合都保持固定顶部按钮、正确内容起点和可操作角标。
 - Terminal、Editor 和 Browser 的内容缩放由各自 owner 管理，不建立全局缩放补偿层。
 - 视觉改动通过项目统一检查和目标窗口交互验证；截图只证明渲染，不替代状态和安全测试。
-- 受 Radix `Presence` 管理的节点（Dialog/Menu 的 `Content`、`SubContent`、`Overlay`）上的 keyframe 动画**必须**限定在 `[data-state='open']`。Presence 在关闭时读计算出的 `animation-name` 判断是否有退场动画在跑；一个无条件声明的入场动画会让它等一个关闭永不触发的 `animationend`，节点因此永久留在 DOM——菜单项继续命中查询，Escape 关不掉任何可观测的东西。这条由一个静态检查守住（`apps/desktop/test/presence-exit-animation.test.ts`）：它从组件源码推出受管类名而非手工清单，因此后加的菜单自动被覆盖；同时断言入场动画仍在，使这条规则不能靠删掉动效来满足。
+- 受 Radix `Presence` 管理的节点（Dialog/Menu 的 `Content`、`SubContent`、`Overlay`）上的入场 keyframe 动画必须限定在 `[data-state='open']`。有意的退出可以限定在 `[data-state='closed']`，但必须使用与入场不同的动画名、真实定义的 keyframes 和明确的有限时长，并由真实 Native Renderer 证明完成与卸载；静态守护本身不能证明退出完成。Presence 关闭时读取计算出的 `animation-name`；无条件入场会让它等一个永不触发的 `animationend`，留下失效节点。这条由 `apps/desktop/test/presence-exit-animation.test.ts` 从 Desktop 与共享 UI 包的实际组件源码推导受管节点，集合必须非空，不维护手抄类名；同时保留入场动画的断言，不能靠删动效满足。
 
 ## 样式表的组织
 
 一个 2551 行的 `styles.css` 不是"文件大"的问题，是**找不到东西**的问题：改 Topic 行要先 grep 出
-它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构。以下清单按 Desktop 入口的实际层叠顺序排列；共同对话样式归 `packages/client-ui/src/styles`，Desktop 在原层叠位置导入，其他 Client 直接消费共享包样式：
+它散在哪几段，改完不知道有没有漏。样式按**表面**分文件，与组件目录同构；同一表面的默认、状态与响应式规则由同一 owner 持有，窄布局按实际可用容器生效，不由后置无条件规则覆写。共同对话样式归 `packages/client-ui/src/styles`，组件正常呈现所需的 overlay、尺寸与可访问性规则也随组件归包；宿主提供主题 token、Portal 容器与平台能力，不补另一份共享组件必需样式。以下清单按 Desktop 入口的实际层叠顺序排列，Desktop 在原层叠位置导入，其他 Client 直接消费共享包样式：
 
 ```
 styles/
   index.css       入口：@import 的顺序即层叠顺序
-  tokens.css  唯一的 :root——颜色、字号、间距、圆角、阴影、动效
+  tokens.css  唯一全局主题值——颜色、字号、间距、圆角、阴影、动效
   base.css  reset、html/body、滚动条、共享原子（.icon-button/.small-button/.eyebrow/.status）
   chrome.css  Titlebar、Project Rail、Tabbar、Attention Bar
   space-tree.css  Space 查找、分类、折叠与目录 pins 归属
@@ -374,6 +390,7 @@ styles/
   surfaces.css  Settings、New Tab、Launch、Welcome
   settings-overview.css  Settings overview 的实际分区与紧凑身份行
   settings-toolkit.css  Settings 工具目录
+  toolkit-custom.css  自定义工具的动作、参数与结果
   settings-keyboard-shortcuts.css  Settings 键盘快捷键
   board.css  Board：Branch/Topic × 状态矩阵、扇出条、Board 工具清单、Discussion 画布
   global-board.css  Global Agents Board 的 demand/session 列、工作区和 region
@@ -381,7 +398,6 @@ styles/
   focus.css  Focus 三段工作面：历史、状态、选中的 Session
   focus-timeline-ruler.css  Focus 时间轴与有界标尺
   pmo-teams-topic.css  Mote 快捷面、对象选择与 compact 入口
-  mote-workface.css  Mote 工作面与导航底栏
   browser.css  Browser 工具与地址栏
   browser-operation-surface.css  Browser 操作轨迹与回放表面
   browser-step-evidence.css  Browser 步骤证据详情
@@ -402,7 +418,8 @@ styles/
   resume.css  已有 Session 恢复入口
   activity.css  Activity 时间线、机器步骤与标尺
   conversation-message.css  对话回合、消息动作与状态（packages/client-ui/src/styles）
-  markdown.css  共同正文的 Markdown、资源与图片（packages/client-ui/src/styles）
+  markdown.css  共同正文的 Markdown 与资源（packages/client-ui/src/styles）
+  conversation-image.css  共同图片缩略图、放大预览与可访问性（packages/client-ui/src/styles）
   conversation-input-details.css  消息来源、作者与输入详情（packages/client-ui/src/styles）
   conversation-tool-trace.css  原生对话工具调用与结果（packages/client-ui/src/styles）
   conversation-native-thread.css  原生对话过程与消息顺序（packages/client-ui/src/styles）
@@ -415,6 +432,7 @@ styles/
   performance-toolkit.css  性能观察与脚本工具
   agent-avatar.css  执行器头像的 Provider 轮廓、角标、状态、计数与设置预览
   full-page-loading.css  启动与全页 loading/recovering/failed 大屏的网格、切片、品牌层和动效
+  session-recap.css  Session recap 的真实来源、阅读与就地动作
 ```
 
 这张清单由 `stylesheet-organisation.test.ts` 钉住：文件名集合必须与 `index.css` 的 `@import`
@@ -422,7 +440,7 @@ styles/
 
 约束：
 
-- **`:root` 只有一处**，在 `tokens.css`。其余文件不得声明全局 token，只能引用。
+- 全局主题值的唯一 owner 与消费边界见[《主题与样式 SSOT 规范》](#主题与样式-ssot-规范)；组织守护检查真实声明的归属，不把读取现有外观的选择器判成第二份主题值。
 - 分文件是**按表面切**而不是按属性切（不设 `typography.css`/`colors.css`）——改一个表面时想看到的是
   它的全部规则，而不是在三个文件间来回跳。
 - 入口按上述顺序 `@import`，层叠顺序即文件顺序；不依赖选择器特异性打架来决定胜负。
