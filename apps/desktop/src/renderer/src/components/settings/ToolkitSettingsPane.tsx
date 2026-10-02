@@ -75,11 +75,11 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
     if (selected.expected) await onRemoveTool(selectedId, toolkitFields(selected.expected))
     resource.forget(selectedId); setSelectedId(entries.find(([id]) => id !== selectedId)?.[0] ?? null); focusBack.current = true; setView('library'); return true
   }
-  return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view}>
+  return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view} data-creation-empty={!entries.length && !templateOpen && selectedId === null} data-starting-point={templateOpen}>
     <header className="settings-pane-toolbar toolkit-workbench__toolbar">
       <p className="toolkit-workbench__intro">Your scripts. Your actions.</p>
-      <button type="button" className="small-button" data-tool-template="account-usage" onClick={() => { setTemplateOpen(true); setView('editor') }}>Starting points</button>
-      <button type="button" className="small-button" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> New custom tool</button>
+      <button type="button" className="small-button toolkit-workbench__starting" data-tool-template="account-usage" onClick={() => { setTemplateOpen(true); setView('editor') }}>Starting points</button>
+      <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> New custom tool</button>
     </header>
     <div className="toolkit-workbench__body">
       <section className="toolkit-library" aria-label="Tool library">
@@ -90,10 +90,10 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
           {visible.map(([id,entry]) => {
             const directory = shortDirectory(entry.value.workspacePath)
             return <button type="button" className="toolkit-library__item" key={id} data-tool-id={id} aria-pressed={!templateOpen && selectedId === id} onClick={() => open(id)}>
-            <ToolkitIcon icon={entry.value.icon} size={17} /><span><strong>{entry.value.name.trim() || 'Untitled tool'}</strong><small>Custom · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}</small><code title={entry.value.workspacePath}>{entry.value.workspacePath ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a fixed directory'}</code></span>{!templateOpen && selectedId === id ? <Check size={12} aria-label="Selected tool" /> : null}
+            <ToolkitIcon icon={entry.value.icon} size={17} /><span><strong>{entry.value.name.trim() || 'Untitled tool'}</strong><small>Custom · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}</small><code title={entry.value.workspacePath}>{entry.value.workspacePath ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a fixed directory'}</code></span>{!templateOpen && selectedId === id ? <Check className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
           </button>})}
           {!visible.length ? <p className="settings-resource-empty">{entries.length ? 'No matching custom tools. Your drafts are kept.' : 'Create a tool with your own script and actions.'}</p> : null}
-          {showPerformance ? <><p className="toolkit-library__group">Built-in</p><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={!templateOpen && selectedId === 'performance'} onClick={() => open('performance')}><Activity size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><LockKeyhole size={12} aria-label="Official tool" /></button></> : null}
+          {showPerformance ? <><p className="toolkit-library__group">Built-in</p><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={!templateOpen && selectedId === 'performance'} onClick={() => open('performance')}><Activity size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><LockKeyhole className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
         </div>
       </section>
       <div className="toolkit-workbench__detail">
@@ -105,8 +105,8 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
           <p className="settings-hint">For this account query, choose a fixed directory, set Argument 1 to your query executable and Argument 2 to the exact account key.</p>
           <p className="settings-hint">Starts hidden and disabled. Creating and saving do not query accounts; enable it and run when you are ready.</p>
           <details className="toolkit-editor__scope"><summary>Review template source</summary><pre className="toolkit-template__source">{accountUsageScript}</pre></details>
-          <div><button type="button" className="small-button" disabled={entries.length >= 128} onClick={() => add(createAccountUsageTool())}><Plus size={13} /> Use this starting point</button></div>
-        </section> : selectedId === 'performance' ? null : selected && selectedId !== null ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={onRunTool} onBack={back} /> : <section className="toolkit-workbench__empty"><Wrench size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Make a tool your own.'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Start with any script. Give it a name and icon, then add buttons to its results.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="small-button" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> Create your first tool</button> : null}</section>}
+          <div><button type="button" className="primary-button toolkit-template__adopt" disabled={entries.length >= 128} onClick={() => add(createAccountUsageTool())}><Plus size={13} /> Use this starting point</button></div>
+        </section> : selectedId === 'performance' ? null : selected && selectedId !== null ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={onRunTool} onBack={back} /> : <section className="toolkit-workbench__empty"><Wrench size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Make a tool your own.'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Start with any script. Give it a name and icon, then add buttons to its results.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> Create your first tool</button> : null}</section>}
       </div>
     </div>
   </div>
