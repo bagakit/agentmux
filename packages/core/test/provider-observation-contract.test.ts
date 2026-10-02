@@ -59,12 +59,12 @@ function observe(input: {
 }
 
 describe('三条轴不折叠成一个 busy', () => {
-  it('进程 alive + semantic idle + readiness pending 三件事各自可判、互不塌陷', () => {
+  it('进程 alive + semantic unknown + readiness pending 三件事各自可判、互不塌陷', () => {
     // 进程活着、有待答请求：这恰是"活着但不是在干活、且还不能接普通输入"这一格——若三轴塌成 busy，
     // 这三个不同的值就再也分不出来。
     const pending = observe({ process: 'running', source: 'run-process', awaitingRequest: true })
     expect(pending.process).toBe('running')   // 进程 alive
-    expect(pending.semantic).toBe('idle')     // 没有活动声明 = 语义 idle（不是 busy）
+    expect(pending.semantic).toBe('unknown')     // 没有活动声明 = 语义 unknown，不能推定 idle/active
     expect(pending.readiness).toBe('pending') // 卡在待答请求 = 就绪 pending
 
     // 同一进程状态下，语义与就绪各自能独立取到别的值——证明它们不是同一个布尔的三个别名。
@@ -73,13 +73,13 @@ describe('三条轴不折叠成一个 busy', () => {
     expect(active.readiness).toBe('ready')
   })
 
-  it('semantic active 只由活动声明来源支撑，裸 running 是 idle 不是 active', () => {
+  it('semantic active 只由活动声明来源支撑，裸 running 是 unknown 不是 active', () => {
     // 缺陷的正脸：把 run-process 也当活动声明会让每个活着的进程都显示"在干活"。
     expect(observe({ source: 'native-hook' }).semantic).toBe('active')
     expect(observe({ source: 'acp' }).semantic).toBe('active')
-    expect(observe({ source: 'run-process' }).semantic).toBe('idle')
+    expect(observe({ source: 'run-process' }).semantic).toBe('unknown')
     // 终端字节永不作语义活动证据（本仓设计红线）。
-    expect(observe({ source: 'terminal-output' }).semantic).toBe('idle')
+    expect(observe({ source: 'terminal-output' }).semantic).toBe('unknown')
   })
 
   it('同一活动声明来源(native-hook)下，声明的 state 决定 semantic——不塌成一个 active', () => {
@@ -104,9 +104,9 @@ describe('三条轴不折叠成一个 busy', () => {
     // 只有 working 会衰减；waiting/blocked 静默与其相容，衰减掉等于把「需要你」提醒悄悄抹了。
     const staleWaiting = observe({ source: 'native-hook', state: 'waiting', observedAt: NOW, now: NOW + 20 * 60_000 })
     expect(staleWaiting.semantic).toBe('awaiting-input')
-    // 对照：同样静默 20 分钟的 working 会衰减落 idle——证明衰减确实只作用于 working。
+    // 对照：同样静默 20 分钟的 working 会衰减为 unknown——证明衰减确实只作用于 working。
     expect(observe({ source: 'native-hook', state: 'working', observedAt: NOW, now: NOW + 20 * 60_000 }).semantic)
-      .toBe('idle')
+      .toBe('unknown')
   })
 
   it('进程不是 running 时语义/就绪都退回 unknown，绝不伪造 idle/ready', () => {
@@ -117,9 +117,9 @@ describe('三条轴不折叠成一个 busy', () => {
     }
   })
 
-  it('迟到活动声明过了新鲜度窗口 → 语义落回 idle 且标 stale，不再冒充在干活', () => {
+  it('迟到活动声明过了新鲜度窗口 → 语义落回 unknown 且标 stale，不再冒充在干活', () => {
     const stale = observe({ source: 'native-hook', observedAt: NOW, now: NOW + 16 * 60_000 })
-    expect(stale.semantic).toBe('idle')
+    expect(stale.semantic).toBe('unknown')
     expect(stale.stale).toBe(true)
     // 未过窗口的同源读数仍是 active——证明衰减确实是那道窗口在起作用。
     expect(observe({ source: 'native-hook', observedAt: NOW, now: NOW + 60_000 }).semantic).toBe('active')
