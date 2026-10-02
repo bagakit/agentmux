@@ -20,7 +20,7 @@
 .toolkit-settings__choices label:focus-within { outline: 2px solid var(--focus-line); outline-offset: -2px; }
 .toolkit-settings__choices input { margin: 0; accent-color: var(--green); width: 13px; height: 13px; }
 .toolkit-settings__locked { display: flex; gap: var(--sp-2); align-items: flex-start; margin: 0; padding: var(--sp-4) var(--sp-7); border-top: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
-.toolkit-settings__locked svg { margin-top: 2px; flex: 0 0 auto; }
+.toolkit-settings__locked svg { margin-top: var(--sp-1); flex: 0 0 auto; }
 @media (max-width: 580px) {
   .toolkit-settings__identity, .toolkit-settings__toggle { padding: var(--sp-5); }
   .toolkit-settings__icon { width: 44px; height: 44px; }

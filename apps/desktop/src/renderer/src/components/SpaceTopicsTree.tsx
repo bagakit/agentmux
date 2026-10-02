@@ -174,7 +174,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ArchiveRestore size={12} /></button> : null}
             {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
           </div>
-          {topic.readError ? <div className="new-tab-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
+          {topic.readError ? <div className="surface-inline-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
           {topic.moteArchive?.state === 'unknown' ? <MoteArchiveNotice workspaceId={workspace.id} issue={topic.moteArchive.issue} /> : null}
         </div></SpaceObjectContextMenu>
       }) : null}
@@ -183,7 +183,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   return <div ref={tree} className="space-topics-tree">
     {section('Motes', motes.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived))}
     {section('Topics', entries)}
-    {error ? <div className="new-tab-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
+    {error ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
     <MoteArchiveNotice workspaceId={workspace.id} issue={archive.issue} />
     <MoteRenameDialog target={renameTarget ? { topic: renameTarget, workspace } : null} onClose={() => setRenameTarget(null)}
       returnFocus={() => tree.current?.querySelector<HTMLButtonElement>('[data-space-nav="topic:' + renameId.current + '"]') ?? null} />

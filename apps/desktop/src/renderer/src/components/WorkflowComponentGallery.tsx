@@ -1,4 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { APP_APPEARANCE_IDS, type AppAppearanceId } from '../../../shared/contracts'
+import { applyAppAppearance } from '../lib/app-appearance'
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard, WorkflowDock, WorkflowToolRow } from './workflow'
 import { ObservationSurfaceGallery } from './ObservationSurfaceGallery'
@@ -12,27 +14,19 @@ import {
   runningWorkflow
 } from './workflow/fixtures'
 
-type ThemeMode = 'light' | 'dark' | 'system'
-
-function applyTheme(mode: ThemeMode): void {
-  if (mode === 'system') delete document.documentElement.dataset.appearance
-  else document.documentElement.dataset.appearance = mode
-}
+const APPEARANCE_LABELS = { light: '浅色', dark: '深色', system: '跟随系统' } satisfies Record<AppAppearanceId, string>
 
 export function WorkflowComponentGallery() {
-  const [theme, setTheme] = useState<ThemeMode>('dark')
-  const setThemeMode = (mode: ThemeMode): void => {
-    setTheme(mode)
-    applyTheme(mode)
-  }
+  const [theme, setTheme] = useState<AppAppearanceId>('dark')
+  useEffect(() => applyAppAppearance(theme), [theme])
   return (
     <main className="wf-gallery">
       <header className="wf-gallery__bar">
         <div className="wf-gallery__brand">Workflow 时间线组件 <span>· reusable gallery</span></div>
         <div className="wf-gallery__theme" role="group" aria-label="主题切换">
-          {(['light', 'dark', 'system'] as const).map((mode) => (
-            <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => setThemeMode(mode)}>
-              {mode === 'light' ? '浅色' : mode === 'dark' ? '深色' : '跟随系统'}
+          {APP_APPEARANCE_IDS.map((mode) => (
+            <button key={mode} type="button" aria-pressed={theme === mode} onClick={() => setTheme(mode)}>
+              {APPEARANCE_LABELS[mode]}
             </button>
           ))}
         </div>

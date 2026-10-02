@@ -74,7 +74,7 @@
 .launch-refine__count[data-tier='danger'] { color: var(--red-text); background: var(--red-bg); }
 .launch-refine__count[data-tier='caution'] { color: var(--amber-text); background: var(--amber-bg); }
 .launch-refine__named { width: 4px; height: 4px; border-radius: 50%; background: var(--text-2); }
-.launch-refine__panel { position: fixed; z-index: var(--layer-popover); width: min(400px, calc(100vw - 24px)); max-height: min(480px, calc(100vh - 32px)); overflow: auto; padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); outline: none; }
+.launch-refine__panel { container-type: inline-size; container-name: launch-refine; position: fixed; z-index: var(--layer-popover); width: min(400px, calc(100vw - 24px)); max-height: min(480px, calc(100vh - 32px)); overflow: auto; padding: var(--sp-5); border: 1px solid var(--line); border-radius: var(--radius-lg); color: var(--text); background: var(--surface-1); box-shadow: var(--elev-2), var(--hl); outline: none; }
 .launch-refine__panel > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .launch-refine__panel h2 { margin: 0; font-size: var(--fs-title); font-weight: 600; }
 .launch-refine__panel > p { margin: var(--sp-2) 0 var(--sp-5); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
@@ -87,6 +87,11 @@
 .launch-refine__names { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); margin: var(--sp-2) 0 0; padding: var(--sp-4) 0 0; border: 0; border-top: 1px solid var(--line-soft); }
 .launch-refine__names legend { padding: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-meta); }
 .launch-refine__names label { display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+/* Portal content measures itself; the launcher Region is no longer its ancestor. */
+@container launch-refine (max-width: 320px) {
+  .launch-refine__row, .launch-refine__names { grid-template-columns: minmax(0, 1fr); }
+  .launch-refine__row { row-gap: var(--sp-3); }
+}
 /* Utility modules share one quiet row language. Hiding only releases the View, never its Run. */
 .launch-surface__alt { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
 .launch-surfaces-stack { display: flex; flex-direction: column; gap: var(--sp-4); }

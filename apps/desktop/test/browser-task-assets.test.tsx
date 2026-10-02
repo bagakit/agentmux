@@ -320,6 +320,10 @@ describe('BrowserTaskAssetEditor', () => {
     const s = setup(), asset = await saved(s.assets), m = await mount(asset, { run: { id: 'run-1', assetId: asset.id, version: 1, browserId: 'browser-1', nextStep: 1, status: 'waiting-human', operationIds: ['op-1'], pendingCheckpointId: 'cp-1', warning: 'Inspect before returning control', startedAt: 1, updatedAt: 2 } })
     try {
       expect(m.host.querySelectorAll('[data-task-step-id]')).toHaveLength(2)
+      for (const label of ['Locate task step 1', 'Insert checkpoint after task step 1', 'Delete task step 1']) {
+        const button = m.host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+        expect(button).not.toBeNull(); expect(button!.title).toBe(label)
+      }
       expect(m.host.textContent).toContain('Return control and continue')
       expect(m.host.textContent).toContain('Inspect before returning control')
       await act(async () => m.host.querySelector<HTMLButtonElement>('[aria-label="Delete task step 1"]')!.click())

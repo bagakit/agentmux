@@ -8,10 +8,9 @@
  * 层叠顺序即 index.css 里的 @import 顺序，不靠特异性打架决定胜负。
  */
 
-/* `.new-tab-error` 是这一族里唯一还活着的：NewTabSurface 与 SurfaceToolDock 各有一处 role="alert"。
-   它上面那整块（`.new-tab-surface` 卡片、`.new-tab-grid` 九宫格、`.new-tab-card__icon`、以及
-   `footer` / `kbd` 两条后代规则）随 launcher 改版后无人渲染，已删——本仓不留"以后可能用得上"。 */
-.new-tab-error { margin-top:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }
+/* Inline errors shared by launch, Topic panels and rename forms. Each domain retains its own
+   failure/recovery facts; dialog and Settings errors keep their distinct layout rules. */
+.surface-inline-error { margin-top:var(--sp-4); padding:var(--sp-3) var(--sp-4); border: 1px solid var(--red-line); border-radius: var(--radius-sm); color: var(--red-text); background: var(--red-bg); font-size: var(--fs-meta); }
 
 .welcome { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; background: radial-gradient(circle at 50% 42%, var(--surface-0) 0, var(--surface-0) 38%, var(--surface-0) 100%); text-align: center; }
 .welcome h1 { margin:var(--sp-4) 0 var(--sp-4); font-size: var(--fs-display); line-height: 1.08; letter-spacing: -.03em; }

@@ -63,6 +63,8 @@ describe('real format preview pane', () => {
     await render(<FilePreviewPane surface={file} visible={false} />); expect(api.files.readPreview).not.toHaveBeenCalled()
     await render(<FilePreviewPane surface={file} />)
     expect(api.files.readPreview).toHaveBeenCalledExactlyOnceWith('workspace', 'diagram.png')
+    expect(container.querySelector('button[aria-label="Zoom out"]')?.getAttribute('title')).toBe('Zoom out (-)')
+    expect(container.querySelector('button[aria-label="Zoom in"]')?.getAttribute('title')).toBe('Zoom in (+)')
     const image = container.querySelector('img')!
     expect(image).not.toBeNull(); expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('loading')
     const viewport = container.querySelector('.image-preview__viewport')!

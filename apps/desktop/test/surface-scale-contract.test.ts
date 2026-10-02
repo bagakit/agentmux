@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { allStyles } from './helpers/styles.js'
+import { allStyles, stripCssComments, styleFiles } from './helpers/styles.js'
 
-// 守住尺度合同（docs/design/agentmux-surface-density.md《尺度系统》）。
+// 守住尺度合同（docs/design/presentation/shared-rules.md《主题与样式 SSOT 规范》）。
 //
 // 立这道检查之前的实测：16 种字号字面值、32 种间距字面值、330 处非 :root 硬编码颜色，而
 // `font-size: var(...)` 出现 **零次**。设计决策全藏在字面值里——改一档字号要靠 grep，改错一处
@@ -57,47 +57,30 @@ const DECORATIVE_FONT_SIZE_EXCEPTIONS = new Map<string, number>([
   ['.surface-navigation__tooltip small', 10],
 ])
 
-/**
- * 间距例外：刻度外的值必须有理由，且理由要能一句话说清。
- *
- * 1px 是 hairline 的物理下限，不是间距选择；104px 是 Activity 展开内容与其标题的对齐点，
- * 由 20px 节点槽 + 56px 时间槽 + padding 累加而来，改成 96 或 112 会让对齐失效。
- * 2/3/6/9px 是刻度轨道 / avatar 排布 / tooltip 内边距等紧凑装饰场景;--sp-1 (4px) 会显得散。
- * 116px 是 recent-focus ruler 起点,由 32+8+76 累加而来。
- */
-const SPACING_EXCEPTIONS = new Set([1, 2, 3, 6, 9, 104, 116])
-
-/**
- * 布局尺寸例外：这些大值不是节奏，是几何。
- *
- * 刻度管的是"元素之间隔多远"，它到 24px 为止；再往上的值全都在回答别的问题——给红绿灯让出多宽、
- * 输入框右侧的图标占几像素、`clamp()` 在大屏上的上界是多少。把它们塞进刻度会让刻度失去含义
- * （一个有 80px 的"节奏刻度"约束不了任何东西），所以按**选择器**具名放行，而不是把数值加进白名单——
- * 数值白名单一旦放开 30px，全表任何地方都能写 30px。
- */
-const LAYOUT_GEOMETRY = new Map<string, string>([
-  ['.sidebar-toggle-chrome', '左侧 80px 给 macOS 红绿灯让位'],
-  // Global surface 隐藏 Project Rail，于是顶栏拿不到 rail 那边的红绿灯让位，只能自己让一次。
-  // 与上一条是同一个 80px，同一个理由——不是节奏，是原生窗口控件的物理占位。
-  ['.top-row-leading-chrome--global-inset', '左侧 80px 给 macOS 红绿灯让位（Global surface 无 Project Rail）'],
-  ['.settings-content', '34px 顶栏偏移，与 .settings-sidebar 对齐'],
-  ['.settings-sidebar', '34px 顶栏偏移，与 .settings-content 对齐'],
-  ['.settings-content__header', '25px 光学垂直居中；clamp 上界 74px 是大屏阅读宽度'],
-  ['.settings-content__scroll', 'clamp 上界 74px 与 header 同宽；底部 50px 是滚动尾部留白'],
-  ['.settings-search input', '右 28px / 左 30px 给搜索与清除图标让位'],
-  ['.board-search input', '右 28px 给清除按钮让位'],
-  ['.launch-surface', 'clamp 上界 60px 是大屏阅读宽度；底部 44px 给 composer 让位'],
-  ['.browser-selection-result', 'clamp 上界 44px 是大屏阅读宽度'],
-  ['.activity-feed__empty', '70px 让空态在视觉中心而非几何中心'],
-  ['.wf-gallery__intro', '左 32px 给绝对定位的 24px 章节标记让位']
+/** Exceptions name the selector, exact property and value that own the geometry. */
+const SPACING_EXCEPTIONS = new Map<string, { values: number[]; reason: string }>([
+  ['.settings-content|padding-top', { values: [34], reason: 'native titlebar offset' }],
+  ['.settings-sidebar|padding-top', { values: [34], reason: 'same native titlebar offset' }],
+  ['.settings-search input|padding', { values: [28, 30], reason: 'search and clear icon slots' }],
+  ['.board-search input|padding', { values: [28], reason: 'clear icon slot' }],
+  ['.browser-selection-result|padding', { values: [44], reason: 'wide reading measure clamp' }],
+  ['.activity-feed__empty|padding-top', { values: [70], reason: 'empty state optical centre' }],
+  ['.wf-gallery__intro|padding-left', { values: [32], reason: 'absolute 24px section marker slot' }],
+  ['.log-row__prose|margin', { values: [104], reason: 'shared activity node and time column alignment' }],
+  ['.log-row__payload|margin', { values: [104], reason: 'same activity alignment' }],
+  ['.log-row__output|margin', { values: [104], reason: 'same activity alignment' }],
+  ['.log-diff|margin', { values: [104], reason: 'same activity alignment' }],
+  ['.log-row__chip|padding', { values: [1], reason: 'compact metadata chip optical inset' }],
+  ['.browser-profiles__catalog article strong em|padding', { values: [1], reason: 'compact current-profile badge optical inset' }],
+  ['.browser-selection-result dl|gap', { values: [1], reason: 'hairline separator between metadata rows' }],
+  ['.browser-profiles__browsers label > span|gap', { values: [1], reason: 'compact profile name and location optical separation' }]
 ])
-
 
 type Rule = { selector: string; body: string }
 
-function rules(): Rule[] {
+function rules(source = styles): Rule[] {
   const out: Rule[] = []
-  for (const match of styles.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+  for (const match of source.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
     const selector = match[1]!.trim().replace(/\s+/g, ' ')
     if (selector.startsWith('@')) continue
     out.push({ selector, body: match[2]! })
@@ -107,41 +90,35 @@ function rules(): Rule[] {
 
 type Violation = { selector: string; detail: string }
 
-function fontSizeLiterals(): Violation[] {
+function fontSizeLiterals(source = styles): Violation[] {
   const out: Violation[] = []
-  for (const { selector, body } of rules()) {
-    for (const match of body.matchAll(/font-size:\s*([\d.]+)px/g)) {
-      const px = Number(match[1])
-      if (FONT_SIZE_EXCEPTIONS.get(selector) === px) continue
-      if (DECORATIVE_FONT_SIZE_EXCEPTIONS.get(selector) === px) continue
-      if (FONT_SCALE.has(px)) {
-        // 值对了但没走 token——改 token 时这一处不会跟着动，等于没收进来。
-        out.push({ selector, detail: `font-size: ${px}px 应写作 var(--fs-…)` })
-        continue
+  for (const { selector, body } of rules(source)) {
+    for (const declaration of body.matchAll(/(?:^|;)\s*(font-size|font)\s*:\s*([^;]+)/g)) {
+      const literals = [...declaration[2]!.matchAll(/(?:^|[\s(,])([\d.]+)px\b/g)]
+      // A font shorthand has one size; a later px line-height is a different property.
+      for (const match of declaration[1] === 'font' ? literals.slice(0, 1) : literals) {
+        const px = Number(match[1])
+        if (FONT_SIZE_EXCEPTIONS.get(selector) === px) continue
+        if (DECORATIVE_FONT_SIZE_EXCEPTIONS.get(selector) === px) continue
+        out.push({ selector, detail: `${declaration[1]}: ${px}px ${FONT_SCALE.has(px) ? '应写作 var(--fs-…)' : '不在字号阶梯内'}` })
       }
-      out.push({ selector, detail: `font-size: ${px}px 不在字号阶梯内` })
     }
   }
   return out
 }
 
-const SPACING_PROPERTIES = /(?:^|;|\s)(gap|row-gap|column-gap|padding|margin)(?:-(?:top|right|bottom|left|inline|block))?:\s*([^;]+)/g
+const SPACING_PROPERTIES = /(?:^|;)\s*((?:gap|row-gap|column-gap|padding|margin)(?:-(?:top|right|bottom|left|inline|block)(?:-(?:start|end))?)?)\s*:\s*([^;]+)/g
 
-function spacingLiterals(): Violation[] {
+function spacingLiterals(source = styles): Violation[] {
   const out: Violation[] = []
-  for (const { selector, body } of rules()) {
+  for (const { selector, body } of rules(source)) {
     for (const declaration of body.matchAll(SPACING_PROPERTIES)) {
       const property = declaration[1]!
-      for (const raw of declaration[2]!.matchAll(/(\d+)px/g)) {
+      for (const raw of declaration[2]!.matchAll(/(-?[\d.]+)px\b/g)) {
         const px = Number(raw[1])
-        if (SPACING_EXCEPTIONS.has(px)) continue
-        // 超出刻度上限的是布局几何，按选择器放行——数值一旦进白名单，全表哪里都能写它。
-        if (px > 24 && LAYOUT_GEOMETRY.has(selector)) continue
-        if (SPACE_SCALE.has(px)) {
-          out.push({ selector, detail: `${property}: ${px}px 应写作 var(--sp-…)` })
-          continue
-        }
-        out.push({ selector, detail: `${property}: ${px}px 不在间距刻度内` })
+        if (px === 0) continue
+        if (SPACING_EXCEPTIONS.get(`${selector}|${property}`)?.values.includes(px)) continue
+        out.push({ selector, detail: `${property}: ${px}px ${SPACE_SCALE.has(px) ? '应写作 var(--sp-…)' : '不在间距刻度内'}` })
       }
     }
   }
@@ -155,9 +132,9 @@ function spacingLiterals(): Violation[] {
  * 表达的是"把这个 token 提亮"，那是一个从 token 派生的关系，正是本合同想要的写法。为它造一个
  * `--white` token 只会让同一件事多绕一层。
  */
-function colorLiterals(): Violation[] {
+function colorLiterals(source = styles): Violation[] {
   const out: Violation[] = []
-  for (const { selector, body } of rules()) {
+  for (const { selector, body } of rules(source)) {
     if (selector === ':root') continue
     // 先摘掉 color-mix(...) 里的纯白/纯黑配料，剩下的才是真的手调颜色。
     // 内层可能还有 var(...)，所以放行一层嵌套括号。
@@ -165,7 +142,7 @@ function colorLiterals(): Violation[] {
       /color-mix\((?:[^()]|\([^()]*\))*\)/g,
       (mix) => mix.replace(/#(?:fff|ffffff|000|000000)\b/gi, 'mix-base')
     )
-    for (const match of scrubbed.matchAll(/#[0-9a-fA-F]{3,8}\b/g)) {
+    for (const match of scrubbed.matchAll(/#[0-9a-fA-F]{3,8}\b|\brgba?\([^)]*\)/gi)) {
       out.push({ selector, detail: `裸颜色 ${match[0]}` })
     }
   }
@@ -173,10 +150,10 @@ function colorLiterals(): Violation[] {
 }
 
 /** 被 var() 引用却无人定义的变量。CSS 不报错，所以这里必须报。 */
-function danglingVariables(): string[] {
-  const defined = new Set([...styles.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]!))
+function danglingVariables(source = styles): string[] {
+  const defined = new Set([...source.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((m) => m[1]!))
   const dangling = new Set<string>()
-  for (const match of styles.matchAll(/var\((--[a-z0-9-]+)/g)) {
+  for (const match of source.matchAll(/var\((--[a-z0-9-]+)/g)) {
     const name = match[1]!
     // Radix 在运行时注入自己的变量，样式表里定义不到它们。
     if (name.startsWith('--radix-')) continue
@@ -261,8 +238,10 @@ describe('surface scale contract', () => {
     for (const selector of FONT_SIZE_EXCEPTIONS.keys()) {
       expect(selectors).toContain(selector)
     }
-    for (const selector of LAYOUT_GEOMETRY.keys()) {
-      expect(selectors).toContain(selector)
+    for (const [key, exception] of SPACING_EXCEPTIONS) {
+      expect(selectors).toContain(key.split('|')[0])
+      expect(exception.reason.length).toBeGreaterThan(0)
+      expect(exception.values.length).toBeGreaterThan(0)
     }
   })
 
@@ -297,19 +276,37 @@ describe('surface scale contract', () => {
     expect(body, '.agent-catalog 不自己滚，溢出会转嫁给整个 launcher').toMatch(/overflow(-y)?:/)
   })
 
-  it('lets a layout exception excuse only the large values, never the scale itself', () => {
-    // 一个具名了布局几何的选择器，它的常规间距仍要走刻度——否则"具名一次，全屏放开"。
-    const excused: Violation[] = []
-    for (const { selector, body } of rules()) {
-      if (!LAYOUT_GEOMETRY.has(selector)) continue
-      for (const declaration of body.matchAll(SPACING_PROPERTIES)) {
-        for (const raw of declaration[2]!.matchAll(/(\d+)px/g)) {
-          const px = Number(raw[1])
-          if (px > 24 || SPACING_EXCEPTIONS.has(px)) continue
-          excused.push({ selector, detail: `${declaration[1]}: ${px}px` })
-        }
-      }
-    }
-    expect(excused.map((v) => `${v.selector} { ${v.detail} }`)).toEqual([])
+  it('limits each geometry exception to its exact selector and property', () => {
+    expect(spacingLiterals('.log-row__payload { margin: 0 104px; }')).toEqual([])
+    expect(spacingLiterals('.another { margin: 0 104px; }')).toHaveLength(1)
+    expect(spacingLiterals('.log-row__payload { padding: 104px; }')).toHaveLength(1)
+    expect(spacingLiterals('.another { gap: 3px; }')).toHaveLength(1)
+    expect(spacingLiterals('.another { padding-inline-start: 6px; }')).toHaveLength(1)
+  })
+
+  it('detects font shorthand and rgb status recipes with the real scanners', () => {
+    expect(fontSizeLiterals('.readable { font: 600 11px/1.5 sans-serif; }')).toHaveLength(1)
+    expect(fontSizeLiterals('.readable { font: var(--fs-meta)/16px sans-serif; }')).toEqual([])
+    expect(fontSizeLiterals('.readable { font-size: clamp(10px, 1vw, 12px); }')).toHaveLength(2)
+    expect(colorLiterals('.state { background: rgba(102,187,125,.12); color: rgb(1 2 3); }')).toHaveLength(2)
+    expect(colorLiterals('.state { background: var(--green-bg); color: color-mix(in srgb, var(--green) 90%, #ffffff); }')).toEqual([])
+  })
+
+  it('keeps the repaired consumers on existing scales and status families', () => {
+    const files = styleFiles().filter(file => ['settings-toolkit.css', 'browser.css'].includes(file.name))
+    expect(files).toHaveLength(2)
+    const selected = files.flatMap(file => rules(stripCssComments(file.text))).concat(
+      rules().filter(({ selector }) => selector === '.focus-navigation-preview__identity .focus-navigation-preview__viewing' || selector === '.focus-location-choice strong')
+    )
+    expect(selected.length).toBeGreaterThan(10)
+    const source = selected.map(({ selector, body }) => `${selector} { ${body} }`).join('\n')
+    expect(fontSizeLiterals(source)).toEqual([])
+    const statusSource = selected.filter(({ selector }) => selector.includes('.toolkit-') || selector.includes('.browser-profiles')).map(({ selector, body }) => `${selector} { ${body} }`).join('\n')
+    expect(statusSource.length).toBeGreaterThan(0)
+    expect(colorLiterals(statusSource)).toEqual([])
+    const definitions = rules().filter(({ body }) => /--[\w-]+\s*:/.test(body))
+    expect(definitions.length).toBeGreaterThan(0)
+    expect(danglingVariables(definitions.map(({ selector, body }) => `${selector} { ${body} }`).join('\n') + source)).toEqual([])
+    expect(spacingLiterals(source).filter(({ selector }) => selector.startsWith('.toolkit-') || selector.startsWith('.browser-profiles'))).toEqual([])
   })
 })

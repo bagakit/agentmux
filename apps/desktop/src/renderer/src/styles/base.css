@@ -69,13 +69,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   color: var(--text-2);
   background: transparent;
   cursor: pointer;
-  transition: color .12s ease, background .12s ease;
+  transition: color var(--dur-fast) ease, background var(--dur-fast) ease;
 }
 /* The density contract asks press to read as an inner shadow rather than a border shift, so the most
    reused control in the app answers the click instead of only the hover. */
 .icon-button:active:not(:disabled) { box-shadow: inset 0 1px 2px var(--scrim-1); }
-.icon-button:hover { color: var(--text); background: var(--surface-3); }
-.icon-button--danger:hover { color: var(--red); background: var(--red-bg); }
+.icon-button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
+.icon-button--danger:hover:not(:disabled) { color: var(--red); background: var(--red-bg); }
+.icon-button:disabled { opacity: .45; cursor: default; }
 /* Source Control: the content slot's bottom half switches between Branches and Changes. */
 .content-slot-source-control { height: 100%; min-height: 0; display: flex; flex-direction: column; background: var(--surface-0); }
 .content-slot-source-control .branches-panel, .content-slot-source-control .changes-panel { flex: 1; min-height: 0; }
@@ -89,14 +90,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .browser-screenshot-toolbar__actions > span { margin-right:auto; }
 }
 .eyebrow { color: var(--text-3); font-size: var(--fs-micro); font-weight: 600; letter-spacing: .06em; text-transform: uppercase; opacity: .85; }
-.icon-rotate-90 { transform: rotate(90deg); transition: transform 150ms ease; }
-/* First container query in the sheet: .launch-refine is a min(640px,100%) column child, so it tracks the
-   real available inline-size even inside a narrow split Region. Below 400px the two-column option row
-   collapses so the label/description stacks above its (already-wrapping) segments. */
-@container (max-width: 400px) {
-  .launch-refine__row { grid-template-columns: minmax(0, 1fr); row-gap:var(--sp-3); padding:var(--sp-4) var(--sp-1); }
-}
-.animate-fade-in { animation: fadeIn 150ms ease; }
+.icon-rotate-90 { transform: rotate(90deg); transition: transform var(--dur-fast) ease; }
+.animate-fade-in { animation: fadeIn var(--dur-enter) ease; }
 @keyframes fadeIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }
 
 .small-button, .primary-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); border-radius: var(--radius-sm); font-weight: 560; cursor: pointer; transition: background var(--dur-fast) ease, color var(--dur-fast) ease, box-shadow var(--dur-fast) ease; }
@@ -142,7 +137,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .error-notice__close:hover { color: var(--red-text); background: color-mix(in srgb, var(--red) 16%, transparent); }
 .error-notice__reopen { align-self: flex-end; display: inline-flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; font-size: var(--fs-micro); cursor: pointer; }
 .error-notice__reopen:hover { color: var(--red-text); background: var(--red-bg); }
-.danger-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--red-text), var(--red)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); cursor: pointer; transition: background 120ms ease; }
+.danger-button { display: inline-flex; align-items: center; justify-content: center; gap:var(--sp-2); padding:var(--sp-3) var(--sp-4); border: 0; border-radius: var(--radius-sm); color: var(--bg); background: linear-gradient(180deg, var(--red-text), var(--red)); font-size: var(--fs-meta); font-weight: 620; box-shadow: var(--elev-1), var(--hl-strong); cursor: pointer; transition: background var(--dur-fast) ease; }
 .danger-button:hover:not(:disabled) { background: linear-gradient(180deg, var(--red-text), var(--red-text)); }
 .danger-button:active:not(:disabled) { background: var(--red); box-shadow: inset 0 1px 3px var(--scrim-1); }
 .danger-button:disabled { opacity: .5; cursor: default; }

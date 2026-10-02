@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { allStyles } from './helpers/styles.js'
 
-// 守住控件语言里的选中态禁令（docs/design/agentmux-surface-density.md《控件语言》）。
+// 守住控件语言里的选中态禁令（docs/design/presentation/shared-rules.md《控件语言》）。
 //
 // 用户看着 Topic 面板说："现在 topic 左边的窄边表示选中, 太难看了, AI 味道重, 不够现代化.
 // 这个项目有没有设计引导, 能不能吧这种样式全 ban 了"。改掉那一行 CSS 只解决当前这一处——

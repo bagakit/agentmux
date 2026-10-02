@@ -1,5 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { readFileSync } from 'node:fs'
+import { allStyles } from './helpers/styles.js'
 import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import ts from 'typescript'
@@ -256,7 +257,7 @@ describe('Source Control 面板', () => {
   })
 
   it('读取实际行样式，名字有宽度边界且状态与动作独立，键盘与确认态显出动作', () => {
-    const css = readFileSync(new URL('../src/renderer/src/styles/source-control.css', import.meta.url), 'utf8')
+    const css = allStyles()
     const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)]
     expect(rules.length).toBeGreaterThan(0)
     const row = rules.find(rule => rule[1]!.trim() === '.change-row')

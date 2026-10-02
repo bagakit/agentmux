@@ -133,7 +133,7 @@
 .focus-navigation-preview__copy { flex: 1; display: grid; gap: 3px; min-width: 0; }
 .focus-navigation-preview__identity strong { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .focus-navigation-preview__identity > small { flex: none; color: var(--text-3); }
-.focus-navigation-preview__identity .focus-navigation-preview__viewing { color: var(--blue); font-size: 9px; }
+.focus-navigation-preview__identity .focus-navigation-preview__viewing { color: var(--blue); font-size: var(--fs-micro); }
 .focus-navigation-preview__activity { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-micro); }
 .focus-navigation-preview__activity > span:first-child { color: var(--text-3); }
 .focus-navigation-preview__empty { margin: 0; color: var(--text-3); font-size: var(--fs-micro); }
