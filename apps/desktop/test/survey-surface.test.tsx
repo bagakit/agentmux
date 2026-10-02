@@ -6,6 +6,7 @@ import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
+import type { KnowledgeTopic, TopicKnowledgeWrite, TopicMethod, TopicParams, TopicResult } from '@agentmux/core/control'
 import type { BrowserSnapshot } from '../src/shared/contracts'
 import type { SurfaceMemoryCollectionInput } from '../src/renderer/src/lib/surface-memory-budget-candidates'
 import type { TerminalParkingCollectionInput } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
@@ -159,13 +160,35 @@ async function openItemOptions() {
 }
 async function openItemSubmenu(label: string) {
   await openItemOptions()
-  if (label === 'Link Topics') {
-    const details = document.querySelector<HTMLElement>('[aria-label="Item details"]')!
-    await act(async () => { details.focus(); details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
-  }
   const item = document.querySelector<HTMLElement>(`[aria-label="${label}"]`)!
   expect(item).not.toBeNull()
   await act(async () => { item.focus(); item.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+}
+function knowledgeTransport() {
+  const topics: KnowledgeTopic[] = ['a', 'b'].map(id => ({ topicId: `view:${id}`, hostId: 'local', zoneId: `original-topic-zone-${id}`, directoryPath: (_hygiene_fixturePath("topics/") + (id) + ""),
+    title: 'Research', summary: '', categorySpaceIds: ['category'], chatIds: [], spatialRevision: 7 }))
+  const handler: typeof api.topics.call = async <M extends TopicMethod>(method: M, params: TopicParams<M>) => {
+    if (method === 'topic.ls') return { topics, unavailable: [] } as unknown as TopicResult<M>
+    if (method === 'topic.knowledge.write') return { entry: { ...(params as TopicKnowledgeWrite), revision: 'written', updatedAt: 1 }, diskDurability: 'confirmed' } as unknown as TopicResult<M>
+    throw new Error(`Unexpected Topic call: ${method}`)
+  }
+  return vi.spyOn(api.topics, 'call').mockImplementation(handler)
+}
+const captureDialog = () => document.querySelector<HTMLElement>('[role="dialog"].topic-dialog:not(.topic-knowledge-editor)')!
+const knowledgeDialog = () => document.querySelector<HTMLElement>('[role="dialog"].topic-knowledge-editor')!
+async function captureScope(scope: 'research' | 'panel') {
+  await openItemOptions()
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === (scope === 'research' ? 'Save research to Topic…' : 'Save current panel to Topic…'))!
+  expect(item).toBeDefined(); await act(async () => item.click())
+  expect(captureDialog()).not.toBeNull()
+}
+async function selectValue(field: HTMLSelectElement, value: string) {
+  expect(field).not.toBeNull()
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('change', { bubbles: true })) })
+}
+async function dialogButton(dialog: HTMLElement, text: string) {
+  const button = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === text)!
+  expect(button).toBeDefined(); await act(async () => button.click())
 }
 const catalog = () => spatialCatalog(useAppStore.getState(), [])
 const originalZoneId = () => catalog().tabs.find(tab => tab.tabId === mixed.id)!.zoneId!
@@ -524,34 +547,23 @@ it('restores exact Zone references through storage and original Browser rebuild 
   } finally { dispose() }
 })
 
-it('consumes real Topic relations by exact same-name IDs and retains cancellation when discovery becomes unknown', async () => {
-  const scratch = { ...workspace, id: SCRATCH_WORKSPACE_ID, name: 'Scratch', path: _hygiene_fixturePath("topics") }
-  const topics = ['a', 'b'].map(id => ({ id, title: 'Research', summary: '', directoryPath: (_hygiene_fixturePath("topics/") + (id) + ""), topicPath: (_hygiene_fixturePath("topics/") + (id) + "/topic.md"), collaborators: [] }))
-  useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, scratch] }, scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1, topics, error: null, reading: false } } })
-  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
+it('keeps research capture cancellable when Topic discovery is unknown without changing original bindings', async () => {
+  const call = vi.spyOn(api.topics, 'call').mockRejectedValue(new Error('Topic discovery failed'))
   const change = vi.spyOn(useAppStore.getState(), 'setZoneSpaceRelation')
   await renderApp(); await enterSurvey(); await choose()
-  const openMenu = async () => openItemSubmenu('Link Topics')
-  await openMenu()
-  const spaceB = directoryIdentity(scratch.hostId, topics[1]!.directoryPath)
-  const checkbox = () => [...document.querySelectorAll<HTMLElement>('[role="menuitemcheckbox"][data-survey-topic-id]')].find(item => item.dataset.surveyTopicId === spaceB)!
-  expect(checkbox()).not.toBeNull(); expect(checkbox().getAttribute('aria-checked')).toBe('false')
-  await act(async () => checkbox().click())
-  expect(change).toHaveBeenCalledExactlyOnceWith(originalZoneId(), spaceB, true)
-  expect(checkbox().getAttribute('aria-checked')).toBe('true')
-  expect(dom.container.querySelector('.survey-navigation')!.textContent).toContain('Topic status')
-  await act(async () => useAppStore.setState({ scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 2, topics: null, error: 'Topic discovery failed', reading: false } } }))
-  expect(checkbox().getAttribute('aria-checked')).toBe('true'); expect(document.querySelector('.survey-topic-submenu')!.textContent).toContain('Unconfirmed linked spaces')
-  expect(document.querySelector('.survey-topic-submenu')!.textContent).toContain('Topic discovery failed')
-  expect(dom.container.querySelector('.survey-navigation')!.textContent).toContain('Topic status')
-  vi.mocked(api.scratch.listTopics).mockResolvedValue([])
-  await act(async () => checkbox().click())
-  expect(change).toHaveBeenLastCalledWith(originalZoneId(), spaceB, false)
-  await act(async () => document.querySelector('.survey-topic-submenu')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
-  expect(document.querySelector('.survey-topic-submenu')).toBeNull()
-  expect(dom.container.querySelector('[aria-label="View service notice: Topic status"]')).not.toBeNull()
-  expect(dom.container.querySelector('.survey-navigation')!.textContent).toContain('Topic status')
-  expect(useAppStore.getState().tabs[mixed.id]).toBe(mixed); expect(useAppStore.getState().mainSurface).toBe('survey'); healthy()
+  const owner = useAppStore.getState(), originalBindings = catalog().bindings
+  await captureScope('research')
+  expect(call).toHaveBeenCalledExactlyOnceWith('topic.ls', {})
+  expect(captureDialog().textContent).toContain('Research: Agent')
+  expect(captureDialog().textContent).toContain('Topic discovery failed')
+  expect([...captureDialog().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Continue')!.disabled).toBe(true)
+  expect(change).not.toHaveBeenCalled()
+  await dialogButton(captureDialog(), 'Cancel')
+  expect(captureDialog()).toBeNull()
+  expect(useAppStore.getState().tabs).toBe(owner.tabs); expect(useAppStore.getState().layouts).toBe(owner.layouts)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(owner.surveyZoneSelection)
+  expect(useAppStore.getState().spaceZoneBindings).toBe(owner.spaceZoneBindings); expect(catalog().bindings).toEqual(originalBindings)
+  expect(useAppStore.getState().mainSurface).toBe('survey'); healthy()
 })
 
 it('keeps the live sidebar width and original work surface when its original save owner reports a host failure', async () => {
@@ -817,7 +829,7 @@ it('keeps a distinct unnamed exploration instead of concatenating its mixed Tab 
   expect(row.querySelector('strong')!.textContent).toBe('Untitled exploration')
   expect(row.querySelector('.survey-item')!.getAttribute('title')).toBe('Untitled exploration')
   expect(row.querySelector('.survey-item')!.getAttribute('aria-label')).toBe('Show survey item: Untitled exploration')
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
+  expect(dom.container.querySelector('.survey-view-controls')).toBeNull()
   expect(row.textContent).not.toContain('2 tabs')
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts); healthy()
 })
@@ -851,7 +863,7 @@ it('flat list exposes one Item-options menu in either sidebar state and keeps th
   expect(dom.container.querySelector('.survey-page-content [aria-label="Exploration options"]')).toBeNull()
   expect(dom.container.querySelector('.survey-page-content [aria-label="Add note to this exploration"]')).toBeNull()
   expect(dom.container.querySelector('.survey-item-details')).toBeNull()
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
+  expect(dom.container.querySelector('.survey-view-controls')).toBeNull()
   collection.mockClear() // Fixture membership was explicitly saved before the menu action.
   const optionsTrigger = await openItemOptions()
   expect(document.querySelector('.survey-item-menu')!.textContent).toContain('Agent')
@@ -864,7 +876,7 @@ it('flat list exposes one Item-options menu in either sidebar state and keeps th
   expect(actions.querySelector('[aria-label="Exploration options"]')).not.toBeNull()
   expect(actions.querySelector('[aria-label="Add note to this exploration"]')).not.toBeNull()
   expect(dom.container.querySelector('.survey-page-content [aria-label="Exploration options"]')).toBeNull()
-  expect(dom.container.querySelector<HTMLElement>('.survey-view-controls')!.hidden).toBe(true)
+  expect(dom.container.querySelector('.survey-view-controls')).toBeNull()
   await selectRegion(pageB.regionId)
   const exact = { tabId: mixed.id, regionId: pageB.regionId }
   expect(useAppStore.getState().surveyZoneSelection!.active).toEqual(exact)
@@ -1106,39 +1118,66 @@ it('starts ordinary browsing with only Scratch and no selected project', async (
   expect(api.sessions.stop).not.toHaveBeenCalled()
 })
 
-it('confirms the whole research before organizing into the exact Topic and keeps entities and other bindings', async () => {
-  const topics = ['a', 'b'].map(id => ({ id, title: 'Research', summary: '', directoryPath: (_hygiene_fixturePath("topics/") + (id) + ""), topicPath: (_hygiene_fixturePath("topics/") + (id) + "/topic.md"), collaborators: [] }))
-  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
-  useAppStore.setState({ scratchTopicSnapshots: { [SCRATCH_WORKSPACE_ID]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, topics, error: null, reading: false } } })
+it('saves the whole research as a reference to the exact same-name Topic without moving entities or other bindings', async () => {
+  const call = knowledgeTransport()
   await renderApp(); await enterSurvey(); await choose()
-  const owner = useAppStore.getState(), change = vi.spyOn(owner, 'setZoneSpaceRelation'), zoneId = originalZoneId()
-  const destination = directoryIdentity('local', _hygiene_fixturePath("topics/b"))
-  async function pick() {
-    await openItemSubmenu('Organize into Topic')
-    const item = document.querySelector<HTMLElement>(`[data-survey-topic-id='${destination}']`)!
-    expect(item).not.toBeNull(); await act(async () => item.click())
-  }
-  await pick()
-  const confirm = dom.container.querySelector('[aria-label="Confirm research organization"]')!
-  expect(confirm).not.toBeNull(); expect(confirm.textContent).toContain('All tabs, split panels and notes')
-  expect(dom.container.querySelector('.survey-navigation')!.contains(confirm)).toBe(true)
-  expect(dom.container.querySelector('.survey-view-controls')!.textContent).not.toContain('Topic status')
+  const owner = useAppStore.getState(), change = vi.spyOn(owner, 'setZoneSpaceRelation'), zoneId = originalZoneId(), bindings = catalog().bindings
+  await captureScope('research')
+  expect(call).toHaveBeenCalledExactlyOnceWith('topic.ls', {})
+  expect([...captureDialog().querySelectorAll('option')].map(option => option.value)).toEqual(['', 'view:a', 'view:b'])
+  expect(call.mock.calls.some(([method]) => method === 'topic.knowledge.write')).toBe(false)
+  await dialogButton(captureDialog(), 'Cancel')
   expect(change).not.toHaveBeenCalled()
-  await act(async () => [...confirm.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Cancel')!.click())
-  expect(change).not.toHaveBeenCalled()
-  await pick()
-  await act(async () => [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-organization button')].find(button => button.textContent === 'Organize research')!.click())
-  expect(change).toHaveBeenCalledExactlyOnceWith(zoneId, destination, true)
+  await captureScope('research'); await selectValue(captureDialog().querySelector('select')!, 'view:b')
+  await dialogButton(captureDialog(), 'Continue')
+  const editor = knowledgeDialog()
+  expect(editor).not.toBeNull(); expect(editor.querySelector('select')!.value).toBe('reference')
+  expect(editor.textContent).toContain('Original research')
+  await dialogButton(editor, 'Save knowledge')
+  expect(call).toHaveBeenLastCalledWith('topic.knowledge.write', expect.objectContaining({ topicId: 'view:b', title: 'Research: Agent',
+    form: 'reference', content: '', certainty: 'proposal', expectedRevision: null, sources: [{ kind: 'survey', zoneId }] }))
+  expect(knowledgeDialog()).toBeNull(); expect(captureDialog()).toBeNull(); expect(change).not.toHaveBeenCalled()
   const current = useAppStore.getState()
   expect(current.tabs).toBe(owner.tabs); expect(current.layouts).toBe(owner.layouts)
-  expect(current.surveyZoneSelection).toBe(owner.surveyZoneSelection)
-  expect(current.surveyCollectedZones).toBe(owner.surveyCollectedZones)
-  expect(catalog().bindings.some(binding => binding.zoneId === zoneId && binding.spaceId === destination)).toBe(true)
-  expect(dom.container.querySelector('[aria-label="Confirm research organization"]')).toBeNull()
-  expect(dom.container.querySelector('.survey-navigation')!.textContent).toContain('Available in Research')
-  const open = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open in Topic')!
-  expect(open).not.toBeNull(); await act(async () => open.click())
-  expect(useAppStore.getState().mainSurface).toBe('workbench'); healthy()
+  expect(current.surveyZoneSelection).toBe(owner.surveyZoneSelection); expect(current.surveyCollectedZones).toBe(owner.surveyCollectedZones)
+  expect(current.spaceZoneBindings).toBe(owner.spaceZoneBindings); expect(catalog().bindings).toEqual(bindings)
+  expect(current.mainSurface).toBe('survey'); healthy()
+})
+
+it('captures the exact selected panel as written knowledge and retains its original source through later selection changes', async () => {
+  const call = knowledgeTransport()
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
+  const owner = useAppStore.getState(), zoneId = originalZoneId(), selected = owner.surveyZoneSelection!.active!
+  const change = vi.spyOn(owner, 'setZoneSpaceRelation')
+  await captureScope('panel'); expect(captureDialog().textContent).toContain('Current panel: Agent')
+  await selectValue(captureDialog().querySelector('select')!, 'view:a'); await dialogButton(captureDialog(), 'Continue')
+  const editor = knowledgeDialog()
+  await selectValue(editor.querySelector('select')!, 'derived')
+  const content = editor.querySelector('textarea')!
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(content, 'A conclusion from this panel'); content.dispatchEvent(new Event('input', { bubbles: true })) })
+  await act(async () => owner.setSurveyZoneSelection({ ...owner.surveyZoneSelection!, active: { ...selected, regionId: pageA.regionId }, selection: [{ ...selected, regionId: pageA.regionId }] }))
+  await dialogButton(editor, 'Save knowledge')
+  expect(call).toHaveBeenLastCalledWith('topic.knowledge.write', expect.objectContaining({ topicId: 'view:a', form: 'derived', content: 'A conclusion from this panel',
+    sources: [{ kind: 'survey', zoneId, tabId: selected.tabId, regionId: selected.regionId }] }))
+  expect(change).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs).toBe(owner.tabs)
+  expect(useAppStore.getState().layouts).toBe(owner.layouts); expect(useAppStore.getState().spaceZoneBindings).toBe(owner.spaceZoneBindings)
+  expect(useAppStore.getState().surveyCollectedZones).toBe(owner.surveyCollectedZones); healthy()
+})
+
+it('retains a failed knowledge-save draft and the original research while the content owner is unavailable', async () => {
+  const call = knowledgeTransport()
+  await renderApp(); await enterSurvey(); await choose()
+  const owner = useAppStore.getState(), change = vi.spyOn(owner, 'setZoneSpaceRelation')
+  await captureScope('research'); await selectValue(captureDialog().querySelector('select')!, 'view:b'); await dialogButton(captureDialog(), 'Continue')
+  const editor = knowledgeDialog(), title = editor.querySelector('input')!
+  await fill(title, 'Keep this knowledge draft')
+  call.mockRejectedValueOnce(new Error('Save acknowledgement is unavailable'))
+  await dialogButton(editor, 'Save knowledge')
+  expect(editor.querySelector('input')!.value).toBe('Keep this knowledge draft')
+  expect(editor.querySelector('[role="alert"]')!.textContent).toContain('Your draft is kept here.')
+  expect(call).toHaveBeenLastCalledWith('topic.knowledge.write', expect.objectContaining({ topicId: 'view:b', title: 'Keep this knowledge draft', sources: [{ kind: 'survey', zoneId: originalZoneId() }] }))
+  expect(change).not.toHaveBeenCalled(); expect(useAppStore.getState().tabs).toBe(owner.tabs); expect(useAppStore.getState().layouts).toBe(owner.layouts)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(owner.surveyZoneSelection); healthy()
 })
 
 it.runIf(process.env.SURVEY_RESTART_PHASE === 'write')('writes new Survey browser identities and Topic bindings for a separate restart process', async () => {
@@ -1200,7 +1239,8 @@ it('keeps an old unsaved projection usable without offering to adopt its project
   expect(dom.container.querySelector('[aria-label="Add note to this exploration"]')).toBeNull()
   await openItemOptions()
   expect(document.querySelector('.survey-item-menu')!.textContent).not.toContain('Keep in Survey')
-  expect(document.querySelector('[aria-label="Organize into Topic"]')).toBeNull()
+  expect(document.querySelector('.survey-item-menu')!.textContent).not.toContain('Save research to Topic')
+  expect(document.querySelector('.survey-item-menu')!.textContent).not.toContain('Save current panel to Topic')
   expect(useAppStore.getState().surveyCollectedZones).toEqual({}); healthy()
 })
 

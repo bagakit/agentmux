@@ -1,5 +1,6 @@
 import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
+import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentMuxClient } from './client.js'
@@ -48,6 +49,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   notebookStore?: AgentMuxNotebookStore
+  topics?: AgentMuxRpcTopicsOwner
   spatialState?: AgentMuxSpatialStateStore
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
@@ -91,7 +93,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -282,6 +284,12 @@ export class AgentMuxRpcService {
         : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
     }
     const caller = await this.authenticated(context)
+    if (isTopicMethod(method)) {
+      const input = parseTopicParams(method, params)
+      if (!this.ports.topics) throw new AgentMuxError('The original Host Topic content owner is unavailable. Existing content and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      context.signal?.throwIfAborted()
+      return parseTopicResult(method, await this.ports.topics.call(method, input, context), input) as AgentMuxRpcResult<M>
+    }
     const p = rpcRecord(params)
     if (method === 'agent.history') {
       const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>

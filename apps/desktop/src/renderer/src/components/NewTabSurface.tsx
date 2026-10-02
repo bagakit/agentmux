@@ -111,7 +111,8 @@ export function NewTabSurface({
   const detectExecutors = useAppStore((state) => state.detectExecutors)
   const launchAgent = useAppStore((state) => state.launchAgent)
   const prewarmTerminal = useAppStore((state) => state.prewarmTerminal)
-  const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null || state.workbenchSpaceSelection !== null)
+  const controlNavigation = useAppStore(state => state.workbenchNavigationInputPolicy !== null ||
+    state.workbenchSpaceSelection !== null && state.workbenchSpaceSelection.tabId === null)
   // A visible Tab can contain an unselected Launcher created by Control. Only its
   // selected Region may acquire input; the original empty-group Launcher has no Region.
   const inputRegionActive = useAppStore(state => tabId && regionId

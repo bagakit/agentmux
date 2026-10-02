@@ -1,6 +1,7 @@
-import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress } from '@agentmux/core/control'
+import type { AgentMuxSpaceFact, AgentMuxZoneFact, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceBindingFact, AgentMuxSpaceAddress, TopicCategory } from '@agentmux/core/control'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceRecord } from './contracts'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scratchTopicPhysicalPath } from './scratch-topics'
+import { categorySpaceFact, isKnowledgeTopic, UNCLASSIFIED_TOPIC_CATEGORY_ID } from './topic-categories'
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
 export function directoryIdentity(hostId: string, path: string): string {
@@ -13,6 +14,33 @@ export function workspaceZoneId(spaceId: string, workspaceId: string): string {
   return JSON.stringify([spaceId, 'workspace', workspaceId])
 }
 export function homeZoneId(spaceId: string): string { return JSON.stringify([spaceId, 'home']) }
+
+/** A failed Host read cannot replace the durable original identity with a logical-path guess. */
+export function originalTopicAddress(workspace: WorkspaceRecord, topic: ScratchTopicSnapshot, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
+  if (topic.readError && !topic.identityDirectoryPath && !topic.physicalDirectoryPath) {
+    const original = Object.entries(bindings).filter(([, binding]) => binding.topicId === topic.id && binding.workspaceId === workspace.id);
+    return original.length === 1 ? { spaceId: original[0]![1].spaceId, zoneId: original[0]![0] } : null;
+  }
+  const spaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, topic));
+  return { spaceId, zoneId: homeZoneId(spaceId) };
+}
+
+/** Content identity fixes the Topic Zone; Category membership fixes its display Space. */
+export function topicSpatialAddress(config: AppConfig | null, topic: ScratchTopicSnapshot,
+  bindings: SpaceZoneBindings = {}, categories: readonly TopicCategory[] = []): { spaceId: string; zoneId: string } | null {
+  const workspace = config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
+  if (!workspace) return null
+  const source = originalTopicAddress(workspace, topic, bindings)
+  if (!source) return null
+  const { spaceId: contentId, zoneId } = source
+  const original = bindings[zoneId]
+  if (!isKnowledgeTopic(topic) || original?.contentKind === 'mote' || !categories.length) return { spaceId: contentId, zoneId }
+  const relationships = bindings[zoneId]?.relations
+  if (original?.topicId !== topic.id && !categories.some(category => relationships?.[category.spaceId] === true)) return { spaceId: contentId, zoneId }
+  const selected = categories.find(category => relationships?.[category.spaceId] === true) ??
+    categories.find(category => category.categoryId === UNCLASSIFIED_TOPIC_CATEGORY_ID && relationships?.[category.spaceId] !== false)
+  return selected ? { spaceId: selected.spaceId, zoneId } : null
+}
 
 /** Resolve execution resources independently of every display Space and current focus. */
 export function projectResourceWorkspace(workspaces: readonly WorkspaceRecord[], projectId: string, sourceWorkspaceId?: string): WorkspaceRecord {
@@ -35,6 +63,10 @@ export type SpaceZoneBinding = {
   /** Original creation/resource context; never a unique display parent. */
   spaceId: string
   workspaceId: string
+  /** Topic content identity and confirmed resource path projected from the same Core Zone. */
+  topicId?: string
+  directoryPath?: string
+  contentKind?: 'topic' | 'mote'
   /** Current effective relations on this same durable record. */
   relations?: Record<string, boolean>
 }
@@ -70,19 +102,27 @@ export type SpaceZoneResourceResult = {
 }
 
 export function spatialSources(config: AppConfig | null, topics: readonly ScratchTopicSnapshot[], bindings: SpaceZoneBindings = {},
-  retained: readonly { workspaceId: string; space: { zoneId: string; spaceId: string } }[] = []): {
+  retained: readonly { workspaceId: string; space: { zoneId: string; spaceId: string } }[] = [], categories: readonly TopicCategory[] = []): {
   spaces: AgentMuxSpaceFact[]; zones: AgentMuxZoneFact[]; bindings: AgentMuxSpaceBindingFact[]
 } {
   const spaces = new Map<string, AgentMuxSpaceFact>()
   const zones = new Map<string, AgentMuxZoneFact>()
   const seeds = new Map<string, Set<string>>()
   const conflictingResources = new Set<string>()
+  const categoryByContent = new Map<string, string | null>()
   const workspaces = new Map(config?.workspaces.map(workspace => [workspace.id, workspace]))
   const scratchWorkspace = workspaces.get(SCRATCH_WORKSPACE_ID)
-  const topicHomes = new Map(scratchWorkspace ? topics.map(topic => [
-    directoryIdentity(scratchWorkspace.hostId, scratchTopicIdentityPath(scratchWorkspace, topic)),
-    scratchTopicPhysicalPath(scratchWorkspace, topic)
-  ]) : [])
+  const topicHomes = new Map<string, string>(scratchWorkspace ? topics.flatMap(topic => {
+    const address = originalTopicAddress(scratchWorkspace, topic, bindings);
+    if (!address) return [];
+    const path = bindings[address.zoneId]?.directoryPath ?? (topic.readError && !topic.physicalDirectoryPath ? null : scratchTopicPhysicalPath(scratchWorkspace, topic));
+    return path ? [[address.spaceId, path] as [string, string]] : [];
+  }) : [])
+  for (const binding of Object.values(bindings)) {
+    if (!binding.topicId || binding.contentKind === 'mote' || !categories.length || binding.relations?.[binding.spaceId] === true) continue
+    const category = categories.find(category => binding.relations?.[category.spaceId] === true)
+    categoryByContent.set(binding.spaceId, category?.spaceId ?? null)
+  }
   const addZone = (zoneId: string, workspaceId: string, spaceId: string, homePath?: string): void => {
     const workspace = workspaces.get(workspaceId)
     // Read the original factory/context pair without minting or rewriting its opaque identity.
@@ -105,7 +145,8 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
       issue: 'Original Zone resource contexts conflict; its identity and every saved binding are retained.' })
     else if (!previous || previous.kind === 'unknown' && fact.kind !== 'unknown' || fact.kind === 'home') zones.set(zoneId, fact)
     const members = seeds.get(zoneId) ?? new Set<string>()
-    members.add(spaceId)
+    const displayId = categoryByContent.has(spaceId) ? categoryByContent.get(spaceId) : spaceId
+    if (displayId) members.add(displayId)
     seeds.set(zoneId, members)
   }
   for (const workspace of workspaces.values()) {
@@ -125,22 +166,31 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
     spaces.set(container, { spaceId: container, kind: 'container', name: scratch.name,
       hostId: scratch.hostId, directoryPath: scratch.path, projectId: null })
     addZone(homeZoneId(container), scratch.id, container, scratch.path)
+    for (const category of categories) spaces.set(category.spaceId, categorySpaceFact(category))
     for (const topic of topics) {
-      const path = scratchTopicPhysicalPath(scratch, topic)
-      const spaceId = directoryIdentity(scratch.hostId, scratchTopicIdentityPath(scratch, topic))
-      spaces.set(spaceId, { spaceId, kind: topic.id === PMO_TEAMS_TOPIC_ID || topic.soul ? 'mote' : 'topic',
+      const source = originalTopicAddress(scratch, topic, bindings)
+      if (!source) continue
+      const { spaceId, zoneId } = source
+      const path = bindings[zoneId]?.directoryPath ?? scratchTopicPhysicalPath(scratch, topic)
+      const knownKind = bindings[zoneId]?.contentKind
+      const kind = knownKind ?? (!isKnowledgeTopic(topic) ? 'mote' : topic.readError ? 'container' : 'topic')
+      const address = topicSpatialAddress(config, topic, bindings, categories)
+      if (kind === 'topic' && categories.length && address?.spaceId !== spaceId) {
+        categoryByContent.set(spaceId, address?.spaceId ?? null)
+      } else spaces.set(spaceId, { spaceId, kind,
         name: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title, hostId: scratch.hostId,
         directoryPath: path, projectId: null, topicId: topic.id, ...(topic.readError ? { issue: topic.readError } : {}) })
-      addZone(homeZoneId(spaceId), scratch.id, spaceId, path)
+      addZone(zoneId, scratch.id, spaceId, path)
     }
   }
   for (const [zoneId, binding] of Object.entries(bindings)) {
-    if (binding && typeof binding.spaceId === 'string' && typeof binding.workspaceId === 'string') addZone(zoneId, binding.workspaceId, binding.spaceId)
+    if (binding && typeof binding.spaceId === 'string' && typeof binding.workspaceId === 'string') addZone(zoneId, binding.workspaceId, binding.spaceId, binding.directoryPath)
   }
-  for (const tab of retained) addZone(tab.space.zoneId, tab.workspaceId, tab.space.spaceId)
+  for (const tab of retained) addZone(tab.space.zoneId, tab.workspaceId, tab.space.spaceId, bindings[tab.space.zoneId]?.directoryPath)
   const relations: AgentMuxSpaceBindingFact[] = []
   for (const [zoneId, members] of seeds) {
     for (const [spaceId, linked] of Object.entries(bindings[zoneId]?.relations ?? {})) {
+      if (categoryByContent.has(spaceId)) continue
       if (linked === true) members.add(spaceId)
       else if (linked === false) members.delete(spaceId)
     }
@@ -150,7 +200,8 @@ export function spatialSources(config: AppConfig | null, topics: readonly Scratc
         let identity: unknown
         try { identity = JSON.parse(spaceId) } catch { identity = null }
         if (Array.isArray(identity) && identity.length === 2 && typeof identity[0] === 'string' && typeof identity[1] === 'string') {
-          spaces.set(spaceId, { spaceId, kind: 'container', name: identity[1].split('/').filter(Boolean).at(-1) ?? identity[1],
+          const origin = Object.values(bindings).find(binding => binding.spaceId === spaceId && binding.contentKind === 'mote')
+          spaces.set(spaceId, { spaceId, kind: origin ? 'mote' : 'container', ...(origin?.topicId ? { topicId: origin.topicId } : {}), name: origin ? 'Mote' : identity[1].split('/').filter(Boolean).at(-1) ?? identity[1],
             hostId: identity[0], directoryPath: identity[1], projectId: null,
             issue: 'Filesystem Space discovery is unavailable; its durable Zone binding is retained.' })
         }

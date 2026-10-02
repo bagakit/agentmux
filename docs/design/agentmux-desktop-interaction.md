@@ -12,6 +12,7 @@
 | --- | --- |
 | 全局原则、保护边界及文档归属 | [共同原则、设计事实与 Owner](behavior/shared-rules.md) |
 | Space、Zone、Tab、Region、导航和布局身份 | [空间、导航与工作面](behavior/spaces-and-layout.md) |
+| Topics 的分类、主题、讨论、知识沉淀与本地承接 | [Topics 知识库的层级与沉淀](behavior/spaces-and-layout.md#topics-知识库的层级与沉淀) |
 | 持久 Mote、PMO、快捷面和原协调上下文 | [Mote 与 PMO 协调](behavior/motes-and-coordination.md) |
 | 目标对齐、结果核对、Demand、Board 与 Task | [Goals 与 Demand 闭环](behavior/goals-and-demand.md) |
 | 执行焦点、项目泳道、历史与时间音轨 | [Focus 执行上下文](behavior/focus-context.md) |
@@ -23,6 +24,7 @@
 | 真实文件、格式、保存、worktree 与 Git 操作 | [文件、编辑与 Git](behavior/files-and-git.md) |
 | 配置入口、状态、通知、资源与 Toolkit | [设置、状态与观测](behavior/settings-and-observation.md) |
 | 对象优先 CLI、公共服务、自操作和跨客户端合同 | [公共控制与跨客户端接入](behavior/public-control.md) |
+| Topics CUI 的准确目标、内容修订、转分类与承接回执 | [Topics 知识库的公共接入](behavior/public-control.md#topics-知识库的公共接入) |
 
 ## 更新与保全
 

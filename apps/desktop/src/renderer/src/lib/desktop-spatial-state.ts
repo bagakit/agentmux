@@ -2,6 +2,7 @@ import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit,
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
+import { categoriesFromSpatial, categoryResource } from '../../../shared/topic-categories';
 import { reducePersistedTab, type PersistedWorkbench } from './workbench-persistence';
 /** Host resource descriptors, never a second entity or topology store. */
 const tabKey = (id: string) => 'tab:' + id;
@@ -9,11 +10,13 @@ const regionKey = (id: string) => 'region:' + id;
 const zoneKey = (id: string) => 'zone:' + id;
 const json = (value: unknown): SpatialJson => JSON.parse(JSON.stringify(value)) as SpatialJson;
 export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[], previous: AgentMuxSpatialGraph | null = null, removed: ReadonlySet<string> = new Set()): AgentMuxSpatialGraph {
-  const catalog = spatialCatalog(state, topics);
+  const categories = [...new Map([...(previous ? categoriesFromSpatial(previous) : []), ...(state.topicCategories ?? [])].map(category => [category.spaceId, category])).values()];
+  const catalog = spatialCatalog({ ...state, topicCategories: categories }, topics);
   const { locations: _, ...facts } = catalog;
   if (state.projectGroups === undefined && previous?.projectGroups) facts.projectGroups = previous.projectGroups;
   const persisted = { tabs: Object.fromEntries(Object.values(state.tabs).map(tab => [tab.id, reducePersistedTab(tab)])), layouts: state.layouts };
   const resources: AgentMuxSpatialGraph['resources'] = {}, tabLayouts: AgentMuxSpatialGraph['tabLayouts'] = {};
+  for (const category of categories) resources['space:' + category.spaceId] = categoryResource(category);
   for (const tab of Object.values(persisted.tabs)) {
     const { id: _, workspaceId: __, name: ___, layout, regions, ...metadata } = tab;
     resources[tabKey(tab.id)] = json(metadata);
@@ -35,7 +38,10 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
     if (!binding)
       continue;
     const { relations: _, ...origin } = binding;
-    resources[zoneKey(id)] = json(origin);
+    const saved = previous?.resources[zoneKey(id)];
+    const originalKind = originalSources.spaces.find(space => space.spaceId === origin.spaceId)?.kind;
+    resources[zoneKey(id)] = json({ ...(saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {}), ...origin,
+      ...(originalKind === 'topic' || originalKind === 'mote' ? { contentKind: originalKind } : {}) });
   }
   if (previous) {
     for (const field of ['spaces', 'zones', 'tabs', 'regions'] as const) {
@@ -89,7 +95,15 @@ export function desktopWorkbenchFromSpatial(graph: AgentMuxSpatialGraph, onUnava
       onUnavailable?.(fact.tabId);
       continue;
     }
-    const space = metadata.space && typeof metadata.space === 'object' && !Array.isArray(metadata.space) && fact.zoneId !== null ? { ...metadata.space, zoneId: fact.zoneId } : undefined;
+    const origin = fact.zoneId === null ? null : graph.resources[zoneKey(fact.zoneId)];
+    const bindings = fact.zoneId === null ? [] : graph.bindings.filter(binding => binding.zoneId === fact.zoneId);
+    const sourceSpaceId = origin && typeof origin === 'object' && !Array.isArray(origin) && typeof origin.spaceId === 'string'
+      ? origin.spaceId : bindings.length === 1 ? bindings[0]!.spaceId : null;
+    const descriptor = metadata.space && typeof metadata.space === 'object' && !Array.isArray(metadata.space) ? metadata.space : null;
+    // Core's exact Tab→Zone survives older host descriptors. Multiple display bindings
+    // never select an arbitrary Space; the original resource context remains separate.
+    const space = fact.zoneId === null ? undefined : descriptor ? { ...descriptor, zoneId: fact.zoneId }
+      : sourceSpaceId ? { spaceId: sourceSpaceId, zoneId: fact.zoneId } : undefined;
     // Unavailable host data is reported by the consumer, not fabricated here.
     tabs[fact.tabId] = { ...metadata, space, id: fact.tabId, workspaceId: fact.workspaceId, layout, regions,
       ...(fact.name === null ? {} : { name: fact.name }) } as PersistedWorkbench['tabs'][string];
@@ -105,7 +119,14 @@ export function desktopBindingsFromSpatial(graph: AgentMuxSpatialGraph): SpaceZo
     const spaceId = typeof origin?.spaceId === 'string' ? origin.spaceId : relationships.length === 1 ? relationships[0]!.spaceId : null;
     if (!spaceId)
       continue;
-    result[zone.zoneId] = { spaceId, workspaceId: zone.workspaceId, relations: Object.fromEntries(graph.spaces.map(s => [s.spaceId, relationships.some(b => b.spaceId === s.spaceId)])) };
+    const originalSpace = graph.spaces.find(space => space.spaceId === spaceId);
+    const originalKind = origin?.contentKind ?? originalSpace?.kind;
+    const topicId = typeof origin?.topicId === 'string' ? origin.topicId : originalSpace?.topicId;
+    result[zone.zoneId] = { spaceId, workspaceId: zone.workspaceId,
+      ...(originalKind === 'topic' || originalKind === 'mote' ? { contentKind: originalKind } : {}),
+      ...(topicId ? { topicId } : {}),
+      ...(zone.kind === 'home' && zone.directoryPath ? { directoryPath: zone.directoryPath } : {}),
+      relations: Object.fromEntries(graph.spaces.map(s => [s.spaceId, relationships.some(b => b.spaceId === s.spaceId)])) };
   }
   return result;
 }

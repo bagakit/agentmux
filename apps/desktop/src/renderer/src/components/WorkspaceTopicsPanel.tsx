@@ -1,4 +1,6 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
+import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
+import { originalTopicAddress } from '../../../shared/space-addresses'
 import {
   Crosshair,
   LoaderCircle,
@@ -62,12 +64,16 @@ const NO_PINNED_TOPICS: readonly string[] = []
 
 export function WorkspaceTopicsPanel({
   workspace,
-  onRevealDirectory
+  onRevealDirectory,
+  categorySpaceId
 }: {
   workspace: WorkspaceRecord
+  categorySpaceId?: string | undefined
   onRevealDirectory(path: string): void
 }) {
   const displayPath = usePathDisplay()
+  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const category = useAppStore(state => state.topicCategories.find(category => category.spaceId === categorySpaceId))
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
   const topicId = layout ? activeTopicIdFromLayout(layout, tabs) : null
@@ -113,7 +119,7 @@ export function WorkspaceTopicsPanel({
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
   // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
   // pin 段按 pin 的先后、未 pin 段保留拖拽序原样。两者组合而不是取代（见 topic-order.ts）。
-  const userTopics = topics?.filter((topic) => topic.id !== PMO_TEAMS_TOPIC_ID && !topic.soul) ?? null
+  const userTopics = topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings) && (!categorySpaceId || (() => { const address = originalTopicAddress(workspace, topic, bindings); return address && bindings[address.zoneId]?.relations?.[categorySpaceId] === true })())) ?? null
   const projected = userTopics
     ? (() => {
         const withAgents = topicsWithAgents(userTopics, sessions, workspace)
@@ -217,7 +223,7 @@ export function WorkspaceTopicsPanel({
     setPending('create')
     setError(null)
     try {
-      await createScratchTopic()
+      await createScratchTopic(undefined, undefined, category ? { categoryId: category.categoryId } : undefined)
     } catch (cause) {
       setError(presentError(cause))
     } finally {
@@ -330,7 +336,7 @@ export function WorkspaceTopicsPanel({
     <section ref={panel} className="surface-tool-summary workspace-topics-panel workspace-topics-panel--index">
       <SelectorListHeader
         className="workspace-topic-index-header"
-        title="Topics"
+        title={category?.title ?? 'Topics'}
         count={userTopics?.length ?? null}
         actions={
           <button

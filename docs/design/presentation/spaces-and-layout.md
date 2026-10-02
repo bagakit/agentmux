@@ -8,6 +8,7 @@
 
 - [左下角导航与右下角工具组](#左下角导航与右下角工具组)
 - [Topic 导航反馈](#topic-导航反馈)
+- [Topics 知识库的导航与内容层级](#topics-知识库的导航与内容层级)
 - [Agent Region 的关闭与动作密度](#agent-region-的关闭与动作密度)
 - [Scratch Topic 首次打开的工作面反馈](#scratch-topic-首次打开的工作面反馈)
 - [三工作面与注意力密度](#三工作面与注意力密度)
@@ -50,6 +51,14 @@ Settings覆盖当前背景绑定时的原生 Browser 局部可见性与实体保
 
 - Topic 选中行与右侧可见 Tabs 必须一致；布局、焦点和读取失败约束见交互合同[《Topic 点击必须打开可见 Tabs》](../behavior/spaces-and-layout.md#topic-点击必须打开可见-tabs)。使用现有选中态和服务窗，不加重复导航栏或无限全页加载。
 
+## Topics 知识库的导航与内容层级
+
+产品对象、默认「未分类」、归属转移、知识来源与 CUI 只见交互合同[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。Topics 总入口下用同一树表达 Category → Topic，知识分类与物理目录分别可辨；分类展开后显示具体主题，不在每个主题的功能组中重复整库目录。「未分类」沿普通 Category 的同一密度呈现，已有主题可扫描、可选择，不用告警色或空状态引导遮住旧内容。Category、具体 Topic 和当前 Chat 的层次清楚，沿原整行 Surface、焦点与缩进语言，不增加第二条导航壳。
+
+Chat 使用原 Tab，既有 Group 沿原工作面分组；Thread 使用原 Agent Region 的正文与输入；文件、Browser、Terminal 与 Launcher 保自身内容类型，不伪装成 Agent Thread。知识与讨论入口清楚分工，正文优先；知识列表用可读标题与短摘要，来源、确认范围与修订按需可见并可回原内容，不铺满复制聊天或技术 ID。Note／Notebook 的编辑与页面导航沿原内容控件，不为 Topic 增加另一套块编辑器。准确对象、失败和未知的行为只见交互合同，持续服务说明在当前工作面可读并保原内容。
+
+归属转移沿紧凑对象动作表达准确 Topic、当前分类、目标分类和真实保存结果；窄栏、长标题、键盘与取消仍清楚可操作。原总览的列表质量、pin、头像／拓扑、定位动作与真实状态预算继续遵守[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)，分类不增加一套状态条、强制卡片网格或常驻技术说明。Mote 使用自身对象内容与原工作面，不把共享 Scratch 的全库列表或未绑定内容画作 Mote 的讨论。
+
 ## Agent Region 的关闭与动作密度
 
 行为与身份归属见交互合同[《Agent Region 关闭与身份入口》](../behavior/spaces-and-layout.md#agent-region-关闭与身份入口)。关闭命中区是 Region 的固定保留区；History 入口、阅读工具条、服务窗和长文本不能进入该区，不能仅提高层级后让两个控件视觉叠在一起。正常与窄分屏都保持原关闭尺寸、焦点环和完整可访问名称，不靠 hover 才找得到。
@@ -86,7 +95,7 @@ Terminal 与 Activity 的 History 进入和返回行为只见交互合同[《Age
 - 分屏菜单的 `Move to New Tab` 继续表达搬动，完成后源处不留同一 Agent 的副本；不新增常驻重复视图提示。移动与额外投影的行为约束见 [Desktop interaction](../agentmux-desktop-interaction.md)。
 - Project Rail 的“移除视图”放在项目行的 context menu 中，使用危险动作语义但不画成常驻删除图标；确认文案必须说清楚“只从侧栏移除，磁盘文件不受影响”。路径失效时的“重设路径”是错误面中的次级按钮，与 Retry 并列但不抢错误标题，选择成功后仍回到同一行的工作面。
 - 用户反馈“自动放到一起并缩进，但是视觉上区分度不高”，分组必须优雅且清晰：真实目录集合的成员向内一格，真实嵌套继续缩进，组间紧凑留白明确归属。 进一步明确去掉箭头与线带来的噪声：不再画细结构线，以本层[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)的明确左缘差与权重表达归属。分组头仍轻于项目标题。
-- **同一族列表行共用一套表现层**。Branch/Worktree 条与 Topic 条回答的是同一种形状的问题——"这一组条目里挑一个，进去是一组 Tab、每个 Tab 是一套 Region 分屏"。因此列表容器（标题 + 计数 + 动作位）与行（状态槽 + identity + 尾部 Agent 簇）**只有一套实现**，数据源、选中判定与动作由调用方注入。两者的**选中真相模型确实不同**——Branch 换的是 `activeWorkspaceId`（worktree 自成一个 workspace），Topic 是对同一份 Scratch layout 做投影——这条差异归交互合同，表现层不感知它，也不得为了"统一"把其中一侧改成另一侧。判据：两个条上看起来相同的东西（计数徽章、Agent 簇、hover、选中填充）必须真的是同一段代码，不是两处长得像的写法。
+Branch／Worktree 与 Topic 沿同一控件语言选择原工作面；资源身份与准确空间选择只见交互合同[《Project 与 Workspace》](../behavior/spaces-and-layout.md#project-与-workspace)。呈现不另定义选中字段，也不复制原布局、Session 或 Runtime。
 - 失效的声明比错的声明更危险。`-var(--sp-2)` 这类写法不是合法 CSS，浏览器**静默丢弃整条声明**——它不报错、不回退、在样式表里看起来完全正常，而它想做的事从未发生（负外边距归零，靠它做居中或叠压的东西一直是错位的）。数值型契约测试抓不到这一族，因为压根没有数字字面值可扫。负值必须写成 `calc(-1 * var(--sp-2))`，或改用不依赖数值的手法（如 `translate(-50%)` 随自身尺寸走）。这条由 `apps/desktop/test/stylesheet-organisation.test.ts` 守住：它扫全表断言 `-var(` 出现零次并报出文件与行号。**这类失效还会掩盖第二层错误**——声明既然从未生效，写在里面的数值对不对也就从来没人验证过；修复时要重新核算那个值，而不是照抄进 `calc()`。
 - hover 提升 Surface 明度；active 用内阴影表达按下，不靠边框位移。
 - 输入聚焦统一使用 `--focus-line` 与 `--focus-ring`。
@@ -168,11 +177,11 @@ Region 移位属于低频布局动作，放入右键菜单，不增加常驻按�
 
 ## Project Rail 与 Topic 行密度
 
-- Folder/Project、Topic 与 Mote 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 默认一级节点使用特殊图标，其下 Topic 子项保持树的紧凑节奏；产品归属与共同框架分别见交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)与[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。
+- Folder/Project、Topic 与 Mote 共用导航控件语言与密度，类型差异用清楚、紧凑的身份信息表达。Topics 总入口使用特殊图标，Category 与 Topic 的真实层级保持同一树的紧凑节奏；产品归属与共同框架分别见交互 SSOT[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)与[《Space 的统一工作面框架》](../behavior/spaces-and-layout.md#space-的统一工作面框架)。
 - 用户提供的 Topics 总览截图是本轮保留参照：现有已经 polish 过的列表页继续可达，保留标题与计数、`+`、连续列表容器、逐行标题和次级摘要、邻接的 pin、右侧 Agent/Tab/Region 簇、尾部定位动作及选中 Surface。树的子项与总览列表使用各自适合的密度，树整合不能把总览缩成只有一列名称；两处都消费同一事实和既有控件能力。Topics 分类入口保留可辨身份，列表行首图标继续遵守[《控件语言》](shared-rules.md#控件语言)中同图标不重复占位的规则。
 - Space 树中 Folder/Project 与 Topic 的显示应可区分。Folder/Project 的主身份表达目录或项目；Topic 的主身份使用读取到的语义标题，摘要作为次级信息，目录名不抢占语义标题的位置。两类条目复用选择、焦点、状态和命中区语言。树头通用 `+` 打开紧凑动作菜单，各分区另有就地 `+`；入口含义与 Topic 的自动识别规则只定义在交互 SSOT[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
 - Topic 与一般 Folder 的类型可从分区和必要的类型图标辨认；Topics 的默认分类入口与 Folder 分组均有可读标签，真实父子缩进清楚，分区标签不冒充目录父子关系，避免靠颜色或底层目录地址猜类别。两类复用同一行密度和工作面操作语言，目标是好懂好找。
-- 用户反馈：「你自己看看, 缩进和样式都有点问题, 很一般」，并要求「发挥你的全部能力, 优化这里的交互体验」。本轮进一步明确「最左边有个 padding 浪费空间」「很土的箭头和线」「顶部 icon 两层、有多余标题」。树的同级对象共享自然左缘，整棵树只有一份必要的外缘留白；没有折叠动作的叶节点不再保留空箭头槽，没有信息的类型图标也不留空框。分类成员与真实路径聚合、父子关系的层级差统一遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent；分类不是实体目录，不叠加容器留白与层级缩进。层级由清楚的标题左缘差、类型与分组权重表达，不画树干、拐线或虚线。行高与图标随同一密度档变化，真实层级缩进遵守同表，不随密度压缩。长标题、省略、尾部动作与键盘焦点在窄栏保持完整，不靠颜色猜层级。Mote、Topics 和 Folders 属于同一可滚动树，短窗口中仍能找到下方 Folder。原 Topics 总览的独立密度继续遵守本节保留参照。
+- 用户反馈：「你自己看看, 缩进和样式都有点问题, 很一般」，并要求「发挥你的全部能力, 优化这里的交互体验」。本轮进一步明确「最左边有个 padding 浪费空间」「很土的箭头和线」「顶部 icon 两层、有多余标题」。树的同级对象共享自然左缘，整棵树只有一份必要的外缘留白；没有折叠动作的叶节点不再保留空箭头槽，没有信息的类型图标也不留空框。分类成员与真实路径聚合、父子关系的层级差统一遵守[《密度预算》](shared-rules.md#密度预算)表的 Project Rail Nesting Indent；知识分类层级与实体目录分别表达，不叠加容器留白与层级缩进。层级由清楚的标题左缘差、类型与分组权重表达，不画树干、拐线或虚线。行高与图标随同一密度档变化，真实层级缩进遵守同表，不随密度压缩。长标题、省略、尾部动作与键盘焦点在窄栏保持完整，不靠颜色猜层级。Mote、Topics 和 Folders 属于同一可滚动树，短窗口中仍能找到下方 Folder。原 Topics 总览的独立密度继续遵守本节保留参照。
 - 用户继续要求左树达到更高水准。名称必须是主要扫描轨道：普通条目使用克制字重，当前对象以完整行的选中 Surface、明确文字与 `aria-current` 区别于 hover；不能让 hover 和选中只有相同填充，也不靠单侧色条表达选中。Motes、Topics、Folders 分类、真实路径分组和具体对象具有可读的权重次序；分类之间以紧凑段距分区，不借厚边框或卡片堆叠。Topic 成员以语义标题、分类成员缩进与共用身份槽表达归属，不伪造实体 Folder，也不逐项重复无区分价值的类型图标；其类型、pin 与语义标题仍可辨认。就地查找紧凑地位于树头，清除、无结果与命中上下文可见，不能新增第二个大标题或抢走名称宽度。Mote 人格编辑与未置顶时的 pin 动作在 hover、键盘焦点或菜单打开时清楚可达；已置顶标记安静时仍可见，安静状态不重复陈列低频动作。所有 Space 行共用状态入口，最多保留两类最需处理的精确 icon+count：待回答和错误同时存在时都保留；安静时保留当前最相关的 working、idle 或 completed 一类，其余准确分类进入既有展开面。状态图形和数量不可混成含义不明的总数，不改变 Session 状态事实。三档密度、窄栏与短窗口均需保留可读名称、清晰命中区及可见键盘焦点；交互与过滤恢复合同引用 interaction[《Space、Folder 与 Topic》](../behavior/spaces-and-layout.md#spacefolder-与-topic)。
 - 顶部仅一层控制行：侧栏开关与通用创建共面排列，保留 macOS 交通灯所需避让，不在下一层重复 `Spaces`/`Projects` 标题或同组 icon。三档密度常驻于紧凑查找行尾，不能以窄栏为由隐藏进设置或增加第二层 toolbar；查找不能拿搜索标签凑出第二个标题。分区头使用轻标签、准确成员数和尾部常驻 `+`；折叠状态将真实注意力放在同一尾部轨道，不能用一个无解释的彩色点代替准确状态。`+` 的命中区、hover 和可见焦点与现有 icon-button 一致，180px 窄栏仍能明确创建的类别。
 - 折叠字形只属于确有子项的类型/分组槽：类型图标与折叠控制不同时抢两列，指针 hover 或键盘焦点显露紧凑 disclosure，`aria-expanded` 和独立可访问名保持明确。叶节点没有箭头，也没有为箭头空出的 gutter；标题和动作的点击互不触发。标记、当前对象和热度分别占身份邻接位、完整行 Surface 与尾部状态轨道，不能用同一装饰同时承担三种事实。
@@ -241,7 +250,7 @@ Note 的“来源”和“轨迹”沿原详情入口按需展开，显示可读
 
 探索名称、创建作用域与笔记本入口的行为唯一见 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。普通浏览先呈现网页标题和标签导航；明确研究的入口以安静单行名称呈现，改名可达，不把内部结构铺成标题。起步页保持中央网页输入，以短标题和可辨的新建笔记本入口表达浏览与知识整理的共同用途，不增加教程、功能卡墙或项目分组。当前探索的添加笔记与整理动作集中于左侧列表底部，与顶部新建入口分开；收起后保留左侧图标入口，作用域行为只见交互合同[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。右侧 Tab 上方不叠这两项探索动作；无需重复铺来源项目、路径、计数或结构术语。外层探索与内层内容标签通过控件作用域和留白区分，宽窄窗口都能读懂和操作。 Note 正文优先，来源检查沿按需展开的底部入口可达，失败说明保持持续可见；空白笔记给出轻量落笔提示，不让目录信息和空工具层抢在正文之前。
 
-用户最新要求 Survey 首先是一款普通用户可以日常使用的浏览器，项目 Browser 不自动属于 Survey；研究成果单向整理为 Topic 中的 Zone。默认层级以网页、地址／搜索和标签导航为主，研究组织、Note 和复杂分割按需显露；不在第一步解释 Zone、项目归属或多 Topic 关系。入口与流转只引用交互合同，单向工作流不改变通用实体与展示绑定能力。公共实体和展示合同引用 interaction[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)；Survey 的行为、关系、控制、关闭与恢复只引用[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。原完整内容是主对象。
+用户最新要求 Survey 首先是一款普通用户可以日常使用的浏览器，项目 Browser 不自动属于 Survey；研究成果单向整理到知识库 Topic，层级与关系沿[知识库合同](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。默认层级以网页、地址／搜索和标签导航为主，研究组织、Note 和复杂分割按需显露；不在第一步解释 Zone、项目归属或多 Topic 关系。入口与流转只引用交互合同，单向工作流不改变通用实体与展示绑定能力。公共实体和展示合同引用 interaction[《Zone→Tabs→Regions 的实体与展示绑定》](../behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)；Survey 的行为、关系、控制、关闭与恢复只引用[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。原完整内容是主对象。
 
 用户在实际运行版中进一步反馈左侧 Survey Item 不现代、文字啰嗦、宽度固定，随后要求重做 Item 与整体界面。本轮重做须同时建立清楚的探索列表、明确的当前网页／研究范围和原内容工作面的层级；不能仅在原行布局上换颜色、加圆角或声明 blur。左栏平铺原 Item，以真实内容标题为第一层，来源信息归原 Details；平铺、顺序和身份边界只引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。内容类型、关系和可信操作事实按需表达。重复通用图标、常驻更多按钮、路径和状态文案不挤掉标题；完整信息与动作在指针、键盘及触屏下仍可达，未知／失败不靠隐藏信息换简洁。明确创建／保存的入列边界唯一引用 interaction[《Survey、临时 Zone 工作面与知识入口》](../behavior/spaces-and-layout.md#survey临时-zone-工作面与知识入口)。
 
@@ -267,7 +276,7 @@ Note 的“来源”和“轨迹”沿原详情入口按需展开，显示可读
 
 ## Scratch Topic 工作面可见性
 
-Scratch 的 Files + Topics 工具栏与右侧 Workbench 是同一工作区的两块表面。打开 Topic 后，右侧必须保留普通 Workbench 的 Tab bar、Region 和 Terminal/Agent 内容；不得把 Scratch 从 Workbench registry 排除而只留下全幅空底。
+Scratch 的 Files + Topics 工具栏在 Topics 总览与 Category 总览中承载对应范围的目录；具体 Topic 显示自身知识与资料，Mote 显示自身名片与点子，不在对象二级重复整库列表。打开具体对象后仍保持原 Tab/Region 工作面可见，身份与作用域只见交互合同[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。
 
 ## Topic topology 的摘要与展开密度
 

@@ -23,6 +23,7 @@ import { nextAttentionSessionId } from './agent-attention'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from './scratch-topic-layout'
 import { SHORTCUT_BINDINGS } from './shortcut-registry'
 import { logicalRegionId, layoutForLogicalRegionFocus, type RegionFocusCause } from './region-focus'
+import { workbenchObjectLayout, type NavigationState } from './desktop-focus-navigation'
 
 /**
  * 一次按键解析出的命令——已经定到「哪个动作、往哪个方向、第几张」，但**落点（哪个 Workspace/Tab/
@@ -178,8 +179,7 @@ export function adjacentRegionId(
 }
 
 /** 落点解析 + 转发所需的最小 store 切片。App 直接把 store 快照传进来（它是这个类型的超集）。 */
-export type WorkbenchShortcutStore = {
-  workbenchSpaceSelection?: { workspaceId: string; topicId: string | null } | null
+export type WorkbenchShortcutStore = Partial<Pick<NavigationState, 'config' | 'spaceZoneBindings' | 'spatialRequests' | 'scratchTopicSnapshots' | 'topicCategories' | 'workbenchSpaceSelection'>> & {
   retainedSpatialFocus?: { regionId: string; tabId: string; workspaceId: string; topicId?: string } | null
   mainSurface: string
   activeWorkspaceId: string | null
@@ -219,6 +219,14 @@ export type WorkbenchShortcutStore = {
   swapRegions(workspaceId: string, tabId: string, regionIdA: string, regionIdB: string): void
 }
 
+function visibleShortcutLayout(store: WorkbenchShortcutStore, workspaceId: string, storedLayout: WorkspaceLayout) {
+  if (store.config !== undefined) return workbenchObjectLayout({ ...store, config: store.config,
+    mainSurface: 'workbench', selectedDemandId: null, workbenchSpaceSelection: store.workbenchSpaceSelection ?? null,
+    sessions: [], tabs: { ...store.tabs }, layouts: { ...store.layouts }, spaceZoneBindings: store.spaceZoneBindings ?? {},
+    spatialRequests: store.spatialRequests ?? {}, scratchTopicSnapshots: store.scratchTopicSnapshots ?? {} }, workspaceId).layout
+  return layoutForActiveTopic(storedLayout, store.tabs, activeTopicIdFromLayout(storedLayout, store.tabs), false)
+}
+
 /**
  * 把一条命令解析成落点并转发到 store action，返回是否吃下了这个键。
  *
@@ -240,11 +248,9 @@ export function dispatchWorkbenchCommand(
   const storedLayout = workspaceId ? store.layouts[workspaceId] : undefined
   if (!workspaceId || !storedLayout) return false
   // 投影出与 Workbench 渲染相同的 Topic 过滤后 layout，让序号与活动组/Tab 恰好对上用户所见。
-  const layout = layoutForLogicalRegionFocus(layoutForActiveTopic(
-    storedLayout,
-    store.tabs,
-    store.workbenchSpaceSelection?.workspaceId === workspaceId ? store.workbenchSpaceSelection.topicId : store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
-  ), store.tabs, store.retainedSpatialFocus)
+  const projected = visibleShortcutLayout(store, workspaceId, storedLayout)
+  if (!projected) return false
+  const layout = layoutForLogicalRegionFocus(projected, store.tabs, store.retainedSpatialFocus)
   const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
   if (!group) return false
 
@@ -346,11 +352,9 @@ export function focusedSessionId(store: WorkbenchShortcutStore): string | null {
   const workspaceId = store.activeWorkspaceId
   const storedLayout = workspaceId ? store.layouts[workspaceId] : undefined
   if (!workspaceId || !storedLayout) return null
-  const layout = layoutForLogicalRegionFocus(layoutForActiveTopic(
-    storedLayout,
-    store.tabs,
-    store.workbenchSpaceSelection?.workspaceId === workspaceId ? store.workbenchSpaceSelection.topicId : store.retainedSpatialFocus?.workspaceId === workspaceId ? store.retainedSpatialFocus.topicId ?? activeTopicIdFromLayout(storedLayout, store.tabs) : activeTopicIdFromLayout(storedLayout, store.tabs)
-  ), store.tabs, store.retainedSpatialFocus)
+  const projected = visibleShortcutLayout(store, workspaceId, storedLayout)
+  if (!projected) return null
+  const layout = layoutForLogicalRegionFocus(projected, store.tabs, store.retainedSpatialFocus)
   const group = layout.groups.find((candidate) => candidate.id === layout.activeGroupId)
   const tab = group?.activeTabId ? store.tabs[group.activeTabId] : undefined
   if (!tab) return null

@@ -2,21 +2,23 @@ import type { AgentMuxAgentSession } from '@agentmux/core'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceAgentFact, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest,
   AgentMuxSpaceControlResult, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport,
-  AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave, AgentMuxZoneFact, AgentMuxSpaceBindingReport, AgentMuxSpaceBindingTarget
+  AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave, AgentMuxZoneFact, AgentMuxSpaceBindingReport, AgentMuxSpaceBindingTarget, TopicCategory
 } from '@agentmux/core/control'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, regionIds,
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
 import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { projectResourceWorkspace, spatialSources, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
+import { projectResourceWorkspace, spatialSources, topicSpatialAddress, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
   type SpaceZoneResourceInput, type SpaceZoneResourceResult } from '../../../shared/space-addresses'
 import { addWorkbenchRegion, assertRegionInvariant, createWorkbenchTab, removeWorkbenchRegion,
   type AgentWorkbenchSurface, type WorkbenchTab } from './workbench-tabs'
 import { resolveSpatialCommit } from './control-spatial-commit'
 import { isSessionSurface } from './workbench-surface-kinds'
+import { topicContentZoneId } from '../../../shared/topic-categories'
 
 export type SpatialWorkbench = {
+  topicCategories?: TopicCategory[]
   projectGroups?: import('@agentmux/core/control').AgentMuxProjectGroupFact[]
   config: AppConfig | null
   sessions: SessionSnapshot[]
@@ -63,7 +65,7 @@ const unsaved = (layoutApplied = false): AgentMuxSpatialSave => ({ layoutApplied
 /** Metadata only; every durable entity is indexed once, independent of display. */
 export function spatialCatalog(state: SpatialWorkbench, topics: readonly ScratchTopicSnapshot[]): AgentMuxSpaceCatalog {
   const sources = spatialSources(state.config, topics, state.spaceZoneBindings,
-    Object.values(state.tabs).flatMap(tab => tab.space ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []))
+    Object.values(state.tabs).flatMap(tab => tab.space ? [{ workspaceId: tab.workspaceId, space: tab.space }] : []), state.topicCategories)
   const catalog: AgentMuxSpaceCatalog = { ...sources, ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}), tabs: [], regions: [], locations: [] }
   const sessions = new Map(state.sessions.map(session => [session.id, session]))
   const tabs = new Map<string, AgentMuxSpaceCatalog['tabs'][number]>()
@@ -75,9 +77,10 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
   }
   for (const tab of Object.values(state.tabs)) {
     const workspace = state.config?.workspaces.find(workspace => workspace.id === tab.workspaceId)
-    const source = tab.topicId ? sources.spaces.find(space => space.topicId === tab.topicId) : undefined
+    const topic = tab.topicId ? topics.find(topic => topic.id === tab.topicId) : undefined
+    const source = topic ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : undefined
     const referencedZoneId = tab.space?.zoneId ?? (workspace ? tab.topicId
-      ? source ? homeZoneId(source.spaceId) : null
+      ? source?.zoneId ?? null
       : tab.workspaceId === SCRATCH_WORKSPACE_ID ? homeZoneId(directoryIdentity(workspace.hostId, workspace.path))
         : workspaceZoneId(directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path), workspace.id) : null)
     const resolvedZone = sources.zones.find(zone => zone.zoneId === referencedZoneId)
@@ -163,7 +166,8 @@ export function zoneContext(state: SpatialWorkbench, topics: readonly ScratchTop
   const saved = state.spaceZoneBindings[zone.zoneId]
   if (saved) {
     if (saved.workspaceId !== zone.workspaceId) failure('SPACE_CONTEXT_UNKNOWN', 'The saved Zone context contradicts its resource Workspace; its original facts are retained.')
-    if (zone.kind === 'home' && zone.hostId && zone.directoryPath && saved.spaceId !== directoryIdentity(zone.hostId, zone.directoryPath)) {
+    const originalTopic = saved.topicId && saved.directoryPath === zone.directoryPath && homeZoneId(saved.spaceId) === zone.zoneId
+    if (zone.kind === 'home' && zone.hostId && zone.directoryPath && !originalTopic && saved.spaceId !== directoryIdentity(zone.hostId, zone.directoryPath)) {
       failure('SPACE_CONTEXT_UNKNOWN', 'The saved home context contradicts its confirmed resource; its original facts are retained.')
     }
     return saved.spaceId
@@ -300,7 +304,8 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
     if (tabs[address.tabId]) failure('SPACE_TARGET_CHANGED', 'The reserved Tab ID already exists.')
     const catalog = spatialCatalog(state, topics), zone = catalog.zones.find(zone => zone.zoneId === address.zoneId)!
     const sourceSpaceId = zoneContext(state, topics, zone)
-    const sourceTopic = zone.kind === 'home' ? catalog.spaces.find(item => item.spaceId === sourceSpaceId)?.topicId : undefined
+    const workspace = state.config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
+    const sourceTopic = zone.kind === 'home' && workspace ? topics.find(topic => topicContentZoneId(workspace, topic) === zone.zoneId)?.id : undefined
     tabs[address.tabId] = { ...createWorkbenchTab(address.tabId, placed),
       space: { spaceId: sourceSpaceId, zoneId: address.zoneId! }, ...(sourceTopic ? { topicId: sourceTopic } : {}) }
     let layout = layouts[address.displayWorkspaceId] ?? createWorkspaceLayout(address.groupId)
@@ -554,11 +559,12 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (request.focus) ports.focus(target.address)
     if (binding.createAgent && operation === 'agent.open' && request.content.kind === 'new-agent') {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
-      const space = catalog.spaces.find(item => item.spaceId === target.address.spaceId)
-      const launched = await ports.launch({ executorId: executorId!, hostId: zone.hostId, workspacePath: space?.topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
+      const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
+      const topicId = zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
+      const launched = await ports.launch({ executorId: executorId!, hostId: zone.hostId, workspacePath: topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
           ? ports.get().config!.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!.path : zone.directoryPath,
         agentSessionId: sessionId, createOperationId: request.requestId,
-        ...(space?.topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: space.topicId } : {}),
+        ...(topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
         ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })

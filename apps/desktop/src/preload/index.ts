@@ -170,6 +170,9 @@ const api: AgentMuxPreloadApi = {
     openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
+  topics: {
+    call: (method, params) => ipcRenderer.invoke('topics:call', method, params)
+  },
   scratch: {
     setMoteArchived: (workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string) =>
       ipcRenderer.invoke('scratch:setMoteArchived', workspaceId, topicId, archived, objectKey, expectedVersion),

@@ -1,3 +1,9 @@
+import { TopicKnowledgePanel } from './TopicKnowledgePanel'
+import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
+import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
+import { useScratchTopics } from '../hooks/useScratchTopics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { MoteDetailsPanel } from './MoteDetailsPanel'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { AgentAvatar } from './AgentAvatar'
@@ -79,10 +85,20 @@ export function WorkspaceFilesTool({
   onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
 }) {
   const mote = useMoteWorkfaceScope(workspace.id, topicId)
+  const choice = useAppStore(state => state.workbenchSpaceSelection?.workspaceId === workspace.id ? state.workbenchSpaceSelection : null)
+  const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
+  const { topics: knownTopics } = useScratchTopics(scratch?.id ?? null)
+  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const selectedTopicId = topicId ?? choice?.topicId
+  const knowledgeTopic = !mote && selectedTopicId ? knownTopics?.find(topic => topic.id === selectedTopicId && isKnowledgeTopicInBindings(topic, bindings)) : undefined
+  const topicRoot = knowledgeTopic && scratch ? scratchTopicLogicalPath(scratch, knowledgeTopic) : null
+  const categories = useAppStore(state => state.topicCategories)
+  const category = !mote && !selectedTopicId ? categories.find(category => category.spaceId === choice?.spaceId && choice?.zoneId === null) : undefined
+  const [capture, setCapture] = useState<ReturnType<typeof selectedKnowledgeSources>>(null)
   const materials = useMoteMaterialsActions(mote)
   const [createFileRequest, setCreateFileRequest] = useState<{ requestId: number; parentPath: string }>()
   const [allFiles, setAllFiles] = useState(false)
-  useEffect(() => setAllFiles(false), [mote?.topic.id])
+  useEffect(() => setAllFiles(false), [mote?.topic.id, knowledgeTopic?.id])
   const presentation = contentSlotPresentation(isScratch)
   const displayPath = usePathDisplay()
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
@@ -112,9 +128,10 @@ export function WorkspaceFilesTool({
     onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
       setAllFiles(false); setExplorerCollapsed(workspace.id, false)
       setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
-    }} /> : presentation.showTopics ? (
+    }} /> : knowledgeTopic && scratch ? <TopicKnowledgePanel key={knowledgeTopic.id} workspace={scratch} topic={knowledgeTopic} /> : selectedTopicId ? <div className="surface-inline-error" role="status">The selected object's original content is still restoring. Its workface is retained; refresh its original directory to continue.</div> : presentation.showTopics ? (
     <WorkspaceTopicsPanel
       workspace={workspace}
+      categorySpaceId={category?.spaceId}
       onRevealDirectory={revealDirectoryInExplorer}
     />
   ) : (
@@ -174,6 +191,7 @@ export function WorkspaceFilesTool({
 
   return (
     <div className="workspace-tool-explorer">
+      <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} />
       <div className="workspace-tool-context workspace-tool-context--collapsible workspace-tool-context--explorer">
         <button
           type="button"
@@ -189,14 +207,15 @@ export function WorkspaceFilesTool({
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
         <span title={displayPath(workspace.path, workspace.hostId)}>
-          <strong>{mote ? allFiles ? workspace.name : mote.topic.title : workspace.name}</strong>
-          {mote ? allFiles ? <small>All files</small> : null : isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
+          <strong>{mote ? allFiles ? workspace.name : mote.topic.title : knowledgeTopic?.title ?? category?.title ?? workspace.name}</strong>
+          {mote ? allFiles ? <small>All files</small> : null : isScratch || workspace.branch ? <small>{isScratch ? 'Knowledge' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
         ) : null}
         <div className="workspace-tool-context__actions">
           {mote ? <button type="button" className="workspace-files-scope" onClick={() => setAllFiles(value => !value)}>{allFiles ? 'Back to this Mote' : 'Show all files'}</button> : null}
+<button type="button" className="icon-button" aria-label="Save selected content to Topic" title="Save selected content to Topic" onClick={() => { try { const target = selectedKnowledgeSources(workspace.id); if (target) setCapture(target); else throw new Error('Choose the original file, page or discussion before saving knowledge.') } catch (error) { useAppStore.getState().reportError(error) } }}><NotebookText size={13} /></button>
           <div ref={setToolbarTarget} />
         </div>
       </div>
@@ -213,8 +232,8 @@ export function WorkspaceFilesTool({
         >
           <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
             <FileExplorer key={workspace.id + (mote?.topic.id ?? '') + allFiles} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
-              workspaceId={workspace.id} rootPath={mote && !allFiles ? mote.rootPath : ''}
-              rootLabel={mote && !allFiles ? mote.topic.title : workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
+              workspaceId={workspace.id} rootPath={mote && !allFiles ? mote.rootPath : topicRoot ?? ''}
+              rootLabel={mote && !allFiles ? mote.topic.title : knowledgeTopic?.title ?? workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
               onOpenPath={mote ? onOpenPath ?? materials.open : onOpenPath} onOpenTerminal={mote ? onOpenTerminal ?? materials.terminal : onOpenTerminal} />
           </Panel>
           <PanelResizeHandle className="workspace-tools-resize-handle" />

@@ -1,3 +1,4 @@
+import { readControlJsonInput } from './cli-json-input.js'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
@@ -142,6 +143,19 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       return {expectedRevision,...operation(f),change}
     },SAVE_NOTICE),
 
+  empty('topic.category.ls', 'Discover original filesystem-backed knowledge categories.'),
+  command('topic.category.create', '--category UUID --title TEXT', 'Create one exact knowledge category without starting an Agent.', { '--category': 'data', '--title': 'data' }, f => ({ categoryId: id(f, '--category', true), title: value(f, '--title', true)! }), SAVE_NOTICE),
+  command('topic.category.rename', '--category UUID --title TEXT --revision HASH', 'Rename a category while preserving its directory and spatial identity.', { '--category': 'data', '--title': 'data', '--revision': 'data' }, f => ({ categoryId: id(f, '--category', true), title: value(f, '--title', true)!, expectedRevision: id(f, '--revision') }), SAVE_NOTICE),
+  command('topic.ls', '[--category UUID] [--topic ID]', 'Discover ordinary Topics with original category and Chat bindings.', { '--category': 'data', '--topic': 'data' }, f => fields(f, { '--category': 'categoryId', '--topic': 'topicId' })),
+  command('topic.inspect', '--topic ID', 'Read one exact Topic and its original spatial membership.', { '--topic': 'data' }, f => ({ topicId: id(f, '--topic', true) })),
+  command('topic.create', '--topic ID --title TEXT [--category UUID]', 'Create one exact Topic in a knowledge category without starting a Run.', { '--topic': 'data', '--title': 'data', '--category': 'data' }, f => ({ topicId: id(f, '--topic', true), title: value(f, '--title', true)!, ...fields(f, { '--category': 'categoryId' }) }), SAVE_NOTICE),
+  command('topic.move', '--topic ID --category UUID --revision NUMBER', 'Move the whole Topic to one category, preserving content, Chat identities and execution.', { '--topic': 'data', '--category': 'data', '--revision': 'value' }, f => ({ topicId: id(f, '--topic', true), categoryId: id(f, '--category', true), expectedRevision: Number(value(f, '--revision', true)) }), SAVE_NOTICE),
+  command('topic.knowledge.ls', '--topic ID [--limit N]', 'Read knowledge entries in one exact ordinary Topic, retaining per-entry unknown facts.', { '--topic': 'data', '--limit': 'value' }, f => ({ topicId: id(f, '--topic', true), ...numbers(f, { '--limit': 'limit' }) })),
+  command('topic.knowledge.search', '--query TEXT [--topic ID] [--limit N]', 'Search saved knowledge and source locators without reading or copying original conversations.', { '--topic': 'data', '--query': 'data', '--limit': 'value' }, f => ({ query: value(f, '--query', true)!, ...fields(f, { '--topic': 'topicId' }), ...numbers(f, { '--limit': 'limit' }) })),
+  command('topic.knowledge.read', '--topic ID --entry UUID', 'Read one exact knowledge entry, its sources and content revision.', { '--topic': 'data', '--entry': 'data' }, f => ({ topicId: id(f, '--topic', true), entryId: id(f, '--entry', true) })),
+  command('topic.knowledge.write', '--input FILE|-', 'Save a typed knowledge entry at its exact expectedRevision without starting or messaging an Agent.', { '--input': 'data' }, async f => await readControlJsonInput(value(f, '--input', true)!, 'Topic knowledge') as Record<string, unknown>, 'The JSON carries exact topicId/entryId, title, content, form, certainty, sources and expectedRevision (null to create). Read the original revision before editing. ' + SAVE_NOTICE),
+  empty('topic.migrate.preview', 'Preview existing local Topic identities and exact category changes without writing.'),
+  command('topic.migrate.apply', '--revision NUMBER', 'Apply the inspected local Topic organization at its exact spatial revision.', { '--revision': 'value' }, f => ({ expectedRevision: Number(value(f, '--revision', true)) }), 'Read topic migrate preview first. The original owner preserves content and writes a backup before the spatial change. ' + SAVE_NOTICE),
   empty('space.state', 'Read the Core durable spatial graph and revision without a graphical frontend.'),
   command('space.commit', '--revision N [--allow-entity-removal] < graph.json', 'Commit a spatial graph from JSON stdin using an exact revision; stale writes are refused.',
     {'--revision':'value','--allow-entity-removal':'boolean'}, f => {
