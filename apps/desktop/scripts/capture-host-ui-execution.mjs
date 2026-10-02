@@ -140,6 +140,12 @@ export async function captureHostUiExecution() {
     proof.passed = true
   } catch (error) { proof.failure = { name: error.name, message: error.message, stack: error.stack } }
   finally {
+    try {
+      const log = await fs.readFile(path.join(privateRoot, 'agentmux-host.log'))
+      const destination = path.join(evidence, 'private-local-host.log')
+      await fs.writeFile(destination, log, { mode: 0o600 })
+      proof.localHostLog = { absolutePath: destination, bytes: log.length, sha256: digest(log) }
+    } catch (error) { if (error.code !== 'ENOENT') cleanupErrors.push(`Preserving private Host log: ${error.message}`) }
     let owned = []
     try { owned = await json(path.join(privateRoot, 'owned-sessions.json')) } catch (error) { if (error.code !== 'ENOENT') cleanupErrors.push(error.message) }
     // Reconcile a crash immediately after Core creation using exact fresh Task cwd and the
