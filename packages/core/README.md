@@ -189,3 +189,46 @@ await client.dispose()
 `hostname` 可以使用已有 SSH config 的 Host 别名；`user`、`port`、`identityFile`、`remoteCommand` 与 `remoteSocketPath` 按需覆盖默认值。连接采用非交互 SSH。Desktop 的 Hosts 设置保存这些连接参数，并展示已绑定的稳定 Runtime ID。
 
 连接中断时，原 Session、Tab、Region、布局和未发出的输入保持原身份。缓存只表示最后一次观察，服务窗说明失败步骤与恢复动作；只有 Core 明确确认原 Session 的终局事实才允许移除对应投影，观测 unknown / unavailable 保留原工作面。Owner 重启使用原持久目录恢复 Session，再附着同一 ctxmux Run。Provider-native Resume 保持 Session ID，并创建有 provenance 的新 Run。
+
+## Notebook 目录 API 与 CLI
+
+知识目录不需要 App。`@agentmux/core/notebook-store` 的 `AgentMuxNotebookStore` 负责
+`notebooks.json`，默认位于 `AGENTMUX_STATE_DIRECTORY` 所指的原状态目录。
+`@agentmux/core/notebook-catalog` 导出 `NotebookState`、`NotebookWrite`、`NotebookChange`
+和严格读取类型。正文由原资源 Host/Workspace 的文件能力持有，目录保存准确引用、
+页面层级、网页来源和真实变化轨迹。[Notebook 行为合同](../../docs/design/behavior/spaces-and-layout.md#notebook页面与持久目录)
+定义归属和关闭语义；这里列出实际公开调用方式。
+
+```sh
+amux notebook ls
+amux notebook inspect --notebook quick-notes
+amux notebook inspect --note NOTE_ID
+amux notebook inspect --operation-id ORIGINAL_OPERATION_ID
+amux notebook apply --revision CURRENT_REVISION --operation-id NEW_OPERATION_ID \
+  --change-json '{"kind":"create","notebookId":"research","name":"Research wiki"}'
+```
+
+`notebook.ls`、`notebook.inspect`、`notebook.apply` 是同一公共 RPC 的方法。
+`notebook.apply` 输入 `{ expectedRevision, operationId, change }`，返回完整确认目录。
+读写走已有 Endpoint；写入者由可信运输或 AgentSession 确认，不能在 `change` 中自报身份。
+
+| `change.kind` | 字段（除 kind） | 结果 |
+| --- | --- | --- |
+| `create` | `notebookId, name, workface?` | 新建 Notebook；默认 `quick-notes` 名称为“随手记” |
+| `rename` | `notebookId, name` | 改 Notebook 名；默认名称固定 |
+| `bind` | `notebookId, workface` | 绑定原工作面 `{ zoneId, workspaceId }` |
+| `register` | `noteId, title, resource, notebookId?, parentNoteId?, workface?, source?` | 登记已保存的原 Note；未指定 Notebook 时进入随手记 |
+| `move` | `noteId, notebookId, parentNoteId` | 移动页面及子树；根级用 `null`，循环明确拒绝 |
+| `rename-page` | `noteId, title` | 改页面标题，保原 Note/Block 与文件 |
+| `source` | `noteId, source` | 追加来源；不覆盖已有来源身份 |
+| `organize` | `noteId, topic` | 记录已确认的 Topic 整理；不是空间关系创建命令 |
+| `relocate` | `noteId, resource` | 记录原文件能力已确认的真实新位置；不是文件移动命令 |
+
+`resource` 为 `{ hostId, workspaceId, workspacePath, path }`，`path` 相对原 Workspace。
+`source` 为 `{ sourceId, url, title, recordedAt, operator?, position? }`；标题未知用 `null`，
+原展示可选地址为 `{ zoneId, tabId, regionId }`。来源 URL 不依赖该展示仍然存在。
+`topic` 为 `{ spaceId, topicId? }`。`inspect --note` 返回原页面与完整事件轨迹。
+
+丢回执时查询原 `operationId`，再以同一个 ID、原 payload 和同一操作者重试；成功不会重复。
+新意图使用新 ID 和最新 revision；并发冲突先读目录。损坏或未确认读取保原字节与页面，
+不创建空知识库覆盖它。与当前事实相同的改名、位置或资源操作不添加虚假的变化事件。

@@ -1,4 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook-catalog'
+import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -94,6 +96,12 @@ let savedLauncherStorage: string | null
 let css: HTMLStyleElement
 
 beforeEach(() => {
+  let catalog = emptyNotebookState()
+  vi.spyOn(api.notebooks, 'read').mockImplementation(async () => structuredClone(catalog))
+  vi.spyOn(api.notebooks, 'apply').mockImplementation(async input => { catalog = applyNotebookChange(catalog, input, { kind: 'user', id: 'actual-ui-user' }, Date.now()); return structuredClone(catalog) })
+  vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {})
+  useNotebookLibrary.setState({ state: null, issue: null })
+
   // The API module already loaded its project-native mock transport. Exercise the real native
   // visibility branch in BrowserPane instead of the web-preview placeholder branch.
   vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false)
@@ -109,7 +117,7 @@ beforeEach(() => {
   })
   useAppStore.setState({ loading: false, initialize: vi.fn(async () => () => {}), mainSurface: 'workbench',
     surveySidebarWidth: 220, surveySidebarCollapsed: false,
-    surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratchWorkspace] }, activeWorkspaceId: workspace.id,
+    surveyNotebookId: null, surveyNoteId: null, surveyCollectedZones: {}, surveyExplorationNames: {}, surveyZoneSelection: null, spaceZoneBindings: {}, spatialRequests: {}, scratchTopicSnapshots: {}, surveyToolsOpen: false, config: { ...composerConfig, workspaces: [...composerConfig.workspaces, scratchWorkspace] }, activeWorkspaceId: workspace.id,
     sessions: [session], viewModes: { [session.id]: 'terminal' }, tabs: { [mixed.id]: mixed }, layouts: { [workspace.id]: createWorkspaceLayout('original-group', [mixed.id]), [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') },
     agentFocus: { execution: { sessionId: session.id, history: [{ sessionId: session.id, focusedAt: 1 }] }, pmo: { sessionId: null } },
     projectRailOpen: true, toolsOpen: true, workspaceTool: 'agents', demands: {}, browserAnnotationsByBrowserId: {},
@@ -136,7 +144,7 @@ function savedNotes() { return Object.values(useLauncherState.getState().drafts)
 function pendingNoteReference() { const receipt = savedNotes().at(-1)!; expect(receipt.launcher).toBeDefined(); return receipt.launcher! }
 function noteTransport(status: 'written' | 'unknown' | 'error' = 'written', waiting?: Promise<void>) {
   const writes = new Map<string, string>()
-  vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { writes.set(input.path, input.content); await waiting; return status === 'written' ? { status, revision: 'note-written' } : { status, code: 'NOTE_WRITE', message: 'Note write not confirmed' } })
+  vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { if (input.expectedRevision === null && writes.has(input.path)) return { status: 'conflict', observedRevision: 'note-written' }; writes.set(input.path, input.content); await waiting; return status === 'written' ? { status, revision: 'note-written' } : { status, code: 'NOTE_WRITE', message: 'Note write not confirmed' } })
   vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: writes.get(path)!, revision: 'note-written' } }))
   return writes
 }
@@ -597,7 +605,7 @@ it('does not let a delayed new item steal a later explicit Zone selection', asyn
   let finish!: (snapshot: BrowserSnapshot) => void
   vi.mocked(api.browser.create).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   await renderApp(); await enterSurvey()
-  await dom.click('[aria-label="New tab"]')
+  await dom.click('[aria-label="New webpage"]')
   const nativeId = vi.mocked(api.browser.create).mock.calls[0]![0]
   await choose(); const chosen = useAppStore.getState().surveyZoneSelection
   await act(async () => finish({ ...browser, id: nativeId, url: 'about:blank' }))
@@ -635,7 +643,7 @@ it('creates a Scratch temporary Zone and a new Tab without inheriting another ac
     tabs: { [mixed.id]: mixed, [existing.id]: existing }, layouts: { ...useAppStore.getState().layouts, [scratch.id]: createWorkspaceLayout('scratch-group', [existing.id]) },
     scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 1, topics: [topic], error: null, reading: false } } })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
-  await renderApp(); await enterSurvey(); await dom.click('[aria-label="New tab"]')
+  await renderApp(); await enterSurvey(); await dom.click('[aria-label="New webpage"]')
   const selected = useAppStore.getState().surveyZoneSelection!, tab = useAppStore.getState().tabs[selected.active!.tabId]!
   expect(tab.workspaceId).toBe(scratch.id); expect(tab.topicId).toBeUndefined(); expect(tab.space?.zoneId).toBe(selected.zoneId)
   await dom.click('.global-survey-surface [title="New tab"]')
@@ -907,14 +915,14 @@ it('renames an exploration through its real menu without renaming or rebuilding 
   expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection); healthy()
 })
 
-it('starts a Note exploration from Survey without creating a Browser or leaving its empty preparation Tab', async () => {
+it('creates a Notebook first and adds its Note page in the original Zone without a Browser or spare preparation Tab', async () => {
   const writes = new Map<string, string>()
   vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { writes.set(input.path, input.content); return { status: 'written', revision: 'note-created' } })
   vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: writes.get(path)!, revision: 'note-created' } }))
   await renderApp(); await enterSurvey()
   expect(dom.container.querySelector('.survey-start-heading h1')!.textContent).toBe('Survey')
   const before = useAppStore.getState()
-  await dom.click('.survey-start-note')
+  await startNotebookWithPage()
   await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.active).not.toBeNull())
   const current = useAppStore.getState(), selected = current.surveyZoneSelection!, ref = selected.active!
   expect(selected.zoneId).not.toBe(originalZoneId())
@@ -929,7 +937,7 @@ it('checks the same Note after an unknown write without issuing another create o
   let notePath = '', content = ''
   vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { notePath = input.path; content = input.content; return { status: 'unknown', code: 'WRITE_ACK_UNKNOWN', message: 'Write acknowledgement unavailable' } })
   vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path: notePath, content, revision: 'confirmed' } }))
-  await renderApp(); await enterSurvey(); await dom.click('.survey-start-note')
+  await renderApp(); await enterSurvey(); await startNotebookWithPage()
   await vi.waitFor(() => expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('acknowledgement'))
   const prepared = useAppStore.getState(), zoneId = Object.keys(prepared.surveyCollectedZones)[0]!
   expect(zoneId).toBeDefined(); expect(api.files.write).toHaveBeenCalledTimes(1)
@@ -971,7 +979,7 @@ it('recovers the original new exploration when Launcher preparation is unavailab
   const writes = new Map<string, string>()
   vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { writes.set(input.path, input.content); return { status: 'written', revision: 'new' } })
   vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: writes.get(path)!, revision: 'new' } }))
-  await renderApp(); await enterSurvey(); await dom.click('.survey-start-note')
+  await renderApp(); await enterSurvey(); await startNotebookWithPage()
   await vi.waitFor(() => expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('Group is still restoring'))
   const zoneIds = Object.keys(useAppStore.getState().surveyCollectedZones)
   expect(zoneIds).toHaveLength(1); expect(create).toHaveBeenCalledTimes(1); expect(api.files.write).not.toHaveBeenCalled()
@@ -1423,4 +1431,150 @@ it('refuses to replace a different live Region with a saved Note and keeps its f
   await act(async () => { opened = await before.openFile(receipt.path,'original-group',undefined,workspace.id,undefined,{displayWorkspaceId:workspace.id,space:{spaceId:receipt.target.sourceSpaceId!,zoneId:receipt.target.zoneId!},resource:{hostId:'local',path:workspace.path},launcher:{tabId:mixed.id,regionId:pageA.regionId}}) })
   expect(opened).toBe(false); expect(useAppStore.getState().tabs[mixed.id]!.regions[pageA.regionId]).toBe(pageA)
   expect(writes.get(receipt.path)).toContain(receipt.noteId); expect(api.files.write).toHaveBeenCalledTimes(1); healthy()
+})
+
+async function startNotebookWithPage() {
+  await dom.click('[aria-label="New notebook"]')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyNotebookId).not.toBeNull())
+  await dom.click('.notebook-create-page')
+}
+
+it('creates an empty Notebook from the left and keeps 随手记 visible without creating any Note or Browser', async () => {
+  const write = vi.spyOn(api.files, 'write')
+  await renderApp(); await enterSurvey()
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Notebooks"]')?.textContent).toContain('随手记'))
+  await dom.click('[aria-label="New notebook"]')
+  await vi.waitFor(() => expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Notebook name"]')?.value).toBe('Untitled notebook'))
+  expect(useAppStore.getState().surveyZoneSelection).toBeNull()
+  expect(Object.values((await api.notebooks.read()).pages)).toHaveLength(0)
+  expect(write).not.toHaveBeenCalled(); expect(api.browser.create).not.toHaveBeenCalled()
+  healthy()
+})
+
+it('keeps a Browser note in 随手记 after closing its Region and reopens the same file through the Notebook directory', async () => {
+  const files = new Map<string, string>()
+  vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { files.set(input.path, input.content); return { status: 'written', revision: 'same-note' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: files.get(path)!, revision: 'same-note' } }))
+  await renderApp(); await enterSurvey(); await choose()
+  await selectRegion(pageA.regionId)
+  await dom.click('[aria-label="Add note to this exploration"]')
+  await vi.waitFor(async () => expect(Object.keys((await api.notebooks.read()).pages)).toHaveLength(1))
+  const saved = (await api.notebooks.read()).pages, page = Object.values(saved)[0]!
+  expect(page.notebookId).toBe('quick-notes'); expect(page.sources[0]).toMatchObject({ url: pageA.url, title: pageA.title, position: { regionId: pageA.regionId } })
+  const selection = useAppStore.getState().surveyZoneSelection!.active!
+  await act(async () => useAppStore.getState().closeRegion(workspace.id, selection.tabId, selection.regionId))
+  expect((await api.notebooks.read()).pages).toEqual(saved)
+  const book = dom.container.querySelector<HTMLButtonElement>('[data-notebook-id="quick-notes"]>.survey-notebook-item')!
+  await act(async () => book.click())
+  expect(dom.container.querySelector('[aria-label="Saved pages"]')?.textContent).toContain(page.title)
+  await dom.click('[aria-label="Saved pages"] button')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection?.active?.regionId).toBeDefined())
+  const opened = observation.survey.at(-1)!.selection!.active!, surface = useAppStore.getState().tabs[opened.tabId]!.regions[opened.regionId]!
+  expect(surface).toMatchObject({ kind: 'file', workspaceId: workspace.id, path: page.resource.path })
+  expect(api.files.write).toHaveBeenCalledTimes(1)
+  expect((await api.notebooks.read()).pages[page.noteId]).toEqual(page)
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.global-survey-surface .note-file-view .ProseMirror')).not.toBeNull() })
+  await act(async () => useAppStore.getState().closeTab(workspace.id, opened.groupId, opened.tabId))
+  expect(useAppStore.getState().surveyNoteId).toBeNull()
+  expect(dom.container.querySelector('.survey-notebook-home h1')?.textContent).toBe('随手记')
+  expect((await api.notebooks.read()).pages[page.noteId]).toEqual(page)
+  healthy()
+})
+
+it('keeps a saved Note editable when Notebook registration loses its reply and recovers one original directory entry', async () => {
+  const files = new Map<string, string>()
+  vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { files.set(input.path, input.content); return { status: 'written', revision: 'same-note' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: files.get(path)!, revision: 'same-note' } }))
+  const actual = vi.mocked(api.notebooks.apply).getMockImplementation()!
+  vi.mocked(api.notebooks.apply).mockImplementationOnce(async input => { await actual(input); throw new Error('Notebook reply lost') })
+  await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  await dom.click('[aria-label="Add note to this exploration"]')
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.global-survey-surface .note-file-view .ProseMirror')).not.toBeNull() })
+  expect(dom.container.textContent).toContain('Notebook registration is unconfirmed')
+  const before = await api.notebooks.read()
+  const recover = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Retry Notebook registration')!
+  await act(async () => recover.click())
+  await vi.waitFor(() => expect(dom.container.textContent).not.toContain('Notebook registration is unconfirmed'))
+  expect(await api.notebooks.read()).toEqual(before)
+  expect(api.files.write).toHaveBeenCalledTimes(1)
+  healthy()
+})
+
+
+async function renameNotebookField(label: string, value: string) {
+  const field = dom.container.querySelector<HTMLInputElement>(`.global-survey-surface [aria-label="${label}"]`)!
+  await act(async () => field.focus()); await fill(field, value)
+  await act(async () => field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+}
+async function chooseNotebookSelect(label: string, value: string) {
+  const field = dom.container.querySelector<HTMLSelectElement>(`[aria-label="${label}"]`)!
+  expect(field).not.toBeNull(); await act(async () => { field.value = value; field.dispatchEvent(new Event('change', { bubbles: true })) })
+}
+it('organizes a real Notebook wiki tree through rename, subpage creation, search and subtree move without copying Note blocks', async () => {
+  const files = noteTransport(); await renderApp(); await enterSurvey()
+  await dom.click('[aria-label="New notebook"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Notebook name"]')).not.toBeNull())
+  const bookId = useAppStore.getState().surveyNotebookId!
+  await renameNotebookField('Notebook name', 'Research wiki')
+  await vi.waitFor(async () => expect((await api.notebooks.read()).notebooks[bookId]!.name).toBe('Research wiki'))
+  await dom.click('.notebook-create-page'); await readyNoteRegion()
+  await renameNotebookField('Page title', 'A research question')
+  await vi.waitFor(async () => expect(Object.values((await api.notebooks.read()).pages)[0]!.title).toBe('A research question'))
+  const parent = Object.values((await api.notebooks.read()).pages)[0]!, before = files.get(parent.resource.path)!
+  await dom.click('[aria-label="Add subpage to A research question"]')
+  await vi.waitFor(async () => expect(Object.values((await api.notebooks.read()).pages).some(page => page.parentNoteId === parent.noteId)).toBe(true))
+  const child = Object.values((await api.notebooks.read()).pages).find(page => page.parentNoteId === parent.noteId)!
+  await vi.waitFor(async () => { await act(async () => {}); expect(useAppStore.getState().surveyNoteId).toBe(child.noteId); expect(dom.container.querySelector<HTMLInputElement>('.global-survey-surface [aria-label="Page title"]')?.value, JSON.stringify({ selected: useAppStore.getState().surveyZoneSelection, projected: observation.survey.at(-1)?.projection, titles: [...dom.container.querySelectorAll<HTMLInputElement>('.global-survey-surface [aria-label="Page title"]')].map(n => ({ value: n.value, region: n.closest('[data-workbench-region-id]')?.getAttribute('data-workbench-region-id'), slot: n.closest('.workbench-tab-slot')?.id })) }, (key, value) => key === 'catalog' ? undefined : value)).toBe(child.title) }); await renameNotebookField('Page title', 'Evidence and findings')
+  await vi.waitFor(async () => expect((await api.notebooks.read()).pages[child.noteId]!.title).toBe('Evidence and findings'))
+  const tree = dom.container.querySelector(`[aria-label="Research wiki pages"]`)!
+  expect(tree.textContent).toContain('A research question'); expect(tree.textContent).toContain('Evidence and findings')
+  await fill(dom.container.querySelector<HTMLInputElement>('[aria-label="Find pages in Research wiki"]')!, 'findings')
+  expect(tree.textContent).toContain('A research question'); expect(tree.textContent).toContain('Evidence and findings')
+  await fill(dom.container.querySelector<HTMLInputElement>('[aria-label="Find pages in Research wiki"]')!, 'no-match')
+  expect(tree.textContent).toContain('No matching pages'); expect(tree.textContent).not.toContain('A research question')
+  await fill(dom.container.querySelector<HTMLInputElement>('[aria-label="Find pages in Research wiki"]')!, '')
+  const original = useNotebookLibrary.getState().state!.pages[parent.noteId]!
+  const parentButton = [...tree.querySelectorAll<HTMLButtonElement>('.survey-notebook-page')].find(button => button.textContent === 'A research question')!
+  await act(async () => parentButton.click())
+  await vi.waitFor(() => expect(dom.container.querySelector<HTMLInputElement>('.global-survey-surface [aria-label="Page title"]')?.value).toBe('A research question'))
+  await dom.click('[aria-label="Move page"]'); await chooseNotebookSelect('Destination notebook', 'quick-notes')
+  await submit(dom.container.querySelector<HTMLFormElement>('[aria-label="Move Note page"]')!)
+  await vi.waitFor(async () => expect((await api.notebooks.read()).pages[parent.noteId]!.notebookId).toBe('quick-notes'))
+  const final = await api.notebooks.read()
+  expect(final.pages[child.noteId]).toMatchObject({ notebookId: 'quick-notes', parentNoteId: parent.noteId })
+  expect(final.pages[parent.noteId]!.resource).toEqual(original.resource); expect(files.get(parent.resource.path)).toBe(before)
+  expect(files.size).toBe(2); expect(new Set([parent.resource.path, child.resource.path]).size).toBe(2); expect(api.files.write).toHaveBeenCalledTimes(3)
+  expect(final.trail.filter(event => event.action === 'moved')).toHaveLength(2)
+  await dom.click('[aria-label="Page history"]')
+  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Research wiki / Root → 随手记 / Root')
+  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('actual-ui-user')
+  healthy()
+})
+
+it('retains web sources after their Browser closes, shows exact Note history and retries one original rename after a lost reply', async () => {
+  noteTransport(); await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  await dom.click('[aria-label="Add note to this exploration"]'); await readyNoteRegion()
+  const page = Object.values((await api.notebooks.read()).pages)[0]!, original = useAppStore.getState().documents[documentKey(page.resource.workspaceId, page.resource.path)]!.content
+  const actual = vi.mocked(api.notebooks.apply).getMockImplementation()!
+  vi.mocked(api.notebooks.apply).mockImplementationOnce(async input => { await actual(input); throw new Error('Rename reply lost') })
+  await renameNotebookField('Page title', 'Useful evidence')
+  await vi.waitFor(() => expect(dom.container.querySelector('.notebook-change-issue')?.textContent).toContain('Rename reply lost'))
+  const changed = await api.notebooks.read(), intent = vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0]
+  await dom.click('.notebook-change-issue button')
+  await vi.waitFor(() => expect(dom.container.querySelector('.notebook-change-issue')).toBeNull())
+  expect(vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0].operationId).toBe(intent.operationId)
+  expect(await api.notebooks.read()).toEqual(changed)
+  await act(async () => useAppStore.getState().closeRegion(workspace.id, mixed.id, pageA.regionId))
+  await dom.click('[aria-label="Page sources"]')
+  expect(dom.container.querySelector('[aria-label="Saved web sources"]')?.textContent).toContain(pageA.url)
+  await dom.click('[aria-label="Page history"]')
+  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Untitled note → Useful evidence')
+  await dom.click('[aria-label="Page sources"]')
+  const create = vi.spyOn(useAppStore.getState(), 'createSurveyBrowser')
+  await dom.click('[aria-label="Open source Same title"]')
+  await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+  expect(create.mock.calls[0]![0]).toMatchObject({ workspaceId: workspace.id, url: pageA.url, preparation: null })
+  expect((await api.notebooks.read()).pages[page.noteId]!.sources).toEqual(page.sources)
+  expect(useAppStore.getState().documents[documentKey(page.resource.workspaceId, page.resource.path)]!.content).toBe(original)
+  expect(api.files.write).toHaveBeenCalledTimes(1); healthy()
 })

@@ -1,6 +1,7 @@
 import { AGENTMUX_RPC_TOPIC_METHODS } from './public-rpc-topics.js'
 import type { TopicParameterMap, TopicResultMap, TopicMethod } from './public-rpc-topics.js'
 import type { AgentMuxClient } from './client.js'
+import type { AgentPromptExecution } from './types.js'
 import { AGENTMUX_HOSTED_RPC_METHODS } from './hosted-client-contract.js'
 import type { AgentMuxHostedRuntimeParameterMap, AgentMuxHostedRuntimeResultMap, AgentMuxHostedStreamMethod, AgentMuxHostedStreamInitialMap, AgentMuxHostedStreamEvent } from './hosted-client-contract.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxMessageTarget } from './control.js'
@@ -14,6 +15,7 @@ import type { AgentMuxRpcDeviceMethod, AgentMuxRpcDeviceParameterMap, AgentMuxRp
 
 /** Canonical public names and their existing business owner. No wire aliases. */
 export const AGENTMUX_RPC_CONTROL_METHODS = {
+  'message.pending.ls': 'message.pending.ls', 'message.pending.edit': 'message.pending.edit', 'message.pending.send': 'message.pending.send',
   'agent.open': 'agent.open', 'agent.rename': 'agent.rename', 'agent.view': 'agent.view',
   'agent.interrupt': 'interrupt', 'agent.resume': 'resume', 'agent.stop': 'stop',
   'space.ls': 'space.ls', 'space.inspect': 'space.inspect', 'space.rename': 'space.rename',
@@ -160,6 +162,7 @@ type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMux
   'agent.role.register': { role: string; providerId?: string }
   'agent.role.resolve': { role: string; workspacePath?: string }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
+    execution?: AgentPromptExecution;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }

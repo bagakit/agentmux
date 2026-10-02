@@ -30,7 +30,7 @@ beforeAll(async()=>{
   await writeFile(join(output,'compiled-inputs.json'),JSON.stringify(hashes,null,2)+'\n')
 })
 function run(file:string,args:string[],env:NodeJS.ProcessEnv={}) { return new Promise<{code:number;result:any;stderr:string}>((ok,fail)=>{
-  const child=spawn(process.execPath,[file,...args],{env:{...process.env,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_RPC_ENDPOINT:undefined,...env},stdio:['ignore','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',s=>stdout+=s);child.stderr.on('data',s=>stderr+=s);child.on('error',fail);child.on('close',code=>{try{ok({code:code??-1,result:JSON.parse(stdout),stderr})}catch(e){fail(new Error(stdout+'\n'+stderr,{cause:e}))}})
+  const child=spawn(process.execPath,[file,...args],{env:{...process.env,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined,AGENTMUX_RPC_ENDPOINT:undefined,...env},stdio:['ignore','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',s=>stdout+=s);child.stderr.on('data',s=>stderr+=s);child.on('error',fail);child.on('close',code=>{try{ok({code:code??-1,result:JSON.parse(stdout.trim() || stderr.trim()),stderr})}catch(e){fail(new Error(stdout+'\n'+stderr,{cause:e}))}})
 }) }
 describe('durable Notebook directory with no App or open Note',()=>{
   it('keeps 随手记 stable and never creates storage merely to list an empty library',async()=>{
@@ -97,4 +97,39 @@ describe('durable Notebook directory with no App or open Note',()=>{
   it('refuses an unauthenticated write but keeps read access and the healthy original content',async()=>{
     const {store}=await fixture(),service=new AgentMuxRpcService({notebookStore:store,coreClients:()=>[]});await expect(service.call('notebook.apply',{operationId:'bad-author',expectedRevision:0,change:{kind:'create',notebookId:'book',name:'Book'}})).rejects.toMatchObject({code:'CONTROL_PERMISSION_DENIED'});expect((await service.call('notebook.ls',{})).state.pages).toEqual({});await service.dispose()
   })
+  it('records only real knowledge changes and keeps source, body references and exact replay after no-op requests', async () => {
+    const { store } = await fixture()
+    await apply(store, 'register', { kind: 'register', noteId: 'original', title: 'Reading', resource, source })
+    await apply(store, 'same-title', { kind: 'rename-page', noteId: 'original', title: 'Reading' })
+    await apply(store, 'same-place', { kind: 'move', noteId: 'original', notebookId: DEFAULT_NOTEBOOK_ID, parentNoteId: null })
+    const first = await apply(store, 'same-resource', { kind: 'relocate', noteId: 'original', resource })
+    expect(first.trail).toHaveLength(1)
+    expect(first.pages.original).toMatchObject({ resource, sources: [source] })
+    expect(await store.apply({ expectedRevision: 0, operationId: 'same-resource', change: { kind: 'relocate', noteId: 'original', resource } }, actor)).toEqual(first)
+  })
+  it('organizes and inspects a wiki subtree through the shipping CLI without an App or duplicate success events', async () => {
+    const { dir, store } = await fixture(), server = new AgentMuxControlServer({ socketPath: join(dir, 'wiki.sock'), notebookStore: store, coreClients: () => [] })
+    servers.push(server); await server.start(); const env = { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }
+    async function change(operationId: string, value: NotebookChange) {
+      const result = await run(cli, ['notebook', 'apply', '--revision', String((await store.read()).revision), '--operation-id', operationId, '--change-json', JSON.stringify(value)], env)
+      expect(result.code, result.stderr).toBe(0); return result.result.result.state
+    }
+    await change('wiki-book', { kind: 'create', notebookId: 'wiki', name: 'Research wiki' })
+    await change('wiki-parent', { kind: 'register', noteId: 'parent', title: 'Question', resource, source })
+    await change('wiki-child', { kind: 'register', noteId: 'child', parentNoteId: 'parent', title: 'Evidence', resource: { ...resource, path: 'child.note.json' } })
+    await change('wiki-rename', { kind: 'rename-page', noteId: 'parent', title: 'A clearer question' })
+    const changed = await change('wiki-move', { kind: 'move', noteId: 'parent', notebookId: 'wiki', parentNoteId: null })
+    expect(changed.pages.child).toMatchObject({ notebookId: 'wiki', parentNoteId: 'parent' })
+    const exact = await run(cli, ['notebook', 'inspect', '--note', 'parent'], env)
+    expect(exact.code, exact.stderr).toBe(0)
+    expect(exact.result.result.pages[0]).toMatchObject({ noteId: 'parent', title: 'A clearer question', resource, sources: [source] })
+    expect(exact.result.result.trail.map((event: { action: string }) => event.action)).toEqual(['created', 'renamed', 'moved'])
+    expect(exact.result.result.trail.every((event: { actor: { kind: string } }) => event.actor.kind === 'user')).toBe(true)
+    const replay = await change('wiki-move', { kind: 'move', noteId: 'parent', notebookId: 'wiki', parentNoteId: null })
+    expect(replay).toEqual(changed)
+    const cycle = await run(cli, ['notebook', 'apply', '--revision', String(changed.revision), '--operation-id', 'bad-cycle', '--change-json', JSON.stringify({ kind: 'move', noteId: 'parent', notebookId: 'wiki', parentNoteId: 'child' })], env)
+    expect(cycle.code).not.toBe(0); expect(cycle.result.error.code).toBe('NOTEBOOK_INPUT_INVALID'); expect(await store.read()).toEqual(changed)
+    await writeFile(resolve('.tmp/survey-notebook/organization-cli-receipt.json'), JSON.stringify({ state: changed, inspected: exact.result.result, replay: replay, cycleRejected: true }, null, 2) + '\n')
+  })
+
 })

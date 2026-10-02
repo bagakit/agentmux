@@ -27,6 +27,7 @@ type ScreenEvidenceDeps = {
 export class AgentScreenEvidenceStore {
   private readonly evidence = new Map<string, {
     runId: string
+    originalAttributes: boolean
     evidence: AgentTerminalScreenEvidence
     close: () => void
   }>()
@@ -61,6 +62,9 @@ export class AgentScreenEvidenceStore {
       terminalMessage: string
       signal?: AbortSignal
       requireFrameAfterBoundary?: boolean
+      requireCompleteFrame?: boolean
+      /** Cell attributes needed for native authorization must come from original bytes. */
+      requireOriginalAttributes?: boolean
     }
   ): Promise<number> {
     const observation = new AbortController()
@@ -82,7 +86,8 @@ export class AgentScreenEvidenceStore {
       observation.signal.throwIfAborted()
       const evidence = await this.ensure(
         session,
-        requireOutputAfterBoundary ? 0 : Math.max(0, outputBoundaryByte - 64 * 1024)
+        options.requireOriginalAttributes || requireOutputAfterBoundary ? 0 : Math.max(0, outputBoundaryByte - 64 * 1024),
+        options.requireOriginalAttributes === true
       )
       // A cancelled handshake may finish later; it must not install an orphan waiter.
       observation.signal.throwIfAborted()
@@ -90,6 +95,7 @@ export class AgentScreenEvidenceStore {
         boundaryByte: outputBoundaryByte,
         requireOutputAfterBoundary,
         predicate,
+        ...(options.requireCompleteFrame ? { requireCompleteFrame: true } : {}),
         timeoutMessage: options.timeoutMessage,
         terminalMessage: options.terminalMessage,
         signal: observation.signal,
@@ -110,18 +116,20 @@ export class AgentScreenEvidenceStore {
 
   private async ensure(
     session: AgentMuxAgentSession,
-    startByte: number
+    startByte: number,
+    originalAttributes: boolean
   ): Promise<AgentTerminalScreenEvidence> {
     for (;;) {
       const existing = this.evidence.get(session.agentSessionId)
-      if (existing && existing.runId === session.run.runId && !existing.evidence.failed) {
+      if (existing && existing.runId === session.run.runId && !existing.evidence.failed &&
+          (!originalAttributes || existing.originalAttributes)) {
         return existing.evidence
       }
       const building = this.builds.get(session.agentSessionId)
       if (!building) break
       await building.catch(() => {})
     }
-    const build = this.build(session, startByte)
+    const build = this.build(session, startByte, originalAttributes)
     this.builds.set(session.agentSessionId, build)
     try {
       return await build
@@ -134,7 +142,8 @@ export class AgentScreenEvidenceStore {
 
   private async build(
     session: AgentMuxAgentSession,
-    startByte: number
+    startByte: number,
+    originalAttributes: boolean
   ): Promise<AgentTerminalScreenEvidence> {
     this.discard(session.agentSessionId)
     const generation = this.generations.get(session.agentSessionId) ?? 0
@@ -158,7 +167,7 @@ export class AgentScreenEvidenceStore {
       } else if (event.type === 'exit') {
         forward({ type: 'exit' })
       }
-    }, 'terminal')
+    }, originalAttributes ? 'raw' : 'terminal')
     // 握手期间被作废了（掉线 / Run 更换）：这条 Attachment 挂在已经死掉的连线上，登记它就是留一具
     // `failed === false` 的尸体给 `ensure()` 复用。关掉它并抛，让调用方走与「观察被取消」相同的出口。
     if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
@@ -185,7 +194,7 @@ export class AgentScreenEvidenceStore {
       matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null,
       continuation.type === 'basic-vt' ? continuation.checkpoint.throughByte
         : observation.gap?.firstAvailableByte ?? startByte,
-      false,
+      originalAttributes && startByte === 0 && observation.gap === null && observation.resizeRevision === 0,
       continuation.type === 'basic-vt' ? continuation.checkpoint.resizeRevision : observation.resizeRevision
     )
     try {
@@ -208,6 +217,7 @@ export class AgentScreenEvidenceStore {
     })
     this.evidence.set(session.agentSessionId, {
       runId: session.run.runId,
+      originalAttributes,
       evidence: built,
       close: () => {
         unsubscribe()

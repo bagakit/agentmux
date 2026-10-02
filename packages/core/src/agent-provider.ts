@@ -29,6 +29,10 @@ import type {
   AgentNativeSessionHandle,
   AgentPostureInputPlan,
   AgentPromptInputPlan,
+  AgentPromptExecution,
+  AgentPromptExecutionContext,
+  AgentPromptExecutionEvidence,
+  AgentTerminalScreenSnapshot,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
   AgentProviderNativeSessionDiscovery,
@@ -68,6 +72,12 @@ export type AgentProviderHookNormalizationContext = Readonly<{
   nativeHandle?: Readonly<AgentNativeSessionHandle>
 }>
 
+export type AgentProviderPromptExecutionContext = {
+  args: readonly string[]
+  workspacePath: string
+  nativeHandle?: Readonly<AgentNativeSessionHandle>
+}
+
 export type AgentProvider = {
   readonly id: AgentProviderId
   readonly label: string
@@ -93,7 +103,11 @@ export type AgentProvider = {
   buildLaunch(context: AgentProviderLaunchContext): AgentLaunchPlan
   buildResumeLaunch(context: AgentProviderResumeContext): AgentLaunchPlan
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
-  planPromptInput(prompt: string): AgentPromptInputPlan
+  planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
+  /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
+  inspectPromptExecution?(screen: AgentTerminalScreenSnapshot): AgentPromptExecutionContext
+  verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
+  readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
     response: AgentMuxInteractionResponse
@@ -125,7 +139,10 @@ export type AgentProviderDefinition = {
     prompt: string | undefined,
     args: readonly string[]
   ) => string[]
-  planPromptInput?: (prompt: string) => AgentPromptInputPlan
+  planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution }) => AgentPromptInputPlan
+  inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot) => AgentPromptExecutionContext
+  verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
+  readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
 }
@@ -256,6 +273,9 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     hook: definition.hook,
     ...(definition.terminalHandshake ? { terminalHandshake: { ...definition.terminalHandshake } } : {}),
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
+    ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),
+    ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
+    ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.observeSessionHistory ? { observeSessionHistory: definition.observeSessionHistory } : {}),
@@ -344,8 +364,14 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     resolveLaunchArgv(selections) {
       return resolveLaunchOptionArgv(catalog.id, launchOptionDeclarations, selections)
     },
-    planPromptInput(prompt) {
-      return definition.planPromptInput?.(prompt) ?? { kind: 'single-phase', data: `${prompt}\r` }
+    planPromptInput(prompt, context) {
+      const plan = definition.planPromptInput?.(prompt, context) ?? { kind: 'single-phase' as const, data: `${prompt}\r` }
+      if (context?.execution === 'immediate' &&
+          (plan.kind !== 'render-then-submit' || !plan.prepare || !definition.inspectPromptExecution)) {
+        throw new AgentMuxError(`${catalog.label} has no safe native immediate input plan. The message and healthy Run are retained; ordinary terminal input remains available.`,
+          'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
+      }
+      return plan
     },
     planInteractionResponse(request, response) {
       if (!definition.interaction) {

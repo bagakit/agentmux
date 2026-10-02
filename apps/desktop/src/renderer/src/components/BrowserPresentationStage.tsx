@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref, type PointerEvent } from 'react'
-import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier } from '../../../shared/contracts'
+import type { BrowserPresentationOccurrence, BrowserPresentationLease, BrowserPresentationCapture, BrowserPresentationGeometry, BrowserPresentationActivationReceipt, BrowserPresentationMouseModifier, BrowserBounds } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { LatestBrowserBoundsSynchronizer, focusRingYieldOf, hasPositiveBrowserStageGeometry, nativeBoundsClearOfFocusRing, regionAncestorOf, rendererCssBoundsToWindowDip } from '../lib/browser-bounds-sync'
 import { observeBrowserStageGeometry } from '../lib/browser-stage-geometry'
@@ -31,7 +31,12 @@ export function useBrowserPresentationCapture(browserId: string) {
   const pending = useRef<Promise<void> | null>(null)
   const captureFailed = useRef(false)
   const generation = useRef(0)
-  const inputChosen = useRef(false)
+  const inputChosen = useRef<string | null>(null)
+  const ownerRevision = useRef(0)
+  const [ownerClearedRevision, setOwnerClearedRevision] = useState(0)
+  const inputIntentRevision = useRef(0)
+  const inputSelectionLease = useRef<string | null>(null)
+  const readInputIntentRevision = useCallback(() => inputIntentRevision.current, [])
   const inputSelection = useRef<Promise<void> | null>(null)
   const ensureCapture = useCallback((lease: BrowserPresentationLease): Promise<void> => {
     if (media.current) return Promise.resolve()
@@ -78,27 +83,42 @@ export function useBrowserPresentationCapture(browserId: string) {
     captureFailed.current = false
     return ensureCapture(lease)
   }, [ensureCapture])
-  const registered = useCallback(async (lease: BrowserPresentationLease, initialInputOwner: boolean, visible: boolean) => {
-    // Only the already-selected original occurrence receives initial native input authority.
+  const registered = useCallback(async (lease: BrowserPresentationLease, initialInputOwner: boolean, visible: boolean,
+    inputCurrent: () => boolean, intentRevision: number | null) => {
     const current = generation.current
-    if (visible && initialInputOwner && !inputChosen.current) {
-      if (!inputSelection.current) {
+    if (visible && initialInputOwner && inputCurrent()) {
+      // Await only real in-flight selections; another lease's receipt cannot select this one.
+      while (inputSelection.current) {
+        await inputSelection.current.catch(() => {})
+        if (current !== generation.current || !inputCurrent()) return
+      }
+      if (inputChosen.current !== lease.leaseId && (inputChosen.current === null || intentRevision === inputIntentRevision.current)) {
+        if (current !== generation.current || !inputCurrent()) return
+        const selectedAt = ownerRevision.current
+        inputSelectionLease.current = lease.leaseId
         const selection = api.browser.activatePresentation(lease.leaseId, { kind: 'select', focus: 'preserve' }).then(receipt => {
-          if (current !== generation.current) return
+          if (current !== generation.current || !inputCurrent()) return
           if (receipt.outcome !== 'selected') throw new Error(receipt.outcome === 'input-unconfirmed'
             ? receipt.message : 'The Browser presentation input owner could not be confirmed')
-          inputChosen.current = true
-        }).finally(() => { if (inputSelection.current === selection) inputSelection.current = null })
+          if (ownerRevision.current === selectedAt) inputChosen.current = lease.leaseId
+        }).finally(() => { if (inputSelection.current === selection) { inputSelection.current = null; inputSelectionLease.current = null } })
         inputSelection.current = selection
+        await selection
       }
-      await inputSelection.current
     }
-    if (visible && current === generation.current) await ensureCapture(lease)
+    if (visible && current === generation.current && (!initialInputOwner || inputCurrent())) await ensureCapture(lease)
   }, [ensureCapture])
   useEffect(() => {
     const stop = api.browser.onPresentationEvent(event => {
       if (event.browserId !== browserId) return
-      if (event.type === 'input-owner-changed') { inputChosen.current = event.leaseId !== null; return }
+      if (event.type === 'input-owner-changed') {
+        ownerRevision.current += 1
+        // The expected pending selection confirms its own lease; it does not retire a newer queued UI intent.
+        if (event.leaseId !== inputSelectionLease.current || event.leaseId === null) inputIntentRevision.current += 1
+        inputChosen.current = event.leaseId
+        if (event.leaseId === null) setOwnerClearedRevision(ownerRevision.current)
+        return
+      }
       if (event.type !== 'capture-revoked') return
       const held = media.current
       if (!held || held.capture.captureId !== event.captureId) return
@@ -107,7 +127,7 @@ export function useBrowserPresentationCapture(browserId: string) {
       media.current = null; setStream(null); setCaptureId(null)
     })
     return () => {
-      stop(); generation.current += 1; inputChosen.current = false; inputSelection.current = null; captureFailed.current = false
+      stop(); generation.current += 1; inputChosen.current = null; inputSelection.current = null; inputSelectionLease.current = null; captureFailed.current = false
       const held = media.current
       media.current = null
       if (held) {
@@ -117,7 +137,7 @@ export function useBrowserPresentationCapture(browserId: string) {
       }
     }
   }, [browserId])
-  return { stream, captureId, notice, registered, ensureCapture, retryCapture }
+  return { stream, captureId, notice, registered, ensureCapture, retryCapture, ownerClearedRevision, readInputIntentRevision }
 }
 
 type MediaOwner = ReturnType<typeof useBrowserPresentationCapture>
@@ -132,6 +152,12 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
   const [notice, setNotice] = useState<{ source: 'registration' | 'presentation' | 'input'; message: string } | null>(null)
   const latest = useRef({ presentation, blocked, navigationId, inputSelected })
   latest.current = { presentation, blocked, navigationId, inputSelected }
+  const lastInputSelected = useRef(inputSelected)
+  const selectionIntent = useRef<number | null>(inputSelected ? media.readInputIntentRevision() : null)
+  if (lastInputSelected.current !== inputSelected) {
+    lastInputSelected.current = inputSelected
+    selectionIntent.current = inputSelected ? media.readInputIntentRevision() : null
+  }
   const registrationRetry = useRef<((explicit?: boolean) => void) | null>(null)
   const geometry = useCallback((): BrowserPresentationGeometry => {
     const stage = element.current, facts = latest.current
@@ -144,6 +170,9 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       { x: parent.x, y: parent.y, width: parent.width, height: parent.height }, focusRingYieldOf(region!, facts.presentation.yieldToFocusRing)) : bounds, api.ui.getZoomFactor()) }
   }, [])
   const synchronizer = useRef<LatestBrowserBoundsSynchronizer | null>(null)
+  const geometryWriter = useRef<((bounds: BrowserBounds | null, intentRevision?: number | null) => Promise<void>) | null>(null)
+  const inputCurrent = useCallback((registered: BrowserPresentationLease) =>
+    lease.current === registered && latest.current.inputSelected && geometry().visible, [geometry])
   const stopGeometry = useRef<() => void>(() => {})
   const observe = useCallback(() => {
     stopGeometry.current()
@@ -186,27 +215,39 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       lease.current = registered
       registrationFailed = false
       setNotice(null) // A real lease confirms this registration.
-      synchronizer.current = new LatestBrowserBoundsSynchronizer(async bounds => {
+      const writeGeometry = async (bounds: BrowserBounds | null, intentRevision: number | null = null) => {
         await api.browser.updatePresentation(registered.leaseId, bounds ? { visible: true, bounds } : { visible: false })
         if (bounds && !cancelled) {
-          void media.registered(registered, latest.current.inputSelected, true).then(() => {
+          void media.registered(registered, latest.current.inputSelected, true, () => !cancelled && inputCurrent(registered), intentRevision).then(() => {
             if (!cancelled) setNotice(current => current?.source === 'presentation' ? null : current)
           }).catch(failure)
         }
-      }, failure)
+      }
+      geometryWriter.current = writeGeometry
+      synchronizer.current = new LatestBrowserBoundsSynchronizer(writeGeometry, failure)
       observe() // Native geometry stays current while preview capture is pending.
-      await media.registered(registered, latest.current.inputSelected, geometry().visible)
+      await media.registered(registered, latest.current.inputSelected, geometry().visible, () => !cancelled && inputCurrent(registered), selectionIntent.current)
     }
     registrationRetry.current = retry
     // The original stable host attaches after child layout effects.
     queueMicrotask(() => { if (!cancelled) void mount().catch(failure) })
     return () => { cancelled = true; if (registrationRetry.current === retry) registrationRetry.current = null
-      stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null
+      stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null; geometryWriter.current = null
       const current = lease.current; lease.current = null
       if (current) void api.browser.removePresentation(current.leaseId).catch(() => {}) }
-  }, [browserId, presentation.occurrence.presentationId, geometry, observe, media.registered, media.ensureCapture])
+  }, [browserId, presentation.occurrence.presentationId, geometry, observe, inputCurrent, media.registered, media.ensureCapture])
   useLayoutEffect(() => { registrationRetry.current?.() }, [navigationId])
-  useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, inputSelected, blocked, observe])
+  useLayoutEffect(() => { if (lease.current) observe() }, [presentation.visible, presentation.yieldToFocusRing, blocked, observe])
+  useLayoutEffect(() => {
+    const current = lease.current
+    if (!inputSelected || !current) return
+    const next = geometry()
+    if (!next.visible) return
+    // Selection is a separate fact: confirm geometry through the original writer even if its rectangle is unchanged.
+    void geometryWriter.current?.(next.bounds, selectionIntent.current).catch(error => {
+      if (lease.current === current && latest.current.inputSelected) setNotice({ source: 'presentation', message: String(error) })
+    })
+  }, [inputSelected, media.ownerClearedRevision, geometry])
   useLayoutEffect(() => {
     const node = video.current
     if (node && node.srcObject !== media.stream) { node.srcObject = media.stream; if (media.stream) void node.play().catch(() => {}) }
@@ -261,7 +302,7 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
     try {
       const next = geometry()
       await api.browser.updatePresentation(current.leaseId, next)
-      await media.registered(current, latest.current.inputSelected, next.visible)
+      await media.registered(current, latest.current.inputSelected, next.visible, () => inputCurrent(current), null)
       if (next.visible) await media.retryCapture(current)
       setNotice(null)
     } catch (error) { setNotice({ source: 'presentation', message: error instanceof Error ? error.message : String(error) }) }

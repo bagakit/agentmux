@@ -1,3 +1,4 @@
+import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { BROWSER_COMPLETION_UNAVAILABLE_WARNING, parseBrowserCompletionFacts } from './browser-completion-facts.js'
@@ -262,6 +263,21 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
   // Toolkit was handled from its own data descriptor above. Reject inherited
   // or inconsistent operation facts and keep the shared parser's exhaustive narrowing.
   if (isToolkitOperation(source.operation)) throw new AgentMuxError('Toolkit operation must be declared as data.', 'INVALID_CONTROL_REQUEST')
+  if (isPendingMessageOperation(source.operation)) {
+    const code = 'INVALID_CONTROL_REQUEST'
+    const fields = ['schemaVersion', 'requestId', 'operation', 'agentSessionId',
+      ...(source.operation === 'message.pending.ls' ? [] : ['pendingId']),
+      ...(source.operation === 'message.pending.edit' ? ['expectedText', 'text'] : [])]
+    settingsFields(source, fields, code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
+      agentSessionId: identity(source.agentSessionId, 'Pending message Session ID is invalid.', code) }
+    if (source.operation === 'message.pending.ls') return { ...base, operation: source.operation }
+    const pendingId = identity(source.pendingId, 'Pending message ID is invalid.', code)
+    if (source.operation === 'message.pending.send') return { ...base, operation: source.operation, pendingId }
+    const edited = text(source.text, 'Edited message', code)
+    if (!edited.trim() || edited.includes('\0')) throw new AgentMuxError('Edited message is invalid.', code)
+    return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code), text: edited }
+  }
   if (source.operation === 'metrics.get' || source.operation === 'metrics.watch') {
     if (Object.keys(source).some(key => !['schemaVersion', 'requestId', 'operation'].includes(key))) {
       throw new AgentMuxError('Metrics queries take no data parameters.', 'INVALID_CONTROL_REQUEST')
@@ -381,6 +397,10 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
         }
   }
   if (source.operation === 'send') {
+    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','execution','caller','message'], 'INVALID_CONTROL_REQUEST')
+    if (source.execution !== undefined && source.execution !== 'default' && source.execution !== 'immediate') {
+      throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
+    }
     const target = messageTarget(source.target)
     const owner = optionalCaller(source.caller)
     if (target.kind === 'self' && !owner) throw new AgentMuxError('A self target requires a managed caller.', 'INVALID_CONTROL_REQUEST')
@@ -395,6 +415,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     }
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
       text: text(source.text, 'Message text'), promptCondition: validateAgentPromptCondition(source.promptCondition),
+      ...(source.execution === undefined ? {} : { execution: source.execution }),
       ...(owner ? { caller: owner } : {}), message }
   }
   if (source.operation === 'list.agents') {
@@ -898,6 +919,29 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const parsed = parseToolkitResult(operation, result)
     const { operation: _operation, ...payload } = parsed
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: payload } as AgentMuxControlSuccessReceipt
+  }
+  if (isPendingMessageOperation(operation)) {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsFields(result, operation === 'message.pending.ls' ? ['agentSessionId', 'messages']
+      : operation === 'message.pending.edit' ? ['agentSessionId', 'message', 'changed']
+      : ['agentSessionId', 'pendingId', 'disposition', 'message'], code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const }
+    const agentSessionId = identity(result.agentSessionId, 'Pending message Session ID is invalid.', code)
+    if (operation === 'message.pending.ls') {
+      if (!Array.isArray(result.messages) || result.messages.length > 100) throw new AgentMuxError('Pending message list is invalid.', code)
+      const messages = result.messages.map(parsePendingMessage)
+      if (new Set(messages.map(item => item.pendingId)).size !== messages.length) throw new AgentMuxError('Pending message identities repeat.', code)
+      return { ...base, operation, result: { agentSessionId, messages } }
+    }
+    if (operation === 'message.pending.edit') {
+      if (typeof result.changed !== 'boolean') throw new AgentMuxError('Pending message edit result is invalid.', code)
+      return { ...base, operation, result: { agentSessionId, message: parsePendingMessage(result.message), changed: result.changed } }
+    }
+    const pendingId = identity(result.pendingId, 'Pending message ID is invalid.', code)
+    if (result.disposition !== 'submitted' && result.disposition !== 'unconfirmed') throw new AgentMuxError('Pending message send result is invalid.', code)
+    const message = result.message === null ? null : parsePendingMessage(result.message)
+    if (message && message.pendingId !== pendingId) throw new AgentMuxError('Pending message send result belongs to another input.', code)
+    return { ...base, operation, result: { agentSessionId, pendingId, disposition: result.disposition, message } }
   }
   if (operation === 'metrics.get') {
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')

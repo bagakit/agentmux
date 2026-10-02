@@ -20,7 +20,7 @@ import {
   type HistoryState
 } from '../lib/composer-history'
 import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit } from '../lib/composer-resubmit-guard'
-import { useAppStore, type AgentSteerQueueEntry } from '../store'
+import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from '../lib/agent-steer-queue-drain'
 import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
@@ -272,6 +272,8 @@ export function AgentSessionComposer({
           text: entry.text,
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
+          editable: agentSteerCanEdit(entry, sendingId),
+          immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
           preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',
           sending: entry.operationId === sendingId && sendingPhase === 'submitting',
           unconfirmed: entry.promptCondition != null && (entry.status === 'deferred' || entry.status === 'failed'),
@@ -282,8 +284,14 @@ export function AgentSessionComposer({
         }))}
         onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
+        sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
-        {...(!disabled && !readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(() => sendQueuedAgentSteer(sessionId, operationId)) } } : {})}
+        {...(!disabled && !readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
+        {...(!disabled && !readOnly ? { onEditQueued: async (id: string, expectedText: string, nextText: string) => {
+          feedback.dismiss()
+          try { useAppStore.getState().editQueuedAgentSteer(sessionId, id, expectedText, nextText) }
+          catch (error) { feedback.report(error); throw error }
+        } } : {})}
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
     >
     {(mailbox, pending) => (

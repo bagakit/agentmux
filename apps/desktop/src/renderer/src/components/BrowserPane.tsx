@@ -47,6 +47,7 @@ import { composeScreenshot } from './browser-screenshot/compose'
 import { ComposerTextarea } from './ComposerTextarea'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
+import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
 import { BrowserDemonstrationSurface } from './BrowserDemonstrationSurface'
 import { BrowserTaskAssetEditor } from './BrowserTaskAssetEditor'
 import { BrowserTaskReliability, useBrowserTaskReliabilityRefresh, type BrowserTaskReliabilityRequest } from './BrowserTaskReliability'
@@ -134,27 +135,7 @@ export function BrowserPane({
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
   // Selection comes from the owning surface, never the first rendered occurrence.
-  const selectedPresentationId = useAppStore(state => {
-    const selected = presentations.filter(presentation => {
-      const { target, occurrence, visible, active } = presentation
-      const reference = target.reference, location = occurrence.location
-      if (!visible || !active || !reference || reference.displayWorkspaceId !== location.displayWorkspaceId ||
-        reference.groupId !== location.groupId || reference.tabId !== location.tabId) return false
-      // Keep the existing Space Group initialization for its visible Browser siblings.
-      if (target.surface === 'space') return state.mainSurface === 'workbench' &&
-        state.layouts[location.displayWorkspaceId]?.activeGroupId === location.groupId
-      if (target.surface === 'survey') {
-        return state.mainSurface === 'survey'
-      }
-      if (reference.regionId !== location.regionId) return false
-      if (target.surface === 'focus') return state.mainSurface === 'agents'
-      return false
-    })
-    const current = state.mainSurface === 'survey' ? state.surveyZoneSelection?.active : null
-    const explicit = current ? selected.filter(presentation => presentation.target.surface === 'survey' &&
-      presentation.occurrence.location.tabId === current.tabId) : []
-    return explicit.length === 1 ? explicit[0]!.occurrence.presentationId : selected.length === 1 ? selected[0]!.occurrence.presentationId : null
-  })
+  const selectedPresentationId = useAppStore(state => selectedBrowserPresentationId(presentations, state))
   const media = useBrowserPresentationCapture(tab.browserId)
   const [presentationHosts, setPresentationHosts] = useState<ReadonlyMap<string, HTMLElement>>(() => new Map())
   const presentationKey = presentations.map(presentation => presentation.occurrence.presentationId).join('\n')

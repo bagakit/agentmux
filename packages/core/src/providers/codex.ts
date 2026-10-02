@@ -1,3 +1,5 @@
+import { readCodexPromptExecutionEvidence, verifyCodexPromptExecutionTransport } from './codex-prompt-execution-evidence.js'
+import { inspectCodexPromptExecution } from './codex-prompt-execution.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
@@ -22,13 +24,16 @@ export const CODEX_HOOK_EVENTS = [
   'UserPromptSubmit',
   'SubagentStart',
   'SubagentStop',
-  'Stop'
+  'Stop',
+  'Interrupt'
 ] as const
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：与 Claude 同族，stdin 负载带 `hook_event_name`。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
+  nativeTurnIdKeys: ['turn_id'],
   rules: [
+    { events: ['Interrupt'], state: 'unknown', lifecycleEvent: 'turn-end' },
     { events: ['PermissionRequest'], state: 'waiting' },
     { events: ['PreToolUse'], toolNames: ['request_user_input', 'askuserquestion'], state: 'waiting' },
     { events: ['Stop'], state: 'done' },
@@ -89,6 +94,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, replyCorrelation: 'none',
+        promptExecution: { immediate: 'interrupt-before-input' },
         usage: { kind: 'native-transcript', transcriptFormat: 'codex-rollout' }
       }
     }),
@@ -99,11 +105,15 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     ],
     terminalHandshake: { query: '\u001b[?u', response: '\u001b[?0u' },
     terminalPromptRender: { frameStart: '\u001b[?2026h', activeComposer: '›', frameEnd: '\u001b[?2026l' },
-    planPromptInput: (prompt) => ({
+    inspectPromptExecution: inspectCodexPromptExecution,
+    verifyPromptExecutionTransport: verifyCodexPromptExecutionTransport,
+    readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
+    planPromptInput: (prompt, context) => ({
       kind: 'render-then-submit',
       payload: buildPromptInputPayload(prompt),
       renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
-      submit: '\r'
+      submit: '\r',
+      ...(context?.execution === 'immediate' ? { prepare: { interrupt: '\u001b', endEvent: 'Interrupt' } } : {})
     }),
     interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PreToolUse'],

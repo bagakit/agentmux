@@ -152,14 +152,14 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
         ...(change.workface?{workface:workface(change.workface)}:{}),createdAt:at,updatedAt:at,sources:change.source?[source(change.source)]:[],topics:[]};next.pages[id]=p;event(p,'created',null,change.source?{source:p.sources[0]!}:{});break
     }
     case 'move': {
-      const p=getPage(change.noteId),book=getBook(change.notebookId);if(change.parentNoteId!==null)text(change.parentNoteId,'parent Note ID');parent(next,p.noteId,book.notebookId,change.parentNoteId)
+      const p=getPage(change.noteId),book=getBook(change.notebookId);if(p.notebookId===book.notebookId&&p.parentNoteId===change.parentNoteId)break;if(change.parentNoteId!==null)text(change.parentNoteId,'parent Note ID');parent(next,p.noteId,book.notebookId,change.parentNoteId)
       const members=new Set<string>([p.noteId]);let changed=true;while(changed){changed=false;for(const page of Object.values(next.pages))if(page.parentNoteId&&members.has(page.parentNoteId)&&!members.has(page.noteId)){members.add(page.noteId);changed=true}}
       for(const id of members){const page=next.pages[id]!,before=location(page);page.notebookId=book.notebookId;if(id===p.noteId)page.parentNoteId=change.parentNoteId;event(page,'moved',before)}break
     }
-    case 'rename-page': {const p=getPage(change.noteId),before=location(p);p.title=text(change.title,'page title').trim();event(p,'renamed',before);break}
+    case 'rename-page': {const p=getPage(change.noteId),before=location(p);const title=text(change.title,'page title').trim();if(title===p.title)break;p.title=title;event(p,'renamed',before);break}
     case 'source': {const p=getPage(change.noteId),added=source(change.source),old=p.sources.find(s=>s.sourceId===added.sourceId);if(old){if(notebookFingerprint(old)!==notebookFingerprint(added))invalid('The original source identity cannot be overwritten.');break}const before=location(p);p.sources.push(added);event(p,'source-added',before,{source:added});break}
     case 'organize': {const p=getPage(change.noteId),added=topic(change.topic);if(!p.topics.some(t=>t.spaceId===added.spaceId)){const before=location(p);p.topics.push(added);event(p,'organized',before,{topic:added})}break}
-    case 'relocate': {const p=getPage(change.noteId),before=location(p);p.resource=resource(change.resource);event(p,'relocated',before);break}
+    case 'relocate': {const p=getPage(change.noteId),before=location(p);const target=resource(change.resource);if(notebookFingerprint(p.resource)===notebookFingerprint(target))break;p.resource=target;event(p,'relocated',before);break}
     default: invalid('Unknown Notebook action. Original knowledge is kept.')
   }
   next.operations[operationId]={fingerprint,actor:recorded};next.revision=state.revision+1

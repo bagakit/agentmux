@@ -17,6 +17,7 @@ import type {
   AgentMuxRunRef,
   AgentMuxStoredAgentSession,
   AgentPromptInputPlan,
+  AgentPromptExecution,
   AgentPromptMessageContent,
   AgentTerminalPromptDeliveryState,
   AgentTerminalPromptReadinessState
@@ -49,7 +50,7 @@ function promptReadinessDetail(
 function terminalPromptPhaseOperationIdentity(
   session: AgentMuxAgentSession,
   submissionId: string,
-  phase: 'payload' | 'submit',
+  phase: 'interrupt' | 'payload' | 'submit',
   data: string
 ): string {
   return createHash('sha256')
@@ -115,7 +116,8 @@ export class AgentPromptSubmissionCoordinator {
     allowUncertainTurn = false,
     renderSignal?: AbortSignal,
     expectedInputByte?: number,
-    message?: AgentPromptMessageContent
+    message?: AgentPromptMessageContent,
+    execution: AgentPromptExecution = 'default'
   ): Promise<AgentPromptMessageContent | undefined> {
     try {
       return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -143,7 +145,8 @@ export class AgentPromptSubmissionCoordinator {
               throw new AgentMuxError('Original message source facts are unconfirmed. The original Input and healthy Agent are kept; use the terminal while its source is reviewed.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
             }
             if (previous.submissionId === submissionId && (previous.intent.prompt !== prompt ||
-                promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message))) {
+                promptMessageIdentity(previous.intent.message) !== promptMessageIdentity(message) ||
+                (previous.intent.execution ?? 'default') !== execution)) {
               throw new AgentMuxError('Agent prompt operation was reused with conflicting Session or content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
             }
             if (unfinished) await this.publishDeliveryDegrade(current, {
@@ -154,7 +157,7 @@ export class AgentPromptSubmissionCoordinator {
             // request; a fresh cursor or a changed Provider plan cannot replace it.
             try {
               await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
-                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message)
+                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution)
             } catch (error) {
               const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
               if (previous.submissionId === submissionId ||
@@ -170,7 +173,7 @@ export class AgentPromptSubmissionCoordinator {
             this.deps.assertAgentRun(current, currentRun)
           }
           await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message)
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution)
           return structuredClone(message)
         } catch (error) {
           if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
@@ -207,7 +210,8 @@ export class AgentPromptSubmissionCoordinator {
     allowUncertainTurn = false,
     renderSignal?: AbortSignal,
     expectedInputByte?: number,
-    message?: AgentPromptMessageContent
+    message?: AgentPromptMessageContent,
+    execution: AgentPromptExecution = 'default'
   ): Promise<void> {
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       if (current.pendingInteraction) throw new AgentMuxError(
@@ -282,7 +286,7 @@ export class AgentPromptSubmissionCoordinator {
       const observedAt = Date.now()
       const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
         submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte,
-        intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan),
+        intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan), execution,
           ...(message === undefined ? {} : { message: structuredClone(message) }) },
         acknowledged: false,
         ...(uncertainTurn ? { uncertainTurn: true } : {})
@@ -378,6 +382,52 @@ export class AgentPromptSubmissionCoordinator {
       )
     }
 
+    if (Boolean(plan.prepare) !== (execution === 'immediate')) {
+      throw new AgentMuxError('Provider preparation does not match this single prompt execution authorization.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    }
+    const provider = this.deps.providers.get(session.providerId)
+    const nativeContext = { args: run.args, workspacePath: session.workspacePath,
+      ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
+    let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
+    if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {
+      try {
+        if (provider.verifyPromptExecutionTransport && !await provider.verifyPromptExecutionTransport(nativeContext)) {
+          throw new AgentMuxError('The native input transport can receive unowned pending input.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        }
+        const observation: { context: 'idle' | 'interruptible' | 'unavailable' } = { context: 'unavailable' }
+        const readyThroughByte = await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => {
+          observation.context = provider.inspectPromptExecution?.(screen.snapshot()) ?? 'unavailable'
+          return observation.context !== 'unavailable'
+        }, { timeoutMs: 2_000, requireCompleteFrame: true, requireOriginalAttributes: true,
+          timeoutMessage: 'Native immediate input context is unconfirmed.',
+          terminalMessage: 'Agent Run exited before native immediate preparation.', ...(renderSignal ? { signal: renderSignal } : {}) })
+        const context = observation.context
+        const observed = await this.deps.registry.refresh(session.agentSessionId, session.run)
+        // A busy native turn must be identified by the Provider's authenticated hook,
+        // not by the visible timer or a previous turn's completion.
+        const nativeEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
+        const nativeTurnId = nativeEvidence?.nativeTurnId ?? observed.hookReceipt?.nativeTurnId
+        if (context === 'interruptible' && (!nativeTurnId || (provider.readPromptExecutionEvidence
+          ? nativeEvidence?.state !== 'working' : observed.hookReceipt?.lifecycleEvent === 'turn-end'))) {
+          throw new AgentMuxError('The active native turn identity is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+        }
+        if (context === 'idle' && (provider.readPromptExecutionEvidence
+          ? !nativeEvidence || nativeEvidence.state === 'working'
+          : !agentTurnEndBoundary(observed) && observed.terminalPromptReadiness?.source !== 'initial-composer')) {
+          throw new AgentMuxError('The native idle boundary is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+        }
+        preparation = { context: context as 'idle' | 'interruptible',
+          ...(nativeTurnId ? { nativeTurnId } : {}),
+          ...(nativeEvidence ? { nativeSourceId: nativeEvidence.sourceId, previousReceiptId: nativeEvidence.id } :
+            observed.hookReceipt?.id ? { previousReceiptId: observed.hookReceipt.id } : {}),
+          ...(context === 'idle' ? { readyThroughByte } : {}) }
+      } catch (error) {
+        await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
+          reason: 'immediate-context-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
+        throw new AgentMuxError('Immediate execution context is unconfirmed. This message is kept; ordinary input and the healthy Run remain available. Review native pending input or draft, then retry this exact message.',
+          'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', error instanceof AgentMuxError ? error.code : 'unknown')
+      }
+    }
     const promptDigest = createHash('sha256').update(prompt).digest('base64url')
     const payloadOperationId = terminalPromptPhaseOperationIdentity(
       session,
@@ -399,6 +449,11 @@ export class AgentPromptSubmissionCoordinator {
         value.run.runId !== session.run.runId ||
         value.submissionId !== submissionId ||
         value.promptDigest !== promptDigest ||
+        Boolean(value.prepare) !== Boolean(plan.prepare) ||
+        (value.prepare?.interrupt && (!plan.prepare ||
+          value.prepare.interrupt.operationId !== terminalPromptPhaseOperationIdentity(session, submissionId, 'interrupt', plan.prepare.interrupt) ||
+          value.prepare.interrupt.inputByteRange.endByte - value.prepare.interrupt.inputByteRange.startByte !== Buffer.byteLength(plan.prepare.interrupt) ||
+          value.prepare.interrupt.inputByteRange.endByte !== value.payload.inputByteRange.startByte)) ||
         (value.readinessEvidence !== undefined && value.readinessEvidence.readyThroughByte < value.readinessEvidence.outputCursorBytes) ||
         (value.readinessEvidence !== undefined && value.outputCursorBytes < value.readinessEvidence.readyThroughByte) ||
         value.payload.operationId !== payloadOperationId ||
@@ -448,7 +503,12 @@ export class AgentPromptSubmissionCoordinator {
           })
         )
       }
-      uncertainTurn = assertTurnBoundary(stored, existing !== undefined || stored.promptCompletionAdmission !== undefined)
+      uncertainTurn = plan.prepare ? false : assertTurnBoundary(stored, existing !== undefined || stored.promptCompletionAdmission !== undefined)
+      if (plan.prepare && (!preparation || (!preparation.nativeSourceId && preparation.previousReceiptId !== stored.hookReceipt?.id))) {
+        throw new AgentMuxError('Native context changed before immediate admission.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+      }
+      const interruptBytes = preparation?.context === 'interruptible' ? Buffer.byteLength(plan.prepare!.interrupt) : 0
+      const interruptOperationId = interruptBytes ? terminalPromptPhaseOperationIdentity(session, submissionId, 'interrupt', plan.prepare!.interrupt) : undefined
       const readiness = stored.terminalPromptReadiness
       const readinessEvidence = readiness && readiness.run.runId === session.run.runId &&
         readiness.outputCursorBytes !== undefined &&
@@ -463,7 +523,7 @@ export class AgentPromptSubmissionCoordinator {
       // must not lock a healthy Agent out. Payload rendering below still verifies or degrades.
       const outputCursorBytes = Math.max(run.latestOutputBytes, readinessEvidence?.readyThroughByte ?? 0)
       return {
-        ...claimInput(stored, payloadOperationId, expectedByte, expectedByte + payloadBytes + submitBytes, uncertainTurn),
+        ...claimInput(stored, interruptOperationId ?? payloadOperationId, expectedByte, expectedByte + interruptBytes + payloadBytes + submitBytes, uncertainTurn),
         ...(readinessEvidence ? { terminalPromptReadiness: {
           ...readiness!, consumedBySubmissionId: submissionId
         } } : {}),
@@ -473,19 +533,22 @@ export class AgentPromptSubmissionCoordinator {
           promptDigest,
           ...(readinessEvidence ? { readinessEvidence } : {}),
           outputCursorBytes,
+          ...(preparation ? { prepare: { ...preparation,
+            ...(interruptOperationId ? { interrupt: { operationId: interruptOperationId,
+              inputByteRange: { startByte: expectedByte, endByte: expectedByte + interruptBytes }, acknowledged: false } } : {}) } } : {}),
           payload: {
             operationId: payloadOperationId,
             inputByteRange: {
-              startByte: expectedByte,
-              endByte: expectedByte + payloadBytes
+              startByte: expectedByte + interruptBytes,
+              endByte: expectedByte + interruptBytes + payloadBytes
             },
             acknowledged: false
           },
           submit: {
             operationId: submitOperationId,
             inputByteRange: {
-              startByte: expectedByte + payloadBytes,
-              endByte: expectedByte + payloadBytes + submitBytes
+              startByte: expectedByte + interruptBytes + payloadBytes,
+              endByte: expectedByte + interruptBytes + payloadBytes + submitBytes
             },
             acknowledged: false
           }
@@ -512,7 +575,7 @@ export class AgentPromptSubmissionCoordinator {
     let acceptedInputBytes = run.acceptedInputBytes
 
     const applyPhase = async (
-      phaseName: 'payload' | 'submit',
+      phaseName: 'interrupt' | 'payload' | 'submit',
       data: string
     ): Promise<void> => {
       const currentSession = await this.deps.registry.refresh(session.agentSessionId, session.run)
@@ -524,7 +587,8 @@ export class AgentPromptSubmissionCoordinator {
         )
       }
       assertSubmission(submission)
-      const phase = submission[phaseName]
+      const phase = phaseName === 'interrupt' ? submission.prepare?.interrupt : submission[phaseName]
+      if (!phase) throw new AgentMuxError('The original preparation phase is missing.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
       if (phase.notApplied) {
         throw new AgentMuxError('The original prompt phase was not applied. Its accepted payload is kept; this input range cannot be reused.',
           'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
@@ -562,6 +626,17 @@ export class AgentPromptSubmissionCoordinator {
         )
       }
       acceptedInputBytes = accepted.run.acceptedInputBytes
+      if (phaseName === 'interrupt') {
+        await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+          const state = stored.terminalPromptSubmission
+          if (!state?.prepare?.interrupt) throw new AgentMuxError('The original preparation phase disappeared.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
+          assertSubmission(state)
+          return { ...stored, terminalPromptSubmission: { ...state, prepare: { ...state.prepare,
+            interrupt: { ...state.prepare.interrupt, acknowledged: true } } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
+        })
+        this.deps.agentInputCursors.set(session.agentSessionId, acceptedInputBytes)
+        return
+      }
       if (phaseName === 'payload') {
         // 高频受据合并（f-23q8faabh / T-003）：payload 受据不单独整写一次 CAS JSON，随后续
         // submit 受据一次落盘。崩溃窗口内它可从 ctxmux 事实重推——同一 operationId 重放拿到
@@ -634,6 +709,60 @@ export class AgentPromptSubmissionCoordinator {
       }
       return
     }
+    if (plan.prepare && submission.prepare &&
+        (acceptedInputBytes === null || acceptedInputBytes < submission.payload.inputByteRange.endByte)) {
+      const prepared = submission.prepare
+      try {
+        if (prepared.interrupt) await applyPhase('interrupt', plan.prepare.interrupt)
+        let barrierReceiptId: string | undefined
+        if (prepared.context === 'interruptible' && prepared.nativeSourceId && provider.readPromptExecutionEvidence) {
+          const deadline = Date.now() + TERMINAL_PROMPT_RENDER_TIMEOUT_MS
+          for (;;) {
+            if (renderSignal?.aborted) throw new AgentMuxError('Immediate preparation observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED')
+            const observedSession = await this.deps.registry.refresh(session.agentSessionId, session.run)
+            const evidence = await provider.readPromptExecutionEvidence({ ...nativeContext,
+              ...(observedSession.nativeHandle ? { nativeHandle: observedSession.nativeHandle } : {}) })
+            if (evidence && (evidence.sourceId !== prepared.nativeSourceId || evidence.nativeTurnId !== prepared.nativeTurnId)) {
+              throw new AgentMuxError('The original native turn evidence changed.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+            }
+            if (evidence?.state === 'ended' && evidence.endReason === 'interrupted' && evidence.id !== prepared.previousReceiptId) {
+              barrierReceiptId = evidence.id
+              break
+            }
+            if (Date.now() >= deadline) throw new AgentMuxError('The exact native turn interruption is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+            await new Promise(resolve => setTimeout(resolve, 50))
+          }
+        }
+        const readyThroughByte = await this.deps.screenEvidence.wait(session, submission.outputCursorBytes,
+          prepared.context === 'interruptible', screen => {
+            const observed = this.deps.requireAgentSession(session.agentSessionId)
+            const receipt = observed.hookReceipt
+            if (prepared.context === 'interruptible' && !prepared.nativeSourceId) {
+              if (!receipt || receipt.id === prepared.previousReceiptId || receipt.eventName !== plan.prepare!.endEvent ||
+                  receipt.nativeTurnId !== prepared.nativeTurnId || receipt.lifecycleEvent !== 'turn-end' ||
+                  receipt.run.runId !== session.run.runId) return false
+              barrierReceiptId = receipt.id
+            }
+            return provider.inspectPromptExecution?.(screen.snapshot()) === 'idle'
+          }, { timeoutMs: TERMINAL_PROMPT_RENDER_TIMEOUT_MS, requireCompleteFrame: true, requireOriginalAttributes: true,
+            ...(prepared.context === 'interruptible' ? { requireFrameAfterBoundary: true } : {}),
+            timeoutMessage: 'Native interruption or empty composer is unconfirmed.',
+            terminalMessage: 'Agent Run exited before immediate input was prepared.', ...(renderSignal ? { signal: renderSignal } : {}) })
+        await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+          const state = stored.terminalPromptSubmission
+          if (!state?.prepare) throw new AgentMuxError('The original preparation phase disappeared.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
+          assertSubmission(state)
+          return { ...stored, terminalPromptSubmission: { ...state, outputCursorBytes: readyThroughByte,
+            prepare: { ...state.prepare, readyThroughByte, ...(barrierReceiptId ? { barrierReceiptId } : {}) } },
+            updatedAt: Math.max(stored.updatedAt, Date.now()) }
+        })
+      } catch (error) {
+        await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
+          reason: 'immediate-context-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
+        throw new AgentMuxError('Native immediate preparation is unconfirmed. The original message and Run are kept; do not resend it as ordinary input. The terminal remains available.',
+          'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', error instanceof AgentMuxError ? error.code : 'unknown')
+      }
+    }
     await applyPhase('payload', plan.payload)
     submission = this.deps.requireAgentSession(session.agentSessionId).terminalPromptSubmission
     if (!submission) {
@@ -662,7 +791,7 @@ export class AgentPromptSubmissionCoordinator {
     session: AgentMuxAgentSession,
     submissionId: string,
     operation: Parameters<CtxmuxRunAdapter['input']>[1],
-    phaseName?: 'payload' | 'submit'
+    phaseName?: 'interrupt' | 'payload' | 'submit'
   ): ReturnType<CtxmuxRunAdapter['input']> {
     const admission = this.deps.requireAgentSession(session.agentSessionId).promptCompletionAdmission
     if (admission?.submissionId === submissionId && admission.operationId === operation.operationId && admission.notApplied) {
@@ -695,6 +824,11 @@ export class AgentPromptSubmissionCoordinator {
               return { ...current, terminalPromptSubmission: { ...submission,
                 payload: { ...submission.payload, acknowledged: true },
                 submit: { ...submission.submit, notApplied: true } }, updatedAt: Math.max(current.updatedAt, Date.now()) }
+            }
+            if (phaseName === 'interrupt' && submission?.prepare?.interrupt?.operationId === operation.operationId) {
+              return { ...current, promptCompletionAdmission: { ...admission, notApplied: true },
+                terminalPromptSubmission: { ...submission, prepare: { ...submission.prepare,
+                  interrupt: { ...submission.prepare.interrupt, notApplied: true } } }, updatedAt: Math.max(current.updatedAt, Date.now()) }
             }
             if (admission.operationId !== operation.operationId) return current
             return { ...current, promptCompletionAdmission: { ...admission, notApplied: true },

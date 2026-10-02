@@ -40,6 +40,8 @@ const probe = {
       timelines:{},sessions:state.sessions.map(s => s.id === base.sessionId ? {...s,promptSubmissionPredecessor:null} : s)})))
   },
   queue(text = 'Review the mailbox design and keep the original message identity', count = 1) { flushSync(() => { for (let i = 0; i < count; i++) useAppStore.getState().enqueueAgentSteer(base.sessionId,text,undefined,undefined,'manual') }) },
+  distinctQueue(count = 100) { flushSync(() => { for (let i=0;i<count;i++) useAppStore.getState().enqueueAgentSteer(base.sessionId,`原消息 ${i + 3} · 独立正文 ${i}\n第二行保留全文与原身份`,undefined,undefined,'manual') }) },
+  revise(id: string, text: string) { const entry=useAppStore.getState().agentSteerQueues[base.sessionId]?.find(e=>e.operationId===id);if(!entry)throw Error('Original queue record missing');flushSync(()=>useAppStore.getState().editQueuedAgentSteer(base.sessionId,id,entry.text,text)) },
   prepared() { if(!releasePreparation)throw Error('No actual preparation'); const release=releasePreparation;releasePreparation=undefined;release() },
   submitted(fail = false) { if(!releaseSubmission)throw Error('No actual submission'); const release=releaseSubmission,reject=rejectSubmission;releaseSubmission=undefined;rejectSubmission=undefined;fail?reject!(new Error('Delivery result unknown')):release() },
   interaction(value: boolean) { flushSync(() => useAppStore.setState(state => ({sessions:state.sessions.map(s => s.id===base.sessionId?{...s,pendingInteraction:value?{id:'private-request',kind:'permission',agentSessionId:s.id,title:'Original request',options:[{id:'allow',label:'Allow once',kind:'allow_once'}],evidence:{source:'native-hook',observedAt:1,run:s.control.run}} satisfies AgentMuxPermissionRequest:undefined}:s)}))) },

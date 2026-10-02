@@ -1,5 +1,6 @@
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
+import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
@@ -698,6 +699,15 @@ export async function registerIpc(args: {
   handle('demands:decision', async (id: string, input: Omit<import('@agentmux/demand').DemandDecision, 'id' | 'createdAt'>) => await demands.addDecision(id, input))
   const disposeToolkitIpc = registerToolkitIpc(toolkit, handleWithEvent)
 
+  const notebookStore = new AgentMuxNotebookStore()
+  const disposeNotebook = notebookStore.subscribe(observation => {
+    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('notebook:changed', observation)
+  })
+  handleWithEvent('notebook:read', async event => { requireTrustedSender('notebook:read', event); return notebookStore.read() })
+  handleWithEvent('notebook:apply', async (event, input: NotebookWrite) => {
+    requireTrustedSender('notebook:apply', event)
+    return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
+  })
   const spatialState = new AgentMuxSpatialStateStore()
   const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
@@ -911,7 +921,7 @@ export async function registerIpc(args: {
     prompt: string,
     operationId: string,
     condition: AgentPromptCondition,
-    choice?: { allowUncertainTurn: true },
+    choice?: Parameters<RuntimeController['submitPrompt']>[5],
     authorHuman?: boolean,
     agentMuxNote?: string
   ) => {
@@ -1254,6 +1264,7 @@ export async function registerIpc(args: {
     execute: executeControl,
     spatialState,
     topics: topicKnowledge,
+    notebookStore,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     ...(rpcHttp ? { http: rpcHttp } : {}),
@@ -1291,7 +1302,7 @@ export async function registerIpc(args: {
   await control.start()
   return async () => {
     await runOwnerDisposals([
-      async () => { acceptingControl = false; disposeSpatial()
+      async () => { acceptingControl = false; disposeSpatial(); disposeNotebook()
     disposeToolkitIpc(); await toolkit.dispose() },
       () => {
         acceptingControl = false

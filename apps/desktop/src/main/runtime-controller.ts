@@ -5,6 +5,7 @@ import {
   agentPromptPredecessor,
   validateAgentPromptCondition,
   type AgentPromptCondition,
+  type AgentPromptExecution,
   type AgentMuxAgentMessageInput,
   runtimeStorageUsage,
   agentInteractionResponseUnavailableReason,
@@ -1324,7 +1325,7 @@ export class RuntimeController {
     operationId: string,
     condition: AgentPromptCondition,
     automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
-    choice?: { allowUncertainTurn: true },
+    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution },
     authorHuman?: boolean,
     agentMuxNote?: string
   ): Promise<void> {
@@ -1353,6 +1354,7 @@ export class RuntimeController {
           prompt,
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
+          ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
           ...(authorHuman === true ? { authorHuman: true } : {})
         })
       } catch (error) {

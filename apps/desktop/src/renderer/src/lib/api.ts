@@ -1,3 +1,4 @@
+import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
 import type {
   AgentExecutorConfig,
   AgentTimelineSnapshot,
@@ -335,8 +336,19 @@ function normalizeMockBrowserUrl(value: string): string {
 
 let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState|null=null
 const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
+let mockNotebookState = emptyNotebookState()
+const mockNotebookListeners = new Set<(event: NotebookObservation) => void>()
 const mockApi: AgentMuxDesktopApi = {
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
+  notebooks: {
+    read: async () => structuredClone(mockNotebookState),
+    apply: async input => {
+      mockNotebookState = applyNotebookChange(mockNotebookState, input, { kind: 'user', id: 'web-preview-user' }, Date.now())
+      for (const listener of mockNotebookListeners) listener({ state: structuredClone(mockNotebookState) })
+      return structuredClone(mockNotebookState)
+    },
+    onChange: listener => { mockNotebookListeners.add(listener); return () => mockNotebookListeners.delete(listener) }
+  },
   git: {
     projectIdentity: async (workspaceId) => {
       const workspace = mockConfig.workspaces.find(item => item.id === workspaceId)

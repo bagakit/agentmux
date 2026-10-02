@@ -23,6 +23,9 @@ export type NoteCreationReceipt = {
   path: string
   status: 'pending' | 'written' | 'unknown' | 'error'
   write?: Exclude<WorkspaceFileWriteResult, { status: 'conflict' }>
+  notebook?: import('./notebook-library').NoteNotebookContext
+  notebookRegistered?: boolean
+  notebookIssue?: string | undefined
   revealed: boolean
   presentation?: { presentationId: string; entity: WorkbenchEntityReference; reference: WorkbenchProjectionSelection }
   launcher?: { tabId: string; regionId: string }

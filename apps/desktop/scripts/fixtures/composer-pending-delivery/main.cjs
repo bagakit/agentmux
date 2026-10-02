@@ -11,14 +11,15 @@ const result = { schema: 'agentmux.composer-pending-delivery-native.v1', passed:
 const surface = `document.querySelector('[data-workbench-region-id="result-input-owner"] .agent-surface')`;
 const neighbor = `document.querySelector('[data-workbench-region-id="result-input-neighbor"]')`;
 const editor = `${surface}.querySelector('.composer [role="textbox"]')`;
-const strip = `${surface}.querySelector('.composer-pending')`;
+const strip = `document.querySelector('.composer-pending:not([hidden])')`;
+const selectedCard = `${strip}.querySelector('.composer-pending__card[data-selected="true"]')`;
 const panel = `${surface}.querySelector('.composer-mailbox')`;
-const send = `${strip}.querySelector('[aria-label="发送这条待发消息"]')`;
-const more = `${strip}.querySelector('[aria-label="在 Outbox 查看待发消息和操作"]')`;
+const send = `${selectedCard}.querySelector('.composer-pending__send')`;
+const more = `${selectedCard}.querySelector('[aria-label="在 Outbox 查看待发消息和操作"]')`;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function evaluate(expression) {
   const value = await win.webContents.executeJavaScript(`(async()=>{try{return await eval(${JSON.stringify(expression)})}catch(error){return{__probeError:true,name:error.name,message:error.message,stack:error.stack}}})()`);
-  if (value?.__probeError) { const error = new Error(value.message); error.name = value.name; error.stack = value.stack; throw error; }
+  if (value?.__probeError) { const error = new Error(value.message); error.name = value.name; error.stack = value.stack + '\nProbe expression: ' + expression; throw error; }
   return value;
 }
 async function waitFor(expression) {
@@ -50,11 +51,11 @@ async function geometry() {
     const owner=records.find(r=>r.terminal.element===original&&!r.disposed),other=records.find(r=>n.contains(r.terminal.element)&&!r.disposed);
     const terminal=pendingDelivery.terminal(),activeBuffer=owner.terminal.buffer.active,screen=rect(s.querySelector('.xterm-screen')),cursorRow=terminal.baseY+terminal.cursorY-terminal.viewportY;
     const cellHeight=screen.height/terminal.rows,b=${strip},e=${editor},composer=s.querySelector('.composer');
-    const state=b?.querySelector('.composer-pending__state'),preview=b?.querySelector('.composer-pending__preview'),mailbox=composer.querySelector('.composer__mailbox');
+    const selected=b?.querySelector('.composer-pending__card[data-operation-id="'+b.dataset.operationId+'"]'),state=selected?.querySelector('.composer-pending__state'),preview=selected?.querySelector('.composer-pending__preview'),mailbox=composer.querySelector('.composer__mailbox');
     const editorSlot=e.closest('.composer__editor'),controls=mailbox.closest('.composer__toolbar > div');
     const range=node=>{if(!node)return[];const r=document.createRange();r.selectNodeContents(node);return[...r.getClientRects()].map(r=>({x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}))};
     const buffer=other?.terminal.buffer.active;
-    return{terminal,buffer:{type:activeBuffer.type,stable:activeBuffer===window.pendingNative.buffer,repeatedReadStable:activeBuffer===owner.terminal.buffer.active},screen,cellHeight,cursorVisible:cursorRow>=0&&cursorRow<terminal.rows,
+    return{terminal,buffer:{type:activeBuffer.type,stable:activeBuffer===window.pendingNative.buffer,repeatedReadStable:activeBuffer===owner.terminal.buffer.active},screen,cellHeight,cursorCell:{x:screen.x+terminal.cursorX*screen.width/terminal.cols,y:screen.y+cursorRow*cellHeight,width:screen.width/terminal.cols,height:cellHeight,right:screen.x+(terminal.cursorX+1)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorText:{x:screen.x,y:screen.y+cursorRow*cellHeight,right:screen.x+Math.min(terminal.cols,terminal.cursorLine.length)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorVisible:cursorRow>=0&&cursorRow<terminal.rows,
       cursorBottom:screen.y+(cursorRow+1)*cellHeight,ownerRect:rect(s),terminalRect:rect(original),
       originalConnected:Boolean(original?.isConnected),originalHidden:Boolean(original?.closest('[hidden]')),originalId:owner?.id,
       retainedNodes:{editor:e===window.pendingNative.editor,terminal:original===window.pendingNative.terminal,neighbor:n===window.pendingNative.neighbor},
@@ -68,16 +69,17 @@ async function geometry() {
         gap:parseFloat(getComputedStyle(mailbox).columnGap),composerDisplay:getComputedStyle(composer).display,
         editorSlot:{rect:rect(editorSlot),isComposerChild:editorSlot.parentElement===composer,gridColumn:getComputedStyle(editorSlot).gridColumn,gridRow:getComputedStyle(editorSlot).gridRow},
         controls:{rect:rect(controls),gridColumn:getComputedStyle(controls).gridColumn,gridRow:getComputedStyle(controls).gridRow}},
-      strip:b?{rect:rect(b),operationId:b.dataset.operationId,busy:b.dataset.busy,outsideInput:!composer.contains(b),depth:b.dataset.depth,
-        count:b.querySelector('.composer-pending__count').textContent,shadow:getComputedStyle(b).boxShadow,
-        transition:getComputedStyle(b).transitionDuration,hover:b.matches(':hover'),focused:b.matches(':focus-within'),
-        focusedLabel:b.contains(document.activeElement)?document.activeElement.getAttribute('aria-label'):null,
-        previewClipped:preview.scrollWidth>preview.clientWidth,
-        edges:['::before','::after'].map(pseudo=>{const style=getComputedStyle(b,pseudo);return{content:style.content,top:style.top,height:style.height,transform:style.transform,pointerEvents:style.pointerEvents,transition:style.transitionDuration}}),
-        actions:[...b.querySelectorAll('button')].map(node=>({rect:rect(node),label:node.getAttribute('aria-label')})),
+      strip:b?{rect:rect(b),operationId:b.dataset.operationId,busy:selected?.dataset.busy,outsideInput:!composer.contains(b),
+        count:b.querySelector('.composer-pending__count')?.textContent,position:getComputedStyle(b).position,background:getComputedStyle(b).backgroundColor,
+        hover:b.matches(':hover'),focused:b.matches(':focus-within'),focusedLabel:b.contains(document.activeElement)?document.activeElement.getAttribute('aria-label'):null,
+        previewClipped:preview?preview.scrollWidth>preview.clientWidth:false,
+        cards:[...b.querySelectorAll('.composer-pending__card')].map(node=>({id:node.dataset.operationId,index:Number(node.dataset.queueIndex),selected:node.dataset.selected,
+          rect:rect(node),transform:getComputedStyle(node).transform,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
+          preview:node.querySelector('.composer-pending__preview').textContent,actions:[...node.querySelectorAll('button')].map(button=>({rect:rect(button),label:button.getAttribute('aria-label')}))})),
+        reading:{id:b.querySelector('.composer-pending__reading')?.dataset.readingId,text:b.querySelector('.composer-pending__reading')?.textContent,rect:rect(b.querySelector('.composer-pending__reading'))},
+        list:{rect:rect(b.querySelector('.composer-pending__cards')),scrollTop:b.querySelector('.composer-pending__cards')?.scrollTop,scrollHeight:b.querySelector('.composer-pending__cards')?.scrollHeight},
         label:state?.textContent,stateRect:rect(state),stateLines:range(state?.querySelector('span')),preview:preview?.textContent,
-        previewRect:rect(preview),sendDisabled:b.querySelector('.composer-pending__send').disabled,
-        marginTop:parseFloat(getComputedStyle(b).marginTop),marginBottom:parseFloat(getComputedStyle(b).marginBottom)}:null,
+        previewRect:rect(preview),sendDisabled:selected?.querySelector('.composer-pending__send').disabled}:null,
       popover:s.querySelector('.composer-mailbox').matches(':popover-open'),facts:pendingDelivery.facts(),trustedActions:window.pendingNative.actions,trustedHoverActions:window.pendingNative.hoverActions,
       terminalEvents:window.pendingNative.terminalEvents}
   })()`);
@@ -126,7 +128,7 @@ function noticeGeometry(before, after) {
   }
   return { before: { mailbox: before.mailbox, editor: before.editor }, after: { mailbox: after.mailbox, editor: after.editor }, noticeWidthDelta, sameRow };
 }
-function retained(before, after, attentionTransition = false) {
+function retained(before, after, attentionTransition = false, priorPermissionTransition = false) {
   assert.equal(after.originalConnected, true); assert.equal(after.originalHidden, false);
   assert.equal(after.originalId, before.originalId); assert.equal(after.terminal.id, before.terminal.id);
   assert.deepEqual(after.retainedNodes, { editor: true, terminal: true, neighbor: true }, 'Pending UI retains the actual original DOM nodes');
@@ -135,7 +137,13 @@ function retained(before, after, attentionTransition = false) {
   assert.deepEqual(after.neighbor, before.neighbor, 'Pending UI leaves the neighboring terminal, layout and draft exact');
   assert.equal(after.draft, before.draft); assert.equal(after.editor.height, before.editor.height);
   const noticeBoundary = attentionTransition ? noticeGeometry(before, after) : null;
-  if (!attentionTransition) assert.equal(after.editor.width, before.editor.width);
+  if (!attentionTransition) {
+    assert.deepEqual(after.editor, before.editor, 'Floating cards preserve the original editor geometry exactly');
+    assert.deepEqual(after.composer, before.composer, 'Floating cards take zero normal-flow height');
+    assert.deepEqual(after.terminalRect, before.terminalRect, 'Floating cards preserve the original terminal rectangle');
+    assert.equal(after.terminal.rows, before.terminal.rows, 'Floating cards change zero terminal rows');
+    if (!priorPermissionTransition) assert.equal(after.facts.resizes.length, before.facts.resizes.length, 'Floating cards cause zero attachment resize requests');
+  }
   for (const name of ['sessions', 'tab', 'layout', 'drafts', 'writes', 'pastes']) assert.deepEqual(after.facts[name], before.facts[name], 'Pending UI preserves original ' + name);
   return noticeBoundary;
 }
@@ -151,21 +159,19 @@ function pendingGeometry(before, after, label, busy, disabled, attentionTransiti
   assert.ok(after.strip.stateLines.length > 0, 'Actual status text has a nonempty Range');
   assert.ok(after.strip.stateLines.every(line => line.x >= r.x - 1 && line.right <= r.right + 1), 'Status text remains inside the visible pending surface');
   assert.ok(after.terminal.rows > 0);
-  const allowance = Math.ceil((r.height + after.strip.marginTop + after.strip.marginBottom) / after.cellHeight) + 1;
-  assert.ok(Math.abs(after.terminal.rows - before.terminal.rows) <= allowance, 'Only the necessary pending row height changes the terminal grid');
-  const attachmentIds = new Set(before.facts.resizes.map(resize => resize[0]));
-  assert.ok(attachmentIds.size > 0, 'The original real terminal attachment resize collection is nonempty');
-  for (const resize of after.facts.resizes.slice(before.facts.resizes.length)) {
-    assert.ok(attachmentIds.has(resize[0]), 'Pending rows resize an existing attachment');
-    assert.equal(resize[1], before.terminal.cols); assert.ok(resize[2] > 0);
-  }
   return noticeBoundary;
 }
 function visibleCursor(facts) {
   assert.equal(facts.cursorVisible, true, 'The actual original terminal cursor remains in its viewport');
   assert.match(facts.terminal.cursorLine, /agent > half typed prompt/);
   assert.ok(facts.cursorBottom <= facts.terminalRect.bottom + 1, 'The cursor line remains inside the real terminal');
-  if (facts.strip) assert.ok(facts.cursorBottom <= facts.strip.rect.y + 1, 'Pending UI does not cover the unfinished cursor line');
+  if (facts.strip) {
+    const intersects=(a,b)=>a.x<b.right&&a.right>b.x&&a.y<b.bottom&&a.bottom>b.y;
+    const list=facts.strip.list.rect,visibleCards=facts.strip.cards.filter(card=>intersects(card.rect,list)).map(card=>({x:Math.max(card.rect.x,list.x),right:Math.min(card.rect.right,list.right),y:Math.max(card.rect.y,list.y),bottom:Math.min(card.rect.bottom,list.bottom)}));
+    const footprints=[facts.strip.reading.rect,...visibleCards].filter(Boolean);
+    assert.ok(footprints.every(r=>!intersects(r,facts.cursorCell)), 'Actual floating card footprints do not cover the terminal cursor cell');
+    assert.ok(footprints.every(r=>!intersects(r,facts.cursorText)), 'Actual floating card footprints do not cover the unfinished terminal text');
+  }
 }
 async function frame(scene, name) {
   if (capture !== 'capture') return;
@@ -181,63 +187,98 @@ async function pointAt(expression) {
   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
   await delay(160); await painted();
 }
-function cardGeometry(facts, depth, count) {
-  const card = facts.strip; assert.ok(card);
-  assert.equal(card.depth, String(depth)); assert.equal(card.count, `待发 ${count}`);
-  assert.ok(card.rect.width <= 360, 'Pending card respects its maximum width');
-  assert.ok(Math.abs(card.rect.right - facts.mailbox.controls.rect.right) <= 1, 'Pending card aligns with the original right-hand Mailbox control group');
-  assert.ok(card.rect.x > facts.ownerRect.x + 4, 'Pending card leaves space on the left');
-  assert.ok(card.rect.height <= 44, 'One compact card bounds visible queue height');
-  assert.equal(card.edges.filter(edge => edge.content !== 'none').length, depth, 'Queue depth has exactly the bounded noninteractive edges');
-  for (const edge of card.edges) assert.equal(edge.pointerEvents, 'none');
-  for (const action of card.actions) {
-    assert.equal(action.rect.width, 24); assert.equal(action.rect.height, 24);
-    assert.ok(action.rect.x >= card.rect.x && action.rect.right <= card.rect.right);
+function cardGeometry(facts, count) {
+  const card=facts.strip;assert.ok(card);assert.equal(card.count,`待发 ${count}`);
+  assert.equal(card.background,'rgba(0, 0, 0, 0)','The float has no full-strip background');
+  assert.equal(card.cards.length,count,'Every queued operation has its own real card inside the floating surface');
+  assert.equal(new Set(card.cards.map(c=>c.id)).size,count,'Every real card has a distinct operation identity');
+  assert.ok(card.rect.width<=360.1&&card.rect.height<=320.1,'Floating queue has bounded width and height');
+  assert.ok(Math.abs(card.rect.right-facts.mailbox.rect.right)<=1,'Pending cards align with the actual Mailbox');
+  assert.ok(card.rect.bottom<=facts.composer.y-8,'The floating queue remains visibly detached from Message Tool');
+  if(count>1){
+    assert.ok(card.cards.filter(c=>c.selected==='false').every(c=>c.transform.startsWith('matrix3d(')),'Real queued cards preserve depth while idle');
+    const first=card.cards[0],second=card.cards[1];
+    assert.ok(second.rect.y>first.rect.y+10&&second.rect.y<first.rect.bottom,'Real queued cards have visible vertical stacking height and overlap');
+    assert.notEqual(first.transform,second.transform,'Idle selected and queued cards occupy distinct depth planes');
   }
-  assert.equal(card.actions.length, 2);
   visibleCursor(facts);
 }
 async function cardScenes(scene, baseline) {
-  await pointAt(surface);
-  await evaluate("pendingDelivery.queue('稍后复查')");
-  const short = await settled(); pendingGeometry(baseline, short, '排队中', false, false); cardGeometry(short, 0, 1);
-  assert.ok(short.strip.rect.width < 300, 'Short pending card sizes to its content');
-  await frame(scene, 'card-short');
-  await evaluate("pendingDelivery.queue('第二条保留在原 Outbox')");
-  const two = await settled(); cardGeometry(two, 1, 2); retained(short, two);
-  assert.equal(two.strip.rect.height, short.strip.rect.height); await frame(scene, 'card-two');
-  await evaluate("pendingDelivery.queue('额外排队内容只在原 Outbox 读取',23)");
-  const stack = await settled(); cardGeometry(stack, 2, 25); retained(two, stack);
-  assert.equal(stack.strip.rect.height, short.strip.rect.height); assert.deepEqual(stack.terminal, short.terminal);
-  await frame(scene, 'card-stack');
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'no-preference' }] });
-  await pointAt(`${strip}.querySelector('.composer-pending__preview')`);
-  const hover = await settled(); cardGeometry(hover, 2, 25); retained(stack, hover);
-  assert.ok(hover.trustedHoverActions.some(action => action.trusted && action.operationId === hover.strip.operationId), 'Trusted pointer movement reaches the actual pending card'); assert.notEqual(hover.strip.shadow, stack.strip.shadow, 'Hover emphasizes the real card surface');
-  assert.notEqual(hover.strip.edges[0].transform, stack.strip.edges[0].transform, 'Hover focuses the bounded depth');
-  assert.notEqual(hover.strip.transition, '0s'); assert.deepEqual(hover.strip.rect, stack.strip.rect);
-  assert.deepEqual(hover.facts.queues, stack.facts.queues); assert.deepEqual(hover.facts.attempts, stack.facts.attempts);
-  await frame(scene, 'card-hover');
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
-  await click(editor); await pointAt(surface); await key('Tab', 'Tab', 9, undefined, 8);
-  const focus = await settled(); cardGeometry(focus, 2, 25); retained(stack, focus);
-  assert.equal(focus.strip.hover, false); assert.equal(focus.strip.focused, true);
-  assert.equal(focus.strip.focusedLabel, '在 Outbox 查看待发消息和操作');
-  assert.notEqual(focus.strip.shadow, stack.strip.shadow, 'Keyboard focus emphasizes the same real card');
-  assert.equal(focus.strip.transition, '0s'); assert.ok(focus.strip.edges.every(edge => edge.transition === '0s'));
-  assert.deepEqual(focus.strip.rect, stack.strip.rect); assert.deepEqual(focus.facts.queues, stack.facts.queues);
-  assert.deepEqual(focus.facts.attempts, stack.facts.attempts); await frame(scene, 'card-keyboard-focus');
-  await click(editor); await evaluate('pendingDelivery.clear()');
-  const cleared = await settled(); assert.equal(cleared.strip, null); retained(baseline, cleared);
-  assert.deepEqual(cleared.terminal, baseline.terminal);
-  await evaluate(`pendingDelivery.queue(${JSON.stringify('这是一条需要保留原文的较长待发消息，完整内容和所有队列操作仍然在同一个 Outbox 中查看。'.repeat(6))})`);
-  const long = await settled(); cardGeometry(long, 0, 1); pendingGeometry(cleared, long, '排队中', false, false);
-  assert.ok(long.strip.rect.width > short.strip.rect.width, 'Long content uses more width than the short card');
-  assert.equal(long.strip.previewClipped, true, 'Long content clips to the one-line preview');
-  assert.equal(long.strip.rect.height, short.strip.rect.height); await frame(scene, 'card-long');
-  await evaluate('pendingDelivery.clear()'); const end = await settled();
-  retained(baseline, end); assert.equal(end.strip, null); assert.deepEqual(end.terminal, baseline.terminal);
-  result.checkpoints.push({ scene, name: 'bounded-card-shape', short, two, stack, hover, focus, long, end });
+  await pointAt(surface);await evaluate("pendingDelivery.queue('稍后复查')");
+  const short=await settled();pendingGeometry(baseline,short,'排队中',false,false);cardGeometry(short,1);
+  assert.ok(short.strip.rect.width<300,'Short pending card sizes to its content');await frame(scene,'card-short');
+  await evaluate("pendingDelivery.queue('第二条真实卡片')");const two=await settled();cardGeometry(two,2);retained(short,two);await frame(scene,'card-two');
+  await evaluate("pendingDelivery.distinctQueue(98)");const stack=await settled();cardGeometry(stack,100);retained(two,stack);
+  assert.ok(stack.strip.list.scrollHeight>stack.strip.list.rect.height,'Long queues traverse inside the same bounded floating surface');await frame(scene,'card-stack');
+  const sid=await evaluate('resultReady.sessionId'),entries=stack.facts.queues[sid],visited=[];
+  for(const index of [0,49,99]){
+    const expr=`${strip}.querySelector('[data-queue-index="${index}"]')`;
+    await evaluate(`${expr}.scrollIntoView({block:'nearest'})`);await painted();
+    await pointAt(`${expr}.querySelector('.composer-pending__preview')`);
+    const focused=await settled();retained(baseline,focused);
+    assert.equal(focused.strip.operationId,entries[index].operationId,'Trusted hover targets the original head, middle or tail card');
+    assert.equal(focused.strip.reading.id,entries[index].operationId);assert.equal(focused.strip.reading.text,entries[index].text,'Hover reads the full original text of this card');
+    assert.ok(focused.trustedHoverActions.some(a=>a.trusted&&a.operationId===entries[index].operationId),'Actual pointer reaches this individual original card');
+    await click(`${expr}.querySelector('[aria-label="复制这条待发消息"]')`);
+    const copied=await settled();assert.equal(copied.facts.copies.at(-1),entries[index].text,'Each card copies its own complete original text');
+    assert.equal(copied.strip.operationId,entries[index].operationId,'Pointer path from card to actions keeps the same operation');
+    assert.deepEqual(copied.facts.attempts,stack.facts.attempts,'Hover and Copy send no prompt');
+    visited.push({index,id:entries[index].operationId,facts:copied});await frame(scene,'card-hover-'+index);
+  }
+  // Trusted keyboard traversal remains in the same floating surface; IME is covered by mounted tests.
+  await click(`${strip}.querySelector('[data-queue-index="99"]')`);await key('Home','Home',36);
+  const focus=await settled();assert.equal(focus.strip.operationId,entries[0].operationId);retained(baseline,focus);
+  assert.ok(focus.strip.cards.every(c=>c.transition==='0s'),'Reduced motion retains static depth without movement');await frame(scene,'card-keyboard-focus');
+  await key('End','End',35);await click(send);await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`);
+  await evaluate('pendingDelivery.prepared()');await waitFor('pendingDelivery.facts().attempts.length===2');
+  const attempt=await evaluate('pendingDelivery.facts().attempts.at(-1)');
+  assert.equal(attempt[2],entries[99].operationId,'Nonhead Send submits only that original card');assert.equal(attempt[1],entries[99].text);
+  await evaluate('pendingDelivery.submitted()');await waitFor(`!pendingDelivery.facts().inFlight[${JSON.stringify(sid)}]`);
+  const afterSend=await settled();assert.deepEqual(afterSend.facts.queues[sid],entries.slice(0,99),'Nonhead Send preserves every other original queue entry');retained(baseline,afterSend);
+  await evaluate('pendingDelivery.clear()');await click(editor);const cleared=await settled();assert.equal(cleared.strip,null);retained(baseline,cleared);
+  await evaluate(`pendingDelivery.queue(${JSON.stringify('这是一条保留原文的较长待发消息，全文在同一浮层阅读，操作始终绑定原消息。'.repeat(6))})`);
+  const long=await settled();cardGeometry(long,1);pendingGeometry(cleared,long,'排队中',false,false);
+  assert.ok(long.strip.rect.width>short.strip.rect.width,'Long content uses more width than the short card');assert.equal(long.strip.previewClipped,true);await frame(scene,'card-long');
+  const originalLong=long.facts.queues[sid][0],editText='保存后的原消息 · 同身份\n完整新正文';
+  const textarea=`${strip}.querySelector('textarea')`;
+  await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);await waitFor(`Boolean(${textarea})`);
+  await evaluate(`${textarea}.select()`);await win.webContents.debugger.sendCommand('Input.insertText',{text:editText});await painted();
+  const editing=await settled();retained(long,editing);assert.equal(editing.facts.queues[sid][0].text,originalLong.text,'Typing an edit has no queue write');await frame(scene,'card-editing');
+  await evaluate(`(window.pendingNativeEditNode=${textarea},true)`);
+  await pointAt(`${surface}.querySelector('.composer__mailbox')`);await waitFor(`${panel}.matches(':popover-open')`);
+  assert.equal(await evaluate(`Boolean(${strip})`),false,'Open Mailbox suppresses the floating projection');
+  assert.equal(await evaluate(`document.querySelector('.composer-pending[hidden] textarea')===pendingNativeEditNode`),true,'Mailbox preview retains the same local editing node');
+  assert.equal(await evaluate('pendingNativeEditNode.value'),editText);await frame(scene,'card-edit-mailbox');
+  await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);await waitFor(`!${panel}.matches(':popover-open')&&Boolean(${textarea})`);
+  assert.equal(await evaluate(`${textarea}===pendingNativeEditNode`),true);assert.equal(await evaluate(`${textarea}.value`),editText);
+  await click(`${strip}.querySelector('[aria-label="保存待发消息"]')`);await waitFor(`!${textarea}`);
+  const saved=await settled();retained(long,saved);
+  assert.deepEqual(saved.facts.queues[sid],[{...originalLong,text:editText}],'Save preserves original operation, Run, time and order');
+  assert.equal(saved.facts.attempts.length,2,'Save grants no submission');assert.equal(saved.strip.reading.text,editText);await frame(scene,'card-edit-saved');
+  await click(`${selectedCard}.querySelector('[aria-label="复制这条待发消息"]')`);assert.equal(await evaluate('pendingDelivery.facts().copies.at(-1)'),editText);
+  await click(send);await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`);await evaluate('pendingDelivery.prepared()');
+  await waitFor('pendingDelivery.facts().attempts.length===3');const editedAttempt=await evaluate('pendingDelivery.facts().attempts.at(-1)');
+  assert.equal(editedAttempt[1],editText,'Explicit Send after Save submits the updated original text');assert.equal(editedAttempt[2],originalLong.operationId);
+  await evaluate('pendingDelivery.submitted()');await waitFor(`!pendingDelivery.facts().inFlight[${JSON.stringify(sid)}]`);
+  await evaluate("pendingDelivery.queue('原 CAS 消息')");await painted();
+  const casEntry=(await settled()).facts.queues[sid][0];await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);
+  await evaluate(`${textarea}.select()`);await win.webContents.debugger.sendCommand('Input.insertText',{text:'未保存的本地稿'});await painted();
+  await evaluate(`pendingDelivery.revise(${JSON.stringify(casEntry.operationId)},'另一个调用者保存的原消息')`);const beforeConflict=await settled();
+  await click(`${strip}.querySelector('[aria-label="保存待发消息"]')`);await waitFor(`Boolean(${strip}.querySelector('[role="alert"]'))`);
+  const rejected=await settled();noticeGeometry(beforeConflict,rejected);
+  assert.equal(await evaluate(`${textarea}.value`),'未保存的本地稿','CAS rejection keeps the local editing text');
+  assert.equal(rejected.facts.queues[sid][0].text,'另一个调用者保存的原消息');assert.equal(rejected.facts.attempts.length,3);
+  assert.deepEqual(rejected.terminalRect,beforeConflict.terminalRect);assert.equal(rejected.terminal.rows,beforeConflict.terminal.rows);assert.equal(rejected.facts.resizes.length,beforeConflict.facts.resizes.length);
+  await frame(scene,'card-edit-rejected');await evaluate('pendingDelivery.unknown()');const locked=await settled();
+  assert.equal(await evaluate(`${strip}.querySelector('[aria-label="保存待发消息"]').disabled`),true,'Admitted unknown input cannot be edited into a new retry');
+  assert.equal(await evaluate(`${textarea}.value`),'未保存的本地稿');assert.equal(locked.facts.queues[sid][0].text,'另一个调用者保存的原消息');
+  assert.ok(locked.facts.queues[sid][0].promptCondition);assert.equal(locked.facts.attempts.length,3);await frame(scene,'card-edit-unknown-lock');
+  await key('Escape','Escape',27);await waitFor(`!${textarea}`);await click(`${selectedCard}.querySelector('[aria-label="复制这条待发消息"]')`);
+  await evaluate('pendingDelivery.clear()');await click(editor);await pointAt(surface);await evaluate("pendingDelivery.queue('收起后仍可发现的原消息')");await painted();
+  await click(`${strip}.querySelector('[aria-label="收起待发卡片"]')`);const collapsed=await settled();retained(baseline,collapsed);
+  assert.ok(await evaluate(`Boolean(${strip}.querySelector('.composer-pending__restore'))`));await frame(scene,'card-collapsed');
+  await click(`${strip}.querySelector('.composer-pending__restore')`);await evaluate('pendingDelivery.clear()');const end=await settled();retained(baseline,end);
+  result.checkpoints.push({scene,name:'real-floating-card-traversal',short,two,stack,visited,focus,afterSend,long,editing,saved,rejected,locked,collapsed,end,editedAttempt});
 }
 async function scene(scene) {
   result.stage = scene;
@@ -245,10 +286,11 @@ async function scene(scene) {
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: scene.viewport, height: 750, deviceScaleFactor: 1, mobile: false });
   await evaluate(`pendingDelivery.seed(${JSON.stringify(scene.appearance)})`);
   await waitFor(`Boolean(${surface}.querySelector('.xterm-helper-textarea'))&&!${surface}.querySelector('.terminal-view__xterm--hydrating')&&pendingDelivery.terminal().cursorLine.includes('half typed prompt')`);
-  await evaluate(`(()=>{window.pendingNative={editor:${editor},terminal:${surface}.querySelector('.xterm'),neighbor:${neighbor},actions:[],hoverActions:[],terminalEvents:[],phase:'seed'};const log=window.pendingNative,record=resultReadyTerminals.find(r=>r.terminal.element===log.terminal&&!r.disposed);log.buffer=record.terminal.buffer.active;const observe=(kind,value)=>{const b=record.terminal.buffer.active;log.terminalEvents.push({kind,value,phase:log.phase,bufferType:b.type,bufferStable:b===log.buffer,repeatedReadStable:b===record.terminal.buffer.active,rows:record.terminal.rows,baseY:b.baseY,viewportY:b.viewportY,cursorY:b.cursorY,stack:kind==='scroll'?new Error('Private terminal scroll observation').stack:undefined})};record.terminal.onResize(value=>observe('resize',value));record.terminal.onScroll(value=>observe('scroll',value));if(!window.pendingNativeRecorder){window.pendingNativeRecorder=true;document.addEventListener('pointermove',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending'):null;if(target&&window.pendingNative)window.pendingNative.hoverActions.push({trusted:event.isTrusted,operationId:target.dataset.operationId})},true);document.addEventListener('click',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending button'):null;if(target&&window.pendingNative)window.pendingNative.actions.push({trusted:event.isTrusted,label:target.getAttribute('aria-label'),operationId:target.closest('.composer-pending').dataset.operationId})},true)}})()`);
+  await evaluate(`(()=>{window.pendingNative={editor:${editor},terminal:${surface}.querySelector('.xterm'),neighbor:${neighbor},actions:[],hoverActions:[],terminalEvents:[],phase:'seed'};const log=window.pendingNative,record=resultReadyTerminals.find(r=>r.terminal.element===log.terminal&&!r.disposed);log.buffer=record.terminal.buffer.active;const observe=(kind,value)=>{const b=record.terminal.buffer.active;log.terminalEvents.push({kind,value,phase:log.phase,bufferType:b.type,bufferStable:b===log.buffer,repeatedReadStable:b===record.terminal.buffer.active,rows:record.terminal.rows,baseY:b.baseY,viewportY:b.viewportY,cursorY:b.cursorY,stack:kind==='scroll'?new Error('Private terminal scroll observation').stack:undefined})};record.terminal.onResize(value=>observe('resize',value));record.terminal.onScroll(value=>observe('scroll',value));if(!window.pendingNativeRecorder){window.pendingNativeRecorder=true;document.addEventListener('pointermove',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending__card'):null;if(target&&window.pendingNative)window.pendingNative.hoverActions.push({trusted:event.isTrusted,operationId:target.dataset.operationId})},true);document.addEventListener('click',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending button'):null;if(target&&window.pendingNative)window.pendingNative.actions.push({trusted:event.isTrusted,label:target.getAttribute('aria-label'),operationId:target.closest('.composer-pending__card')?.dataset.operationId})},true)}})()`);
   // CDP typing exercises the maintained original editor, without an Enter or Runtime submit.
   await click(editor); await key('End', 'End', 35); await key('x', 'KeyX', 88, 'x');
   await waitFor(`pendingDelivery.facts().drafts[resultReady.sessionId].includes('x')`);
+  await evaluate(`new Promise(done=>{const r=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);r.terminal.write('x'.repeat(Math.max(0,r.terminal.cols-r.terminal.buffer.active.cursorX-2)),done)})`);
   const baseline = await settled();
   assert.equal(baseline.strip, null, 'An empty queue has no pending slot'); visibleCursor(baseline);
   assert.ok(baseline.facts.inputs.some(input => input.trusted && input.composer && input.key === 'x'));
@@ -292,7 +334,7 @@ async function scene(scene) {
   assert.equal(preparing.facts.inFlight[sid], entry.operationId); assert.equal(preparing.facts.attempts.length, 0);
   assert.ok(preparing.trustedActions.some(action => action.trusted && action.label === '发送这条待发消息' && action.operationId === entry.operationId));
   // The real tail proves that this direct icon grants only the selected operation.
-  await evaluate('pendingDelivery.queue()');
+  await evaluate('pendingDelivery.queue()');await pointAt(`${strip}.querySelector('[data-queue-index="0"] .composer-pending__preview')`);
   const withTail = await settled(); assert.equal(withTail.facts.queues[sid].length, 2);
   const tail = withTail.facts.queues[sid][1]; assert.notEqual(tail.operationId, entry.operationId);
   pendingGeometry(preparing, withTail, '准备发送', true, true); visibleCursor(withTail);
@@ -323,15 +365,13 @@ async function scene(scene) {
   const pending = waiting.facts.queues[sid][0];
   assert.equal(waiting.facts.attempts.length, 1); assert.equal(waiting.facts.inFlight[sid], undefined);
   await frame(scene, 'waiting');
-  await evaluate('pendingDelivery.interaction(false);pendingDelivery.unknown()');
+  await evaluate("pendingNative.phase='permission-cleared';pendingDelivery.interaction(false);pendingDelivery.unknown()");
   const unknown = await settled();
   result.noticeTransitions.push({ scene, name: 'unknown-notice-appears', ...pendingGeometry(clearedTail, unknown, '投递未确认', false, false, true) });
   visibleCursor(unknown);
   assert.equal(unknown.facts.queues[sid][0].operationId, pending.operationId); assert.equal(unknown.facts.attempts.length, 1);
   await frame(scene, 'unknown');
   await click(more); await waitFor(`${panel}.matches(':popover-open')&&${panel}.querySelector('[id$="-outbox-tab"]').getAttribute('aria-selected')==='true'`);
-  const row = `${panel}.querySelector('[data-record-key=${JSON.stringify('queue:' + pending.operationId)}].composer-mailbox__row')`;
-  await waitFor(`Boolean(${row})`); await click(row);
   await waitFor(`Boolean(${panel}.querySelector('.composer-outbox.composer-mailbox__detail'))`);
   assert.equal(await evaluate(`${panel}.querySelector('.log-turn__body').textContent`), pending.text, 'Original Outbox retains the exact full queued text');
   assert.equal(await evaluate(`${panel}.querySelector('.log-turn__actions .composer-mailbox__reveal').disabled`), true);
@@ -356,7 +396,7 @@ async function scene(scene) {
   await waitFor(`!${panel}.matches(':popover-open')`); await evaluate('pendingDelivery.clear()');
   await click(editor); const cleared = await settled();
   assert.equal(cleared.strip, null); assert.equal(cleared.editorFocused, true);
-  retained(baseline, cleared); assert.deepEqual(cleared.terminal, baseline.terminal); visibleCursor(cleared);
+  retained(baseline, cleared, false, true); assert.equal(cleared.facts.resizes.length,unknown.facts.resizes.length,'Clearing pending after the independent permission transition causes zero resize'); assert.deepEqual(cleared.terminal, baseline.terminal); visibleCursor(cleared);
   result.noticeTransitions.push({ scene, name: 'unknown-notice-clears', ...noticeGeometry(unknown, cleared) });
   assert.equal(cleared.facts.attempts.length, 1); assert.deepEqual(cleared.facts.inFlight, {}); assert.deepEqual(cleared.facts.phase, {});
   // Trusted terminal input is echoed only by the private preview adapter on the same actual xterm.
@@ -386,7 +426,7 @@ app.whenReady().then(async () => {
     for (const sceneConfig of [{ viewport: 1280, ownerWidth: 640, appearance: 'dark' }, { viewport: 1280, ownerWidth: 640, appearance: 'light' },
       { viewport: 640, ownerWidth: 320, appearance: 'dark' }, { viewport: 640, ownerWidth: 320, appearance: 'light' }]) await scene(sceneConfig);
     assert.equal(result.scenes.length, 4);
-    if (capture === 'capture') assert.equal(result.frames.length, 56, 'Every bounded scene has eight original and six pending-card screenshots');
+    if (capture === 'capture') assert.equal(result.frames.length, 88, 'Every bounded scene captures the original flows and each real-card traversal state');
     result.rendererErrors = await evaluate('window.pendingNativeErrors');
     assert.deepEqual(result.rendererErrors, [], 'Successful actual Renderer scenes have no error or unhandled rejection');
     result.passed = true;

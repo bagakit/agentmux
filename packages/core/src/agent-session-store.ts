@@ -568,6 +568,7 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     agentSessionId: string(source.agentSessionId, 'hookReceipt.agentSessionId'),
     run: runRef(source.run),
     eventName,
+    ...(source.nativeTurnId === undefined ? {} : { nativeTurnId: string(source.nativeTurnId, 'hookReceipt.nativeTurnId') }),
     ...(source.lifecycleEvent === null ? { lifecycleEvent: null } : lifecycleEvent ? { lifecycleEvent } : {}),
     observedAt: timestamp(source.observedAt, 'hookReceipt.observedAt'),
     ...(outputCursorBytes === undefined ? {} : { outputCursorBytes })
@@ -1101,6 +1102,27 @@ function terminalPromptSubmission(
       }
     })() }),
     outputCursorBytes,
+    ...(source.prepare === undefined ? {} : { prepare: (() => {
+      const prepare = record(source.prepare, 'terminalPromptSubmission.prepare')
+      if (prepare.context !== 'idle' && prepare.context !== 'interruptible') {
+        throw new AgentMuxError('Prompt preparation context is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      const interrupt = prepare.interrupt === undefined ? undefined : terminalInputPhase(prepare.interrupt, 'prompt prepare interrupt')
+      if ((prepare.context === 'interruptible') !== (interrupt !== undefined) ||
+          (interrupt && interrupt.inputByteRange.endByte !== payload.inputByteRange.startByte) ||
+          (prepare.context === 'interruptible' && prepare.nativeTurnId === undefined) ||
+          (prepare.readyThroughByte !== undefined && (prepare.context === 'interruptible' &&
+            (prepare.barrierReceiptId === undefined || !interrupt?.acknowledged)))) {
+        throw new AgentMuxError('Prompt preparation receipt is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return { context: prepare.context,
+        ...(interrupt ? { interrupt } : {}),
+        ...(prepare.nativeTurnId === undefined ? {} : { nativeTurnId: string(prepare.nativeTurnId, 'prepare.nativeTurnId') }),
+        ...(prepare.nativeSourceId === undefined ? {} : { nativeSourceId: string(prepare.nativeSourceId, 'prepare.nativeSourceId') }),
+        ...(prepare.previousReceiptId === undefined ? {} : { previousReceiptId: string(prepare.previousReceiptId, 'prepare.previousReceiptId') }),
+        ...(prepare.barrierReceiptId === undefined ? {} : { barrierReceiptId: string(prepare.barrierReceiptId, 'prepare.barrierReceiptId') }),
+        ...(prepare.readyThroughByte === undefined ? {} : { readyThroughByte: timestamp(prepare.readyThroughByte, 'prepare.readyThroughByte') }) }
+    })() }),
     payload,
     submit
   }
@@ -1118,11 +1140,21 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
   let input: AgentPromptInputPlan
   if (plan.kind === 'single-phase') input = { kind: plan.kind, data: bytes(plan.data) }
   else if (plan.kind === 'render-then-submit') input = {
-    kind: plan.kind, payload: bytes(plan.payload), renderedText: bytes(plan.renderedText), submit: bytes(plan.submit)
+    kind: plan.kind, payload: bytes(plan.payload), renderedText: bytes(plan.renderedText), submit: bytes(plan.submit),
+    ...(plan.prepare === undefined ? {} : { prepare: (() => {
+      const prepare = record(plan.prepare, 'prompt input prepare')
+      return { interrupt: bytes(prepare.interrupt), endEvent: bytes(prepare.endEvent) }
+    })() })
   }
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
   return { run: runRef(source.run), ownerInstanceId: string(source.ownerInstanceId, 'promptCompletionAdmission.intent.ownerInstanceId'),
     prompt: bytes(source.prompt), plan: input,
+    ...(source.execution === undefined ? {} : { execution: (() => {
+      if (source.execution !== 'default' && source.execution !== 'immediate') {
+        throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return source.execution
+    })() }),
     ...(source.message === undefined ? {} : { message: (() => {
       const message = record(source.message, 'promptCompletionAdmission.intent.message')
       return {

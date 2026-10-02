@@ -1,0 +1,31 @@
+import { afterEach, expect, it, vi } from 'vitest'
+import { join } from 'node:path'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+
+afterEach(()=>{vi.restoreAllMocks();vi.unstubAllEnvs()})
+it('actual CLI and RPC bind execution to one original durable message and Core Provider plan',async()=>{
+ const h=await rpcOwnerFixture(),path=join(h.root,'control.sock')
+ const phase=vi.spyOn((h.client as any).promptSubmission,'submitInputPlan').mockImplementation(async (...args:any[])=>args[11])
+ const server=new AgentMuxControlServer({socketPath:path,coreClients:h.coreClients})
+ await server.start();const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path},credentials:h.credentials})
+ try{
+  const args=['--endpoint','unix://'+path,'agent','send','--to-session','recipient','--text','exact immediate body','--execution','immediate','--operation-id','public-immediate-op']
+  const cli=await runCompiledObjectCli(args,objectCliEnvironment(h.root,{AGENTMUX_AGENT_SESSION_ID:'caller',AGENTMUX_AGENT_CAPABILITY:h.capability}))
+  expect(cli.code,cli.stderr).toBe(0);const result=JSON.parse(cli.stdout).result
+  expect(phase).toHaveBeenCalledOnce();expect(phase.mock.calls[0]![12]).toBe('immediate')
+  expect(phase.mock.calls[0]![4]).toMatchObject({kind:'render-then-submit',prepare:{interrupt:'\x1b',endEvent:'Interrupt'}})
+  expect(phase.mock.calls[0]![3]).toBe('[Message from Agent caller]\nexact immediate body')
+  const params={target:{kind:'agent-session' as const,agentSessionId:'recipient'},text:'exact immediate body',execution:'immediate' as const,operationId:'public-immediate-op'}
+  expect((await rpc.call('agent.send',params)).messageId).toBe(result.messageId);expect(phase).toHaveBeenCalledOnce()
+  await expect(rpc.call('agent.send',{...params,execution:'default'})).rejects.toMatchObject({code:'MESSAGE_ID_CONFLICT'})
+  await expect(rpc.call('agent.send',{...params,execution:'other' as any,operationId:'bad-mode'})).rejects.toMatchObject({code:'INVALID_CONTROL_REQUEST'})
+  const durable=await new DurableAgentMuxMessageQueue(join(h.root,'messages.ndjson')).listAfter(0)
+  expect(durable).toHaveLength(1);expect(durable[0]!.execution).toBe('immediate')
+  await h.client.submitAgentMessage({agentSessionId:'recipient',envelope:durable[0]!.envelope,condition:{expectedRun:{runId:'run-recipient'},afterSubmissionId:null},execution:'immediate',caller:h.credentials})
+  await expect(h.client.submitAgentMessage({agentSessionId:'recipient',envelope:durable[0]!.envelope,condition:{expectedRun:{runId:'run-recipient'},afterSubmissionId:null},execution:'default',caller:h.credentials})).rejects.toMatchObject({code:'MESSAGE_ID_CONFLICT'})
+ }finally{await rpc.dispose();await server.stop();await h.close()}
+},20000)
