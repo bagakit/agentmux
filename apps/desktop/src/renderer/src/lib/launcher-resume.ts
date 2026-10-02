@@ -72,7 +72,7 @@ export function launcherResumeRows(input: {
       : continuity === 'conflict' ? 'Recovery conflict'
       : session?.processState === 'running' ? 'Running'
       : session?.processState === 'exited' ? 'Exited'
-      : 'Saved · Run unverified'
+      : 'Saved · Connection unconfirmed'
     return {
       candidate,
       name: resolveAgentName({
@@ -87,9 +87,10 @@ export function launcherResumeRows(input: {
       recap: launcherTimelineRecap(timeline) ?? input.nativeRecaps[candidate.agentSessionId] ?? null,
       inProject: Boolean(projectId && workspace && workspaceProjectId(workspace) === projectId),
       stateLabel,
-      stateDetail: session?.status.detail ?? (session?.processState === 'running'
-        ? 'The current Runtime projection reports a running Run.'
-        : 'This Session is saved. Its current Run has not been confirmed; Core will check attachment or native resume when you continue.')
+      stateDetail: continuity === 'unavailable' || continuity === 'conflict' ? session!.status.detail ?? 'The saved Session is kept. Check its recovery status before retrying.'
+        : session?.processState === 'running' ? 'This Agent process is running. Continue to reconnect to the same Session.'
+        : session?.processState === 'exited' ? 'This Agent process has ended. Continue to resume the saved Session.'
+        : 'This Session is saved. Continue to check its connection and resume where you left off.'
     }
   }).sort((left, right) => right.candidate.updatedAt - left.candidate.updatedAt || left.candidate.agentSessionId.localeCompare(right.candidate.agentSessionId))
 }

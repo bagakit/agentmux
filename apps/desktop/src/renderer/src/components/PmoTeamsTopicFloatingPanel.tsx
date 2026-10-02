@@ -153,7 +153,7 @@ function foreignFloatOwnsKeyboardEvent(event: KeyboardEvent, panel: HTMLElement 
 export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
   floating: PmoTeamsTopicFloatingState; setFloating(next: Partial<PmoTeamsTopicFloatingState>): void
 }): React.JSX.Element {
-  const presentation = useMemo(() => ({ active: floating.open, retainedRegionId: null }), [floating.open])
+  const presentation = useMemo(() => ({ active: floating.open, retainedRegionId: null, surface: 'mote' as const }), [floating.open])
   const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
   const openScratchTopic = useAppStore(state => state.openScratchTopic)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
@@ -418,7 +418,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating }: {
       <span>{selectedMote.title} · Archived. The original work surface remains available.</span>
       <button type="button" className="small-button" disabled={archive.pending === selectedMote.id} onClick={() => void archive.change(selectedMote, false)}>Restore Mote</button>
     </div> : null}
-    <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} />
+    <MoteArchiveNotice workspaceId={SCRATCH_WORKSPACE_ID} issue={archive.issue ?? (selectedMote?.moteArchive?.state === 'unknown' ? selectedMote.moteArchive.issue : null)} failure={archive.failure} targetName={selectedMote?.title} />
     {!scratch ? <div role="status" className="workbench-restore-notice">Original Mote retained · Workspace is still restoring</div> : null}
     {visible && (directoryError || !topics || !motes.some(mote => mote.id === target.topicId)) ? <div role="status" className="workbench-restore-notice mote-context-notice">
       <span>{directoryError ? 'Mote directory could not be refreshed: ' + directoryError : 'Mote directory is not confirmed yet.'} The current work surface is retained.</span>

@@ -183,7 +183,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
           <label className="launcher-resume__search"><Search size={14} aria-hidden="true" />
             <input ref={searchRef} aria-label="Search saved Sessions" role="combobox" aria-expanded="true"
               aria-controls={listId} aria-activedescendant={selectedSessionId ? `${listId}-${selectedSessionId}` : undefined}
-              placeholder="Search recap, Agent, ID or project…" value={query} onChange={event => { setQuery(event.target.value); setSelectedId(null); setFeedback(null) }}
+              placeholder="Search Agent, ID, project or known recap…" value={query} onChange={event => { setQuery(event.target.value); setSelectedId(null); setFeedback(null) }}
               onKeyDown={event => {
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); moveSelection(event.key === 'ArrowDown' ? 1 : -1) }
                 if (event.key === 'Enter' && selected) { event.preventDefault(); void resume(selected) }
@@ -213,7 +213,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             })}
             {!filtered.length ? <div className="launcher-resume__empty"><FolderOpen size={23} aria-hidden="true" />
               <strong>{query ? 'No matching Sessions' : scope === 'project' ? 'No saved Sessions in this project' : 'No saved Sessions yet'}</strong>
-              <p>{query ? 'Try an Agent name, Session ID or project.' : scope === 'project' ? 'Switch to All projects to continue work elsewhere.' : 'Sessions with retained Core identities will appear here.'}</p>
+              <p>{query ? 'Try an Agent name, Session ID, project or a recap already available here.' : scope === 'project' ? 'Switch to All projects to continue work elsewhere.' : 'Your saved Sessions will appear here.'}</p>
               {scope === 'project' ? <button type="button" className="small-button" onClick={() => setScope('global')}>Browse all projects <ArrowRight size={12} /></button> : null}
             </div> : null}
           </div>
@@ -231,7 +231,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
             </div>
             <dl className="launcher-resume__facts">
               <div><dt>Project</dt><dd>{selected.projectName}{!selected.workspace ? <small>Project is not registered</small> : null}</dd></div>
-              <div><dt>Directory</dt><dd className="launcher-resume__path" title={displayPath(selected.candidate.workspacePath, selected.candidate.hostId)}>{displayPath(selected.candidate.workspacePath, selected.candidate.hostId)}</dd></div>
+              <div><dt>Directory</dt><dd className="launcher-resume__path" title={selected.candidate.workspacePath}>{displayPath(selected.candidate.workspacePath, selected.candidate.hostId)}</dd></div>
               <div><dt>Host</dt><dd>{selected.hostName}{selected.hostName !== selected.candidate.hostId ? <small>{selected.candidate.hostId}</small> : null}</dd></div>
               <div><dt>Session ID</dt><dd><code>{selected.candidate.agentSessionId}</code></dd></div>
               <div><dt>Last active</dt><dd><Clock3 size={11} aria-hidden="true" /><time dateTime={new Date(selected.candidate.updatedAt).toISOString()}>{new Date(selected.candidate.updatedAt).toLocaleString()}</time></dd></div>

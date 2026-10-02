@@ -8,11 +8,13 @@ import { LaunchRefine } from '../src/renderer/src/components/LaunchOptionControl
 const options: LaunchOption[] = [{ id: 'sandbox', label: 'Sandbox', choices: [{ id: 'read', label: 'Read only' }, { id: 'full', label: 'Full access', tier: 'danger' }] }]
 let container: HTMLDivElement, root: Root
 const selected = vi.fn()
-beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); selected.mockClear() })
+const resetRequested = vi.fn()
+beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); container = document.createElement('div'); document.body.append(container); root = createRoot(container); selected.mockClear(); resetRequested.mockClear() })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks() })
-function Fixture({ declarations = options, naming = false }: { declarations?: LaunchOption[]; naming?: boolean }) {
-  const [expanded, setExpanded] = useState(false), [selection, setSelection] = useState<LaunchOptionSelection>({}), [names, setNames] = useState({ agentName: '', tabName: '' })
-  return <LaunchRefine options={declarations} selection={selection} expanded={expanded} active={true} onToggle={() => setExpanded(value => !value)} onSelect={(id, choice) => { selected(id, choice); setSelection(choice === null ? {} : { [id]: choice }) }}
+function Fixture({ declarations = options, naming = false, saved = {} }: { declarations?: LaunchOption[]; naming?: boolean; saved?: LaunchOptionSelection }) {
+  const [expanded, setExpanded] = useState(false), [selection, setSelection] = useState<LaunchOptionSelection>(saved), [names, setNames] = useState({ agentName: '', tabName: '' })
+  return <LaunchRefine options={declarations} selection={selection} expanded={expanded} active={true} onToggle={() => setExpanded(value => !value)} onSelect={(id, choice) => { selected(id, choice); setSelection(current => { const next = { ...current }; if (choice === null) delete next[id]; else next[id] = choice; return next }) }}
+    onReset={() => { resetRequested(); setSelection({}) }}
     {...(naming ? { names, onNameChange: (field: 'agentName' | 'tabName', value: string) => setNames(current => ({ ...current, [field]: value })) } : {})} />
 }
 async function mount(declarations = options, naming = false) { await act(async () => root.render(<Fixture declarations={declarations} naming={naming} />)) }
@@ -48,5 +50,37 @@ describe('compact actual launch options', () => {
   it('does not invent model/effort for a Provider whose declaration has neither', async () => {
     const declarations = describeLaunchOptions(CODEX_LAUNCH_OPTIONS); expect(declarations.map(option => option.id)).toEqual(['sandbox', 'approval'])
     await mount(declarations); await click('[aria-label="Launch options"]'); expect([...document.querySelectorAll('select')].map(element => element.getAttribute('aria-label'))).toEqual(['Sandbox', 'Approval policy'])
+  })
+  it('shows retained missing fields and choices without silently clearing or disabling them', async () => {
+    await act(async () => root.render(<Fixture saved={{ sandbox: 'legacy-mode', retired: 'original-value' }} />))
+    expect(selected).not.toHaveBeenCalled(); expect(resetRequested).not.toHaveBeenCalled()
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Launch options"]')!
+    expect(trigger.disabled).toBe(false); expect(trigger.textContent).toContain('2Review')
+    await click('[aria-label="Launch options"]')
+    expect(document.querySelector('[role="status"]')!.textContent).toContain('Sandbox: legacy-mode')
+    expect(document.querySelector('[role="status"]')!.textContent).toContain('retired: original-value')
+    expect(document.querySelector<HTMLSelectElement>('select')!.value).toBe('legacy-mode')
+    const retained = [...document.querySelector<HTMLSelectElement>('select')!.options].find(option => option.value === 'legacy-mode')!
+    expect(retained.textContent).toBe('Saved choice: legacy-mode')
+    expect(retained.disabled).toBe(true)
+    await change('select', 'read'); expect(document.querySelector('[role="status"]')!.textContent).not.toContain('legacy-mode')
+    expect(document.querySelector('[role="status"]')!.textContent).toContain('original-value')
+  })
+  it('keeps the retained choices accessible when the Provider removes every declared field', async () => {
+    await act(async () => root.render(<Fixture declarations={[]} saved={{ retired: 'original-value' }} />))
+    await click('[aria-label="Launch options"]'); expect(document.querySelector('[role="status"]')!.textContent).toContain('retired: original-value')
+    expect(document.querySelectorAll('select')).toHaveLength(0)
+    const reset = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use Agent defaults')!
+    await act(async () => reset.click()); expect(resetRequested).toHaveBeenCalledOnce(); expect(container.textContent).toBe('')
+  })
+  it('resets only on explicit intent and keeps custom names in the panel', async () => {
+    await act(async () => root.render(<Fixture naming saved={{ sandbox: 'full', retired: 'original-value' }} />))
+    await click('[aria-label="Launch options"]')
+    const name = document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!
+    await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Keep this name'); name.dispatchEvent(new Event('input', { bubbles: true })) })
+    const reset = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Use Agent defaults')!
+    await act(async () => reset.click()); expect(resetRequested).toHaveBeenCalledOnce()
+    expect(document.querySelector<HTMLSelectElement>('select')!.value).toBe(''); expect(document.querySelector('[role="status"]')).toBeNull()
+    expect(document.querySelector<HTMLInputElement>('[aria-label="Agent name"]')!.value).toBe('Keep this name')
   })
 })

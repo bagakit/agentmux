@@ -184,7 +184,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
     {section('Motes', motes.filter(topic => topic.moteArchive?.state !== 'archived' || showArchived))}
     {section('Topics', entries)}
     {error ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
-    <MoteArchiveNotice workspaceId={workspace.id} issue={archive.issue} />
+    <MoteArchiveNotice workspaceId={workspace.id} issue={archive.issue} failure={archive.failure} />
     <MoteRenameDialog target={renameTarget ? { topic: renameTarget, workspace } : null} onClose={() => setRenameTarget(null)}
       returnFocus={() => tree.current?.querySelector<HTMLButtonElement>('[data-space-nav="topic:' + renameId.current + '"]') ?? null} />
   </div>
