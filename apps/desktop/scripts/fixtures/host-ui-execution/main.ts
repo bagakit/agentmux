@@ -120,9 +120,9 @@ app.whenReady().then(async () => {
     process.stderr.write(`host-ui:${phase}:${step}\n`)
     await fs.writeFile(path.join(evidence, `${phase}-progress.json`), JSON.stringify({ phase, step, pid: process.pid, at: Date.now() }), { mode: 0o600 })
   }
-  const until = async (expression: string, budget = 20_000) => {
+  const until = async (expression: string | (() => unknown), budget = 20_000) => {
     const deadline = Date.now() + budget
-    do { const value = await win.webContents.executeJavaScript(expression); if (value) return value; await delay(40) } while (Date.now() < deadline)
+    do { const value = typeof expression === 'string' ? await win.webContents.executeJavaScript(expression) : expression(); if (value) return value; await delay(40) } while (Date.now() < deadline)
     throw new Error(`Native Host UI condition did not settle: ${expression}`)
   }
   const capture = async (name: string) => {
@@ -277,6 +277,10 @@ app.whenReady().then(async () => {
       await stage('actual-launcher-geminicc-button')
       await click(`${region('host-ui-launcher-a')} .launcher-launch-button`)
       await until(`window.hostUiState().tabs['host-ui-original-tab'].regions['host-ui-launcher-a'].kind==='agent'`, 35_000)
+      await until(`document.querySelector(${JSON.stringify(region('host-ui-launcher-a') + ' [data-execution-host-id="' + input.remoteHostId + '"]')})`)
+      result.creationPaint = await state()
+      await capture('agent-creation-stage')
+      await until(() => Boolean(result.agentLaunch?.created?.agentSessionId), 35_000)
       assert.ok(result.agentLaunch?.created.agentSessionId)
       const sid = result.agentLaunch.created.agentSessionId
       assert.notEqual(sid, originalSessionId)
@@ -311,6 +315,7 @@ app.whenReady().then(async () => {
       result.terminalUiAction = terminalAction
       await click(`${region('host-ui-launcher-b')} [aria-label="${terminalAction}"]`)
       await until(`window.hostUiState().tabs['host-ui-original-tab'].regions['host-ui-launcher-b'].kind==='terminal'`)
+      await until(() => Boolean(result.terminalLaunch?.session))
       const terminal = result.terminalLaunch.session
       const run = (await remoteClient().listRuns()).find(one => one.runId === terminal.control.run.runId)!
       assert.equal(run.workspacePath, workspace('host-ui-remote').path)
