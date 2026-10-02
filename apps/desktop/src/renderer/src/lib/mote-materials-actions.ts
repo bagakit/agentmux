@@ -87,11 +87,14 @@ function emptyMoteDestination(state: ReturnType<typeof useAppStore.getState>, ow
   } else {
     const choice = state.workbenchSpaceSelection
     if (choice?.tabId || choice?.regionId) return null
-    if (destination === undefined && choice?.groupId) {
+    if (destination === undefined && choice && state.mainSurface === 'workbench' && state.activeWorkspaceId === choice.workspaceId) {
       const spaceId = directoryIdentity(owner.workspace.hostId, scratchTopicIdentityPath(owner.workspace, owner.topic))
       const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
       if (choice.spaceId !== spaceId || !catalog.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === choice.zoneId)) return null
-      destination = { displayWorkspaceId: choice.workspaceId, groupId: choice.groupId }
+      // A new File/Terminal action uses the active Pane of this actual empty Space.
+      // This is not an address for any saved or unconfirmed discussion.
+      const groupId = choice.groupId ?? state.layouts[choice.workspaceId]?.activeGroupId
+      if (groupId) destination = { displayWorkspaceId: choice.workspaceId, groupId }
     }
   }
   return destination ? confirmedMoteDestination(state, owner, destination, true) : null

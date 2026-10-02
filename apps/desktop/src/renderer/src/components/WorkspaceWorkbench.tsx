@@ -1018,6 +1018,7 @@ function WorkbenchRegionBranch({
       </Panel>
       <PanelResizeHandle
         className="workbench-region-resize-handle"
+        disabled={!surfaceVisible}
         onDragging={(active) => {
           committer.setDragging(active)
           setDragging(active)
@@ -1052,6 +1053,7 @@ function PaneGroup({
   isRootLeaf,
   showWindowChrome = false,
   leadingChrome,
+  presentationAction,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1067,6 +1069,7 @@ function PaneGroup({
   isRootLeaf?: boolean
   showWindowChrome?: boolean
   leadingChrome?: ReactNode
+  presentationAction?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1167,6 +1170,7 @@ function PaneGroup({
         ) : leadingChrome ?? null}
         {tabNavigation}
         <div className="pane-tabbar__actions">
+          {layout.activeGroupId === group.id ? presentationAction : null}
           {activeRuntimeSession && canStopSessionRun(activeRuntimeSession) ? (
             <button
               type="button"
@@ -1284,6 +1288,7 @@ function SplitNode({
   isRootLeaf = false,
   showWindowChrome = false,
   leadingChrome,
+  presentationAction,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1299,6 +1304,7 @@ function SplitNode({
   isRootLeaf?: boolean
   showWindowChrome?: boolean
   leadingChrome?: ReactNode
+  presentationAction?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1317,6 +1323,7 @@ function SplitNode({
         isRootLeaf={isRootLeaf}
         showWindowChrome={showWindowChrome}
         leadingChrome={leadingChrome}
+        presentationAction={presentationAction}
         viewHostPrefix={viewHostPrefix}
         onNewTab={onNewTab}
       />
@@ -1335,6 +1342,7 @@ function SplitNode({
       interactiveResize={interactiveResize}
       showWindowChrome={showWindowChrome}
       leadingChrome={leadingChrome}
+      presentationAction={presentationAction}
       viewHostPrefix={viewHostPrefix}
       onNewTab={onNewTab}
     />
@@ -1353,6 +1361,7 @@ function SplitBranch({
   interactiveResize,
   showWindowChrome,
   leadingChrome,
+  presentationAction,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1367,6 +1376,7 @@ function SplitBranch({
   interactiveResize: boolean
   showWindowChrome: boolean
   leadingChrome?: ReactNode
+  presentationAction?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1409,13 +1419,14 @@ function SplitBranch({
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
           leadingChrome={leadingChrome}
+          presentationAction={presentationAction}
           viewHostPrefix={viewHostPrefix}
           onNewTab={onNewTab}
         />
       </Panel>
       <PanelResizeHandle
         className="pane-resize-handle"
-        disabled={projection?.placementConfirmed === false}
+        disabled={!surfaceVisible || projection?.placementConfirmed === false}
         onDragging={(active) => {
           committer.setDragging(active)
           setDragging(active)
@@ -1433,6 +1444,7 @@ function SplitBranch({
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={false}
+          presentationAction={presentationAction}
           viewHostPrefix={viewHostPrefix}
           onNewTab={onNewTab}
         />
@@ -1482,10 +1494,11 @@ function RetainedWorkbenchNotice({ workspaceId, targetTabId, available, visible,
 }
 
 /** The shared owner keeps an unplaced original View and every explicit navigation choice. */
-function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId, viewHostPrefix, visible }: {
+function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId, viewHostPrefix, visible, presentationAction }: {
   workspaceId: string
   tabs: Readonly<Record<string, WorkbenchTab>>; layout: WorkspaceLayout | undefined
   original: WorkbenchTab | undefined; targetTabId: string; viewHostPrefix: string; visible: boolean
+  presentationAction?: ReactNode
 }) {
   const visibleGroups = layout ? new Set(groupIds(layout.root)) : new Set<string>()
   const groups = layout?.groups.filter(group => visibleGroups.has(group.id) && group.tabOrder.length > 0) ?? []
@@ -1495,7 +1508,9 @@ function RetainedWorkbenchTab({ workspaceId, tabs, layout, original, targetTabId
         <WorkbenchTabStrip activeTabId={null} tabIds={group.tabOrder}>{group.tabOrder.flatMap(id => tabs[id] ? [<SortableWorkbenchTab key={id}
           workspaceId={workspaceId} tab={tabs[id]!} group={{ ...group, activeTabId: null }} />] : [])}</WorkbenchTabStrip>
       </SortableContext>
+      {layout?.activeGroupId === group.id ? <div className="pane-tabbar__actions">{presentationAction}</div> : null}
     </header>)}
+    {!groups.some(group => group.id === layout?.activeGroupId) && presentationAction ? <header className="pane-tabbar pane-tabbar--root"><div className="pane-tabbar__actions">{presentationAction}</div></header> : null}
     <RetainedWorkbenchNotice workspaceId={workspaceId} targetTabId={targetTabId} available={Boolean(original)} visible={visible} />
     <div className="pane-content"><div className="pane-body">
       {original ? <div id={`${viewHostPrefix}:${targetTabId}`} data-workbench-tab-id={targetTabId} className="workbench-tab-slot" />
@@ -1518,7 +1533,8 @@ export function WorkspaceWorkbench({
   onTabSelect,
   onCreateTab,
   projection,
-  leadingChrome
+  leadingChrome,
+  presentationAction
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1546,6 +1562,8 @@ export function WorkspaceWorkbench({
   projection?: WorkbenchProjection | undefined
   /** Surface chrome follows the same first-Pane path without taking content ownership. */
   leadingChrome?: ReactNode
+  /** One host action in the active Pane header; original content and controls stay shared. */
+  presentationAction?: ReactNode
 }) {
   const moteContext = useContext(MoteWorkfaceContext)
   const workbenchRef = useRef<HTMLDivElement>(null)
@@ -1794,6 +1812,7 @@ export function WorkspaceWorkbench({
 
   if (viewOwnership === 'projection' && !retainedTabId && !projection) {
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
+      {presentationAction ? <header className="pane-tabbar pane-tabbar--root"><div className="pane-tabbar__actions">{presentationAction}</div></header> : null}
       {layout ? <div className="pane-state">
         <strong role="status">{moteContext ? 'No discussion yet' : 'No Tab in this context'}</strong>
         <button type="button" className="small-button" aria-label={moteContext ? 'New discussion' : 'New Tab'} title={moteContext ? 'New discussion' : 'New tab'}
@@ -1863,7 +1882,7 @@ export function WorkspaceWorkbench({
           targetTabId={retainedTabId} available={Boolean(original)} visible={visible} active={retainUnplacedTab} /> : null}
         {retainedTabId && showReferenceBody ? <div className="workbench-reference-body">
           <RetainedWorkbenchTab workspaceId={workspaceId} tabs={tabs} layout={layout ?? undefined}
-            original={original} targetTabId={retainedTabId} viewHostPrefix={viewHostPrefix} visible={visible && retainUnplacedTab} />
+            original={original} targetTabId={retainedTabId} viewHostPrefix={viewHostPrefix} visible={visible && retainUnplacedTab} presentationAction={presentationAction} />
         </div> : null}
         <div className="workbench-layout-body" data-workbench-layout-state={retainUnplacedTab && !bodyLayout ? 'parked' : undefined}
           aria-hidden={retainUnplacedTab && !bodyLayout ? true : undefined} inert={retainUnplacedTab && !bodyLayout}>
@@ -1881,6 +1900,7 @@ export function WorkspaceWorkbench({
           isRootLeaf={rootIsLeaf}
           showWindowChrome={viewOwnership === 'owner'}
           leadingChrome={leadingChrome}
+          presentationAction={presentationAction}
           viewHostPrefix={bodyViewHostPrefix}
           onNewTab={newTab}
         /> : <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div>}
