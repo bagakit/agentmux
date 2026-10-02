@@ -1,0 +1,17 @@
+.session-recovery-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-3); }
+.session-recovery-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(460px, calc(100vw - 32px)); padding: var(--sp-6); overflow-y: auto; }
+.session-recovery-dialog h2 { margin: 0; font-size: var(--fs-title); font-weight: 600; letter-spacing: -.015em; line-height: 1.4; }
+.session-recovery-dialog > p { margin: var(--sp-4) 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }
+.session-recovery-dialog__source { display: grid; gap: var(--sp-2); margin: var(--sp-5) 0; padding: var(--sp-4); border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-body); color: var(--text-2); }
+.session-recovery-dialog__source strong { font-weight: 500; color: var(--text); overflow-wrap: anywhere; user-select: text; }
+.session-recovery-dialog fieldset { display: flex; flex-wrap: wrap; gap: var(--sp-5); border: 0; padding: 0; margin: var(--sp-5) 0; font-size: var(--fs-body); }
+.session-recovery-dialog legend { margin-bottom: var(--sp-3); color: var(--text-2); }
+.session-recovery-dialog fieldset label { display: flex; align-items: center; gap: var(--sp-2); }
+.session-recovery-dialog input { accent-color: var(--text-2); }
+.session-recovery-dialog__field { display: grid; gap: var(--sp-3); margin: var(--sp-5) 0; font-size: var(--fs-body); color: var(--text-2); }
+.session-recovery-dialog select { width: 100%; min-height: 30px; border: 0; border-radius: var(--radius-sm); padding: var(--sp-3); color: var(--text); background: var(--surface-3); font: inherit; }
+.session-recovery-dialog select:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.session-recovery-dialog__field > span { line-height: 1.5; }
+.session-recovery-dialog .session-recovery-dialog__hint { font-size: var(--fs-meta); color: var(--text-3); line-height: 1.5; }
+.session-recovery-dialog footer { display: flex; justify-content: space-between; align-items: center; gap: var(--sp-3); margin-top: var(--sp-6); }
+.dialog-surface footer .session-recovery-dialog__confirm { background: var(--surface-3); color: var(--text); }

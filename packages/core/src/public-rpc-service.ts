@@ -6,6 +6,7 @@ import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates,
   type AgentMuxControlCaller, type AgentMuxDemand } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
 import { AgentMuxError } from './errors.js'
+import { readAgentSessionHistory, validateSessionHistoryReadInput } from './session-history-reader.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { classifySelfViewFailure, SELF_CONTEXT_TOPIC_HINT } from './agent-self-context.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
@@ -31,7 +32,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
@@ -73,6 +74,7 @@ const NATIVE_FIELDS = {
   'space.resolve': ['tabId','regionId','direction'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
+  'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
   'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId'],
@@ -276,6 +278,23 @@ export class AgentMuxRpcService {
     }
     const caller = await this.authenticated(context)
     const p = rpcRecord(params)
+    if (method === 'agent.history') {
+      const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>
+      validateSessionHistoryReadInput(input)
+      const owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (owners.length !== 1) throw new AgentMuxError('The exact history Host owner is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
+      const client = owners[0]!.client
+      context.signal?.throwIfAborted()
+      if (client.forwardRpc) {
+        // Page at the original semantic Host; do not transport a complete SDK timeline first.
+        // The caller was authenticated here. Borrow the same original Host transport authority
+        // used by inspect; a managed capability must not cross semantic Runtime owners.
+        const { caller: _localCaller, ...readContext } = context
+        const page = await client.forwardRpc('agent.history', { ...input, hostId: 'local' }, readContext)
+        return { ...page, hostId: input.hostId } as AgentMuxRpcResult<M>
+      }
+      return await readAgentSessionHistory(client, input) as AgentMuxRpcResult<M>
+    }
     if (caller?.client.forwardRpc && ['agent.role.ls', 'agent.role.register', 'agent.role.resolve',
       'agent.discuss', 'agent.handoff', 'message.inbox.check', 'message.inbox.ack',
       'message.dispatch.open', 'message.dispatch.inspect', 'message.dispatch.report'].includes(method)) {

@@ -27,6 +27,8 @@ import type { ConversationAnnotation } from '@agentmux/client-ui/components/Conv
 import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } from './ConversationAnnotationNote'
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { SessionRecoveryActions } from './SessionRecoveryActions'
+import type { RecoverySource } from '../lib/session-recovery-actions'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
@@ -130,6 +132,7 @@ export function SessionPane({
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
   const tabName = useAppStore((state) => linkOrigin.tabId ? state.tabs?.[linkOrigin.tabId]?.name : undefined)
+  const sourceWorkspaceId = useAppStore(state => linkOrigin.tabId ? state.tabs[linkOrigin.tabId]?.workspaceId : undefined)
   const moteOwner = useMoteConversationOwner(linkOrigin.workspaceId, linkOrigin.tabId,
     visible || presentations.some(target => target.visible !== false))
   const timeline = useAppStore((state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
@@ -553,6 +556,12 @@ export function SessionPane({
     session?.status.continuityReason,
     session?.status.continuityConflict
   )
+  const recoveryActionSource: RecoverySource | null = executionHostId && sourceWorkspaceId && linkOrigin.tabId && linkOrigin.regionId ? {
+    hostId: executionHostId, agentSessionId: sessionId, workspaceId: sourceWorkspaceId,
+    tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
+    ...(linkOrigin.tabGroupId ? { groupId: linkOrigin.tabGroupId } : {}),
+    diagnostic: continuityNotice?.reason ?? session?.status.detail ?? 'Original Session state is not confirmed.'
+  } : null
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -682,11 +691,8 @@ export function SessionPane({
     const executorLabel = metadata ? connectingExecutor?.label ?? metadata.executorId : null
     const identityLabel = providerLabel && executorLabel && providerLabel.toLowerCase() !== executorLabel.toLowerCase()
       ? `${providerLabel} · ${executorLabel}` : providerLabel
-    const resumeAction = projectionPolicy.allowsRecovery ? <button type="button" className="small-button"
-      disabled={recovering} onClick={() => void reopenRetained()}>
-      {recovering ? <LoaderCircle size={12} className="spin" /> : <RotateCcw size={12} />}
-      {recovering ? continuationUnconfirmed ? 'Checking…' : 'Resuming…' : continuationUnconfirmed ? 'Check again' : 'Continue session'}
-    </button> : null
+    const resumeAction = projectionPolicy.allowsRecovery && recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource}
+      restoring={recovering} workingLabel={continuationUnconfirmed ? 'Checking…' : 'Restoring…'} restoreLabel={continuationUnconfirmed ? 'Check original restore' : 'Restore original'} onRestore={() => void reopenRetained()} /> : null
     const reopenCause = retainedReopenError ?? (pendingReopen
       ? pendingReopen.operationId ? 'Core retains the original continue operation. Its result is not yet confirmed.'
         : 'Core retains the original continue operation, but its correlation is unavailable. Its result remains unknown.' : null)
@@ -787,16 +793,11 @@ export function SessionPane({
   // The history notice and the underlying Session share one Core-reasoned action.
   const agentRecoveryAction = !projectionPolicy.allowsRecovery ? (
     <span>Open this Session in its Project to restore it.</span>
-  ) : continuityNotice ? (
-    <button type="button" className="small-button"
-      disabled={!(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) || recovering || refreshing}
-      title={continuityNotice.reason}
-      onClick={continuityRefreshEnabled(continuityNotice)
-        ? () => void refresh() : continuityRetryEnabled(continuityNotice) ? () => void recover() : undefined}>
-      <RotateCcw size={12} /> {recovering && continuityRetryEnabled(continuityNotice)
-        ? 'Resuming…' : refreshing && continuityRefreshEnabled(continuityNotice) ? 'Re-reading…' : continuityNotice.actionLabel}
-    </button>
-  ) : (
+  ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} restoring={recovering || refreshing}
+    workingLabel={refreshing ? 'Re-reading…' : 'Restoring…'}
+    restoreDisabled={continuityNotice ? !(continuityRetryEnabled(continuityNotice) || continuityRefreshEnabled(continuityNotice)) : false}
+    restoreLabel={continuityNotice && continuityRefreshEnabled(continuityNotice) ? 'Re-read original' : continuityNotice?.remedy.kind === 'wait' ? 'Waiting for operation' : 'Restore original'}
+    onRestore={() => { if (continuityNotice && continuityRefreshEnabled(continuityNotice)) void refresh(); else void recover() }} /> : (
     <button type="button" className="small-button" disabled={recovering} onClick={() => void recover()}>
       <RotateCcw size={12} /> {recovering ? 'Resuming…' : 'Resume'}
     </button>

@@ -10,6 +10,15 @@ export interface DurableWriteOptions {
   readonly requireDirectorySync?: boolean
 }
 
+/** The replacement is readable, but its directory entry has no durable acknowledgement. */
+export class DurableWriteConfirmationError extends Error {
+  readonly replacementApplied = true
+  constructor(readonly path: string, cause: unknown) {
+    super('The file was replaced, but its parent directory flush is unconfirmed.', { cause })
+    this.name = 'DurableWriteConfirmationError'
+  }
+}
+
 /**
  * 原子且持久地写一个文件：临时文件 → fsync(文件) → rename → fsync(父目录)。
  *
@@ -18,8 +27,8 @@ export interface DurableWriteOptions {
  * 必须先把新内容刷进磁盘，再 rename，最后刷父目录让这条目录项本身落地。把 fsync 挪到
  * rename 之后、或者干脆不 fsync，就等于回到「原子但会丢」的老问题。
  *
- * 父目录 fsync 尽力而为：部分文件系统对目录句柄的 fsync 返回 EINVAL/EISDIR/EACCES，
- * 那不代表数据没落盘，吞掉即可，不阻断这次写入。
+ * 要求持久确认的调用者收到分阶段错误：rename 后目录 flush 失败不能冒充未写入，
+ * 也不能把当前读得到字节冒充断电后的保证。
  */
 export async function durableWriteFile(
   path: string,
@@ -45,7 +54,11 @@ export async function durableWriteFile(
     signal?.throwIfAborted()
     await rename(temporaryPath, path)
     committed = true
-    await syncDirectory(dirname(path), options.requireDirectorySync === true)
+    try {
+      await syncDirectory(dirname(path), options.requireDirectorySync === true)
+    } catch (error) {
+      throw new DurableWriteConfirmationError(path, error)
+    }
   } finally {
     if (!committed) {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {
