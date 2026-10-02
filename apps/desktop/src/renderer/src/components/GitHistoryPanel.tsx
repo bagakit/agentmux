@@ -1,10 +1,11 @@
-import { useMemo, type CSSProperties } from 'react'
+import { useLayoutEffect, useMemo, useRef, type CSSProperties } from 'react'
 import { RefreshCw } from 'lucide-react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import type { GitHistoryCommit, GitHistoryRef } from '../../../shared/git-contracts'
 import type { useGitHistory } from '../hooks/useGitHistory'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
+import { useGitHistoryDetails } from './GitHistoryDetails'
 
 const ROW_HEIGHT = 24
 const LANE_WIDTH = 14
@@ -59,6 +60,11 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
   const displayPath = usePathDisplay()
   const ready = history.result?.kind === 'ready' ? history.result : null
   const graph = useMemo(() => historyGraph(ready?.commits ?? [], ready?.snapshot.refs ?? []), [ready?.commits, ready?.snapshot.refs])
+  const detailsScope = useMemo(() => JSON.stringify([workspace.id, workspace.hostId, workspace.path, history.reference, ready?.snapshot ?? null]),
+    [workspace.id, workspace.hostId, workspace.path, history.reference, ready?.snapshot])
+  const details = useGitHistoryDetails(detailsScope, history.enabled)
+  const previousScrollTop = useRef(0)
+  useLayoutEffect(() => { previousScrollTop.current = 0 }, [detailsScope])
   return <section className="git-history-panel" aria-label="Git history" aria-busy={history.loading}>
     <div className="git-history-controls">
       <select aria-label="History reference" value={history.reference ?? ''}
@@ -69,13 +75,23 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
           <option key={ref.name} value={ref.name}>{ref.kind === 'remote' ? 'Remote · ' : ''}{referenceLabel(ref)}</option>)}
         {history.reference && !history.refs.some(ref => ref.name === history.reference) && <option value={history.reference}>{history.reference.replace(/^refs\/(heads|remotes)\//u, '')}</option>}
       </select>
-      <button className="icon-button" title="Refresh history" aria-label="Refresh history" disabled={history.loading}
+      <button className="icon-button" title="Refresh history" aria-label="Refresh history" disabled={!history.enabled || history.loading}
         onClick={() => { void history.refresh() }}><RefreshCw size={13} /></button>
     </div>
-    {history.error && <div className="git-history-error" role="alert">{history.error}</div>}
+    {history.error && <div className="git-history-error" role="alert"><span>{history.error}</span>
+      <button disabled={!history.enabled || history.loading} onClick={() => { void (ready?.nextCursor ? history.loadMore() : history.refresh()) }}>Retry</button>
+    </div>}
     {!ready && !history.error && <div className="branches-empty"><strong>{history.loading ? 'Reading history…' : 'Not a Git repository'}</strong></div>}
     {ready && ready.commits.length === 0 && <div className="branches-empty"><strong>No commits yet</strong></div>}
-    {ready && ready.commits.length > 0 && <div className="git-history-scroll">
+    {ready && ready.commits.length > 0 && <div className="git-history-scroll" onScroll={event => {
+      details.close()
+      if (event.target !== event.currentTarget) return
+      const { scrollTop, scrollHeight, clientHeight } = event.currentTarget
+      const readingDown = scrollTop > previousScrollTop.current
+      previousScrollTop.current = scrollTop
+      if (readingDown && scrollHeight - clientHeight - scrollTop <= ROW_HEIGHT * 3 &&
+        history.enabled && document.visibilityState !== 'hidden' && !history.loading && !history.error && ready.nextCursor) void history.loadMore()
+    }}>
       <div className="git-history-window">
         <div className="git-history-graph" aria-label="Commit relationships" tabIndex={0}>
           <svg width={graph.width} height={graph.rows.length * ROW_HEIGHT + (graph.pending.length ? 12 : 0)} role="img" aria-label="Loaded commit graph">
@@ -93,9 +109,8 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
                   style={branchStyle(graph.guides.get(commit.parents[0] === parent ? commit.oid : parent))}
                   d={`M ${x(lane)} ${middle} C ${x(lane)} ${bottom - ROW_HEIGHT / 4}, ${x(after.indexOf(parent))} ${bottom - ROW_HEIGHT / 4}, ${x(after.indexOf(parent))} ${bottom}`} />)}
                 <circle className="git-history-node" data-commit-oid={commit.oid} data-branch-ref={graph.guides.get(commit.oid)}
-                  style={branchStyle(graph.guides.get(commit.oid))} cx={x(lane)} cy={middle} r={3}>
-                  <title>{commit.oid}{commit.parents.length === 0 ? ' · Root commit' : ` · ${commit.parents.length} parent${commit.parents.length > 1 ? 's' : ''}`}</title>
-                </circle>
+                  style={branchStyle(graph.guides.get(commit.oid))} cx={x(lane)} cy={middle} r={3}
+                  {...details.triggerEvents(commit)} />
               </g>
             })}
             {graph.pending.map((oid, lane) => <path key={oid} className="git-history-continuation" data-unloaded-parent={oid}
@@ -105,15 +120,15 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
         </div>
         <ol className="git-history-commits">
           {ready.commits.map(commit => <li className="git-history-commit" key={commit.oid} data-history-oid={commit.oid} style={{ height: ROW_HEIGHT }}
-            title={`${commit.subject || '(No commit message)'}\n${commit.oid} · ${commit.author}${commit.authoredAt === null ? '' : ` · ${new Date(commit.authoredAt).toLocaleString()}`}${commit.refs.length ? `\n${commit.refs.map(ref => ref.name).join('\n')}` : ''}`}>
+            {...details.triggerEvents(commit)}>
             <strong>{commit.subject || '(No commit message)'}</strong>
-              {commit.refs.length > 0 && <div className="git-history-refs" title={commit.refs.map(ref => ref.name).join('\n')}>
+              {commit.refs.length > 0 && <div className="git-history-refs">
                 {commit.refs.slice(0, 2).map(ref => {
                   const guide = ref.kind === 'local' || ref.kind === 'remote' ? ref.name : ref.kind === 'head' ? graph.guides.get(commit.oid) : undefined
-                  return <span key={ref.name} className={`git-history-ref git-history-ref--${ref.kind}`} title={ref.name}
-                    data-branch-ref={guide} style={branchStyle(guide)}>{referenceLabel(ref)}</span>
+                  return <span key={ref.name} className={`git-history-ref git-history-ref--${ref.kind}`}
+                    {...details.triggerEvents(commit, ref)} data-branch-ref={guide} style={branchStyle(guide)}>{referenceLabel(ref)}</span>
                 })}
-                {commit.refs.length > 2 && <span className="git-history-ref-count">+{commit.refs.length - 2}</span>}
+                {commit.refs.length > 2 && <span className="git-history-ref-count" {...details.triggerEvents(commit)}>+{commit.refs.length - 2}</span>}
               </div>}
             <code className="git-history-hash">{commit.oid.slice(0, 7)}</code>
           </li>)}
@@ -121,8 +136,9 @@ export function GitHistoryPanel({ workspace, history }: { workspace: WorkspaceRe
       </div>
       <div className="git-history-footer">
         <span>{ready.commits.length} commits{graph.pending.length ? ` · ${graph.pending.length} parent${graph.pending.length > 1 ? 's' : ''} beyond view` : ''}</span>
-        {ready.nextCursor && <button disabled={history.loading} onClick={() => { void history.loadMore() }}>{history.loading ? 'Reading…' : 'Load more'}</button>}
+        {ready.nextCursor && <button disabled={!history.enabled || history.loading} onClick={() => { void history.loadMore() }}>{history.loading ? 'Reading…' : history.error ? 'Retry loading more' : 'Load more'}</button>}
       </div>
     </div>}
+    {details.preview}
   </section>
 }

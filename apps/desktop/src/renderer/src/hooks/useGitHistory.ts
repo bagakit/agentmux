@@ -87,7 +87,7 @@ export function useGitHistory(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' |
   return {
     result: owned?.result ?? null, loading: owned?.loading ?? enabled, error: owned?.error ?? null,
     refs: state?.key === key && state.result?.kind === 'ready' ? state.result.snapshot.refs : [],
-    reference,
+    reference, enabled,
     selectReference: (value: string | null) => setSelection({ key, reference: value }),
     refresh: () => read(false), loadMore: () => read(true)
   }
