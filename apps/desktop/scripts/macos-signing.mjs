@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { sign } from '@electron/osx-sign'
 
 const exec = promisify(execFile)
@@ -62,11 +62,15 @@ export async function verifyMacosSigning(appPath, plan, { run = runNative, bundl
 /** Electron's maintained signer owns inside-out traversal; local runtime mode stays unchanged. */
 export async function signMacosApplication(appPath, plan, { signer = sign } = {}) {
   requireSigningPlan(plan)
+  // Core's manifest pins these already signed Runtime binaries byte for byte.
+  const pinnedRuntimeBinaries = new Set(['ctxmux', 'ctxmuxd'].map(name => resolve(appPath,
+    'Contents', 'Resources', 'app', 'node_modules', '@agentmux', 'core', 'vendor', 'ctxmux', 'darwin-arm64', 'bin', name)))
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-signing-'))
   try {
     const entitlements = join(temporary, 'empty-entitlements.plist')
     await writeFile(entitlements, '<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd"><plist version="1.0"><dict/></plist>\n')
     await signer({ app: appPath, platform: 'darwin', identity: plan.kind === 'certificate' ? plan.identity : '-',
+      ignore: file => pinnedRuntimeBinaries.has(resolve(file)),
       identityValidation: plan.kind === 'certificate', strictVerify: true, preAutoEntitlements: false,
       preEmbedProvisioningProfile: false, optionsForFile: () => ({ hardenedRuntime: false, entitlements,
         ...(plan.kind === 'ad-hoc' ? { timestamp: 'none' } : {}) }) })
