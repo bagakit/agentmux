@@ -140,6 +140,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 - 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、Browser、General），资源配置随后（Agents、Prompts、Workspaces），环境连接与手机设备接入独立归入 Connections；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，Workspaces 从资源导航进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
+- Provider 是 Agent CLI 的协议适配声明，Executor 是用户保存的启动模板；同一 Provider 可有多个名称、命令、参数和环境不同的 Executor。Agents 有明确的 Provider 查看入口，读取原 Core／Main 公共目录与能力声明；声明不等于目标环境的命令可执行、登录或 Session 健康结论。目录尚未取得或读取失败时，创建入口可进入原因与就地显式重试；不伪造可选 Provider、命令或保存成功。成功空目录与未知失败清楚区分，失败保留此前目录和已有草稿、保存能力。新 UI Executor 的自动 ID 采用 `<provider-id>-<8位随机十六进制短码>`，不加 `executor-` 或完整 UUID；生成时避开当前草稿、配置及 authored expected 中的同名 ID，不按名称、序号或删除空位派生。仅未保存草稿换 Provider 时重铸正确前缀，完整保留字段、自定义命令、展开状态与 Provider 焦点；命令仍恰为旧 Provider 默认值时切换到新默认值。名称变更不换 ID，保存期间固定提交批次的 Provider 与 ID，保存后 ID 稳定。已有 ID、显式 CLI ID、Provider 不可变、引用保护及保存冲突语义保持，不引入迁移或 ID 平台。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。
 - 启动参数的可编辑表示必须与实际 argv 可逆；追加或修改一个参数不能拆开其他参数中的空格、引号、反斜杠或空值。
 - 字体字号等数字设置必须允许清空、选中替换与逐位输入完整值；输入中的未完成值不能被立即钳位或舍入打断。明确保存时才验证有限整数和实际允许范围，非法输入保留草稿并说明原因，不改变已提交值；滑块选择保持合法，外部 CLI 提交、冲突与保存失败仍遵守同一草稿保留规则。
