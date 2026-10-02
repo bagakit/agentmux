@@ -332,17 +332,22 @@
 .focus-hierarchy-warning { margin: 0; padding: var(--sp-1) var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 
 .focus-toolbar { flex: none; display: flex; align-items: center; min-width: 0; height: 36px; background: var(--surface-1); border-bottom: 1px solid var(--line); -webkit-app-region: drag; }
-.focus-toolbar__filters { flex: 1 1 auto; min-width: min(100%, 204px); container: focus-filter-area / inline-size; }
-.focus-toolbar__context { display: flex; align-items: center; flex: 0 1 var(--focus-workspace-width, calc(61.8% - 6px)); min-width: 0; gap: var(--sp-1); padding: 0 var(--sp-2); container: focus-context-area / inline-size; -webkit-app-region: no-drag; }
-.focus-toolbar__identity { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: var(--sp-2); border: 0; background: transparent; color: var(--text-2); padding: 3px 0; text-align: left; cursor: default; }
-.focus-toolbar__identity strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 500; }
+.focus-toolbar__filters { flex: 1 1 auto; min-width: 0; container: focus-filter-area / inline-size; }
+.focus-toolbar__context { display: flex; align-items: center; flex: 0 1 var(--focus-workspace-width, calc(61.8% - 6px)); min-width: min(216px, 100%); gap: var(--sp-1); padding: 0 var(--sp-2); container: focus-context-area / inline-size; -webkit-app-region: no-drag; }
+.focus-toolbar__identity { flex: 1; min-width: 24px; display: flex; align-items: baseline; gap: var(--sp-2); border: 0; background: transparent; color: var(--text-2); padding: 3px 0; text-align: left; cursor: default; }
+.focus-toolbar__context:has(> .focus-toolbar__review) { gap: 1px; }
+.focus-toolbar__identity strong { flex: 1; min-width: 24px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 500; }
 .focus-toolbar__identity small { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
 .focus-toolbar__identity:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
 .focus-toolbar__context .icon-button { width: 24px; height: 24px; flex: none; }
 .focus-toolbar__rename { flex: 1; min-width: 0; height: 24px; border: 1px solid var(--green); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: 0 var(--sp-1); font: inherit; font-size: var(--fs-meta); }
 .focus-toolbar__review { display: inline-flex; align-items: center; gap: 3px; flex: none; padding: 2px var(--sp-1); border: 0; background: transparent; color: var(--amber); font: inherit; font-size: var(--fs-micro); cursor: pointer; }
-.focus-toolbar__region-slot { flex: none; min-width: 0; }
+.focus-toolbar__region-slot { flex: none; min-width: 0; margin-left: 2px; padding-left: 6px; border-left: 1px solid var(--line); }
+.focus-toolbar__region-slot:empty { display: none; }
 .focus-toolbar__region-slot .agent-region-header { min-height: 24px; padding: 0; }
+.focus-toolbar__region-slot .agent-region-header__more { width: 24px; height: 24px; }
+.focus-toolbar__view-menu { position: relative; margin-left: 4px; }
+.focus-toolbar__view-menu::before { position: absolute; content: ''; height: 14px; width: 1px; left: -4px; background: var(--line); pointer-events: none; }
 .focus-toolbar__action { display: inline-flex; align-items: center; justify-content: center; gap: 4px; flex: none; height: 24px; padding: 0 5px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-micro); white-space: nowrap; cursor: pointer; }
 .focus-toolbar__action > svg { flex: none; }
 .focus-toolbar__action:hover { background: var(--surface-3); color: var(--text); }
@@ -368,9 +373,23 @@
 .focus-chat-mote-menu__check { flex: 0 0 12px; }
 @container focus-context-area (max-width: 400px) {
   .focus-toolbar__action > span, .focus-toolbar__review > span { display: none; }
+  .focus-toolbar__identity small, .focus-toolbar__region-slot .agent-region-header__execution > span { display: none; }
   .focus-toolbar__action, .focus-toolbar__review { width: 24px; height: 24px; padding: 0; justify-content: center; }
   .focus-toolbar__mote-name { display: none; }
   .focus-toolbar__mote-choice { padding: 0 4px; }
+}
+@container focus-context-area (max-width: 260px) {
+  .focus-toolbar__action, .focus-toolbar__review { width: 22px; }
+  .focus-toolbar__mote-choice { position: relative; min-width: 24px; gap: 0; padding: 0; }
+  .focus-toolbar__mote-warning { position: absolute; left: 5px; top: -1px; width: 8px; height: 8px; border-radius: 50%; background: var(--surface-1); }
+  .focus-toolbar__mote-choice .project-rail-row__icon, .focus-toolbar__mote-choice .project-rail-row__icon :is(svg, img) { width: 12px; height: 12px; }
+  .focus-toolbar__region-slot { margin-left: 0; padding-left: 1px; }
+  .focus-toolbar__region-slot .agent-region-header { gap: 0; }
+  .focus-toolbar__view-menu { margin-left: 0; }
+  .focus-toolbar__view-menu::before { left: -1px; }
+}
+@container focus-filter-area (max-width: 204px) {
+  .focus-toolbar__filters .global-board-search { min-width: 0; gap: 2px; padding: 0 2px; }
 }
 @media (max-width: 900px) {
   .focus-filters .global-board-toolbar__controls { gap: 3px; }
