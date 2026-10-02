@@ -3,11 +3,22 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { AgentMuxAgentSession, AgentSessionHistoryDescriptor } from '@agentmux/core'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
+
+// The actual mounted Panel registration requires the same browser platform entry as
+// the existing Region-close owning suite. Product SessionPane/Header are not mocked.
+vi.mock('react-resizable-panels', async () => {
+  const { createRequire } = await import('node:module')
+  return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js')
+})
 
 const initial = useAppStore.getState()
 let root: Root, container: HTMLDivElement, agent: Extract<SessionSnapshot, { kind: 'agent' }>, config: AppConfig
@@ -70,6 +81,13 @@ it('the actual Agent Region uses its original control Host even in a local displ
   expect(context.textContent).toContain(`Host ID: ${remoteId}`)
   expect(context.textContent).toContain(`Directory: ${directory}`)
   expect(context.textContent).not.toMatch(/connected|healthy/i)
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  // A late appearance configuration must not replace the confirmed Session's name
+  // with its SID or a recovery-candidate label while the theme remains unconfirmed.
+  await act(async () => useAppStore.setState({ config: null }))
+  expect(document.querySelector('.agent-region-header strong')?.textContent).toBe('Original Agent')
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  expect((await details()).textContent).toContain(`Executor: ${agent.executorId}`)
 })
 
 it('the actual plain Terminal shows its execution Host without manufacturing an Agent identity or lifecycle action', async () => {
@@ -87,6 +105,10 @@ it('the actual plain Terminal shows its execution Host without manufacturing an 
   expect(context.textContent).not.toMatch(/Executor:|Session:/)
   expect(document.querySelector('.agent-region-menu')!.getAttribute('data-agent-session-id')).toBeNull()
   expect(stop).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await act(async () => useAppStore.setState({ config: null }))
+  expect(document.querySelector('.agent-region-header strong')?.textContent).toBe('Original shell')
+  expect(badge().dataset.executionHostId).toBe(remoteId)
 })
 
 it('two actual Regions with the same Agent name distinguish their own local and remote machines without changing either Session', async () => {
@@ -141,4 +163,141 @@ it('the Focus portal preserves the same Header and original Host, including a lo
   expect(badge().getAttribute('aria-label')).toContain(long)
   expect(header.getAttribute('aria-label')).toContain(long)
   expect((await details()).textContent).toContain(`Host ID: ${remoteId}`)
+})
+
+function createdReceipt(): AgentMuxAgentSession {
+  // Core's local is relative to the remote server. It is deliberately different
+  // from the configured Desktop endpoint captured by the original launch request.
+  return { kind: 'agent', agentSessionId: agent.id, hostId: 'local', providerId: agent.providerId,
+    executorId: agent.executorId, workspacePath: directory, run: agent.control.run, retiredRuns: [],
+    createdAt: agent.createdAt, updatedAt: agent.updatedAt }
+}
+async function withoutSnapshot(kind: 'agent' | 'terminal' = 'agent', visible = false, workspaceId = 'local-display') {
+  await act(async () => root.render(<SessionPane sessionId={agent.id} surfaceKind={kind} interactiveResize={false}
+    visible={visible} parked={!visible} readOnly
+    linkOrigin={{ workspaceId, tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }} />))
+}
+
+it('a missing Agent or Terminal snapshot exposes unknown Host while preserving its original connecting surface', async () => {
+  useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: {} })
+  for (const kind of ['agent', 'terminal'] as const) {
+    await withoutSnapshot(kind)
+    expect(badge().textContent).toBe('Host unknown')
+    expect(badge().dataset.executionHostId).toBe('')
+    expect(container.textContent).toContain('Connecting to this session')
+    expect((await details()).textContent).toContain('Host ID: Unknown')
+    expect(document.querySelector('.agent-region-menu__context')!.textContent).toContain('Directory: Unknown')
+    await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  }
+})
+
+it('the no-snapshot recovery surface shows only its original Core recovery-candidate Host and cwd', async () => {
+  useAppStore.setState({ sessions: [], pendingAgentLaunches: {}, recoveryCandidates: [{ agentSessionId: agent.id,
+    hostId: remoteId, workspacePath: directory, providerId: agent.providerId, executorId: agent.executorId,
+    label: agent.label, capabilities: agent.capabilities, run: agent.control.run, createdAt: agent.createdAt, updatedAt: agent.updatedAt }] })
+  const before = structuredClone(useAppStore.getState().recoveryCandidates)
+  await withoutSnapshot()
+  expect(container.textContent).toContain('Restoring your session')
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  expect(badge().textContent).toBe('Build machine')
+  expect((await details()).textContent).toContain(`Directory: ${directory}`)
+  expect(useAppStore.getState().recoveryCandidates).toEqual(before)
+})
+
+it('an accepted remote creation uses the frozen submitted endpoint rather than Core server-local identity', async () => {
+  useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: { [agent.id]: {
+    events: [], overflowed: false, request: { executorId: agent.executorId, hostId: remoteId, workspacePath: directory },
+    created: createdReceipt(), projectionFailures: [{ step: 'session', message: 'Private projection unavailable' }] } } })
+  const before = structuredClone(useAppStore.getState().pendingAgentLaunches)
+  await withoutSnapshot()
+  expect(container.textContent).toContain('Agent created')
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  expect(badge().textContent).toBe('Build machine')
+  expect((await details()).textContent).toContain(`Directory: ${directory}`)
+  expect(useAppStore.getState().pendingAgentLaunches).toEqual(before)
+})
+
+it('an accepted Core receipt without the original endpoint stays unknown instead of becoming This Mac', async () => {
+  useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: { [agent.id]: {
+    events: [], overflowed: false, request: { executorId: agent.executorId }, created: createdReceipt(), projectionFailures: [] } } })
+  await withoutSnapshot()
+  expect(container.textContent).toContain('Agent created')
+  expect(badge().textContent).toBe('Host unknown')
+  expect(badge().dataset.executionHostId).toBe('')
+  expect((await details()).textContent).toContain('Host ID: Unknown')
+})
+
+it('the pending launch keeps its exact submitted remote target, prompt and original lifecycle untouched', async () => {
+  useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: { [agent.id]: {
+    events: [], overflowed: false, request: { executorId: agent.executorId, hostId: remoteId, workspacePath: directory,
+      prompt: 'Original submitted request' } } } })
+  const before = structuredClone(useAppStore.getState().pendingAgentLaunches)
+  const launch = vi.spyOn(api.sessions, 'launchAgent'), write = vi.spyOn(api.sessions, 'write'), stop = vi.spyOn(api.sessions, 'stop')
+  await withoutSnapshot()
+  expect(container.textContent).toContain('Starting your agent')
+  expect(container.textContent).toContain('Original submitted request')
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  expect((await details()).textContent).toContain(`Directory: ${directory}`)
+  expect(useAppStore.getState().pendingAgentLaunches).toEqual(before)
+  expect(launch).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+})
+
+it('the original retired History keeps its Core Host through the existing reader and More return without a new Run', async () => {
+  const descriptor: AgentSessionHistoryDescriptor = { agentSessionId: agent.id, hostId: remoteId, state: 'retired', retiredAt: 42,
+    history: { providerId: agent.providerId, executorId: agent.executorId, workspacePath: directory,
+      createdAt: agent.createdAt, nativeHandle: { kind: 'provider', providerId: agent.providerId, sessionId: 'private-original-native' } } }
+  useAppStore.setState({ config: { ...config, workspaces: [...config.workspaces,
+    { id: 'private-original-resource', hostId: remoteId, path: directory, name: 'Original resource', kind: 'folder' }] },
+    sessions: [], recoveryCandidates: [], pendingAgentLaunches: {} })
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([descriptor])
+  const page = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({ agentSessionId: agent.id,
+    source: { providerId: agent.providerId, nativeSessionId: 'private-original-native' }, nextCursor: null,
+    items: [{ id: 'private-history-item', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original saved conversation' }] }] })
+  const launch = vi.spyOn(api.sessions, 'launchAgent'), reopen = vi.spyOn(api.sessions, 'reopen'), write = vi.spyOn(api.sessions, 'write')
+  await withoutSnapshot('agent', true, 'private-original-resource')
+  await act(async () => vi.waitFor(() => expect(container.textContent).toContain('Session closed')))
+  const header = document.querySelector('.agent-region-header')
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  expect((await details()).textContent).toContain(`Directory: ${directory}`)
+  const more = document.querySelector<HTMLButtonElement>('.agent-region-header__more')!
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await act(async () => vi.waitFor(() => expect(document.activeElement).toBe(more)))
+  const button = (name: string) => {
+    const found = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === name)
+    expect(found, `Original reader action: ${name}`).toBeDefined(); return found!
+  }
+  await act(async () => button('Read conversation history').click())
+  await act(async () => vi.waitFor(() => expect(container.textContent).toContain('Original saved conversation')))
+  expect(page).toHaveBeenCalledWith({ hostId: remoteId, agentSessionId: agent.id }, undefined)
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  const back = container.querySelector<HTMLButtonElement>('[aria-label="Conversation history"] .session-history__toolbar > button')
+  expect(back, 'The original History reader must expose its return action').not.toBeNull()
+  expect(back!.textContent?.trim()).toBe('Session')
+  await act(async () => back!.click())
+  expect(container.textContent).toContain('Session closed')
+  expect(document.querySelector('.agent-region-header')).toBe(header)
+  expect(badge().dataset.executionHostId).toBe(remoteId)
+  expect(launch).not.toHaveBeenCalled(); expect(reopen).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
+})
+
+it('the actual Workbench X closes only its unknown-snapshot Region and leaves the other reference and draft untouched', async () => {
+  const workspaceId = 'private-unknown-workspace', tabId = 'private-unknown-tab', left = 'unknown-left', right = 'unknown-right'
+  let tab = createWorkbenchTab(tabId, { kind: 'agent', regionId: left, workspaceId, sessionId: agent.id, phase: 'attached' })
+  tab = addWorkbenchRegion(tab, left, 'right', { kind: 'terminal', regionId: right, workspaceId, sessionId: 'original-unknown-shell', phase: 'attached' })
+  useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: {},
+    tabs: { [tabId]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('private-group', [tabId]) },
+    activeWorkspaceId: workspaceId, agentComposerDrafts: { [right]: 'Original neighbor draft' } })
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  const stop = vi.spyOn(api.sessions, 'stop'), write = vi.spyOn(api.sessions, 'write')
+  await act(async () => root.render(<WorkspaceWorkbench workspaceId={workspaceId} />))
+  const region = container.querySelector(`[data-workbench-region-id="${left}"]`)!
+  expect(region).not.toBeNull()
+  expect(region.querySelector('.agent-region-header__execution')?.textContent).toBe('Host unknown')
+  const close = region.querySelector<HTMLButtonElement>('button[aria-label="Close split"]')
+  expect(close).not.toBeNull()
+  await act(async () => close!.click())
+  expect(Object.keys(useAppStore.getState().tabs[tabId]!.regions)).toEqual([right])
+  expect(useAppStore.getState().tabs[tabId]!.regions[right]).toMatchObject({ kind: 'terminal', sessionId: 'original-unknown-shell' })
+  expect(useAppStore.getState().agentComposerDrafts[right]).toBe('Original neighbor draft')
+  expect(stop).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled()
 })

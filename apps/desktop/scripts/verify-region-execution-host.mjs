@@ -17,6 +17,7 @@ const testHelper = 'apps/desktop/test/helpers/client-ui-render.tsx'
 const script = 'apps/desktop/scripts/verify-region-execution-host.mjs'
 const callers = [
   { symbol: 'regionExecutionHost', definition: product.helper, caller: product.pane, kind: 'call' },
+  { symbol: 'executionHostProjection', definition: product.helper, caller: product.pane, kind: 'call' },
   { symbol: 'HostBadge', definition: product.badge, caller: product.header, kind: 'jsx' },
   { symbol: 'AgentRegionHeader', definition: product.header, caller: product.pane, kind: 'jsx' },
   { symbol: 'AgentRegionHeader', definition: product.header, caller: product.activity, kind: 'jsx' },
@@ -62,13 +63,27 @@ async function productionCallers() {
 async function causal() {
   const selector = "const hostId = session.kind === 'agent' ? session.control.hostId : session.hostId"
   const badge = '<HostBadge host={executionHost} />'
+  const submittedHost = 'pendingLaunch ? executionHostProjection(pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)'
+  const preSnapshotHeader = `<AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
+      sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
+      regionId={linkOrigin.regionId} readOnly={readOnly} portalTargetId={headerPortalTargetId} onHistory={undefined} />`
   const controlCase = 'the actual Agent Region uses its original control Host even in a local display and with a different snapshot label'
   const phases = [
     { name: 'original-baseline-green', target: product.helper, before: selector, after: selector },
     { name: 'wrong-execution-host-assertion-red', target: product.helper, before: selector, after: 'const hostId = session.hostId', required: [controlCase] },
     { name: 'original-execution-host-restored-green', target: product.helper, before: selector, after: selector },
     { name: 'remove-visible-host-assertion-red', target: product.header, before: badge, after: '{/* private readonly withdrawal of the original Host projection */}', required: [controlCase], withdrawnModule: product.badge },
-    { name: 'original-visible-host-restored-green', target: product.header, before: badge, after: badge }
+    { name: 'original-visible-host-restored-green', target: product.header, before: badge, after: badge },
+    { name: 'borrow-core-local-identity-assertion-red', target: product.pane, before: submittedHost,
+      after: 'pendingLaunch ? executionHostProjection(pendingLaunch.created?.hostId ?? pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)',
+      required: ['an accepted remote creation uses the frozen submitted endpoint rather than Core server-local identity',
+        'an accepted Core receipt without the original endpoint stays unknown instead of becoming This Mac'] },
+    { name: 'original-submitted-host-restored-green', target: product.pane, before: submittedHost, after: submittedHost },
+    { name: 'withdraw-pre-snapshot-header-assertion-red', target: product.pane, before: preSnapshotHeader, after: 'null',
+      required: ['a missing Agent or Terminal snapshot exposes unknown Host while preserving its original connecting surface',
+        'the no-snapshot recovery surface shows only its original Core recovery-candidate Host and cwd',
+        'the original retired History keeps its Core Host through the existing reader and More return without a new Run'] },
+    { name: 'original-pre-snapshot-header-restored-green', target: product.pane, before: preSnapshotHeader, after: preSnapshotHeader }
   ]
   let names
   for (const phase of phases) {
@@ -153,8 +168,8 @@ async function artifacts() {
   const causalPath = path.join(evidence, 'latest-causal.json'), old = await json(causalPath)
   assert.equal(old.schema, receipt.schema); assert.equal(old.mode, 'readonly-product-causal'); assert.equal(old.passed, true)
   assert.deepEqual(old.inputsBefore, receipt.inputsBefore); assert.deepEqual(old.inputsAfter, receipt.inputsBefore)
-  assert.equal(old.checks.filter(item => item.qualifiedAssertionRed).length, 2)
-  assert.equal(old.checks.filter(item => item.qualifiedOriginalGreen).length, 3)
+  assert.equal(old.checks.filter(item => item.qualifiedAssertionRed).length, 4)
+  assert.equal(old.checks.filter(item => item.qualifiedOriginalGreen).length, 5)
   assert.ok(old.productionCallers.length > 0)
   for (const check of old.checks) {
     assert.ok(check.total > 0); assert.equal(hash(await read(check.resultFile)), check.resultSHA256)

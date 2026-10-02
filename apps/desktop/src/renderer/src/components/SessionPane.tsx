@@ -47,7 +47,7 @@ import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import { AgentRegionHeader } from './AgentRegionHeader'
-import { regionExecutionHost } from '../lib/region-execution-host'
+import { executionHostProjection, regionExecutionHost } from '../lib/region-execution-host'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
 import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
@@ -114,13 +114,17 @@ export function SessionPane({
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
     tabGroupId: primaryReference.groupId, tabId: primaryReference.tabId } : linkOrigin
   const session = useAppStore((state) => sessionPresentationById(state.sessions).get(sessionId))
-  const executionHostId = session?.kind === 'agent' ? session.control.hostId : session?.hostId
-  const configuredExecutionHost = useAppStore(state => state.config?.hosts.find(host => host.id === executionHostId))
   const pendingLaunch = useAppStore((state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useAppStore((state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
   const historyHostId = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
   const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
+  // Core creation's `local` is local to its server, not this Desktop. The existing
+  // submitted request retains the configured endpoint; missing intent stays unknown.
+  const executionHostId = session ? session.kind === 'agent' ? session.control.hostId : session.hostId
+    : pendingLaunch ? pendingLaunch.request?.hostId
+      : retainedHistory?.state === 'retired' ? retainedHistory.hostId : recoveryCandidate?.hostId
+  const configuredExecutionHost = useAppStore(state => state.config?.hosts.find(host => host.id === executionHostId))
   const runtimeOwnershipWarnings = useAppStore((state) => state.runtimeOwnershipWarnings)
   const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId ?? retainedHistory?.history?.executorId)
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
@@ -626,6 +630,16 @@ export function SessionPane({
 
   const acceptedLaunch = pendingLaunch?.created && (!session || session.control.run.runId === pendingLaunch.created.run.runId)
     ? pendingLaunch.created : undefined
+  const preSnapshotHost = session ? regionExecutionHost(session, configuredExecutionHost)
+    : pendingLaunch ? executionHostProjection(pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)
+      : retainedHistory?.state === 'retired' ? executionHostProjection(retainedHistory.hostId, retainedHistory.history?.workspacePath, configuredExecutionHost)
+        : executionHostProjection(recoveryCandidate?.hostId, recoveryCandidate?.workspacePath, configuredExecutionHost)
+  const preSnapshotHeader = (name = agentInputIdentity ?? (session?.kind === 'terminal' ? session.label : surfaceKind === 'terminal' ? 'Terminal' : agentDisplayName({ userName,
+    firstPrompt: pendingLaunch?.request?.prompt, fallbackLabel: recoveryCandidate?.label ?? sessionId,
+    providerLabel: connectingExecutor?.label ?? sessionId })), executorLabel = agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown') =>
+    <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
+      sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
+      regionId={linkOrigin.regionId} readOnly={readOnly} portalTargetId={headerPortalTargetId} onHistory={undefined} />
   const launchFailures = pendingLaunch?.projectionFailures ?? []
   const launchNotice = (
     <div className={acceptedLaunch && launchFailures.length > 0 ? 'agent-launch-notice' : 'service-disclosure-home'}>
@@ -652,6 +666,7 @@ export function SessionPane({
   )
   if (!session && acceptedLaunch) {
     return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
+      {preSnapshotHeader()}
       <div className="agent-body">{launchNotice}<p>Agent created · {acceptedLaunch.agentSessionId}</p></div>
       {!readOnly ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>
@@ -688,6 +703,7 @@ export function SessionPane({
         : 'Check the Host and current Executor configuration, then explicitly try again. No new message is sent.'
     } }} /> : null
     return <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
+      {preSnapshotHeader(label, executorLabel ?? providerLabel ?? 'Executor unknown')}
       <div className="agent-body"><div className="agent-terminal-stage">
         {historyOpen ? <SessionHistoryView
           key={JSON.stringify([reference.hostId, reference.agentSessionId])}
@@ -719,6 +735,7 @@ export function SessionPane({
   if (!session || !terminalThemeId) {
     return (
       <section className="agent-surface" data-agent-surface-mode="connecting">
+          {preSnapshotHeader()}
           <SessionConnectingSurface key={`connecting:${sessionId}`}
           phase={pendingLaunch ? 'launch' : recoveryCandidate ? 'restore' : 'connect'}
           surfaceKind={surfaceKind}
