@@ -11,7 +11,7 @@ const source = readFileSync(new URL('../scripts/verify-browser-recovery-restart.
 // No test-authored cost body, top-level imports/setup, launch or finally is executed.
 function actualContinuation() {
   const file = ts.createSourceFile('verify-browser-recovery-restart.mjs', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
-  expect(file.parseDiagnostics).toHaveLength(0)
+  expect(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.Latest }, reportDiagnostics: true }).diagnostics ?? []).toHaveLength(0)
   const named = (statement: ts.Statement, name: string) => ts.isVariableStatement(statement)
     ? statement.declarationList.declarations.find(node => ts.isIdentifier(node.name) && node.name.text === name) : undefined
   const owners = file.statements.filter((node): node is ts.TryStatement => ts.isTryStatement(node)
@@ -52,11 +52,12 @@ function fixture() {
   const baseline = { outcome: { kind: 'completed' }, result: { identity: 'explicit-readonly-sibling-snapshot' } }
   const runBrowser = vi.fn(async (_browserId: string, _code: string) => { order.push('baseline'); return baseline })
   const stream = { identity: 'same-private-stream-return' }
-  const subscribeAgentMuxControl = vi.fn(async (_fields: unknown, _handlers: unknown, _socket: string) => stream)
+  const subscribe = vi.fn(async (_method: string, _fields: unknown, _handlers: unknown) => stream)
+  const rpc = { call: vi.fn(), subscribe }
   const runtimeDirectory = _hygiene_fixturePath("tmp/source-cost-no-created-runtime")
   const dependencies = { urls, receipt, localRecoveryKind: null, click: vi.fn(), selectors: vi.fn(), waitFor: vi.fn(), runBrowser,
     phase: 'source', observeNativeFrameReady: vi.fn(), nativePageScript: vi.fn(), resize: vi.fn(),
-    requestAgentMuxControl: vi.fn(), subscribeAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION: 19,
+    rpc,
     randomUUID: vi.fn(() => 'one-source-subscribe-request'), join, runtimeDirectory, process: { argv: [] },
     demonstrationCase: false, taskAssetsCase: false, taskDownloadCase: false, overlayCase: false, browserToolsCase: false, structuredCase: false,
     capture: vi.fn(), desktopRoot: 'source-desktop', userData: 'source-user-data', workspacePath: 'source-workspace', repositoryRoot: 'source-root' }
@@ -70,7 +71,7 @@ function fixture() {
     return new Function(...Object.keys(globals), `return (async () => {${actual.body}\n})()`)(...Object.values(globals)) as Promise<void>
   }
   return { run, first, initial, sibling, urls, receipt, before, expected, pages, baseline, runBrowser, scenarioContext,
-    normalQuit, dependencies, subscribeAgentMuxControl, runtimeDirectory, stream, order }
+    normalQuit, dependencies, subscribe, runtimeDirectory, stream, order }
 }
 
 describe('actual canonical cost collector consumer', () => {
@@ -81,11 +82,12 @@ describe('actual canonical cost collector consumer', () => {
     const collectorGate = new Promise<void>(done => { finishCollector = done })
     x.runBrowser.mockImplementation(async () => { x.order.push('baseline'); return baselineGate })
     const measurements = { identity: 'exact-collector-return', samples: [{ original: true }] }
-    const fields = { operation: 'browser.subscribe', operationId: x.receipt.browserOutcome.initial.id, afterSequence: 0 }
+    const fields = { operationId: x.receipt.browserOutcome.initial.id, afterSequence: 0 }
     const handlers = { onEvent: vi.fn(), onEnd: vi.fn() }
     const collector = vi.fn(async (ctx: Record<string, any>, _options: unknown) => {
       x.order.push('collecting')
-      expect(await ctx.subscribeControl(fields, handlers)).toBe(x.stream)
+      expect(ctx.rpc).toBe(x.dependencies.rpc)
+      expect(await ctx.rpc.subscribe('browser.follow', fields, handlers)).toBe(x.stream)
       await collectorGate; x.order.push('collected'); return measurements
     })
     const running = x.run({ collectBrowserCapabilityMeasurements: collector })
@@ -104,9 +106,8 @@ describe('actual canonical cost collector consumer', () => {
     expect(ctx.receipt).toBe(x.receipt)
     expect(ctx.runBrowser).toBe(x.runBrowser)
     expect(options).toEqual({ relatedOperationId: x.receipt.browserOutcome.initial.id, siblingBrowserId: x.sibling.browserId })
-    expect(x.subscribeAgentMuxControl.mock.calls).toEqual([[{ schemaVersion: 19, requestId: 'one-source-subscribe-request', ...fields },
-      handlers, join(x.runtimeDirectory, 'control.sock')]])
-    expect(x.subscribeAgentMuxControl.mock.calls[0]![1]).toBe(handlers)
+    expect(x.subscribe.mock.calls).toEqual([['browser.follow', fields, handlers]])
+    expect(x.subscribe.mock.calls[0]![2]).toBe(handlers)
     expect(x.receipt.capabilityMeasurementBaseline).toBe(x.baseline)
     expect(x.receipt.capabilityMeasurements).toBeUndefined()
     expect(x.normalQuit).not.toHaveBeenCalled()
@@ -122,7 +123,7 @@ describe('actual canonical cost collector consumer', () => {
     const x = fixture(); await x.run(cost)
     expect(x.runBrowser).not.toHaveBeenCalled()
     expect(x.scenarioContext).not.toHaveBeenCalled()
-    expect(x.subscribeAgentMuxControl).not.toHaveBeenCalled()
+    expect(x.subscribe).not.toHaveBeenCalled()
     expect(x.receipt.capabilityMeasurements).toBeUndefined()
     expect(x.receipt.capabilityMeasurementBaseline).toBeUndefined()
     expect(x.normalQuit.mock.calls).toEqual([[x.first]])

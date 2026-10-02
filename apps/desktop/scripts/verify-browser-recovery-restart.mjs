@@ -20,12 +20,13 @@ const repositoryRoot = resolve(import.meta.dirname, '../../..')
 const desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json'))
 const { listProbeProcesses, signalOwnedProbeProcess } = await import(pathToFileURL(join(desktopRoot, 'scripts/probe-process.mjs')))
-const { requestAgentMuxControl, subscribeAgentMuxControl, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
+const { connectAgentMuxRpc } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
 const exec = promisify(execFile)
 const digest = value => createHash('sha256').update(value).digest('hex')
 const delay = ms => new Promise(done => setTimeout(done, ms))
 const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-browser-recovery-"))
 const userData = join(root, 'user-data'), privateHome = join(root, 'home'), runtimeDirectory = join(root, 'runtime')
+const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
 const workspacePath = join(root, 'workspace'), codexHome = join(privateHome, 'codex')
 const workspaceId = 'private-browser-recovery', workspaceName = 'Private Browser recovery'
 const children = new Set(), connections = new Set()
@@ -136,7 +137,8 @@ async function identity() {
   assert.ok(rendererFiles.length > 0)
   const files = ['apps/desktop/out/main/index.js', 'apps/desktop/out/preload/index.cjs', 'apps/desktop/out/renderer/index.html',
     ...rendererFiles.map(name => `apps/desktop/out/renderer/assets/${name}`),
-    'packages/core/dist/index.js', 'packages/core/dist/control-host.js',
+    'packages/core/dist/index.js', 'packages/core/dist/public-rpc-client.js',
+    'packages/core/dist/public-rpc-wire.js', 'packages/core/dist/rpc-business-codec.js', 'packages/core/dist/public-rpc-frame.js',
     'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/index.ts',
     'apps/desktop/src/main/browser-operation-journal.ts', 'apps/desktop/src/main/browser-step-evidence.ts',
     'apps/desktop/src/main/browser-local-recovery.ts',
@@ -367,14 +369,13 @@ async function click(cdp, expression, button = 'left') {
 }
 const selectors = selector => `Array.from(document.querySelectorAll(${JSON.stringify(selector)})).filter(e => e.getClientRects().length && getComputedStyle(e).visibility !== 'hidden')`
 async function state(cdp) { return cdp.evaluate(`(() => { const raw = localStorage.getItem('agentmux-workbench-v1'); return raw ? JSON.parse(raw).state.restoredWorkbench : null })()`) }
-async function control(operation, target) { return requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation,target}, join(runtimeDirectory,'control.sock')) }
 async function runBrowser(browserId, code) {
   const operationId=randomUUID()
-  const reply=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'browser.run',browserId,operationId,code},join(runtimeDirectory,'control.sock'))
-  assert.equal(reply.operation,'browser.run');assert.equal(reply.result.runOperation.id,operationId)
-  return reply.result
+  const reply=await rpc.call('browser.run',{browserId,operationId,code})
+  assert.equal(reply.runOperation.id,operationId)
+  return reply
 }
-async function openBrowser(url, destination) { const result=await requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),operation:'open.browser',url,destination},join(runtimeDirectory,'control.sock')); assert.equal(result.operation,'open.browser');return result.result.region }
+async function openBrowser(url, destination) { const result=await rpc.call('browser.open',{url,destination});return result.region }
 async function normalQuit(probe) {
   phase = 'normal-quit'
   if(probe.drainStageDelivery){
@@ -448,8 +449,9 @@ async function actualWorkbench(probe, expected) {
     const browserRegions=Object.values(tab.regions).filter(r=>r.kind==='browser');
     return browserRegions.length===2&&expected.regions.every(e=>browserRegions.some(r=>r.browserId===e.browserId&&r.regionId===e.regionId&&r.url===e.url&&r.title===e.title))?value:null
   })
-  const inspected=await control('inspect.tab',{kind:'tab',tabId:expected.tabId}); assert.equal(inspected.operation,'inspect.tab');
-  assert.deepEqual(inspected.result.tab.regions.map(r=>r.regionId).sort(),expected.regions.map(r=>r.regionId).sort())
+  const inspected=await rpc.call('space.inspect',{target:{tabId:expected.tabId}});
+  assert.equal(inspected.catalog.tabs.length,1);assert.equal(inspected.catalog.tabs[0].tabId,expected.tabId)
+  assert.deepEqual(inspected.catalog.regions.map(r=>r.regionId).sort(),expected.regions.map(r=>r.regionId).sort())
   const geometry=await probe.cdp.evaluate(`(${JSON.stringify(expected.regions.map(r=>r.regionId))}).map(id=>{const e=document.querySelector('[data-workbench-region-id="'+id+'"]');if(!e)return null;const r=e.getBoundingClientRect();return {id,width:r.width,height:r.height,active:e.dataset.active}})`)
   assert.equal(geometry.length,2); for(const row of geometry){assert.ok(row&&row.width>100&&row.height>100)}
   const sessions=await probe.cdp.evaluate('(async()=> (await window.agentmux.sessions.snapshot()).sessions.map(s=>({id:s.id,kind:s.kind})))()');assert.equal(sessions.filter(s=>s.kind==='agent').length,0)
@@ -846,8 +848,7 @@ try {
   const outcome = outcomeCase ? await import('./browser-outcome-probe-scenario.mjs') : null
   const cost = outcomeCase ? await import('./lib/browser-capability-cost-collector.mjs') : null
   const scenarioContext = (probe,browserId,pageUrl)=>({probe,browserId,pageUrl,urls,receipt,localRecoveryKind,click,selectors,waitFor,runBrowser,setPhase:value=>{phase=value},nativeFrameReady:actualPageUrl=>observeNativeFrameReady(probe,actualPageUrl),nativePageScript:(target,expression,actualPageUrl=pageUrl)=>nativePageScript(target,expression,actualPageUrl),resize,
-    requestControl:fields=>requestAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),...fields},join(runtimeDirectory,'control.sock')),
-    subscribeControl:(fields,handlers)=>subscribeAgentMuxControl({schemaVersion:AGENTMUX_CONTROL_SCHEMA_VERSION,requestId:randomUUID(),...fields},handlers,join(runtimeDirectory,'control.sock')),
+    rpc,
     diagnoseTarget:process.argv.includes('--diagnose-demonstration-target'),
     capture:(probe,label,content,actualPageUrl=pageUrl)=>capture(probe,label,content??(demonstrationCase||taskAssetsCase||taskDownloadCase?'demonstration':overlayCase?'overlay':browserToolsCase?'page':structuredCase?'structured-output':'operations'),actualPageUrl),desktopRoot,userData,workspacePath,repositoryRoot})
   await Promise.all([mkdir(userData,{recursive:true}),mkdir(workspacePath,{recursive:true}),mkdir(codexHome,{recursive:true,mode:0o700}),mkdir(runtimeDirectory,{recursive:true})])
@@ -919,7 +920,7 @@ try {
     receipt.visual.operations=await reviewOperationRows(first,initial.surface.browserId)
   }
   const sibling=await openBrowser(urls[1],{kind:'split',direction:'right',region:{kind:'region',regionId:initial.surface.regionId}})
-  await control('focus',{kind:'region',regionId:initial.surface.regionId})
+  await rpc.call('space.focus',{target:{kind:'region',regionId:initial.surface.regionId}})
   const regions=localRecoveryCase?(await waitFor('both actual durable Browser projections',async()=>{const value=await state(first.cdp),tab=value?.tabs[initial.tab.id];if(!tab)return null;const actual=[initial.surface.regionId,sibling.regionId].map(id=>tab.regions[id]);return actual.every(region=>region?.kind==='browser')?actual:null})).map(({browserId,regionId,url,title})=>({browserId,regionId,url,title})):null
   const pages=localRecoveryCase?await nativeRegionPages(first,regions):await nativePages(first,urls)
   const expected={tabId:initial.tab.id,focus:initial.surface.regionId,regions:regions??[{browserId:initial.surface.browserId,regionId:initial.surface.regionId,url:urls[0],title:pages[0].title},{browserId:sibling.browserId,regionId:sibling.regionId,url:urls[1],title:pages[1].title}]}
@@ -966,6 +967,7 @@ try {
   if(active&&active.child.exitCode===null&&active.child.signalCode===null){try{receipt.failureWorkbench=await state(active.cdp);receipt.failureDom=await active.cdp.evaluate('document.body.innerText.slice(-5000)')}catch(error){receipt.diagnosticError=error.message}}
 } finally {
   const errors=[]
+  try{await rpc.dispose()}catch(error){errors.push(error.message)}
   for(const probe of [...launchedProbes].reverse()){if(probe.child.exitCode===null&&probe.child.signalCode===null){try{await normalQuit(probe)}catch(error){errors.push(error.message)}}}
   for(const connection of connections){try{connection.close()}catch(error){errors.push(error.message)}}
   const ownedCleanup=await cleanupOwnedProbes(root)

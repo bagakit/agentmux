@@ -115,9 +115,7 @@ export function auditRestoredFrameRead(report, pageUrl) {
 
 export async function run(ctx, code, completed = true) {
   const operationId = randomUUID()
-  const receipt = await ctx.requestControl({ operation: 'browser.run', browserId: ctx.browserId, operationId, code })
-  assert.equal(receipt.ok, true); assert.equal(receipt.operation, 'browser.run')
-  const report = receipt.result
+  const report = await ctx.rpc.call('browser.run', { browserId: ctx.browserId, operationId, code })
   assert.equal(report.runOperation.id, operationId); assert.equal(report.runOperation.browserId, ctx.browserId)
   assert.ok(report.runOperation.steps.length > 0)
   if (completed) assert.equal(report.outcome.kind, 'completed', JSON.stringify(report.outcome))
@@ -154,10 +152,9 @@ function counters(facts) {
   return Object.fromEntries(relevant.map(fact => [fact.document, fact.actions]))
 }
 const history = async ctx => {
-  const reply = await ctx.requestControl({ operation: 'browser.history', browserId: ctx.browserId })
-  assert.equal(reply.ok, true); assert.equal(reply.operation, 'browser.history')
-  assert.ok(reply.result.operations.length > 0)
-  return reply.result.operations
+  const reply = await ctx.rpc.call('browser.history', { browserId: ctx.browserId })
+  assert.ok(reply.operations.length > 0)
+  return reply.operations
 }
 async function readSnapshotEvidence(ctx, operation) {
   const before = (await history(ctx)).map(item => item.id).sort(), step = operation.steps.find(item => item.method === 'snapshot')

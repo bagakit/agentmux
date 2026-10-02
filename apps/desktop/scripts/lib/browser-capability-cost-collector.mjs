@@ -90,25 +90,23 @@ export function assertNativeBrowserMeasurements(value) {
 export async function collectBrowserCapabilityMeasurements(ctx, { relatedOperationId, siblingBrowserId }) {
   const recordedResult = ctx.receipt.browserOutcome.recordedResult
   assert.equal(recordedResult.artifact.operationId, relatedOperationId)
-  const reply = await ctx.requestControl({ operation: 'browser.operation', operationId: relatedOperationId })
-  assert.equal(reply.ok, true); assert.equal(reply.operation, 'browser.operation')
-  const operation = reply.result.runOperation
-  const history = await ctx.requestControl({ operation: 'browser.history', browserId: siblingBrowserId })
-  assert.equal(history.ok, true); assert.equal(history.operation, 'browser.history')
-  nonempty(history.result.operations, 'Require an existing actual sibling operation; the caller owns any explicit baseline observation')
-  const sibling = history.result.operations.find(item => item.browserId === siblingBrowserId && item.phase === 'completed')
+  const reply = await ctx.rpc.call('browser.inspect', { operationId: relatedOperationId })
+  const operation = reply.runOperation
+  const history = await ctx.rpc.call('browser.history', { browserId: siblingBrowserId })
+  nonempty(history.operations, 'Require an existing actual sibling operation; the caller owns any explicit baseline observation')
+  const sibling = history.operations.find(item => item.browserId === siblingBrowserId && item.phase === 'completed')
   assert.ok(sibling, 'Require an existing completed sibling operation')
   const open = async (actual, afterSequence) => {
     const sample = { operationId: actual.id, browserId: actual.browserId, afterSequence, events: [], ends: [] }
-    const stream = await ctx.subscribeControl({ operation: 'browser.subscribe', operationId: actual.id, afterSequence }, {
-      onEvent: event => sample.events.push(structuredClone(event)),
-      onEnd: (reason, error) => sample.ends.push({ at: Date.now(), reason, ...(error ? { error: String(error.message) } : {}) })
+    const stream = await ctx.rpc.subscribe('browser.follow', { operationId: actual.id, afterSequence }, {
+      onInitial: initial => { sample.opened = { at: Date.now(), runOperation: structuredClone(initial.runOperation), gap: structuredClone(initial.gap) } },
+      onEvent: event => { if (event.type === 'progress') sample.events.push(structuredClone(event.data)) },
+      onEnd: error => sample.ends.push({ at: Date.now(), reason: error ? 'error' : 'closed', ...(error ? { error: String(error.message) } : {}) })
     })
-    sample.opened = { at: Date.now(), runOperation: structuredClone(stream.runOperation), gap: structuredClone(stream.gap) }
-    return { sample, dispose: () => { sample.disposedAt = Date.now(); stream.dispose() } }
+    return { sample, dispose: async () => { sample.disposedAt = Date.now(); await stream.dispose() } }
   }
   const close = async item => {
-    item.dispose()
+    await item.dispose()
     await ctx.waitFor('the actual public cost stream close after disposal', () => item.sample.ends.length ? true : null)
   }
   const preparation = await open(sibling, 0)
@@ -134,7 +132,7 @@ export async function collectBrowserCapabilityMeasurements(ctx, { relatedOperati
     assertNativeBrowserMeasurements(result)
     return result
   } finally {
-    for (const item of [preparation, related, unrelated]) if (item && !item.sample.disposedAt) item.dispose()
+    for (const item of [preparation, related, unrelated]) if (item && !item.sample.disposedAt) await item.dispose()
   }
 }
 
