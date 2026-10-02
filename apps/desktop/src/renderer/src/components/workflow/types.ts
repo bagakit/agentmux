@@ -46,7 +46,7 @@ export type WorkflowSnapshot = {
 export type WorkflowVariant = 'inline' | 'dock'
 
 /** A recorded step's status, never the lifecycle of the enclosing task or Agent. */
-export type WorkflowObservationStatus = 'streaming' | 'complete' | 'failed'
+export type WorkflowObservationStatus = 'streaming' | 'complete' | 'failed' | 'running' | 'interrupted'
 
 export type WorkflowRecordedTime = {
   from: string

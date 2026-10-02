@@ -17,7 +17,7 @@ type ObservedToolProps = {
     id: string
     title: string
     status?: WorkflowObservationStatus
-    recordedTime: WorkflowRecordedTime
+    recordedTime?: WorkflowRecordedTime
     source: string
     persistentSource: boolean
   }
@@ -25,21 +25,24 @@ type ObservedToolProps = {
   icon: ReactNode
   expanded?: boolean
   onToggle?: () => void
+  controls?: string
 }
 
 export function WorkflowToolRow(props: WorkflowToolProps | ObservedToolProps) {
   return 'observation' in props ? <RecordedToolRow {...props} /> : <NamedWorkflowToolRow {...props} />
 }
 
-function RecordedToolRow({ observation, className, icon, expanded, onToggle }: ObservedToolProps) {
+function RecordedToolRow({ observation, className, icon, expanded, onToggle, controls }: ObservedToolProps) {
   const { recordedTime, status } = observation
   const content = <>
     <span className="log-row__node">{icon}</span>
-    {onToggle ? <span className="log-row__time" title={recordedTime.offset}>{recordedTime.from}</span>
-      : <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time>}
+    {recordedTime ? onToggle ? <span className="log-row__time" title={recordedTime.offset}>{recordedTime.from}</span>
+      : <time className="log-row__time" tabIndex={0} aria-description={recordedTime.offset} title={recordedTime.offset}>{recordedTime.from}</time> : null}
     <span className="log-row__title">{observation.title}</span>
     <span className="log-row__meta">
       {status === 'streaming' ? <span className="log-row__chip"><WorkflowStatusGlyph status="running" />Streaming</span> : null}
+      {status === 'running' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
+      {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
       {status === undefined ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       <span className="log-row__source" data-persistent={observation.persistentSource ? '' : undefined}>{observation.source}</span>
@@ -47,9 +50,9 @@ function RecordedToolRow({ observation, className, icon, expanded, onToggle }: O
     </span>
   </>
   const rowClass = `${className} wf-tool-row wf-tool-row--observation`
-  return onToggle ? <button type="button" className={rowClass} data-observation-step-id={observation.id}
-    data-status={status} data-open={expanded ? '' : undefined} data-expandable="" aria-expanded={expanded} aria-description={recordedTime.offset} onClick={onToggle}>{content}</button>
-    : <div className={rowClass} data-observation-step-id={observation.id} data-status={status}>{content}</div>
+  return onToggle ? <button type="button" className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id}
+    data-status={status} data-open={expanded ? '' : undefined} data-expandable="" aria-expanded={expanded} aria-controls={controls} aria-description={recordedTime?.offset} onClick={onToggle}>{content}</button>
+    : <div className={rowClass} data-recorded-time={Boolean(recordedTime)} data-observation-step-id={observation.id} data-status={status}>{content}</div>
 }
 
 function NamedWorkflowToolRow({
