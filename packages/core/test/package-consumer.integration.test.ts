@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { spawn } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { once } from 'node:events'
@@ -329,7 +329,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
   'packed @agentmux/core ctxmux consumer',
   () => {
     it('runs the Shell vertical outside the checkout with the pinned SDK and binaries', async () => {
-      const root = await realpath(await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-packed-ctxmux-")))
+      const root = await realpath(await mkdtemp(fixturePath("tmp/agentmux-packed-ctxmux-")))
       roots.push(root)
       const packDirectory = join(root, 'pack')
       const packWorkspace = join(root, 'pack-workspace')
@@ -483,8 +483,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
           directory: 'packages/core'
         },
         engines: { node: '>=24.0.0' },
-        os: ['darwin'],
-        cpu: ['arm64'],
+        os: ['darwin', 'linux'],
+        cpu: ['arm64', 'x64'],
         exports: {
           '.': { types: './dist/index.d.ts', import: './dist/index.js' },
           './runtime': { types: './dist/runtime.d.ts', import: './dist/runtime.js' }
@@ -492,8 +492,9 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')(
         bin: {
           agentmux: './bin/agentmux',
           amux: './bin/amux',
-          ctxmux: './vendor/ctxmux/darwin-arm64/bin/ctxmux',
-          ctxmuxd: './vendor/ctxmux/darwin-arm64/bin/ctxmuxd'
+          ctxmux: './bin/ctxmux',
+          ctxmuxd: './bin/ctxmuxd',
+          'agentmux-runtime': './bin/agentmux-runtime'
         }
       })
       expect(installedManifest.dependencies).not.toHaveProperty('node-pty')

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import process from 'node:process'
+import { randomUUID } from 'node:crypto'
 import packageManifest from '../package.json' with { type: 'json' }
 import {
   connectAgentMuxRpc, agentMuxRpcEndpoint,
@@ -9,6 +10,7 @@ import {
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
 import { isAgentMuxRpcMethod, isAgentMuxRpcStream } from './public-rpc.js'
 import { AgentMuxError } from './errors.js'
+import { rpcEncode } from './public-rpc-wire.js'
 import {
   AGENTMUX_CLI_COMMANDS, agentMuxCliArguments, agentMuxCliMatch,
   agentMuxCliRequestsHelp, parseAgentMuxCliInvocation
@@ -52,6 +54,7 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
   const controller = new AbortController()
   let finish!: () => void
   let streamError: unknown
+  let failureFrameDelivered = false
   const ended = new Promise<void>(resolve => { finish = resolve })
   const interrupted = () => { controller.abort(); finish() }
   process.once('SIGINT', interrupted)
@@ -62,15 +65,23 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
     opened = await client.subscribe(method, params, {
       signal: controller.signal,
       onInitial: () => {},
-      onFrame: frame => write(frame, process.stdout, true),
+      onFrame: frame => {
+        // Opening failures use the CLI error envelope emitted by main. Successful
+        // responses and subscription notifications keep their original RPC frame.
+        if ('error' in frame && frame.error !== undefined) return
+        write(frame, process.stdout, true)
+      },
       onEvent: event => {
-        if (event.type === 'error') { streamError = event.error; finish() }
+        if (event.type === 'error') { failureFrameDelivered = true; streamError = event.error; finish() }
         else if (event.type === 'end') finish()
       },
       onEnd: error => { if (error) streamError = error; finish() }
     })
     await ended
-    if (streamError) throw streamError
+    if (streamError) {
+      if (failureFrameDelivered) return 1
+      throw streamError
+    }
     return 0
   } finally {
     process.off('SIGINT', interrupted)
@@ -150,6 +161,12 @@ async function main(): Promise<number> {
       }
       invocation.params.parameters = (supplied as Record<string, unknown>).parameters
       invocation.params.items = (supplied as Record<string, unknown>).items
+    }
+    try {
+      rpcEncode({ jsonrpc: '2.0', id: randomUUID(), method, params: { ...invocation.params,
+        ...(sid && capability ? { caller: { agentSessionId: sid, capability } } : {}) } })
+    } catch (error) {
+      throw new AgentMuxError(error instanceof Error ? error.message : 'Command input is invalid.', 'INVALID_CLI_ARGUMENT')
     }
     if (isAgentMuxRpcStream(method, invocation.params)) {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)

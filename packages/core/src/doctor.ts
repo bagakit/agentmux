@@ -1,4 +1,6 @@
 import type { AgentMuxClient } from './client.js'
+type DoctorClient = Pick<AgentMuxClient, 'connect' | 'runtimeIdentity' | 'runtimeDiagnostics' |
+  'probeAgent' | 'probeExecutorAvailability' | 'inspectManagedHooks' | 'catalog'>
 import { runtimeStorageUsage, type RuntimeStorageUsage } from './runtime-storage-usage.js'
 import type { AgentProviderId, AgentCapabilities, AgentCatalogEntry, AgentMuxRuntimeDiagnostics } from './types.js'
 
@@ -48,7 +50,7 @@ export type AgentMuxDoctorReport = {
       action: string | null
     }
     remote: {
-      status: 'unsupported'
+      status: 'not-checked'
       action: string
     }
   }
@@ -83,8 +85,7 @@ export type AgentMuxDoctorReport = {
 }
 
 export type DiagnoseAgentMuxOptions = {
-  client: Pick<AgentMuxClient, 'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' |
-    'probeExecutorAvailability' | 'runtimeDiagnostics' | 'runtimeIdentity'>
+  client: DoctorClient
   commandOverrides?: Readonly<Record<string, string>>
   workspacePath?: string
   env?: Readonly<Record<string, string>>
@@ -106,7 +107,7 @@ function blockedAgent(catalog: AgentCatalogEntry, hookInstallation: AgentMuxDoct
 }
 
 async function probeAgent(
-  client: Pick<AgentMuxClient, 'probeAgent' | 'probeExecutorAvailability'>,
+  client: DoctorClient,
   catalog: AgentCatalogEntry,
   commandOverride: string | undefined,
   hookInstallation: AgentMuxDoctorAgent['hookInstallation']
@@ -192,9 +193,9 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       runtime,
       ...await observeStorage(runtime),
       runtimeAction: !runtime.supported
-        ? 'Use Node 24 or newer on macOS arm64 with the bundled darwin-arm64 ctxmux artifacts.'
+        ? 'Use Node 24 or newer on macOS arm64 or Linux x64 with the qualified bundled ctxmux artifacts.'
         : !runtime.ctxmux.ready
-          ? 'Reinstall @agentmux/core and verify the pinned ctxmux artifact manifest.'
+          ? 'Reinstall @agentmux/core with npm lifecycle scripts enabled, then verify the pinned ctxmux artifact manifest.'
           : null,
       hosts: {
         local: {
@@ -204,8 +205,8 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
             : 'Restore the pinned local ctxmux runtime, then rerun doctor.'
         },
         remote: {
-          status: 'unsupported',
-          action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+          status: 'not-checked',
+          action: 'Configure an SSH or Unix endpoint for an AgentMux Headless Runtime; doctor checks only the local Runtime.'
         }
       },
       agents,
@@ -225,7 +226,7 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
         protocolVersion: null,
         runtimeInstanceId: null,
         error: detail,
-        action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
+        action: 'Reinstall @agentmux/core with npm lifecycle scripts enabled and verify the pinned ctxmux artifacts, then rerun doctor.'
       },
       runtime: null,
       ...await observeStorage(null),
@@ -233,11 +234,11 @@ export async function diagnoseAgentMux(options: DiagnoseAgentMuxOptions): Promis
       hosts: {
         local: {
           status: 'unavailable',
-          action: 'Verify the bundled ctxmux artifacts, then rerun doctor.'
+          action: 'Reinstall @agentmux/core with npm lifecycle scripts enabled and verify the pinned ctxmux artifacts, then rerun doctor.'
         },
         remote: {
-          status: 'unsupported',
-          action: 'Remote is unsupported until the ctxmux Remote contract is delivered.'
+          status: 'not-checked',
+          action: 'Configure an SSH or Unix endpoint for an AgentMux Headless Runtime; doctor checks only the local Runtime.'
         }
       },
       agents: catalog.map((entry, index) => blockedAgent(entry, hookInstallations[index]!)),

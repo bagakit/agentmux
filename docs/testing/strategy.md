@@ -11,7 +11,7 @@ Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Too
 | Lane | 命令 | 证明范围 |
 | --- | --- | --- |
 | Fast | `pnpm test:fast` | Pure domain、Store、Provider、Desktop owner 与 UI reducer；不启动 packaged native fixture。 |
-| Native package | `pnpm test:native` | checkout 外 `pnpm pack`、offline install、真实 CtxMux PTY、Control handshake、Codex fixture、crash recovery 与 Remote typed unsupported。 |
+| Native package | `pnpm test:native` | checkout 外 `pnpm pack`、offline install、真实 CtxMux PTY、Control handshake、Codex fixture、crash recovery 与公共 Runtime 边界；真实 SSH 与 Linux 资格单独执行。 |
 | Security | `pnpm test:security` | ACP 默认拒绝、Hook 认证/Secret scope/队列上限、Store 上限、Control endpoint、Hook installer、Workspace 与 Browser 权限边界。 |
 | Seeded fuzz | `pnpm test:fuzz` | 固定 seed/case 数的 Hook/Store/terminal byte 与 Workspace path 边界；失败可由测试名中的 seed 重放。 |
 | Reliability | `pnpm test:reliability` | 16 个真实 Run、并发 Attachment、attach/detach churn、stop/input race、slow/fast Consumer、5 MiB 输出、live daemon `SIGKILL`、恢复与 Core 资源斜率。 |
@@ -37,7 +37,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 | Resize | public resize 到 `101x37`，真实 PTY 子进程从 TTY 读回并输出同一尺寸 |
 | Interrupt | public `SIGINT` 经 CtxMux portable Interrupt；fixture 观察信号后继续 running |
 | complete Stop | 忽略 HUP/TERM 的 root + child fixture 经 public Stop 后全部 PID 消失 |
-| Remote boundary | `connectSshAgentMux` 与 SSH execution host 返回 typed `REMOTE_UNSUPPORTED`，没有旧 SSH Run fallback |
+| Remote boundary | `connectSshAgentMux` 组合系统 SSH 和唯一 Hosted SDK，连接远端已有 Core owner；真实远端 Provider、权限、原 Session／Run 恢复和原活跃终端阅读分别取得同源证据。此边界不宣称 ctxmux 独立 Remote Runtime 已交付。 |
 | no second runtime | packed file list 和源码审计不得保留第二份 daemon、wire、journal 或 `node-pty` owner；公开可执行入口由 [Core package 的 bin](../../packages/core/package.json) 定义，随包 `ctxmux`/`ctxmuxd` 不是第二份实现。 |
 | Agent identity resolver | AgentMux id、Provider + native id、ACP handle 与 exact RunRef 唯一解析；unknown/conflict/retired 失败关闭 |
 | cross-process lifecycle | 两个真实 Node 进程竞争 Create/Resume，只允许一个 File Store reservation/CAS commit；Owner crash 按 CtxMux Run spec operation id 回收 orphan |
@@ -142,8 +142,8 @@ live daemon `SIGKILL` 发生在 Run 与 Attachment 仍活跃时；fixture 证明
 - latency、throughput、CPU/RSS 的对比结论需要独立的重复样本、outlier policy 和同条件 Benchmark，不能从 correctness/resource receipt 外推“全面胜出”；
 - 当前 Core 已消费公开 `basic-vt` checkpoint、restore bytes 与 ordered Resize 的 continuation；来源为 terminal-continuation.ts、screen-evidence.ts 和 CtxmuxRunAdapter。存在这条实现不证明新候选画面或长期 scrollback 已验收；restore bytes 不能冒充新的 PTY output，缺失 checkpoint/历史或观察未知须如实表达；
 - headless 与 Renderer 共用公开 continuation 顺序，各自拥有解释和像素；Runtime 持有字节、checkpoint 与 Resize 事实。不能再把「从 byte 0 重播且等 TUI 全屏 redraw」写成唯一现行恢复模型，也不能从当前画面恢复外推连续向上阅读历史通过；
-- Remote/SSH 的 Agent runtime 仍为 typed unsupported；
-- 当前 artifact 只支持 `darwin-arm64`，其他平台必须有自己的 exact manifest 和 Native proof，不能从本机结果推断。
+- SSH 管理连接远端已有语义 owner，按当前公共 SDK／服务合同验证；本机通过记录不代签真实 SSH、远端 Provider 或桌面验收；
+- 原生产物平台从 [artifact contract](../../packages/core/src/ctxmux-artifact-contract.json) 与对应 manifest 取得；每个平台必须有同源 Native proof，不能从本机结果推断。portable 空间 API 的可安装性与 Native Run 能力分别验证。
 
 ## 任务验收与假绿防护
 

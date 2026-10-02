@@ -2,21 +2,26 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
+import { fileURLToPath } from 'node:url'
+import { dirname, join, resolve } from 'node:path'
+import { mkdir, mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore, agentPromptCondition,
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore, agentPromptCondition, issueAgentCapability, hashAgentCapability,
   type AgentMuxControlRequest, type AgentMuxMessageEnvelope, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
 import type { ConfigStore } from '../src/main/config-store'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import type { WorkspaceFiles } from '../src/main/workspace-files'
+import type { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
 
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
-  invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
+  storageDirectory: _hygiene_fixturePath("private-explicit-steer"), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>() }))
 // Electron transport and unrelated startup services are isolated. The target's Renderer, Store,
 // preload, registered IPC, RuntimeController and public Core submission all execute below.
 vi.mock('electron', () => ({
@@ -24,7 +29,9 @@ vi.mock('electron', () => ({
     bridge.api = api; Object.assign(window, { [name]: api })
   } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => _hygiene_fixturePath("private-explicit-steer") },
+  webFrame: { getZoomFactor: () => 1 }, app: {
+    getPath: () => bridge.storageDirectory, getAppPath: () => resolve(dirname(fileURLToPath(import.meta.url)), '..'), isPackaged: false
+  },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
@@ -57,6 +64,7 @@ let gates: { resolve(): void }[] = []
 let nativeRunId: string
 let writes: string[], holdInput: ((data: string) => Promise<void>) | undefined
 let loseSubmitAck: boolean
+let privateQueueDirectory: string, capability: string
 
 function deferred() {
   let resolve!: () => void
@@ -82,11 +90,16 @@ async function settled() {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   writes = []; holdInput = undefined; loseSubmitAck = false; nativeRunId = RUN; gates = []
+  privateQueueDirectory = await mkdtemp(join(tmpdir(), 'amx-explicit-steer-'))
+  bridge.storageDirectory = privateQueueDirectory
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(privateQueueDirectory, 'messages.ndjson'))
+  await mkdir(join(privateQueueDirectory, 'Local Storage', 'leveldb'), { recursive: true })
+  capability = issueAgentCapability()
   const store = new AgentMuxMemoryAgentSessionStore()
   const durable: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: ID, providerId: 'codex', executorId: 'codex', hostId: 'local',
     workspacePath: _hygiene_fixturePath("private/explicit-steer"), run: { runId: RUN }, retiredRuns: [],
-    hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token',
+    hookBindingId: 'synthetic-binding', hookToken: 'synthetic-token', capabilityHash: hashAgentCapability(capability),
     createdAt: 1, updatedAt: 1, semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 }
   }
   await store.compareAndSwap(null, durable)
@@ -124,8 +137,9 @@ beforeEach(async () => {
     codex: { providerId: 'codex', label: 'Private', command: _hygiene_fixturePath("private/codex"), args: [], env: {}, injectAgentMuxGuide: false }
   }, workspaces: [{ id: 'private', name: 'Fixture', hostId: 'local', path: durable.workspacePath, kind: 'folder' }] }
   const sender = Object.assign(new EventEmitter(), { id: 772, isDestroyed: () => false, send: vi.fn(),
-    session: { flushStorageData: vi.fn() } })
+    session: { getStoragePath: () => privateQueueDirectory, flushStorageData: vi.fn() } })
   disposeIpc = await registerIpc({ window: { webContents: sender } as unknown as BrowserWindow, runtime,
+    progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => config } as unknown as ConfigStore,
     scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
@@ -156,12 +170,14 @@ afterEach(async () => {
   await runtime.dispose()
   useAppStore.setState(initial, true)
   bridge.invoke.mockReset(); vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+  await rm(privateQueueDirectory, { recursive: true, force: true })
 })
 
 it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an older queue-only head', async () => {
   await draft('ordinary queued message'); await enter(); await settled()
   const ordinary = queue()[0]!
-  expect(queue()).toEqual([expect.objectContaining({ text: 'ordinary queued message', status: 'deferred',
+  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'ordinary queued message', status: 'deferred',
     errorCode: 'AGENT_TURN_END_UNCONFIRMED', operationId: ordinary.operationId })])
   expect(writes).toEqual([])
   await draft('first explicit steer'); await enter('metaKey'); await settled()
@@ -169,11 +185,11 @@ it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an
   expect(writes).toEqual(['first explicit steer', '\r', 'second explicit steer', '\r'])
   expect(queue()).toEqual([ordinary])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.filter(call => call[2] !== 'ordinary queued message').map(call => [call[2], call[6]])).toEqual([
+  expect(submits.filter(call => call[2] !== 'ordinary queued message').map(call => [call[2], call[5]])).toEqual([
     ['first explicit steer', { allowUncertainTurn: true }],
     ['second explicit steer', { allowUncertainTurn: true }]
   ])
-  expect(submits.filter(call => call[2] === 'ordinary queued message').map(call => call[6])).toEqual(Array(4).fill(undefined))
+  expect(submits.filter(call => call[2] === 'ordinary queued message').map(call => call[5])).toEqual(Array(4).fill(undefined))
   expect(submits[2]?.[3]).not.toBe(ordinary.operationId)
   expect(client.agentSession(ID).run).toEqual({ runId: RUN })
   expect(client.agentSession(ID).terminalPromptDelivery?.reason).toBe('turn-end-unconfirmed')
@@ -196,7 +212,7 @@ it('retains multiple exact explicit intents arriving while an earlier real Core 
   expect(queue()).toEqual([])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
   expect(submits.map(call => call[3])).toEqual(pending.map(entry => entry.operationId))
-  expect(submits.map(call => call[6])).toEqual(Array(3).fill({ allowUncertainTurn: true }))
+  expect(submits.map(call => call[5])).toEqual(Array(3).fill({ allowUncertainTurn: true }))
 })
 
 it('the sole queued Send retries its exact paused operation without an additional Continue action', async () => {
@@ -205,10 +221,17 @@ it('the sole queued Send retries its exact paused operation without an additiona
   const second = { operationId: 'untouched-op', runId: RUN, text: 'other paused message', status: 'deferred' as const, promptCondition: null,
     errorCode: 'AGENT_EXECUTION_NOT_REQUESTED', error: 'Waiting for explicit execution.' }
   await act(async () => useAppStore.setState({ agentSteerQueues: { [ID]: [first, second] } }))
+  const mailbox = container.querySelector('.composer-mailbox')
+  expect(mailbox).not.toBeNull()
+  const toggle = new Event('toggle'); Object.defineProperty(toggle, 'newState', { value: 'open' })
+  await act(async () => mailbox!.dispatchEvent(toggle))
   const outbox = container.querySelector<HTMLElement>('[role="tab"][id$="-outbox-tab"]')
   expect(outbox).not.toBeNull()
   await act(async () => outbox!.click())
-  const buttons = [...container.querySelectorAll<HTMLButtonElement>('.composer-outbox button')]
+  const firstRow = container.querySelector<HTMLButtonElement>('.composer-outbox .composer-mailbox__row')
+  expect(firstRow).not.toBeNull()
+  await act(async () => firstRow!.click())
+  const buttons = [...container.querySelectorAll<HTMLButtonElement>('.composer-outbox__actions button')]
   const send = buttons.filter(button => button.textContent === 'Send queued message')
   expect(send).toHaveLength(1)
   expect(buttons.map(button => button.textContent)).not.toContain('Send now — turn may still be running')
@@ -216,7 +239,7 @@ it('the sole queued Send retries its exact paused operation without an additiona
   expect(writes).toEqual(['restored explicit retry', '\r'])
   expect(queue()).toEqual([second])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.map(call => [call[3], call[6]])).toEqual([['paused-exact-op', { allowUncertainTurn: true }]])
+  expect(submits.map(call => [call[3], call[5]])).toEqual([['paused-exact-op', { allowUncertainTurn: true }]])
 })
 
 it('does not lend explicit authorization to a queue-only message admitted during its receipt', async () => {
@@ -229,12 +252,12 @@ it('does not lend explicit authorization to a queue-only message admitted during
   expect(pending.map(entry => entry.text)).toEqual(['explicit only', 'bare Enter stays queued'])
   gate.resolve(); await settled()
   expect(writes).toEqual(['explicit only', '\r'])
-  expect(queue()).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', operationId: pending[1]!.operationId })])
+  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', operationId: pending[1]!.operationId })])
   await settled()
   expect(writes).toEqual(['explicit only', '\r'])
-  expect(queue()).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', errorCode: 'AGENT_TURN_END_UNCONFIRMED' })])
+  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', errorCode: 'AGENT_TURN_END_UNCONFIRMED' })])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.filter(call => call[2] === 'bare Enter stays queued').map(call => call[6])).toEqual([undefined])
+  expect(submits.filter(call => call[2] === 'bare Enter stays queued').map(call => call[5])).toEqual([undefined])
 })
 
 it('retains exact Run and permission boundaries even for explicit input', async () => {
@@ -282,9 +305,9 @@ it('keeps a newly explicit healthy replacement Run intent when the old pending r
   ])
   gate.resolve(); await settled()
   expect(writes).toEqual(['old Run awaiting', 'new Run explicit', '\r'])
-  expect(queue()).toEqual([expect.objectContaining({ operationId: oldEntry.operationId, runId: RUN, status: 'deferred' })])
+  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ operationId: oldEntry.operationId, runId: RUN, status: 'deferred' })])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.map(call => [call[1].run.runId, call[3], call[6]])).toEqual([
+  expect(submits.map(call => [call[1].run.runId, call[3], call[5]])).toEqual([
     [RUN, oldEntry.operationId, { allowUncertainTurn: true }],
     [nativeRunId, newEntry.operationId, { allowUncertainTurn: true }]
   ])
@@ -307,7 +330,7 @@ it('a synchronous subscriber Send at final in-flight clear starts a live owner r
     expect(admitted).toBe(true)
     expect(queue()).toEqual([])
     const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-    expect(submits.map(call => [call[2], call[6]])).toEqual([
+    expect(submits.map(call => [call[2], call[5]])).toEqual([
       ['first finalizing steer', { allowUncertainTurn: true }],
       ['subscriber explicit steer', { allowUncertainTurn: true }]
     ])
@@ -323,16 +346,18 @@ it('retains a fresh exact authorization arriving during a default Core attempt u
     return original(...args)
   })
   await draft('default awaiting explicit choice'); await enter()
-  await vi.waitFor(() => expect(client.submitAgentPrompt).toHaveBeenCalledTimes(1))
+  let defaultAttempt!: Promise<void>
+  await act(async () => { defaultAttempt = useAppStore.getState().flushAgentSteerQueue(ID) })
+  await vi.waitFor(() => expect(client.submitAgentPrompt, JSON.stringify(queue())).toHaveBeenCalledTimes(1))
   const entry = queue()[0]!
   let retry!: Promise<void>
   await act(async () => { retry = useAppStore.getState().sendQueuedAgentSteer(ID, entry.operationId) })
-  gate.resolve(); await act(async () => { await retry })
+  gate.resolve(); await act(async () => { await defaultAttempt; await retry })
   expect(client.submitAgentPrompt).toHaveBeenCalledTimes(2)
   expect(writes).toEqual(['default awaiting explicit choice', '\r'])
   expect(queue()).toEqual([])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.map(call => [call[3], call[6]])).toEqual([
+  expect(submits.map(call => [call[3], call[5]])).toEqual([
     [entry.operationId, undefined], [entry.operationId, { allowUncertainTurn: true }]
   ])
 })
@@ -352,9 +377,9 @@ it('Control send steers its exact message through registered Main and public Cor
   const request: AgentMuxControlRequest = {
     schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'control-first-request', operation: 'send',
     target: { kind: 'agent-session', agentSessionId: ID }, text: message.body,
-    caller: { agentSessionId: ID }, message, promptCondition: agentPromptCondition(client.agentSession(ID))
+    caller: { agentSessionId: ID, capability }, message, promptCondition: agentPromptCondition(client.agentSession(ID))
   }
-  // This begins after the existing Control author validation. No submit method is mocked:
+  // Core authenticates the real issued capability against the durable Session/Run. No submit method is mocked:
   // Store -> product preload -> registered IPC -> RuntimeController -> public Core all execute.
   const prompt = `[Message from Agent ${ID}]\n${message.body}`
   await act(async () => {
@@ -365,8 +390,9 @@ it('Control send steers its exact message through registered Main and public Cor
   const session = useAppStore.getState().sessions.find(session => session.id === ID)
   if (session?.kind !== 'agent') throw new Error('The fixture Agent is missing')
   const control = session.control
-  const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt' && call[3] === message.messageId)
-  expect(calls).toEqual([['sessions:submitPrompt', control, prompt, message.messageId, request.promptCondition, ID, { allowUncertainTurn: true }]])
+  const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitMessage' && call[2].envelope.messageId === message.messageId)
+  expect(calls).toEqual([['sessions:submitMessage', control, { envelope: message, condition: request.promptCondition,
+    caller: { agentSessionId: ID, capability } }]])
   expect(client.agentSession(ID).terminalPromptDelivery).toMatchObject({
     reason: 'turn-end-unconfirmed', submissionId: message.messageId
   })
@@ -383,14 +409,16 @@ it('Control send steers its exact message through registered Main and public Cor
   await act(async () => {
     await expect(useAppStore.getState().executeControl({ ...request, requestId: 'control-conflicting-request',
       text: 'changed body', message: { ...message, body: 'changed body' }
-    })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+    })).rejects.toMatchObject({ code: 'MESSAGE_ID_CONFLICT' })
   })
   expect(writes).toEqual(accepted)
   await expect(runtime.submitPrompt(control, 'default is still gated', 'control-default', agentPromptCondition(client.agentSession(ID))))
     .rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+  const inputByte = (await client.statusAgent(ID)).run.acceptedInputBytes
+  if (inputByte === undefined) throw new Error('The actual fixture input fence is missing')
   await expect(runtime.submitPrompt(control, 'automatic is still gated', 'control-auto', agentPromptCondition(client.agentSession(ID)),
-    { completionId: 'not-an-observed-completion', isCurrent: () => true, signal: new AbortController().signal },
-    undefined, { allowUncertainTurn: true }))
+    { completionId: 'not-an-observed-completion', inputByte, isCurrent: () => true, signal: new AbortController().signal },
+    { allowUncertainTurn: true }))
     .rejects.toMatchObject({ code: 'AGENT_COMPLETION_CHANGED' })
   expect(writes).toEqual(accepted)
 })
@@ -428,7 +456,7 @@ it('two preload consumers preserve their original conditions instead of rebindin
   if (session.kind !== 'agent') throw new Error('Missing Agent')
   const condition = agentPromptCondition(client.agentSession(ID))
   const send = (text: string, operationId: string) => bridge.api!.sessions.submitPrompt(
-    session.control, text, operationId, condition, undefined, { allowUncertainTurn: true })
+    session.control, text, operationId, condition, { allowUncertainTurn: true })
   const first = send('IPC client one', 'ipc-one')
   await vi.waitFor(() => expect(writes).toEqual(['IPC client one']))
   const second = send('IPC client two', 'ipc-two').then(() => null, error => error)
@@ -439,7 +467,7 @@ it('two preload consumers preserve their original conditions instead of rebindin
   expect(writes).toEqual(['IPC client one', '\r'])
   expect(client.agentSession(ID).promptCompletionAdmission?.submissionId).toBe('ipc-one')
   await bridge.api!.sessions.submitPrompt(session.control, 'new explicit client two intent', 'ipc-two-new',
-    agentPromptCondition(client.agentSession(ID)), undefined, { allowUncertainTurn: true })
+    agentPromptCondition(client.agentSession(ID)), { allowUncertainTurn: true })
   expect(writes).toEqual(['IPC client one', '\r', 'new explicit client two intent', '\r'])
   expect(client.agentSession(ID).run).toEqual({ runId: RUN })
   expect(container.querySelector('[contenteditable="true"]')).not.toBeNull()

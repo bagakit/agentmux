@@ -61,7 +61,8 @@ function runInfo(currentSize: { cols: number; rows: number } | null): RunInfo {
     first_available_byte: 0,
     attachments: 1,
     applied_input_bytes: 0,
-    current_size: currentSize
+    current_size: currentSize,
+    native_service: null
   }
 }
 

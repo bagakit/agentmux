@@ -1,4 +1,5 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { loadAgentSessions } from '../src/agent-session-store.js'
 import { describe, expect, it } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -8,6 +9,12 @@ import {
   type AgentMuxAgentSessionStore
 } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
+
+async function storeImplementation() {
+  return process.env.AGENTMUX_TEST_SESSION_STORE_ENTRY
+    ? await import(process.env.AGENTMUX_TEST_SESSION_STORE_ENTRY) as typeof import('../src/agent-session-store.js')
+    : { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore }
+}
 
 /**
  * store 层的 compare-and-swap 冲突检测。
@@ -35,7 +42,7 @@ function storedSession(
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/work"),
+    workspacePath: fixturePath("tmp/work"),
     run: { runId: 'daemon-1' },
     retiredRuns: [],
     hookBindingId: 'hook-binding-1',
@@ -54,15 +61,16 @@ const stores: Array<{
 }> = [
   {
     name: '内存 store',
-    open: async () => ({
-      store: new AgentMuxMemoryAgentSessionStore(),
-      dispose: async () => {}
-    })
+    open: async () => {
+      const { AgentMuxMemoryAgentSessionStore } = await storeImplementation()
+      return { store: new AgentMuxMemoryAgentSessionStore(), dispose: async () => {} }
+    }
   },
   {
     name: '文件 store',
     open: async () => {
-      const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-store-cas-"))
+      const root = await mkdtemp(fixturePath("tmp/agentmux-store-cas-"))
+      const { AgentMuxFileAgentSessionStore } = await storeImplementation()
       return {
         store: new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')),
         dispose: async () => {
@@ -150,6 +158,20 @@ for (const variant of stores) {
         const loaded = await store.load()
         expect(loaded).toHaveLength(1)
         expect((loaded[0] as AgentMuxStoredAgentSession).updatedAt).toBe(300)
+      })
+    })
+
+    it('相同 durable 事实即使字段顺序不同也放行，真实字段变化仍拒写', async () => {
+      await withStore(async store => {
+        const original = storedSession({ semanticStatus: { state: 'done', source: 'native-hook', observedAt: 200 } })
+        await store.compareAndSwap(null, original)
+        const reordered = Object.fromEntries(Object.entries(original).reverse()) as AgentMuxStoredAgentSession
+        const result = await store.compareAndSwap(reordered, { ...original, updatedAt: 300 }).then(() => 'written', error => error)
+        expect(result).toBe('written')
+        const current = (await loadAgentSessions(store))[0]!
+        expect(current.updatedAt).toBe(300)
+        await expect(store.compareAndSwap({ ...current, hookToken: 'foreign-token' }, null)).rejects.toMatchObject(STALE)
+        expect(await loadAgentSessions(store)).toEqual([current])
       })
     })
   })

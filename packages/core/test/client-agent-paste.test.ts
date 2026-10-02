@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
@@ -33,14 +33,14 @@ function deferred() {
 async function fixture(providerId: 'codex' | 'claude' | 'generic' = 'codex', pending = false) {
   const template = new AgentProviderRegistry().get('codex')
   const generic = defineAgentProvider({
-    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
+    catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     hook: template.hook,
     buildArgs: (_prompt, args) => [...args]
   })
   const store = new AgentMuxMemoryAgentSessionStore()
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'paste-agent', providerId, executorId: providerId,
-    hostId: 'local', workspacePath: upstreamFixturePath("synthetic"), run: { runId: 'paste-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("synthetic"), run: { runId: 'paste-run' }, retiredRuns: [],
     hookBindingId: 'paste-binding', hookToken: 'paste-token', createdAt: 1, updatedAt: 2,
     ...(pending ? { pendingInteraction: { request: {
       kind: 'permission' as const, id: 'permission', agentSessionId: 'paste-agent', title: 'Allow?',
@@ -59,7 +59,7 @@ async function fixture(providerId: 'codex' | 'claude' | 'generic' = 'codex', pen
   const cursors = new Map<string, number>([['paste-run', 31]])
   const run = (runId: string): CtxmuxAdapterRun => ({
     nativeService: null,
-    runId, lifecycleOperationId: null, program: providerId, args: [], workspacePath: upstreamFixturePath("synthetic"),
+    runId, lifecycleOperationId: null, program: providerId, args: [], workspacePath: fixturePath("synthetic"),
     pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursors.get(runId) ?? 0
   })

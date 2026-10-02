@@ -1,8 +1,10 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './fixture-values.js'
+import { fixturePath } from './fixture-values.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { vi } from 'vitest'
-import { AgentMuxClient } from '../../src/client.js'
+import { AgentMuxClient as SourceClient } from '../../src/client.js'
+const AgentMuxClient: typeof SourceClient = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
+  ? (await import(process.env.AGENTMUX_TEST_RPC_CORE_ENTRY)).AgentMuxClient : SourceClient
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
 import { issueAgentCapability, hashAgentCapability } from '../../src/agent-capability.js'
 import type { AgentMuxStoredAgentSession } from '../../src/types.js'
@@ -10,7 +12,7 @@ import type { CtxmuxAdapterObservationEvent, CtxmuxAdapterRun } from '../../src/
 
 /** Real Core registry, authorization and queue; only the Native transport is a deterministic fixture. */
 export async function rpcOwnerFixture(ids = ['caller', 'recipient']) {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-rpc-owner-")), store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
+  const root = await mkdtemp(fixturePath("tmp/amx-rpc-owner-")), store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const capability = issueAgentCapability()
   for (const [key] of Object.entries(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import type { AgentMuxMessageEnvelope } from '../src/agent-global-message-queue.js'
 import { chmod, mkdtemp, rm, stat } from 'node:fs/promises'
 import { readFileSync } from 'node:fs'
@@ -827,7 +827,7 @@ describe('external Control control', () => {
   // 所以它此前无人守。
   // -------------------------------------------------------------------------
   it('refuses to take over an endpoint whose liveness cannot be determined', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-control-probe-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-control-probe-"))
     roots.push(root)
     const path = join(root, 'control.sock')
 
@@ -875,7 +875,7 @@ describe('external Control control', () => {
         if (request.operation === 'space.inspect') return { operation: request.operation, catalog: emptyCatalog }
         if (request.operation === 'agent.open') return { operation: request.operation, requestId: request.requestId,
           outcome: 'opened', from: null, to: { spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab-main', regionId: 'agent-left' },
-          agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: upstreamFixturePath("repo"), createOperationId: 'creation', initialPrompt: 'not-requested' },
+          agent: { agentSessionId: 'semantic-1', runId: 'run', providerId: 'codex', executorId: 'codex', hostId: 'local', cwd: fixturePath("repo"), createOperationId: 'creation', initialPrompt: 'not-requested' },
           resource: null, save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
         if (request.operation === 'list.active-agents') return { operation: request.operation, agents: [activeAgent(core)] }
         if (request.operation === 'send') {
@@ -934,7 +934,7 @@ describe('external Control control', () => {
   })
 
   it.each(['wire ID', 'legacy operation field'] as const)('rejects an error response with a mismatched %s', async identity => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-control-correlation-")); roots.push(root)
+    const root = await mkdtemp(fixturePath("tmp/amx-control-correlation-")); roots.push(root)
     const path = join(root, 'control.sock')
     const server = createServer(socket => {
       const lines = new AgentMuxRpcLines()
@@ -1144,7 +1144,7 @@ describe('Control 等待预算与慢操作判据只有一处', () => {
     // dispatcher owns each method's handshake; a subscription has no idle timeout.
     const delays = [...serverSource.matchAll(/socket\.setTimeout\(([^,)]+)/g)].map(match => match[1]!.trim())
     expect(delays).toEqual(['AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS', '0'])
-    expect(clientSource).toContain("timeout(method) + (this.endpoint.transport === 'ssh' ? SSH_STARTUP_BUDGET_MS : 0)")
+    expect(clientSource).toContain("timeout(method) + (this.endpoint.transport === 'ssh' ? AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS : 0)")
     expect(wireSource).toContain('}, duration)')
     expect(importShape.test("import { agentMuxControlTimeoutMs } from './control.js'")).toBe(true)
   })

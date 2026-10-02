@@ -1216,6 +1216,8 @@ export type AgentMuxClientEvent = (
        */
       type: 'connection-state'
       state: 'lost' | 'restored' | 'unrecoverable'
+      /** Endpoint observation failure, not an Agent/Run error. Settles with this connection. */
+      diagnostic?: { code: string; message: string }
       evidence: AgentMuxEvidence
     }
 

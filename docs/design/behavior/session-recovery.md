@@ -321,11 +321,22 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ## 联邦 Runtime 与远端恢复边界
 
+用户先要求「彻底理解项目, 实现远程管理能力」，允许「可以用 $farm 的机器测试」，要求研究 `herdr`、`orca` 与 `paseo` 并在准备后讨论；现已授权彻底实现既有联邦 Runtime Feature。通用 Core 与 Desktop 必须能联邦管理本机和远端 Headless AgentMux；首个可用闭环连接已有远端服务，复用统一公共 RPC 与系统 SSH stdio，远端持有 Agent 语义与当地 ctxmux Run，不能让无 UI 客户端依赖 Desktop 才能创建、观察或管理 Agent。参考研究与 Farm 环境观察仍不能代替真实产品验收。
+
 - AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。
 - Desktop 只持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用、工作面布局和最后一次观察结果。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有 Core 明确给出终局 retired/unknown，才允许移除投影。
 - `ExecutionHost`（文件、shell、SSH 等执行能力）与 `AgentMux Runtime endpoint` 是两种不同的产品能力。即使它们落在同一台远端机器上，也不能因为能访问工作区就假定 Agent Runtime 可用；两者的身份、能力和恢复状态分别呈现。
 - 远端管理的对象是 AgentMux Runtime，而不是把 Desktop 直接变成 ctxmux 的远程控制器。ctxmux 继续只负责 PTY、进程、Run、ordered bytes、Replay、Gap、Attachment 和权威运行时事实；AgentMux 负责 Agent 语义与 Session 恢复，Desktop 不在两层之间再保留一份实现。
+- 本地服务、SSH 与宿主提供的 HTTP 连接共用唯一类型化 JSON-RPC Runtime 服务与 Hosted SDK。传输只改变连接方式，不另建 Session、权限、历史、Attachment 或事件恢复实现；Headless 与带宿主能力的服务均组合同一个 Core 语义 owner。宿主私网、设备及 Desktop 转发能力仍由各自 owner 注入。
+- Runtime SDK 的调用方须经过当前传输认可的用户／设备授权；Agent 的 managed capability 只授权其既有受限业务操作，不能借 Runtime SDK 获得完整服务权限。订阅与 Attachment lease 同时绑定已授权 principal、准确 Runtime 及独立 consumer，释放一个 reader 不撤销其他 reader。
+- 建连与读者开流可取消；已由业务 owner 承接的写入必须保留原操作和对账入口，不能用外层通信超时宣告写入没有发生。大快照在同一服务内有界分段，初始切面与随后有序事件之间有明确 ready barrier，保持原 bytes、Gap、resize 与 checkpoint，不按 RPC 单帧预算截断历史。
 - ctxmux 的持久化语义必须如实表达：客户端断开和 daemon 重启可以保留历史 Run、Replay 与恢复线索；宿主机重启后的原生 PTY/进程连续性不是 ctxmux 的保证。宿主重启后由 AgentMux 使用 durable Provider handle 语义恢复同一 Session、创建新的 Run 时，界面应显示“同一 Session 的新 Run”，不能声称原 PTY 仍在继续运行。
+
+- 一个 endpoint 的连接、准备、权限检查、能力探测或快照读取失败只影响该 endpoint 的可确认事实；其它健康 endpoint 与其已有输入输出继续。远端仍在建连或握手尚未完成时，本地已可用的 Runtime 与持久工作面必须先恢复可见、可输入，不能等所有 endpoint 完成才加载界面或交付本地快照；未验证的远端继续保留原引用并如实说明正在连接，可信恢复后再核对它的事实。失败 endpoint 的 durable 工作面、最后观察和稳定引用保留，未取得完整权威读取不能冒充空集合或删除理由；旁侧服务窗说明失败步骤、当前已知/未知与恢复动作。端点传输故障按其明确来源归属服务窗，可信恢复后对应告示收口，不继续冒充 Agent 错误打扰健康工作；相同文案或错误码的真实 Agent／reader 故障仍保留，不能据恢复事件一并清除。
+- 联邦操作始终绑定准确 Runtime、Session 与 Run，不以 Desktop 的 Host 路由、当前焦点、路径同名或旧连接观察冒充远端身份和授权。断线、响应丢失或服务替换时保留已发生与未知事实，沿原业务操作身份对账，不自动重建 Agent、重投 Prompt 或把旧引用绑定到另一个 owner。客户端断开或 Headless 服务结束观察不停止 ctxmux 的健康 Run。
+- 远端 endpoint 首次可信连接所得的语义 Runtime 持久身份与原 Session 引用一并保留，独立于可改的 Host 名称、SSH 连接配置、服务进程代次和 ctxmux 身份；请求始终区分原语义 owner 与当前服务代次。重启或重连遇到不同语义 owner 时保原绑定与工作面，明确身份未确认/不匹配，不能据另一个 owner 的 `unknown Session` 删除旧投影或静默换绑。最后观察是带来源的缓存，不是授权或当前权威事实；只有目标的完整成功读取才能更新对应集合。
+- 完整交付包含真实 Linux Headless 服务、真实 Provider 的输入输出/权限/语义恢复及客户端与服务重启后的自动续接。原 Tab、Tab Group、Region、焦点与 split 先恢复，续接仍归原 Session；终端连续阅读、可信续接、Gap 与成本只沿《Terminal 连续向上阅读历史》及既有终端续接合同，不因远端 framing、响应预算或断网裁掉可用历史或复制 byte 真值。
+- 连接已有服务不暗中安装、部署、升级、重启或停止远端 owner；管理部署使用显式命令并返回准确事实。浏览器/手机远程控制是另一产品边界，本轮不扩入；不以完整升级平台或无关 Goal/PMO 域作为本轮连接和管理已有 Runtime 的前置条件。
 
 ## 断电后旧 Run 消失时的 Agent 恢复
 

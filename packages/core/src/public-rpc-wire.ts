@@ -33,8 +33,9 @@ export class AgentMuxRpcDispatcher {
     for (const method of [...Object.keys(AGENTMUX_RPC_CONTROL_METHODS), ...Object.keys(AGENTMUX_RPC_NATIVE_METHODS)] as AgentMuxRpcMethod[]) {
       this.server.addMethodAdvanced(method, async (request, channel) => {
         try {
-          const { caller, ...params } = rpcRecord(request.params ?? {})
-          const context: AgentMuxRpcCallContext = { signal: channel.signal,
+          const { caller, runtimeFence, ...params } = rpcRecord(request.params ?? {})
+          const context: AgentMuxRpcCallContext = { signal: channel.signal, afterResponse: channel.afterResponse,
+            ...(runtimeFence === undefined ? {} : { runtimeFence: rpcRecord(runtimeFence, ['runtimeId', 'ownerInstanceId']) as NonNullable<AgentMuxRpcCallContext['runtimeFence']> }),
             ...(channel.principal === undefined ? {} : { principal: channel.principal }),
             ...(channel.transport === undefined ? {} : { transport: channel.transport }),
             ...(caller === undefined ? {} : { caller: rpcRecord(caller, ['agentSessionId', 'capability']) as NonNullable<AgentMuxRpcCallContext['caller']> }) }
@@ -135,7 +136,11 @@ export class AgentMuxRpcDispatcher {
     }
     if (!isAgentMuxRpcMethod(request.method)) return Object.hasOwn(request, 'id')
       ? createJSONRPCErrorResponse(request.id!, -32601, 'Method not found.') : null
-    // Bound only the response/reader handshake. Cancellation never rolls back a business Run.
+    // A finite intent is owned by its business owner after admission. Only
+    // subscription establishment has an outer observation deadline; releasing
+    // a reader never rolls back an admitted write or stops its Run.
+    const params = rpcRecord(request.params ?? {})
+    if (!isAgentMuxRpcStream(request.method, params)) return await this.server.receive(request, channel)
     const controller = new AbortController()
     let reject!: (error: AgentMuxError) => void
     const ended = new Promise<never>((_, no) => { reject = no })
@@ -145,12 +150,13 @@ export class AgentMuxRpcDispatcher {
     const duration = Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)
       ? agentMuxControlTimeoutMs(AGENTMUX_RPC_CONTROL_METHODS[method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS])
       : AGENTMUX_RPC_NATIVE_METHODS[method as keyof typeof AGENTMUX_RPC_NATIVE_METHODS] === 'long' ? 60_000 : 2_000
-    const deadline = setTimeout(() => { controller.abort(); reject(new AgentMuxError('RPC response timed out; the business outcome is unconfirmed.', 'CONTROL_TIMEOUT')) }, duration)
+    const deadline = setTimeout(() => { controller.abort(); reject(new AgentMuxError('RPC reader establishment timed out; its owner and Runs are preserved.', 'CONTROL_TIMEOUT')) }, duration)
     try {
       if (channel.signal.aborted) abort()
       return await Promise.race([this.server.receive(request, { ...channel,
         signal: AbortSignal.any([channel.signal, controller.signal]) }), ended])
     } catch (error) { return Object.hasOwn(request, 'id') ? rpcFailure(request.id!, error) : null }
     finally { clearTimeout(deadline); channel.signal.removeEventListener('abort', abort) }
+
   }
 }

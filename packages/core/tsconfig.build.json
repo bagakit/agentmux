@@ -4,6 +4,6 @@
     "composite": true,
     "rootDir": "src"
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.json"],
   "exclude": ["test/**/*.ts"]
 }

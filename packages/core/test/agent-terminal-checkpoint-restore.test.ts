@@ -54,3 +54,18 @@ it.each([{ resizeAfterRestoreBytes: -1 }, { resizeAfterRestoreBytes: 13 },
   expect(() => assertTerminalCheckpointRestore({ ...checkpoint, ...invalid }, new TextEncoder().encode('prefixsuffix')))
     .toThrow(expect.objectContaining({ code: 'CTXMUX_EVENT_INVALID' }))
 })
+
+it('restores a nonempty synthetic suffix and counts only subsequent original bytes', async () => {
+  const screen = new AgentTerminalScreen(80, 24, 0, false)
+  const prefix = new TextEncoder().encode('\u001b[22;1H› draft')
+  try {
+    await screen.restore({ ...checkpoint, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 },
+      restoreScrollbackRows: 0, resizeAfterRestoreBytes: prefix.byteLength }, Buffer.concat([prefix, Buffer.from('!')]))
+    expect(screen.composerText('›')).toBe('draft!')
+    expect(screen.throughByte).toBe(100)
+    expect(screen.authoritative).toBe(true)
+    await screen.write({ startByte: 100, endByte: 101, dataBytes: new TextEncoder().encode('?') })
+    expect(screen.composerText('›')).toBe('draft!?')
+    expect(screen.throughByte).toBe(101)
+  } finally { screen.dispose() }
+})

@@ -47,7 +47,10 @@ export const hostSchema = z.discriminatedUnion('kind', [
       hostname: z.string().min(1),
       user: z.string().min(1).optional(),
       port: z.number().int().min(1).max(65535).optional(),
-      identityFile: z.string().min(1).optional()
+      identityFile: z.string().min(1).optional(),
+      remoteCommand: z.string().min(1).optional(),
+      remoteSocketPath: z.string().startsWith('/').optional(),
+      runtimeId: z.string().min(1).optional()
     })
     .strict()
 ])

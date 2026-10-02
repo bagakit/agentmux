@@ -59,7 +59,7 @@ Agent 生命周期由 Main 的 `RuntimeController` 调用 Core 公共 API。Brow
 | 通用 Run 及其字节、生命周期 | ctxmux；Core 经 `CtxmuxRunAdapter` 核对身份并消费 |
 | AgentSession、原生 handle、当前 Run 关联与 Timeline | [Core Session Store](../../packages/core/src/agent-session-store.ts)；默认目录由 [runtime-paths.ts](../../packages/core/src/runtime-paths.ts) 决定，Desktop 注入 [userData Store 路径](../../apps/desktop/src/main/agent-session-store-path.ts) |
 | 宿主配置、Executor 与 Workspace 配置 | [ConfigOwner](../../apps/desktop/src/main/config-owner.ts) 串行提交，[config-store.ts](../../apps/desktop/src/main/config-store.ts) 保存 |
-| Tab／Region／布局及展示偏好 | Renderer Store 的 `partializeAppState` / `initialize`，经 `projectPersistedWorkbench` / `restorePersistedWorkbench` 投影与恢复 |
+| Tab／Region／布局及展示偏好 | [Core Spatial owner](../../packages/core/src/spatial-state.ts) 持有身份与布局；Renderer Store 的 `initialize` / `projectPersistedWorkbench` / `restorePersistedWorkbench` 读取并投影，偏好和草稿归 client |
 | Goal／Demand 内容与确认记录 | [Demand Store](../../packages/demand/src/demand-store.ts)；宿主提供明确 root，读取失败不替换成空 Store |
 
 通用 Core 的默认目录策略和 Desktop 的宿主目录策略是不同接入上下文，不能把一种路径套给所有消费者。布局记录先恢复，再核对其引用的执行事实；Core snapshot、展示位置和保存回执不互相代签。要求归 [工作面恢复与终端阅读](../../AGENTS.md#工作面恢复与终端阅读)，终端机制另见 [Terminal Runtime](terminal-runtime.md)。
@@ -68,8 +68,12 @@ Agent 生命周期由 Main 的 `RuntimeController` 调用 Core 公共 API。Brow
 
 对象优先 CLI 与共享类型化 JSON-RPC 2.0 服务已经接入当前源码。[Server](../../packages/core/src/public-rpc-server.ts) 默认使用 Unix socket 的有界 JSON-lines framing；显式配置 `AGENTMUX_RPC_HTTP_BIND` 和 `AGENTMUX_RPC_HTTP_TOKEN` 后提供 HTTP POST 与 SSE 订阅，HTTP 默认关闭且不内建 TLS。[Client](../../packages/core/src/public-rpc-client.ts) 的 SSH 传输调用远端 CLI 的 [stdio 转发](../../packages/core/src/agentmux-rpc-stdio.ts)，连接远端已运行 owner 的 Unix socket，要求已有远端 CLI 与 SSH 授权。公共方法与参数归 [公共 RPC 类型](../../packages/core/src/public-rpc.ts)；[Control 定义](../../packages/core/src/control.ts) 中的信封保留为内部 owner DTO。行为合同归 [对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。
 
-SSH 公共服务连接与远端 Run 执行是不同能力。[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 与 [`SshExecutionHost`](../../packages/core/src/execution-host.ts) 的远端执行／Hook 转发入口仍明确返回 `REMOTE_UNSUPPORTED`；可连接远端公共服务不证明 ctxmux Remote Runtime 已交付。具体能力应核对实际连接 owner 的事实；来源不可用保持未知，健康 Agent 与原工作面沿原约束保留。
+Runtime 语义服务由 Core 的 [Headless owner](../../packages/core/src/headless-runtime.ts) 组合唯一 `AgentMuxClient`、durable Session Store 与 [Hosted Runtime service](../../packages/core/src/hosted-runtime-service.ts)。宿主服务组合该 owner 及自己的私网、设备和 Desktop ports；不会再建立另一套 Agent 语义 Runtime。
+
+[`connectHostedAgentMux`](../../packages/core/src/hosted-client.ts) 是公共 RPC 的唯一类型化 Runtime client；[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 只负责组合系统 SSH 传输与同一 Hosted client。Desktop 的 [Host connector](../../apps/desktop/src/main/desktop-host.ts) 连接语义 owner，工作面与文件／Git 能力继续归 Desktop。客户端的最后观察、durable Runtime 身份、当前 owner 进程代次与 ctxmux 身份分别保留；缓存不成为授权或当前运行事实。
+
+SSH 公共服务连接与远端 shell／文件能力是不同能力。[`SshExecutionHost`](../../packages/core/src/execution-host.ts) 不持有 Agent 生命周期；Core 远程管理连接的是远端 AgentMux owner，由它消费当地 ctxmux。此实现不声称 ctxmux 具有独立 Remote Runtime 协议。源码、编译、安装包和当前连接能力仍分别核对；来源不可用保持未知，恢复行为唯一见[联邦 Runtime 与远端恢复边界](../design/behavior/session-recovery.md#联邦-runtime-与远端恢复边界)。
 
 ## Frontend-independent spatial owner
 
-The Core filesystem owner and public API for stable entities, position topology and bindings are defined in [Durable spatial state](spatial-state.md). Desktop screen layout and focus consume these facts; the legacy workbench localStorage remains the current Desktop owner until the explicitly tracked consumer cutover is complete. Do not confuse lookup caches with durable spatial relationships.
+The Core filesystem owner and public API for stable entities, position topology and bindings are defined in [Durable spatial state](spatial-state.md). Desktop screen layout and focus consume these facts through the same Core owner; client preferences and drafts remain separate. Do not confuse lookup caches with durable spatial relationships.

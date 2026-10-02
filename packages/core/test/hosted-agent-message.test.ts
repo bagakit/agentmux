@@ -1,4 +1,5 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -7,9 +8,15 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
-import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
+import { AgentMuxHostedRuntimeService as SourceHostedService } from '../src/hosted-runtime-service.js'
+import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
 import type { AgentMuxHostedClient, AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
+const connectHostedAgentMux: typeof SourceConnectHosted = process.env.AGENTMUX_TEST_CLIENT_ENTRY
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_CLIENT_ENTRY)).connectHostedAgentMux : SourceConnectHosted
+const AgentMuxHostedRuntimeService: typeof SourceHostedService = process.env.AGENTMUX_TEST_SERVICE_ENTRY
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_SERVICE_ENTRY)).AgentMuxHostedRuntimeService : SourceHostedService
+type AgentMuxHostedRuntimeService = SourceHostedService
+
 
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-hosted-message-'))
@@ -25,7 +32,7 @@ async function fixture() {
     kernel: Record<string, unknown> }
   await inner.registry.load('local'); inner.connected = true
   let acceptedInputBytes = 0
-  const run = () => ({ runId: 'recipient-run', lifecycleOperationId: null, program: upstreamFixturePath("private-worker"), args: [],
+  const run = () => ({ runId: 'recipient-run', lifecycleOperationId: null, program: fixturePath("private-worker"), args: [],
     workspacePath: root, pid: 421, state: { type: 'running' as const }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes })
   const input = vi.fn(async (_id: string, operation: { expectedByte: number; data: string }) => {
@@ -39,7 +46,7 @@ async function fixture() {
   vi.spyOn(core, 'connect').mockResolvedValue()
   // Track the original method; its authority, durable queue and prompt submission remain real.
   const submit = vi.spyOn(core, 'submitAgentMessage')
-  const service = new AgentMuxHostedRuntimeService(core, store.path)
+  const service = new AgentMuxHostedRuntimeService(core, store.path, () => hostedTestOwner(core))
   const port = {
     call: async (method: string, params: unknown, options?: { signal?: AbortSignal }) =>
       JSON.parse(JSON.stringify(await service.call(method, JSON.parse(JSON.stringify(params)), options))),
@@ -49,6 +56,7 @@ async function fixture() {
       const stream = await service.subscribe(method, params, event => handlers.onEvent(JSON.parse(JSON.stringify(event))),
         handlers.signal ? { signal: handlers.signal } : {})
       handlers.onInitial(JSON.parse(JSON.stringify(stream.initial)))
+      await stream.start?.()
       return { dispose: async () => await stream.dispose() }
     }
   } as unknown as AgentMuxHostedRpcPort

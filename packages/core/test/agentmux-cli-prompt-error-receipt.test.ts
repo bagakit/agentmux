@@ -9,6 +9,8 @@ import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.j
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
+import { hashAgentCapability, issueAgentCapability } from '../src/agent-capability.js'
+import { renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
 import { AgentMuxFileAgentSessionStore } from '../src/agent-session-store.js'
 import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 import { AgentMuxControlServer } from '../src/control-host.js'
@@ -40,15 +42,16 @@ type Inner = {
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'amx-prompt-code-'))
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
+  const capability = issueAgentCapability()
   const template = new AgentProviderRegistry().get('codex')
   const provider = defineAgentProvider({
     catalog: { ...template.catalog, id: 'generic', label: 'Generic', executable: 'generic', expectedProcess: 'generic' },
-    hook: template.hook, planManagedHooks: template.planManagedHooks, buildArgs: (_prompt, args) => [...args]
+    hook: template.hook, ...(template.planManagedHooks ? { planManagedHooks: template.planManagedHooks } : {}), buildArgs: (_prompt, args) => [...args]
   })
   const stored: AgentMuxStoredAgentSession = {
     kind: 'agent', agentSessionId: 'receipt-agent', executorId: 'generic', providerId: 'generic',
     hostId: 'local', workspacePath: root, run: { runId: 'receipt-run' }, retiredRuns: [],
-    hookBindingId: 'receipt-binding', hookToken: 'receipt-token', createdAt: 1, updatedAt: 1
+    hookBindingId: 'receipt-binding', hookToken: 'receipt-token', capabilityHash: hashAgentCapability(capability), createdAt: 1, updatedAt: 1
   }
   let client: AgentMuxClient | undefined
   let server: AgentMuxControlServer | undefined
@@ -97,10 +100,10 @@ async function fixture() {
         if (request.operation !== 'send') throw new Error(`Unexpected fixture operation: ${request.operation}`)
         requests.push(request)
         try {
-          await owner.submitAgentPrompt({
-            agentSessionId: stored.agentSessionId, ...request.promptCondition,
-            prompt: request.text, operationId: request.message?.messageId ?? request.requestId,
-            allowUncertainTurn: true
+          if (!request.caller?.capability) throw new Error('This fixture requires the issued managed caller capability.')
+          await owner.submitAgentMessage({
+            agentSessionId: stored.agentSessionId, condition: request.promptCondition,
+            envelope: request.message, caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability }
           })
         } catch (error) {
           const source = error as { code: string; message: string }
@@ -117,6 +120,8 @@ async function fixture() {
       const result = await execute(process.execPath, [cli, 'agent', 'send', '--operation-id', 'original-operation', '--to-session', stored.agentSessionId,
         '--text', '  original message\n第二行  ', '--message-id', 'original-message'], {
         env: { ...env, AGENTMUX_RUNTIME_DIRECTORY: root, AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
+          AGENTMUX_RPC_ENDPOINT: `unix:${server!.path}`, AGENTMUX_ENV: '1',
+          AGENTMUX_AGENT_SESSION_ID: stored.agentSessionId, AGENTMUX_AGENT_CAPABILITY: capability,
           AGENTMUX_AGENT_SESSION_STORE: store.path, AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'messages.ndjson') },
         timeout: 10_000, maxBuffer: 256 * 1024
       }).then(() => { throw new Error('CLI unexpectedly accepted the blocked prompt.') }, error => {
@@ -154,15 +159,14 @@ describe('public Prompt errors through Control and built CLI', () => {
         const reply = code === 'AGENT_PROMPT_SUBMISSION_BUSY'
           ? await h.store.withPromptSubmission('receipt-agent', h.failSend)
           : await (async () => {
-              // Ingress now reads durable identities before handing the request
-              // to its owner. Inject the original missing-read fault at the
-              // actual SDK producer, after that independent admission.
-              const original = h.owner.submitAgentPrompt.bind(h.owner)
-              const producer = vi.spyOn(h.owner, 'submitAgentPrompt').mockImplementationOnce(async request => {
-                const missingRead = vi.spyOn(h.store, 'load').mockResolvedValueOnce([])
-                try { return await original(request) } finally { missingRead.mockRestore() }
-              })
-              restoreMissingRead = () => producer.mockRestore()
+              const read = h.store.load.bind(h.store)
+              const withPrompt = h.store.withPromptSubmission.bind(h.store)
+              let producerEntered = false
+              const producer = vi.spyOn(h.store, 'withPromptSubmission').mockImplementation((id, operation) =>
+                withPrompt(id, async () => { producerEntered = true; return await operation() }))
+              const missingRead = vi.spyOn(h.store, 'load').mockImplementation(async () =>
+                producerEntered ? [] : await read())
+              restoreMissingRead = () => { missingRead.mockRestore(); producer.mockRestore() }
               return await h.failSend()
             })()
         restoreMissingRead?.()
@@ -174,6 +178,8 @@ describe('public Prompt errors through Control and built CLI', () => {
         expect(h.failures[0]!.message.length).toBeGreaterThan(0)
         expect(h.requests[0]!.text).toBe('  original message\n第二行  ')
         expect(h.requests[0]!.message?.body).toBe(h.requests[0]!.text)
+        expect(h.requests[0]!.caller).toMatchObject({ agentSessionId: 'receipt-agent', capability: expect.any(String) })
+        expect(h.requests[0]!.message.sender).toEqual({ kind: 'agent-session', agentSessionId: 'receipt-agent' })
         expect(h.owner.agentSession('receipt-agent')).toEqual(beforeSession)
         expect((await readFile(h.store.path)).equals(beforeFile)).toBe(true)
         expect(h.writes).toEqual([])
@@ -185,13 +191,16 @@ describe('public Prompt errors through Control and built CLI', () => {
         expect(h.writes).toEqual([])
         // An explicit caller can use the original SDK prompt operation after
         // restoring the failing producer. The public send receipt never auto-retries.
-        await h.owner.submitAgentPrompt({ agentSessionId: 'receipt-agent', ...h.requests[0]!.promptCondition, prompt: h.requests[0]!.text, operationId: 'original-message', allowUncertainTurn: true })
+        const originalCaller = h.requests[0]!.caller
+        if (!originalCaller?.capability) throw new Error('The original managed caller capability must remain available for explicit retry.')
+        await h.owner.submitAgentMessage({ agentSessionId: 'receipt-agent', condition: h.requests[0]!.promptCondition,
+          envelope: h.requests[0]!.message, caller: { agentSessionId: originalCaller.agentSessionId, capability: originalCaller.capability } })
         const admitted = h.owner.agentSession('receipt-agent').promptCompletionAdmission
         expect(admitted).toMatchObject({ submissionId: 'original-message', acknowledged: true })
-        expect(h.writes).toEqual([{ operationId: admitted!.operationId, data: '  original message\n第二行  \r' }])
+        expect(h.writes).toEqual([{ operationId: admitted!.operationId, data: renderAgentMuxMessageEnvelope(h.requests[0]!.message) + '\r' }])
         expect(h.owner.agentSession('receipt-agent').run).toEqual(beforeSession.run)
         expect(h.stops).toEqual([])
       } finally { restoreMissingRead?.(); await h.close() }
-    }
+    }, 20_000
   )
 })

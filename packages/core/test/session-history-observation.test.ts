@@ -1,4 +1,4 @@
-import { fixtureClock as upstreamFixtureClock, fixtureDay as upstreamFixtureDay } from './helpers/fixture-values.js'
+import { fixtureClock, fixtureDay } from './helpers/fixture-values.js'
 import { appendFile, readFile, rename, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -18,7 +18,7 @@ vi.mock('node:fs', async (importOriginal) => {
   return { ...original, watch: ((path: string, options: import('node:fs').WatchOptions, listener: import('node:fs').WatchListener<string>) => {
     const watcher = original.watch(path, options, (event, name) => {
       watched.names.push(name?.toString() ?? '<unknown>')
-      listener(event, name)
+      listener(event, name?.toString() ?? null)
     })
     const close = vi.fn(watcher.close.bind(watcher))
     watcher.close = close
@@ -44,7 +44,7 @@ afterEach(async () => {
 })
 
 function row(provider: 'claude' | 'pi', id: string, parent: string | null, timed = true) {
-  const timestamp = timed ? { timestamp: upstreamFixtureDay(1) + "T" + upstreamFixtureClock(0, 0, 0, "000") + "Z" } : {}
+  const timestamp = timed ? { timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0, "000") + "Z" } : {}
   return provider === 'claude'
     ? { uuid: id, type: 'user', sessionId: 'native-main', message: { role: 'user', content: 'Identical body.' }, ...timestamp }
     : { id, type: 'message', parentId: parent, message: { role: 'user', content: [{ type: 'text', text: 'Identical body.' }] }, ...timestamp }

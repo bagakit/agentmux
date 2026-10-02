@@ -1,5 +1,7 @@
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { AgentMuxError } from './errors.js'
+import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeAgentSession } from './agent-session-store.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
@@ -40,7 +42,8 @@ export function rpcSessionTargetMatches(selector: unknown, actual: string, crede
 }
 /** Host bootstrap is a read projection of the original SDK, never a new registry. */
 export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown> {
-  const p = record(value, ['identity', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
+  const p = record(value, ['owner', 'identity', 'storePath', 'hostProcessId', 'catalog', 'sessions', 'messageQueuePath'])
+  parseHostedRuntimeOwnerIdentity(p.owner)
   const identity = record(p.identity, ['ownership', 'hostId', 'buildIdentity', 'protocolVersion', 'processId', 'instanceId'])
   for (const key of ['hostId', 'buildIdentity', 'instanceId']) string(identity[key])
   count(identity.protocolVersion); count(identity.processId, true)
@@ -127,8 +130,8 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         }
         if (p.status !== null) status(p.status, session); issues(p.unavailable)
         if (method === 'agent.inspect') { const name = record(p.displayName, ['override', 'availability']); if (name.override !== null) text(name.override); member(name.availability, ['observed', 'unavailable']) }
-        else { text(p.topic); const messaging = record(p.messaging, ['crossSession', 'source', 'nativeSubagents', 'authenticity'])
-          for (const key of ['crossSession', 'source', 'nativeSubagents', 'authenticity']) string(messaging[key])
+        else { text(p.topic); const messaging = record(p.messaging, Object.keys(AGENTMUX_AGENT_MESSAGING_RULES))
+          for (const [key, rule] of Object.entries(AGENTMUX_AGENT_MESSAGING_RULES)) if (messaging[key] !== rule) fail()
           const view = record(p.view); bool(view.attached)
           if (view.attached) { record(view, ['attached', 'region']); const region = record(view.region); if (region.agentSessionId !== session.agentSessionId) fail()
             // Reuse the existing presentation codec, including geometry and terminal facts.

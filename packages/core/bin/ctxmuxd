@@ -1,0 +1,9 @@
+#!/bin/sh
+amx_launcher="$0"
+while [ -L "$amx_launcher" ]; do
+  amx_directory="$(CDPATH= cd -- "$(dirname -- "$amx_launcher")" && pwd)"
+  amx_link="$(readlink "$amx_launcher")"
+  case "$amx_link" in /*) amx_launcher="$amx_link" ;; *) amx_launcher="$amx_directory/$amx_link" ;; esac
+done
+amx_directory="$(CDPATH= cd -- "$(dirname -- "$amx_launcher")" && pwd)"
+exec /bin/sh "$amx_directory/ctxmux-bin" ctxmuxd "$@"

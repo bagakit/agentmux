@@ -12,11 +12,12 @@ import { resolveAgentSessionId } from './agent-session-id.js'
 import { readAgentRoleBindings, registerAgentRole, resolveAgentRole } from './agent-role-directory.js'
 import { appendGlobalMessage, prepareGlobalMessagePrompt, recordGlobalMessageDelivery,
   recordGlobalMessageDeliveryIssue } from './agent-global-message-queue.js'
-import { validateAgentPromptCondition } from './agent-prompt-condition.js'
+import { agentPromptCondition, validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { diagnoseAgentMux } from './doctor.js'
 import { agentSessionMatches } from './rpc-agent-filter.js'
 import { OrderedSessionOutputFollow, type FollowOutput } from './session-output-follow.js'
 import { defaultAgentMuxControlSocketPath } from './runtime-paths.js'
+import { AGENTMUX_HOSTED_RPC_METHODS, AGENTMUX_HOSTED_RPC_FIELDS, type AgentMuxHostedRuntimeMethod, type AgentMuxRuntimeFence } from './hosted-client-contract.js'
 import type { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
 import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
@@ -30,12 +31,14 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
-  'reopenAgent' | 'reconcileAgentReopen' | 'readAgentSessions' | 'sessionHistorySources' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
+  'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
-  'observeAgentOutput' | 'startDiscussion' | 'checkDeliveries' |
+  'observeAgentOutput' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
   'runtimeDiagnostics' | 'runtimeIdentity'> & {
+    runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
+    forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
       Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>
   }
@@ -50,8 +53,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Original Host Authority and native confirmation owner; never constructed here. */
   deviceAdministration?: AgentMuxRpcDeviceAdministration
   /** Borrow the Host's original SDK business owner; never connect a second Runtime. */
-  hostedRuntime?(): Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'> |
-    Promise<Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe'>>
+  hostedRuntime?(): Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> |
+    Promise<Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'>>
   /** Forward canonical GUI work before its original business orchestration begins. */
   forwardControl?<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>>
@@ -59,15 +62,13 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
 export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+  runtimeFence?: AgentMuxRuntimeFence; afterResponse?: Array<() => void | Promise<void>>;
   /** Actual receiving hop, supplied only by the transport owner. */
   transport?: 'unix' | 'http' }
 export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = AgentMuxRpcStreamMethod> = {
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
 const NATIVE_FIELDS = {
-  'runtime.bootstrap': ['consumerId'], 'runtime.invoke': ['consumerId', 'invocation'],
-  'runtime.release-consumer': ['consumerId'], 'runtime.events': ['consumerId'],
-  'runtime.history-watch': ['consumerId', 'agentSessionId', 'options'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval'],
   'space.resolve': ['tabId','regionId','direction'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
@@ -84,7 +85,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -122,16 +123,19 @@ export class AgentMuxRpcService {
       throw new AgentMuxError('The runtime domain requires a transport-approved user or device, without a managed Agent caller.', 'AGENT_CAPABILITY_INVALID')
     }
     const principalId = rpcString(context.principal.id, 'Transport principal')
-    const p = rpcRecord(params, NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS])
+    const p = rpcRecord(params, AGENTMUX_HOSTED_RPC_FIELDS[method as AgentMuxHostedRuntimeMethod])
+    if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
+    const owner = await this.ports.hostedRuntime()
+    if (method === 'runtime.owner.identity' || method === 'runtime.owner.shutdown') return { owner, params: p }
     const consumer = rpcString(p.consumerId, 'Host consumer ID')
     const consumerId = createHash('sha256').update(context.principal.kind + '\0' + principalId + '\0' + consumer).digest('hex')
-    if (method === 'runtime.history-watch') {
-      rpcString(p.agentSessionId, 'History Session ID')
-      if (p.options !== undefined) rpcRecord(p.options, ['commandOverride', 'args', 'env'])
-    }
-    if (method === 'runtime.invoke' && p.invocation === undefined) throw new AgentMuxError('An SDK invocation is required.', 'INVALID_CONTROL_REQUEST')
-    if (!this.ports.hostedRuntime) throw new AgentMuxError('The borrowed Runtime Host business owner is unavailable. Existing Runs are retained.', 'CONTROL_UNAVAILABLE')
-    return { owner: await this.ports.hostedRuntime(), params: { ...p, consumerId } }
+    return { owner, params: { ...p, consumerId } }
+  }
+
+  private async assertRuntimeFence(context: AgentMuxRpcCallContext): Promise<void> {
+    if (!context.runtimeFence) return
+    if (!this.ports.hostedRuntime) throw new AgentMuxError('The original semantic Runtime owner is unavailable. No operation was rerouted.', 'CONTROL_UNAVAILABLE')
+    ;(await this.ports.hostedRuntime()).assertFence(context.runtimeFence)
   }
 
   private async clients(): Promise<readonly AgentMuxRpcCoreClient[]> {
@@ -145,26 +149,42 @@ export class AgentMuxRpcService {
     const local = this.local; this.local = undefined
     if (local) { try { await (await local).dispose() } catch { /* The owner reports Runtime availability separately. */ } }
   }
+  private endpointUnverified(client: AgentMuxRpcCorePort): boolean {
+    return typeof client.runtimeOwnerIdentity === 'function' && client.runtimeOwnerIdentity()?.availability !== 'connected'
+  }
+  private async ownedSessions({ hostId, client }: AgentMuxRpcCoreClient) {
+    if (this.endpointUnverified(client)) throw new AgentMuxError('This endpoint inventory is unverified; its last-seen Session references were retained.', 'RUNTIME_UNAVAILABLE')
+    // A remote Store keeps its local Host facts. The configured Host ID is only our route.
+    return (await client.readAgentSessions()).filter(session => session.hostId === (client.forwardRpc ? 'local' : hostId))
+  }
   private async owner(id: string) {
     const clients = await this.clients()
-    const observed = await Promise.allSettled(clients.map(async ({ hostId, client }) => {
-      const [sessions, identities] = await Promise.all([client.readAgentSessions(), client.sessionHistorySources()])
-      return { entries: sessions.filter(session => session.hostId === hostId)
-        .map(session => ({ hostId, client, session, agentSessionId: session.agentSessionId })),
-        identities: identities.filter(session => session.hostId === hostId).map(session => session.agentSessionId) }
+    const known = clients.filter(({ client }) => !this.endpointUnverified(client) &&
+      client.agentSessions().some(session => session.agentSessionId === id))
+    // Known exact targets do not wait for unrelated endpoint discovery. Authorization
+    // and Session binding still come from this original owner's durable Store below.
+    const scopes = known.length === 1 ? known : clients
+    const observed = await Promise.allSettled(scopes.map(async scope => {
+      const sessions = await this.ownedSessions(scope)
+      // Retained identities participate in prefix ambiguity, never in live inventory.
+      // An exact active target needs no history discovery or unrelated owner handshake.
+      const identities = sessions.some(session => session.agentSessionId === id) ? []
+        : (await scope.client.sessionHistorySources()).filter(session =>
+          session.hostId === (scope.client.forwardRpc ? 'local' : scope.hostId)).map(session => session.agentSessionId)
+      return { entries: sessions.map(session => ({ ...scope, session, agentSessionId: session.agentSessionId })), identities }
     }))
     const entries = observed.flatMap(item => item.status === 'fulfilled' ? item.value.entries : [])
+    const retainedIdentities = observed.flatMap(item => item.status === 'fulfilled' ? item.value.identities : [])
     const issues = observed.flatMap((item, index) => item.status === 'rejected'
-      ? [unavailable(new AgentMuxError(`Session facts on Host ${clients[index]!.hostId} are unconfirmed: ${cause(item.reason).message}`, 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))] : [])
-    // An exact retained identity has its original Host owner. An unread Host
-    // cannot be silently excluded when admitting an otherwise unique prefix.
+      ? [unavailable(new AgentMuxError(`Session facts on Host ${scopes[index]!.hostId} are unconfirmed: ${cause(item.reason).message}`,
+        this.endpointUnverified(scopes[index]!.client) ? 'RUNTIME_UNAVAILABLE' : 'AGENT_SESSION_STORE_READ_UNCONFIRMED'))] : [])
     if (issues.length && !entries.some(entry => entry.agentSessionId === id)) {
-      throw new AgentMuxError('Session prefix or absence cannot be confirmed while a Host store is unreadable. Existing Runs are kept.', 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
+      throw new AgentMuxError('Session prefix or absence cannot be confirmed while an owner is unavailable. Existing Runs are kept.',
+        issues.some(issue => issue.code === 'RUNTIME_UNAVAILABLE') ? 'RUNTIME_UNAVAILABLE' : 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
     }
-    const identities = observed.flatMap(item => item.status === 'fulfilled' ? item.value.identities : [])
-    const agentSessionId = resolveAgentSessionId(id, identities)
+    const agentSessionId = resolveAgentSessionId(id, [...entries.map(entry => entry.agentSessionId), ...retainedIdentities])
     const owners = entries.filter(entry => entry.agentSessionId === agentSessionId)
-    if (!owners.length) throw new AgentMuxError('Agent Session identity is retired or unknown.', 'UNKNOWN_AGENT_SESSION')
+    if (owners.length === 0) throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION')
     if (owners.length !== 1) throw new AgentMuxError('Agent Session has multiple authoritative owners.', 'AMBIGUOUS_AGENT_SESSION')
     return { ...owners[0]!, unavailable: issues }
   }
@@ -226,10 +246,14 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted()
       return parseAgentMuxRpcDeviceResult(method, await this.ports.deviceAdministration.call(method, input, context), input) as AgentMuxRpcResult<M>
     }
-    if (method === 'runtime.bootstrap' || method === 'runtime.invoke' || method === 'runtime.release-consumer') {
+    if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
-      return await hosted.owner.call(method, hosted.params, { ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+      return await hosted.owner.call(method, hosted.params, {
+        ...(context.signal ? { signal: context.signal } : {}),
+        ...(context.afterResponse ? { afterResponse: context.afterResponse } : {})
+      }) as AgentMuxRpcResult<M>
     }
+    await this.assertRuntimeFence(context)
     if (method === 'agent.reopen' || method === 'agent.reopen.check') {
       if (context.caller !== undefined || !context.principal ||
         !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {
@@ -241,7 +265,7 @@ export class AgentMuxRpcService {
       const owners = await Promise.all(clients.map(async entry => ({ ...entry,
         sources: await entry.client.sessionHistorySources() })))
       const matches = owners.filter(entry => entry.sources.some(source => source.agentSessionId === agentSessionId &&
-        source.hostId === entry.hostId && (source.state === 'retired' || method === 'agent.reopen.check')))
+        source.hostId === (entry.client.forwardRpc ? 'local' : entry.hostId) && (source.state === 'retired' || method === 'agent.reopen.check')))
       if (matches.length !== 1) throw new AgentMuxError('The exact retired Session does not have one confirmed Host owner.', matches.length ? 'AMBIGUOUS_AGENT_SESSION' : 'STALE_AGENT_SESSION')
       const client = matches[0]!.client
       context.signal?.throwIfAborted()
@@ -250,9 +274,13 @@ export class AgentMuxRpcService {
         ? await client.reopenAgent(input as unknown as Parameters<AgentMuxClient['reopenAgent']>[0])
         : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
     }
-    if (method === 'runtime.events' || method === 'runtime.history-watch') throw new AgentMuxError('Runtime observations require a subscription.', 'INVALID_CONTROL_REQUEST')
     const caller = await this.authenticated(context)
     const p = rpcRecord(params)
+    if (caller?.client.forwardRpc && ['agent.role.ls', 'agent.role.register', 'agent.role.resolve',
+      'agent.discuss', 'agent.handoff', 'message.inbox.check', 'message.inbox.ack',
+      'message.dispatch.open', 'message.dispatch.inspect', 'message.dispatch.report'].includes(method)) {
+      return await caller.client.forwardRpc(method, params, context)
+    }
     let result: unknown
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
       if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
@@ -354,23 +382,44 @@ export class AgentMuxRpcService {
         if (target.kind === 'self') { this.requireCaller(caller); rpcRecord(target, ['kind']) }
         const clients = await this.clients()
         const sessions: Array<{ client: AgentMuxRpcCorePort; session: ReturnType<AgentMuxClient['agentSession']> }> = []
+        const lookupIssues: AgentMuxRpcUnavailable[] = []
         const selected = target.kind === 'self' ? caller! : target.kind === 'agent-session' ? await this.owner(rpcString(target.agentSessionId, 'Session ID')) : null
         const lookup = selected ? { kind: 'agent-session' as const, agentSessionId: selected.agentSessionId } : target
         const allowed = lookup.kind === 'agent-session' ? ['kind', 'agentSessionId'] : lookup.kind === 'run' ? ['kind', 'run']
           : lookup.kind === 'provider-native' ? ['kind', 'providerId', 'sessionId'] : lookup.kind === 'acp-native' ? ['kind', 'adapterId', 'sessionId'] : []
         rpcRecord(target, target.kind === 'self' ? ['kind'] : allowed)
         if (!allowed.length) throw new AgentMuxError('Agent inspection target is invalid.', 'INVALID_CONTROL_REQUEST')
+        if (lookup.kind === 'run') rpcString(rpcRecord(lookup.run, ['runId']).runId, 'Run ID')
+        else if (lookup.kind === 'provider-native') { rpcString(lookup.providerId, 'Provider ID'); rpcString(lookup.sessionId, 'Native Session ID') }
+        else if (lookup.kind === 'acp-native') { rpcString(lookup.adapterId, 'Adapter ID'); rpcString(lookup.sessionId, 'Native Session ID') }
+        const knownRun = lookup.kind === 'run' ? clients.filter(({ client }) => !this.endpointUnverified(client) &&
+          client.agentSessions().some(session => session.run.runId === rpcRecord(lookup.run, ['runId']).runId)) : []
+        const lookupScopes = knownRun.length === 1 ? knownRun : clients
         if (selected) sessions.push({ client: selected.client, session: selected.session })
-        else for (const { client } of clients) {
-            try { sessions.push({ client, session: client.resolveAgentSession(lookup as Parameters<AgentMuxClient['resolveAgentSession']>[0]) }) }
-            catch (error) { if (!(error instanceof AgentMuxError) || error.code !== 'UNKNOWN_AGENT_SESSION') throw error }
+        else for (const scope of lookupScopes) {
+          // Native bindings may be written by another owner after this client connected.
+          // The durable Session facts, not a cached registry, admit this exact lookup.
+          try {
+            for (const session of await this.ownedSessions(scope)) {
+              const handle = session.nativeHandle
+              const matches = lookup.kind === 'run' ? session.run.runId === rpcString(rpcRecord(lookup.run, ['runId']).runId, 'Run ID')
+                : lookup.kind === 'provider-native' ? handle?.kind === 'provider' &&
+                  handle.providerId === rpcString(lookup.providerId, 'Provider ID') && handle.sessionId === rpcString(lookup.sessionId, 'Native Session ID')
+                : lookup.kind === 'acp-native' ? handle?.kind === 'acp' &&
+                  handle.adapterId === rpcString(lookup.adapterId, 'Adapter ID') && handle.sessionId === rpcString(lookup.sessionId, 'Native Session ID') : false
+              if (matches) sessions.push({ client: scope.client, session })
+            }
+          } catch (error) { lookupIssues.push(unavailable(error)) }
+        }
+        if (!sessions.length && lookupIssues.length) {
+          throw new AgentMuxError('Native Session absence cannot be confirmed while an original owner is unavailable. Existing Runs are retained.',
+            lookupIssues.some(issue => issue.code === 'RUNTIME_UNAVAILABLE') ? 'RUNTIME_UNAVAILABLE' : 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
         }
         if (sessions.length !== 1) throw new AgentMuxError('Session lookup is unknown or ambiguous.', sessions.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
         const { client, session } = sessions[0]!
-        const issues: AgentMuxRpcUnavailable[] = [...(selected?.unavailable ?? [])]
+        const issues: AgentMuxRpcUnavailable[] = [...(selected?.unavailable ?? []), ...lookupIssues]
         let status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null = null
         try {
-          await client.refreshAgentSession(session.agentSessionId, session.run)
           status = await client.statusAgent(session.agentSessionId)
           if (status.session.run.runId !== session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
         } catch (error) { status = null; issues.push(unavailable(error)) }
@@ -390,12 +439,12 @@ export class AgentMuxRpcService {
         const owner = this.requireCaller(caller), issues: AgentMuxRpcUnavailable[] = []
         let status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null = null
         try {
-          await owner.client.refreshAgentSession(owner.agentSessionId, owner.session.run)
           status = await owner.client.statusAgent(owner.agentSessionId)
           if (status.session.run.runId !== owner.session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
         } catch (error) { status = null; issues.push(unavailable(error)) }
         let view: unknown
-        try { const observed = await this.execute(this.request('inspect.region', {
+        if (!this.ports.execute && !this.ports.forwardControl) view = { attached: false, reason: 'no-desktop-view' }
+        else try { const observed = await this.execute(this.request('inspect.region', {
           target: { kind: 'self' }, caller: { agentSessionId: owner.agentSessionId, capability: owner.capability } }))
           view = observed.operation === 'inspect.region' ? { attached: true, region: observed.region } : null
         } catch (error) { view = classifySelfViewFailure(error); issues.push(unavailable(error)) }
@@ -457,7 +506,7 @@ export class AgentMuxRpcService {
         } break
       }
       case 'agent.send': result = this.ports.forwardControl
-        ? await this.ports.forwardControl(method, params, context) : await this.send(p, caller); break
+        ? await this.ports.forwardControl(method, params, context) : await this.send(p, caller, context); break
       case 'agent.output': throw new AgentMuxError('Agent output is a bounded byte subscription.', 'INVALID_CONTROL_REQUEST')
       case 'goal.activity': {
         if (this.ports.forwardControl) {
@@ -509,10 +558,9 @@ export class AgentMuxRpcService {
     rpcRecord(filters, NATIVE_FIELDS['agent.ls'])
     validateFilters(filters)
     const clients = await this.clients()
-    const scopes = await Promise.allSettled(clients.map(async ({ hostId, client }) => await Promise.all((await client.readAgentSessions()).filter(session => session.hostId === hostId).map(async session => {
+    const scopes = await Promise.allSettled(clients.map(async scope => await Promise.all((await this.ownedSessions(scope)).map(async session => {
       try {
-        await client.refreshAgentSession(session.agentSessionId, session.run)
-        const observed = await client.statusAgent(session.agentSessionId)
+        const observed = await scope.client.statusAgent(session.agentSessionId)
         if (observed.session.run.runId !== session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
         return { session: observed }
       }
@@ -541,7 +589,7 @@ export class AgentMuxRpcService {
       (filters.since === undefined || goal.updatedAt >= rpcCount(filters.since, 0)))
       .slice(0, rpcCount(filters.limit, 100, 1000))
   }
-  private async send(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>) {
+  private async send(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
     const target = rpcRecord(p.target)
     const operationId = rpcString(p.operationId, 'Operation ID'), text = rpcText(p.text, 'Message text')
     let recipientId: string
@@ -560,6 +608,13 @@ export class AgentMuxRpcService {
       recipientId = candidates[0]!.agentSessionId
     } else throw new AgentMuxError('Message target is invalid.', 'INVALID_CONTROL_REQUEST')
     const recipientOwner = await this.owner(recipientId)
+    if (recipientOwner.client.forwardRpc) {
+      if (caller && caller.client !== recipientOwner.client) throw new AgentMuxError('Managed credentials cannot cross semantic Runtime owners.', 'AGENT_CAPABILITY_INVALID')
+      // Resolve presentation exactly once. The original remote owner alone queues
+      // the envelope and admits input against its current Session and Run.
+      return await recipientOwner.client.forwardRpc('agent.send', { ...p,
+        operationId, text, target: { kind: 'agent-session', agentSessionId: recipientId } }, context)
+    }
     const durable = (await recipientOwner.client.readAgentSessions()).find(session => session.agentSessionId === recipientId)
     if (!durable) throw new AgentMuxError('Recipient Session is no longer retained.', 'UNKNOWN_AGENT_SESSION')
     const recipient = await recipientOwner.client.refreshAgentSession(recipientId, durable.run)
@@ -587,13 +642,17 @@ export class AgentMuxRpcService {
         if (recorded.recipientRunId !== recipient.run.runId || recorded.recipientSessionId !== recipientId) {
           throw new AgentMuxError('Queued recipient Run changed.', 'MESSAGE_RECIPIENT_MISMATCH')
         }
+        if (!this.ports.execute) return agentPromptCondition(await recipientOwner.client.refreshAgentSession(recipientId, recipient.run))
         const active = await this.execute(this.request('list.active-agents', { agentSessionId: recipientId }))
         if (active.operation !== 'list.active-agents') throw new AgentMuxError('Prompt facts are unavailable.', 'CONTROL_PROTOCOL_ERROR')
         return validateAgentPromptCondition(active.agents.find(agent => agent.agentSessionId === recipientId)?.promptCondition)
       }, queuePath)
       const exactTarget = target.kind === 'agent-session' || target.kind === 'self'
         ? { kind: 'agent-session', agentSessionId: recipientId } : target
-      await this.execute(this.request('send', { requestId: operationId, target: exactTarget, text, promptCondition,
+      if (!this.ports.execute) await recipientOwner.client.submitAgentMessage({
+        agentSessionId: recipientId, envelope: queued.envelope, condition: promptCondition,
+        ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
+      else await this.execute(this.request('send', { requestId: operationId, target: exactTarget, text, promptCondition,
         message: queued.envelope, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }))
       return { ...await recordGlobalMessageDelivery(queued.messageId, 'delivered', Date.now(), undefined, queuePath), agentSessionId: recipientId }
     } catch (error) {
@@ -673,11 +732,12 @@ export class AgentMuxRpcService {
 
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: Record<string, unknown>,
     onEvent: (event: AgentMuxRpcStreamEvent<M>) => void | Promise<void>, context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcServiceSubscription<M>> {
-    if (method === 'runtime.events' || method === 'runtime.history-watch') {
+    if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.subscribe(method, hosted.params, onEvent as (event: import('./hosted-client-contract.js').AgentMuxHostedStreamEvent) => void | Promise<void>,
         { ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcServiceSubscription<M>
     }
+    await this.assertRuntimeFence(context)
     const caller = await this.authenticated(context)
     if (this.ports.forwardSubscription && (method === 'browser.follow' || method === 'toolkit.watch' || method === 'system.metrics.watch')) {
       let initial: AgentMuxRpcStreamInitial<M> | undefined

@@ -3,6 +3,7 @@ import type {
   AgentSessionControl,
   AgentTimelineSnapshot,
   RuntimeEvent,
+  RuntimeEndpointWarning,
   RuntimeSnapshot,
   SessionControl,
   SessionSnapshot
@@ -450,9 +451,8 @@ export function removeSessionProjection(
  * 也没有测试。删除是不可逆的，而多留一格只是等下一份快照来纠正——所以这里 fail open：一份 session
  * 与恢复候选双双为空的快照不作为退役依据，原样返回。
  *
- * 注意判据是**整份快照为空**，不是「这个 agent 不在快照里」。后者正是这个函数存在的理由：一份说得
- * 出别的 session 的快照有资格说某个 agent 不在了。恢复候选也算说得出话——一个候选就是「这个 agent
- * 还在，只是要重连」，这与启动那侧的判据逐字对齐。
+ * 非空联邦快照也只对完整读取成功的 endpoint 有成员权威。某个 endpoint 失联时保留它的旧投影，
+ * 其它 endpoint 返回 Session 不构成删除依据。恢复候选同样表示「还在，只是要重连」。
  *
  * 而正因为一个候选的含义是「还在，只是要重连」，**被点名为候选的那个 agent 自己必须免于删除**。
  * Runtime 保留的已结束 Run 仍可出现在 `sessions`；Run 已缺失但 durable Session 还在时，
@@ -461,6 +461,27 @@ export function removeSessionProjection(
  * 且没有任何理由显示。那正是这个 Feature 要消灭的失败本身（用户原话：「有些 Region 会消失」）。
  * 启动那侧对同一个候选是「保留 + 恢复」，两侧必须对同一个 Core 概念给出同一个语义。
  */
+export function runtimeSnapshotHostUnavailable(snapshot: RuntimeSnapshot, hostId: string): boolean {
+  return (snapshot.runtimeEndpointWarnings ?? []).some((warning) => warning.hostId === hostId && warning.availability !== 'connected')
+}
+
+/** Availability is a display projection. It never replaces cached Run/native facts or their clocks. */
+export function projectRuntimeEndpointSessions(
+  sessions: SessionSnapshot[],
+  warnings: RuntimeEndpointWarning[] | undefined
+): SessionSnapshot[] {
+  const unavailable = new Map((warnings ?? []).filter(warning => warning.availability !== 'connected').map(warning => [warning.hostId, warning]))
+  if (unavailable.size === 0) return sessions
+  let changed = false
+  const projected = sessions.map(session => {
+    const warning = session.kind === 'agent' ? unavailable.get(session.hostId) : undefined
+    if (!warning || (session.status.state === 'disconnected' && session.status.detail === warning.message)) return session
+    changed = true
+    return { ...session, status: { ...session.status, state: 'disconnected' as const, detail: warning.message } }
+  })
+  return changed ? projected : sessions
+}
+
 export function reduceAgentMembershipSnapshot(
   state: SessionProjectionState,
   snapshot: RuntimeSnapshot,
@@ -471,15 +492,19 @@ export function reduceAgentMembershipSnapshot(
   const recoverableIds = new Set(snapshot.recoveryCandidates.map((candidate) => candidate.agentSessionId))
   const removalProtectedIds = new Set([...pendingIds, ...protectedAgentSessionIds, ...recoverableIds])
   const canonicalAgents = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => (
-    session.kind === 'agent' && !pendingIds.has(session.id)
+    session.kind === 'agent' && !pendingIds.has(session.id) && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)
   ))
   const canonicalIds = new Set(canonicalAgents.map((session) => session.id))
   // 空快照不作为退役依据——见上面的函数注释。判据只需要"这一份说不出话"：一份空快照里没有 canonical
   // agent 可合并，所以再检查一遍"本地是否还记着 agent"不会改变任何结果，那个条件是多余的。
-  if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) return state
+  if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) {
+    const sessions = projectRuntimeEndpointSessions(state.sessions, snapshot.runtimeEndpointWarnings)
+    return sessions === state.sessions ? state : { ...state, sessions }
+  }
   let projected = state
   for (const session of state.sessions) {
-    if (session.kind === 'agent' && !removalProtectedIds.has(session.id) && !canonicalIds.has(session.id)) {
+    if (session.kind === 'agent' && !runtimeSnapshotHostUnavailable(snapshot, session.hostId) &&
+      !removalProtectedIds.has(session.id) && !canonicalIds.has(session.id)) {
       projected = removeSessionProjection(projected, session.id)
     }
   }
@@ -500,14 +525,14 @@ export function reduceAgentMembershipSnapshot(
     const current = timelines[session.id]
     if (!current || incoming.revision >= current.revision) timelines[session.id] = incoming
   }
-  return { ...projected, sessions, timelines }
+  return { ...projected, sessions: projectRuntimeEndpointSessions(sessions, snapshot.runtimeEndpointWarnings), timelines }
 }
 
 /**
  * Reconcile Terminal projections against an authoritative Runtime snapshot.
  *
  * Terminal Sessions have no semantic continuity record: once Core gives us a non-empty
- * snapshot that does not contain a terminal run, the old PTY is gone and its saved Region
+ * snapshot from the confirmed owner that does not contain a terminal run, the old PTY is gone and its saved Region
  * must not remain as a title-only shell. An empty snapshot is deliberately fail-open — it
  * can still mean that Runtime is connecting or rooted at the wrong state directory.
  * Unlike Agent membership, this reducer never creates Tabs for unrepresented terminal runs;
@@ -520,7 +545,7 @@ export function reduceTerminalMembershipSnapshot(
   if (snapshot.sessions.length === 0 && snapshot.recoveryCandidates.length === 0) return state
 
   const canonicalTerminals = snapshot.sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'terminal' }> => (
-    session.kind === 'terminal'
+    session.kind === 'terminal' && !runtimeSnapshotHostUnavailable(snapshot, session.hostId)
   ))
   const canonicalIds = new Set(canonicalTerminals.map((session) => session.id))
   const projectedTerminalIds = new Set([
@@ -529,13 +554,25 @@ export function reduceTerminalMembershipSnapshot(
       surface.kind === 'terminal' ? [surface.sessionId] : []
     )))
   ])
+  const previousById = new Map(state.sessions.map((session) => [session.id, session]))
   let projected = state
   for (const sessionId of projectedTerminalIds) {
-    if (!canonicalIds.has(sessionId)) projected = removeSessionProjection(projected, sessionId)
+    const previous = previousById.get(sessionId)
+    // A saved surface without Session facts has no confirmed owner. An unavailable endpoint
+    // cannot authorize its removal merely because an unrelated local snapshot is nonempty.
+    const ownerUnconfirmed = previous ? runtimeSnapshotHostUnavailable(snapshot, previous.hostId)
+      : (snapshot.runtimeEndpointWarnings ?? []).some(warning => warning.availability !== 'connected')
+    if (!ownerUnconfirmed && !canonicalIds.has(sessionId)) projected = removeSessionProjection(projected, sessionId)
   }
 
   const canonicalById = new Map(canonicalTerminals.map((session) => [session.id, session]))
   const sessions = projected.sessions.map((session) => canonicalById.get(session.id) ?? session)
+  // A persisted Terminal Region can precede its first verified endpoint snapshot. Adopt the
+  // original referenced Run when it becomes known; unrelated inventory never creates a View.
+  const existingIds = new Set(sessions.map(session => session.id))
+  for (const session of canonicalTerminals) {
+    if (projectedTerminalIds.has(session.id) && !existingIds.has(session.id)) sessions.push(session)
+  }
   if (sessions.every((session, index) => session === projected.sessions[index])) return projected
   return { ...projected, sessions }
 }

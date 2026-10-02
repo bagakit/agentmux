@@ -48,9 +48,12 @@ async function ensureHost(storePath: string, socketPath: string): Promise<void> 
 
 /** Product connector: the Desktop never constructs a local semantic Core owner. */
 export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config, store) => {
-  if (config.kind === 'ssh') return await connectSshAgentMux({ store, target: { hostId: config.id,
+  if (config.kind === 'ssh') return await connectSshAgentMux({ waitForReady: false,
+    ...(config.runtimeId ? { expectedRuntimeId: config.runtimeId } : {}), target: { hostId: config.id,
     hostname: config.hostname, ...(config.user ? { user: config.user } : {}),
-    ...(config.port ? { port: config.port } : {}), ...(config.identityFile ? { identityFile: config.identityFile } : {}) } })
+    ...(config.port ? { port: config.port } : {}), ...(config.identityFile ? { identityFile: config.identityFile } : {}),
+    ...(config.remoteCommand ? { remoteCommand: config.remoteCommand } : {}),
+    ...(config.remoteSocketPath ? { remoteSocketPath: config.remoteSocketPath } : {}) } })
   if (!(store instanceof AgentMuxFileAgentSessionStore)) throw new AgentMuxError('The Desktop Host requires the original durable File Store.', 'INVALID_CONTROL_REQUEST')
   const socketPath = defaultAgentMuxControlSocketPath()
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })

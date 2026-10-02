@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { execFile } from 'node:child_process'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -15,14 +15,14 @@ const envelope = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'r
 let root: string, server: AgentMuxControlServer
 const seen: AgentMuxControlRequest[] = []
 beforeEach(async () => {
-  root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-refresh-cli-")); seen.splice(0)
-  server = new AgentMuxControlServer({ async execute(request) {
+  root = await mkdtemp(fixturePath("tmp/amux-refresh-cli-")); seen.splice(0)
+  server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request) {
     seen.push(request)
     if (request.operation !== 'settings.executors.refresh') throw new Error(`Unexpected ${request.operation}`)
     return { operation: request.operation, input: { executorId: request.executorId, providerId: 'generic-provider', command: 'literal command',
       host: { id: request.hostId, connection: 'client-owned route' } }, availability: 'check-failed',
       cause: { code: 'EIO', message: 'controlled read failed <kept>\n' } }
-  } }, join(root, 'control.sock'))
+  } })
   await server.start()
 })
 afterEach(async () => { await server?.stop(); if (root) await rm(root, { recursive: true }) })
@@ -30,7 +30,7 @@ async function run(args: string[], offline = false) {
   try {
     return { code: 0, ...await exec(process.execPath, [cli, ...args], { timeout: 5_000,
       env: { ...process.env, AGENTMUX_RUNTIME_DIRECTORY: offline ? join(root, 'absent') : root,
-        AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined } }) }
+        AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }) }
   } catch (error) { return error as { code: number; stdout: string; stderr: string } }
 }
 
@@ -57,7 +57,7 @@ it('rejects absent, guessed, draft, duplicate and extra arguments before reachin
 })
 
 it('help and skill discover Refresh offline, while the actual operation returns CONTROL_UNAVAILABLE', async () => {
-  const help = await run(['settings', 'executors', 'refresh', '--help'], true)
+  const help = await run(['--help', 'settings', 'executors', 'refresh'], true)
   expect(help.code).toBe(0); expect(help.stdout).toContain('refresh <executor-id> --host <host-id>')
   expect(help.stdout).toContain('cause.code/message'); expect(help.stdout).toContain('Exit 0')
   const group = await run(['settings', 'executors', '--help'], true)
@@ -76,7 +76,7 @@ it('the strict bounded primitive owns exactly the two IDs and uses the existing 
     .toEqual({ method: 'settings.executors.refresh', params: { executorId: 'exact', hostId: '--help' } })
   expect(isLongAgentMuxControlOperation(request.operation)).toBe(true)
   for (const fields of [{ executorId: '', hostId: 'local' }, { executorId: 'exact' }, { executorId: 1, hostId: 'local' },
-    { ...request, input: {} }, { ...request, path: upstreamFixturePath("arbitrary") }, { ...request, caller: {} },
+    { ...request, input: {} }, { ...request, path: fixturePath("arbitrary") }, { ...request, caller: {} },
     { executorId: 'x'.repeat(AGENTMUX_CONTROL_MAX_MESSAGE_BYTES), hostId: 'local' }]) {
     expect(() => parseAgentMuxControlRequest({ ...envelope, ...fields })).toThrow()
   }

@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import ctxmuxArtifacts from './ctxmux-artifact-contract.json' with { type: 'json' }
 import {
   Attachment,
   CtxmuxClient,
@@ -36,6 +37,7 @@ import { missingHostEnvironmentKeys, removeInheritedHostSignals } from './termin
 import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation, AgentMuxNativeService, AgentMuxNativeServiceFailure } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
+  supportedCtxmuxArtifactPlatform,
   defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
@@ -47,9 +49,9 @@ import {
 // by CTXMUX_MANIFEST_SHA256). Bundled artifact diagnostics and terminalEnvironment import these
 // instead of retyping them. The serving listener's identity comes from public RuntimeIdentity;
 // its source commit is not exposed by that protocol and must not be inferred from this bundle.
-export const CTXMUX_COMMIT = 'b061b8d05b8553398bb5ad43bf7e81b7f42733a6'
-const CTXMUX_TREE = '1f643ee07f48c5810e9e34ef9715c78e8024ba38'
-export const CTXMUX_VERSION = '0.1.0'
+export const CTXMUX_COMMIT = ctxmuxArtifacts.source.commit
+const CTXMUX_TREE = ctxmuxArtifacts.source.tree
+export const CTXMUX_VERSION = ctxmuxArtifacts.version
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
   [RUNTIME_CAPABILITY_NATIVE_START]: 1,
@@ -548,8 +550,10 @@ export function assertAgentMuxRuntimeCompatibility(runtime: AgentMuxRuntimeCompa
     runtime.protocolGeneration !== PROTOCOL_VERSION ||
     runtime.runtimeIdPersistence !== 'state_dir' ||
     runtime.buildId !== CTXMUX_RUNTIME_BUILD_ID ||
-    runtime.platform !== 'macos' ||
-    runtime.arch !== 'aarch64' ||
+    supportedCtxmuxArtifactPlatform(
+      runtime.platform === 'macos' ? 'darwin' : runtime.platform,
+      runtime.arch === 'aarch64' ? 'arm64' : runtime.arch === 'x86_64' ? 'x64' : runtime.arch
+    ) === null ||
     missingCapability
   ) {
     throw new AgentMuxError(
@@ -1391,11 +1395,7 @@ export class CtxmuxRunAdapter {
         )
       }
     }
-    if (event.type !== 'exited' && event.type !== 'interrupted') return {
-      type: 'error', runId, error: new AgentMuxError(
-        `A native AgentMux Run received an unexpected ${eventType} event.`, 'CTXMUX_EVENT_INVALID')
-    }
-    return {
+    if (event.type === 'exited' || event.type === 'interrupted') return {
       type: 'exit',
       runId,
       state: event.type === 'exited'
@@ -1403,6 +1403,9 @@ export class CtxmuxRunAdapter {
         : { type: 'interrupted', reason: event.reason },
       observedAt: Date.now()
     }
+    const unexpected: never = event
+    return { type: 'error', runId,
+      error: new AgentMuxError(`Unexpected native Run event: ${eventType} (${String(unexpected)})`, 'CTXMUX_EVENT_INVALID') }
   }
 
   private emitRunEvent(runId: string, decoder: TextDecoder, event: RunEvent): void {

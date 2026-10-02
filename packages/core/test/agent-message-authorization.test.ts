@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -13,8 +13,8 @@ describe('Core A2A envelope authorization', () => {
     const client = Object.create(AgentMuxClient.prototype) as AgentMuxClient
     const sender = { agentSessionId: 'sender', run: { runId: 'sender-run' } }
     const recipient = { agentSessionId: 'recipient', run: { runId: 'recipient-run' } }
-    const runtime = client as unknown as { currentMessageReader: (id: string) => Promise<typeof sender>; resolveMessageAuthor: () => string }
-    runtime.currentMessageReader = async id => id === 'sender' ? sender : recipient
+    const runtime = client as unknown as { currentStoredAgentSession: (id: string) => Promise<typeof sender>; resolveMessageAuthor: () => string }
+    runtime.currentStoredAgentSession = async id => id === 'sender' ? sender : recipient
     runtime.resolveMessageAuthor = () => 'sender'
     await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'forged-identity', senderSessionId: 'sender', senderRunId: 'sender-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).rejects.toThrow('sender facts')
     await expect(client.authorizeAgentMessage({ capability: 'cap', callerAgentSessionId: 'sender', senderAgentSessionId: 'sender', senderSessionId: 'sender', senderRunId: 'wrong-run', recipientSessionId: 'recipient', recipientRunId: 'recipient-run' })).rejects.toThrow('sender facts')
@@ -24,11 +24,11 @@ describe('Core A2A envelope authorization', () => {
   })
 
   it('refuses a forged duplicate participant before real durable queue append on the Core send boundary', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-source-proof-"))
+    const root = await mkdtemp(fixturePath("tmp/amux-source-proof-"))
     const store = new AgentMuxMemoryAgentSessionStore()
     const capability = issueAgentCapability()
     const make = (agentSessionId: string): AgentMuxStoredAgentSession => ({
-      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: upstreamFixturePath("repo"),
+      kind: 'agent', agentSessionId, providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: fixturePath("repo"),
       run: { runId: `run-${agentSessionId}` }, retiredRuns: [], hookBindingId: `hook-${agentSessionId}`, hookToken: `token-${agentSessionId}`,
       ...(agentSessionId === 'sender' ? { capabilityHash: hashAgentCapability(capability) } : {}),
        createdAt: 1, updatedAt: 1

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
@@ -27,17 +27,17 @@ import type {
 // 「我读不到光标」误当成「这一轮的完成整个丢失」。
 //
 // 光标本身确实丢了，我们不假装它没丢——但 done 不依赖它：done 来自 Provider 的 normalizeHook 规则
-// （claude 的 Stop→done），与内核状态无关。所以正确的形状是快照降级为 best-effort，done 照落。
+// （Codex 的 Stop→done），与内核状态无关。所以正确的形状是快照降级为 best-effort，done 照落。
 // ---------------------------------------------------------------------------
 
 function storedSession(): AgentMuxStoredAgentSession {
   return {
     kind: 'agent',
     agentSessionId: 'agent-1',
-    providerId: 'claude',
-    executorId: 'claude',
+    providerId: 'codex',
+    executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'binding-stop-disconnected'.padEnd(43, 'A'),
@@ -45,7 +45,7 @@ function storedSession(): AgentMuxStoredAgentSession {
     createdAt: 1,
     // 存储不变量要求 updatedAt 不早于 semanticStatus.observedAt（agent-session-store.ts:972）。
     updatedAt: 10,
-    nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native-1' },
+    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'native-1' },
     semanticStatus: {
       state: 'working',
       source: 'native-hook',
@@ -60,9 +60,9 @@ function run(latestOutputBytes: number): CtxmuxAdapterRun {
     nativeService: null,
     runId: 'run-1',
     lifecycleOperationId: null,
-    program: 'claude',
+    program: 'codex',
     args: [],
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     pid: 999,
     state: { type: 'running' },
     cols: 80,
@@ -73,13 +73,13 @@ function run(latestOutputBytes: number): CtxmuxAdapterRun {
   }
 }
 
-/** 一条真实的 claude Stop：normalizer 按 provider 规则把它投影成 semanticState='done'。 */
+/** 一条真实的 Codex Stop：normalizer 按 provider 规则把它投影成 semanticState='done'。 */
 function stopHook(receiptId: string): NativeHookEnvelope {
   return {
     receiptId,
     agentSessionId: 'agent-1',
     runId: 'run-1',
-    providerId: 'claude',
+    providerId: 'codex',
     eventName: 'Stop',
     payload: { session_id: 'native-1' }
   }
@@ -254,7 +254,7 @@ describe('Stop 落 done 不得依赖活着的内核', () => {
       ...storedSession(),
       hookReceipt: {
         id: 'receipt-forged',
-        providerId: 'claude',
+        providerId: 'codex',
         agentSessionId: 'agent-1',
         run: { runId: 'run-1' },
         eventName: 'PreToolUse',
@@ -275,7 +275,7 @@ describe('Stop 落 done 不得依赖活着的内核', () => {
       ...storedSession(),
       hookReceipt: {
         id: 'receipt-legit',
-        providerId: 'claude',
+        providerId: 'codex',
         agentSessionId: 'agent-1',
         run: { runId: 'run-1' },
         eventName: 'Stop',

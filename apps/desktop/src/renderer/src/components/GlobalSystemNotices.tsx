@@ -13,6 +13,8 @@ import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
   const warning = useAppStore((state) => state.environmentWarning)
   const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)
+  const endpointWarnings = useAppStore((state) => state.runtimeEndpointWarnings)
+  const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const tabs = useAppStore((state) => state.tabs)
   const displacedIds = useAppStore((state) => state.displacedAgentSessionIds)
@@ -49,10 +51,20 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   // missing Session facts during recovery cannot prove that their placement problem resolved.
   const environmentInbox = useServiceNotices('global:environment', environment, warning !== undefined)
   const ownershipInbox = useServiceNotices('global:runtime-ownership', ownership, hosts !== undefined)
+  const endpoints: ServiceNoticeItem[] = (endpointWarnings ?? []).map((warning) => ({
+    id: warning.hostId, cause: JSON.stringify([warning.step, warning.code]),
+    notice: { kind: 'indeterminate', notice: {
+      step: `${config?.hosts.find((host) => host.id === warning.hostId)?.label ?? warning.hostId}: ${warning.step}`,
+      mode: warning.message,
+      restore: warning.recovery
+    } }
+  }))
+  const endpointInbox = useServiceNotices('global:runtime-endpoints', endpoints, endpointWarnings !== undefined)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
   const sessionNotices: ServiceNoticeItem[] = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id],
     { message: lifecycleMessage, failure: lifecycleFailure })
+    .filter(item => item.id !== 'connection' || !(endpointWarnings ?? []).some(warning => warning.hostId === session.hostId && warning.availability !== 'connected'))
     .map(item => ({ ...item, id: JSON.stringify([session.hostId, session.id, item.id]),
       action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } })))
   if (lifecycleMessage && lifecycleFailure?.step === 'launch') sessionNotices.push({
@@ -80,7 +92,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
   }] : [], true)
-  const inboxes = [environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
+  const inboxes = [environmentInbox, ownershipInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)
@@ -95,7 +107,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   }, [open, acquireNativeSurfaceOverlay, releaseNativeSurfaceOverlay])
   useEffect(() => {
     if (open) for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-  }, [open, environmentInbox, ownershipInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox])
+  }, [open, environmentInbox, ownershipInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox])
   return <div className="global-system-notices">
     <button type="button" className="global-system-notices__trigger" data-unread={unread > 0}
       aria-label={`System notifications: ${unread} unread, ${notices.length} current`}

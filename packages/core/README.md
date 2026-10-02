@@ -2,9 +2,11 @@
 
 无 Electron、React 依赖的 AgentMux Runtime Core。
 
-产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)：Space/Zone/Tab/Region 属于 client 空间，Project/Workspace 是来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run。公开 Control 可以表达空间目标和回执，Core 不拥有 UI 空间生命周期。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[空间 CLI 使用合同](../../docs/guides/agentmux-cli-object-control.md)。Desktop Client 组合自己的配置、Git 与持久布局 owner，Core 只传输类型化空间协议并执行公开 Agent API。
+产品术语只引用 [交互合同《统一概念与空间寻址》](../../docs/design/behavior/spaces-and-layout.md#统一概念与空间寻址)：Space/Zone/Tab/Region 属于 client 空间，Project/Workspace 是来源上下文；Core 持有 AgentSession 语义事实，ctxmux 持有 Run。Core 持有稳定空间身份、关系与持久布局；公开 Control 表达空间目标和回执，client 持有可见表面与焦点。Core RuntimeProjection 是执行事实投影，Desktop View 是展示；两者分开，不能与 AgentSession/Run 或 Desktop Tab 身份混同。空间移动不改 Session cwd。空间 CLI 的精确寻址、失败保留和丢回执查询遵循[空间 CLI 使用合同](../../docs/guides/agentmux-cli-object-control.md)。Desktop Client 组合自己的配置与 Git owner，并消费 Core 的持久空间和公开 Agent API。
 
-当前 Local Run 只由随包 [manifest](vendor/ctxmux/darwin-arm64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、SDK tarball 和 darwin-arm64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
+当前 Local Run 只由随包 [Darwin manifest](vendor/ctxmux/darwin-arm64/manifest.json) 与 [Linux manifest](vendor/ctxmux/linux-x64/manifest.json) 绑定的固定 CtxMux 产物持有。包内携带 exact-commit manifest、同一 SDK tarball 和 darwin-arm64 / linux-x64 binaries；开发期依赖只从这份 tarball 取得官方类型，构建再把同一 SDK 私有 bundle 进唯一 `CtxmuxRunAdapter`，不保留手写 wire 声明。公共 API 不导出 CtxMux SDK/wire 类型，发布后的 runtime 也不需要相邻仓库、外部 `@ctxmux/sdk`、全局 `ctxmux` 或运行时下载。
+
+Node 24+ 支持 macOS arm64 与 Linux x64。`ctxmux` / `ctxmuxd` 的 npm bin 按宿主选择固定原生产物；正常 npm 安装的 `postinstall` 先校验 manifest、字节数与 SHA-256，再恢复原生文件的执行位。`--ignore-scripts` 会跳过这个必要安装步骤，Runtime 无法执行；请启用 lifecycle scripts 重新安装。安装脚本只处理包内固定产物，不访问网络、宿主配置或已有 Run。
 
 `connectLocalAgentMux` 不提供逐调用 socket/state 参数。[runtime-paths.ts](src/runtime-paths.ts) 持有进程级路径策略：默认 Endpoint 与持久状态使用稳定宿主 namespace，持久状态在用户目录；`AGENTMUX_RUNTIME_DIRECTORY` 与 `AGENTMUX_STATE_DIRECTORY` 可指定绝对路径。产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
 
@@ -40,7 +42,7 @@ await client.writeTerminal(run, {
 await client.releaseRunAttachment(attachment.run)
 ```
 
-Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTerminal(runId, afterByte)` 用累计 raw-output byte cursor 建立 retained Attachment，`readRunReplay(run, afterByte)` 在不新增 retained owner 的前提下为另一个 View 读取有界 Replay，`releaseRunAttachment(run)` 按 exact RunRef 释放。Input 调用方在 disposition 确定前保留 `ownerInstanceId + operationId + expectedByte + data`，新 Client 可以重试同一 operation，CtxMux 返回精确 applied byte range 且不会重复写 PTY。`signalTerminal(..., 'SIGINT')` 映射 CtxMux portable Interrupt，其他信号失败关闭。Remote 当前返回 `REMOTE_UNSUPPORTED`。
+Run identity 就是 `{ runId }`。关闭 Client 不会停止 Run；`attachTerminal(runId, afterByte)` 用累计 raw-output byte cursor 建立 retained Attachment，`readRunReplay(run, afterByte)` 在不新增 retained owner 的前提下为另一个 View 读取有界 Replay，`releaseRunAttachment(run)` 按 exact RunRef 释放。Input 调用方在 disposition 确定前保留 `ownerInstanceId + operationId + expectedByte + data`，新 Client 可以重试同一 operation，CtxMux 返回精确 applied byte range 且不会重复写 PTY。`signalTerminal(..., 'SIGINT')` 映射 CtxMux portable Interrupt，其他信号失败关闭。远程 Client 使用相同 API，连接方式见下文。
 
 `refreshRunAttachment(run, afterByte, view, operationId?)` 沿同一个 retained owner 重开该 Client 对原 Run 的观察连接：先打开并核对 snapshot，再替换 live pump；打开失败保原 owner，不停止 Run，也不发送 Input。它与只读 `readRunReplay` 的结果范围不同。刷新直接产生的状态投影携带通用 `observationOrigin`（精确 Run 与 operation），仍是事实更新，不构成新的输入执行意图；独立 Hook、重连及 live output 不带该来源。实际新 attachment 只确认观察连接建立，不是 Run 活性或 Input 送达回执。
 
@@ -108,7 +110,7 @@ console.log(session.agentSessionId, creation.initialPrompt)
 
 `createAgent` 仍返回同一次创建的 Session；`createAgentWithDelivery` 同时返回 `promptConfirmed` 和 `creation`。`creation.createOperationId` 是关联标识，不能据此盲重试创建。`initialPrompt` 分别表达 `not-requested/confirmed/unconfirmed/unknown`，不证明任务被接受或执行。Agent 已启动而保存投递事实失败时，当前调用返回实际回执、发出明确提醒并保留健康 Run；后续持久查询仍如实保留 unknown，不能据此自动重发。
 
-空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的生命周期与持久布局由 Client 持有，实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
+空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的稳定身份与持久布局由 Core 的 Spatial owner 持有，client 持有可见表面与焦点；实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
 
 Agent 生命周期通过公开 Core API 和 `agentmux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 只保留有界 stale tombstone，不能再被操作或投影成 Raw Terminal。
 
@@ -153,4 +155,37 @@ amux space resolve --tab TAB_ID --region REGION_ID --direction left
 amux space unbind --zone ZONE_ID --space SPACE_ID
 ```
 
-`space commit` takes a complete graph and its last observed revision. Revision `0` creates an absent store. A conflict requires reading and reconciling edits; it is never automatically retried. Client resource metadata is preserved as JSON and interpreted by its original host. Saving or querying a location does not create a Run or claim a Native page is mounted. Desktop workbench cutover is a separate consumer slice; this API alone does not claim that cutover complete.
+`space commit` takes a complete graph and its last observed revision. Revision `0` creates an absent store. A conflict requires reading and reconciling edits; it is never automatically retried. Client resource metadata is preserved as JSON and interpreted by its original host. Saving or querying a location does not create a Run or claim a Native page is mounted. Desktop consumes this same owner through its trusted preload port; UI preferences and drafts remain client concerns. See [Durable spatial state](../../docs/architecture/spatial-state.md) for the current consumer contract.
+
+## 远程 Runtime
+
+远端运行同一 Core 包的 `agentmux-runtime serve`，持有 Provider、Session Store、Hook、Permission 与 semantic Resume。本地 Client 持有连接和可恢复的观察。远端需要 Node 24+、包内支持的原生产物与目标 Agent CLI。
+
+`connectHostedAgentMux` 是统一的公共 Runtime SDK；本地服务、SSH 与宿主 HTTP 连接使用同一服务合同。`connectSshAgentMux` 组合系统 SSH 与该 SDK，客户端不会复制 Provider、Session Store 或 Run owner。独立 Core Headless 服务与宿主服务共用同一个语义 owner，宿主额外注入私网、设备及 Desktop 能力。调用的传输授权、durable owner 和当前进程代次分别验证；managed Agent capability 不授予完整 Runtime SDK 权限。
+
+```sh
+# 在远端启动语义 Owner；健康 Run 不随该 Owner 退出而终止。
+agentmux-runtime serve
+# 独立终端读取稳定 runtimeId 与当前 ownerInstanceId。
+agentmux-runtime status
+```
+
+```ts
+import { connectSshAgentMux } from '@agentmux/core'
+
+const client = await connectSshAgentMux({
+  target: { hostId: 'build-host', hostname: 'build-host' }
+})
+const session = await client.createAgent({
+  providerId: 'codex', executorId: 'codex', workspacePath: process.env.REMOTE_WORKSPACE!,
+  injectAgentMuxGuide: true, prompt: 'Inspect this repository'
+})
+await client.reattachAgent(session.agentSessionId, 0)
+// 保存稳定身份后，后续连接可传 expectedRuntimeId，防止接到另一台语义 Owner。
+const runtimeId = client.runtimeOwnerIdentity()?.runtimeId
+await client.dispose()
+```
+
+`hostname` 可以使用已有 SSH config 的 Host 别名；`user`、`port`、`identityFile`、`remoteCommand` 与 `remoteSocketPath` 按需覆盖默认值。连接采用非交互 SSH。Desktop 的 Hosts 设置保存这些连接参数，并展示已绑定的稳定 Runtime ID。
+
+连接中断时，原 Session、Tab、Region、布局和未发出的输入保持原身份。缓存只表示最后一次观察，服务窗说明失败步骤与恢复动作；只有 Core 明确确认原 Session 的终局事实才允许移除对应投影，观测 unknown / unavailable 保留原工作面。Owner 重启使用原持久目录恢复 Session，再附着同一 ctxmux Run。Provider-native Resume 保持 Session ID，并创建有 provenance 的新 Run。

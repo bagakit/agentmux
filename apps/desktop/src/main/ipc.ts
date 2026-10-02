@@ -142,7 +142,7 @@ import { RuntimeController } from './runtime-controller.js'
 import { desktopBusinessSocketPath } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
-import { saveRuntimeConfig } from './runtime-config-transaction.js'
+import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
@@ -188,7 +188,14 @@ export async function registerIpc(args: {
     foreground: initialPalette.foreground,
     background: initialPalette.background
   })
-  args.runtime.commit(await args.runtime.prepare(config))
+  const initialRuntime = await args.runtime.prepare(config)
+  let initialBindingError: unknown
+  try {
+    const bound = configWithRuntimeBindings(config, initialRuntime)
+    if (bound !== config) config = await args.configStore.save(bound)
+  } catch (error) { initialBindingError = error }
+  args.runtime.commit(initialRuntime)
+  if (initialBindingError) args.runtime.reportBindingSaveFailure(initialRuntime, initialBindingError)
   let releaseExecutorConfigEdit: (() => void) | undefined
   let toolkit: ToolkitOwner
   const configOwner = new ConfigOwner({
@@ -776,9 +783,22 @@ export async function registerIpc(args: {
   })
   handle('providers:list', () => args.runtime.providerCatalog())
   handle('executors:detect', async (executorId: AgentExecutorId, hostId: string) => await refreshSettingsExecutor(executorId, hostId, configOwner, args.runtime))
-  handle('sessions:snapshot', async () => (
-    sessionSnapshotPayload(await args.runtime.snapshot(config), args.environmentWarning, app.getPath('home'))
-  ))
+  handle('sessions:snapshot', async () => {
+    const snapshot = await args.runtime.snapshot(config)
+    const preparation = { runtimeBindings: args.runtime.runtimeBindings() }
+    try {
+      await configOwner.update(current => configWithRuntimeBindings(current, preparation))
+    } catch (error) { args.runtime.reportBindingSaveFailure(preparation, error) }
+    const runtimeEndpointWarnings = [...new Map([
+      ...args.runtime.endpointWarningSnapshot().map(warning => [warning.hostId, warning] as const),
+      // A connection that completed during this read does not make an omitted endpoint a full
+      // snapshot. Preserve that cut's unverified membership until the ordinary restored resync.
+      ...(snapshot.runtimeEndpointWarnings ?? []).filter(warning => warning.availability !== 'connected')
+        .map(warning => [warning.hostId, warning] as const)
+    ]).values()]
+    return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
+      args.environmentWarning, app.getPath('home'))
+  })
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput) => {
     if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     const result = await args.runtime.launchAgent(input, config)

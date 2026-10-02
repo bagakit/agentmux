@@ -95,6 +95,7 @@ export function* terminalContinuationSteps(snapshot: {
   const checkpoint = terminal.checkpoint
   const resizes = terminal.resizes
   if (checkpoint.runId !== snapshot.run.runId) invalid()
+  assertTerminalCheckpointRestore(checkpoint, terminal.restoreBytes)
   yield { type: 'restore', checkpoint, restoreBytes: terminal.restoreBytes }
   let cursor = checkpoint.throughByte
   let revision = checkpoint.resizeRevision

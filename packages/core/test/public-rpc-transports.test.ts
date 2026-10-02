@@ -3,12 +3,14 @@ import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { stat } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createConnection, createServer } from 'node:net'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, agentMuxRpcHttpOptions } from '../src/public-rpc-server.js'
-import { connectAgentMuxRpc, agentMuxRpcEndpoint, agentMuxRpcSshArguments } from '../src/public-rpc-client.js'
+import { connectAgentMuxRpc as SourceConnect, agentMuxRpcEndpoint, agentMuxRpcSshArguments } from '../src/public-rpc-client.js'
 import { AgentMuxRpcLines, AgentMuxRpcDispatcher, type AgentMuxRpcConnection } from '../src/public-rpc-wire.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES } from '../src/public-rpc-frame.js'
 import { AgentMuxError } from '../src/errors.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import type { AgentMuxControlRequest } from '../src/control.js'
@@ -16,6 +18,8 @@ import { focusFacts } from './fixtures/desktop-focus-facts.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { parseAgentMuxControlRequest } from '../src/control-codec.js'
 
+const connectAgentMuxRpc: typeof SourceConnect = process.env.AGENTMUX_TEST_RPC_CLIENT_ENTRY
+  ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_CLIENT_ENTRY).href)).connectAgentMuxRpc : SourceConnect
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const catalog = { spaces: [{ spaceId: 'space', kind: 'folder' as const, name: '中文 Space', hostId: 'local', directoryPath: upstreamFixturePath("fixture"), projectId: 'project' }],
@@ -52,13 +56,14 @@ describe('one public JSON-RPC service over bounded transports', () => {
   it('bounds ordinary HTTP and Unix responses identically without truncating facts or losing the owner', async () => {
     const h = await endpoint({ http: { host: '127.0.0.1', port: 0, token: 'private-budget' }, snapshot: async () => ({ topics: [
       { id: 'topic', topicId: 'topic', workspaceId: 'scratch', hostId: 'local', path: upstreamFixturePath("scratch/topic"), spaceId: 'space', kind: 'topic',
-        directoryPath: 'topic', topicPath: 'topic/Topic.md', title: 'Topic', summary: 'x'.repeat(300_000), collaborators: [] }
+        directoryPath: 'topic', topicPath: 'topic/Topic.md', title: 'Topic', summary: 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES + 1), collaborators: [] }
     ] }) })
     for (const endpoint of [{ transport: 'unix' as const, path: h.path }, { transport: 'http' as const,
       url: `http://127.0.0.1:${h.owner.httpAddress!.port}/`, token: 'private-budget' }]) {
       const client = await connectAgentMuxRpc({ endpoint })
       try {
-        await expect(client.call('app.snapshot', { include: ['topics'] })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+        const bounded = await client.call('app.snapshot', { include: ['topics'] }).then(() => 'unexpected-success', error => error.code)
+        expect(bounded).toBe('CONTROL_PROTOCOL_ERROR')
         expect((await client.call('space.ls', { target: {} })).catalog.spaces).toEqual(catalog.spaces)
         expect((await client.call('system.endpoint', {})).endpoint).toEqual({ transport: 'unix', path: h.path })
       } finally { await client.dispose() }
@@ -76,6 +81,24 @@ describe('one public JSON-RPC service over bounded transports', () => {
       expect(result.partial).toBe(true); expect(result.navigation.selection.space!.regionId).toBe('selected')
     } finally { await client.dispose() }
   })
+  it.each(['unix', 'http'] as const)('preserves an admitted finite layout write and its exact late receipt over %s', async transport => {
+    const applied: string[] = []
+    const h = await endpoint({ http: { host: '127.0.0.1', port: 0, token: 'private-late-receipt' }, execute: async request => {
+      if (request.operation !== 'focus') throw new Error('Unexpected admitted owner operation')
+      applied.push(request.requestId)
+      await delay(2_300)
+      return focusFacts(request)
+    } })
+    const client = await connectAgentMuxRpc({ endpoint: transport === 'unix' ? { transport, path: h.path }
+      : { transport, url: `http://127.0.0.1:${h.owner.httpAddress!.port}/`, token: 'private-late-receipt' } })
+    try {
+      const operationId = `original-${transport}-late-focus`
+      const receipt = await client.call('space.focus', { operationId, target: { kind: 'space', regionId: 'selected' }, inputPolicy: 'preserve' })
+      expect(applied, 'the original admitted write is never replayed').toEqual([operationId])
+      expect(receipt.navigation.selection.space!.regionId).toBe('selected')
+      expect(receipt.presentation).toEqual({ provenance: 'unknown', state: 'unknown', tabId: 'tab', regionId: 'selected', blockers: [] })
+    } finally { await client.dispose() }
+  }, 10_000)
   it('flushes the final live cursor arriving between drain completion and its settlement', async () => {
     let push!: (event: { sequence: number; event: unknown }) => void
     const cursors: number[] = []
@@ -293,7 +316,7 @@ describe('one public JSON-RPC service over bounded transports', () => {
     expect(agentMuxRpcSshArguments(endpoint)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '--', 'private-host',
       ("'agentmux' '--endpoint' 'unix:" + (upstreamFixturePath("tmp/private-owner.sock")) + "' 'system' 'endpoint' '--stdio'")])
   })
-  it('allows bounded cold SSH child startup without changing the existing business response deadline', async () => {
+  it('allows bounded cold SSH child startup before an admitted finite owner receipt', async () => {
     const h = await endpoint(), bin = join(h.root, 'bin'), ready = join(h.root, 'ssh-child.pid')
     await mkdir(bin)
     // A real private child models remote CLI startup. Actual OpenSSH is proved
@@ -313,16 +336,19 @@ fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid))
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'ssh', host: 'private-startup-fixture' } })
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     try {
-      const pending = client.call('space.ls', { target: {} }); void pending.catch(() => {})
+      const pending = client.call('space.ls', { target: {} })
+      let openingFailure: unknown
+      void pending.catch(error => { openingFailure = error })
       let pid: number | undefined
       const deadline = Date.now() + 2500
       while (!pid && Date.now() < deadline) {
         try { pid = Number(await readFile(ready, 'utf8')) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
         if (!pid) await delay(10)
       }
+      expect(openingFailure, 'The private SSH child must reach startup before any RPC opening failure').toBeUndefined()
       expect(pid).toBeGreaterThan(0)
       // Move only this client's deadline clock beyond the original 2 s before
-      // the child can connect. Its eventual service still has the normal budget.
+      // the child can connect. Its finite owner still owns its eventual receipt.
       await vi.advanceTimersByTimeAsync(2300)
       try { process.kill(pid!, 'SIGUSR2') } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
       await expect(pending).resolves.toEqual({ catalog })

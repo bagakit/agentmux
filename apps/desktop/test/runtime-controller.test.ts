@@ -41,11 +41,14 @@ const runtimeFixture = vi.hoisted(() => {
   class FakeClient {
     static instances: FakeClient[] = []
     static failNextConnect = false
+    static initializeNext: ((client: FakeClient) => void) | undefined
+    connected = false
     readonly connect = vi.fn(async () => {
       if (FakeClient.failNextConnect) {
         FakeClient.failNextConnect = false
         throw new Error('Runtime discovery failed')
       }
+      this.connected = true
     })
     readonly dispose = vi.fn(async () => {})
     readonly submitAgentMessage = vi.fn(async () => {})
@@ -221,6 +224,7 @@ const runtimeFixture = vi.hoisted(() => {
         return { catalog: { capabilities } }
       })
     }
+    readonly sessionHistorySources = vi.fn(async () => [])
     readonly runtimeProjection = vi.fn(async (): Promise<AgentMuxRuntimeProjection> => ({ hostId: 'fixture', subjects: [] }))
     readonly runtimeSubject = vi.fn(async (target: { kind: 'agent-session' | 'terminal-run'; agentSessionId?: string; runId?: string }) => {
       const projection = await this.runtimeProjection()
@@ -240,6 +244,9 @@ const runtimeFixture = vi.hoisted(() => {
 
     constructor() {
       FakeClient.instances.push(this)
+      const initialize = FakeClient.initializeNext
+      FakeClient.initializeNext = undefined
+      initialize?.(this)
     }
   }
 
@@ -274,8 +281,12 @@ vi.mock('@agentmux/core', async () => {
     validateAgentPromptCondition,
     AgentMuxClient: runtimeFixture.FakeClient,
     AgentMuxMemoryAgentSessionStore: class {},
-    connectLocalAgentMux: runtimeFixture.connectClient,
-    connectSshAgentMux: runtimeFixture.connectClient
+    connectSshAgentMux: async () => {
+      const client = new runtimeFixture.FakeClient()
+      return Object.assign(client, { runtimeOwnerIdentity: () => ({ runtimeId: 'controlled-remote-owner',
+        ownerInstanceId: 'controlled-owner-instance', protocolVersion: 1, processId: 42,
+        ctxmux: client.runtimeIdentity(), availability: client.connected ? 'connected' : 'unverified' }) })
+    }
   }
 })
 vi.mock('../src/main/host-factory.js', () => ({
@@ -401,6 +412,7 @@ describe('RuntimeController configuration transaction', () => {
   beforeEach(() => {
     runtimeFixture.FakeClient.instances.length = 0
     runtimeFixture.FakeClient.failNextConnect = false
+    runtimeFixture.FakeClient.initializeNext = undefined
     runtimeFixture.createdHosts.length = 0
     vi.clearAllMocks()
   })
@@ -449,15 +461,16 @@ describe('RuntimeController configuration transaction', () => {
     } finally { await controller.dispose() }
   })
 
-  it('connects a changed host before committing its host capabilities', async () => {
+  it('prepares the changed Host projection before commit and confirms its endpoint in the background', async () => {
     const controller = await configuredController()
     const next = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
 
     const preparation = await controller.prepare(next)
-    expect(runtimeFixture.FakeClient.instances[1]?.connect).toHaveBeenCalledOnce()
+    expect(runtimeFixture.FakeClient.instances[1]?.connect).not.toHaveBeenCalled()
     expect(() => controller.executionHost('remote')).toThrow('not configured')
 
     controller.commit(preparation)
+    expect(runtimeFixture.FakeClient.instances[1]?.connect).toHaveBeenCalledOnce()
     expect(controller.executionHost('remote')).toMatchObject({ id: 'remote' })
   })
 
@@ -483,22 +496,17 @@ describe('RuntimeController configuration transaction', () => {
 
   it('propagates temporary read and release failures after trying both client and Host cleanup', async () => {
     const controller = await configuredController(), connected = runtimeFixture.FakeClient.instances[0]!
-    const connect = runtimeFixture.connectClient.getMockImplementation()!
     try {
-      runtimeFixture.connectClient.mockImplementationOnce(async () => {
-        const client = await connect()
+      runtimeFixture.FakeClient.initializeNext = client => {
         client.runtimeIdentity.mockImplementationOnce(() => { throw new Error('Identity read failed') })
-        return client
-      })
+      }
       await expect(controller.checkHost(localConfig.hosts[0]!)).rejects.toThrow('Identity read failed')
       expect(runtimeFixture.FakeClient.instances[1]!.dispose).toHaveBeenCalledOnce()
       expect(runtimeFixture.createdHosts[1]!.dispose).toHaveBeenCalledOnce()
-      runtimeFixture.connectClient.mockImplementationOnce(async () => {
-        const client = await connect()
+      runtimeFixture.FakeClient.initializeNext = client => {
         client.dispose.mockRejectedValueOnce(new Error('Client release failed'))
         runtimeFixture.createdHosts.at(-1)!.dispose.mockRejectedValueOnce(new Error('Host release failed'))
-        return client
-      })
+      }
       await expect(controller.checkHost(localConfig.hosts[0]!)).rejects.toThrow('Failed to dispose prepared Runtime hosts.')
       expect(runtimeFixture.FakeClient.instances[2]!.dispose).toHaveBeenCalledOnce()
       expect(runtimeFixture.createdHosts[2]!.dispose).toHaveBeenCalledOnce()
@@ -599,34 +607,31 @@ describe('RuntimeController configuration transaction', () => {
     }
   })
 
-  it('does not advance host truth when Runtime discovery fails and retries the same config', async () => {
+  it('retains a reconnectable remote endpoint and reports an unverified handshake without blocking local input', async () => {
     const controller = await configuredController()
     const next = { ...localConfig, hosts: [...localConfig.hosts, remoteHost] }
     runtimeFixture.FakeClient.failNextConnect = true
-
-    await expect(controller.prepare(next)).rejects.toThrow('Runtime discovery failed')
-    expect(() => controller.executionHost('remote')).toThrow('not configured')
-    expect(runtimeFixture.createdHosts.at(-1)?.dispose).toHaveBeenCalledOnce()
-
-    const retry = await controller.prepare(next)
-    controller.commit(retry)
+    const prepared = await controller.prepare(next)
+    expect(prepared.hosts).toHaveLength(1)
+    expect(prepared.hosts[0]?.warning).toMatchObject({ hostId: 'remote', step: 'Connecting to Runtime', availability: 'unverified' })
+    controller.commit(prepared)
+    await vi.waitFor(async () => expect((await controller.snapshot(next)).runtimeEndpointWarnings)
+      .toContainEqual(expect.objectContaining({ hostId: 'remote', step: 'Connecting to Runtime', message: 'Runtime discovery failed' })))
     expect(controller.executionHost('remote')).toMatchObject({ id: 'remote' })
+    expect(runtimeFixture.FakeClient.instances[1]!.dispose).not.toHaveBeenCalled()
+    await controller.dispose()
   })
 
-  it('fences launches between changed-host preparation and commit', async () => {
+  it('does not reserve or replace a live owner when only its display label changes', async () => {
     const controller = await configuredController()
-    const next: AppConfig = {
-      ...localConfig,
-      hosts: [{ ...localConfig.hosts[0]!, label: 'Renamed Mac' }]
-    }
-
+    const next: AppConfig = { ...localConfig, hosts: [{ ...localConfig.hosts[0]!, label: 'Renamed Mac' }] }
     const preparation = await controller.prepare(next)
-    await expect(controller.launchTerminal({
-      hostId: 'local',
-      workspacePath: _hygiene_fixturePath("repo")
-    }, next)).rejects.toThrow('being reconfigured')
-
+    expect(preparation.hosts).toEqual([])
+    expect(preparation.reservedHostIds).toEqual([])
+    expect(runtimeFixture.FakeClient.instances).toHaveLength(1)
     controller.commit(preparation)
+    expect(runtimeFixture.FakeClient.instances[0]!.dispose).not.toHaveBeenCalled()
+    await controller.dispose()
   })
 
   it('releases the quit reservation when owner cleanup fails so a healthy host is not fenced forever', async () => {
@@ -643,7 +648,7 @@ describe('RuntimeController configuration transaction', () => {
       ...localConfig,
       hosts: [{ ...localConfig.hosts[0]!, label: 'Retry after failed quit' }]
     })
-    expect(retry.hosts).toHaveLength(1)
+    expect(retry.hosts).toEqual([])
     await controller.discard(retry)
     expect(client.dispose).toHaveBeenCalledOnce()
   })
@@ -676,7 +681,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.createTerminal).toHaveBeenCalledWith({
       createOperationId: 'terminal-op',
       workspacePath: _hygiene_fixturePath("repo"),
-      command: process.env.SHELL ?? '/bin/sh',
+      command: '/bin/sh',
       args: ['-lc', 'pnpm test:fast']
     })
   })
@@ -847,7 +852,7 @@ describe('RuntimeController configuration transaction', () => {
     const client = runtimeFixture.FakeClient.instances[0]!
     client.runtimeIdentity.mockReturnValue({ ...client.runtimeIdentity(), ownership: 'unverified' } as ReturnType<typeof client.runtimeIdentity>)
     const snapshot = await controller.snapshot(localConfig)
-    expect(snapshot.runtimeOwnershipWarnings).toEqual(['fixture'])
+    expect(snapshot.runtimeOwnershipWarnings).toEqual(['local'])
     expect(snapshot.sessions).toEqual([])
     client.runtimeIdentity.mockReturnValue({ ...client.runtimeIdentity(), ownership: 'owned' } as ReturnType<typeof client.runtimeIdentity>)
     expect((await controller.snapshot(localConfig)).runtimeOwnershipWarnings).toBeUndefined()
@@ -2132,9 +2137,10 @@ describe('RuntimeController configuration transaction', () => {
     })
     client.sessionTimeline.mockResolvedValue({ agentSessionId: 'another-session', revision: 0, items: [] })
 
-    await expect(controller.snapshot(localConfig)).rejects.toThrow(
-      'Runtime snapshot returned a Timeline for another Session: another-session'
-    )
+    const snapshot = await controller.snapshot(localConfig)
+    expect(snapshot.sessions).toEqual([])
+    expect(snapshot.runtimeEndpointWarnings).toEqual([expect.objectContaining({ hostId: 'local',
+      message: 'Runtime snapshot returned a Timeline for another Session: another-session' })])
   })
 
   it('reprojects membership when an Agent disappears before its Timeline can be read', async () => {
@@ -2161,7 +2167,8 @@ describe('RuntimeController configuration transaction', () => {
     await expect(controller.snapshot(localConfig)).resolves.toEqual({
       sessions: [],
       timelines: {},
-      recoveryCandidates: []
+      recoveryCandidates: [],
+      runtimeEndpointWarnings: []
     })
     expect(client.runtimeProjection).toHaveBeenCalledTimes(2)
     expect(client.sessionTimeline).toHaveBeenCalledOnce()

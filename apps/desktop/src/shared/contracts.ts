@@ -154,6 +154,11 @@ export type SshHostConfig = {
   user?: string
   port?: number
   identityFile?: string
+  /** Executable and Unix socket of the existing remote public service. */
+  remoteCommand?: string
+  remoteSocketPath?: string
+  /** Durable semantic owner learned over the trusted SSH connection. */
+  runtimeId?: string
 }
 
 export type HostConfig = LocalHostConfig | SshHostConfig
@@ -983,6 +988,18 @@ export type RuntimeEvent = {
   type: 'core'
   hostId: string
   event: AgentMuxClientEvent
+  /** Present only when this endpoint's observation availability changes. */
+  endpointWarning?: RuntimeEndpointWarning | null
+}
+
+export type RuntimeEndpointWarning = {
+  /** A configuration workflow failure can coexist with a connected healthy Runtime. */
+  availability?: 'connected' | 'unverified'
+  hostId: string
+  step: string
+  code: string
+  message: string
+  recovery: string
 }
 
 /** Electron does not preserve custom Error fields; this carries Core's exact write facts. */
@@ -993,6 +1010,8 @@ export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
 export type RuntimeSnapshot = {
   /** Connected hosts whose daemon launch provenance could not be verified. */
   runtimeOwnershipWarnings?: string[]
+  /** These endpoints did not provide an authoritative complete projection. */
+  runtimeEndpointWarnings?: RuntimeEndpointWarning[]
   /** Non-secret, app-lifetime notice for incomplete local shell environment loading. */
   environmentWarning?: string
   /**

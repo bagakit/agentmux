@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import type { RunInfo } from '@ctxmux/sdk'
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
@@ -10,7 +10,7 @@ function runInfo(id: string): RunInfo {
     spec: {
       program: '/bin/sh',
       args: [],
-      cwd: upstreamFixturePath("repo"),
+      cwd: fixturePath("repo"),
       env: {},
       initial_size: { cols: 80, rows: 24 },
       declared_inputs: []
@@ -33,7 +33,8 @@ function runInfo(id: string): RunInfo {
     first_available_byte: 0,
     attachments: 0,
     applied_input_bytes: 0,
-    current_size: { cols: 80, rows: 24 }
+    current_size: { cols: 80, rows: 24 },
+    native_service: null
   }
 }
 

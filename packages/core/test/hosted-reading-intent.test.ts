@@ -1,10 +1,13 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '../src/errors.js'
-import { connectHostedAgentMux } from '../src/hosted-client.js'
-import { encodeHostedValue, decodeHostedValue } from '../src/hosted-value.js'
+import { connectHostedAgentMux as SourceConnectHosted } from '../src/hosted-client.js'
+import { encodeHostedValue, decodeHostedValue, hostedTransfer } from '../src/hosted-value.js'
 import type { AgentMuxHostedBootstrap, AgentMuxHostedInvocation, AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment } from '../src/types.js'
+const connectHostedAgentMux: typeof SourceConnectHosted = process.env.AGENTMUX_TEST_CLIENT_ENTRY
+  ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_CLIENT_ENTRY)).connectHostedAgentMux : SourceConnectHosted
+
 
 function attachment(runId: string): AgentMuxRunAttachment {
   return { run: { nativeService: null, runId, kind: 'terminal', providerId: null, executorId: null, agentSessionId: null,
@@ -12,10 +15,11 @@ function attachment(runId: string): AgentMuxRunAttachment {
     latestOutputBytes: 4, acceptedInputBytes: 0 }, replay: [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 }
 }
 function fixture() {
-  const initial: AgentMuxHostedBootstrap = { identity: { instanceId: 'original-daemon', ownership: 'owned', hostId: 'local',
-    buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 },
+  const identity: AgentMuxHostedBootstrap['identity'] = { instanceId: 'original-daemon', ownership: 'owned', hostId: 'local',
+    buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123 }
+  const initial: AgentMuxHostedBootstrap = { identity, owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner', protocolVersion: 1, processId: 123, availability: 'connected', ctxmux: identity },
     storePath: upstreamFixturePath("private-store/sessions.json"), hostProcessId: 123, catalog: [], sessions: [], messageQueuePath: upstreamFixturePath("private-store/messages.ndjson") }
-  const subscriptions: Array<Parameters<AgentMuxHostedRpcPort['subscribe']>[2]> = []
+  const subscriptions: Array<{ method: string; handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]; closeTransport(): void }> = []
   const calls: AgentMuxHostedInvocation[] = []
   const behavior: {
     release?: () => Promise<void>
@@ -25,6 +29,7 @@ function fixture() {
   // reconnect and desired-reading behavior; no Run or Core is started by this fixture.
   const port = {
     call: async (method: string, params: unknown) => {
+      if (method === 'runtime.owner.identity') return { owner: initial.owner }
       if (method === 'runtime.bootstrap') return initial
       if (method === 'runtime.release-consumer') return { released: true }
       if (method !== 'runtime.invoke') throw new Error(`Unexpected fixture port method: ${method}`)
@@ -38,13 +43,38 @@ function fixture() {
       else throw new Error(`Unexpected business method: ${invocation.method}`)
       return { value: encodeHostedValue(value) }
     },
-    subscribe: async (_method: string, _params: unknown, handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
-      subscriptions.push(handlers); handlers.onInitial({ bootstrap: initial })
-      return { dispose: async () => {} }
+    subscribe: async (method: string, params: unknown, handlers: Parameters<AgentMuxHostedRpcPort['subscribe']>[2]) => {
+      let closed = false
+      const transferId = crypto.randomUUID()
+      const data = params as { target?: { runId: string }; afterByte?: number; view?: 'raw' | 'terminal'; refresh?: boolean }
+      let value: unknown = initial
+      if (method === 'runtime.attachment-watch') {
+        const runId = data.target!.runId
+        if (data.refresh) {
+          const invocation: Extract<AgentMuxHostedInvocation, { method: 'refreshRunAttachment' }> = { method: 'refreshRunAttachment', args: [{ runId }, data.afterByte!, data.view!] }
+          calls.push(invocation)
+          value = await behavior.refresh?.(invocation) ?? attachment(runId)
+        } else {
+          calls.push({ method: 'attachTerminal', args: [runId, data.afterByte!, data.view!] })
+          value = attachment(runId)
+        }
+      } else if (method !== 'runtime.events') throw new Error(`Unexpected actual Hosted subscription: ${method}`)
+      subscriptions.push({ method, handlers, closeTransport: () => { closed = true } })
+      handlers.onInitial({ owner: initial.owner, transferId })
+      for (const chunk of hostedTransfer({ kind: 'initial', value }, transferId)) handlers.onEvent({ type: 'snapshot', data: chunk })
+      return { dispose: async () => {
+        if (closed) return
+        closed = true
+        if (method === 'runtime.attachment-watch') {
+          calls.push({ method: 'releaseRunAttachment', args: [{ runId: data.target!.runId }] })
+          await behavior.release?.()
+        }
+      } }
     }
   } as AgentMuxHostedRpcPort
   return { port, calls, behavior, subscriptions,
-    disconnect: () => subscriptions.at(-1)!.onEnd?.(new AgentMuxError('Private Host observation interrupted.', 'CONTROL_UNAVAILABLE')) }
+    disconnect: () => { for (const subscription of subscriptions) subscription.closeTransport();
+      [...subscriptions].reverse().find(value => value.method === 'runtime.events')!.handlers.onEnd?.(new AgentMuxError('Private Host observation interrupted.', 'CONTROL_UNAVAILABLE')) } }
 }
 
 describe('Hosted desired reading intent', () => {

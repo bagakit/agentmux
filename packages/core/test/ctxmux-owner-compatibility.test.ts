@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -58,7 +58,7 @@ describe('Runtime compatibility independent of launch provenance', () => {
       backend: { type: 'native' },
       capabilities: { input: true, resize: true, signal: true, stop: true, fork_level_a: true, fork_level_b: false, replay: 'raw_from_start' },
       pid: 12345, state: { type: 'running' }, latest_output_bytes: 19, durable_output_bytes: 19,
-      first_available_byte: 0, attachments: 0, applied_input_bytes: 4, current_size: { rows: 24, cols: 80 }
+      first_available_byte: 0, attachments: 0, applied_input_bytes: 4, current_size: { rows: 24, cols: 80 }, native_service: null
     }
     vi.mocked(CtxmuxClient.prototype.list).mockResolvedValue([{ id: original.id, backend: 'native',
       pid: original.pid, state: original.state, latest_output_bytes: 19, retained_output_bytes: 19, attachments: 0 }])
@@ -139,7 +139,7 @@ describe('Runtime compatibility independent of launch provenance', () => {
       schema: 'agentmux.ctxmux-owner.v1', sourceCommit: manifest.source.commit, sourceTree: manifest.source.tree,
       manifestSha256: createHash('sha256').update(manifestBytes).digest('hex'),
       daemonSha256: manifest.binaries.find((b: { name: string }) => b.name === 'ctxmuxd').sha256,
-      daemonPath: upstreamFixturePath("previous/installation/ctxmuxd"), socketPath: adapter.socketPath, stateDirectory: adapter.stateDirectory,
+      daemonPath: fixturePath("previous/installation/ctxmuxd"), socketPath: adapter.socketPath, stateDirectory: adapter.stateDirectory,
       daemonInstanceId: runtime.daemonInstanceId, runtimeId: runtime.runtimeId, runtimeBuildId: runtime.buildId
     }), { mode: 0o600 })
     try {

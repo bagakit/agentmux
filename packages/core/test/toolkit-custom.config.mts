@@ -11,7 +11,7 @@ const mutant = process.env.AGENTMUX_TOOLKIT_CORE_MUTANT ?? 'baseline'
 const changes: Record<string, [string, string, string]> = {
   budget: ['packages/core/src/toolkit.ts', 'if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)', 'void r'],
   descriptor: ['packages/core/src/toolkit.ts', "if (key === 'name') encodedText(value, 768, code)\n  if (key === 'icon') encodedText(value, 192, code)", 'void key'],
-  header: ['packages/core/src/control-host.ts', 'if (isToolkitOperation(operation?.value)) return parseToolkitRequest(source)', 'void operation'],
+  header: ['packages/core/src/control-codec.ts', 'if (isToolkitOperation(operation?.value)) return parseToolkitRequest(source)', 'void operation'],
   target: ['packages/core/src/toolkit.ts', 'if (toolId !== request.toolId) throw', 'if (false) throw'],
   input: ['packages/core/src/toolkit.ts', "case 'toolkit.run': record(source, source.toolId === 'performance' ? base : [...base, 'input'], [], code); if (source.toolId !== 'performance') parseToolkitRunInput(source.input, code); break", "case 'toolkit.run': record(source, base, ['input'], code); break"],
   utf8: ['packages/core/src/cli-json-input.ts', "new TextDecoder('utf-8', { fatal: true }).decode", "new TextDecoder('utf-8', { fatal: false }).decode"],

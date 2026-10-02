@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { isDeepStrictEqual } from 'node:util'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -280,7 +281,10 @@ function sameSession(
   left: AgentMuxStoredAgentSession | null,
   right: AgentMuxStoredAgentSession | null
 ): boolean {
-  return JSON.stringify(left) === JSON.stringify(right)
+  return isDeepStrictEqual(
+    left === null ? null : normalizeStoredAgentSession(left),
+    right === null ? null : normalizeStoredAgentSession(right)
+  )
 }
 
 function sameReservationOwner(

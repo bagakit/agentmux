@@ -14,7 +14,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invok
 vi.mock('electron', () => ({
   contextBridge: { exposeInMainWorld: (_name: string, api: AgentMuxPreloadApi) => { bridge.api = api } },
   ipcRenderer: { invoke: bridge.invoke, on: vi.fn(), off: vi.fn(), send: vi.fn() }, webFrame: { getZoomFactor: () => 1 },
-  app: { getPath: () => _hygiene_fixturePath("private-retired-history-ipc") },
+  app: { getPath: () => _hygiene_fixturePath("private-retired-history-ipc"), getAppPath: () => _hygiene_fixturePath("private-retired-history-ipc"), isPackaged: false },
   ipcMain: { handle: (channel: string, handler: Function) => bridge.handlers.set(channel, handler), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
@@ -49,7 +49,7 @@ it('reads retired source, native and captured content through actual preload/IPC
   const kernel = (client as unknown as { kernel: Record<string, () => Promise<void>> }).kernel
   const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name))
   const controller = new RuntimeController(store, localRuntimeConnector)
-  controller.commit({ hosts: [{ id: 'private-host', client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
+  controller.commit({ hosts: [{ id: 'private-host', config: { id: 'private-host', kind: 'local', label: 'Private' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { 'private-claude': { providerId: 'claude', label: 'Private', command: 'claude', args: [], env: {}, injectAgentMuxGuide: false } } }
   vi.spyOn(controller, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const sender = Object.assign(new EventEmitter(), { id: 91, isDestroyed: () => false, send: vi.fn() })

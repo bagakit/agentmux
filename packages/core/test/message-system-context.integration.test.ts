@@ -1,3 +1,4 @@
+import { issueAgentCapability, hashAgentCapability } from '../src/agent-capability.js'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -161,7 +162,13 @@ describe('Core-owned system context has one durable source, separate from user a
   })
 
   it('does not turn the peer initial request into a System author', async () => {
-    await launch('Original peer request.', {peer:'known-peer'})
+    const capability = issueAgentCapability()
+    await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'known-peer', providerId, executorId: providerId,
+      hostId: 'local', workspacePath: root, run: { runId: 'peer-run' }, retiredRuns: [],
+      hookBindingId: 'p'.repeat(43), hookToken: 'q'.repeat(43), capabilityHash: hashAgentCapability(capability), createdAt: 1, updatedAt: 1 })
+    await client.createAgentWithDelivery({ agentSessionId: sessionId, createOperationId: requestId, providerId,
+      executorId: 'exact-configured-executor', workspacePath: root, injectAgentMuxGuide: true,
+      prompt: 'Original peer request.', initialMessage: { callerAgentSessionId: 'known-peer', capability } })
     const records=(await timeline()).items
     expect(records.map(i=>[i.kind,i.authorAgentSessionId])).toEqual([['system_message',undefined],['user_message','known-peer']])
     expect(projectSessionUserMessages({agentSessionId:sessionId,timeline:await timeline()}).map(m=>m.author))

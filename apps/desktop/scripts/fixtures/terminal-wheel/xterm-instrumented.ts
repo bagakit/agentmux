@@ -1,4 +1,4 @@
-// Constructor observation only: every parser, mode, encoder and viewport method stays native.
+// Constructor and pass-through write observations: parsing, encoding and viewport methods stay native.
 import { Terminal as EsmTerminal } from '@xterm/xterm/lib/xterm.mjs'
 import type { ITerminalOptions } from '@xterm/xterm'
 declare const __TERMINAL_WHEEL_UMD_URL__: string
@@ -18,6 +18,14 @@ export async function installUmd(distribution: string): Promise<void> {
 }
 export const Terminal = function (options?: ITerminalOptions) {
   const terminal = new constructor(options)
+  const metrics = { writeCalls: 0, inputBytes: 0 }
+  const write = terminal.write.bind(terminal)
+  terminal.write = (data, callback) => {
+    metrics.writeCalls++
+    metrics.inputBytes += typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength
+    write(data, callback)
+  }
+  Object.defineProperty(terminal, 'remoteProofMetrics', { value: metrics })
   ;(window as unknown as { terminals: import('@xterm/xterm').Terminal[] }).terminals.push(terminal)
   return terminal
 } as unknown as typeof import('@xterm/xterm').Terminal

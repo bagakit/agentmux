@@ -3,10 +3,30 @@ import { existsSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import ctxmuxArtifacts from './ctxmux-artifact-contract.json' with { type: 'json' }
 
 // Artifact identity only. The adapter verifies the packed manifest and owner receipt
 // with this digest; changing an artifact must not change the Runtime's address.
-export const CTXMUX_MANIFEST_SHA256 = '0641f3e7f9330d0ee2c49f566a0b3038cc830bccf35405c9bd08d96ab4db5372'
+export function supportedCtxmuxArtifactPlatform(
+  platform: string = process.platform,
+  architecture: string = process.arch
+): string | null {
+  const artifactPlatform = `${platform}-${architecture}`
+  return Object.hasOwn(ctxmuxArtifacts.manifests, artifactPlatform) ? artifactPlatform : null
+}
+
+export function ctxmuxManifestSha256(
+  platform: string = process.platform,
+  architecture: string = process.arch
+): string {
+  const artifactPlatform = supportedCtxmuxArtifactPlatform(platform, architecture)
+  if (artifactPlatform === null) {
+    throw new Error(`AgentMux has no qualified ctxmux artifacts for ${platform}-${architecture}.`)
+  }
+  return ctxmuxArtifacts.manifests[artifactPlatform as keyof typeof ctxmuxArtifacts.manifests]
+}
+
+export const CTXMUX_MANIFEST_SHA256 = ctxmuxManifestSha256()
 
 // A stable host namespace, independent of artifact identity. The short endpoint can be
 // recreated; persistent state uses the same namespace under the user's durable directory.

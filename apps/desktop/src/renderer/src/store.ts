@@ -80,6 +80,7 @@ import type {
   ExecutorDetectionInput,
   RuntimeEvent,
   RuntimeSnapshot,
+  RuntimeEndpointWarning,
   ScratchTopicSnapshot,
   SessionControl,
   SessionRecoveryResult,
@@ -212,6 +213,8 @@ import {
   runtimeDiagnosticNotice,
   removeSessionProjection,
   reduceAgentMembershipSnapshot,
+  runtimeSnapshotHostUnavailable,
+  projectRuntimeEndpointSessions,
   reduceTerminalMembershipSnapshot,
   reduceAgentSessionLaunchAttached,
   reduceDetachedAgentLaunch,
@@ -395,6 +398,7 @@ export type AgentSteerQueueEntry = {
 
 type AppState = {
   runtimeOwnershipWarnings: string[] | undefined
+  runtimeEndpointWarnings: RuntimeEndpointWarning[] | undefined
   // undefined: snapshot unavailable; null: snapshot confirms no environment warning.
   environmentWarning: string | null | undefined
   /**
@@ -1644,6 +1648,7 @@ type SessionMembershipResync = {
   }>
   overflowed: boolean
   recoverSavedAgents: boolean
+  restoredHostIds: Set<string>
   startupNotice: ErrorNoticeContext | null
 }
 const MAX_SESSION_MEMBERSHIP_EVENTS = 256
@@ -1662,12 +1667,21 @@ function enqueueSessionMembershipEvent(
   entry.overflowed = true
 }
 
+function runtimeEndpointWarningsAfterEvent(
+  warnings: RuntimeEndpointWarning[] | undefined, event: RuntimeEvent
+): RuntimeEndpointWarning[] | undefined {
+  if (event.endpointWarning === undefined) return warnings
+  const retained = (warnings ?? []).filter((warning) => warning.hostId !== event.hostId)
+  return event.endpointWarning === null ? retained : [...retained, event.endpointWarning]
+}
+
 function startupSnapshotConfirmsSessions(snapshot: RuntimeSnapshot, sessionIds: readonly string[]): boolean {
   if (sessionIds.length === 0) return false
   const canonicalById = new Map(snapshot.sessions.map((session) => [session.id, session]))
   return sessionIds.every((id) => {
     const session = canonicalById.get(id)
-    return session !== undefined && !(snapshot.runtimeOwnershipWarnings ?? []).includes(session.hostId)
+    return session !== undefined && !runtimeSnapshotHostUnavailable(snapshot, session.hostId) &&
+      !(snapshot.runtimeOwnershipWarnings ?? []).includes(session.hostId)
   })
 }
 
@@ -1687,12 +1701,13 @@ function missingSavedRuntimeFactsNotice(count: number): string {
 
 function startSessionMembershipResync(
   event?: RuntimeEvent,
-  options: { reportFailure?: boolean; recoverSavedAgents?: boolean } = {}
+  options: { reportFailure?: boolean; recoverSavedAgents?: boolean; restoredHostId?: string } = {}
 ): void {
   const currentNotice = useAppStore.getState().errorNoticeContext
   const startupNotice = currentNotice?.startupSessionSnapshot ? currentNotice : null
   if (sessionMembershipResync) {
     sessionMembershipResync.recoverSavedAgents ||= options.recoverSavedAgents === true
+    if (options.restoredHostId) sessionMembershipResync.restoredHostIds.add(options.restoredHostId)
     // initialize can join the resync already started by a buffered membership event.
     if (startupNotice) sessionMembershipResync.startupNotice = startupNotice
     if (event) enqueueSessionMembershipEvent(sessionMembershipResync, event)
@@ -1702,6 +1717,7 @@ function startSessionMembershipResync(
     events: event ? [{ event, pendingLaunchAgentSessionId: null }] : [],
     overflowed: false,
     recoverSavedAgents: options.recoverSavedAgents === true,
+    restoredHostIds: new Set(options.restoredHostId ? [options.restoredHostId] : []),
     startupNotice
   }
   sessionMembershipResync = entry
@@ -1734,6 +1750,7 @@ function startSessionMembershipResync(
             : [])
         ].filter((candidate) => savedSessionIds.has(candidate.agentSessionId)) : []
         const events = entry.events.splice(0)
+        const restoredDuringRead = new Set(events.flatMap(({ event }) => event.event.type === 'connection-state' && event.event.state === 'restored' ? [event.hostId] : []))
         let membershipGap = false
         const timelineGaps = new Set<string>()
         useAppStore.setState((state) => {
@@ -1747,7 +1764,7 @@ function startSessionMembershipResync(
             const decision = agentStartupRecoveryDecision({
               runState: 'missing',
               ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-              canonical: !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+              canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
               now: Date.now()
             })
             projected = { ...projected, sessions: [...projected.sessions, recoveryCandidateSession(candidate, {
@@ -1764,6 +1781,9 @@ function startSessionMembershipResync(
             const reduced = projectRuntimeEvent(projected, pending.event)
             projected = reduced.state
             membershipGap ||= reduced.sessionMembershipGap === true
+            // A reconnect during this read needs its own later canonical cut. A sparse restored
+            // event cannot clear a snapshot's unavailable-owner notice or prove membership.
+            membershipGap ||= pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored'
             if (reduced.timelineGapSessionId) timelineGaps.add(reduced.timelineGapSessionId)
           }
           // The adopted canonical facts settle only the original empty-facts producer. Pending
@@ -1789,7 +1809,14 @@ function startSessionMembershipResync(
               resolvedStartupNotice = { error: message, lastError: message, errorNoticeContext: updated }
             }
           }
-          return { ...projected, ...resolvedStartupNotice, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
+          let reconciled = { ...state, ...projected }
+          for (const session of snapshot.sessions) {
+            if (!runtimeSnapshotHostUnavailable(snapshot, session.hostId)) reconciled = reconcileDeliveredSteers(reconciled, session.id)
+          }
+          const runtimeEndpointWarnings = events.reduce<RuntimeEndpointWarning[] | undefined>((warnings, pending) =>
+            pending.event.event.type === 'connection-state' && pending.event.event.state === 'restored' && pending.event.endpointWarning === null
+              ? warnings : runtimeEndpointWarningsAfterEvent(warnings, pending.event), snapshot.runtimeEndpointWarnings ?? [])
+          return { ...reconciled, sessions: projectRuntimeEndpointSessions(reconciled.sessions, runtimeEndpointWarnings), ...resolvedStartupNotice, runtimeEndpointWarnings, runtimeOwnershipWarnings: snapshot.runtimeOwnershipWarnings ?? [], environmentWarning: snapshot.environmentWarning ?? null }
         })
         for (const pending of events) {
           const diagnostic = runtimeDiagnosticNotice(useAppStore.getState(), pending.event)
@@ -1797,19 +1824,35 @@ function startSessionMembershipResync(
             ...(diagnostic.subject ? { subject: diagnostic.subject } : {}) })
         }
         for (const candidate of startupCandidates) {
+          if (restoredDuringRead.has(candidate.hostId)) continue
           const current = useAppStore.getState().sessions.find((session) => session.id === candidate.agentSessionId)
           if (!current || attemptedStartupRecovery.has(candidate.agentSessionId)) continue
           const decision = agentStartupRecoveryDecision({
             runState: current.processState,
             ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-            canonical: !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+            canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
             now: Date.now()
           })
           if (decision.kind !== 'resume') continue
           attemptedStartupRecovery.add(candidate.agentSessionId)
           await useAppStore.getState().recoverSession(candidate.agentSessionId)
         }
-        for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) void useAppStore.getState().flushAgentSteerQueue(sessionId)
+        for (const sessionId of Object.keys(useAppStore.getState().agentSteerQueues)) {
+          const current = useAppStore.getState(), session = current.sessions.find((item) => item.id === sessionId)
+          if (session && restoredDuringRead.has(session.hostId)) continue
+          if (!session || current.runtimeEndpointWarnings?.some(warning => warning.hostId === session.hostId && warning.availability !== 'connected')) continue
+          const pending = current.agentSteerQueues[sessionId]?.find((item) => item.errorCode !== EXECUTION_NOT_REQUESTED &&
+            (item.runId === undefined || steerEntryTargetsRun(item, session.control.run.runId)))
+          if (entry.restoredHostIds.has(session.hostId) && pending && pending.promptCondition !== null) {
+            // A fresh timeline can settle a delivery receipt. Its absence cannot prove that an
+            // already prepared mutation never ran. Keep that original operation for inspection.
+            useAppStore.setState((state) => ({ agentSteerQueues: { ...state.agentSteerQueues,
+              [sessionId]: state.agentSteerQueues[sessionId]!.map((item) => item.operationId === pending.operationId
+                ? { ...item, status: 'deferred', error: 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' } : item) } }))
+            continue
+          }
+          void current.flushAgentSteerQueue(sessionId)
+        }
         for (const sessionId of timelineGaps) void useAppStore.getState().resyncTimeline(sessionId)
         // Recovery above can publish events while its public API call is pending. Drain those
         // queued facts before releasing this resync owner, just as events during snapshot reads.
@@ -2655,6 +2698,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   loading: true,
   startupProgress: { step: 'saved-workspace' },
   runtimeOwnershipWarnings: undefined,
+  runtimeEndpointWarnings: undefined,
   environmentWarning: undefined,
   localHome: '',
   displacedAgentSessionIds: [],
@@ -2771,7 +2815,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (configResult.status === 'rejected') throw configResult.reason
       if (initialSnapshotResult.status === 'fulfilled') set({
         environmentWarning: initialSnapshotResult.value.environmentWarning ?? null,
-        runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? []
+        runtimeOwnershipWarnings: initialSnapshotResult.value.runtimeOwnershipWarnings ?? [],
+        runtimeEndpointWarnings: initialSnapshotResult.value.runtimeEndpointWarnings ?? []
       })
       // 本机 home 从快照里学（渲染层没有 process/os）。拿不到就保留旧值——不缩写好过按空串猜边界。
       if (initialSnapshotResult.status === 'fulfilled' && initialSnapshotResult.value.localHome !== undefined) {
@@ -2859,7 +2904,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const decision = agentStartupRecoveryDecision({
           runState: projected?.processState ?? 'missing',
           ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-          canonical: snapshotVerified && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+          canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
           now: Date.now()
         })
         if (decision.kind !== 'resume') {
@@ -2988,10 +3033,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         restoredWorkbench: null,
         config,
         providerCatalog,
-        sessions: visibleSessions,
+        sessions: projectRuntimeEndpointSessions(visibleSessions, snapshot.runtimeEndpointWarnings),
         recoveryCandidates: snapshot.recoveryCandidates,
         timelines: snapshot.timelines,
         runtimeOwnershipWarnings: snapshotVerified ? snapshot.runtimeOwnershipWarnings ?? [] : get().runtimeOwnershipWarnings,
+        runtimeEndpointWarnings: snapshotVerified ? snapshot.runtimeEndpointWarnings ?? [] : get().runtimeEndpointWarnings,
         environmentWarning: snapshotVerified ? snapshot.environmentWarning ?? null : get().environmentWarning,
         pendingAgentLaunches: {},
         agentFocus: restoredAgentFocus,
@@ -7227,6 +7273,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const state = get()
           let session = state.sessions.find((item) => item.id === sessionId)
           if (session?.kind !== 'agent') return
+          const sessionHostId = session.hostId
+          if (state.runtimeEndpointWarnings?.some((warning) => warning.hostId === sessionHostId && warning.availability !== 'connected')) return
           const currentRunId = session.control.run.runId
           const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
             item.errorCode !== EXECUTION_NOT_REQUESTED &&
@@ -7239,6 +7287,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Recovery and binding are part of this one attempt. Consume its grant before any
           // failure or await; a new grant arriving during the attempt remains in the set.
           const explicitAttempt = drain.explicitSteers.delete(entry.operationId)
+          if (!explicitAttempt && entry.promptCondition !== null) {
+            // A prepared durable intent may already have crossed admission. A late completion,
+            // startup or reconnect wake is no proof that it was never delivered. Only a fresh
+            // receipt reconciles it; an explicit user retry keeps its original Core identity.
+            set((current) => ({ agentSteerQueues: { ...current.agentSteerQueues,
+              [sessionId]: current.agentSteerQueues[sessionId]!.map(item => item.operationId === entry.operationId
+                ? { ...item, status: 'deferred', error: 'The original message delivery is unconfirmed after reconnect. Inspect the outbox before retrying.' } : item) } }))
+            return
+          }
           // Capture before recovery: a newly restored binding grants no save bypass.
           const explicitlyBound = explicitAttempt && entry.runId === currentRunId
           let preparedHere = false
@@ -7692,6 +7749,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   applyEvent(event) {
     const core = event.event
+    if (event.endpointWarning !== undefined && !(core.type === 'connection-state' && core.state === 'restored' && event.endpointWarning === null)) set((state) => {
+      const runtimeEndpointWarnings = runtimeEndpointWarningsAfterEvent(state.runtimeEndpointWarnings, event)
+      return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
+    })
+    if (core.type === 'connection-state' && core.state === 'restored') {
+      startSessionMembershipResync(event, { recoverSavedAgents: true, restoredHostId: event.hostId })
+      return
+    }
     // Only a projection produced by this exact observation is excluded from automatic delivery.
     // Independent Hook completion, automatic reconnect and explicit sends keep their existing intent.
     const projectedRun = core.type === 'agent-session' ? core.session.run
@@ -7724,20 +7789,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const reduced = projectRuntimeEvent(state, event)
       timelineGapSessionId = reduced.timelineGapSessionId
       sessionMembershipGap = reduced.sessionMembershipGap === true
+      const projected = reduced.state.sessions === state.sessions ? reduced.state
+        : { ...reduced.state, sessions: projectRuntimeEndpointSessions(reduced.state.sessions, state.runtimeEndpointWarnings) }
       return core.type === 'agent-timeline'
-        ? reconcileDeliveredSteers({ ...state, ...reduced.state }, core.agentSessionId)
-        : reduced.state
+        ? reconcileDeliveredSteers({ ...state, ...projected }, core.agentSessionId)
+        : projected
     })
     if (core.type === 'agent-timeline' && get().agentSteerQueues[core.agentSessionId] !== pendingBefore &&
       !observationRefresh && !agentSteerDrains.has(core.agentSessionId)) void get().flushAgentSteerQueue(core.agentSessionId)
     if (sessionMembershipGap) startSessionMembershipResync(event)
     if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
     if (observationRefresh) return
-    if (core.type === 'connection-state' && core.state === 'restored') {
-      for (const session of get().sessions) {
-        if (session.hostId === event.hostId && get().agentSteerQueues[session.id]?.length) void get().flushAgentSteerQueue(session.id)
-      }
-    } else {
+    {
       // A consumed/degraded snapshot can be emitted by the attempt itself. It is not a new
       // delivery opportunity: waking on it would let a persistent refusal sustain its own loop.
       const completed = core.type === 'agent-session' ? core.session.semanticStatus

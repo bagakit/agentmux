@@ -182,6 +182,10 @@ const CONTROL_OPERATION_ANCHOR: Record<AgentMuxControlRequest['operation'], true
   'toolkit.run': true,
   'toolkit.stop': true,
   'toolkit.watch': true,
+  'browser.task.assets': true,
+  'browser.task.reliability': true,
+  'browser.task.run': true,
+  'browser.task.stop': true,
 }
 
 const PERMISSION_KIND_MEMBERS = Object.keys(PERMISSION_KIND_ANCHOR) as readonly PermissionOptionKind[]

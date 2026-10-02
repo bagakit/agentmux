@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { spawn } from 'node:child_process'
@@ -21,7 +21,7 @@ describe('Browser settings built CLI consumes the public Control owner without a
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[], answers: Map<string, string>
 
   beforeEach(async () => {
-    root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-browser-settings-cli-"))
+    root = await mkdtemp(fixturePath("tmp/amux-browser-settings-cli-"))
     seen = []; answers = new Map(initial)
     // Choice vocabulary belongs to the owner. Core must not import a Desktop enum.
     server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
@@ -130,6 +130,8 @@ describe('Browser settings built CLI consumes the public Control owner without a
   ])('requires exactly the string scheme input envelope %j', async input => {
     const output = await run([...forgetArgs, '--input', await file(input)])
     expect(output.code).toBe(1); expect(output.stdout).toBe('')
+    // Parsed JSON reaches the same public business schema as an SDK call;
+    // syntax/decoding/budget failures remain INVALID_CLI_ARGUMENT below.
     expect(JSON.parse(output.stderr)).toMatchObject({ ok: false, operation: 'settings.browser-links.forget', error: { code: 'INVALID_CONTROL_REQUEST' } })
     expect(seen).toEqual([]); expect([...answers]).toEqual(initial)
   })

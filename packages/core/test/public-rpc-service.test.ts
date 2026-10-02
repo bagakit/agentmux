@@ -1,6 +1,8 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { loadAgentSessions } from '../src/agent-session-store.js'
+import { pathToFileURL } from 'node:url'
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+import { AgentMuxRpcService as SourceRpcService } from '../src/public-rpc-service.js'
 import { AgentMuxError } from '../src/errors.js'
 import { hashAgentCapability, issueAgentCapability } from '../src/agent-capability.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
@@ -13,6 +15,11 @@ import { AGENTMUX_AGENT_MESSAGING_RULES } from '../src/agent-messaging-guidance.
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 
 const cleanups: Array<() => Promise<void>> = []
+const AgentMuxRpcService = process.env.AGENTMUX_TEST_RPC_SERVICE_ENTRY
+  ? (await import(process.env.AGENTMUX_TEST_RPC_SERVICE_ENTRY) as typeof import('../src/public-rpc-service.js')).AgentMuxRpcService
+  : SourceRpcService
+const OwnerError: typeof AgentMuxError = process.env.AGENTMUX_TEST_RPC_SERVICE_ENTRY
+  ? (await import(new URL('./errors.js', pathToFileURL(process.env.AGENTMUX_TEST_RPC_SERVICE_ENTRY)).href)).AgentMuxError : AgentMuxError
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function owner(ids?: string[]) { const h = await rpcOwnerFixture(ids); cleanups.push(h.close); return h }
 const catalog = { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] }
@@ -63,7 +70,7 @@ describe('public service uses the original Core and Desktop business owners', ()
   it('keeps Core Sessions and per-item status failures when no Desktop exists', async () => {
     const h = await owner(), actualStatus = h.client.statusAgent.bind(h.client)
     vi.spyOn(h.client, 'statusAgent').mockImplementation(async id => {
-      if (id === 'caller') throw new AgentMuxError('Private Run snapshot unavailable', 'CONTROL_UNAVAILABLE')
+      if (id === 'caller') throw new OwnerError('Private Run snapshot unavailable', 'CONTROL_UNAVAILABLE')
       return await actualStatus(id)
     })
     const service = new AgentMuxRpcService({ coreClients: h.coreClients })
@@ -109,14 +116,47 @@ describe('public service uses the original Core and Desktop business owners', ()
     const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client: h.client }, { hostId: 'remote', client: remote }] })
     const first = await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'caller' } })
     expect(first.session.hostId).toBe('local'); expect(first.session.agentSessionId).toBe('caller')
-    vi.spyOn(remote, 'readAgentSessions').mockRejectedValue(new AgentMuxError('Private remote Store unavailable', 'CONTROL_UNAVAILABLE'))
+    const remoteRead = vi.spyOn(remote, 'readAgentSessions').mockRejectedValue(new OwnerError('Private remote Store unavailable', 'CONTROL_UNAVAILABLE'))
     const healthy = await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'caller' } })
     expect(healthy.session.run).toEqual(first.session.run); expect(healthy.status!.run.state).toBe('running')
-    expect(healthy.unavailable).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' })]))
+    expect(remoteRead).not.toHaveBeenCalled()
+    expect(healthy.session.agentSessionId).toBe(first.session.agentSessionId)
+    expect(healthy.status!.run.pid).toBe(first.status!.run.pid)
     await expect(service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'call' } })).rejects.toMatchObject({ code: 'AGENT_SESSION_STORE_READ_UNCONFIRMED' })
     const listed = await service.call('agent.ls', {})
     expect(listed.sessions).toHaveLength(2); expect(listed.errors).toEqual([{ agentSessionId: null, hostId: 'remote', code: 'CONTROL_UNAVAILABLE', message: 'Private remote Store unavailable' }])
     expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  })
+  it('keeps retired durable identity in prefix ambiguity without publishing it as an active Session', async () => {
+    const retiredId = 'retained-prefix-original', replacementId = 'retained-prefix-replacement'
+    const h = await owner([retiredId]), record = (await loadAgentSessions(h.store))[0]!
+    const reservation = { kind: 'stop' as const, reservationId: 'retire-prefix-original', ownerId: 'private-stop-owner', ownerPid: process.pid,
+      agentSessionId: retiredId, operationId: 'retire-prefix', expiresAt: Date.now() + 60_000, expectedRun: record.run,
+      stopOperation: { daemonInstance: 'private-native-owner', operationKey: 'retire-prefix', runId: record.run.runId } }
+    await h.store.reserveLifecycle(reservation); await h.store.commitLifecycle(reservation, null)
+    await h.store.compareAndSwap(null, { ...record, agentSessionId: replacementId, run: { runId: 'replacement-run' } })
+    const service = new AgentMuxRpcService({ coreClients: h.coreClients })
+    const prefix = await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'retained-prefix-' } })
+      .then(() => 'incorrectly rebound', error => error.code)
+    expect(prefix, 'retired identity prevents prefix rebinding to a replacement').toBe('AMBIGUOUS_AGENT_SESSION')
+    await expect(service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: retiredId } })).rejects.toMatchObject({ code: 'UNKNOWN_AGENT_SESSION' })
+    expect((await service.call('agent.ls', {})).sessions.map(entry => entry.session.agentSessionId)).toEqual([replacementId])
+    await service.dispose(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  })
+  it('observes a later durable Native binding and exact status without rebuilding the live registry', async () => {
+    const h = await owner(), before = h.client.agentSessions(), base = (await loadAgentSessions(h.store))[0]!
+    const fresh = { ...base, agentSessionId: 'later-acp-session', run: { runId: 'later-acp-run' },
+      nativeHandle: { kind: 'acp' as const, adapterId: 'private-adapter', sessionId: 'later-native-session' } }
+    await h.store.compareAndSwap(null, fresh)
+    const service = new AgentMuxRpcService({ coreClients: h.coreClients })
+    const inspected = await service.call('agent.inspect', { target: { kind: 'acp-native', adapterId: 'private-adapter', sessionId: 'later-native-session' } })
+      .then(value => value, error => ({ error: error.code }))
+    expect(inspected, 'Native lookup reads the late durable binding').toMatchObject({ session: { agentSessionId: fresh.agentSessionId }, status: { run: { runId: fresh.run.runId } } })
+    const listed = await service.call('agent.ls', {})
+    expect(listed.sessions.map(entry => entry.session.agentSessionId)).toEqual(['caller', 'recipient', 'later-acp-session'])
+    expect(listed.errors).toEqual([])
+    expect(h.client.agentSessions()).toEqual(before)
+    await service.dispose(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
   })
   it('refuses old public Goal and operation names while leaving user text literal', () => {
     expect(() => rpcControlRequest('goal.inspect', { demandId: 'g' })).toThrow()

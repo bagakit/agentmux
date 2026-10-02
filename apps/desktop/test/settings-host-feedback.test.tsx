@@ -5,9 +5,6 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig, HostCheckResult, SshHostConfig } from '../src/shared/contracts'
 import { HostSettingsPane } from '../src/renderer/src/components/settings/HostSettingsPane'
 import { WorkspaceSettingsPane } from '../src/renderer/src/components/settings/WorkspaceSettingsPane'
-vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => null }))
-import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
@@ -16,7 +13,7 @@ const checkHost = useAppStore.getState().checkHost
 const dom = composerDOM()
 const remote: SshHostConfig = { id: 'remote', kind: 'ssh', label: 'Saved remote', hostname: 'private.invalid' }
 const config: AppConfig = { ...composerConfig, hosts: [composerConfig.hosts[0]!, remote] }
-const unavailable = 'Remote AgentMux Runs are not available until the ctxmux Remote contract is delivered.'
+const unavailable = 'The remote service did not confirm the bound Runtime identity. Original Sessions are kept.'
 const ready = 'Runtime private-build · protocol 1'
 const onSave = vi.fn(async () => {})
 
@@ -59,7 +56,7 @@ it('projects real checkHost pending and ready facts, retaining technical detail 
   expect(useAppStore.getState().hostChecks.local?.result).toEqual({ input: config.hosts[0]!, outcome: 'ready', detail: ready })
 })
 
-it('keeps the complete refusal visible outside connection editing and states the current saving limit honestly', async () => {
+it('keeps a specific service refusal visible outside connection editing and explains the existing-service binding', async () => {
   vi.spyOn(api.hosts, 'check').mockResolvedValue({ input: remote, outcome: 'unsupported', detail: unavailable })
   await mount()
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
@@ -72,9 +69,9 @@ it('keeps the complete refusal visible outside connection editing and states the
   expect(detail!.closest('details')).toBeNull()
   expect(connection.open).toBe(false)
   const hint = card(1).querySelector('.host-edit-grid .field-hint')?.textContent
-  expect(hint).toContain('saving SSH connections are unavailable')
-  expect(hint).toContain('draft')
-  expect(hint).not.toContain('can save and test')
+  expect(hint).toContain('Connects to an existing service over SSH')
+  expect(hint).toContain('keeps its Runtime binding')
+  expect(hint).not.toContain('saving SSH connections are unavailable')
   expect(useAppStore.getState().hostChecks.remote?.result).toEqual({ input: remote, outcome: 'unsupported', detail: unavailable })
   expect(onSave).not.toHaveBeenCalled()
 })
@@ -134,7 +131,7 @@ it.each([
   const connection = card(1).querySelector<HTMLDetailsElement>('.host-edit-disclosure')!
   await act(async () => { connection.open = true; connection.dispatchEvent(new Event('toggle')) })
   const labels = [...connection.querySelectorAll('label')]
-  expect(labels).toHaveLength(5)
+  expect(labels).toHaveLength(8)
   const input = labels.find(label => label.querySelector('span')!.textContent!.startsWith(field))!.querySelector('input')!
   input.focus()
   for (let length = 1; length <= value.length; length++) {
@@ -188,14 +185,13 @@ it('keeps a late Ready inapplicable after editing when the user has not requeste
   expect(onSave).not.toHaveBeenCalled()
 })
 
-it('does not apply a same-ID committed replacement to old Ready in any of the three mounted consumers', async () => {
+it('does not apply a same-ID committed replacement to old Ready in either mounted settings consumer', async () => {
   const saved = { ...config, executors: {}, workspaces: [{ ...config.workspaces[0]!, hostId: remote.id }] }
   const changed = { ...saved, hosts: [saved.hosts[0]!, { ...remote, hostname: 'published.invalid' }] }
   useAppStore.setState({ config: saved, hostChecks: { remote: { state: 'ready', input: remote,
     result: { input: remote, outcome: 'ready', detail: ready }, detail: ready },
     local: { state: 'idle' } }, checkHost: vi.fn(async () => {}), detectExecutors: vi.fn(async () => {}),
     activeWorkspaceId: 'workspace',
-    tabs: { launcher: createWorkbenchTab('launcher', { regionId: 'region', kind: 'launcher', workspaceId: 'workspace' }) },
     agentComposerDrafts: { region: 'Preserved launcher draft' } })
   await dom.render(<HostSettingsPane active={true} config={saved} onSave={onSave} />)
   expect(status(1)).toBe('Ready')
@@ -208,11 +204,7 @@ it('does not apply a same-ID committed replacement to old Ready in any of the th
   await dom.render(<WorkspaceSettingsPane config={changed} onClose={vi.fn()} />)
   expect([...select().options].map(option => option.value)).toEqual([''])
 
-  await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible={false} />)
-  const badge = () => dom.container.querySelector('.launch-host-health')
-  expect(badge()).not.toBeNull(); expect(badge()!.textContent).toBe('Ready')
   await act(async () => useAppStore.setState({ config: changed }))
-  expect(badge()!.textContent).toBe('Not tested')
   expect(useAppStore.getState().agentComposerDrafts.region).toBe('Preserved launcher draft')
   expect(onSave).not.toHaveBeenCalled()
 })
