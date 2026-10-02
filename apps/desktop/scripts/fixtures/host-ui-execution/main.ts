@@ -276,7 +276,7 @@ app.whenReady().then(async () => {
       await capture('restored-workbench')
       await stage('actual-launcher-geminicc-button')
       await click(`${region('host-ui-launcher-a')} .launcher-launch-button`)
-      await until(`window.hostUiState().tabs['host-ui-original-tab'].regions['host-ui-launcher-a'].kind==='agent'`, 35_000)
+      await until(`window.hostUiState().tabs['host-ui-original-tab']?.regions['host-ui-launcher-a']?.kind==='agent'`, 35_000)
       await until(`document.querySelector(${JSON.stringify(region('host-ui-launcher-a') + ' [data-execution-host-id="' + input.remoteHostId + '"]')})`)
       result.creationPaint = await state()
       await capture('agent-creation-stage')
@@ -314,7 +314,7 @@ app.whenReady().then(async () => {
         return null})()`)
       result.terminalUiAction = terminalAction
       await click(`${region('host-ui-launcher-b')} [aria-label="${terminalAction}"]`)
-      await until(`window.hostUiState().tabs['host-ui-original-tab'].regions['host-ui-launcher-b'].kind==='terminal'`)
+      await until(`window.hostUiState().tabs['host-ui-original-tab']?.regions['host-ui-launcher-b']?.kind==='terminal'`)
       await until(() => Boolean(result.terminalLaunch?.session))
       const terminal = result.terminalLaunch.session
       const run = (await remoteClient().listRuns()).find(one => one.runId === terminal.control.run.runId)!
