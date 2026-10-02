@@ -10,6 +10,7 @@ const styleMoveTraceDiagnostic = process.env.AGENTMUX_SHARED_FRAME_STYLE_MOVE_TR
 const preMoveStyleReadDiagnostic = process.env.AGENTMUX_SHARED_FRAME_PRE_MOVE_STYLE_READ_DIAGNOSTIC === '1'
 const commitIntervalDiagnostic = process.env.AGENTMUX_SHARED_FRAME_COMMIT_INTERVAL_DIAGNOSTIC === '1'
 const noDisclosureOpenDiagnostic = process.env.AGENTMUX_SHARED_FRAME_NO_DISCLOSURE_OPEN_DIAGNOSTIC === '1'
+const floatSpaceShortcut = process.env.AGENTMUX_SHARED_FRAME_FLOAT_SPACE_SHORTCUT === '1'
 app.setPath('userData', path.join(privateRoot, 'user-data'))
 app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, pid: process.pid, phase, frames: [], checks: [], userRunTouched: false,
@@ -321,6 +322,12 @@ app.whenReady().then(async () => {
     assert.ok(deniedWarm.every(call=>call.denied===true), 'The controlled API rejects this optional startup request and creates no Session/Run')
     assert.deepEqual(forbidden(result.initial), [])
     result.checks.push({name:'Original-initialize-exact-call-baseline-one-denied-optional-warm-no-created-Run-no-later-launch',passed:true,calls:result.ordinaryStartupCalls})
+    if (floatSpaceShortcut) {
+      await require('./float-space-shortcut.cjs')({ result, phase, evidence, win, read, until, facts, input, click, key, capture,
+        selector, button, panel, entry, size, visible, chooseMote, chooseSection, forbidden, reference, primary, target, custom })
+      result.passed = true
+      return
+    }
     if (phase === 'seed') {
       assert.equal(result.initial.initialization.seedApplied, true)
       await visible(primary, target)

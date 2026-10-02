@@ -85,6 +85,7 @@
 
 /* A face is assembled and articulated, never replaced by frames. Pointer bones
    sit outside ambient/state bones, so looking around cannot erase live expression. */
+.mote-image-follow { display: inline-flex; align-items: center; justify-content: center; width: inherit; height: inherit; transform: translate(var(--mote-gaze-x, 0px), var(--mote-gaze-y, 0px)) rotate(var(--mote-head-turn, 0deg)); transition: transform 220ms cubic-bezier(.2,.7,.2,1); }
 .mote-face__neck { transform-box: view-box; transform-origin: 32px 52px; transform: rotate(var(--mote-head-turn, 0deg)); transition: transform 220ms cubic-bezier(.2,.7,.2,1); }
 .mote-face__gaze-follow { transform: translate(var(--mote-gaze-x, 0px), var(--mote-gaze-y, 0px)); transition: transform 160ms cubic-bezier(.2,.7,.2,1); }
 .mote-face__brow-follow { transform: translateY(var(--mote-brow-lift, 0px)); transition: transform 220ms ease-out; }
@@ -137,11 +138,9 @@
   .space-icon-picker--avatar footer { bottom: calc(-1 * var(--sp-4)); }
 }
 @media (prefers-reduced-motion: reduce) {
-  .mote-face__neck, .mote-face__gaze-follow, .mote-face__brow-follow, .mote-face__mouth-follow { transition: none; }
+  .mote-image-follow, .mote-face__neck, .mote-face__gaze-follow, .mote-face__brow-follow, .mote-face__mouth-follow { transition: none; }
 }
 .mote-identity-motion[data-mote-expression="sleep"] .mote-face__awake-eyes { display: none; transform-box: fill-box; transform-origin: center; transform: scaleY(.55); }
-.mote-identity-motion[data-mote-expression="sleep"][data-mote-gaze="near"] .mote-face__awake-eyes { display: block; }
-.mote-identity-motion[data-mote-expression="sleep"][data-mote-gaze="near"] .mote-face__sleep-eyes { display: none; }
 .mote-face-editor[hidden], .mote-avatar-alternative[hidden] { display: none; }
 .mote-avatar-alternative { display: grid; gap: var(--sp-3); }
 
@@ -149,3 +148,5 @@
 .mote-identity-motion[data-mote-visible="off"] .mote-face__gaze-follow,
 .mote-identity-motion[data-mote-visible="off"] .mote-face__brow-follow,
 .mote-identity-motion[data-mote-visible="off"] .mote-face__mouth-follow { transition: none; }
+
+.mote-identity-motion[data-mote-visible="off"] .mote-image-follow { transition: none; }
