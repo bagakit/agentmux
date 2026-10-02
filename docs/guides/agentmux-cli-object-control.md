@@ -1,6 +1,6 @@
 # AgentMux：按对象操作桌面
 
-先用 `agentmux --skill` 看当前公开合同，具体命令用 `--help`。这些命令操作同一套桌面 owner；Core 提供通用 Session 与 Run API，桌面负责显示名称、空间关系与导航；Run 的进程事实由 ctxmux 持有。
+先用 `agentmux --skill` 看当前公开合同，具体命令用 `--help`。命令经同一公开 JSON-RPC 服务调用各自业务 owner；Core 持有 AgentSession 语义与[持久空间图](../architecture/spatial-state.md)，Client 消费原位置，负责呈现、真实输入焦点及原宿主资源能力；Run 的进程事实由 ctxmux 持有。
 
 Space 是组织工作面的空间，Project 是仓库／目录归属；两者不等同。Zone 可以关联 worktree、普通目录或 Topic/Mote 工作面。Tab 是完整工作面，Region 是其中一格。Session 回答“哪个 Agent”，它可以有多个展示位置。ID 原样使用，不从名称、当前目录或第一处展示位置猜身份。
 
@@ -65,7 +65,7 @@ agentmux space swap --region '<region-a>' --with '<region-b>'
 
 `agent view` 的 `terminal|activity` 偏好属于 Session，会作用于它的全部展示位置。`file view` 的 `source|diff|preview` 偏好属于准确 File Region；同一文件的另一格可以保持自己的模式。省略 `--mode` 只读当前事实，不加载正文、保存或聚焦。File 回执的 `supportedModes` 来自实际格式和读取事实，未知时为 `null`；模式已应用和正文已读到是两件事。File 模式是临时偏好，重启后按原格式默认恢复。
 
-`space swap` 交换同一 Tab 的两个 Region 位置，作用于这个 Tab 的全部展示位置；它保留原 Session、Run、执行目录、文档、草稿、分割比例和逻辑活动 Region。跨 Tab、正在关闭或不唯一的目标会在改动前拒绝，自己与自己交换返回 `unchanged`。这四个入口都不默认抢输入；操作完成后原输入失去资格，回执会如实返回 `partial` 和输入问题，保留已应用结果。保存回执仍不能当作磁盘确认。
+`space swap` 交换同一 Tab 的两个 Region 位置，作用于这个 Tab 的全部展示位置；它保留原 Session、Run、执行目录、文档、草稿、分割比例和逻辑活动 Region。跨 Tab、正在关闭或不唯一的目标会在改动前拒绝，自己与自己交换返回 `unchanged`。这四个入口都不默认抢输入；操作完成后原输入失去资格，回执会如实返回 `partial` 和输入问题，保留已应用结果。保存请求不等于落盘；只有原 Core 持久空间 owner 返回的 `save.diskDurability` 为 `confirmed` 才是耐久确认，`unconfirmed` 保留已应用结果、未保存改动与健康 Agent。
 
 ## 改显示名，再读取当前值
 
