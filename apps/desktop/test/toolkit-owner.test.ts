@@ -28,7 +28,7 @@ async function fixture(delayed = false) {
     stop: vi.fn(async () => {}), release: vi.fn(async () => {}), remove: vi.fn(async () => {}) }
   const owner = new ToolkitOwner({ openRunPort: async () => port, launch: () => ({
     runner: process.execPath, cli: _hygiene_fixturePath("private/compiled-cli.mjs"), script: resolve('apps/desktop/resources/toolkit/performance.mjs'),
-    cwd: process.cwd(), env: {} }), enabled: () => true })
+    cwd: process.cwd(), env: {} }), enabled: () => true, receipts: { read: async () => null, save: async () => {} } })
   let cursor = 0
   function bytes(data: Uint8Array) {
     const startByte = cursor; cursor += data.length
@@ -102,7 +102,8 @@ describe('Toolkit observation owner', () => {
     const stale = observation(66000); stale.app = { ...f.owner.current.observation!.app, state:'stale',reason:'reader unavailable' }
     f.bytes(Buffer.from(f.frame(66,stale)))
     expect(f.owner.current.trend).toHaveLength(60); expect(f.owner.current.trend.at(-1)).toEqual({observedAt:66000,appCpuPercent:null,appRssKib:null})
-    expect(parseToolkitSnapshot(f.owner.current).observedAt).toBe(66000)
+    const parsed = parseToolkitSnapshot(f.owner.current)
+    expect('observedAt' in parsed ? parsed.observedAt : undefined).toBe(66000)
     f.bytes(Buffer.from(f.frame(67,stale)));expect(f.owner.current.trend).toHaveLength(60)
     const cached=observation(67000);cached.app={...stale.app,state:'available',reason:null}
     f.bytes(Buffer.from(f.frame(68,cached)))
@@ -136,7 +137,7 @@ describe('Toolkit observation owner', () => {
     const f=await fixture(),signal=new AbortController()
     let open!: (p:ToolkitRunPort)=>void
     const owner=new ToolkitOwner({openRunPort:()=>new Promise(resolve=>{open=resolve}),launch:()=>({runner:process.execPath,cli:_hygiene_fixturePath("private/compiled-cli.mjs"),
-      script:resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:process.cwd(),env:{}}),enabled:()=>true})
+      script:resolve('apps/desktop/resources/toolkit/performance.mjs'),cwd:process.cwd(),env:{}}),enabled:()=>true,receipts:{read:async()=>null,save:async()=>{}}})
     const pending=owner.subscribe('performance',vi.fn(),vi.fn(),signal.signal)
     while(!open)await flush();signal.abort();open(f.port);(await pending).dispose();await flush()
     expect(f.port.create).not.toHaveBeenCalled();expect(owner.current).toMatchObject({state:'paused',run:null,consumerCount:0})
