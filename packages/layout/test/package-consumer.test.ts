@@ -114,7 +114,7 @@ function importSpecifiers(source: string): string[] {
 
 describe('packages/layout/src 无 UI/Agent 依赖（验收：无 UI/Agent 依赖）', () => {
   // 允许清单：sibling 相对 import（本包内部）与恰好这一个 node-free 子路径。别的一律禁。
-  const ALLOWED_BARE = new Set(['@agentmux/core/workbench-layout-preset'])
+  const ALLOWED_BARE = new Set(['@agentmux/core/spatial-layout'])
   // 明确点名的禁止依赖——UI 框架、桌面运行时、状态库、渲染层/桌面包，以及 @agentmux/core 的 **barrel**
   //（barrel 会把 process/filesystem 运行时拖进来；只有 node-free 的预设子路径可以）。
   const FORBIDDEN = [
@@ -159,7 +159,7 @@ describe('packages/layout/src 无 UI/Agent 依赖（验收：无 UI/Agent 依赖
 
   it('自证：扫描确实读到了 src 文件，且判据认得出被禁的说明符（判据不是恒真）', () => {
     const files = srcFiles()
-    expect(files.length, '扫不到 packages/layout/src 下的源文件——扫描根写错，判据会恒绿').toBeGreaterThan(3)
+    expect(files.length, '扫不到 packages/layout/src 下的源文件——扫描根写错，判据会恒绿').toBeGreaterThan(0)
     // 判据在场证明：合成一段含 react import 的源码，importSpecifiers 必须认出它。
     const specs = importSpecifiers(`import x from 'react'\nimport { y } from './z'`)
     expect(specs).toContain('react')
@@ -168,7 +168,7 @@ describe('packages/layout/src 无 UI/Agent 依赖（验收：无 UI/Agent 依赖
 
   it('自证：允许的 SSOT 子路径确实被某个 src 文件消费（否则放行条目是死的）', () => {
     const consumed = srcFiles().some((file) =>
-      importSpecifiers(readFileSync(file, 'utf8')).includes('@agentmux/core/workbench-layout-preset')
+      importSpecifiers(readFileSync(file, 'utf8')).includes('@agentmux/core/spatial-layout')
     )
     expect(
       consumed,

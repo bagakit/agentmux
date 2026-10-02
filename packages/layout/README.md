@@ -39,3 +39,5 @@ tab-group 布局与 tab 内的 region 布局是同一棵树，只有叶子载荷
 24 个生产调用点全在渲染层（vite），测试走 vitest，都满足。**主进程（纯 node，无 vite）不能
 直接 import 本包**——那会抛 `ERR_UNKNOWN_FILE_EXTENSION`。若将来主进程真要用这套代数，正确
 的动作是那时再加回 emit 并把 `exports` 指向产物，而不是现在留一份没人读的 `dist/`。
+
+The shared algebra now lives in the node-free `@agentmux/core/spatial-layout` entry. This package exports the same original functions for its existing consumers; it holds no spatial store or lifecycle. Core and clients therefore use one implementation of topology, ratios and directional addressing.

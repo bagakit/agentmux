@@ -142,7 +142,7 @@ export function parseDesktopFocusSuccessReceipt(value: unknown): AgentMuxControl
       outcome: member(caret.outcome, ['preserved', 'transferred', 'unavailable', 'unconfirmed'], 'Input outcome', code), before: input(caret.before, code), after: input(caret.after, code) },
     floating: floating(body.floating, code), overlays: overlays(body.overlays, code), focus: focus(body.focus, code), partial: boolean(body.partial, 'Partial', code),
     save: { layoutApplied: boolean(saved.layoutApplied, 'Selection applied', code), localStorageWritten: boolean(saved.localStorageWritten, 'Local storage', code),
-      storageFlushRequested: boolean(saved.storageFlushRequested, 'Storage flush', code), diskDurability: member(saved.diskDurability, ['unconfirmed'], 'Disk durability', code),
+      storageFlushRequested: boolean(saved.storageFlushRequested, 'Storage flush', code), diskDurability: member(saved.diskDurability, ['unconfirmed','confirmed'], 'Disk durability', code),
       reason: saved.reason === null ? null : text(saved.reason, 'Save reason', code) },
     issues: list(body.issues, value => {
       const issue = fields(value, ['step', 'code', 'message', 'recovery', 'candidates'], code)

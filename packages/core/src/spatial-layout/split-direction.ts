@@ -11,8 +11,8 @@
 // 判定写成纯函数、不接布局树本身：本仓库组件测试用 `renderToStaticMarkup`，effect 不跑，写在组件或
 // store 回调里的分支断言够不着；而几何判定是承重的，必须留在够得着的地方。
 
-import type { SplitDirection } from './workbench-layout'
-import type { WorkbenchRegionBounds } from './workbench-view-layout'
+import type { SplitDirection } from './workbench-layout.js'
+import type { WorkbenchRegionBounds } from './workbench-view-layout.js'
 
 /** 一格 Region 的 id 与它在单位面上的归一化几何，来自既有的 `workbenchRegionBounds`。 */
 export type RegionGeometry = { regionId: string; bounds: WorkbenchRegionBounds }

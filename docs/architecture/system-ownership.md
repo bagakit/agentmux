@@ -9,10 +9,10 @@ AgentMux 的优先目标是可独立消费的本地 Agent Core；Desktop 是它�
 | 层或模块 | 持有的事实与职责 | 当前来源 |
 | --- | --- | --- |
 | ctxmux | 通用 Run、PTY、进程生命周期、ordered bytes、Replay、Gap 与 Attachment | [随包 artifact manifest](../../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)、[Core 的唯一适配器](../../packages/core/src/ctxmux-run-adapter.ts) |
-| AgentMux Core | AgentSession、Provider、Hook、Permission、Prompt readiness、Agent status、语义恢复及 Session 与 Run 的关联 | [`AgentMuxClient`](../../packages/core/src/client.ts)、[Session Store](../../packages/core/src/agent-session-store.ts) |
+| AgentMux Core | AgentSession semantics and frontend-independent durable spatial identities, topology and bindings | [Client](../../packages/core/src/client.ts), [Session Store](../../packages/core/src/agent-session-store.ts), [Spatial owner](../../packages/core/src/spatial-state.ts) |
 | Provider | 解释原生 Agent 协议，贡献启动／恢复计划、输入协议、Hook 归一化与原生历史能力 | [`AgentProvider` / `defineAgentProvider`](../../packages/core/src/agent-provider.ts)、[内置 Provider](../../packages/core/src/providers/) |
 | Desktop Main | 宿主配置、文件／Git／Topic、Browser 与 Toolkit 等能力；通过 Core 管理 Agent 与 Run | [RuntimeController](../../apps/desktop/src/main/runtime-controller.ts)、[IPC 接线](../../apps/desktop/src/main/ipc.ts)、[ConfigOwner](../../apps/desktop/src/main/config-owner.ts) |
-| Desktop Renderer | Tab／Region 的展示关系、分割布局、焦点、输入归属及工作面持久投影 | [应用 Store](../../apps/desktop/src/renderer/src/store.ts)、[工作面持久投影](../../apps/desktop/src/renderer/src/lib/workbench-persistence.ts) |
+| Desktop Renderer | Spatial projection, screen layout, focus, input and client resource metadata; legacy persistence is replaced in the tracked consumer cutover | [Store](../../apps/desktop/src/renderer/src/store.ts), [Spatial ownership](spatial-state.md) |
 | `@agentmux/client-ui` | 消息、原生历史、Trace、结构化请求卡片与 Composer 的共享 React 呈现和编辑；宿主能力经平台适配器与 typed props 注入 | [包说明](../../packages/client-ui/README.md)、[导出入口](../../packages/client-ui/src/index.ts)、[`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) |
 | `@agentmux/layout` | 分屏树结构、比例、几何寻址与布局 reducer 的纯代数；不持有展示记录或 Session 生命周期 | [包说明](../../packages/layout/README.md)、[导出入口](../../packages/layout/src/index.ts) |
 | `@agentmux/demand` | Demand／Goal 的 durable 文件事实、关联、决策、目标确认和结果接受的状态 | [包说明](../../packages/demand/README.md)、[Store](../../packages/demand/src/demand-store.ts)、[Goal 类型与规则](../../packages/demand/src/goals.ts) |
@@ -69,3 +69,7 @@ Agent 生命周期由 Main 的 `RuntimeController` 调用 Core 公共 API。Brow
 对象优先 CLI 与共享类型化 JSON-RPC 2.0 服务已经接入当前源码。[Server](../../packages/core/src/public-rpc-server.ts) 默认使用 Unix socket 的有界 JSON-lines framing；显式配置 `AGENTMUX_RPC_HTTP_BIND` 和 `AGENTMUX_RPC_HTTP_TOKEN` 后提供 HTTP POST 与 SSE 订阅，HTTP 默认关闭且不内建 TLS。[Client](../../packages/core/src/public-rpc-client.ts) 的 SSH 传输调用远端 CLI 的 [stdio 转发](../../packages/core/src/agentmux-rpc-stdio.ts)，连接远端已运行 owner 的 Unix socket，要求已有远端 CLI 与 SSH 授权。公共方法与参数归 [公共 RPC 类型](../../packages/core/src/public-rpc.ts)；[Control 定义](../../packages/core/src/control.ts) 中的信封保留为内部 owner DTO。行为合同归 [对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。
 
 SSH 公共服务连接与远端 Run 执行是不同能力。[`connectSshAgentMux`](../../packages/core/src/runtime-client.ts) 与 [`SshExecutionHost`](../../packages/core/src/execution-host.ts) 的远端执行／Hook 转发入口仍明确返回 `REMOTE_UNSUPPORTED`；可连接远端公共服务不证明 ctxmux Remote Runtime 已交付。具体能力应核对实际连接 owner 的事实；来源不可用保持未知，健康 Agent 与原工作面沿原约束保留。
+
+## Frontend-independent spatial owner
+
+The Core filesystem owner and public API for stable entities, position topology and bindings are defined in [Durable spatial state](spatial-state.md). Desktop screen layout and focus consume these facts; the legacy workbench localStorage remains the current Desktop owner until the explicitly tracked consumer cutover is complete. Do not confuse lookup caches with durable spatial relationships.
