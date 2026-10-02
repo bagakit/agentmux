@@ -24,7 +24,7 @@ export function executorRefreshProof({ probe, desktopRoot, command, configPath, 
     const anchors = lines.flatMap((line, index) => line.includes('if (request.operation === "settings.get" || request.operation === "settings.set")') ? [index] : [])
     assert.equal(anchors.length, 1, 'One actual registered Main owner boundary')
     const point = await probe.main.call('Debugger.setBreakpointByUrl', { url: pathToFileURL(mainPath).href, lineNumber: anchors[0] })
-    const pending = command(['settings', 'get'])
+    const pending = command(['settings', 'inspect'])
     try {
       const paused = await waitFor('Refresh actual Main owner boundary', () => probe.main.pauses.shift())
       assert.ok(paused.hitBreakpoints?.includes(point.breakpointId))

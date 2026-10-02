@@ -9,6 +9,7 @@ import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
+import { agentMuxCliMatch } from '../../../packages/core/dist/agentmux-cli-commands.js'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
 import { activate, desktopFixture } from './fixtures/settings-cli/desktop.mjs'
 import { preferenceVocabulary } from './fixtures/settings-cli/preferences.mjs'
@@ -92,14 +93,20 @@ async function identity() {
 }
 async function command(args, expectedCode = 0, stdin) {
   const result = await new Promise(resolveResult => {
-    const child=execFile(process.execPath,[cli,...args],{timeout:10_000,
-      env:{...process.env,...environment,AGENTMUX_ENV:undefined,AGENTMUX_AGENT_SESSION_ID:undefined}},(error,stdout,stderr)=>resolveResult({code:error?.code ?? 0,stdout,stderr}))
+    const child=execFile(process.execPath,[cli,'--endpoint',`unix:${join(runtimeDirectory,'control.sock')}`,...args],{timeout:10_000,
+      env:{...process.env,...environment,AGENTMUX_ENV:undefined,AGENTMUX_AGENT_SESSION_ID:undefined,AGENTMUX_AGENT_CAPABILITY:undefined}},(error,stdout,stderr)=>resolveResult({code:error?.code ?? 0,stdout,stderr}))
     child.stdin.end(stdin)
   })
-  const payload=JSON.parse(result.code===0 ? result.stdout : result.stderr)
-  receipt.cli.push({phase,args,code:result.code,stdout:result.stdout,stderr:result.stderr,receipt:payload})
+  const captured={phase,args,code:result.code,stdout:result.stdout,stderr:result.stderr}
+  receipt.cli.push(captured)
+  const outputs=[result.stdout,result.stderr].map(output=>output.trim()).filter(Boolean)
+  assert.equal(outputs.length,1,'CLI must return one canonical envelope')
+  const payload=JSON.parse(outputs[0])
+  captured.receipt=payload
   assert.equal(result.code,expectedCode,JSON.stringify(payload));assert.equal(payload.ok,expectedCode===0)
-  assert.equal(typeof payload.requestId,'string');assert.ok(payload.requestId.length>0)
+  assert.equal(Boolean(result.stdout.trim()),payload.ok,'Success uses stdout; business failure uses stderr')
+  assert.equal(payload.operation,agentMuxCliMatch(args)?.command.method ?? null,'Reply belongs to the actual public command')
+  assert.deepEqual(Object.keys(payload).sort(),(payload.ok ? ['ok','operation','result'] : ['error','ok','operation']).sort())
   return payload
 }
 async function resource(kind, action, id, input, expectedCode=0, stdin=false) {
@@ -115,9 +122,9 @@ async function resource(kind, action, id, input, expectedCode=0, stdin=false) {
   const publications=observeWrites && probe ? await probe.cdp.evaluate('window.__settingsResourcesProof.configEvents.length') : undefined
   const payload=await command(args,expectedCode,stdin ? body : undefined)
   if(expectedCode!==0)return payload
-  assert.equal(payload.operation,`settings.resource.${action}`);assert.equal(payload.result.resource,kind)
-  if(action==='list'){assert.equal(payload.result.partial,true);assert.ok(Array.isArray(payload.result.items))}
-  else if(action==='get' || action==='add' || action==='update')assert.equal(payload.result.item.id,id)
+  assert.equal(payload.operation,`settings.${kind}.${action}`);assert.equal(payload.result.resource,kind)
+  if(action==='ls'){assert.equal(payload.result.partial,true);assert.ok(Array.isArray(payload.result.items))}
+  else if(action==='inspect' || action==='create' || action==='update')assert.equal(payload.result.item.id,id)
   else {assert.equal(payload.result.id,id);assert.equal(payload.result.removed,true)}
   if(publications!==undefined && (payload.result.changed===true || payload.result.removed===true)) {
     await waitFor('committed resource publishes exactly once',()=>probe.cdp.evaluate(`window.__settingsResourcesProof.configEvents.length===${publications+1}`))
@@ -238,8 +245,8 @@ try {
   // Exercise stdin at the actual built CLI/Main boundary as well as owned input files.
   phase='actual-cli-stdin'
   const stdinValue={keyword:'stdin-private',label:'Private stdin',body:'  $HOME\n`literal`  '}
-  assert.deepEqual((await resource('prompts','add','stdin-private',stdinValue,0,true)).item.value,stdinValue)
-  assert.equal((await resource('prompts','remove','stdin-private',{expected:stdinValue},0,true)).removed,true)
+  assert.deepEqual((await resource('prompts','create','stdin-private',stdinValue,0,true)).item.value,stdinValue)
+  assert.equal((await resource('prompts','delete','stdin-private',{expected:stdinValue},0,true)).removed,true)
   await waitFor('last Prompt stays empty after stdin cycle',async()=>{const current=await resources.state('prompts');return current.cards===0 && current.empty.includes('No prompts') && current.saveText==='Save prompts' && current.saveDisabled===true})
   assert.deepEqual(await first.cdp.evaluate('window.__settingsResourcesProof.controlRequests'),[],'Resource settings never use the Renderer control bridge')
   const inputs=await first.cdp.evaluate('window.__settingsResourcesProof.inputEvents')
@@ -276,7 +283,7 @@ try {
   const runBeforeContinuity=(await client.listRuns()).find(run=>run.runId===session.run.runId)
   assert.equal(runBeforeContinuity?.state,'running');assert.equal(current.nativeHandle,undefined)
   // With a confirmed healthy Run and no native handle this public call cannot resume/relaunch.
-  const template=(await resource('executors','get','probe')).item.value
+  const template=(await resource('executors','inspect','probe')).item.value
   const continuity=await client.ensureAgentContinuity({agentSessionId:session.agentSessionId,expectedRun:session.run,operationId:randomUUID(),commandOverride:template.command,args:template.args,env:template.env})
   assert.equal(continuity.kind,'reattachable');assert.deepEqual(continuity.session.run,session.run);assert.equal(continuity.session.providerId,'codex');assert.equal(continuity.run.pid,originalRun.pid)
   receipt.facts.continuity={kind:continuity.kind,providerId:continuity.session.providerId,runId:continuity.run.runId,pid:continuity.run.pid,evidence:continuity.evidence}
@@ -287,19 +294,19 @@ try {
   const electronRequire=`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron')`
   await second.main.evaluate(`(() => {const {BrowserWindow}=${electronRequire};for(const window of BrowserWindow.getAllWindows())window.destroy();return true})()`)
   assert.equal(await second.main.evaluate(`${electronRequire}.BrowserWindow.getAllWindows().length`),0)
-  assert.deepEqual((await resource('prompts','list')).items,[])
+  assert.deepEqual((await resource('prompts','ls')).items,[])
   const noViewPrompt={keyword:'no-view',label:'No View owner',body:'  Private Main owns this\n  '}
-  assert.deepEqual((await resource('prompts','add','no-view',noViewPrompt)).item.value,noViewPrompt)
-  assert.deepEqual((await resource('prompts','get','no-view')).item.value,noViewPrompt)
-  assert.equal((await resource('prompts','remove','no-view',{expected:noViewPrompt})).removed,true)
+  assert.deepEqual((await resource('prompts','create','no-view',noViewPrompt)).item.value,noViewPrompt)
+  assert.deepEqual((await resource('prompts','inspect','no-view')).item.value,noViewPrompt)
+  assert.equal((await resource('prompts','delete','no-view',{expected:noViewPrompt})).removed,true)
   assert.deepEqual(JSON.parse(await readFile(configPath,'utf8')).composerShortcuts,[])
-  const noViewInspect=await command(['inspect','--tab',tabId],1)
+  const noViewInspect=await command(['app','inspect'],1)
   assert.equal(noViewInspect.error.code,'CONTROL_UNAVAILABLE')
   receipt.facts.noView={windows:0,resourceOwnerAvailable:true,rendererControlError:noViewInspect.error.code}
   await terminate(second)
   phase='resource-offline-owner'
   const offlineBytes=await readFile(configPath)
-  const offline=await resource('prompts','add','offline',noViewPrompt,1)
+  const offline=await resource('prompts','create','offline',noViewPrompt,1)
   assert.equal(offline.error.code,'CONTROL_UNAVAILABLE');assert.deepEqual(await readFile(configPath),offlineBytes)
   receipt.facts.offline={code:offline.error.code,configUnchanged:true}
   phase='same-healthy-resource-run'

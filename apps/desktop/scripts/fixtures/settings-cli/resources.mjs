@@ -113,7 +113,7 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
 
   return { facts, state, readExecutor, readPrompt, assertCleanExecutor, assertCleanPrompt, async exercise() {
     phase('nonempty-resource-owner')
-    const executors = await resource('executors','list'), prompts = await resource('prompts','list')
+    const executors = await resource('executors','ls'), prompts = await resource('prompts','ls')
     assert.deepEqual(executors.items.map(item=>item.id).sort(), ['probe','spare'])
     assert.deepEqual(prompts.items.map(item=>item.id).sort(), ['prompt-a','prompt-b'])
     await show('executors'); assert.equal((await state('executors')).cards, 2)
@@ -121,14 +121,14 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     facts.initial = { executors: executors.items, prompts: prompts.items }
 
     phase('actual-effective-avatar-reset')
-    const absentAvatar=(await resource('executors','get','spare')).item.value
+    const absentAvatar=(await resource('executors','inspect','spare')).item.value
     assert.equal(Object.hasOwn(absentAvatar,'avatar'),false,'CLI DTO reports authored data, not effective legacy decoration')
     await show('executors');await open(executor('spare'))
     const legacyUi=await readExecutor('spare')
     assert.equal(legacyUi.tint,'#654321');assert.equal(legacyUi.badge,'spark');assert.equal(legacyUi.resetDisabled,false)
     await activate(probe.cdp,`${nodes('#executor-settings-spare button')}.filter(e=>e.getAttribute('aria-label')==='Reset Spare executor avatar')`)
     await save('executors')
-    const resetValue=(await resource('executors','get','spare')).item.value
+    const resetValue=(await resource('executors','inspect','spare')).item.value
     assert.deepEqual(resetValue,{...absentAvatar,avatar:{}})
     assert.deepEqual(JSON.parse(await readFile(configPath,'utf8')).executors.spare.avatar,{})
     assert.deepEqual(JSON.parse(await readFile(configPath,'utf8')).appearance.agentAvatars.spare,{tint:'#654321',badge:'spark'})
@@ -136,15 +136,15 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     facts.effectiveAvatarReset={before:absentAvatar,legacyUi,committed:resetValue,ui:effectiveResetUi,legacyPreserved:true}
 
     phase('referenced-executor-owner-rejection')
-    const kept = (await resource('executors','get','probe')).item.value
-    await unchanged('retained healthy Session blocks Executor deletion', () => resource('executors','remove','probe',{expected:kept},1), 'SETTING_RESOURCE_IN_USE')
-    assert.deepEqual((await resource('executors','get','probe')).item.value, kept)
+    const kept = (await resource('executors','inspect','probe')).item.value
+    await unchanged('retained healthy Session blocks Executor deletion', () => resource('executors','delete','probe',{expected:kept},1), 'SETTING_RESOURCE_IN_USE')
+    assert.deepEqual((await resource('executors','inspect','probe')).item.value, kept)
     const referencedUiBytes=await readFile(configPath),referencedUiPublications=await count()
     await show('executors'); await open(executor('probe'))
     await activate(probe.cdp, `${nodes('#executor-settings-probe button')}.filter(e=>e.textContent.trim()==='Delete executor')`)
     await activate(probe.cdp, button('executors','Save executors'))
     await waitFor('referenced UI deletion reports named template', async()=> {const current=await state('executors');return current.saveText==='Save executors' && !current.saveDisabled && current.alert.includes('probe')})
-    assert.deepEqual((await resource('executors','get','probe')).item.value, kept)
+    assert.deepEqual((await resource('executors','inspect','probe')).item.value, kept)
     assert.equal((await state('executors')).cards,1,'Rejected delete draft is retained')
     assert.deepEqual(await readFile(configPath),referencedUiBytes);assert.equal(await count(),referencedUiPublications)
     facts.referencedUi = {...await state('executors'),configUnchanged:true,publicationsUnchanged:true}
@@ -153,12 +153,12 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     phase('literal-resource-fields')
     const ownEnv = Object.fromEntries([['__proto__','owned literal prototype key'],['constructor','owned literal constructor'],['MULTILINE','  first\n$HOME `literal` $(literal) \\\nlast  '],['EMPTY','']])
     const literalArgs = ['--help','', '  spaces  ', '$HOME', '$(not-a-command)', '`literal`', 'line one\nline two', 'quote"slash\\']
-    let spare = (await resource('executors','get','spare')).item.value
+    let spare = (await resource('executors','inspect','spare')).item.value
     const fields = {label:'Literal executor', command:'  literal command $HOME  ', args:literalArgs, env:ownEnv, injectAgentMuxGuide:true, avatar:{tint:'#123456',badge:'bolt'}}
     for (const [name,value] of Object.entries(fields)) {
       const previous = spare[name], result = await resource('executors','update','spare',{changes:{[name]:value},expected:{[name]:previous ?? {}}})
       assert.equal(result.changed,true); spare={...spare,[name]:value}; assert.deepEqual(result.item.value,spare)
-      assert.deepEqual((await resource('executors','get','spare')).item.value,spare)
+      assert.deepEqual((await resource('executors','inspect','spare')).item.value,spare)
       assert.deepEqual(JSON.parse(await readFile(configPath,'utf8')).executors.spare,spare)
       facts.fields.push({resource:'executors',field:name,literal:true})
     }
@@ -182,18 +182,18 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
       await unchanged(`invalid Executor ${name}`,()=>resource('executors','update','spare',{changes:{[name]:value}},1),'INVALID_SETTING_VALUE')
     }
     await unchanged('Executor Provider binding immutable',()=>resource('executors','update','spare',{changes:{providerId:'claude'}},1),'SETTING_IDENTITY_IMMUTABLE')
-    await unchanged('duplicate add never replaces',()=>resource('executors','add','spare',spare,1),'SETTING_RESOURCE_EXISTS')
+    await unchanged('duplicate add never replaces',()=>resource('executors','create','spare',spare,1),'SETTING_RESOURCE_EXISTS')
     await unchanged('unknown update never adds',()=>resource('executors','update','absent',{changes:{label:'No upsert'}},1),'SETTING_RESOURCE_NOT_FOUND')
     const added={label:'Disposable',providerId:'claude',command:'/bin/cat',args:[],env:{},injectAgentMuxGuide:false}
-    assert.deepEqual((await resource('executors','add','disposable',added)).item.value,added)
-    await unchanged('remove compares complete snapshot',()=>resource('executors','remove','disposable',{expected:{...added,label:'stale'}},1),'CONFIG_CONFLICT')
-    assert.equal((await resource('executors','remove','disposable',{expected:added})).removed,true)
-    await unchanged('unknown remove remains explicit',()=>resource('executors','remove','disposable',undefined,1),'SETTING_RESOURCE_NOT_FOUND')
+    assert.deepEqual((await resource('executors','create','disposable',added)).item.value,added)
+    await unchanged('remove compares complete snapshot',()=>resource('executors','delete','disposable',{expected:{...added,label:'stale'}},1),'CONFIG_CONFLICT')
+    assert.equal((await resource('executors','delete','disposable',{expected:added})).removed,true)
+    await unchanged('unknown remove remains explicit',()=>resource('executors','delete','disposable',undefined,1),'SETTING_RESOURCE_NOT_FOUND')
     // This valid own record id must never become Object.prototype.constructor during deletion.
     const constructorValue={...added,label:'Own constructor identity'}
-    assert.deepEqual((await resource('executors','add','constructor',constructorValue)).item,{id:'constructor',value:constructorValue})
-    assert.deepEqual((await resource('executors','get','constructor')).item.value,constructorValue)
-    assert.equal((await resource('executors','remove','constructor',{expected:constructorValue})).removed,true)
+    assert.deepEqual((await resource('executors','create','constructor',constructorValue)).item,{id:'constructor',value:constructorValue})
+    assert.deepEqual((await resource('executors','inspect','constructor')).item.value,constructorValue)
+    assert.equal((await resource('executors','delete','constructor',{expected:constructorValue})).removed,true)
     facts.ownIdentity={id:'constructor',addedAndRead:true,removed:true}
 
     phase('trusted-executor-editor')
@@ -204,13 +204,13 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     await replaceText(probe.cdp,field(card,'Environment','textarea'),envText)
     assert.equal((await readExecutor('spare')).envRaw,envText)
     await save('executors')
-    spare=(await resource('executors','get','spare')).item.value
+    spare=(await resource('executors','inspect','spare')).item.value
     assert.equal(spare.label,'UI executor literal');assert.deepEqual(spare.args,literalArgs);assert.deepEqual(spare.env,ownEnv)
     assert.equal(Object.hasOwn(spare.env,'__proto__'),true);assert.equal(Object.hasOwn(spare.env,'constructor'),true)
     facts.bidirectional.executorUiToCli=spare
     // Name-only save must preserve the authored own-key environment, not silently reparse/drop it.
     await replaceText(probe.cdp,field(card,'Name'),'Name-only environment preserved');await save('executors')
-    spare=(await resource('executors','get','spare')).item.value;assert.deepEqual(spare.env,ownEnv)
+    spare=(await resource('executors','inspect','spare')).item.value;assert.deepEqual(spare.env,ownEnv)
     await replaceText(probe.cdp,field(card,'Environment','textarea'),'{"INVALID": 14}')
     const invalidBytes=await readFile(configPath),invalidEvents=await count()
     await activate(probe.cdp,button('executors','Save executors'))
@@ -231,12 +231,12 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     await activate(probe.cdp,button('executors','Save executors'))
     await waitFor('Environment is compared as one authored launch field',async()=>{const current=await state('executors');return current.saveText==='Save executors' && !current.saveDisabled && current.alert.includes('env')})
     assert.equal((await readExecutor('spare')).envRaw,localEnvText)
-    assert.deepEqual((await resource('executors','get','spare')).item.value.env,externalEnv)
+    assert.deepEqual((await resource('executors','inspect','spare')).item.value.env,externalEnv)
     assert.deepEqual(await readFile(configPath),envConflictBytes);assert.equal(await count(),envConflictCount)
     facts.conflicts.push({resource:'executors',field:'env',raw:localEnvText,ui:await state('executors'),configUnchanged:true,publicationsUnchanged:true})
     await resetDraft('executors')
     await resource('executors','update','spare',{changes:{env:ownEnv},expected:{env:externalEnv}})
-    spare=(await resource('executors','get','spare')).item.value
+    spare=(await resource('executors','inspect','spare')).item.value
 
     phase('executor-authored-conflict')
     await launch(card);await replaceText(probe.cdp,field(card,'Name'),'Locally authored Executor')
@@ -249,16 +249,16 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     assert.equal((await readExecutor('spare')).label,'Locally authored Executor');assert.deepEqual(await readFile(configPath),conflictBytes);assert.equal(await count(),conflictCount)
     facts.conflicts.push({resource:'executors',ui:await readExecutor('spare'),configUnchanged:true})
     await resetDraft('executors');await launch(card)
-    spare=(await resource('executors','get','spare')).item.value
+    spare=(await resource('executors','inspect','spare')).item.value
     await replaceText(probe.cdp,field(card,'Name'),'Disjoint Executor draft')
     await resource('executors','update','spare',{changes:{command:'/usr/bin/env'},expected:{command:spare.command}})
     await waitFor('disjoint Executor clean command follows external fact',async()=>(await readExecutor('spare')).command==='/usr/bin/env')
     assert.equal((await readExecutor('spare')).label,'Disjoint Executor draft');await save('executors')
-    spare=(await resource('executors','get','spare')).item.value;assert.equal(spare.label,'Disjoint Executor draft');assert.equal(spare.command,'/usr/bin/env');assert.deepEqual(spare.env,ownEnv)
+    spare=(await resource('executors','inspect','spare')).item.value;assert.equal(spare.label,'Disjoint Executor draft');assert.equal(spare.command,'/usr/bin/env');assert.deepEqual(spare.env,ownEnv)
     facts.disjointExecutor=spare
 
     phase('literal-prompt-fields')
-    let a=(await resource('prompts','get','prompt-a')).item.value
+    let a=(await resource('prompts','inspect','prompt-a')).item.value
     const body='  literal $HOME $(not-run) `not-run`\nsecond line\\ends  \n'
     for (const [name,value] of Object.entries({keyword:'literal-a',label:'Literal prompt',body,providerId:'additional-provider'})) {
       const result=await resource('prompts','update','prompt-a',{changes:{[name]:value},expected:{[name]:a[name] ?? null}})
@@ -275,25 +275,25 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     await unchanged('Prompt blank body',()=>resource('prompts','update','prompt-a',{changes:{body:'   '}},1),'INVALID_SETTING_VALUE')
     await unchanged('Prompt nested unknown field',()=>resource('prompts','update','prompt-a',{changes:{unknown:'value'}},1),'INVALID_SETTING_VALUE')
     const defaultPrompt={keyword:'  derived-label  ',label:'   ',body:'  Exact default-label body\n  '}
-    const defaulted=await resource('prompts','add','default-label',defaultPrompt)
+    const defaulted=await resource('prompts','create','default-label',defaultPrompt)
     assert.deepEqual(defaulted.item.value,{keyword:'derived-label',label:'derived-label',body:defaultPrompt.body})
-    await resource('prompts','remove','default-label',{expected:defaulted.item.value})
+    await resource('prompts','delete','default-label',{expected:defaulted.item.value})
     facts.promptNormalization={input:defaultPrompt,committed:defaulted.item.value}
     const literalId='--help', literalPrompt={keyword:'literal-help',label:'Literal help data',body:'  --help\n$HOME  '}
-    assert.deepEqual((await resource('prompts','add',literalId,literalPrompt)).item,{id:literalId,value:literalPrompt})
-    assert.deepEqual((await resource('prompts','get',literalId)).item.value,literalPrompt)
-    assert.equal((await resource('prompts','remove',literalId,{expected:literalPrompt})).removed,true)
+    assert.deepEqual((await resource('prompts','create',literalId,literalPrompt)).item,{id:literalId,value:literalPrompt})
+    assert.deepEqual((await resource('prompts','inspect',literalId)).item.value,literalPrompt)
+    assert.equal((await resource('prompts','delete',literalId,{expected:literalPrompt})).removed,true)
 
     phase('trusted-prompt-editor')
     await show('prompts');let pc=prompt(a.keyword);await open(pc)
     await replaceText(probe.cdp,field(pc,'Name'),'UI literal prompt')
     await replaceText(probe.cdp,field(pc,'Prompt','textarea'),'  UI $HOME\n$(literal) `literal`  \n')
     await select(probe.cdp,field(pc,'Agent','select'),'codex');await save('prompts')
-    a=(await resource('prompts','get','prompt-a')).item.value
+    a=(await resource('prompts','inspect','prompt-a')).item.value
     assert.equal(a.label,'UI literal prompt');assert.equal(a.body,'  UI $HOME\n$(literal) `literal`  \n');assert.equal(a.providerId,'codex')
     facts.bidirectional.promptUiToCli=a
     await select(probe.cdp,field(pc,'Agent','select'),'');await save('prompts')
-    a=(await resource('prompts','get','prompt-a')).item.value;assert.equal(Object.hasOwn(a,'providerId'),false)
+    a=(await resource('prompts','inspect','prompt-a')).item.value;assert.equal(Object.hasOwn(a,'providerId'),false)
     await replaceText(probe.cdp,field(pc,'Name'),'Local Prompt draft')
     await resource('prompts','update','prompt-a',{changes:{label:'External Prompt commit'},expected:{label:a.label}})
     await waitFor('Prompt external event',async()=>JSON.parse(await readFile(configPath,'utf8')).composerShortcuts.find(item=>item.id==='prompt-a').label==='External Prompt commit')
@@ -304,30 +304,30 @@ export function resourceProof({ probe, desktopRoot, resource, configPath, waitFo
     assert.equal((await readPrompt(a.keyword)).label,'Local Prompt draft');assert.deepEqual(await readFile(configPath),promptConflictBytes);assert.equal(await count(),promptConflictCount)
     facts.conflicts.push({resource:'prompts',ui:await readPrompt(a.keyword),state:await state('prompts'),configUnchanged:true})
     await resetDraft('prompts');pc=prompt(a.keyword);await open(pc)
-    a=(await resource('prompts','get','prompt-a')).item.value
+    a=(await resource('prompts','inspect','prompt-a')).item.value
     await replaceText(probe.cdp,field(pc,'Name'),'Disjoint Prompt draft')
     await resource('prompts','update','prompt-a',{changes:{body:'  External disjoint body\n  '},expected:{body:a.body}})
     await waitFor('Prompt disjoint body follows external fact',async()=>(await readPrompt(a.keyword)).body==='  External disjoint body\n  ')
     assert.equal((await readPrompt(a.keyword)).label,'Disjoint Prompt draft');await save('prompts')
-    a=(await resource('prompts','get','prompt-a')).item.value;assert.equal(a.label,'Disjoint Prompt draft');assert.equal(a.body,'  External disjoint body\n  ')
+    a=(await resource('prompts','inspect','prompt-a')).item.value;assert.equal(a.label,'Disjoint Prompt draft');assert.equal(a.body,'  External disjoint body\n  ')
     facts.disjointPrompt=a
 
     phase('last-prompt-empty-durable')
-    for(const item of (await resource('prompts','list')).items)await resource('prompts','remove',item.id,{expected:item.value})
-    assert.deepEqual((await resource('prompts','list')).items,[])
+    for(const item of (await resource('prompts','ls')).items)await resource('prompts','delete',item.id,{expected:item.value})
+    assert.deepEqual((await resource('prompts','ls')).items,[])
     assert.deepEqual(JSON.parse(await readFile(configPath,'utf8')).composerShortcuts,[])
     await waitFor('actual clean empty Prompt UI',async()=>{const current=await state('prompts');return current.cards===0 && current.empty.includes('No prompts') && current.saveText==='Save prompts' && current.saveDisabled===true})
     facts.emptyPrompts=await state('prompts')
-    facts.restartExecutors=(await resource('executors','list')).items
+    facts.restartExecutors=(await resource('executors','ls')).items
     assert.equal(facts.restartExecutors.length,2)
     return facts
   }, async verifyRestart(next) {
     // Recreate only read helpers for the new actual Renderer. No seed, write, manual flush or draft reset.
     const restored=resourceProof({probe:next,desktopRoot,resource,configPath,waitFor,section,phase})
-    assert.deepEqual((await resource('executors','list')).items,facts.restartExecutors)
+    assert.deepEqual((await resource('executors','ls')).items,facts.restartExecutors)
     for(const item of facts.restartExecutors)await restored.assertCleanExecutor(item.id,item.value)
     await section(next,'Prompts','prompts')
-    assert.deepEqual((await resource('prompts','list')).items,[])
+    assert.deepEqual((await resource('prompts','ls')).items,[])
     const empty=await restored.state('prompts');assert.equal(empty.cards,0);assert.ok(empty.empty.includes('No prompts'));assert.equal(empty.saveDisabled,true);assert.equal(empty.saveText,'Save prompts')
     assert.deepEqual(JSON.parse(await readFile(configPath,'utf8')).composerShortcuts,[])
     facts.restored={executors:facts.restartExecutors,prompts:[],ui:empty}
