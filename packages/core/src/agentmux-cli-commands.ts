@@ -335,11 +335,16 @@ export function agentMuxCliArguments(argv: readonly string[]): { args: string[];
   return { args, ...(endpoint === undefined ? {} : { endpoint }) }
 }
 export function agentMuxCliMatch(args: readonly string[]): { command: AgentMuxCliCommand; tail: string[] } | null {
+  let selected: AgentMuxCliCommand | undefined
+  let length = 0
   for (const entry of AGENTMUX_CLI_COMMANDS) {
     const path = entry.method.split('.')
-    if (path.every((part, index) => args[index] === part)) return { command: entry, tail: args.slice(path.length) }
+    if (path.length > length && path.every((part, index) => args[index] === part)) {
+      selected = entry
+      length = path.length
+    }
   }
-  return null
+  return selected ? { command: selected, tail: args.slice(length) } : null
 }
 export function agentMuxCliRequestsHelp(command: AgentMuxCliCommand, args: readonly string[]): boolean {
   // Help is a syntax-only invocation. A data-bearing request cannot hide extra
