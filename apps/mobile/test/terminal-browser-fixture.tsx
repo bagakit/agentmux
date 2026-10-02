@@ -26,9 +26,10 @@ Terminal.prototype.write = function (data, callback) {
 Object.defineProperty(window, 'Notification', { configurable: true, value: class { constructor() { notifications.push('Notification'); throw new Error('Unexpected terminal notification') } } })
 const session: AgentMuxAgentSession = { kind: 'agent', agentSessionId: 'private-fixture-session', providerId: 'codex', executorId: 'local', hostId: 'private-fixture-host',
   workspacePath: fixturePath("private/fixture"), run: { runId: 'private-fixture-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1 }
-const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, kind: 'agent', agentSessionId: session.agentSessionId, providerId: 'codex', executorId: 'local', workspacePath: session.workspacePath,
+const attachment = (): AgentMuxRunAttachment => ({ run: { ...session.run, nativeService: null, kind: 'agent', agentSessionId: session.agentSessionId, providerId: 'codex', executorId: 'local', workspacePath: session.workspacePath,
   pid: 1, state: 'running', cols, rows, observedAt: 1, latestOutputBytes: raw.length, acceptedInputBytes: 0 }, replay: [], gap: null, resizeRevision,
-  terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: raw.length, resizeRevision, size: { cols, rows } },
+  terminal: { type: 'basic-vt', checkpoint: { runId: session.run.runId, throughByte: raw.length, resizeRevision, size: { cols, rows },
+    restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 },
     restoreBytes: raw.length ? new Uint8Array(raw) : encoder.encode('\x1b[0m'), resizes: [] } })
 const finite = {
   runtimeIdentity() { return { hostId: 'local', instanceId: 'private-fixture-runtime', buildIdentity: 'fixture', protocolVersion: 1, processId: null } },

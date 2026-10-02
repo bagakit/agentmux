@@ -5,6 +5,7 @@ import { TerminalLiveOutputQueue, composeTerminalLiveOutputWrite } from '@agentm
 import { hydrateTerminalReplay, restoreTerminalCheckpoint, terminalHistoryBoundary, yieldTerminalWork } from '@agentmux/client-ui/terminal/replay'
 
 export type MobileTerminalCanvas = {
+  options: { scrollback?: number }
   write(data: Uint8Array, callback: () => void): void
   reset(): void
   resize(cols: number, rows: number): void
@@ -64,9 +65,21 @@ export function createMobileTerminalReader({ client, agentSessionId, canvas, rep
     for (const step of steps) {
       if (closed) return
       if (step.type === 'restore') {
+        const checkpoint = step.checkpoint
+        const scrollback = canvas.options.scrollback!
         canvas.reset()
-        canvas.resize(step.checkpoint.size.cols, step.checkpoint.size.rows)
-        await restoreTerminalCheckpoint(step.restoreBytes, write)
+        canvas.resize(checkpoint.restoreSize.cols, checkpoint.restoreSize.rows)
+        if (checkpoint.restoreScrollbackRows !== null) canvas.options.scrollback = checkpoint.restoreScrollbackRows
+        try {
+          await restoreTerminalCheckpoint(step.restoreBytes.subarray(0, checkpoint.resizeAfterRestoreBytes), write)
+          if (closed) return
+          if (checkpoint.size.cols !== checkpoint.restoreSize.cols || checkpoint.size.rows !== checkpoint.restoreSize.rows) {
+            canvas.resize(checkpoint.size.cols, checkpoint.size.rows)
+          }
+          await restoreTerminalCheckpoint(step.restoreBytes.subarray(checkpoint.resizeAfterRestoreBytes), write)
+        } finally {
+          canvas.options.scrollback = scrollback
+        }
         if (closed) return
         cursor = step.checkpoint.throughByte
         resizeRevision = step.checkpoint.resizeRevision

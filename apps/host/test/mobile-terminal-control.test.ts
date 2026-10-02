@@ -101,7 +101,7 @@ it('uses authenticated actual HTTPS mobile control and the original SDK against 
     const bytes: number[] = [], unrelated: unknown[] = [], reports: unknown[] = [], resized: Array<[number, number]> = []
     mobile.onEvent(event => { if (event.type === 'terminal-output' && event.run.runId === other!.run.runId) unrelated.push(event) })
     reader = createMobileTerminalReader({ client: mobile, agentSessionId: original!.agentSessionId,
-      canvas: { rows: 30, buffer: { active: { type: 'normal', length: 30, baseY: 0, viewportY: 0 } },
+      canvas: { options: { scrollback: 10_000 }, rows: 30, buffer: { active: { type: 'normal', length: 30, baseY: 0, viewportY: 0 } },
         write(data, done) { bytes.push(...data); done() }, resize(cols, rows) { resized.push([cols, rows]) }, reset() {}, scrollToLine() {} },
       report: value => reports.push(value) })
     reader.setVisible(true)
