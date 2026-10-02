@@ -83,6 +83,7 @@ describe('the real Launcher execution target consumer', () => {
     const before = useAppStore.getState()
     await browse('empty-machine')
     expect(document.querySelector('.launcher-target__projects')?.textContent).toContain('No project registered')
+    expect(document.querySelector('.launcher-environment__identity')?.textContent).toContain('Choose where to startCurrent target · This Mac')
     expect(document.querySelector('.launcher-target__manage')?.textContent).toContain('Manage projects')
     expect(document.querySelectorAll('.launcher-target__project')).toHaveLength(0)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
@@ -236,12 +237,19 @@ describe('the real Launcher execution target consumer', () => {
     await mount()
     await selectRemote()
     const localPicker = vi.spyOn(api.ui, 'chooseFiles')
-    const list = vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ name: 'remote.md', path: 'remote.md', isDirectory: false, isSymlink: false }])
+    const list = vi.spyOn(api.files, 'readDirectory')
+      .mockResolvedValueOnce([{ name: 'reports', path: 'reports', isDirectory: true, isSymlink: false }])
+      .mockResolvedValueOnce([{ name: 'remote.md', path: 'reports/remote.md', isDirectory: false, isSymlink: false }])
     await dom.click('[aria-label="Reference files for the Agent"]')
     expect(list).toHaveBeenCalledWith('flowlens', '')
     expect(localPicker).not.toHaveBeenCalled()
-    await act(async () => document.querySelector<HTMLButtonElement>('[data-reference-path="remote.md"]')!.click())
-    expect(useAppStore.getState().agentComposerDrafts.input).toContain('@remote.md')
+    expect(document.querySelector('.launcher-file-references .confirmation-dialog__description')?.textContent).toBe('FlowLens · DAFarm')
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-reference-path="reports"]')!.click())
+    expect(list).toHaveBeenLastCalledWith('flowlens', 'reports')
+    expect(document.querySelector('.launcher-file-references__directory span')?.getAttribute('title')).toBe(`${remoteProject.path}/reports`)
+    expect(document.querySelector('[data-reference-path="reports/remote.md"]')?.getAttribute('title')).toBe(`remote.md\n${remoteProject.path}/reports/remote.md`)
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-reference-path="reports/remote.md"]')!.click())
+    expect(useAppStore.getState().agentComposerDrafts.input).toContain('@reports/remote.md')
     expect(useAppStore.getState().agentComposerDrafts.input).toContain('Keep the complete\nunsent request')
   })
 
@@ -267,9 +275,15 @@ describe('the real Launcher execution target consumer', () => {
     expect(state.launcherOptionDrafts.input?.codex).toEqual({ model: 'selected-model' })
   })
 
-  it.each(['open.terminal', 'open.browser'] as const)('public Control %s uses the exact selected Launcher resource', async operation => {
+  it.each([
+    { operation: 'open.terminal', display: 'workspace' }, { operation: 'open.browser', display: 'workspace' },
+    { operation: 'open.terminal', display: 'third' }, { operation: 'open.browser', display: 'third' }
+  ] as const)('public Control $operation uses the exact selected Launcher resource in display $display', async ({ operation, display }) => {
     await mount()
     await selectRemote()
+    if (display === 'third') await act(async () => useAppStore.setState({
+      activeWorkspaceId: 'third', layouts: { third: createWorkspaceLayout('group', ['launcher']) }
+    }))
     const before = useAppStore.getState()
     const terminal = vi.spyOn(api.sessions, 'launchTerminal').mockResolvedValue({ ...warm, id: 'control-remote',
       hostId: 'farm', workspacePath: remoteProject.path,

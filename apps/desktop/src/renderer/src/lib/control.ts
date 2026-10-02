@@ -38,6 +38,7 @@ import {
   type WorkbenchTab
 } from './workbench-tabs'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
+import { workbenchDisplayReferenceMatches } from './workbench-resource-display'
 
 export type WorkbenchControlState = {
   sessions: readonly SessionSnapshot[]
@@ -143,8 +144,11 @@ export function resolveWorkbenchControlRegion(
     return matches[0]!
   }
   const matches = Object.values(input.tabs).flatMap((tab) => {
-    const layout = input.layouts[tab.workspaceId]
-    if (!layout || !findGroupForTab(layout, tab.id)) return []
+    const displayed = Object.values(input.layouts).some(layout => {
+      const group = findGroupForTab(layout, tab.id)
+      return group && workbenchDisplayReferenceMatches(layout, { groupId: group.id, tabId: tab.id })
+    })
+    if (!displayed) return []
     const surface = tab.regions[target.regionId]
     return surface ? [{ tab, surface }] : []
   })

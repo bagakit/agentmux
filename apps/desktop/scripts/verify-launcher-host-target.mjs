@@ -90,6 +90,15 @@ const mutations = [
   { id: 'control-borrows-tab-resource', path: source('lib/control.ts'),
     from: 'workspaceId: launcher.workspaceId,', to: 'workspaceId: tab.workspaceId,',
     test: targetTest, name: 'public Control' },
+  { id: 'control-borrows-resource-layout', path: source('lib/control.ts'),
+    from: `    const displayed = Object.values(input.layouts).some(layout => {
+      const group = findGroupForTab(layout, tab.id)
+      return group && workbenchDisplayReferenceMatches(layout, { groupId: group.id, tabId: tab.id })
+    })
+    if (!displayed) return []`,
+    to: `    const layout = input.layouts[tab.workspaceId]
+    if (!layout || !findGroupForTab(layout, tab.id)) return []`,
+    test: targetTest, name: 'public Control.*display third' },
   { id: 'terminal-failure-drops-executor', path: source('lib/session-state.ts'),
     from: '        ...launcher,\n        regionId,', to: '        regionId,',
     test: targetTest, name: 'a cold Terminal failure remounts' },

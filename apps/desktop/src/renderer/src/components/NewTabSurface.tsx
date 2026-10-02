@@ -416,7 +416,7 @@ export function NewTabSurface({
         <LauncherMoteAction workspace={workspace} prompt={prompt} sourceTabId={tabId} sourceRegionId={regionId} disabled={busy !== null || !workspace} />
       </div> : null}
       {selectedExecutor && selectedExecutor.detection?.state !== 'ready' && selectedExecutor.detection?.state !== 'missing' && sections.agents !== 'hidden' ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Agent availability check is unconfirmed', mode: `${selectedExecutor.label} is configured; ${executorDetectionLabel(selectedExecutor.detection).toLowerCase()}. Launch remains available and reports its actual result.`, restore: 'Recheck agents on this host to confirm discovery.' } }} /> : null}
-      {fileReferencesOpen && workspace && motionActive ? <LauncherFileReferences key={toolsScope} workspace={workspace}
+      {fileReferencesOpen && workspace && motionActive ? <LauncherFileReferences key={toolsScope} workspace={workspace} hostLabel={host?.label}
         onSelect={appendReference} onClose={() => setFileReferencesOpen(false)} /> : null}
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
