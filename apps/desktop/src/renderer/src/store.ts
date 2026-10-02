@@ -2348,6 +2348,37 @@ function partializeAppState(state: AppState): PersistedAppState {
 
 let coreSpatialPersistence:DesktopSpatialPersistence|null=null
 let disposeCoreSpatial:(()=>void)|null=null
+
+export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string }
+
+/** The existing Core document owns execution identity; display placement never supplies a Host. */
+export function agentRegionExecution(reference: AgentRegionReference) {
+  return coreSpatialPersistence?.current?.graph.regions.find(region => region.tabId === reference.tabId &&
+    region.regionId === reference.regionId && region.kind === 'agent' && region.agentSessionId === reference.agentSessionId)?.execution ?? null
+}
+
+/** An explicit related reader refreshes the original owner, without applying or resaving the graph. */
+export async function rereadAgentRegionExecution(reference: AgentRegionReference) {
+  const owner = coreSpatialPersistence
+  if (!owner) throw new Error('The original Core spatial owner is not available. Its Region is retained.')
+  await owner.read()
+  if (coreSpatialPersistence !== owner) throw new Error('The original Core spatial owner changed during observation. Its Region is retained; re-read the current owner.')
+  return agentRegionExecution(reference)
+}
+
+/** Project only the exact observed Session through the existing launch reducer. */
+export function adoptAgentRegionObservation(reference: AgentRegionReference & { hostId: string }, result: AgentLaunchResult) {
+  useAppStore.setState(state => {
+    const region = state.tabs[reference.tabId]?.regions[reference.regionId]
+    const session = result.session
+    if (!workbenchViewCloseAllowsView(state.closingWorkbenchViews, reference.tabId) ||
+      region?.kind !== 'agent' || region.sessionId !== reference.agentSessionId ||
+      session?.kind !== 'agent' || session.id !== reference.agentSessionId || session.control.hostId !== reference.hostId)
+      throw new Error('The original Region or Session changed during observation. Its work is retained.')
+    return reduceDetachedAgentLaunch(state, result).state
+  })
+}
+
 const nonBrowserWorkbenchStorage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> = {
   getItem: () => null,
   setItem: () => undefined,

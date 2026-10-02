@@ -4,22 +4,83 @@ import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { api } from './api'
 import { scratchTopicsForWorkspace, scratchTopicKind } from './scratch-topic-snapshots'
 import { spatialCatalog } from './space-agent-control'
-import { useAppStore, retainRecoveryMessageIntent } from '../store'
+import { useAppStore, retainRecoveryMessageIntent, agentRegionExecution, rereadAgentRegionExecution, adoptAgentRegionObservation } from '../store'
 
 export type RecoveryMode = 'takeover' | 'analyze'
 export type RecoverySource = SessionHistoryReference & {
   workspaceId: string; tabId: string; regionId: string; displayWorkspaceId: string; groupId?: string
   diagnostic: string
+  observation?: 'unconfirmed'
 }
 export type RecoveryMoteTarget = { topicId: string; tabId: string; regionId: string; agentSessionId: string; hostId: string; label: string }
 export type RecoveryActionResult = { kind: 'confirmed' | 'unknown'; message: string; requestId: string; report?: AgentMuxSpaceMutationReport }
+
+export type RecoveryRegionIdentity = Pick<RecoverySource, 'agentSessionId' | 'tabId' | 'regionId' | 'displayWorkspaceId' | 'groupId'>
+
+/** Missing observations retain the original reference; conflicting owners never select a winner. */
+export function unobservedRecoveryReference(identity: RecoveryRegionIdentity): { source: RecoverySource | null; issue: string | null } {
+  const state = useAppStore.getState(), tab = state.tabs[identity.tabId], region = tab?.regions[identity.regionId]
+  if (region?.kind !== 'agent' || region.sessionId !== identity.agentSessionId)
+    return { source: null, issue: 'The original Region no longer contains this Session. Its work is retained.' }
+  const session = state.sessions.find(item => item.id === identity.agentSessionId)
+  const hosts = new Set([
+    session?.kind === 'agent' ? session.control.hostId : undefined,
+    state.pendingAgentLaunches[identity.agentSessionId]?.request?.hostId,
+    ...state.recoveryCandidates.filter(candidate => candidate.agentSessionId === identity.agentSessionId).map(candidate => candidate.hostId),
+    agentRegionExecution(identity)?.hostId
+  ].filter((host): host is string => Boolean(host)))
+  if (hosts.size > 1) return { source: null, issue: 'Original Host references conflict. Re-read the original owner; no replacement Host is selected.' }
+  const hostId = [...hosts][0]
+  if (!hostId) return { source: null, issue: 'The original execution Host is not confirmed. The display Project does not establish it.' }
+  return { source: { ...identity, hostId, workspaceId: tab!.workspaceId, diagnostic: 'Original Session state is not confirmed.', observation: 'unconfirmed' }, issue: null }
+}
+
+/** Read canonical facts only. Neither a missing Run nor a failed read authorizes native recovery. */
+export async function rereadUnobservedSession(identity: RecoveryRegionIdentity, current: () => boolean): Promise<void> {
+  const originalIntent = useAppStore.getState().pendingAgentLaunches[identity.agentSessionId]?.request
+  const originalWorkspace = useAppStore.getState().tabs[identity.tabId]?.workspaceId
+  const originalOperation = useAppStore.getState().pendingAgentLaunches[identity.agentSessionId]?.created?.creation?.createOperationId
+  const initial = unobservedRecoveryReference(identity)
+  const assertSource = (expectedHost?: string) => {
+    const next = unobservedRecoveryReference(identity)
+    const pending = useAppStore.getState().pendingAgentLaunches[identity.agentSessionId], request = pending?.request
+    const operation = pending?.created?.creation?.createOperationId
+    if (!current() || (request && request !== originalIntent) || (originalOperation && operation && operation !== originalOperation) || useAppStore.getState().tabs[identity.tabId]?.workspaceId !== originalWorkspace ||
+      useAppStore.getState().tabs[identity.tabId]?.regions[identity.regionId]?.kind !== 'agent' ||
+      (useAppStore.getState().tabs[identity.tabId]?.regions[identity.regionId] as { sessionId?: string } | undefined)?.sessionId !== identity.agentSessionId)
+      throw new Error('The original observation scope or creation intent changed. Its work is retained.')
+    if (expectedHost && next.source?.hostId !== expectedHost)
+      throw new Error(next.issue ?? 'The original execution Host changed during observation.')
+    return next
+  }
+  assertSource(initial.source?.hostId)
+  if (!initial.source) {
+    await rereadAgentRegionExecution(identity)
+    assertSource()
+  }
+  const reference = unobservedRecoveryReference(identity)
+  if (!reference.source) throw new Error(reference.issue!)
+  const hostId = reference.source.hostId
+  const canonical = await api.sessions.creation(hostId, identity.agentSessionId)
+  assertSource(hostId)
+  if (canonical.agentSessionId !== identity.agentSessionId) throw new Error('The original Core owner returned another Session identity.')
+  if (originalOperation && canonical.creation?.createOperationId !== originalOperation)
+    throw new Error('The original creation operation is not confirmed. No replacement is attached.')
+  const session = await api.sessions.refresh({ kind: 'agent', hostId, agentSessionId: identity.agentSessionId, run: canonical.run })
+  assertSource(hostId)
+  if (session.kind !== 'agent' || session.id !== identity.agentSessionId || session.control.hostId !== hostId ||
+    session.control.agentSessionId !== identity.agentSessionId || session.control.run.runId !== canonical.run.runId)
+    throw new Error('The original Session observation returned another Host, Session or Run.')
+  adoptAgentRegionObservation({ ...identity, hostId }, { created: canonical, session, projectionFailures: [] })
+}
 
 /** The original display reference must still contain the exact original Session. */
 export function ownsRecoverySource(source: RecoverySource): boolean {
   const state = useAppStore.getState(), tab = state.tabs[source.tabId], region = tab?.regions[source.regionId]
   const session = state.sessions.find(item => item.id === source.agentSessionId)
   return tab?.workspaceId === source.workspaceId && region?.kind === 'agent' && region.sessionId === source.agentSessionId &&
-    (!session || session.kind === 'agent' && session.control.hostId === source.hostId && session.control.agentSessionId === source.agentSessionId)
+    (session ? session.kind === 'agent' && session.control.hostId === source.hostId && session.control.agentSessionId === source.agentSessionId
+      : source.observation !== 'unconfirmed' || unobservedRecoveryReference(source).source?.hostId === source.hostId)
 }
 
 /** Deterministic correlation is retained by the existing spatial intent / message queue owners. */

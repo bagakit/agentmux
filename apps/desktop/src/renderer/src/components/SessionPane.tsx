@@ -28,7 +28,7 @@ import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } fro
 import { SessionConnectingSurface } from './SessionConnectingSurface'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { SessionRecoveryActions } from './SessionRecoveryActions'
-import type { RecoverySource } from '../lib/session-recovery-actions'
+import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySource } from '../lib/session-recovery-actions'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
@@ -121,10 +121,15 @@ export function SessionPane({
   const historyCatalogue = useFocusHistorySources(!session && !pendingLaunch && surfaceKind === 'agent' && visible && !parked)
   const historyHostId = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === linkOrigin.workspaceId)?.hostId)
   const retainedHistory = historyCatalogue.sources.find(source => source.agentSessionId === sessionId && source.hostId === historyHostId)
+  const unobservedIdentity = !session && retainedHistory?.state !== 'retired' && surfaceKind === 'agent' && visible && !parked && linkOrigin.tabId && linkOrigin.regionId
+    ? { agentSessionId: sessionId, tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
+        ...(linkOrigin.tabGroupId ? { groupId: linkOrigin.tabGroupId } : {}) } : null
+  const unobservedReference = unobservedIdentity ? unobservedRecoveryReference(unobservedIdentity) : null
   // Core creation's `local` is local to its server, not this Desktop. The existing
   // submitted request retains the configured endpoint; missing intent stays unknown.
   const executionHostId = session ? session.kind === 'agent' ? session.control.hostId : session.hostId
-    : pendingLaunch ? pendingLaunch.request?.hostId
+    : unobservedReference ? unobservedReference.source?.hostId
+      : pendingLaunch ? pendingLaunch.request?.hostId
       : retainedHistory?.state === 'retired' ? retainedHistory.hostId : recoveryCandidate?.hostId
   const configuredExecutionHost = useAppStore(state => state.config?.hosts.find(host => host.id === executionHostId))
   const runtimeOwnershipWarnings = useAppStore((state) => state.runtimeOwnershipWarnings)
@@ -516,6 +521,13 @@ export function SessionPane({
     [linkRequest, openHttpLink, linkOrigin, reportError]
   )
   const [refreshing, setRefreshing] = useState(false)
+  const [unobservedReadError, setUnobservedReadError] = useState<string | null>(null)
+  const observationScope = JSON.stringify([sessionId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.workspaceId, linkOrigin.tabGroupId])
+  const observationScopeRef = useRef<string | null>(observationScope)
+  observationScopeRef.current = visible && !readOnly && !parked ? observationScope : null
+  const observationActive = useRef(true)
+  useEffect(() => { observationActive.current = true; return () => { observationActive.current = false } }, [])
+  useEffect(() => { setUnobservedReadError(null) }, [observationScope])
   const [observationMounted, setObservationMounted] = useState(false)
   const observationRefreshRef = useRef<(() => Promise<void>) | null>(null)
   const bindObservationRefresh = useCallback((refresh: (() => Promise<void>) | null) => {
@@ -556,12 +568,35 @@ export function SessionPane({
     session?.status.continuityReason,
     session?.status.continuityConflict
   )
-  const recoveryActionSource: RecoverySource | null = executionHostId && sourceWorkspaceId && linkOrigin.tabId && linkOrigin.regionId ? {
+  const recoveryActionSource: RecoverySource | null = unobservedReference ? unobservedReference.source : executionHostId && sourceWorkspaceId && linkOrigin.tabId && linkOrigin.regionId ? {
     hostId: executionHostId, agentSessionId: sessionId, workspaceId: sourceWorkspaceId,
     tabId: linkOrigin.tabId, regionId: linkOrigin.regionId, displayWorkspaceId: linkOrigin.workspaceId,
     ...(linkOrigin.tabGroupId ? { groupId: linkOrigin.tabGroupId } : {}),
     diagnostic: continuityNotice?.reason ?? session?.status.detail ?? 'Original Session state is not confirmed.'
   } : null
+
+  async function refreshUnobserved(): Promise<void> {
+    if (!unobservedIdentity || refreshing) return
+    const scope = observationScope
+    const current = () => observationActive.current && observationScopeRef.current === scope
+    setRefreshing(true); setUnobservedReadError(null)
+    try { await rereadUnobservedSession(unobservedIdentity, current) }
+    catch (error) { if (current()) setUnobservedReadError(presentError(error)) }
+    finally { if (observationActive.current) setRefreshing(false) }
+  }
+
+  const unobservedActions = projectionPolicy.allowsRecovery && unobservedIdentity ? <>
+    {unobservedReadError || unobservedReference?.issue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      step: unobservedReadError ?? unobservedReference!.issue!,
+      mode: 'The original Region and drafts are retained. Current Session facts are not confirmed.',
+      restore: 'Re-read this original owner. This action does not start a Run or send input.'
+    } }} /> : null}
+    {recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} restoring={refreshing}
+      workingLabel="Reading…" restoreLabel="Check original" onRestore={() => void refreshUnobserved()} />
+      : <button type="button" className="small-button" disabled={refreshing} onClick={() => void refreshUnobserved()}>
+        <RefreshCw size={12} /> {refreshing ? 'Reading…' : 'Check original identity'}
+      </button>}
+  </> : null
 
   async function recover(): Promise<void> {
     if (recovering) return
@@ -640,7 +675,8 @@ export function SessionPane({
   const acceptedLaunch = pendingLaunch?.created && (!session || session.control.run.runId === pendingLaunch.created.run.runId)
     ? pendingLaunch.created : undefined
   const preSnapshotHost = session ? regionExecutionHost(session, configuredExecutionHost)
-    : pendingLaunch ? executionHostProjection(pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)
+    : unobservedReference ? executionHostProjection(unobservedReference.source?.hostId, pendingLaunch?.request?.workspacePath ?? recoveryCandidate?.workspacePath, configuredExecutionHost)
+      : pendingLaunch ? executionHostProjection(pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)
       : retainedHistory?.state === 'retired' ? executionHostProjection(retainedHistory.hostId, retainedHistory.history?.workspacePath, configuredExecutionHost)
         : executionHostProjection(recoveryCandidate?.hostId, recoveryCandidate?.workspacePath, configuredExecutionHost)
   const preSnapshotHeader = (name = agentInputIdentity ?? (session?.kind === 'terminal' ? session.label : surfaceKind === 'terminal' ? 'Terminal' : agentDisplayName({ userName,
@@ -669,14 +705,18 @@ export function SessionPane({
         mode: session?.processState === 'running' ? 'Confirmed Session running; input remains available.'
           : 'Creation confirmed; process and input unconfirmed.',
         restore: 'Check again for this same Session and Timeline.'
-      }} actions={!readOnly ? <button type="button" className="small-button" disabled={refreshing}
+      }} actions={!readOnly && session ? <button type="button" className="small-button" disabled={refreshing}
         onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null} />
     </div>
   )
   if (!session && acceptedLaunch) {
     return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
       {preSnapshotHeader()}
-      <div className="agent-body">{launchNotice}<p>Agent created · {acceptedLaunch.agentSessionId}</p></div>
+      <div className="agent-body"><FullPageLoadingSurface scope="region" phase="parked"
+        eyebrow="Original Session" title="Session created"
+        detail="Creation is confirmed. Current process and input availability are not yet confirmed."
+        actions={unobservedActions} supplement={launchNotice}
+        details={{ summary: 'Original reference', content: <dl><dt>Session ID</dt><dd>{acceptedLaunch.agentSessionId}</dd></dl> }} /></div>
       {!readOnly ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
     </section>
   }
@@ -743,12 +783,13 @@ export function SessionPane({
       <section className="agent-surface" data-agent-surface-mode="connecting">
           {preSnapshotHeader()}
           <SessionConnectingSurface key={`connecting:${sessionId}`}
-          phase={pendingLaunch ? 'launch' : recoveryCandidate ? 'restore' : 'connect'}
+          phase={pendingLaunch ? 'launch' : recoveryCandidate && !unobservedIdentity ? 'restore' : 'connect'}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
           executor={connectingExecutor}
           appearance={connectingAppearance}
-          session={{ hostId: session?.kind === 'agent' ? session.control.hostId : recoveryCandidate?.hostId ?? retainedHistory?.hostId ?? '', agentSessionId: sessionId }}
+          session={{ hostId: executionHostId ?? '', agentSessionId: sessionId }}
+          actions={unobservedActions}
           visible={visible && !parked}
         />
         {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
