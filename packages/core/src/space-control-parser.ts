@@ -225,7 +225,6 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     if (projectIds.length < 2) fail('A project group needs at least two Projects.', code)
     return { groupId: spaceControlId(item.groupId, 'Project group', code), name, projectIds }
   }, 'Project groups', code), item => item.groupId, 'Project groups', code) : undefined
-  if (projectGroups) unique(projectGroups.flatMap(group => group.projectIds), value => value, 'Grouped Project IDs', code)
   const spaces = unique(list(source.spaces, value => {
     const item = fields(value, ['spaceId', 'kind', 'name', 'hostId', 'directoryPath', 'projectId', 'topicId', 'issue'], code)
     return { spaceId: spaceControlId(item.spaceId, 'Space', code, true), kind: member(item.kind, ['folder', 'topic', 'mote', 'container'], 'Space kind', code),

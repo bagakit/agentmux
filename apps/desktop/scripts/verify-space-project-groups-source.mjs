@@ -11,19 +11,19 @@ const catalog = renderer + 'lib/space-agent-control.ts', adapter = renderer + 'l
 const store = renderer + 'store.ts', helper = renderer + 'lib/cross-device-project-groups.ts'
 const sidebar = renderer + 'components/WorkspaceSidebar.tsx', tree = renderer + 'components/ProjectGroupsTree.tsx'
 const dialog = renderer + 'components/ProjectGroupDialog.tsx', owner = 'packages/core/src/spatial-state.ts'
-const graph = 'packages/core/src/spatial-graph.ts'
-const tests = ['apps/desktop/test/cross-device-project-groups.test.ts', 'apps/desktop/test/cross-device-project-groups.test.tsx']
+const graph = 'packages/core/src/spatial-graph.ts', parser = 'packages/core/src/space-control-parser.ts'
+const tests = ['apps/desktop/test/cross-device-project-groups.test.ts', 'apps/desktop/test/cross-device-project-groups.test.tsx', 'packages/core/test/space-project-groups-codec.test.ts']
 const testHelper = 'apps/desktop/test/helpers/cross-device-project-groups.ts'
 const desktopGlobals = renderer + 'global.d.ts'
-const sources = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, 'packages/core/src/space-control.ts',
+const sources = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, parser, 'packages/core/src/rpc-business-codec.ts', 'packages/core/src/space-control.ts',
   renderer + 'components/WorkspaceRowContextMenu.tsx', renderer + 'hooks/useGitProjectAssociations.ts', renderer + 'lib/api.ts',
   renderer + 'lib/workspace-projects.ts', renderer + 'lib/workbench-persistence.ts', renderer + 'lib/workbench-tabs.ts',
   renderer + 'components/SpaceCreateMenu.tsx', renderer + 'components/SpaceSectionHeader.tsx', renderer + 'components/HostFolderDialog.tsx', renderer + 'styles/project-groups.css', renderer + 'styles/index.css', 'apps/desktop/src/shared/space-addresses.ts',
   'apps/desktop/src/shared/contracts.ts', desktopGlobals]
-const captured = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, renderer + 'components/SpaceCreateMenu.tsx', renderer + 'components/HostFolderDialog.tsx', ...tests, testHelper]
-const inputs = [...sources, ...tests, testHelper, 'apps/desktop/scripts/verify-space-project-groups-source.mjs',
+const captured = [catalog, adapter, store, helper, sidebar, tree, dialog, owner, graph, parser, renderer + 'components/SpaceCreateMenu.tsx', renderer + 'components/HostFolderDialog.tsx', ...tests, testHelper]
+const inputs = [...sources, ...tests, testHelper, 'packages/core/test/helpers/object-cli-rpc.ts', 'apps/desktop/scripts/verify-space-project-groups-source.mjs',
   'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts', 'tsconfig.base.json', 'apps/desktop/tsconfig.json', 'pnpm-lock.yaml']
-const dependencies = ['packages/core/package.json', 'packages/core/dist/index.js', 'packages/core/dist/index.d.ts',
+const dependencies = ['packages/core/dist/space-control-parser.js', 'packages/core/dist/agentmux.js', 'packages/core/package.json', 'packages/core/dist/index.js', 'packages/core/dist/index.d.ts',
   'packages/core/dist/spatial-graph.js', 'packages/core/dist/spatial-graph.d.ts', 'packages/core/dist/spatial-state.js',
   'packages/core/dist/spatial-state.d.ts', 'packages/core/dist/space-control.d.ts', 'packages/demand/package.json',
   'packages/demand/dist/src/index.js', 'packages/demand/dist/src/index.d.ts']
@@ -49,6 +49,7 @@ async function execute(args, logPath) {
 async function consumers() {
   const ts = createRequire(import.meta.url)('typescript')
   const required = [
+    { definition: parser, file: 'packages/core/src/rpc-business-codec.ts', expression: 'parseSpaceControlSuccessReceipt' },
     { definition: helper, file: store, expression: 'validateProjectGroup' },
     { definition: catalog, file: adapter, expression: 'spatialCatalog' },
     { definition: adapter, file: store, expression: 'desktopSpatialGraph' },
@@ -119,7 +120,11 @@ try {
       testcase: 'separates host folders, keeps independent disclosure and renders original member icons in overlapping groups' },
     { id: 'hide-git-hint-when-grouped', target: sidebar,
       before: 'related.length > 0 ? <button', after: '!memberships.length && related.length > 0 ? <button',
-      testcase: 'shows Git associations through the real API consumer and creates a manually chosen group' }
+      testcase: 'shows Git associations through the real API consumer and creates a manually chosen group' },
+    { id: 'reject-overlapping-public-catalog', target: parser,
+      before: '  const spaces = unique(list(source.spaces, value => {',
+      after: "  if (projectGroups) unique(projectGroups.flatMap(group => group.projectIds), value => value, 'Grouped Project IDs', code); const spaces = unique(list(source.spaces, value => {",
+      testcase: 'preserves overlapping project groups through actual Desktop and Core public catalogs' }
 
   ]
   const phases = [{ id: 'baseline', target: mutations[0].target, before: mutations[0].before, after: mutations[0].before }]
