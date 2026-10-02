@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
-import { AlertCircle, ArrowUpRight, Check, ChevronDown, Inbox, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
+import { AlertCircle, ArrowUpRight, Check, ChevronDown, Inbox, MessageCircle, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import type { FocusContext } from '../lib/focus-context'
@@ -18,7 +18,6 @@ import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import { useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { MoteIcon } from './MoteIcon'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 
 export function FocusToolbar({ children, selectedId, selected, tab, reference, onReview, onCloseWorkspace, regionOnly, onToggleRegion }: {
@@ -140,7 +139,7 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     </ContextMenu.Root>}
     <button type="button" className="focus-toolbar__action" aria-label="View in Space" title={`View in Space · ${name}`} onClick={viewInSpace}><ArrowUpRight size={14} aria-hidden="true" /><span>Space</span></button>
     <div className="focus-toolbar__chat">
-      <button type="button" className="focus-toolbar__action" aria-label="Chat about this tab with Mote" aria-description={`Recipient: ${recipientLabel}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`Chat about this tab with ${recipientLabel} · ${name}${recipientIssue ? '\n' + recipientIssue : ''}`} disabled={discussionPending} aria-busy={discussionPending} onClick={() => { void chatAboutTab() }}><MoteIcon size={14} /><span>{discussionPending ? 'Preparing…' : 'Chat'}</span></button>
+      <button type="button" className="focus-toolbar__action" aria-label="Chat about this tab with Mote" aria-description={`Recipient: ${recipientLabel}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`Chat about this tab with ${recipientLabel} · ${name}${recipientIssue ? '\n' + recipientIssue : ''}`} disabled={discussionPending} aria-busy={discussionPending} onClick={() => { void chatAboutTab() }}><MessageCircle size={14} aria-hidden="true" /><span>{discussionPending ? 'Preparing…' : 'Chat'}</span></button>
       <DropdownMenu.Root modal={false}>
         <DropdownMenu.Trigger asChild><button type="button" className="focus-toolbar__mote-choice" aria-label="Choose Chat Mote" aria-description={`${recipientLabel}${topicId ? ' · ' + topicId : ''}${recipientIssue ? ' · ' + recipientIssue : ''}`} title={`${recipientLabel}${topicId ? ' · ' + topicId : ''}${recipientIssue ? '\n' + recipientIssue : ''}`} data-focus-chat-topic={topicId}>
           <SpaceObjectIcon kind="mote" name={recipientName} manualIcon={recipientIcon ? icons[recipientIcon.key] ?? null : null} avatarWorkspaceId={recipientIcon?.avatarTarget?.workspaceId} avatarTopicId={recipientIcon?.avatarTarget?.topicId} avatarObjectKey={recipientIcon?.key} />
@@ -165,11 +164,11 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
       </DropdownMenu.Root>
     </div>
     {selected?.actionable ? <button type="button" className="focus-toolbar__review" aria-label="Review request" title="Review request" onClick={onReview}><Inbox size={12} /><span>Review</span></button> : null}
-    <div id="focus-workspace-slot-header" className="focus-toolbar__region-slot" />
+    <div id="focus-workspace-slot-header" className="focus-toolbar__region-slot" title="Region actions and execution Host" />
     <DropdownMenu.Root modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
-      <DropdownMenu.Trigger asChild><button type="button" className="icon-button" aria-label="Focus context actions" onPointerEnter={event => { if (!menuOpen && event.pointerType === 'mouse' && event.buttons === 0) menuOriginRef.current = null }} onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
+      <DropdownMenu.Trigger asChild><button type="button" className="icon-button focus-toolbar__view-menu" aria-label="Focus context actions" title={`Focus view actions · ${name}`} onPointerEnter={event => { if (!menuOpen && event.pointerType === 'mouse' && event.buttons === 0) menuOriginRef.current = null }} onPointerDown={event => { menuOriginRef.current = event.currentTarget }} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ArrowDown') menuOriginRef.current = event.currentTarget }}><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
       <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><DropdownMenu.Content className="tab-context-menu" align="end" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = menuOriginRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <DropdownMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></DropdownMenu.Item>)}</DropdownMenu.Content></DropdownMenu.Portal>
     </DropdownMenu.Root>
-    <button type="button" className="icon-button" aria-label="Close Focus workspace" onClick={onCloseWorkspace}><PanelRightClose size={14} /></button>
+    <button type="button" className="icon-button" aria-label="Close Focus workspace" title="Collapse Focus workspace" onClick={onCloseWorkspace}><PanelRightClose size={14} /></button>
   </div>
 }
