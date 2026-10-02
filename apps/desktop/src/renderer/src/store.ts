@@ -1,4 +1,4 @@
-import { validateProjectGroup, projectGroupFor } from './lib/cross-device-project-groups'
+import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
@@ -3383,11 +3383,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     return saveWorkbenchSelection(true)
   },
   async selectWorkspace(id) {
-    const workspace = get().config?.workspaces.find(workspace => workspace.id === id)
-    const group = workspace && projectGroupFor(get().projectGroups, workspaceProjectId(workspace))
-    if (group && get().collapsedProjectGroups[`project-group:${group.groupId}`]) {
-      set(state => { const collapsedProjectGroups = { ...state.collapsedProjectGroups }; delete collapsedProjectGroups[`project-group:${group.groupId}`]; return { collapsedProjectGroups } })
-    }
     set({ workbenchSpaceSelection: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
     if (get().retainedSpatialFocus !== null) set({ retainedSpatialFocus: null })
     set({ activeWorkspaceId: id, mainSurface: 'workbench', regionCaretFocus: null, error: null, errorDismissed: true })

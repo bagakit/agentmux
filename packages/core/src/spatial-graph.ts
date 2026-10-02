@@ -99,15 +99,11 @@ function facts(value: unknown, key: string, check: (entry: Record<string, unknow
 export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph {
   const g = record(value);
   if (g.projectGroups !== undefined) {
-    const members = new Set<string>();
     facts(g.projectGroups, 'groupId', group => {
       if (typeof group.name !== 'string' || !group.name.trim()) invalid('A project group needs a name.');
       strings(group.projectIds);
       if (group.projectIds.length < 2) invalid('A project group needs at least two Projects.');
-      for (const projectId of group.projectIds) {
-        if (members.has(projectId)) invalid('A Project already belongs to another group.');
-        members.add(projectId);
-      }
+
     });
   }
   facts(g.spaces, 'spaceId', s => {

@@ -35,7 +35,7 @@ export function useGitProjectAssociations(projects: readonly WorkspaceProject[],
     return new Map(projects.map(project => {
       const result = observations.get(project.id)
       const candidates = result?.kind === 'known' ? result.identities.flatMap(identity => sources.get(identity) ?? []) : []
-      return [project.id, [...new Set(candidates.filter(other => other.hostId !== project.hostId).map(other => other.id))]]
+      return [project.id, [...new Set(candidates.filter(other => other.id !== project.id).map(other => other.id))]]
     }))
   }, [projects, observations])
   return { observations, related }
