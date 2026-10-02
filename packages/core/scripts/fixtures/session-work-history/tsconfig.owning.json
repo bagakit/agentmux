@@ -1,0 +1,6 @@
+{
+  "extends": "../../../tsconfig.build.json",
+  "compilerOptions": { "composite": false, "incremental": false, "rootDir": "../../..", "noEmit": true },
+  "include": ["../../../src/**/*.ts", "../../../test/session-work-history.test.ts"],
+  "exclude": []
+}

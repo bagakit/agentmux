@@ -13,10 +13,11 @@ function sameItemSemantics(left: AgentTimelineItem, right: AgentTimelineItem): b
 function retainTimelineWindows(items: AgentTimelineItem[]): AgentTimelineItem[] {
   let inputs = 0
   let activity = 0
+  let states = 0
   const retained: AgentTimelineItem[] = []
   for (let index = items.length - 1; index >= 0; index -= 1) {
     const item = items[index]!
-    const count = item.kind === 'user_message' ? ++inputs : ++activity
+    const count = item.activityState ? ++states : item.kind === 'user_message' ? ++inputs : ++activity
     if (count <= MAX_TIMELINE_ITEMS_PER_WINDOW) retained.push(item)
   }
   return retained.reverse()

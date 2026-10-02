@@ -1,11 +1,12 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { chmodSync } from 'node:fs'
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, unlink, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   AgentMuxFileAgentSessionStore,
-  AgentMuxMemoryAgentSessionStore
+  AgentMuxMemoryAgentSessionStore,
+  normalizeStoredAgentSession
 } from '../src/agent-session-store.js'
 import {
   agentTimelineMutationFromAcpEvent,
@@ -25,13 +26,13 @@ afterEach(async () => {
 })
 
 function session(agentSessionId: string, runId: string): AgentMuxStoredAgentSession {
-  return {
+  return normalizeStoredAgentSession({
     kind: 'agent',
     agentSessionId,
     providerId: 'codex',
     executorId: 'codex-safe',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/agentmux-timeline"),
+    workspacePath: fixturePath("tmp/agentmux-timeline"),
     run: { runId },
     retiredRuns: [],
     hookBindingId: `hook-${agentSessionId}`,
@@ -39,7 +40,7 @@ function session(agentSessionId: string, runId: string): AgentMuxStoredAgentSess
 
     createdAt: 1,
     updatedAt: 1
-  }
+  })
 }
 
 function assistantAppend(
@@ -448,7 +449,7 @@ describe('Agent Session Timeline', () => {
   })
 
   it('persists each Session independently and restores the bounded Timeline after restart', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-store-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-store-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     const first = new AgentMuxFileAgentSessionStore(path)
@@ -494,7 +495,7 @@ describe('Agent Session Timeline', () => {
   })
 
   it('keeps one Agent Session Timeline across a committed Run replacement', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-resume-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-resume-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     const store = new AgentMuxFileAgentSessionStore(path)
@@ -546,7 +547,7 @@ describe('Agent Session Timeline', () => {
   })
 
   it('keeps Session commits authoritative when Timeline cleanup fails and recovers the orphan', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-cleanup-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-cleanup-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     const timelineDirectory = join(root, 'agent-timelines')
@@ -576,7 +577,7 @@ describe('Agent Session Timeline', () => {
   })
 
   it('does not hide a malformed Timeline that belongs to a live Session', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-invalid-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-invalid-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     const timelineDirectory = join(root, 'agent-timelines')
@@ -594,7 +595,7 @@ describe('Agent Session Timeline', () => {
   })
 
   it('fails closed instead of publishing a revision that is not safely monotonic', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-revision-limit-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-revision-limit-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     const timelineDirectory = join(root, 'agent-timelines')
@@ -634,7 +635,7 @@ describe('Agent Session Timeline', () => {
   })
 
   it('returns a committed receipt and poisons later writes when lock cleanup fails', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-timeline-lock-release-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-timeline-lock-release-"))
     roots.push(root)
     const path = join(root, 'agent-sessions.json')
     const store = new AgentMuxFileAgentSessionStore(path)

@@ -902,6 +902,8 @@ export type AgentMuxStoredAgentSession = AgentMuxAgentSession & {
   hookToken: string
   /** Agent 说话凭证的 sha256。raw 只在受管进程的 env 里，Core 侧只留 hash。 */
   capabilityHash?: string
+  /** Bounded accepted-observation commit state; never a second history ledger. */
+  activityCommit?: AgentActivityCommit
 }
 
 /**
@@ -1235,6 +1237,39 @@ export type AgentTimelineItemKind =
 
 export type AgentTimelineItemStatus = 'streaming' | 'complete' | 'failed'
 
+/** Accepted semantic observations and actual Run/connection boundaries, never inferred from text. */
+export type AgentActivityState = {
+  run: AgentMuxRunRef
+  previousObservationId?: string
+} & (
+  | { state: AgentDisplayState; stateEnteredAt?: number }
+  | { boundary: 'exited' | 'interrupted' | 'lost' | 'restored' | 'history-gap' }
+)
+
+/** Private, constant-size metadata retained by the existing Session owner for failed history I/O. */
+export type AgentActivityObservation = {
+  id: string
+  source: AgentMuxEvidenceSource
+  createdAt: number
+  activityState: AgentActivityState
+}
+export type AgentActivityCommit = {
+  latest: AgentActivityObservation
+  latestCommitted: boolean
+  pending?: AgentActivityObservation
+}
+
+export type AgentWorkHistoryProjection = {
+  segments: Array<{
+    run: AgentMuxRunRef
+    startAt: number
+    endAt: number | null
+    end: 'state-change' | 'run-ended' | 'observation-gap' | 'unknown' | 'current'
+    startKnown: boolean
+  }>
+  coverage: { recorded: boolean; truncated: boolean; gaps: boolean }
+}
+
 export type AgentTimelineItem = {
   id: string
   agentSessionId: string
@@ -1257,6 +1292,7 @@ export type AgentTimelineItem = {
    */
   toolOutput?: string
   eventName?: string
+  activityState?: AgentActivityState
 }
 
 export type AgentTimelineMutation =

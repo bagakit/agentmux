@@ -1,6 +1,12 @@
 import { AgentMuxError } from './errors.js'
+import { semanticStatusStale } from './agent-status-freshness.js'
 import { applyNormalizedTimelineMutation, MAX_TIMELINE_ITEMS_PER_WINDOW } from './session-timeline-reducer.js'
 import type {
+  AgentActivityState,
+  AgentDisplayState,
+  AgentMuxRunRef,
+  AgentStatus,
+  AgentWorkHistoryProjection,
   AgentMuxAcpEvent,
   AgentMuxEvidence,
   AgentMuxEvidenceSource,
@@ -11,6 +17,8 @@ import type {
 } from './types.js'
 
 export type {
+  AgentActivityState,
+  AgentWorkHistoryProjection,
   AgentTimelineCommit,
   AgentTimelineItem,
   AgentTimelineItemKind,
@@ -19,7 +27,8 @@ export type {
   AgentTimelineSnapshot
 } from './types.js'
 
-export const MAX_AGENT_TIMELINE_ITEMS = 2 * MAX_TIMELINE_ITEMS_PER_WINDOW
+export const MAX_AGENT_TIMELINE_STATUS_ITEMS = MAX_TIMELINE_ITEMS_PER_WINDOW
+export const MAX_AGENT_TIMELINE_ITEMS = 3 * MAX_TIMELINE_ITEMS_PER_WINDOW
 const MAX_TIMELINE_MUTATION_BYTES = 128 * 1024
 const UTF8_ENCODER = new TextEncoder()
 // These three arrays are the sole runtime validation gate in `normalizeItem`. A plain
@@ -116,6 +125,33 @@ function acpTimelineItemId(
   ])
 }
 
+const DISPLAY_STATES: Record<AgentDisplayState, true> = {
+  starting: true, running: true, disconnected: true, working: true, waiting: true,
+  blocked: true, done: true, exited: true, error: true
+}
+const ACTIVITY_BOUNDARIES: Record<Extract<AgentActivityState, { boundary: string }>['boundary'], true> = {
+  exited: true, interrupted: true, lost: true, restored: true, 'history-gap': true
+}
+
+export function normalizeAgentActivityState(value: unknown): AgentActivityState {
+  const source = record(value)
+  const run = record(source.run)
+  const common = {
+    run: { runId: text(run.runId, 'Activity Run id') },
+    ...optionalField(source, 'previousObservationId', false)
+  }
+  if (source.state !== undefined && source.boundary === undefined &&
+    Object.hasOwn(DISPLAY_STATES, source.state as string)) {
+    return { ...common, state: source.state as AgentDisplayState,
+      ...(source.stateEnteredAt === undefined ? {} : { stateEnteredAt: timestamp(source.stateEnteredAt, 'Activity stateEnteredAt') }) }
+  }
+  if (source.state === undefined && source.boundary !== undefined &&
+    Object.hasOwn(ACTIVITY_BOUNDARIES, source.boundary as string)) {
+    return { ...common, boundary: source.boundary as Extract<AgentActivityState, { boundary: string }>['boundary'] }
+  }
+  throw new AgentMuxError('Activity state observation is invalid.', 'INVALID_AGENT_TIMELINE')
+}
+
 function normalizeItem(value: unknown): AgentTimelineItem {
   const source = record(value)
   if (!KINDS.includes(source.kind as AgentTimelineItemKind)) {
@@ -136,6 +172,9 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     throw new AgentMuxError('Timeline item authorHuman is invalid.', 'INVALID_AGENT_TIMELINE')
   }
   const authorAgent = optionalField(source, 'authorAgentSessionId')
+  if (source.activityState !== undefined && source.kind !== 'lifecycle') {
+    throw new AgentMuxError('Activity state requires a lifecycle item.', 'INVALID_AGENT_TIMELINE')
+  }
   return {
     id: text(source.id, 'Timeline item id'),
     agentSessionId: text(source.agentSessionId, 'Timeline Agent Session id'),
@@ -151,7 +190,8 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),
     ...optionalField(source, 'toolOutput'),
-    ...optionalField(source, 'eventName')
+    ...optionalField(source, 'eventName'),
+    ...(source.activityState === undefined ? {} : { activityState: normalizeAgentActivityState(source.activityState) })
   }
 }
 
@@ -215,8 +255,10 @@ export function normalizeAgentTimeline(
     throw new AgentMuxError('Agent Timeline exceeds its item limit.', 'AGENT_TIMELINE_LIMIT')
   }
   const normalized = values.map(normalizeItem)
-  const inputs = normalized.filter((item) => item.kind === 'user_message').length
-  if (inputs > MAX_TIMELINE_ITEMS_PER_WINDOW || normalized.length - inputs > MAX_TIMELINE_ITEMS_PER_WINDOW) {
+  const states = normalized.filter((item) => item.activityState !== undefined).length
+  const inputs = normalized.filter((item) => !item.activityState && item.kind === 'user_message').length
+  if (states > MAX_AGENT_TIMELINE_STATUS_ITEMS || inputs > MAX_TIMELINE_ITEMS_PER_WINDOW ||
+    normalized.length - inputs - states > MAX_TIMELINE_ITEMS_PER_WINDOW) {
     throw new AgentMuxError('Agent Timeline exceeds its retention window.', 'AGENT_TIMELINE_LIMIT')
   }
   return normalized.reduce<AgentTimelineItem[]>((items, item) => applyNormalizedTimelineMutation(items, normalizeAgentTimelineMutation({
@@ -286,4 +328,62 @@ export function agentTimelineMutationFromAcpEvent(
       ...(event.toolInput === undefined ? {} : { toolInput: event.toolInput })
     }
   })
+}
+
+/** Pure projection of the already bounded typed window. Reading never creates work facts. */
+export function projectAgentWorkHistory(
+  items: readonly AgentTimelineItem[],
+  options: {
+    now?: number
+    current?: { run: AgentMuxRunRef; processState: 'running' | 'exited' | 'interrupted' | 'unknown'; semanticStatus?: AgentStatus; available: boolean }
+  } = {}
+): AgentWorkHistoryProjection {
+  const observations = items.filter((item) => item.activityState !== undefined)
+  const byId = new Map(observations.map((item) => [item.id, item]))
+  const successors = new Map<string, AgentTimelineItem[]>()
+  const coverage = { recorded: observations.length > 0, truncated: false, gaps: false }
+  for (const item of observations) {
+    const previous = item.activityState!.previousObservationId
+    if (!previous) continue
+    if (!byId.has(previous)) { coverage.truncated = true; coverage.gaps = true }
+    const next = successors.get(previous) ?? []
+    next.push(item)
+    successors.set(previous, next)
+  }
+  const tails = observations.filter(item => !successors.has(item.id))
+  const uniqueTailId = tails.length === 1 ? tails[0]!.id : undefined
+  const segments: AgentWorkHistoryProjection['segments'] = []
+  for (const item of observations) {
+    const activity = item.activityState!
+    if ('boundary' in activity) {
+      if (activity.boundary === 'lost' || activity.boundary === 'history-gap') coverage.gaps = true
+      continue
+    }
+    if (activity.state !== 'working') continue
+    const segment: AgentWorkHistoryProjection['segments'][number] = {
+      run: { ...activity.run }, startAt: item.createdAt, endAt: null, end: 'unknown',
+      startKnown: activity.stateEnteredAt === item.createdAt
+    }
+    if (!segment.startKnown) coverage.gaps = true
+    const following = successors.get(item.id) ?? []
+    const next = following.length === 1 ? following[0] : undefined
+    if (next && next.createdAt > item.createdAt && next.activityState!.run.runId === activity.run.runId) {
+      const state = next.activityState!
+      segment.endAt = next.createdAt
+      segment.end = 'boundary' in state
+        ? state.boundary === 'exited' || state.boundary === 'interrupted' ? 'run-ended' : 'observation-gap'
+        : state.state !== 'working' ? 'state-change' : 'unknown'
+    } else if (!next && following.length === 0 && uniqueTailId === item.id &&
+      options.current?.available === true && options.current.processState === 'running' &&
+      options.current.run.runId === activity.run.runId && options.current.semanticStatus?.state === 'working' &&
+      activity.stateEnteredAt !== undefined && options.current.semanticStatus.stateEnteredAt === activity.stateEnteredAt &&
+      options.now !== undefined && Number.isSafeInteger(options.now) && options.now >= item.createdAt &&
+      !semanticStatusStale(options.current.semanticStatus, options.now)) {
+      segment.endAt = options.now
+      segment.end = 'current'
+    }
+    if (segment.end === 'unknown' || segment.end === 'observation-gap') coverage.gaps = true
+    segments.push(segment)
+  }
+  return { segments, coverage }
 }
