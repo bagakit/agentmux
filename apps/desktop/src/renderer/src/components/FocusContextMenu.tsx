@@ -1,6 +1,6 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import { useRef, type ReactNode } from 'react'
-import { Pencil } from 'lucide-react'
+import { Pencil, Square } from 'lucide-react'
 import type { FocusContext } from '../lib/focus-context'
 import { agentRosterMenuActions } from '../lib/agent-roster-menu'
 import { resolveAgentSharingMetadata } from '../lib/agent-sharing-metadata'
@@ -8,6 +8,7 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { useAppStore } from '../store'
 import { RegionMenuEntryView } from './RegionContextMenu'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+import { useFocusStopAgent } from './FocusStopAgent'
 
 /** A Context card knows its semantic SID, not which of its Regions to address. */
 export function FocusContextMenu({ context, children, onOpenChange, onRename, onRestoreFocus }: {
@@ -15,11 +16,13 @@ export function FocusContextMenu({ context, children, onOpenChange, onRename, on
 }) {
   const sessionId = context.id
   const actionOwnsFocus = useRef(false)
+  const origin = useRef<HTMLElement | null>(null)
+  const stop = useFocusStopAgent()
   const actions = agentRosterMenuActions({ sessionId, sharingMetadata: () => resolveAgentSharingMetadata(sessionId, useAppStore.getState()), writeClipboardText: async text => {
     await copyTextToClipboard(text, error => useAppStore.getState().reportError(error))
   } })
-  return <ContextMenu.Root modal={false} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>
-    <ContextMenu.Trigger asChild onKeyDown={event => {
+  return <><ContextMenu.Root modal={false} onOpenChange={open => { if (open) actionOwnsFocus.current = false; onOpenChange(open) }}>
+    <ContextMenu.Trigger asChild onContextMenu={event => { origin.current = event.currentTarget }} onKeyDown={event => {
       if (event.key !== 'ContextMenu' && !(event.key === 'F10' && event.shiftKey)) return
       event.preventDefault()
       const rect = event.currentTarget.getBoundingClientRect()
@@ -39,7 +42,9 @@ export function FocusContextMenu({ context, children, onOpenChange, onRename, on
         <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRename() }}><Pencil size={14} /><span>Rename Agent</span></ContextMenu.Item>
         <ContextMenu.Separator className="tab-context-menu__separator" />
         {actions.filter(action => action.key === 'copy-session').map((action, index) => <RegionMenuEntryView key={action.key} entry={{ kind: 'action', action }} index={index} Item={ContextMenu.Item} Separator={ContextMenu.Separator} />)}
+        <ContextMenu.Separator className="tab-context-menu__separator" />
+        <ContextMenu.Item className="tab-context-menu__item" onSelect={() => { actionOwnsFocus.current = true; onRestoreFocus(); stop.requestStop(sessionId, context.name, origin.current) }}><Square size={14} /><span>Stop Agent</span></ContextMenu.Item>
       </ContextMenu.Content>
     </ContextMenu.Portal>
-  </ContextMenu.Root>
+  </ContextMenu.Root>{stop.dialog}</>
 }

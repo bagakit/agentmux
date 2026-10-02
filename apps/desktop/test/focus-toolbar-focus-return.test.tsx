@@ -13,7 +13,7 @@ vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((select
 import { FocusToolbar } from '../src/renderer/src/components/FocusToolbar'
 
 const selected: FocusContext = {
-  id: 'original-context', name: 'Original Focus context', detail: 'Review the original request', state: 'blocked', stateLabel: 'Blocked',
+  id: 'original-context', name: 'Original Focus context', detail: 'Review the original request', recap: null, detailIsRecap: false, state: 'blocked', stateLabel: 'Blocked',
   bucket: 'attention', kind: 'agent', providerId: null, hostId: 'local', topicId: null, workspaceId: 'original-workspace',
   workspaceName: 'Original workspace', workspacePath: _hygiene_fixturePath("fixture/original"), workspace: undefined,
   liveAgent: true, actionable: true, lastActivityAt: null, processState: 'running', runId: 'original-run', workingEnteredAt: null
