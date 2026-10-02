@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { app, BrowserWindow, ipcMain } from 'electron'
 import { AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { RuntimeController } from '../../../src/main/runtime-controller'
 import { connectDesktopAgentMuxHost } from '../../../src/main/desktop-host'
 import { runRemoteTerminalReadingProof } from '../../remote-terminal-reading-proof.mjs'
@@ -37,6 +38,8 @@ const store = new AgentMuxFileAgentSessionStore(path.join(privateRoot, 'agent-se
 process.env.AGENTMUX_AGENT_SESSION_STORE = store.path
 const runtime = new RuntimeController(store, connectDesktopAgentMuxHost)
 let win: BrowserWindow, snapshotCalls = 0
+const spatial = new AgentMuxSpatialStateStore(path.join(privateRoot, 'spatial-state.json'))
+let disposeSpatial: (() => void) | undefined
 let localHealth: any
 const calls: { operation: string; args: unknown[] }[] = []
 const result: Record<string, any> = { passed: false, phase, pid: process.pid, controlledRemoteObservation: warning, userAppRunTouched: false }
@@ -61,6 +64,8 @@ ipcMain.handle('remote-proof:request', async (_event, operation, ...args) => {
   switch (operation) {
     case 'setup': return { phase, config, recovery: Boolean(recoveryInput), terminalReading: recoveryInput?.terminalReading,
       splitTerminal: recoveryInput?.splitTerminal, identity: phase === 'restore' ? JSON.parse(await fs.readFile(path.join(privateRoot, 'identity.json'), 'utf8')) : recoveryInput?.identity ?? null }
+    case 'spatial-read': return spatial.read()
+    case 'spatial-commit': return spatial.commit(args[0])
     case 'launch': return runtime.launchAgent({ hostId: 'local', executorId: 'codex', workspacePath: config.workspaces[0].path }, localConfig as any)
     case 'snapshot': snapshotCalls++; return recoveryInput ? runtime.snapshot(runtimeConfig) : { ...await runtime.snapshot(runtimeConfig as any), runtimeEndpointWarnings: [warning] }
     case 'attach': return runtime.attachSession(win.webContents.id, args[0], args[1], runtimeConfig as any)
@@ -105,7 +110,9 @@ app.whenReady().then(async () => {
     do { const value = await win.webContents.executeJavaScript(expression); if (value) return value; await delay(35) } while (Date.now() < end)
     throw Error(`Private native observation timed out: ${expression}`)
   }
-  const state = () => win.webContents.executeJavaScript('window.remoteState()')
+  // Capture the same JSON facts stored in receipts and the Core graph resource metadata.
+  // Optional absent fields must not differ solely because structured-clone retains undefined.
+  const state = async () => JSON.parse(JSON.stringify(await win.webContents.executeJavaScript('window.remoteState()')))
   const capture = async (file: string) => {
     await win.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
     await delay(350)
@@ -113,6 +120,12 @@ app.whenReady().then(async () => {
   }
   try {
     await stage('prepare')
+    result.coreSpatialBefore = await spatial.read()
+    if (phase === 'restore') {
+      const saved = JSON.parse(await fs.readFile(path.join(privateRoot, 'expected-spatial.json'), 'utf8'))
+      assert.ok(result.coreSpatialBefore && result.coreSpatialBefore.graph.tabs.length > 0, 'Original nonempty Core spatial state must precede Renderer recovery')
+      assert.deepEqual(result.coreSpatialBefore, saved, 'The original Core document survives the ordinary process boundary')
+    }
     runtime.commit(await runtime.prepare(runtimeConfig as any))
     if (recoveryInput?.localHealth) {
       const localClient = runtime.rpcClients().find(item => item.hostId === 'local')!.client
@@ -137,6 +150,9 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 1280, height: 850, show: false,
       webPreferences: { contextIsolation: true, sandbox: true, backgroundThrottling: false, preload } })
     runtime.attach(win.webContents)
+    disposeSpatial = spatial.subscribe(state => {
+      if (!win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('remote-proof:spatial-changed', state)
+    })
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer: ${message}\n`) })
     await win.loadFile(html)
     // A hidden macOS window can report a fully laid-out DOM while capturing an
@@ -304,6 +320,16 @@ app.whenReady().then(async () => {
     result.saved = await state()
     if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected.json'), JSON.stringify(result.saved))
     await win.webContents.executeJavaScript('window.remoteFlush()')
+    result.coreSpatialSaved = await spatial.read()
+    assert.ok(result.coreSpatialSaved && result.coreSpatialSaved.graph.tabs.length > 0, 'The workbench is saved by the actual Core filesystem owner')
+    const savedTabIds = result.coreSpatialSaved.graph.tabs.map((tab: any) => tab.tabId).sort()
+    assert.deepEqual(savedTabIds, Object.keys(result.saved.tabs).sort(), 'Core durable identities match the original nonempty workbench')
+    for (const tab of Object.values(result.saved.tabs) as any[]) for (const region of Object.values(tab.regions) as any[]) {
+      const fact = result.coreSpatialSaved.graph.regions.find((item: any) => item.regionId === region.regionId)
+      assert.ok(fact, 'The original Region is persisted by Core')
+      if (region.kind === 'agent') assert.equal(fact.agentSessionId, region.sessionId, 'Persisting a Region cannot replace its AgentSession')
+    }
+    if (phase === 'seed') await fs.writeFile(path.join(privateRoot, 'expected-spatial.json'), JSON.stringify(result.coreSpatialSaved))
     result.calls = calls
     result.passed = true
   } catch (error: any) {
@@ -311,6 +337,7 @@ app.whenReady().then(async () => {
     if (win && !win.isDestroyed()) result.observationAtFailure = await state().catch(() => null)
   } finally {
     await stage('dispose')
+    disposeSpatial?.()
     await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
     await runtime.dispose().catch(error => { result.cleanupFailure = String(error); result.passed = false })
     await fs.writeFile(path.join(evidence, `${phase}.json`), JSON.stringify(result, null, 2))
