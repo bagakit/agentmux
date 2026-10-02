@@ -328,6 +328,14 @@ export function WorkspaceAgentsTool({
   )
 }
 
+function ConnectedWorkspaceAgentsTool({ workspace, onOpen }: {
+  workspace: WorkspaceRecord
+  onOpen(sessionId: string): void
+}) {
+  const sessions = useAppStore((state) => state.sessions)
+  return <WorkspaceAgentsTool workspace={workspace} sessions={sessions} onOpen={onOpen} />
+}
+
 export function SurfaceToolDock({
   workspace,
   visible = true
@@ -342,7 +350,6 @@ export function SurfaceToolDock({
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
   const openLauncher = useAppStore((state) => state.openLauncher)
   const selectSession = useAppStore((state) => state.selectSession)
-  const sessions = useAppStore((state) => state.sessions)
   const fileEditingProbe = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
   // Scratch is a wiki-first workspace: the content slot keeps its `files-branches` role but is
@@ -405,9 +412,8 @@ export function SurfaceToolDock({
           <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} visible={visible} />
         ) : null}
         {effectiveWorkspaceTool === 'agents' && workspace ? (
-          <WorkspaceAgentsTool
+          <ConnectedWorkspaceAgentsTool
             workspace={workspace}
-            sessions={sessions}
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}
           />
         ) : null}

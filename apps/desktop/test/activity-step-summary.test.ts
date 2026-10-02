@@ -1,5 +1,5 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import {
   MAX_STEP_SUMMARY_LENGTH,
   clampStep,
@@ -272,11 +272,11 @@ describe('按字素簇切，不吐半个字符', () => {
   })
 
   it('单个簇就超预算时有界退化成一个省略号，而不是原样吐回整串', () => {
-    // 两处 `?? value.length` 兜底是承重的，不是防御性写法：换成 `?? 0`，尾切会返回整串 65 个码元，
-    // 超上界 17 格。基字母加 60 个组合重音是一个字素簇，比预算宽——这条既钉住下界，也钉住兜底。
+    // 基字母加 60 个组合重音是一个字素簇，比预算宽；不许保留一截组合重音或吐回整串。
     const oneHugeCluster = `xxxe${'́'.repeat(60)}`
     expect(oneHugeCluster.length).toBeGreaterThan(MAX_STEP_SUMMARY_LENGTH)
     expect(clampStep(oneHugeCluster, 'tail')).toBe('…')
+    expect(clampStep(`e${'́'.repeat(60)}xxx`, 'head')).toBe('…')
   })
 
   it('经由 stepSummary 的真实路径也不吐半个字符', () => {
@@ -286,6 +286,64 @@ describe('按字素簇切，不吐半个字符', () => {
     const out = stepSummary('Edit', JSON.stringify({ file_path: path }))!
     expect(hasLoneSurrogate(out), `真实路径吐出孤立代理项：${JSON.stringify(out)}`).toBe(false)
     expect(out).toContain('rocket.ts')
+  })
+})
+
+describe('短摘要只物化切点所需的字素', () => {
+  function countSegments(run: () => void) {
+    const counts = { iterator: 0, containing: 0 }
+    const original = Intl.Segmenter.prototype.segment
+    const spy = vi.spyOn(Intl.Segmenter.prototype, 'segment').mockImplementation(function (this: Intl.Segmenter, input: string) {
+      const segments = original.call(this, input)
+      return {
+        containing(index: number) {
+          const cluster = segments.containing(index)
+          if (cluster) counts.containing += 1
+          return cluster
+        },
+        *[Symbol.iterator]() {
+          for (const cluster of segments) {
+            counts.iterator += 1
+            yield cluster
+          }
+        }
+      }
+    })
+    try {
+      run()
+      return counts
+    } finally {
+      spy.mockRestore()
+    }
+  }
+
+  it('长命令经生产 stepTitle 只迭代预算需要的前缀', () => {
+    const command = 'x'.repeat(20_000)
+    const counts = countSegments(() => {
+      expect(stepTitle('Bash', 'Bash', JSON.stringify({ command })))
+        .toBe(`Bash ${'x'.repeat(MAX_STEP_SUMMARY_LENGTH - 6)}…`)
+    })
+    expect(counts.iterator).toBeGreaterThan(0)
+    expect(counts.iterator).toBeLessThanOrEqual(MAX_STEP_SUMMARY_LENGTH)
+    expect(counts.containing).toBe(0)
+  })
+
+  it('长路径只物化保留的尾部簇，不从头构造全文分段', () => {
+    const path = `${'x'.repeat(20_000)}👨‍👩‍👧🚀e\u0301.ts`
+    const counts = countSegments(() => {
+      expect(clampStep(path, 'tail')).toBe(`…${'x'.repeat(32)}👨‍👩‍👧🚀e\u0301.ts`)
+    })
+    expect(counts.iterator).toBe(0)
+    expect(counts.containing).toBeGreaterThan(0)
+    expect(counts.containing).toBeLessThanOrEqual(MAX_STEP_SUMMARY_LENGTH)
+  })
+
+  it.each([1, 0, -1])('预算 %i 仍保留原有空串和省略号行为', (limit) => {
+    for (const keep of ['head', 'tail'] as const) {
+      expect(clampStep('ab', keep, limit)).toBe('…')
+      expect(clampStep('', keep, limit)).toBe(limit < 0 ? '…' : '')
+      if (limit === 1) expect(clampStep('a', keep, limit)).toBe('a')
+    }
   })
 })
 
