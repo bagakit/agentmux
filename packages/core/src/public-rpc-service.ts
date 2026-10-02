@@ -776,7 +776,7 @@ export class AgentMuxRpcService {
         let attached: Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>> | undefined
         cleanup = async () => { if (attached) await attached.close() }
         attached = await owner.client.observeAgentOutput(owner.agentSessionId, cursor, event => {
-          if (event.type === 'agent-error') { void emit({ type: 'error', error: { code: event.code, message: event.message } }); return }
+          if (event.type === 'agent-error') { void emit({ type: 'error', error: { code: event.code, message: event.message, evidence: event.evidence } }); return }
           if (params.follow === true) ordered.accept(event)
         })
         if (attached.session.run.runId !== runId || attached.attachment.run.runId !== runId) {

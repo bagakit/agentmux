@@ -18,6 +18,7 @@ import { decodeHostedValue, parseHostedRuntimeOwnerIdentity, parseHostedTransfer
 import { AGENTMUX_HOSTED_RPC_METHODS, type AgentMuxRuntimeFence } from './hosted-client-contract.js'
 import { parseTerminalContinuation } from './terminal-continuation.js'
 import { parseRpcControlFailure } from './public-rpc-frame.js'
+import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, isAgentMuxRpcStream,
   type AgentMuxRpcEndpoint, type AgentMuxRpcCredentials, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
@@ -188,10 +189,16 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   if (event.type === 'end') { rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR'); return event }
   if (event.type === 'error') {
     rpcRecord(event, ['type', 'error'], 'CONTROL_PROTOCOL_ERROR')
-    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure'], 'CONTROL_PROTOCOL_ERROR')
+    const error = rpcRecord(event.error, ['code', 'message', 'detail', 'details', 'candidates', 'controlFailure', 'evidence'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof error.code !== 'string' || !error.code || typeof error.message !== 'string' ||
       error.detail !== undefined && typeof error.detail !== 'string') throw new AgentMuxError('Invalid reader error.', 'CONTROL_PROTOCOL_ERROR')
     if (error.controlFailure !== undefined) parseRpcControlFailure(error.controlFailure)
+    if (error.evidence !== undefined) {
+      const evidence = parseOutputGapEvidence(error.evidence)
+      if (method === 'agent.output' && evidence.run && evidence.run.runId !== (initial as import('./public-rpc.js').AgentMuxRpcOutputInitial).run.runId) {
+        throw new AgentMuxError('Output diagnostic belongs to another Run.', 'CONTROL_PROTOCOL_ERROR')
+      }
+    }
     return event
   }
   rpcRecord(event, ['type', 'data'], 'CONTROL_PROTOCOL_ERROR')

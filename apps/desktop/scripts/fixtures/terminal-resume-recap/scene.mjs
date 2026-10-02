@@ -13,6 +13,9 @@ import { listProbeProcesses, stopProbeProcesses } from '../../probe-process.mjs'
 // triggered from its real Region button; private home is isolated before startup.
 const repositoryRoot = resolve(import.meta.dirname, '../../../../..'), desktopRoot = join(repositoryRoot, 'apps/desktop')
 const require = createRequire(join(desktopRoot, 'package.json')), exec = promisify(execFile)
+const p22Qualification = process.env.AGENTMUX_VERIFY_P22_SCENE === '1'
+const mainIntegrationScene = process.env.AGENTMUX_VERIFY_P22_MAIN_SCENE === '1'
+assert.ok(!mainIntegrationScene || p22Qualification, 'The Main integration scene requires the private p22 scene')
 // Reuse the maintained WebSocket transport already supplied by the desktop test
 // dependency. Large compiled Renderer script bodies must survive CDP frames.
 const WebSocket = createRequire(require.resolve('happy-dom'))('ws')
@@ -23,9 +26,13 @@ const socketPath = join(runtimeDirectory, 'ctxmux.sock'), deadline = Date.now() 
 const fixtureEnvironment = { HOME: home, AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_RUNTIME_DIRECTORY: runtimeDirectory,
   AGENTMUX_STATE_DIRECTORY: join(runtimeDirectory, 'state'),
   AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'), CODEX_HOME: join(home, 'codex') }
+const spatialStatePath = join(runtimeDirectory, 'state', 'spatial-state.json')
+if (mainIntegrationScene) fixtureEnvironment.AGENTMUX_SPATIAL_STATE_STORE = spatialStatePath
 const environmentBefore = new Map(Object.keys(fixtureEnvironment).map(key => [key, process.env[key]]))
 const cwdEnv = { ...process.env, ...fixtureEnvironment }
 for (const key of Object.keys(cwdEnv)) if (key.startsWith('AGENTMUX_') && !Object.hasOwn(fixtureEnvironment, key)) delete cwdEnv[key]
+// A hosting Node process can inherit this Electron switch; the probe launches a GUI.
+delete cwdEnv.ELECTRON_RUN_AS_NODE
 Object.assign(process.env, fixtureEnvironment)
 const { CtxmuxClient } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')))
 const { connectLocalAgentMux, AgentMuxFileAgentSessionStore, connectAgentMuxRpc, agentPromptCondition } = await import(pathToFileURL(join(repositoryRoot, 'packages/core/dist/index.js')))
@@ -82,6 +89,12 @@ function durableWorkbench(observation) {
       : region)
   })) }
 }
+function persistedPresentation(state) {
+  if (mainIntegrationScene) return { workbenchSpaceSelection: state.workbenchSpaceSelection,
+    retainedSpatialFocus: state.retainedSpatialFocus, agentComposerDrafts: state.agentComposerDrafts }
+  return { restoredWorkbench: state.restoredWorkbench, workbenchSpaceSelection: state.workbenchSpaceSelection,
+    retainedSpatialFocus: state.retainedSpatialFocus, agentComposerDrafts: state.agentComposerDrafts }
+}
 async function launch(label) {
   phase = `launch-${label}`
   const child = spawn(require('electron'), ['--inspect-brk=0', join(desktopRoot, 'out/main/index.js'), '--remote-debugging-port=0'], {
@@ -105,12 +118,106 @@ async function launch(label) {
   const frame = paused.callFrames[0]
   const mainUrls=[mainPath,pathToFileURL(mainPath).href]
   assert.ok(main.scripts.size>0,'Initial debugger script observations must be nonempty')
-  assert.ok(!mainUrls.some(url=>main.scripts.has(url)),'Private home is isolated before compiled Main is loaded')
+  const parsedMainId = mainUrls.map(url=>main.scripts.get(url)).find(Boolean)
+  const beforeHomeRead = !parsedMainId || frame.location.scriptId === parsedMainId && frame.location.lineNumber < anchors[0] ||
+    paused.reason === 'Break on start' && frame.location.lineNumber === 0
+  // ESM dependencies can be parsed before the first instruction executes.
+  // Also observe the exact home-read barrier below before allowing that fact.
+  receipt.startupIsolation ??= []
+  const isolation = {label,reason:paused.reason,parsedMain:Boolean(parsedMainId),parsedMainId,frame:frame.location,
+    pausedScript:[...main.scripts].find(([,id])=>id===frame.location.scriptId)?.[0],
+    firstHomeReadLine:anchors[0],beforeHomeRead}
+  receipt.startupIsolation.push(isolation)
+  assert.ok(beforeHomeRead,'Private home must be isolated before Main executes its first home-dependent fact')
   const isolated = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
-    expression: `(() => { const app=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app; app.setPath('home',${JSON.stringify(home)}); return app.getPath('home') })()`, returnByValue: true })
+    expression: `(() => { const app=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app; app.setPath('userData',${JSON.stringify(userData)}); app.setPath('home',${JSON.stringify(home)}); return app.getPath('home') })()`, returnByValue: true })
   assert.equal(isolated.exceptionDetails, undefined); assert.equal(isolated.result.value, home)
+  const exactMainUrl = `^(?:file://)?${mainPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`
+  const homeBreakpoint = await main.call('Debugger.setBreakpointByUrl', {urlRegex:exactMainUrl,lineNumber:anchors[0]})
   await main.call('Debugger.resume')
   const probe = { child, main, label, diagnostics: () => diagnostics }; probes.push(probe); active = probe
+  const homePause = await waitFor('first real Main home-read barrier', async () => {
+    alive()
+    while (main.pauses.length) {
+      const pause = main.pauses.shift()
+      if (pause.hitBreakpoints?.includes(homeBreakpoint.breakpointId)) return pause
+      await main.call('Debugger.resume')
+    }
+    return null
+  })
+  const homeAtBarrier = await main.call('Debugger.evaluateOnCallFrame', {callFrameId:homePause.callFrames[0].callFrameId,
+    expression:`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').app.getPath('home')`,returnByValue:true})
+  assert.equal(homeAtBarrier.exceptionDetails,undefined);assert.equal(homeAtBarrier.result.value,home)
+  isolation.homeReadBarrier={location:homePause.callFrames[0].location,actualHome:homeAtBarrier.result.value}
+  if (mainIntegrationScene) {
+    // Observe the real Core file read before startup. The original I/O promises,
+    // values and failures are returned unchanged; this never seeds spatial data.
+    const spatialObserver = `(() => {
+      const fs = process.getBuiltinModule('fs/promises');
+      const record = globalThis.__privateP22SpatialTrace = { path: ${JSON.stringify(spatialStatePath)}, sequence: 0, reads: [], writes: [] };
+      const readFile = fs.readFile, rename = fs.rename;
+      fs.readFile = function(path) {
+        const result = readFile.apply(this, arguments);
+        if (path === record.path && record.reads.length < 8) {
+          const read = { sequence: ++record.sequence }; record.reads.push(read);
+          void result.then(value => { read.raw = typeof value === 'string' ? value : value.toString('utf8'); },
+            error => { read.error = { code: error.code, message: error.message }; });
+        }
+        return result;
+      };
+      fs.rename = function(from, to) {
+        const result = rename.apply(this, arguments);
+        if (to === record.path && record.writes.length < 8) record.writes.push({ sequence: ++record.sequence });
+        return result;
+      };
+      process.getBuiltinModule('module').syncBuiltinESMExports();
+      return true;
+    })()`
+    const registration = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: homePause.callFrames[0].callFrameId,
+      expression: spatialObserver, returnByValue: true })
+    assert.equal(registration.exceptionDetails, undefined); assert.equal(registration.result.value, true)
+    probe.spatialObserverSha256 = hash(Buffer.from(spatialObserver))
+  }
+  if (p22Qualification) {
+    const trace = `(() => {
+      const record = window.__privateP22StorageTrace = { sequence: 0, reads: [], writes: [] };
+      const getItem = Storage.prototype.getItem, setItem = Storage.prototype.setItem;
+      Storage.prototype.getItem = function(name) {
+        const value = getItem.apply(this, arguments);
+        if (name === 'agentmux-workbench-v1' && this === window.localStorage) {
+          const sequence = ++record.sequence;
+          if (record.reads.length < 8) record.reads.push({ sequence, raw: value });
+        }
+        return value;
+      };
+      Storage.prototype.setItem = function(name, value) {
+        const result = setItem.apply(this, arguments);
+        if (name === 'agentmux-workbench-v1' && this === window.localStorage && record.writes.length < 8) record.writes.push({ sequence: ++record.sequence });
+        return result;
+      };
+    })()`
+    const observerPath=join(root,'observe-workbench.cjs')
+    const observer=`require('electron').contextBridge.executeInMainWorld({func:${trace.slice(0,-2)}});\n`
+    await writeFile(observerPath,observer)
+    // Session frame preloads run before the product preload and its real Store.
+    // This read observer adds no navigation, data seed or loadFile interposition.
+    const registration = await main.call('Debugger.evaluateOnCallFrame', {callFrameId:homePause.callFrames[0].callFrameId,
+      expression:`(() => {
+        const {app,session,BrowserWindow}=process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron');
+        app.whenReady().then(()=>{
+          if(BrowserWindow.getAllWindows().length!==0)throw Error('Observer registration must precede the first product window');
+          if(app.getPath('userData')!==${JSON.stringify(userData)})throw Error('Observer Session must use the private userData');
+          const id=session.defaultSession.registerPreloadScript({type:'frame',filePath:${JSON.stringify(observerPath)}});
+          globalThis.__privateP22PreloadRegistration={scriptIdentifier:id,observerPath:${JSON.stringify(observerPath)},registeredBeforeFirstWindow:true};
+        });
+        return true;
+      })()`,returnByValue:true})
+    assert.equal(registration.exceptionDetails,undefined);assert.equal(registration.result.value,true)
+    probe.traceSha256=hash(Buffer.from(trace))
+    probe.observerSha256=hash(Buffer.from(observer))
+  }
+  await main.call('Debugger.removeBreakpoint',{breakpointId:homeBreakpoint.breakpointId})
+  await main.call('Debugger.resume')
   const endpoint = new URL(await waitFor('Renderer debugger', async () => {
     alive()
     // Electron pauses its bootstrap and then the application entry for inspect-brk.
@@ -118,14 +225,52 @@ async function launch(label) {
     while(main.pauses.length){main.pauses.shift();await main.call('Debugger.resume')}
     return rendererUrl
   }))
-  const page = await waitFor('real loaded Renderer', async () => { alive(); return (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(row => row.type === 'page' && row.url.startsWith('file:')) })
-  probe.cdp = await cdpConnect(page.webSocketDebuggerUrl); await probe.cdp.call('Runtime.enable'); await probe.cdp.call('Debugger.enable')
+  const page = await waitFor('real loaded Renderer', async () => { alive(); return (await (await fetch(`http://${endpoint.host}/json/list`,{signal:AbortSignal.timeout(5000)})).json()).find(row => row.type === 'page' && row.url.startsWith('file:')) })
+  probe.cdp ??= await cdpConnect(page.webSocketDebuggerUrl); await probe.cdp.call('Runtime.enable'); await probe.cdp.call('Debugger.enable')
   await waitFor('public IPC and loaded Store', () => probe.cdp.evaluate('Boolean(window.agentmux && document.querySelector(".window-status-bar"))'))
   await waitFor('actual client readiness', async () => { try { const value = await observe(); return !value.workbench.loading ? value : null } catch (error) { alive(); receipt.readinessError = { message: error.message, code: error.code }; if (error instanceof TypeError) throw error; return null } })
   assert.equal(await probe.cdp.evaluate('(async()=>(await window.agentmux.sessions.snapshot()).localHome)()'), home)
   const loadedMainUrl=mainUrls.find(url=>main.scripts.has(url));assert.ok(loadedMainUrl,'Actual compiled Main must have loaded')
   const loadedMain=await main.call('Debugger.getScriptSource',{scriptId:main.scripts.get(loadedMainUrl)})
   assert.ok(loadedMain.scriptSource.includes(await readFile(mainPath,'utf8')),'Actual loaded Main must contain exact compiled bytes')
+  if (p22Qualification) {
+    probe.preLoadTrace=await main.evaluate('globalThis.__privateP22PreloadRegistration')
+    assert.equal(probe.preLoadTrace?.registeredBeforeFirstWindow,true)
+    assert.ok(probe.preLoadTrace.scriptIdentifier)
+    probe.preLoadTrace.scriptSha256=probe.traceSha256
+    probe.preLoadTrace.observerSha256=probe.observerSha256
+    probe.firstHydration = await probe.cdp.evaluate('window.__privateP22StorageTrace')
+    assert.ok(probe.firstHydration?.reads.length > 0, 'The real startup must read durable workbench storage')
+    if (label === 'after') {
+      const first = probe.firstHydration.reads[0]
+      assert.ok(first.raw, 'The second process must read its nonempty saved workbench before fixture actions')
+      assert.ok(probe.firstHydration.writes.every(write => write.sequence > first.sequence), 'No write may precede the first durable read')
+      const persisted = JSON.parse(first.raw)
+      if (!mainIntegrationScene) {
+        assert.ok(Object.keys(persisted.state.restoredWorkbench.tabs).length > 0, 'The original durable Tabs cannot be empty')
+        assert.ok(Object.keys(persisted.state.restoredWorkbench.layouts).length > 0, 'The original durable Tab Groups cannot be empty')
+      }
+      assert.ok(Object.keys(persisted.state.agentComposerDrafts).length > 0, 'The original durable draft cannot be empty')
+      receipt.firstHydration = { ...probe.preLoadTrace, ...probe.firstHydration, persisted }
+      assert.deepEqual(persistedPresentation(persisted.state), receipt.persistedBefore.presentation, 'First hydrate must consume the first process durable workbench, including focus and draft')
+    }
+  }
+  if (mainIntegrationScene) {
+    probe.spatialHydration = await main.evaluate('globalThis.__privateP22SpatialTrace')
+    assert.equal(probe.spatialHydration.path, spatialStatePath)
+    assert.ok(probe.spatialHydration.reads.length > 0, 'Ordinary startup must read the private Core spatial document')
+    if (label === 'after') {
+      const first = probe.spatialHydration.reads[0]
+      assert.ok(first.raw, 'The second process must first read the nonempty spatial document saved by the first process')
+      assert.ok(probe.spatialHydration.writes.every(write => write.sequence > first.sequence), 'No spatial write may precede the first Core read')
+      const state = JSON.parse(first.raw)
+      assert.deepEqual(state, receipt.spatialBefore.state, 'First Core read must consume the first process exact durable spatial state')
+      const current = await probe.cdp.evaluate('window.agentmux.spatial.read()')
+      assert.deepEqual(current.graph, state.graph, 'The public spatial API must retain the first Core graph')
+      receipt.firstSpatialHydration = { observerSha256: probe.spatialObserverSha256, ...probe.spatialHydration,
+        state, publicState: current, rawSha256: hash(Buffer.from(first.raw)) }
+    }
+  }
   return probe
 }
 async function quit(probe, cleanup = false) {
@@ -205,6 +350,7 @@ try {
  let daemonDiagnostic=''
  daemon=spawn(join(repositoryRoot,'packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),['--socket',socketPath,'--state-dir',stateDirectory],{detached:true,stdio:['ignore','ignore','pipe']});children.add(daemon);daemon.stderr.on('data',bytes=>{daemonDiagnostic=(daemonDiagnostic+bytes.toString()).slice(-16384)});await own(daemon.pid)
  sdk=new CtxmuxClient({socketPath});receipt.runtime=await waitFor('private native Runtime',async()=>{if(daemon.exitCode!==null||daemon.signalCode!==null)throw new Error(daemonDiagnostic);try{return await sdk.runtimeInfo()}catch{return null}})
+ if(p22Qualification)assert.equal(receipt.runtime.protocolGeneration,22)
  const executable=join(root,'private-agent.sh'),writer=join(root,'private-writer.sh')
  await writeFile(executable,"#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'codex-cli 0.159.2'; exit 0; fi\nstty -echo -icanon\nprintf 'Private Agent ready\\r\\n'\nexec /bin/cat\n",{mode:0o700})
  await writeFile(writer,`#!/bin/sh\nif [ "$1" = --version ]; then echo 'codex-cli 0.159.2'; exit 0; fi\nfor arg in "$@"; do if [ "$arg" = resume ]; then sleep 3; break; fi; done\nexec ${quote(process.execPath)} ${quote(join(repositoryRoot,'packages/core/test/fixtures/fake-codex-cli.mjs'))} "$@"\n`,{mode:0o700})
@@ -257,11 +403,11 @@ try {
  const restored=await control('agent.open',{content:{kind:'agent-session',agentSessionId:saved.agentSessionId},destination:{regionId:healthyRegion.regionId,split:'right'},focus:true});assert.equal(restored.outcome,'opened');savedRegion=restored.to
  await control('agent.view',{agentSessionId:saved.agentSessionId,mode:'terminal'})
  await size(1320,820);receipt.ready=await recap(savedRegion.regionId,'下一步核对');assert.equal(receipt.ready.title,'Ready to restore');assert.ok(receipt.ready.text.includes('Captured conversation'));receipt.screenshotNormal=await screenshot('normal-ready')
- await size(920,520);receipt.narrow=await recap(savedRegion.regionId,'下一步核对');receipt.screenshotNarrow=await screenshot('narrow-long-recap')
+ if(!p22Qualification){await size(920,520);receipt.narrow=await recap(savedRegion.regionId,'下一步核对');receipt.screenshotNarrow=await screenshot('narrow-long-recap')}
  assert.ok(savedRegion.spaceId,'The real private Space must exist')
  const newTab=await control('agent.open',{content:{kind:'agent-session',agentSessionId:empty.agentSessionId},destination:{spaceId:savedRegion.spaceId,newTab:true},focus:true});assert.equal(newTab.outcome,'opened')
  await control('agent.view',{agentSessionId:empty.agentSessionId,mode:'terminal'})
- receipt.empty=await waitFor('honest unavailable recap',()=>active.cdp.evaluate(`(()=>{const e=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(newTab.to.regionId)}+'"] .session-recap');return e&&e.dataset.recapState!=='loading'?{text:e.textContent,state:e.dataset.recapState}:null})()`));assert.notEqual(receipt.empty.state,'ready');receipt.screenshotEmpty=await screenshot('unavailable-recap')
+ receipt.empty=await waitFor('honest unavailable recap',()=>active.cdp.evaluate(`(()=>{const e=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(newTab.to.regionId)}+'"] .session-recap');return e&&e.dataset.recapState!=='loading'?{text:e.textContent,state:e.dataset.recapState}:null})()`));assert.notEqual(receipt.empty.state,'ready');if(!p22Qualification)receipt.screenshotEmpty=await screenshot('unavailable-recap')
  await control('app.focus',{target:{kind:'space',regionId:savedRegion.regionId},inputPolicy:'preserve'});await size(1320,820)
  // A real draft is entered through the product's controlled input and survives quit/relaunch.
  const draft='UNSENT RECAP RECOVERY DRAFT'
@@ -270,20 +416,77 @@ try {
  receipt.draftBefore=await waitFor('actual ProseMirror draft input',()=>active.cdp.evaluate(`document.querySelector(${JSON.stringify(composerSelector)})?.textContent===${JSON.stringify(draft)}?${JSON.stringify(draft)}:null`));assert.equal(receipt.draftBefore,draft)
  receipt.inputBefore=await healthyInput(healthyRegion.regionId,agent.run.runId,'PRIVATE_RECAP_HEALTHY_BEFORE')
  receipt.before=await observe();receipt.loadedBefore=await loadedRenderer();const healthyBefore=await sdk.status(agent.run.runId)
- receipt.firstQuit=await quit(active);await launch('after');receipt.after=await observe();assert.notEqual(receipt.before.main.pid,receipt.after.main.pid);assert.deepEqual(durableWorkbench(receipt.after),durableWorkbench(receipt.before))
+ if(p22Qualification){
+  receipt.persistedBefore=await waitFor('first process actually persisted nonempty draft and original workbench',async()=>{
+   const raw=await active.cdp.evaluate('localStorage.getItem("agentmux-workbench-v1")');if(!raw)return null
+   // AgentSessionComposer owns an attached Agent draft by Session ID; launcher
+   // drafts use Region IDs. Bind this real controlled editor to its actual owner.
+   const state=JSON.parse(raw).state;if(state.agentComposerDrafts?.[saved.agentSessionId]!==draft)return null
+   if (mainIntegrationScene) {
+    const spatial = await active.cdp.evaluate('window.agentmux.spatial.read()')
+    if (!spatial?.graph.regions.some(region => region.regionId === savedRegion.regionId && region.agentSessionId === saved.agentSessionId)) return null
+    assert.ok(spatial.graph.regions.some(region => region.regionId === healthyRegion.regionId && region.agentSessionId === agent.agentSessionId))
+    assert.ok(spatial.graph.tabs.length > 0)
+    assert.ok(Object.values(spatial.graph.layouts).some(layout => layout.groups.length > 0 && layout.groups.some(group => group.tabOrder.length > 0)))
+    receipt.spatialBefore = { path: spatialStatePath, state: spatial }
+   } else {
+    const tabs=Object.values(state.restoredWorkbench?.tabs??{}),layouts=Object.values(state.restoredWorkbench?.layouts??{})
+    assert.ok(tabs.length>0&&layouts.length>0)
+    assert.ok(tabs.some(tab=>Object.keys(tab.regions).length===2))
+    assert.ok(layouts.some(layout=>layout.groups.length>0&&layout.groups.some(group=>group.tabOrder.length>0)))
+   }
+   return {rawSha256:hash(Buffer.from(raw)),draftOwner:{agentSessionId:saved.agentSessionId,regionId:savedRegion.regionId},presentation:persistedPresentation(state)}
+  })
+ }
+ receipt.firstQuit=await quit(active)
+ if (mainIntegrationScene) {
+  const raw = await readFile(spatialStatePath, 'utf8'), state = JSON.parse(raw)
+  assert.deepEqual(state.graph, receipt.spatialBefore.state.graph, 'Ordinary quit must retain the first process Core graph')
+  receipt.spatialBefore = { ...receipt.spatialBefore, state, rawSha256: hash(Buffer.from(raw)) }
+ }
+ await launch('after');receipt.after=await observe();assert.notEqual(receipt.before.main.pid,receipt.after.main.pid);assert.deepEqual(durableWorkbench(receipt.after),durableWorkbench(receipt.before))
  receipt.recappedAfter=await recap(savedRegion.regionId,'下一步核对');assert.equal(receipt.recappedAfter.text,receipt.ready.text)
  receipt.draftAfter=await waitFor('durable ProseMirror draft',()=>active.cdp.evaluate(`document.querySelector(${JSON.stringify(composerSelector)})?.textContent===${JSON.stringify(draft)}?${JSON.stringify(draft)}:null`));assert.equal(receipt.draftAfter,draft)
  receipt.inputAfter=await healthyInput(healthyRegion.regionId,agent.run.runId,'PRIVATE_RECAP_HEALTHY_AFTER');const healthyAfter=await sdk.status(agent.run.runId);assert.equal(healthyAfter.pid,healthyBefore.pid);assert.equal(healthyAfter.state.type,'running');receipt.healthyRun={id:healthyAfter.id,pid:healthyAfter.pid,state:healthyAfter.state};receipt.screenshotRestart=await screenshot('after-process-restart')
  receipt.loadedAfter=await loadedRenderer();assert.deepEqual(receipt.loadedAfter,receipt.loadedBefore)
  phase='actual-resume';const resumeSelector=`[data-workbench-region-id="${savedRegion.regionId}"] .full-page-loading__actions button`
- await click(resumeSelector);receipt.resuming=await waitFor('actual Resume remains alongside recap',()=>active.cdp.evaluate(`(()=>{const r=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(savedRegion.regionId)}+'"]'),b=r.querySelector('.full-page-loading__actions button'),e=r.querySelector('.session-recap');return b?.textContent.includes('Resuming')&&e?.textContent.includes('下一步核对')?{button:b.textContent,disabled:b.disabled,recap:e.textContent}:null})()`));receipt.screenshotResuming=await screenshot('actual-resuming')
+ await click(resumeSelector);receipt.resuming=await waitFor('actual Resume remains alongside recap',()=>active.cdp.evaluate(`(()=>{const r=document.querySelector('[data-workbench-region-id="'+${JSON.stringify(savedRegion.regionId)}+'"]'),b=r.querySelector('.full-page-loading__actions button'),e=r.querySelector('.session-recap');return b?.textContent.includes('Resuming')&&e?.textContent.includes('下一步核对')?{button:b.textContent,disabled:b.disabled,recap:e.textContent}:null})()`));if(!p22Qualification)receipt.screenshotResuming=await screenshot('actual-resuming')
  receipt.resumed=await waitFor('same Session genuinely resumed',async()=>{const snapshot=await active.cdp.evaluate('(async()=>await window.agentmux.sessions.snapshot())()');const s=snapshot.sessions.find(s=>s.id===saved.agentSessionId);return s?.processState==='running'&&s.control.run.runId!==saved.run.runId?{sessionId:s.id,runId:s.control.run.runId}:null});await own((await sdk.status(receipt.resumed.runId)).pid)
  receipt.inputAfterResume=await healthyInput(healthyRegion.regionId,agent.run.runId,'PRIVATE_RECAP_HEALTHY_AFTER_RESUME')
+ if(p22Qualification){
+  // Presentation-only replay of a previously captured private Native event. This
+  // is not a claim that this GUI's daemon produced that historical Gap.
+  const gapPath=join(repositoryRoot,'.tmp/ctxmux-p22-qualification/core-gap-runtime.json')
+  const gapBytes=await readFile(gapPath),counterexample=JSON.parse(gapBytes)
+  assert.equal(counterexample.passed,true);assert.equal(counterexample.userRuntimeTouched,false);assert.equal(counterexample.protocol,22)
+  assert.equal(counterexample.gap.code,'OUTPUT_GAP')
+  const channelSource=await readFile(join(desktopRoot,'src/shared/contracts.ts'),'utf8')
+  const channels=Array.from(channelSource.matchAll(/export const SESSION_EVENT_CHANNEL = '([^']+)'/g))
+  assert.equal(channels.length,1,'Use the actual existing production event channel')
+  const event={type:'core',hostId:'local',event:counterexample.gap}
+  await active.main.evaluate(`process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot,'package.json'))})('electron').BrowserWindow.getAllWindows()[0].webContents.send(${JSON.stringify(channels[0][1])},${JSON.stringify(event)})`)
+  await waitFor('captured Gap through actual preload/Store diagnostic',()=>active.cdp.evaluate('document.querySelector(".error-notice")?.textContent.includes("OUTPUT_GAP")'))
+  await click('.error-notice__details summary')
+  receipt.gapProjection=await active.cdp.evaluate('({text:document.querySelector(".error-notice")?.innerText,detailsOpen:document.querySelector(".error-notice__details")?.open})')
+  assert.equal(receipt.gapProjection.detailsOpen,true);assert.ok(receipt.gapProjection.text.includes('Origin: daemon'))
+  assert.ok(receipt.gapProjection.text.includes('decoded output missed by this observation: unknown'))
+  receipt.gapProjection.record={path:gapPath,sha256:hash(gapBytes),kind:'previously-captured-private-Core-Native-event',liveGapInThisGUI:false}
+  receipt.screenshotGap=await screenshot('captured-gap-details')
+  receipt.inputAfterGapProjection=await healthyInput(healthyRegion.regionId,agent.run.runId,'PRIVATE_RECAP_HEALTHY_AFTER_GAP_PROJECTION')
+  assert.equal(receipt.inputAfterGapProjection.pid,receipt.inputBefore.pid)
+  receipt.limitations.push('The additional Gap details frame replays a captured private Native event through ordinary Main/preload/Store IPC; it does not claim this GUI Runtime emitted that event or owns its Run.')
+ }
  assert.deepEqual(await sdk.runtimeInfo(),receipt.runtime);assert.equal(await identity(daemon.pid),owners.get(daemon.pid));receipt.inputsAfter=await inputs();assert.deepEqual(receipt.inputsAfter,receipt.inputsBefore)
  receipt.secondQuit=await quit(active);receipt.passed=true
 } catch(error) {
   failure={phase,message:error.message,stack:error.stack};receipt.passed=false
-  if(active?.cdp)try{receipt.failureObservation=await observe();receipt.failureDom=await active.cdp.evaluate('({text:document.body.innerText.slice(0,12000),keyTrace:window.__privateRecoveryKeyTrace??null,buttons:Array.from(document.querySelectorAll("button")).filter(e=>e.getClientRects().length).map(e=>({text:e.textContent,title:e.title,aria:e.getAttribute("aria-label")}))})');receipt.failureScreenshot=await screenshot('failure')}catch(diagnosticError){receipt.diagnosticError=diagnosticError.message}
+  if(active?.cdp)try{receipt.failureObservation=await observe();receipt.failureDom=await active.cdp.evaluate(`(() => {
+    const rect=e=>{const r=e.getBoundingClientRect(),s=getComputedStyle(e);return{tag:e.tagName,class:e.className,width:r.width,height:r.height,display:s.display,visibility:s.visibility,position:s.position,flex:s.flex,overflow:s.overflow,clipPath:s.clipPath,inert:e.inert}};
+    return {text:document.body.innerText.slice(0,12000),keyTrace:window.__privateP22StorageTrace??null,
+      regions:Array.from(document.querySelectorAll('[data-workbench-region-id]')).map(e=>{const parents=[];for(let p=e;p&&parents.length<12;p=p.parentElement)parents.push(rect(p));return{id:e.dataset.workbenchRegionId,parents}}),
+      recaps:Array.from(document.querySelectorAll('.session-recap')).map(e=>({regionId:e.closest('[data-workbench-region-id]')?.dataset.workbenchRegionId,...rect(e),state:e.dataset.recapState,title:e.closest('.full-page-loading')?.querySelector('h1')?.textContent})),
+      buttons:Array.from(document.querySelectorAll('button')).filter(e=>e.getClientRects().length).map(e=>({text:e.textContent,title:e.title,aria:e.getAttribute('aria-label')}))}
+  })()`);receipt.failureScreenshot=await screenshot('failure')}catch(diagnosticError){receipt.diagnosticError=diagnosticError.message}
 }
 finally {
   const errors=[]

@@ -289,6 +289,49 @@ export type AgentMuxRunAppliedSize = AgentMuxRunRef & {
   rows: number
 }
 
+/** Fixed owner-observed causes; a Gap is an observation loss, not child or Input failure. */
+export type AgentMuxOutputGapCauses = {
+  liveEventPressure: boolean
+  subscriberLag: boolean
+  sourceDiscontinuity: boolean
+  terminalCatchup: boolean
+  geometryLag: boolean
+  clientViewPressure: boolean
+  unknown: boolean
+}
+
+/** SDK handoff facts for one Attachment; no Renderer acknowledgement or permanent source loss is inferred. */
+export type AgentMuxAttachmentGapObservation = {
+  attachmentId: string
+  runtime: { runtimeId: string; daemonInstanceId: string } | null
+  runId: string
+  origins: { daemon: boolean; client: boolean }
+  firstObservedAtUnixMs: number
+  lastObservedAtUnixMs: number
+  deliveredAtUnixMs: number | null
+  receivedOutputHeadByte: number | null
+  deliveredThroughByte: number | null
+  requestedAfterByte: number
+  recoveryAfterByte: number
+  missingOutputBytes: number | null
+  queue: {
+    payloadBudgetBytes: number
+    envelopeBudgetBytes: number
+    retainedPayloadBytes: number
+    retainedEnvelopeBytes: number
+    payloadHighWaterBytes: number
+    envelopeHighWaterBytes: number
+  }
+  localPressure: {
+    payloadLimitHit: boolean
+    envelopeLimitHit: boolean
+    attemptedPayloadBytes: number
+    attemptedEnvelopeBytes: number
+    droppedOutputBytes: number | null
+    countersSaturated: boolean
+  } | null
+}
+
 export type AgentMuxEvidence = {
   source: AgentMuxEvidenceSource
   observedAt: number
@@ -301,6 +344,8 @@ export type AgentMuxEvidence = {
         /** This Core client's publication boundary; null when it owns no live Attachment. */
         publishedThroughByte: number | null
         representation: AgentMuxRunAttachmentView | null
+        causes: AgentMuxOutputGapCauses
+        observation: AgentMuxAttachmentGapObservation
       }
     | {
         kind: 'replay'

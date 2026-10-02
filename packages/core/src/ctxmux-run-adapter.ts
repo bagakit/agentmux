@@ -22,7 +22,8 @@ import {
   type OutputChunk,
   type AttachedSnapshot,
   type RecoverableStopOperation,
-  type RunEvent,
+  type AttachmentEvent,
+  type AttachmentGapEvent,
   type RunInfo,
   type NativeServiceSnapshot,
   type NativeServiceFailure,
@@ -34,7 +35,7 @@ import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
 import { missingHostEnvironmentKeys, removeInheritedHostSignals } from './terminal-environment-policy.js'
-import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation, AgentMuxNativeService, AgentMuxNativeServiceFailure } from './types.js'
+import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxRuntimeResourceSnapshot, AgentMuxRunAttachmentView, AgentMuxTerminalContinuation, AgentMuxNativeService, AgentMuxNativeServiceFailure, AgentMuxOutputGapCauses, AgentMuxAttachmentGapObservation } from './types.js'
 import {
   CTXMUX_MANIFEST_SHA256,
   supportedCtxmuxArtifactPlatform,
@@ -160,6 +161,8 @@ export type CtxmuxAdapterGapEvent = {
   type: 'gap'
   runId: string
   latestOutputBytes: number
+  causes: AgentMuxOutputGapCauses
+  observation: AgentMuxAttachmentGapObservation
 }
 
 export type CtxmuxAdapterResizedEvent = {
@@ -210,6 +213,54 @@ type LiveAttachment = {
   view: AgentMuxRunAttachmentView
   /** Last raw byte published by this process, not a Renderer parse acknowledgement. */
   publishedThroughByte: number
+}
+
+/** Only this private seam translates the SDK's Gap facts into public Core data. */
+function projectGap(event: AttachmentGapEvent): Pick<CtxmuxAdapterGapEvent, 'causes' | 'observation'> {
+  const { causes, observation } = event
+  return {
+    causes: {
+      liveEventPressure: causes.live_event_pressure,
+      subscriberLag: causes.subscriber_lag,
+      sourceDiscontinuity: causes.source_discontinuity,
+      terminalCatchup: causes.terminal_catchup,
+      geometryLag: causes.geometry_lag,
+      clientViewPressure: causes.client_view_pressure,
+      unknown: causes.unknown
+    },
+    observation: {
+      attachmentId: observation.attachmentId,
+      runtime: observation.runtime === null ? null : {
+        runtimeId: observation.runtime.runtimeId, daemonInstanceId: observation.runtime.daemonInstanceId
+      },
+      runId: observation.runId,
+      origins: { daemon: observation.origins.daemon, client: observation.origins.client },
+      firstObservedAtUnixMs: observation.firstObservedAtUnixMs,
+      lastObservedAtUnixMs: observation.lastObservedAtUnixMs,
+      deliveredAtUnixMs: observation.deliveredAtUnixMs,
+      receivedOutputHeadByte: observation.receivedOutputHeadByte,
+      deliveredThroughByte: observation.deliveredThroughByte,
+      requestedAfterByte: observation.requestedAfterByte,
+      recoveryAfterByte: observation.recoveryAfterByte,
+      missingOutputBytes: observation.missingOutputBytes,
+      queue: {
+        payloadBudgetBytes: observation.queue.payloadBudgetBytes,
+        envelopeBudgetBytes: observation.queue.envelopeBudgetBytes,
+        retainedPayloadBytes: observation.queue.retainedPayloadBytes,
+        retainedEnvelopeBytes: observation.queue.retainedEnvelopeBytes,
+        payloadHighWaterBytes: observation.queue.payloadHighWaterBytes,
+        envelopeHighWaterBytes: observation.queue.envelopeHighWaterBytes
+      },
+      localPressure: observation.localPressure === null ? null : {
+        payloadLimitHit: observation.localPressure.payloadLimitHit,
+        envelopeLimitHit: observation.localPressure.envelopeLimitHit,
+        attemptedPayloadBytes: observation.localPressure.attemptedPayloadBytes,
+        attemptedEnvelopeBytes: observation.localPressure.attemptedEnvelopeBytes,
+        droppedOutputBytes: observation.localPressure.droppedOutputBytes,
+        countersSaturated: observation.localPressure.countersSaturated
+      }
+    }
+  }
 }
 
 function delay(milliseconds: number): Promise<void> {
@@ -645,7 +696,7 @@ function snapshotCurrentSize(run: RunInfo): OwnerConfirmedSize | null {
   return run.current_size
 }
 
-function liveResizedSize(event: RunEvent): OwnerConfirmedSize | null {
+function liveResizedSize(event: AttachmentEvent): OwnerConfirmedSize | null {
   if (event.type !== 'resized') return null
   const size = event.size
   if (
@@ -1158,7 +1209,7 @@ export class CtxmuxRunAdapter {
             listener(this.translateLiveEvent(runId, decoder, event))
           }
         } catch (error) {
-          if (!closed) this.errorListener?.(translateCtxmuxError(error), runId)
+          if (!closed) listener({ type: 'error', runId, error: translateCtxmuxError(error) })
         }
       })()
       return {
@@ -1357,7 +1408,7 @@ export class CtxmuxRunAdapter {
   private translateLiveEvent(
     runId: string,
     decoder: TextDecoder,
-    event: RunEvent
+    event: AttachmentEvent
   ): CtxmuxAdapterObservationEvent {
     const eventType = event.type
     const resized = liveResizedSize(event)
@@ -1383,7 +1434,7 @@ export class CtxmuxRunAdapter {
       return { type: 'service', runId, nativeService: projectNativeService(event.service), observedAt: Date.now() }
     }
     if (event.type === 'gap') {
-      return { type: 'gap', runId, latestOutputBytes: event.latest_output_bytes }
+      return { type: 'gap', runId, latestOutputBytes: event.latest_output_bytes, ...projectGap(event) }
     }
     if (event.type === 'tmux' || event.type === 'observation_discontinuity') {
       return {
@@ -1408,7 +1459,7 @@ export class CtxmuxRunAdapter {
       error: new AgentMuxError(`Unexpected native Run event: ${eventType} (${String(unexpected)})`, 'CTXMUX_EVENT_INVALID') }
   }
 
-  private emitRunEvent(runId: string, decoder: TextDecoder, event: RunEvent): void {
+  private emitRunEvent(runId: string, decoder: TextDecoder, event: AttachmentEvent): void {
     const translated = this.translateLiveEvent(runId, decoder, event)
     if (translated.type === 'error') {
       this.errorListener?.(translated.error, runId)

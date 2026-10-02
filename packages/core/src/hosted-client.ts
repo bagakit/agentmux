@@ -7,6 +7,7 @@ import { AGENTMUX_HOSTED_METHODS, type AgentMuxHostedClient, type AgentMuxHosted
   type AgentMuxHostedSubscription, type AgentMuxRuntimeFence, type AgentMuxHostedForwardRpc,
   type AgentMuxHostedAttachmentTarget, type AgentMuxHostedStreamValue } from './hosted-client-contract.js'
 import { decodeHostedValue, encodeHostedValue, AgentMuxHostedTransferReader, parseHostedBootstrap, parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
+import { parseOutputGapEvidence } from './output-gap-evidence.js'
 import { createHostedOutputObservation } from './hosted-output-observer.js'
 
 function isAbortSignal(value: unknown): value is AbortSignal {
@@ -41,6 +42,17 @@ export async function connectHostedAgentMux(options: {
     return { runtimeId: bootstrap.owner.runtimeId, ownerInstanceId: bootstrap.owner.ownerInstanceId }
   }
   const emit = (event: AgentMuxClientEvent): void => {
+    if (event.type === 'agent-error' && event.evidence?.outputGap !== undefined) {
+      try { parseOutputGapEvidence(event.evidence) }
+      catch (error) {
+        // Reject this decoded observation without releasing a healthy Host lease.
+        // Invalid evidence cannot establish its claimed Session or Run scope.
+        publisher.publish({ type: 'agent-error', code: 'CONTROL_PROTOCOL_ERROR',
+          message: 'The Host supplied invalid output Gap evidence. Its connection and input remain available; refresh the output observation.',
+          evidence: { source: 'agentmux', observedAt: Date.now() } })
+        return
+      }
+    }
     if (event.type === 'run-removed' && bootstrap) {
       // A low-level Run stop does not retire its retained Agent Session. Only the
       // Core's explicit Session retirement fact may remove that durable projection.

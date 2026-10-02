@@ -1,4 +1,5 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { gapFacts } from './helpers/output-gap.js'
 import { describe, expect, it } from 'vitest'
 import {
   AgentTerminalScreen,
@@ -283,7 +284,7 @@ function screenStoredSession(): AgentMuxStoredAgentSession {
     providerId: 'codex',
     executorId: 'codex',
     hostId: 'local',
-    workspacePath: upstreamFixturePath("tmp/screen-agent"),
+    workspacePath: fixturePath("tmp/screen-agent"),
     run: { runId: 'screen-run' },
     retiredRuns: [],
     hookBindingId: 'binding-screen',
@@ -301,7 +302,7 @@ function screenRun(cols: number | null = 80, rows: number | null = 24): CtxmuxAd
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: upstreamFixturePath("tmp/screen-agent"),
+    workspacePath: fixturePath("tmp/screen-agent"),
     pid: 321,
     state: { type: 'running' },
     cols,
@@ -436,7 +437,7 @@ describe('有界增量屏幕证据接到 client 观察路径', () => {
     )).resolves.toBeGreaterThan(0)
 
     // CtxMux 驱逐了旧输出：长命证据必须失效，不许拿旧屏幕继续作证。
-    emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: 8192 })
+    emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: 8192, ...gapFacts('screen-run') })
 
     await expect(waiter.wait(
       session,
@@ -519,7 +520,7 @@ it('retains the attachment after prefix eviction and recovers only after a real 
     await expect(observe()).resolves.toBe(cursor)
     expect(observeCalls()).toBe(1)
     // Real gaps after recovery remain invalidating, never silently bridged.
-    emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: cursor + 99 })
+    emit({ type: 'gap', runId: 'screen-run', latestOutputBytes: cursor + 99, ...gapFacts('screen-run') })
     await expect(observe()).rejects.toMatchObject({ code: 'OUTPUT_GAP' })
     expect(observeCalls()).toBe(2)
   } finally { await client.dispose() }

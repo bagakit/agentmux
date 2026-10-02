@@ -1,3 +1,4 @@
+import { gapFacts } from '../../../packages/core/test/helpers/output-gap.js'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
@@ -6,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient, AgentMuxMemoryAgentSessionStore, AgentProviderRegistry, defineAgentProvider } from '@agentmux/core'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '@agentmux/core'
@@ -26,7 +27,7 @@ const bridge = vi.hoisted(() => ({
 // Isolate native transport/painting and unrelated services, not Core producers, subscription,
 // RuntimeController, preload, initialized Store, mounted App or Focus.
 vi.mock('electron', () => ({
-  app: { getPath: () => bridge.storageRoot, dock: { setBadge: vi.fn() } },
+  app: { getPath: () => bridge.storageRoot, getAppPath: () => process.cwd(), isPackaged: false, dock: { setBadge: vi.fn() } },
   contextBridge: { exposeInMainWorld: (key: string, value: unknown) => Object.assign(window, { [key]: value }) },
   webFrame: { getZoomFactor: () => 1 },
   ipcMain: { handle: (key: string, handler: any) => bridge.handlers.set(key, handler),
@@ -67,8 +68,11 @@ import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../src/renderer/src/lib/workbench-persistence'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 
+// The actual preload must be evaluated before the UI provider imports its clipboard API.
+const { createClientUiRoot: createRoot } = await import('./helpers/client-ui-render')
 const initial = useAppStore.getState()
 const ids = ['flow-one', 'flow-two', 'flow-three']
 let root: Root, element: HTMLDivElement, dir: string, sender: any
@@ -141,6 +145,7 @@ beforeEach(async () => {
   await mkdir(join(dir, 'Local Storage', 'leveldb'), { recursive: true })
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(dir, 'runtime'));
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(dir, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(dir, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(dir, 'spatial-state.json'))
   bridge.handlers.clear(); bridge.listeners.clear(); events = []; wire = []; writes = []
   semanticTime = 1_000
   // A fixed clock gives the mutation and copied control the same freshness inputs.
@@ -163,7 +168,8 @@ beforeEach(async () => {
   stop = vi.fn(); kernel.stop = stop
   core.onEvent(event => { events.push(event); if (event.type === 'agent-error') beforeDiagnostic = useAppStore.getState() })
   runtime = new RuntimeController(durable, localRuntimeConnector, {} as ScratchTopics)
-  runtime.commit({ hosts: [{ id: 'local', client: core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
+  runtime.commit({ hosts: [{ id: 'local', client: core, config: { id: 'local', kind: 'local', label: 'Private local Host' },
+    executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   recover = vi.spyOn(core, 'resumeAgent')
@@ -188,14 +194,20 @@ beforeEach(async () => {
     tabs, layouts, restoredWorkbench: projectPersistedWorkbench({ tabs, layouts }),
     agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: 10 }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { [ids[0]!]: 'Keep this unsent draft' }, sessions: [], timelines: {}, error: null, lastError: null }, true)
+  // Seed the fixture's durable topology through the actual Core-owned public IPC,
+  // rather than expecting the Renderer-only retired layout owner to restore it.
+  const snapshot = await api.sessions.snapshot()
+  const graph = desktopSpatialGraph({ ...useAppStore.getState(), config, sessions: snapshot.sessions }, [])
+  await api.spatial.commit({ expectedRevision: 0, graph })
   vi.spyOn(useAppStore.persist, 'hasHydrated').mockReturnValue(true)
   element = document.createElement('div'); document.body.append(element); root = createRoot(element)
 })
 afterEach(async () => {
+  if (root) await prepareRendererUpdate('quit')
   if (root) await act(async () => root.unmount()); element?.remove()
   await disposeIpc?.(); disposeIpc = undefined; await runtime.dispose()
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllEnvs()
-  await rm(dir, { recursive: true, force: true })
+  await rm(dir, { recursive: true, force: true, maxRetries: 3, retryDelay: 20 })
 })
 
 it('shows an actual Core workflow diagnostic without changing authoritative state, clocks, Focus or healthy input', async () => {
@@ -277,11 +289,13 @@ it('rehydrates the durable workface and initializes again from the same Core fac
   const facts = useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control,
     status: session.status, processState: session.processState, updatedAt: session.kind === 'agent' && session.agentSessionUpdatedAt }))
   await prepareRendererUpdate()
+  const durableSpatial = await api.spatial.read()
+  expect(durableSpatial?.graph.tabs).toHaveLength(3)
   const name = useAppStore.persist.getOptions().name!
   const saved = localStorage.getItem(name)
   expect(saved).not.toBeNull()
   const durableFace = JSON.parse(saved!).state
-  expect(Object.keys(durableFace.restoredWorkbench.tabs)).toHaveLength(3)
+  expect(durableFace.restoredWorkbench).toBeUndefined()
   expect(durableFace.agentComposerDrafts[ids[0]!]).toBe('Keep this unsent draft')
   expect(durableFace.sessions).toBeUndefined()
   const written = [...writes]
@@ -290,9 +304,9 @@ it('rehydrates the durable workface and initializes again from the same Core fac
   vi.mocked(useAppStore.persist.hasHydrated).mockRestore()
   await act(async () => useAppStore.persist.rehydrate())
   expect(localStorage.getItem(name)).toBe(saved)
-  expect(useAppStore.getState().restoredWorkbench).toEqual(durableFace.restoredWorkbench)
   root = createRoot(element)
   await mount()
+  expect((await api.spatial.read())?.graph).toEqual(durableSpatial?.graph)
   expect(snapshots).toHaveBeenCalledTimes(2)
   expect(workface()).toEqual(face)
   expect(useAppStore.getState().sessions.map(session => ({ id: session.id, control: session.control,
@@ -325,6 +339,12 @@ it('keeps real semantic errors and Run crashes authoritative while user stops an
     runs.get('run-flow-one').state = { type: 'exited', code: 139, signal: 'SIGSEGV' }
     ;(core as any).acceptKernelEvent({ type: 'exit', runId: 'run-flow-one',
       state: runs.get('run-flow-one').state, observedAt: Date.now() })
+  }); await settle()
+  // Assert the crash notice when it arrives. A later independent workflow error
+  // may occupy the shared notice, while the authoritative Session remains failed.
+  expect({ role: notice()?.getAttribute('role'), cause: notice()?.textContent })
+    .toMatchObject({ role: 'alert', cause: expect.stringContaining('SIGSEGV') })
+  await act(async () => {
     await core.stopAgent(ids[1]!, { runId: 'run-flow-two' })
     runs.get('run-flow-three').state = { type: 'exited', code: 0, signal: null }
     ;(core as any).acceptKernelEvent({ type: 'exit', runId: 'run-flow-three',
@@ -334,8 +354,6 @@ it('keeps real semantic errors and Run crashes authoritative while user stops an
     .toEqual(['crashed', 'user-stopped', 'unknown'])
   expect(useAppStore.getState().sessions.map(session => [session.id, session.status.state, session.processState, session.status.exitReason]))
     .toEqual([[ids[0], 'error', 'exited', 'crashed'], [ids[2], 'exited', 'exited', 'unknown']])
-  expect(notice()?.getAttribute('role')).toBe('alert')
-  expect(notice()?.textContent).toContain('SIGSEGV')
   expect(focus().querySelector(`[data-session-id="${ids[0]}"]`)?.textContent).toContain('Failed')
   expect(focus().querySelector(`[data-session-id="${ids[1]}"]`)).toBeNull()
   expect(focus().querySelector(`[data-session-id="${ids[2]}"]`)?.textContent).not.toContain('Failed')
@@ -345,7 +363,7 @@ it('keeps real semantic errors and Run crashes authoritative while user stops an
 
 it.each(['before', 'after'])('shows a real output gap %s a Run observation without changing its semantic state', async order => {
   await mount()
-  const gap = () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 20 })
+  const gap = () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 20, ...gapFacts('run-flow-one') })
   const observed = async () => { await core.statusAgent(ids[0]!) }
   await act(async () => { if (order === 'before') gap(); await observed(); if (order === 'after') gap() }); await settle()
   expect(events.filter(event => event.type === 'agent-error').map(event => event.code)).toEqual(['OUTPUT_GAP'])
@@ -364,7 +382,7 @@ it('transports a live Gap observation to the mounted notice and preserves dismis
   vi.spyOn(kernel, 'hasAttachment').mockReturnValue(true)
   vi.spyOn(kernel, 'continuationByte').mockReturnValue(4)
   vi.spyOn(kernel, 'continuationView').mockReturnValue('terminal')
-  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 27 }))
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 27, ...gapFacts('run-flow-one') }))
   await settle()
   const gap = events.filter(event => event.type === 'agent-error' && event.code === 'OUTPUT_GAP')
   expect(gap).toHaveLength(1)
@@ -384,7 +402,7 @@ it('transports a live Gap observation to the mounted notice and preserves dismis
   expect(notice()?.textContent).toContain('Gap latest output byte: 27. Core published-through byte: 4. Representation: terminal.')
   expect(notice()?.textContent).toContain('not a Renderer parsing or Input acknowledgement')
   await act(async () => notice()!.querySelector<HTMLButtonElement>('[aria-label="Dismiss error"]')!.click())
-  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 40 }))
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 40, ...gapFacts('run-flow-one') }))
   await settle()
   expect(events.filter(event => event.type === 'agent-error' && event.code === 'OUTPUT_GAP')).toHaveLength(2)
   expect(useAppStore.getState().errorDismissed).toBe(true)
@@ -428,7 +446,7 @@ it('locates a real Core Gap for an ordinary Terminal without changing the workfa
   const before = useAppStore.getState(), face = workface()
   expect(Object.keys(before.tabs)).toHaveLength(4)
   expect(before.agentSteerQueues[ids[0]!]).toHaveLength(1)
-  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: terminal.id, latestOutputBytes: 20 })); await settle()
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: terminal.id, latestOutputBytes: 20, ...gapFacts(terminal.id) })); await settle()
   const gap = events.filter(event => event.type === 'agent-error' && event.code === 'OUTPUT_GAP')
   expect(gap).toHaveLength(1)
   expect(gap[0]).toMatchObject({ evidence: { source: 'terminal-output', run: terminal.control.run } })
@@ -443,7 +461,7 @@ it('locates a real Core Gap for an ordinary Terminal without changing the workfa
   expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
   await act(async () => useAppStore.getState().dismissError())
   expect(useAppStore.getState().errorDismissed).toBe(true)
-  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: terminal.id, latestOutputBytes: 30 })); await settle()
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: terminal.id, latestOutputBytes: 30, ...gapFacts(terminal.id) })); await settle()
   expect(useAppStore.getState().errorDismissed).toBe(true)
 })
 
@@ -453,7 +471,7 @@ it('locates a current Agent without the Core Agent mapping and keeps explicit in
   expect(before.sessions).toHaveLength(3)
   const lookup = vi.spyOn((core as any).registry, 'findByRun').mockReturnValue(undefined)
   try {
-    await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 20 })); await settle()
+    await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 20, ...gapFacts('run-flow-one') })); await settle()
   } finally { lookup.mockRestore() }
   expect(notice()?.textContent).toContain(`Agent "${before.sessions[0]!.label}" on host "local"; Run "run-flow-one"`)
   expect(useAppStore.getState().errorNoticeContext?.subject).toBe(before.sessions[0]!.control)
@@ -462,4 +480,27 @@ it('locates a current Agent without the Core Agent mapping and keeps explicit in
   expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
   await input('Explicit input after Gap')
   expect(writes).toEqual([{ runId: 'run-flow-one', data: 'Explicit input after Gap' }])
+})
+
+it.each(['daemon', 'client', 'mixed'] as const)('discloses %s Gap facts through the real Main/preload/Store and mounted notice', async origin => {
+  await mount()
+  const before = useAppStore.getState(), face = workface()
+  await act(async () => (core as any).acceptKernelEvent({ type: 'gap', runId: 'run-flow-one', latestOutputBytes: 27,
+    ...gapFacts('run-flow-one', origin) })); await settle()
+  const details = notice()?.querySelector<HTMLDetailsElement>('details')
+  expect(details).not.toBeNull()
+  await act(async () => details!.querySelector('summary')!.click())
+  expect(notice()?.textContent).toContain(`Origin: ${origin === 'mixed' ? 'mixed (daemon + client)' : origin}`)
+  expect(notice()?.textContent).toContain('Attachment: private-attachment; Run: run-flow-one')
+  expect(notice()?.textContent).toContain('Runtime: private-runtime; Native instance: private-native')
+  expect(notice()?.textContent).toContain('SDK received output head: 23; continuous delivery through: 4')
+  expect(notice()?.textContent).toContain('Requested after byte: 2; recovery after byte: 4')
+  expect(notice()?.textContent).toContain(`decoded output missed by this observation: ${origin === 'client' ? '19' : 'unknown'}`)
+  expect(notice()?.textContent).not.toContain('high water')
+  expect(notice()?.textContent).not.toContain('localPressure')
+  expect(notice()?.textContent).toContain(origin === 'client' ? 'Cause: client view pressure.' : 'source output discontinuity')
+  expect(notice()?.textContent).toContain('not proof of permanent history loss')
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(workface()).toEqual(face)
+  expect(writes).toEqual([]); expect(stop).not.toHaveBeenCalled(); expect(recover).not.toHaveBeenCalled()
 })
