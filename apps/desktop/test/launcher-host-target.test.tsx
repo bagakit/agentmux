@@ -219,6 +219,8 @@ describe('the real Launcher execution target consumer', () => {
     await dom.click('.launcher-launch-button')
     expect(launched).toHaveBeenCalledWith(expect.objectContaining({ executorId: 'review', hostId: 'farm',
       prompt: 'Original custom request', launchOptions: { model: 'original-model' } }))
+    const submitted = Object.values(useAppStore.getState().pendingAgentLaunches)[0]?.request
+    expect(submitted).toMatchObject({ executorId: 'review', hostId: 'farm', workspacePath: remoteProject.path })
     await dom.render(<div data-pending-launch />)
     await act(async () => fail(new Error('Task-owned pending failure')))
     await dom.render(<NewTabSurface tabGroupId="group" tabId={tab.id} regionId={regionId} />)
