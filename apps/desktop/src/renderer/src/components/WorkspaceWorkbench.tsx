@@ -25,9 +25,10 @@ import {
   SquareTerminal,
   X
 } from 'lucide-react'
-import { lazy, Suspense, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
@@ -45,8 +46,10 @@ import {
   type RegionFocusExpression
 } from '../lib/region-focus'
 import { activeTopicIdFromLayout, layoutForActiveTopic } from '../lib/scratch-topic-layout'
+import { projectWorkbenchProjection, selectWorkbenchProjectionTab, sameWorkbenchProjectionSelection, workbenchProjectionSlotId, workbenchRegionProjectionSlotId, workbenchProjectionTabIds, workbenchProjectionZone, WorkbenchProjectionContext, type WorkbenchProjection } from '../lib/workbench-projection'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, type BrowserControlConfirmation, type WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { workbenchDisplayTabs, workbenchDisplayReferenceMatches, workbenchDisplayOccurrenceAmbiguous } from '../lib/workbench-resource-display'
+import { useWorkbenchRetainedRegionId, useWorkbenchBrowserPresentation, workbenchHomePresentationReferences, WorkbenchBrowserTargetsContext, workbenchBrowserStageHostId, workbenchSessionStageHostId, type BrowserControlConfirmation, type WorkbenchViewTarget, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { opensContextMenuFromKeyboard } from '../lib/context-menu-key'
 import { SessionPane } from './SessionPane'
 import { SessionRegionHost } from './SessionRegionHost'
@@ -112,10 +115,6 @@ type DragTabData = { kind: 'tab'; tabId: string; groupId: string }
 type DropData = DragTabData | { kind: 'pane'; groupId: string }
 type SplitTarget = { groupId: string; direction: SplitDirection }
 
-function workspaceTabs(tabs: Readonly<Record<string, WorkbenchTab>>, workspaceId: string): Record<string, WorkbenchTab> {
-  return Object.fromEntries(Object.entries(tabs).filter(([, tab]) => tab.workspaceId === workspaceId))
-}
-
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
@@ -138,6 +137,7 @@ function SortableWorkbenchTab({
   group: TabGroup
   workspaceId: string
 }) {
+  const projection = useContext(WorkbenchProjectionContext)
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
@@ -204,7 +204,7 @@ function SortableWorkbenchTab({
   const moveSessionView = moveSessionViewMenu({
     surface,
     workspaces: config?.workspaces ?? [],
-    currentWorkspaceId: workspaceId,
+    currentWorkspaceId: tab.workspaceId,
     move: moveSessionViewToWorkspace
   })
   const dirty =
@@ -221,6 +221,44 @@ function SortableWorkbenchTab({
     agentSessionCount: number
   } | null>(null)
   const [closing, setClosing] = useState(false)
+  const [displayTargets, setDisplayTargets] = useState<{
+    displayWorkspaceId: string; groupId: string; label: string; linked: boolean
+  }[]>([])
+  const [bindingPending, setBindingPending] = useState(false)
+  const [bindingMenuOpen, setBindingMenuOpen] = useState(false)
+  // Inspect display metadata only when this menu opens; terminal output and unrelated tab renders
+  // do not enumerate all layouts. A binding result refreshes the same controlled facts.
+  function refreshDisplayTargets(): void {
+    const state = useAppStore.getState()
+    setDisplayTargets(Object.entries(state.layouts).flatMap(([displayWorkspaceId, layout]) => {
+      const name = state.config?.workspaces.find(workspace => workspace.id === displayWorkspaceId)?.name ?? displayWorkspaceId
+      return groupIds(layout.root).flatMap((groupId, index) => {
+        const target = layout.groups.find(group => group.id === groupId)
+        return target ? [{ displayWorkspaceId, groupId, label: `${name} · Group ${index + 1}`, linked: target.tabOrder.includes(tab.id) }] : []
+      })
+    }))
+  }
+  useEffect(() => {
+    if (!bindingMenuOpen) return
+    refreshDisplayTargets()
+    return useAppStore.subscribe((state, previous) => {
+      if (state.layouts !== previous.layouts || state.config !== previous.config) refreshDisplayTargets()
+    })
+    // This subscription exists only for the open menu and reads no Session/output facts.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bindingMenuOpen, tab.id])
+  async function changeDisplayBinding(displayWorkspaceId: string, groupId: string, linked: boolean): Promise<void> {
+    if (bindingPending) return
+    setBindingPending(true)
+    try {
+      await useAppStore.getState().setTabDisplayPlacement(tab.id, displayWorkspaceId, groupId, linked)
+    } catch (error) {
+      reportError(error)
+    } finally {
+      refreshDisplayTargets()
+      setBindingPending(false)
+    }
+  }
   // Inline rename reuses the topic-row pattern: a right-click menu entry flips the tab into an input, no
   // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
   const [rename, setRename] = useState<{ target: 'tab' | 'agent'; value: string } | null>(null)
@@ -348,9 +386,13 @@ function SortableWorkbenchTab({
         // 重排的是**这张**被右键点中的 Tab，不是当前活动的那张——非活动 Tab 上右键时，
         // 用活动 Tab 的格数会按错的容量过滤预设（列出摆不成的档，或藏掉摆得成的档）。
         regionCount={Object.keys(tab.regions).length}
-        onArrange={(mode) => arrangeTabRegions(workspaceId, tab.id, mode)}
+        onArrange={(mode) => arrangeTabRegions(tab.workspaceId, tab.id, mode)}
         moveSessionViewTargets={moveSessionView.targets}
         onMoveSessionView={moveSessionView.onSelect}
+        displayTargets={displayTargets}
+        bindingPending={bindingPending}
+        onOpenChange={(open) => { if (open) refreshDisplayTargets(); setBindingMenuOpen(open) }}
+        onDisplayBindingChange={(displayWorkspaceId, groupId, linked) => void changeDisplayBinding(displayWorkspaceId, groupId, linked)}
       >
         <button
           ref={setNodeRef}
@@ -366,7 +408,7 @@ function SortableWorkbenchTab({
               ? sessionTabTooltip(session, displayName, regionSummary)
               : surfaceTabTooltip(displayName, regionSummary)
           }
-          onClick={() => activateTab(workspaceId, group.id, tab.id)}
+          onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : activateTab(workspaceId, group.id, tab.id)}
           {...attributes}
           {...listeners}
         >
@@ -455,22 +497,29 @@ function SurfaceContent({
   nativeSurfacesVisible,
   interactiveResize,
   headerPortalTargetId,
-  focus
+  focus,
+  browserFrame,
+  onBrowserInputSelected,
+  primaryPresentationHostId
 }: {
   surface: WorkbenchSurface
   tabId: string
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   headerPortalTargetId: string | null
   /** 这一格的焦点表达。只有 browser 那格真用得到（原生视图要让位），但由上游一次算好传下来。 */
   focus: RegionFocusExpression
+  primaryPresentationHostId?: string | undefined
+  browserFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
+  onBrowserInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
 }) {
   const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
   const browserReleased = useBrowserSurfaceReleased(surface.regionId)
   const browserPresentation = useWorkbenchBrowserPresentation()
+  const browserTargets = useContext(WorkbenchBrowserTargetsContext)
   if (isSessionSurface(surface)) {
     return (
       <SessionPane
@@ -480,9 +529,13 @@ function SurfaceContent({
         visible={surfaceVisible}
         parked={parked}
         headerPortalTargetId={headerPortalTargetId}
+        presentations={surface.kind === 'agent' ? browserTargets.filter(target => target.reference?.tabId === tabId &&
+          target.hostId !== primaryPresentationHostId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)) : []}
+        renderPresentationFrame={browserFrame}
+        onPresentationSelected={onBrowserInputSelected}
         linkOrigin={{
           workspaceId: surface.workspaceId,
-          tabGroupId: groupId,
+          ...(groupId ? { tabGroupId: groupId } : {}),
           tabId,
           regionId: surface.regionId,
           sessionId: surface.sessionId
@@ -508,6 +561,12 @@ function SurfaceContent({
     return (
       <BrowserPane key={surface.browserId}
         tab={surface}
+        presentations={browserTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
+          ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId } },
+            stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
+            active: target.active, yieldToFocusRing: focus.nativeViewYieldsToRing, target }] : [])}
+        renderPresentationFrame={browserFrame}
+        onPresentationInputSelected={onBrowserInputSelected}
         visible={nativeSurfacesVisible}
         released={browserReleased}
         yieldToFocusRing={focus.nativeViewYieldsToRing}
@@ -521,6 +580,10 @@ function SurfaceContent({
   // render a sixth kind as an empty start page — the pane looks fine and does the wrong thing, with no
   // compile error. Naming the case lets `assertUnreachableSurface` refuse to type-check that day.
   if (surface.kind === 'launcher') {
+    if (!groupId) return <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+      step: 'Original launcher retained', mode: 'Its Group placement is not confirmed. No new Session has been started.',
+      restore: 'Choose an existing discussion or the original Group in Space before starting work here.'
+    } }} />
     return (
       <NewTabSurface
         tabGroupId={groupId}
@@ -537,11 +600,12 @@ type RegionSwapTargets = Parameters<typeof regionSwapMenuEntries>[0]['regions']
 
 function WorkbenchRegionTree(props: {
   tab: WorkbenchTab
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   headerPortalTargetId: string | null
+  regionTarget?: WorkbenchViewTarget | undefined
 }) {
   const { tab } = props
   const sessions = useWorkbenchTabSessions(tab)
@@ -568,17 +632,19 @@ function WorkbenchRegionNode({
   surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
-  headerPortalTargetId = null
+  headerPortalTargetId = null,
+  regionTarget
 }: {
   node: WorkbenchRegionLayoutNode
   nodePath: string
   tab: WorkbenchTab
   swapTargets: RegionSwapTargets
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   headerPortalTargetId?: string | null
+  regionTarget?: WorkbenchViewTarget | undefined
 }) {
   if (node.type === 'leaf') {
     return (
@@ -591,6 +657,7 @@ function WorkbenchRegionNode({
         nativeSurfacesVisible={nativeSurfacesVisible}
         interactiveResize={interactiveResize}
         headerPortalTargetId={headerPortalTargetId}
+        regionTarget={regionTarget}
       />
     )
   }
@@ -604,13 +671,43 @@ function WorkbenchRegionNode({
       surfaceVisible={surfaceVisible}
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
+      regionTarget={regionTarget}
     />
   )
 }
 
 // 一格（leaf）单独成组件：消费键盘关格意图的 effect、以及「关这一格要不要确认」的决定，都得跑在组件顶层
 // hook 里——它们够不着 node.type 分支之后。拆出来后这些 hook 无条件执行，套路同 WorkbenchRegionBranch。
-function WorkbenchRegionLeaf({
+type WorkbenchRegionLeafProps = Parameters<typeof WorkbenchRegionContent>[0] & { regionTarget?: WorkbenchViewTarget | undefined }
+function confirmedRegionTarget(regionTarget: WorkbenchViewTarget | undefined, tabId: string, regionId: string): WorkbenchViewTarget | undefined {
+  const reference = regionTarget?.reference
+  const scope = regionTarget?.projection
+  return scope?.entity.kind === 'region' && scope.entity.regionId === regionId &&
+    reference?.regionId === regionId && reference.tabId === tabId && reference.displayWorkspaceId === scope.displayWorkspaceId &&
+    scope.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))
+    ? regionTarget : undefined
+}
+function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
+  const parent = useWorkbenchBrowserPresentation()
+  const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
+  const homeId = `${parent.tabHostId}:region:${props.node.regionId}`
+  const visible = target ? target.visible !== false : props.surfaceVisible
+  return <>
+    <div id={homeId} className="workbench-region-slot" />
+    <StableWorkbenchView kind="region" homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
+      retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
+      surface={target ? target.surface : parent.surface}
+      survey={target ? target.surface === 'survey' : parent.survey} controlsOpen={target?.controlsOpen ?? parent.controlsOpen}
+      onBrowserControlConfirmation={parent.onBrowserControlConfirmation} onSelectRegion={target?.onSelectRegion ?? parent.onSelectRegion}
+      projection={target?.projection ?? parent.projection} reference={target?.reference ?? parent.reference}
+      homeNotice={target && props.surfaceVisible ? <div role="status" className="workbench-restore-notice">This Region is shown in the selected presentation. Close that presentation to return it here.</div> : undefined}>
+      <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={target ? visible : props.nativeSurfacesVisible}
+        headerPortalTargetId={target?.headerPortalTargetId ?? props.headerPortalTargetId} />
+    </StableWorkbenchView>
+  </>
+}
+
+function WorkbenchRegionContent({
   node,
   tab,
   swapTargets,
@@ -618,16 +715,18 @@ function WorkbenchRegionLeaf({
   surfaceVisible,
   nativeSurfacesVisible,
   interactiveResize,
-  headerPortalTargetId
+  headerPortalTargetId,
+  primaryPresentationHostId
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'leaf' }>
   tab: WorkbenchTab
   swapTargets: RegionSwapTargets
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   headerPortalTargetId: string | null
+  primaryPresentationHostId?: string | undefined
 }) {
   const browserPresentation = useWorkbenchBrowserPresentation()
   const focusRegion = useAppStore((state) => state.focusRegion)
@@ -693,6 +792,7 @@ function WorkbenchRegionLeaf({
   // 也发不出 keydown，故这条接线由 AST 守（section 带 tabIndex/onKeyDown、handler 合成 contextmenu），
   // 判据本身由纯谓词层守。
   function openRegionMenuFromKeyboard(event: React.KeyboardEvent<HTMLElement>): void {
+    if (!event.currentTarget.contains(event.target as Node)) return
     if (!opensContextMenuFromKeyboard(event)) return
     event.preventDefault()
     const region = event.currentTarget
@@ -704,7 +804,17 @@ function WorkbenchRegionLeaf({
     }))
   }
 
-  return (
+  const selectFrameRegion = (target?: WorkbenchViewTarget, floating = false): void => {
+    if (target?.onSelectRegion) target.onSelectRegion(node.regionId)
+    else if (!target && browserPresentation.onSelectRegion) browserPresentation.onSelectRegion(node.regionId)
+    else if (!((target?.surface === 'survey' || !target && browserPresentation.survey) && surface?.kind === 'browser')) {
+      const reference = target?.reference ?? browserPresentation.reference
+      focusRegion(reference?.displayWorkspaceId ?? tab.workspaceId, tab.id, node.regionId,
+        floating || target?.surface === 'mote' ? 'floating-pointer' : 'pointer', reference?.groupId)
+    }
+  }
+
+  const renderFrame = (content: ReactNode, target?: WorkbenchViewTarget): ReactNode => (
     <RegionContextMenu
       regionId={node.regionId}
       // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
@@ -747,24 +857,14 @@ function WorkbenchRegionLeaf({
       tabIndex={-1}
       onKeyDown={openRegionMenuFromKeyboard}
       onPointerDown={(event) => {
+        // A portal's React ancestor is not another occurrence of this DOM interaction.
+        if (!event.currentTarget.contains(event.target as Node)) return
         // A Region portal keeps React ancestry. Survey browser input does not navigate Space;
         // the original floating pointer path still owns actual Mote/Agent/Terminal interaction.
-        if (!(browserPresentation.survey && surface?.kind === 'browser')) focusRegion(tab.workspaceId, tab.id, node.regionId,
-          event.currentTarget.closest('[data-pmo-teams-topic-floating]') ? 'floating-pointer' : 'pointer')
+        selectFrameRegion(target, Boolean(event.currentTarget.closest('[data-pmo-teams-topic-floating]')))
       }}
     >
-      <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
-        <SurfaceContent
-          surface={surface}
-          tabId={tab.id}
-          groupId={groupId}
-          surfaceVisible={surfaceVisible}
-          nativeSurfacesVisible={nativeSurfacesVisible}
-          interactiveResize={interactiveResize}
-          headerPortalTargetId={headerPortalTargetId}
-          focus={focus}
-        />
-      </SessionRegionHost>
+      {content}
       {canClose ? (
         <button
           type="button"
@@ -780,6 +880,27 @@ function WorkbenchRegionLeaf({
           <X size={12} />
         </button>
       ) : null}
+
+    </section>
+    </RegionContextMenu>
+  )
+  return <>{renderFrame(
+      <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
+        <SurfaceContent
+          surface={surface}
+          tabId={tab.id}
+          groupId={groupId}
+          surfaceVisible={surfaceVisible}
+          nativeSurfacesVisible={nativeSurfacesVisible}
+          interactiveResize={interactiveResize}
+          headerPortalTargetId={headerPortalTargetId}
+          focus={focus}
+          browserFrame={renderFrame}
+          primaryPresentationHostId={primaryPresentationHostId}
+          onBrowserInputSelected={target => selectFrameRegion(target)}
+        />
+      </SessionRegionHost>
+  )}
       <ConfirmationDialog
         open={confirmingClose}
         title="Discard unsaved changes?"
@@ -792,9 +913,20 @@ function WorkbenchRegionLeaf({
           void closeRegion(tab.workspaceId, tab.id, node.regionId)
         }}
       />
-    </section>
-    </RegionContextMenu>
-  )
+  </>
+}
+
+/** Thin leaf destinations: all actions/content remain with the original Region owner. */
+function WorkbenchBrowserPresentationSlots({ tab, target, node }: { tab: WorkbenchTab; target: WorkbenchViewTarget; node: WorkbenchRegionLayoutNode }): ReactNode {
+  if (node.type === 'leaf') return tab.regions[node.regionId]?.kind === 'browser'
+    ? <div id={workbenchBrowserStageHostId(target, node.regionId)} className="workbench-region-slot" data-browser-occurrence-slot={node.regionId} />
+    : tab.regions[node.regionId]?.kind === 'agent'
+      ? <div id={workbenchSessionStageHostId(target, node.regionId)} className="workbench-region-slot" data-session-occurrence-slot={node.regionId} />
+    : <div role="status" className="workbench-restore-notice">This Region remains in its original work surface. Simultaneous live display is not available yet.</div>
+  return <div className="workbench-browser-presentation-split" style={{ display: 'flex', flex: 1, minHeight: 0, minWidth: 0, flexDirection: node.direction === 'horizontal' ? 'row' : 'column' }}>
+    <div style={{ display: 'flex', flex: node.ratio, minHeight: 0, minWidth: 0 }}><WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.first} /></div>
+    <div style={{ display: 'flex', flex: 1 - node.ratio, minHeight: 0, minWidth: 0 }}><WorkbenchBrowserPresentationSlots tab={tab} target={target} node={node.second} /></div>
+  </div>
 }
 
 /** Project the Store's accepted ratio into the existing PanelGroup, leaving drag commits with its owner. */
@@ -821,16 +953,18 @@ function WorkbenchRegionBranch({
   groupId,
   surfaceVisible,
   nativeSurfacesVisible,
-  interactiveResize
+  interactiveResize,
+  regionTarget
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'split' }>
   nodePath: string
   tab: WorkbenchTab
   swapTargets: RegionSwapTargets
-  groupId: string
+  groupId: string | undefined
   surfaceVisible: boolean
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
+  regionTarget?: WorkbenchViewTarget | undefined
 }) {
   const updateRegionSplitRatio = useAppStore((state) => state.updateRegionSplitRatio)
   const [dragging, setDragging] = useState(false)
@@ -863,6 +997,7 @@ function WorkbenchRegionBranch({
           surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
+          regionTarget={regionTarget}
         />
       </Panel>
       <PanelResizeHandle
@@ -882,6 +1017,7 @@ function WorkbenchRegionBranch({
           surfaceVisible={surfaceVisible}
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
+          regionTarget={regionTarget}
         />
       </Panel>
     </PanelGroup>
@@ -899,6 +1035,7 @@ function PaneGroup({
   interactiveResize,
   isRootLeaf,
   showWindowChrome = false,
+  leadingChrome,
   viewHostPrefix,
   onNewTab
 }: {
@@ -913,10 +1050,14 @@ function PaneGroup({
   interactiveResize: boolean
   isRootLeaf?: boolean
   showWindowChrome?: boolean
+  leadingChrome?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
-  const tabsById = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
+  const projection = useContext(WorkbenchProjectionContext)
+  const tabsById = useAppStore(useShallow((state) => projection
+    ? Object.fromEntries(group.tabOrder.flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
+    : workbenchDisplayTabs(state.tabs, workspaceId, allLayout)))
   const focusTabGroup = useAppStore((state) => state.focusTabGroup)
   const activateTab = useAppStore((state) => state.activateTab)
   const splitRegion = useAppStore((state) => state.splitRegion)
@@ -944,7 +1085,7 @@ function PaneGroup({
   const hasOriginalTopicTab = emptySpaceSelection && Object.values(tabsById).some(tab => tab.topicId === emptySpaceSelection.topicId)
   const showEmptySpace = emptySpaceSelection && !activeTab
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
-  const focusMoved = retainedSpatialFocus?.workspaceId === workspaceId && layout.activeGroupId === group.id &&
+  const focusMoved = retainedSpatialFocus?.displayWorkspaceId === workspaceId && layout.activeGroupId === group.id &&
     (!activeTab || !activeTab.regions[retainedSpatialFocus.regionId])
   // Pane 组的焦点环同样只在「有得选」时才有内容：不分屏时唯一那组铺满整个工作区且恒等于
   // activeGroupId，画出来就是整个界面镶一圈绿边（用户原话：「整个界面也有」）。
@@ -957,7 +1098,10 @@ function PaneGroup({
     group.id,
     groupIds(layout.root).length
   )
-  const activeRegionId = activeTab ? logicalRegionId(activeTab, retainedSpatialFocus?.regionId) : null
+  const retainedHere = retainedSpatialFocus?.displayWorkspaceId === workspaceId && retainedSpatialFocus.groupId === group.id &&
+    retainedSpatialFocus.tabId === activeTab?.id
+  const activeRegionId = activeTab ? logicalRegionId(activeTab, retainedHere ? retainedSpatialFocus.regionId :
+    projection?.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId) : null
   const activeSurface = activeTab && activeRegionId ? activeTab.regions[activeRegionId] : null
   // Route through isSessionSurface (SSOT in workbench-surface-kinds.ts). This site was invisible
   // to the exhaustiveness guard for months because it read `.kind` off a nullable receiver
@@ -984,6 +1128,10 @@ function PaneGroup({
     }
   }
 
+  const tabNavigation = <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
+    <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>{tabs.map(tab => <SortableWorkbenchTab key={tab.id} tab={tab} group={group} workspaceId={workspaceId} />)}</WorkbenchTabStrip>
+  </SortableContext>
+
   return (
     <section
       ref={setNodeRef}
@@ -991,24 +1139,15 @@ function PaneGroup({
         isOver ? 'pane-group--drop-over' : ''
       }`}
       data-pane-group-id={group.id}
-      onPointerDown={() => focusTabGroup(workspaceId, group.id)}
+      onPointerDown={() => projection ? activeTab && selectWorkbenchProjectionTab(projection, group.id, activeTab,
+        projection.selection.find(reference => reference.displayWorkspaceId === workspaceId && reference.groupId === group.id && reference.tabId === activeTab.id)?.regionId)
+        : focusTabGroup(workspaceId, group.id)}
     >
       <header className={`pane-tabbar ${isRootLeaf ? 'pane-tabbar--root' : ''} ${showWindowChrome ? 'pane-tabbar--chrome-owner' : ''}`}>
         {showWindowChrome ? (
           <TopRowLeadingChrome />
-        ) : null}
-        <SortableContext items={group.tabOrder} strategy={horizontalListSortingStrategy}>
-          <WorkbenchTabStrip activeTabId={group.activeTabId} tabIds={group.tabOrder}>
-            {tabs.map((tab) => (
-              <SortableWorkbenchTab
-                key={tab.id}
-                tab={tab}
-                group={group}
-                workspaceId={workspaceId}
-              />
-            ))}
-          </WorkbenchTabStrip>
-        </SortableContext>
+        ) : leadingChrome ?? null}
+        {tabNavigation}
         <div className="pane-tabbar__actions">
           {activeRuntimeSession && canStopSessionRun(activeRuntimeSession) ? (
             <button
@@ -1026,11 +1165,11 @@ function PaneGroup({
             regionCount={activeTab ? Object.keys(activeTab.regions).length : 0}
             onSplit={(direction) => {
               if (activeTab && activeSurface) {
-                splitRegion(workspaceId, activeTab.id, activeSurface.regionId, direction)
+                splitRegion(activeTab.workspaceId, activeTab.id, activeSurface.regionId, direction)
               }
             }}
             onArrange={(mode) => {
-              if (activeTab) arrangeTabRegions(workspaceId, activeTab.id, mode)
+              if (activeTab) arrangeTabRegions(activeTab.workspaceId, activeTab.id, mode)
             }}
           />
           <button
@@ -1052,13 +1191,14 @@ function PaneGroup({
         } } : null} />
       </div>
       </header>
-      <div className="pane-body">
+      <div className="pane-content">
+      <div className="pane-body" key="original-body">
         {showEmptySpace ? storedSpaceLayout && emptySpaceTopic && !hasOriginalTopicTab ? <div className="pane-state" data-mote-empty-space={emptySpaceTopic.id}
           onPointerDown={event => event.stopPropagation()}>
           <span>{emptySpaceTopic.title}</span>
-          <strong role="status">No Tab in this context</strong>
-          <button type="button" className="small-button" aria-label="New Tab" title="New tab"
-            onClick={() => onNewTab(group.id)}><Plus size={13} /> New Tab</button>
+          <strong role="status">No discussion yet</strong>
+          <button type="button" className="small-button" aria-label="New discussion" title="New discussion"
+            onClick={() => onNewTab(group.id)}><Plus size={13} /> New discussion</button>
         </div> : <div role="status" className="workbench-restore-notice">Original context retained · Topic or Tab placement is still being confirmed · Reopen this context in Space to continue recovery</div> : null}
         {/* 每个 Tab 都留在 DOM 里，不活动的靠 CSS 隐藏。
             此前这里只挂 activeTab，"不可见"实现为"不渲染"——切走即卸载整棵子树，xterm 实例
@@ -1076,11 +1216,19 @@ function PaneGroup({
             // 隐藏的格子退出可交互树：它仍在 DOM 里，但不该被 Tab 键走到、不该被搜索命中。
             inert={tab.id !== group.activeTabId}
           >
-            <div id={`${viewHostPrefix}:${tab.id}`} data-workbench-tab-id={tab.id} className="workbench-tab-slot" />
+            <div id={workbenchProjectionSlotId(viewHostPrefix, { displayWorkspaceId: workspaceId, groupId: group.id, tabId: tab.id })}
+              data-workbench-tab-id={tab.id} data-workbench-group-id={group.id} className="workbench-tab-slot">
+              {projection && group.activeTabId === tab.id && projection.unsupportedTabIds.has(tab.id)
+                ? <div role="status" className="workbench-restore-notice">This exact Tab is selected in more than one Group. Simultaneous live display is not available; its original content and references are kept.</div> : null}
+              {!projection && tab.workspaceId !== workspaceId && group.activeTabId === tab.id && workbenchDisplayOccurrenceAmbiguous(layout, group.id, tab.id)
+                ? <div role="status" className="workbench-restore-notice">Original Tab retained · Select this exact Group to display its existing View here.</div> : null}
+            </div>
           </div>
         )) : !focusMoved && !showEmptySpace ? (
-          <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
+          projection ? <div role="status" className="workbench-restore-notice">Select a Tab in this Zone to display its original content.</div>
+            : <NewTabSurface tabGroupId={group.id} visible={surfaceVisible} />
         ) : null}
+      </div>
       </div>
       <ConfirmationDialog
         open={pendingStopSessionId !== null}
@@ -1113,6 +1261,7 @@ function SplitNode({
   interactiveResize = false,
   isRootLeaf = false,
   showWindowChrome = false,
+  leadingChrome,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1127,6 +1276,7 @@ function SplitNode({
   interactiveResize?: boolean
   isRootLeaf?: boolean
   showWindowChrome?: boolean
+  leadingChrome?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1144,6 +1294,7 @@ function SplitNode({
         interactiveResize={interactiveResize}
         isRootLeaf={isRootLeaf}
         showWindowChrome={showWindowChrome}
+        leadingChrome={leadingChrome}
         viewHostPrefix={viewHostPrefix}
         onNewTab={onNewTab}
       />
@@ -1161,6 +1312,7 @@ function SplitNode({
       nativeSurfacesVisible={nativeSurfacesVisible}
       interactiveResize={interactiveResize}
       showWindowChrome={showWindowChrome}
+      leadingChrome={leadingChrome}
       viewHostPrefix={viewHostPrefix}
       onNewTab={onNewTab}
     />
@@ -1178,6 +1330,7 @@ function SplitBranch({
   nativeSurfacesVisible,
   interactiveResize,
   showWindowChrome,
+  leadingChrome,
   viewHostPrefix,
   onNewTab
 }: {
@@ -1191,6 +1344,7 @@ function SplitBranch({
   nativeSurfacesVisible: boolean
   interactiveResize: boolean
   showWindowChrome: boolean
+  leadingChrome?: ReactNode
   viewHostPrefix: string
   onNewTab(groupId: string): void
 }) {
@@ -1229,6 +1383,7 @@ function SplitBranch({
           nativeSurfacesVisible={nativeSurfacesVisible}
           interactiveResize={terminalResizeSuspended}
           showWindowChrome={showWindowChrome}
+          leadingChrome={leadingChrome}
           viewHostPrefix={viewHostPrefix}
           onNewTab={onNewTab}
         />
@@ -1281,20 +1436,43 @@ function splitTargetAtPoint(point: { x: number; y: number }): SplitTarget | null
   return direction ? { groupId: pane.dataset.paneGroupId!, direction } : null
 }
 
+/** Keep the exact original Tab mounted while its display placement is unconfirmed. */
+function RetainedWorkbenchTab({ workbenchRef, workspaceId, original, targetTabId, viewHostPrefix }: {
+  workbenchRef: React.RefObject<HTMLDivElement | null>; workspaceId: string
+  original: WorkbenchTab | undefined; targetTabId: string; viewHostPrefix: string
+}) {
+  return <div ref={workbenchRef} className="workspace-workbench workspace-workbench--merged" data-workbench-retained-reference={targetTabId}>
+    <div className="service-disclosure-home">
+      <ServiceWindowNotice disclosure={{ scope: JSON.stringify(['local:retained-tab', workspaceId, targetTabId]),
+        id: 'retained-tab', occurrence: targetTabId, cause: 'placement-unconfirmed', visible: true }}
+        notice={{ kind: 'indeterminate', notice: {
+          step: 'Original Tab retained', mode: original ? 'The original Tab is kept here. Its Group placement is not confirmed.'
+            : 'The saved Tab is not currently available. Its reference and your existing Sessions are kept.',
+          restore: 'Reopen its original location in Space.'
+        } }} />
+    </div>
+    <div className="pane-content"><div className="pane-body">
+      {original ? <div id={`${viewHostPrefix}:${targetTabId}`} data-workbench-tab-id={targetTabId} className="workbench-tab-slot" />
+        : <div className="pane-state"><strong>Choose a Tab</strong><span>Your existing Tabs remain available.</span></div>}
+    </div></div>
+  </div>
+}
+
 export function WorkspaceWorkbench({
   workspaceId,
   interactiveResize = false,
   visible = true,
   topicId,
   topicIsolation = 'default',
-  focusTabId = null,
-  focusPortalTargetId = null,
   viewOwnership = 'owner',
   viewHostPrefix = 'workbench-tab-slot',
   viewTargets,
   onBrowserControlConfirmation,
   projectionTabId,
-  onTabSelect
+  onTabSelect,
+  onCreateTab,
+  projection,
+  leadingChrome
 }: {
   workspaceId: string
   interactiveResize?: boolean
@@ -1307,36 +1485,65 @@ export function WorkspaceWorkbench({
    * this seam to stop fit/bounds work until the slot is visible again.
   */
   visible?: boolean
-  /** When Focus owns a Session, keep this Workbench instance alive but project one complete Tab into Focus. */
-  focusTabId?: string | null
-  focusPortalTargetId?: string | null
   /** Projection chrome supplies slots; the window registry remains the single View owner. */
   viewOwnership?: 'owner' | 'projection'
   viewHostPrefix?: string
   /** Explicit visible destinations move existing Tab contents without mounting another tree. */
-  viewTargets?: Readonly<Record<string, WorkbenchViewTarget>> | undefined
+  viewTargets?: WorkbenchViewTargets | undefined
   onBrowserControlConfirmation?: BrowserControlConfirmation | undefined
   /** Select within projection chrome without changing the durable main workface. */
   projectionTabId?: string | undefined
   /** Explicit navigation inside this projection may retain its own selected Tab. */
   onTabSelect?: ((tabId: string) => void) | undefined
+  onCreateTab?: ((groupId: string) => void) | undefined
+  /** Controlled exact Zone projection; the original workface keeps entity/content ownership. */
+  projection?: WorkbenchProjection | undefined
+  /** Surface chrome follows the same first-Pane path without taking content ownership. */
+  leadingChrome?: ReactNode
 }) {
   const workbenchRef = useRef<HTMLDivElement>(null)
+  const projectionEntity = projection?.entity
+  const projectionKey = projectionEntity ? `${projection?.presentationId}:${projectionEntity.kind}:${projectionEntity.kind === 'zone' ? projectionEntity.zoneId : projectionEntity.kind === 'tab' ? projectionEntity.tabId : projectionEntity.regionId}` : null
+  const projectionSlotKey = projection && JSON.stringify([projection.entity, projection.selection])
+  const [projectionActiveGroupId, setProjectionActiveGroupId] = useState<string | null>(null)
+  useEffect(() => setProjectionActiveGroupId(null), [projectionKey])
+  const effectiveViewHostPrefix = projection ? `${projection.presentationId}-slot` : viewHostPrefix
   const storedLayout = useAppStore((state) => state.layouts[workspaceId])
-  const tabs = useAppStore(useShallow((state) => workspaceTabs(state.tabs, workspaceId)))
   const retainedLayout = useRef(storedLayout)
   if (storedLayout) retainedLayout.current = storedLayout
   const residentLayout = storedLayout ?? retainedLayout.current
+  const projectedMemberIds = useMemo(() => projection ? workbenchProjectionTabIds(projection) : null, [projection?.entity, projection?.catalog])
+  const tabs = useAppStore(useShallow((state) => projection
+    ? Object.fromEntries([...projectedMemberIds ?? []].flatMap(id => state.tabs[id] ? [[id, state.tabs[id]!]] : []))
+    : workbenchDisplayTabs(state.tabs, workspaceId, residentLayout)))
+  const presentedAgentIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
+    Object.values(tab.regions).flatMap(region => region.kind === 'agent' ? [region.sessionId] : [])))], [tabs])
+  const activityPresentable = useAppStore(useShallow(state => Object.fromEntries(presentedAgentIds.map(id =>
+    [id, sessionPresentationById(state.sessions).get(id)?.kind === 'agent' && effectiveSessionViewMode(state, id) !== 'terminal']))))
+  const ordinaryDisplayIds = useMemo(() => [...new Set(Object.values(tabs).flatMap(tab =>
+    tab.workspaceId === workspaceId && viewTargets?.[tab.id] ? viewTargets[tab.id]!.flatMap(target => target.surface === 'space' && target.reference ? [target.reference.displayWorkspaceId] : []) : []))], [tabs, viewTargets, workspaceId])
+  const ordinaryLayouts = useAppStore(useShallow(state => Object.fromEntries(ordinaryDisplayIds.map(id => [id, state.layouts[id]]))))
   // 切 Topic 就像切 Branch：换掉那一组 Tab。layout 仍只有一份，这里只是一次投影。
   // 当前 Topic 从活动 Tab 的绑定派生，而不是读一个只有面板点击会写的字段——否则从别的路径
   // 进入 Topic（点 Tab、会话恢复、Board 跳转）时它是空的，投影整个不发生。
-  const focusTab = focusTabId ? tabs[focusTabId] : null
   const retainedSpatialFocus = useAppStore(state => state.retainedSpatialFocus)
+  const zoneLayout = useMemo(() => projection ? projectWorkbenchProjection(residentLayout, tabs, projection, projectionActiveGroupId) : null,
+    [residentLayout, tabs, projection, projectionActiveGroupId])
+  const projectionContext = useMemo(() => projection && zoneLayout
+    ? { ...projection, unsupportedTabIds: new Set([...zoneLayout.unsupportedTabIds, ...zoneLayout.layout?.groups.flatMap(group => {
+        const tabId = group.activeTabId
+        if (!tabId || !viewTargets?.[tabId]) return []
+        const slotId = projection.entity.kind === 'region'
+          ? workbenchRegionProjectionSlotId(effectiveViewHostPrefix, { displayWorkspaceId: workspaceId, groupId: group.id, tabId, regionId: projection.entity.regionId })
+          : workbenchProjectionSlotId(effectiveViewHostPrefix, { displayWorkspaceId: workspaceId, groupId: group.id, tabId })
+        return viewTargets[tabId]!.some(target => target.hostId === slotId) ? [] : [tabId]
+      }) ?? []]),
+      onSelect: (reference: Parameters<WorkbenchProjection['onSelect']>[0]) => { setProjectionActiveGroupId(reference.groupId); projection.onSelect(reference) } } : null, [projection, zoneLayout, viewTargets, effectiveViewHostPrefix, workspaceId])
   const layout = useMemo(
-    () => residentLayout
-      ? layoutForLogicalRegionFocus(layoutForActiveTopic(residentLayout, tabs, topicId ?? (retainedSpatialFocus?.workspaceId === workspaceId ? retainedSpatialFocus.topicId : undefined) ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId), tabs, retainedSpatialFocus?.workspaceId === workspaceId ? retainedSpatialFocus : null)
+    () => zoneLayout ? zoneLayout.layout : residentLayout
+      ? layoutForLogicalRegionFocus(layoutForActiveTopic(residentLayout, tabs, topicId ?? (retainedSpatialFocus?.displayWorkspaceId === workspaceId ? retainedSpatialFocus.topicId : undefined) ?? activeTopicIdFromLayout(residentLayout, tabs), topicIsolation !== 'bound-only', projectionTabId), tabs, retainedSpatialFocus?.displayWorkspaceId === workspaceId ? retainedSpatialFocus : null)
       : residentLayout,
-    [residentLayout, tabs, topicId, topicIsolation, projectionTabId, retainedSpatialFocus, workspaceId]
+    [zoneLayout, residentLayout, tabs, topicId, topicIsolation, projectionTabId, retainedSpatialFocus, workspaceId]
   )
   const moveTab = useAppStore((state) => state.moveTab)
   const openLauncher = useAppStore((state) => state.openLauncher)
@@ -1365,13 +1572,14 @@ export function WorkspaceWorkbench({
     for (const group of residentLayout?.groups ?? []) for (const id of group.tabOrder) owners.set(id, group.id)
     return owners
   }, [residentLayout?.groups])
+  const homeReferences = useMemo(() => workbenchHomePresentationReferences(storedLayout, workspaceId, tabs), [storedLayout, workspaceId, tabs])
   const retainedOwners = useRef(new Map<string, string>())
   for (const [id, groupId] of ownerByTab) retainedOwners.current.set(id, groupId)
   for (const id of retainedOwners.current.keys()) if (!tabs[id]) retainedOwners.current.delete(id)
 
   useEffect(() => {
     const element = workbenchRef.current
-    if (!element || !visible || !onTabSelect) return
+    if (!element || !visible || !onTabSelect || projection) return
     // Retained View contents arrive through a portal owned by another Workbench.
     // Native events follow the visible DOM host, so both Tab clicks and a Region
     // focus inside that moved View identify the projection the person selected.
@@ -1396,7 +1604,7 @@ export function WorkspaceWorkbench({
       element.removeEventListener('click', select)
       element.removeEventListener('focusin', select)
     }
-  }, [visible, onTabSelect, workspaceId, topicId, layout])
+  }, [visible, onTabSelect, workspaceId, topicId, layout, projection])
 
   function onDragStart(event: DragStartEvent): void {
     const data = event.active.data.current as DragTabData | undefined
@@ -1433,33 +1641,85 @@ export function WorkspaceWorkbench({
   }
 
   function newTab(groupId: string): void {
+    if (onCreateTab) { onCreateTab(groupId); return }
+    if (projection) {
+      const zone = workbenchProjectionZone(projection)
+      const state = useAppStore.getState()
+      if (!zone) {
+        state.reportError(new Error('The exact Zone resource Group is unavailable here. Existing content is kept; create its Tab from the original resource workface.'))
+        return
+      }
+      const tabId = openLauncher({ workspaceId: zone.workspaceId, displayWorkspaceId: projection.displayWorkspaceId, ...(groupId ? { tabGroupId: groupId } : {}), zoneId: zone.zoneId, reveal: false })
+      const tab = tabId ? useAppStore.getState().tabs[tabId] : undefined
+      if (tab) projection.onSelect({ displayWorkspaceId: workspaceId, groupId, tabId: tab.id, regionId: tab.layout.activeRegionId })
+      return
+    }
     const projectedTopicId = topicId ?? (layout ? activeTopicIdFromLayout(layout, tabs) : undefined)
-    const tabId = openLauncher({ workspaceId, tabGroupId: groupId,
+    const tabId = openLauncher({ workspaceId, ...(groupId ? { tabGroupId: groupId } : {}),
       ...(projectedTopicId ? { topicId: projectedTopicId } : {}), reveal: viewOwnership === 'owner' })
     if (tabId) onTabSelect?.(tabId)
   }
 
-  if (viewOwnership === 'projection' && !projectionTabId) {
+  if (viewOwnership === 'projection' && !projectionTabId && !projection) {
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>
       {layout ? <div className="pane-state">
         <strong role="status">No Tab in this context</strong>
-        <button type="button" className="small-button" aria-label="New Tab" title="New tab"
+        <button type="button" className="small-button" aria-label="New Tab"
+          title="New tab"
           onClick={() => newTab(layout.activeGroupId)}><Plus size={13} /> New Tab</button>
       </div> : <div role="status" className="workbench-restore-notice">Original context retained · Workspace layout is still restoring</div>}
     </div>
   }
   const projectedTab = projectionTabId ? tabs[projectionTabId] : undefined
-  if (viewOwnership === 'projection' && projectionTabId && (!projectedTab || projectedTab.workspaceId !== workspaceId ||
-    topicId && projectedTab.topicId !== topicId || !ownerByTab.has(projectionTabId))) {
-    return <div ref={workbenchRef} className="workspace-workbench">
-      <div role="status" className="workbench-restore-notice">Original Tab retained · Its placement in this context is not available · Reopen this context in Space to continue recovery</div>
-      <div id={`${viewHostPrefix}:${projectionTabId}`} data-workbench-tab-id={projectionTabId} className="workbench-tab-slot" />
-    </div>
+  if (viewOwnership === 'projection' && !projection && projectionTabId && (!projectedTab || projectedTab.workspaceId !== workspaceId ||
+    topicId && projectedTab.topicId !== topicId || !homeReferences.get(projectionTabId))) {
+    const original = projectedTab?.workspaceId === workspaceId && (!topicId || projectedTab.topicId === topicId) ? projectedTab : undefined
+    return <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart}
+      onDragMove={onDragMove} onDragEnd={onDragEnd} onDragCancel={() => { setActiveDrag(null); setSplitTarget(null) }}>
+      <RetainedWorkbenchTab workbenchRef={workbenchRef} workspaceId={workspaceId}
+        original={original} targetTabId={projectionTabId} viewHostPrefix={viewHostPrefix} />
+    </DndContext>
   }
-  if (!layout) return null
+  const projectionNotice = zoneLayout?.issues.length ? <ServiceWindowNotice
+    notice={{ kind: 'indeterminate', notice: { step: 'Original work surface retained', mode: zoneLayout.issues.join(' '),
+      restore: 'Select a Tab in its Group, or reopen the original work surface in Space.' } }} /> : null
+  if (!layout && viewOwnership !== 'owner') return projection ? <div className="workspace-workbench" data-workbench-pending-owner>{projectionNotice}</div> : null
+  if (layout && viewOwnership === 'projection' && projection?.entity.kind === 'region') {
+    const reference = projection.selection.length === 1 ? projection.selection[0] : undefined
+    const confirmed = reference && reference.regionId === projection.entity.regionId && reference.displayWorkspaceId === workspaceId &&
+      tabs[reference.tabId]?.regions[reference.regionId] && layout.groups.some(group => group.id === reference.groupId && group.activeTabId === reference.tabId) &&
+      !projectionContext?.unsupportedTabIds.has(reference.tabId)
+    return <WorkbenchProjectionContext.Provider value={projectionContext}>
+      <div ref={workbenchRef} className="workspace-workbench">
+        {projectionNotice}
+        {confirmed ? <div key={projectionSlotKey} id={workbenchRegionProjectionSlotId(effectiveViewHostPrefix, reference)}
+          data-workbench-tab-id={reference.tabId} data-workbench-group-id={reference.groupId} className="workbench-region-slot" />
+          : <div role="status" className="workbench-restore-notice">The exact Region occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
+      </div>
+    </WorkbenchProjectionContext.Provider>
+  }
+  // Tab-level callers supply their own title band. The original View owner still
+  // holds the Region tree; this exact slot does not recreate its Group chrome.
+  if (layout && viewOwnership === 'projection' && projection?.entity.kind === 'tab') {
+    const reference = projection.selection.length === 1 ? projection.selection[0] : undefined
+    const group = reference && layout.groups.find(group => group.id === reference.groupId)
+    const tab = tabs[projection.entity.tabId]
+    const confirmed = reference && tab && reference.displayWorkspaceId === workspaceId &&
+      reference.tabId === tab.id && group?.activeTabId === tab.id &&
+      !projectionContext?.unsupportedTabIds.has(tab.id)
+    return <WorkbenchProjectionContext.Provider value={projectionContext}>
+      <div ref={workbenchRef} className="workspace-workbench">
+        {projectionNotice}
+        {confirmed ? <div key={projectionSlotKey} id={workbenchProjectionSlotId(effectiveViewHostPrefix, reference)}
+          data-workbench-tab-id={tab.id} data-workbench-group-id={reference.groupId} className="workbench-tab-slot" />
+          : <div role="status" className="workbench-restore-notice">The exact Tab occurrence is not confirmed here. Its content and reference are kept; choose its original location.</div>}
+      </div>
+    </WorkbenchProjectionContext.Provider>
+  }
   // 单 Pane 与分屏都让 Tabbar 从窗口顶边开始；分屏只把一次必要的全局 chrome 传给首个 Pane。
-  const rootIsLeaf = layout.root.type === 'leaf'
+  const rootIsLeaf = layout?.root.type === 'leaf'
   const workbench = (
+    <WorkbenchProjectionContext.Provider value={projectionContext}>
     <DndContext
       sensors={sensors}
       collisionDetection={pointerWithin}
@@ -1472,57 +1732,103 @@ export function WorkspaceWorkbench({
       }}
       autoScroll={false}
     >
-      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''} ${focusTab ? 'workspace-workbench--focus-source' : ''}`}>
-        <SplitNode
+      <div ref={workbenchRef} className={`workspace-workbench ${rootIsLeaf ? 'workspace-workbench--merged' : ''}`}>
+        {projectionNotice}
+        {!storedLayout && residentLayout && !projection ? <div role="status" className="workbench-restore-notice">Original work surface retained · Display layout is still restoring</div> : null}
+        {layout ? <SplitNode
           node={layout.root}
           nodePath=""
           workspaceId={workspaceId}
           layout={layout}
           allLayout={viewOwnership === 'owner' ? storedLayout ?? layout : layout}
           splitTarget={splitTarget}
-          surfaceVisible={visible && !focusTab}
-          nativeSurfacesVisible={visible && !focusTab && activeDrag === null}
+          surfaceVisible={visible}
+          nativeSurfacesVisible={visible && activeDrag === null}
           interactiveResize={interactiveResize}
           isRootLeaf={rootIsLeaf}
           showWindowChrome={viewOwnership === 'owner'}
-          viewHostPrefix={viewHostPrefix}
+          leadingChrome={leadingChrome}
+          viewHostPrefix={effectiveViewHostPrefix}
           onNewTab={newTab}
-        />
+        /> : <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div>}
       </div>
       {viewOwnership === 'owner' && Object.values(tabs).filter(tab => tab.workspaceId === workspaceId).map(tab => {
-        const ownerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
+        const targets = viewTargets?.[tab.id] ?? []
+        const repeatableContent = Object.values(tab.regions).length > 0 && Object.values(tab.regions).every(region => region.kind === 'browser' || region.kind === 'agent' && activityPresentable[region.sessionId])
+        const projection = (repeatableContent ? targets.find(target => target.surface === 'space') : undefined) ??
+          [...targets].reverse().find(target => target.visible !== false && target.surface !== 'space') ?? targets.find(target => target.visible !== false) ??
+          [...targets].reverse().find(target => target.surface !== 'space') ?? targets[0]
+        const reference = projection?.reference
+        const ordinaryLayout = reference ? ordinaryLayouts[reference.displayWorkspaceId] : undefined
+        const confirmedDisplayGroup = reference?.tabId === tab.id && tab.regions[reference.regionId] &&
+          (projection?.surface === 'space' ? workbenchDisplayReferenceMatches(ordinaryLayout, reference)
+            : projection?.projection?.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference)))
+          ? reference.groupId : undefined
+        if (confirmedDisplayGroup) retainedOwners.current.set(tab.id, confirmedDisplayGroup)
+        const originalOwnerId = ownerByTab.get(tab.id) ?? retainedOwners.current.get(tab.id)
+        const ownerId = projection?.surface === 'space' && confirmedDisplayGroup ? confirmedDisplayGroup : originalOwnerId ?? confirmedDisplayGroup
         const projectedGroup = ownerId ? groupById.get(ownerId) : undefined
-        const projection = viewTargets?.[tab.id]
-        const targetId = focusTab?.id === tab.id ? focusPortalTargetId : projection?.hostId ?? null
-        const tabVisible = (targetId !== null && (projection?.surface === 'survey' ? projection.visible === true : true)) || (targetId === null && visible && (focusTab ? tab.id === focusTab.id : projectedGroup?.activeTabId === tab.id))
-        return <StableWorkbenchView key={tab.id} homeId={`${viewHostPrefix}:${tab.id}`} targetId={targetId}
-          active={focusTab?.id === tab.id ? true : projection?.active ?? true}
-          survey={projection?.surface === 'survey'} controlsOpen={projection?.controlsOpen ?? false}
+        const regionTarget = projection?.projection?.entity.kind === 'region' ? projection : undefined
+        const projectedSurface = regionTarget?.reference ? tab.regions[regionTarget.reference.regionId] : undefined
+        const nativeRegionTarget = projectedSurface && projectedSurface.kind !== 'browser'
+          ? confirmedRegionTarget(regionTarget, tab.id, projectedSurface.regionId) : undefined
+        const tabProjection = regionTarget ? undefined : projection
+        const targetId = tabProjection?.hostId ?? null
+        const primaryReference = targetId === null ? homeReferences.get(tab.id) : tabProjection?.reference
+        const retainedHere = primaryReference && retainedSpatialFocus?.tabId === tab.id &&
+          primaryReference.displayWorkspaceId === retainedSpatialFocus.displayWorkspaceId && primaryReference.groupId === retainedSpatialFocus.groupId
+        const homeId = homeReferences.get(tab.id) ? workbenchProjectionSlotId(viewHostPrefix, homeReferences.get(tab.id)!) : `${viewHostPrefix}:${tab.id}`
+        const primaryHostId = targetId ?? homeId
+        const tabVisible = (targetId !== null && (tabProjection?.surface ? tabProjection.visible === true : true)) || (targetId === null && visible && projectedGroup?.activeTabId === tab.id)
+        return <WorkbenchBrowserTargetsContext.Provider key={tab.id} value={targets}>
+        {targets.filter(target => target.hostId !== primaryHostId && target.hostId !== nativeRegionTarget?.hostId && target.reference).map(target =>
+          <StableWorkbenchView key={target.hostId} homeId={`${target.hostId}:parked`} targetId={target.hostId}
+            active={target.active} surface={target.surface} retainedRegionId={target.reference!.regionId} reference={target.reference}>
+            <WorkbenchBrowserPresentationSlots tab={tab} target={target} node={target.projection?.entity.kind === 'region' ? { type: 'leaf', regionId: target.projection.entity.regionId } : tab.layout.root} />
+          </StableWorkbenchView>)}
+        <StableWorkbenchView homeId={homeId} targetId={targetId}
+          active={tabProjection?.active ?? true}
+          surface={tabProjection?.surface}
+          survey={tabProjection?.surface === 'survey'} controlsOpen={tabProjection?.controlsOpen ?? false}
           onBrowserControlConfirmation={onBrowserControlConfirmation}
-          homeNotice={projection && focusTab?.id !== tab.id && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
+          homeNotice={tabProjection && tabProjection.surface !== 'space' && visible && projectedGroup?.activeTabId === tab.id ? <div data-workbench-borrowed-view-notice>
             <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
-              step: 'Selected View is in Mote',
-              mode: 'This Tab is selected here. Its original View remains in the floating window.',
-              restore: 'Close Mote to return this View to Space.'
+              step: tabProjection.surface === 'focus' ? 'Selected View is in Focus' : tabProjection.surface === 'survey' ? 'Selected View is in Survey' : 'Selected View is in Mote',
+              mode: tabProjection.surface === 'focus' || tabProjection.surface === 'survey'
+                ? 'This Tab is selected here. Its original View remains in the named presentation.'
+                : 'This Tab is selected here. Its original View remains in the floating window.',
+              restore: tabProjection.surface === 'focus' ? 'Close Focus workspace to return this View to Space.'
+                : tabProjection.surface === 'survey' ? 'Return to Space to see the original View.' : 'Close Mote to return this View to Space.'
             } }} />
           </div> : undefined}
-          retainedRegionId={targetId === null && retainedSpatialFocus?.tabId === tab.id ? retainedSpatialFocus.regionId : null}>
-          {ownerId && (!storedLayout || !ownerByTab.has(tab.id)) ? <div role="status" className="workbench-restore-notice">Original Tab retained · Workspace layout is still restoring</div> : null}
-          {ownerId ? <WorkbenchRegionTree
-            tab={tab} groupId={ownerId}
-            headerPortalTargetId={focusTab?.id === tab.id && targetId && storedLayout && ownerByTab.has(tab.id) &&
+          onSelectRegion={tabProjection?.onSelectRegion}
+          projection={tabProjection?.projection}
+          reference={targetId === null ? homeReferences.get(tab.id) ?? undefined : projection?.reference}
+          retainedRegionId={retainedHere && (targetId === null || tabProjection?.surface === 'space')
+            ? retainedSpatialFocus.regionId : tabProjection?.retainedRegionId ?? null}>
+          {originalOwnerId && !confirmedDisplayGroup && !homeReferences.get(tab.id) && !tabProjection ? <ServiceWindowNotice
+            disclosure={{ scope: JSON.stringify(['local:retained-tab-placement', workspaceId, tab.id]), id: 'tab-placement',
+              occurrence: tab.id, cause: 'placement-unconfirmed', visible: tabVisible }}
+            notice={{ kind: 'indeterminate', notice: { step: 'Original display location unconfirmed',
+              mode: 'The original Tab and Regions remain available. Group placement is not confirmed.',
+              restore: 'Choose its original location in Space to restore placement-dependent actions.' } }} /> : null}
+          <WorkbenchRegionTree
+            tab={tab} groupId={confirmedDisplayGroup ?? homeReferences.get(tab.id)?.groupId} regionTarget={regionTarget}
+            headerPortalTargetId={projection?.surface === 'focus' && targetId && storedLayout && ownerByTab.has(tab.id) &&
               tab.layout.root.type === 'leaf' && tab.regions[tab.layout.root.regionId]?.kind === 'agent'
-              ? `${targetId}-header` : null}
+              ? projection?.headerPortalTargetId ?? `${targetId}-header` : null}
             surfaceVisible={tabVisible}
             nativeSurfacesVisible={tabVisible && activeDrag === null}
             interactiveResize={interactiveResize}
-          /> : <FullPageLoadingSurface scope="region" phase="loading" eyebrow="Focus" title="Restoring Tab layout" detail="The original Tab is retained while its workspace layout is restored." />}
+          />
         </StableWorkbenchView>
+        </WorkbenchBrowserTargetsContext.Provider>
       })}
       <DragOverlay dropAnimation={null}>
         {activeTab ? <DragPreview tab={activeTab} /> : null}
       </DragOverlay>
     </DndContext>
+    </WorkbenchProjectionContext.Provider>
   )
   return workbench
 }
