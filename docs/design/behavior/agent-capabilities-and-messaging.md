@@ -6,6 +6,7 @@
 
 **本页章节**
 
+- [AgentMux 消息与分享格式](#agentmux-消息与分享格式)
 - [AgentMux 注入上下文](#agentmux-注入上下文)
 - [启动握手与自命名](#启动握手与自命名)
 - [交出去与派出去](#交出去与派出去)
@@ -31,6 +32,16 @@
 - [A2A 身份信封与持久化全局消息队列](#a2a-身份信封与持久化全局消息队列)
 - [A2A 消息要让人一眼看懂](#a2a-消息要让人一眼看懂)
 - [按 amux id 搜索 Agent](#按-amux-id-搜索-agent)
+
+## AgentMux 消息与分享格式
+
+AgentMux 提供的对话与分享外框在此集中导航：平台说明、对象分享与跨 Session 消息来源各有用途，具体合同仍由下列专题唯一持有。本文的格式导航不改变原消息角色、内容归属、寻址身份或授权；外部 Skill 声明包、Provider 原生消息与机器回执沿各自 owner。
+
+| 可读格式 | 用途 | 唯一合同 | 当前公共出口 |
+| --- | --- | --- | --- |
+| `<amux from="amux">…</amux>` | 随请求附带或独立投递的平台说明 | [AgentMux 注入上下文](#agentmux-注入上下文) | [Core `composeAgentPrompt` / `composeOutboundMessage`](../../../packages/core/src/agent-outbound-message.ts) |
+| `--- amux : IDCard/Region/Tab/File/Browser ---` … `-----` | 可复制的对象地址与内容分享 | [寻址与复制](spaces-and-layout.md#寻址与复制) | [Core `formatAmuxSharing` 及对象格式器](../../../packages/core/src/sharing.ts) |
+| `[Message from Agent <canonical Session ID>]` 加原正文 | Core 核验作者后的跨 Session 消息可读来源 | [A2A 身份信封与持久化全局消息队列](#a2a-身份信封与持久化全局消息队列) | [Core `renderAgentMuxMessageEnvelope`](../../../packages/core/src/agent-message-render.ts)，作者核验与持久投递仍归 Core |
 
 ## AgentMux 注入上下文
 
