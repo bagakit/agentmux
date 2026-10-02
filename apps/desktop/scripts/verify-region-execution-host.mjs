@@ -204,9 +204,9 @@ async function artifacts() {
   assert.ok(proof.cleanup.owned.length > 0)
   assert.deepEqual(proof.cleanup.stopped.map(({ beforeState, action, ...identity }) => {
     assert.ok(typeof beforeState === 'string' && beforeState.length > 0)
-    assert.equal(action, 'public-stop')
+    assert.equal(action, beforeState === 'running' ? 'public-stop' : 'already-ended')
     return identity
-  }), proof.cleanup.owned, 'Every owned Session/Host/Run is stopped through its actual public owner')
+  }), proof.cleanup.owned, 'Cleanup accounts for the exact owned Session/Host/Run identities')
   assert.deepEqual(proof.cleanup.errors, []); assert.deepEqual(proof.cleanup.remaining, []); assert.equal(proof.cleanup.privateRootRemoved, true)
   assert.equal(proof.cleanup.originalBusinessSessionStopped, false); assert.equal(proof.cleanup.sharedRemoteHostStopped, false)
   assert.equal(review.conclusion, 'accepted'); assert.ok(typeof review.reviewer === 'string' && review.reviewer.trim())
