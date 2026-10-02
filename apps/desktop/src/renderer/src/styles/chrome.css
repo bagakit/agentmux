@@ -48,6 +48,7 @@
   padding:0;
   border-right: 0;
 }
+.top-row-leading-chrome--compact:has(> .sidebar-toggle-chrome) { min-width: calc(180px + var(--sp-4)); }
 /* Global surfaces hide the Project Rail, so the topbar no longer gets its traffic-light inset from
    the rail's toggle chrome. Keep the native macOS controls and the title in separate hit areas. */
 .top-row-leading-chrome--global-inset { padding-left: var(--window-controls-inset); }

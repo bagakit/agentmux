@@ -1,4 +1,8 @@
+import { MoteDetailsPanel } from './MoteDetailsPanel'
+import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { AgentAvatar } from './AgentAvatar'
+import { useMoteWorkfaceScope } from '../lib/mote-workface'
+import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import {
   Activity,
   ArrowUpRight,
@@ -13,7 +17,7 @@ import {
   Plus,
   RadioTower
 } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import type {
   SessionSnapshot,
   WorkspaceRecord
@@ -42,7 +46,7 @@ import { ChangesPanel } from './ChangesPanel'
 import { GitHistoryPanel } from './GitHistoryPanel'
 import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
-import { SidebarToggleChrome } from './TopRowChrome'
+import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 
 type ToolDefinition<T extends string> = {
@@ -57,15 +61,28 @@ const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTo
   agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot }
 }
 
-function WorkspaceFilesTool({
+export function WorkspaceFilesTool({
   workspace,
   isScratch,
-  visible
+  visible,
+  topicId,
+  onOpenPath,
+  onOpenTerminal,
+  reference
 }: {
   workspace: WorkspaceRecord
   isScratch: boolean
   visible: boolean
+  topicId?: string | undefined
+  reference?: WorkbenchProjectionSelection | null | undefined
+  onOpenPath?: ((path: string) => Promise<unknown>) | undefined
+  onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
 }) {
+  const mote = useMoteWorkfaceScope(workspace.id, topicId)
+  const materials = useMoteMaterialsActions(mote)
+  const [createFileRequest, setCreateFileRequest] = useState<{ requestId: number; parentPath: string }>()
+  const [allFiles, setAllFiles] = useState(false)
+  useEffect(() => setAllFiles(false), [mote?.topic.id])
   const presentation = contentSlotPresentation(isScratch)
   const displayPath = usePathDisplay()
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
@@ -79,8 +96,8 @@ function WorkspaceFilesTool({
   // The content slot's bottom half is Branches by default (unchanged behavior); a real project can
   // switch it to Source Control changes. Scratch never shows this — it renders Topics instead.
   const [bottomView, setBottomView] = useState<'branches' | 'changes' | 'history'>('branches')
-  // Own completed pages above the file-tree split: collapsing only moves presentation.
-  const history = useGitHistory(workspace, visible && !presentation.showTopics && bottomView === 'history')
+  // Completed pages survive a file-tree split or collapse in their original owner.
+  const history = useGitHistory(workspace, visible && !presentation.showTopics && !mote && bottomView === 'history')
 
   function revealDirectoryInExplorer(path: string): void {
     explorerRevealRequestId.current += 1
@@ -91,7 +108,11 @@ function WorkspaceFilesTool({
     })
   }
 
-  const bottomHalf = presentation.showTopics ? (
+  const bottomHalf = mote ? <MoteDetailsPanel key={mote.topic.id} scope={mote} reference={reference}
+    onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
+      setAllFiles(false); setExplorerCollapsed(workspace.id, false)
+      setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
+    }} /> : presentation.showTopics ? (
     <WorkspaceTopicsPanel
       workspace={workspace}
       onRevealDirectory={revealDirectoryInExplorer}
@@ -168,13 +189,16 @@ function WorkspaceFilesTool({
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
         <span title={displayPath(workspace.path, workspace.hostId)}>
-          <strong>{workspace.name}</strong>
-          {isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
+          <strong>{mote ? allFiles ? workspace.name : mote.topic.title : workspace.name}</strong>
+          {mote ? allFiles ? <small>All files</small> : null : isScratch || workspace.branch ? <small>{isScratch ? 'Topic wiki' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
         ) : null}
-        <div className="workspace-tool-context__actions" ref={setToolbarTarget} />
+        <div className="workspace-tool-context__actions">
+          {mote ? <button type="button" className="workspace-files-scope" onClick={() => setAllFiles(value => !value)}>{allFiles ? 'Back to this Mote' : 'Show all files'}</button> : null}
+          <div ref={setToolbarTarget} />
+        </div>
       </div>
       {collapsed ? (
         // 折叠＝没有可切分的第二块，所以整块直接由 bottomHalf 占满，不渲染 PanelGroup / 把手（见评审
@@ -188,7 +212,10 @@ function WorkspaceFilesTool({
           key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
         >
           <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
-            <FileExplorer key={workspace.id} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget} />
+            <FileExplorer key={workspace.id + (mote?.topic.id ?? '') + allFiles} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
+              workspaceId={workspace.id} rootPath={mote && !allFiles ? mote.rootPath : ''}
+              rootLabel={mote && !allFiles ? mote.topic.title : workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
+              onOpenPath={mote ? onOpenPath ?? materials.open : onOpenPath} onOpenTerminal={mote ? onOpenTerminal ?? materials.terminal : onOpenTerminal} />
           </Panel>
           <PanelResizeHandle className="workspace-tools-resize-handle" />
           <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
@@ -309,7 +336,8 @@ export function SurfaceToolDock({
   visible?: boolean
 }) {
   const workspaceTool = useAppStore((state) => state.workspaceTool)
-  const projectRailOpen = useAppStore((state) => state.projectRailOpen)
+  const preferredProjects = useAppStore((state) => state.projectRailOpen)
+  const projectRailOpen = useContext(WindowSidebarLayoutContext)?.projectRailOpen ?? preferredProjects
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const layout = useAppStore((state) => workspace ? state.layouts[workspace.id] : undefined)
   const openLauncher = useAppStore((state) => state.openLauncher)

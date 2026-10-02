@@ -402,8 +402,10 @@ function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disable
 }
 
 export function FileExplorer({
-  revealRequest, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal
+  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal
 }: {
+  onCreateRequestHandled?: (() => void) | undefined
+  createRequest?: { requestId: number; parentPath: string } | undefined
   workspaceId?: string | undefined
   rootPath?: string | undefined
   rootLabel?: string | undefined
@@ -532,6 +534,7 @@ export function FileExplorer({
     setEditError(null)
     setEditPending(false)
     editSubmissionRef.current = null
+    setQuery('')
     return () => clearHoverExpand()
   }, [workspaceId, workspacePath, rootPath])
 
@@ -717,6 +720,12 @@ export function FileExplorer({
     setEditValue('')
     setEditError(null)
   }
+
+  useEffect(() => {
+    if (createRequest && fileExplorerContains(rootPath, createRequest.parentPath)) {
+      beginCreate('create-file', createRequest.parentPath); onCreateRequestHandled?.()
+    }
+  }, [createRequest, workspaceId, rootPath])
 
   function pathsForContext(node: TreeNode): string[] {
     return selection.selectedPaths.has(node.path)
@@ -1123,7 +1132,7 @@ export function FileExplorer({
               </div>
             </div>
           ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
-            <div className="tree-empty"><strong>{query ? 'No loaded files match' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
+            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
           ) : null}
         </div>
         <DragOverlay dropAnimation={null}>

@@ -13,7 +13,7 @@ import { PmoTeamsTopicEntry } from '../src/renderer/src/components/PmoTeamsTopic
 import { PmoTeamsTopicFloatingPanel } from '../src/renderer/src/components/PmoTeamsTopicFloatingPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { customAgent, customMoteId, customTab, defaultAgent, defaultTab, executionAgent, installNativePopover,
-  moteTopics, neighborAgent, ordinaryTab, quietTab, savedMoteKey, seedMoteWorkface } from './fixtures/mote-workface'
+  fixtureMoteProjection, moteTopics, neighborAgent, ordinaryTab, quietTab, savedMoteKey, seedMoteWorkface } from './fixtures/mote-workface'
 
 // Native transport and timeline rendering are controlled; the real Entry,
 // retained Workbench, SessionPane, Composer, target and mode owners remain.
@@ -31,12 +31,13 @@ function Workface({ probeOnly = false }: { probeOnly?: boolean }) {
   const [floating, setFloating] = usePmoTeamsTopicFloatingState()
   const tabs = useAppStore(state => state.tabs), layout = useAppStore(state => state.layouts[SCRATCH_WORKSPACE_ID])
   const pmo = useAppStore(state => state.agentFocus.pmo.sessionId)
-  const targets = useMemo(() => pmoTeamsTopicFloatingViewTargets(floating, tabs, layout, pmo), [floating, tabs, layout, pmo])
+  const projectionState = useMemo(() => fixtureMoteProjection(floating, reference => setFloating({ targetTabId: reference.tabId, reference })), [floating, tabs, layout, pmo, setFloating])
+  const targets = useMemo(() => pmoTeamsTopicFloatingViewTargets(floating, tabs, layout, pmo, projectionState.projection), [floating, tabs, layout, pmo, projectionState])
   if (probeOnly) return createElement('output', { 'data-floating-open': String(floating.open), 'data-floating-tab': floating.targetTabId })
   return createElement(Fragment, null,
     createElement('input', { id: 'original-input', defaultValue: 'Original caret' }),
     createElement(PmoTeamsTopicEntry), createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, visible: false, viewTargets: targets }),
-    createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating }))
+    createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating, projectionState }))
 }
 function panel() { const node = container.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]'); expect(node).not.toBeNull(); return node! }
 function entry() { const node = container.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button'); expect(node).not.toBeNull(); return node! }

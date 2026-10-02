@@ -13,10 +13,13 @@ let app: MoteAppFixture
 beforeEach(() => { app = createMoteApp() })
 afterEach(async () => { await app.dispose() })
 function scope() {
-  const node = app.container.querySelector<HTMLElement>('.workspace-workbench-registry [data-mote-workface]')
+  const node = app.container.querySelector<HTMLElement>('.workspace-workbench-registry [data-workspace-id="' + SCRATCH_WORKSPACE_ID + '"] > .workspace-workbench')
   expect(node).not.toBeNull(); return node!
 }
-function tabs(node: HTMLElement) { return [...node.querySelectorAll<HTMLButtonElement>('.mote-conversations button.workbench-tab')] }
+function tabs(node: HTMLElement) {
+  return [...node.querySelectorAll<HTMLButtonElement>('.workbench-tab-strip button.workbench-tab')]
+    .filter(button => !button.closest('[hidden], [inert]'))
+}
 
 describe('original Mote chat workface consumer', () => {
   it.each([['ensureMote', 'selection'], ['readTopic', 'selection'], ['ensureMote', 'unmount'], ['readTopic', 'unmount']] as const)('releases cold %s observers on %s while its original read is still pending', async (step, cancellation) => {
@@ -177,9 +180,11 @@ describe('original Mote chat workface consumer', () => {
     const before = useAppStore.getState()
     await moteClick(row!)
     expect(app.ensureMote).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID)
-    expect(scope().dataset.moteWorkface).toBe(PMO_TEAMS_TOPIC_ID)
+    expect(scope().parentElement?.dataset.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(useAppStore.getState().tabs[defaultTab.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
     expect(tabs(scope()).map(node => node.dataset.workbenchTabId)).toEqual([defaultTab.id, neighborTab.id])
-    expect(scope().querySelector('.mote-conversations__identity')?.textContent).toContain('Mote')
+    expect(scope().parentElement?.dataset.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(useAppStore.getState().tabs[defaultTab.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
     expect(scope().querySelector('[aria-label="Message Agent"]')?.textContent).toContain('Default unsent')
     expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
     expect(useAppStore.getState().sessions).toBe(before.sessions)
@@ -188,7 +193,8 @@ describe('original Mote chat workface consumer', () => {
 
   it('gives one Mote its own two workfaces and preserves the original input across a real Topic and Folder transition', async () => {
     await app.mount()
-    expect(scope().dataset.moteWorkface).toBe(PMO_TEAMS_TOPIC_ID)
+    expect(scope().parentElement?.dataset.workspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    expect(useAppStore.getState().tabs[defaultTab.id]?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
     expect(tabs(scope()).map(node => node.dataset.workbenchTabId)).toEqual([defaultTab.id, neighborTab.id])
     const input = scope().querySelector('[aria-label="Message Agent"]')
     expect(input).not.toBeNull()
@@ -197,6 +203,7 @@ describe('original Mote chat workface consumer', () => {
     expect(before.agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
     await act(async () => useAppStore.getState().openScratchTopic(ordinaryTopicId, SCRATCH_WORKSPACE_ID, { tabId: ordinaryTab.id }))
     await settleMoteApp()
+    expect(app.container.querySelector('.workspace-workbench-registry [data-workspace-id="' + SCRATCH_WORKSPACE_ID + '"] > .workspace-workbench')).not.toBeNull()
     expect(app.container.querySelector('.workspace-workbench-registry [data-mote-workface]')).toBeNull()
     expect(app.container.querySelector('.workspace-workbench-registry .workbench-tab-strip')).not.toBeNull()
     await act(async () => useAppStore.setState({ activeWorkspaceId: 'project' }))
@@ -214,8 +221,8 @@ describe('original Mote chat workface consumer', () => {
     const split = addWorkbenchRegion(defaultTab, 'default-region', 'right', { kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'second-original-region', sessionId: neighborAgent.id })
     useAppStore.setState(state => ({ tabs: { ...state.tabs, [defaultTab.id]: split } }))
     await app.mount()
-    const regions = [...scope().querySelectorAll<HTMLButtonElement>('[data-mote-session-region]')]
-    expect(regions.map(node => node.dataset.moteSessionId)).toEqual([defaultAgent.id, neighborAgent.id])
+    const regions = [...scope().querySelectorAll<HTMLElement>('[data-workbench-tab-id="' + defaultTab.id + '"] [data-workbench-region-id]')]
+    expect(regions.map(node => node.dataset.workbenchRegionId)).toEqual(['default-region', 'second-original-region'])
     expect(tabs(scope()).map(node => node.dataset.workbenchTabId)).toEqual([defaultTab.id, neighborTab.id])
     const original = useAppStore.getState().agentComposerDrafts
     await moteClick(regions[0]!)

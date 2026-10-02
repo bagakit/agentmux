@@ -129,6 +129,7 @@ export function NewTabSurface({
   // Only show a warm shell created for this exact host and working directory.
   // It remains outside the ordinary Session list until the user claims it.
   const warmKey = workspace ? warmTerminalKey(workspace.hostId, workspace.path) : null
+  const automaticWarmAttempt = useRef<string | null>(null)
   // 「这次启动来自哪个 launcher Region」——五个动作共用的同一个实参，只在这里算一次。
   // 手抄五遍时任何一处写成 `regionId ? …`（漏掉 tabId）都会让那一个动作静默丢掉 launcher 上下文，
   // 于是它按活动 Workspace 解析——正是 createNote 已经犯过的那个缺陷的另一种入口。
@@ -206,8 +207,15 @@ export function NewTabSurface({
     // 若依赖跟着归属翻动，失去归属的那个立刻重新预热去夺回来，对方随即再夺回——两个同时在场的
     // launcher 之间无限 ping-pong。prewarmTerminal 对同 key 是幂等的（只转移归属，不重开 PTY），
     // 所以这条 effect 多跑几次不会攒出多余进程。
-    if (workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded') prewarmTerminal(workspace.id, launcherId)
-  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, sections.terminal])
+    // A failed speculative warm clears its slot. That is not a new request to
+    // launch again; retain the ordinary cold launch and the current input.
+    if (warmSlotHeld && warmTerminal?.session) automaticWarmAttempt.current = null
+    if (workspace && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
+      (warmSlotHeld || automaticWarmAttempt.current !== warmKey)) {
+      if (!warmSlotHeld) automaticWarmAttempt.current = warmKey
+      prewarmTerminal(workspace.id, launcherId)
+    }
+  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmKey, sections.terminal])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return

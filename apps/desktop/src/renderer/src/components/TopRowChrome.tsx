@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState } from 'react'
 import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
@@ -11,6 +11,22 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 // 顶行 chrome 的单一实现：Board/欢迎页 topbar 与 workbench 顶行（root tabbar / chromeline）
 // 共用同一套组件，消除双路径漂移。组件直接从 store 读取，不做 prop drilling。
 
+// A compact window changes presentation only; the original wide-window preferences stay durable.
+export function useWindowSidebarLayout(compact: boolean) {
+  const preferredProjects = useAppStore(state => state.projectRailOpen)
+  const preferredTools = useAppStore(state => state.toolsOpen)
+  const toggleProjects = useAppStore(state => state.toggleProjectRail)
+  const toggleTools = useAppStore(state => state.toggleTools)
+  const [compactChoice, setCompactChoice] = useState<'projects' | 'tools' | null | undefined>(undefined)
+  const choice = compactChoice === undefined ? preferredTools ? 'tools' : preferredProjects ? 'projects' : null : compactChoice
+  const projectRailOpen = compact ? choice === 'projects' : preferredProjects
+  const toolsOpen = compact ? choice === 'tools' : preferredTools
+  return { projectRailOpen, toolsOpen,
+    toggleProjectRail: () => compact ? setCompactChoice(projectRailOpen ? null : 'projects') : toggleProjects(),
+    toggleTools: () => compact ? setCompactChoice(toolsOpen ? null : 'tools') : toggleTools() }
+}
+export const WindowSidebarLayoutContext = createContext<ReturnType<typeof useWindowSidebarLayout> | null>(null)
+
 function useSurfaceIdentity() {
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -20,8 +36,11 @@ function useSurfaceIdentity() {
 }
 
 export function TopRowLeadingChrome() {
-  const projectRailOpen = useAppStore((state) => state.projectRailOpen)
-  const toolsOpen = useAppStore((state) => state.toolsOpen)
+  const preferredProjects = useAppStore((state) => state.projectRailOpen)
+  const preferredTools = useAppStore((state) => state.toolsOpen)
+  const sidebars = useContext(WindowSidebarLayoutContext)
+  const projectRailOpen = sidebars?.projectRailOpen ?? preferredProjects
+  const toolsOpen = sidebars?.toolsOpen ?? preferredTools
   const { mainSurface, workspace } = useSurfaceIdentity()
   const toolDockOwnsChrome = !projectRailOpen
     && toolsOpen
@@ -48,8 +67,11 @@ export function SidebarToggleChrome() {
 }
 
 function ProjectRailToggle() {
-  const projectRailOpen = useAppStore((state) => state.projectRailOpen)
-  const toggleProjectRail = useAppStore((state) => state.toggleProjectRail)
+  const preferredProjects = useAppStore((state) => state.projectRailOpen)
+  const originalToggle = useAppStore((state) => state.toggleProjectRail)
+  const sidebars = useContext(WindowSidebarLayoutContext)
+  const projectRailOpen = sidebars?.projectRailOpen ?? preferredProjects
+  const toggleProjectRail = sidebars?.toggleProjectRail ?? originalToggle
   const label = `${projectRailOpen ? 'Hide' : 'Show'} projects sidebar`
   return (
     <button
@@ -67,8 +89,11 @@ function ProjectRailToggle() {
 
 export function ToolsToggle() {
   const mainSurface = useAppStore((state) => state.mainSurface)
-  const toolsOpen = useAppStore((state) => state.toolsOpen)
-  const toggleTools = useAppStore((state) => state.toggleTools)
+  const preferredTools = useAppStore((state) => state.toolsOpen)
+  const originalToggle = useAppStore((state) => state.toggleTools)
+  const sidebars = useContext(WindowSidebarLayoutContext)
+  const toolsOpen = sidebars?.toolsOpen ?? preferredTools
+  const toggleTools = sidebars?.toggleTools ?? originalToggle
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   if (mainSurface === 'board') return null

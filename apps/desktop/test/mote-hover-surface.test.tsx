@@ -19,7 +19,7 @@ import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWork
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { WindowOverlayPortal } from '../src/renderer/src/components/WindowOverlayHost'
 import { customAgent, customMoteId, customTab, defaultAgent, defaultTab, executionAgent, installNativePopover,
-  moteTopics, neighborAgent, ordinaryTab, quietMoteId, quietTab, savedMoteKey, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
+  fixtureMoteProjection, moteTopics, neighborAgent, ordinaryTab, quietMoteId, quietTab, savedMoteKey, scratchWorkspace, seedMoteWorkface } from './fixtures/mote-workface'
 
 // Keep the actual Workbench, SessionPane, Composer and launcher. Only the native
 // Terminal attachment and Markdown body are outside this bounded DOM proof.
@@ -38,13 +38,14 @@ function Workface({ focus = false, workbenchVisible = false }: { focus?: boolean
   const tabs = useAppStore(state => state.tabs)
   const layout = useAppStore(state => state.layouts[SCRATCH_WORKSPACE_ID])
   const pmo = useAppStore(state => state.agentFocus.pmo.sessionId)
-  const targets = useMemo(() => pmoTeamsTopicFloatingViewTargets(floating, tabs, layout, pmo), [floating, tabs, layout, pmo])
+  const projectionState = useMemo(() => fixtureMoteProjection(floating, reference => setFloating({ targetTabId: reference.tabId, reference })), [floating, tabs, layout, pmo, setFloating])
+  const targets = useMemo(() => pmoTeamsTopicFloatingViewTargets(floating, tabs, layout, pmo, projectionState.projection), [floating, tabs, layout, pmo, projectionState])
   return createElement(Fragment, null,
     createElement('input', { id: 'original-input', defaultValue: 'Original caret' }),
     createElement(PmoTeamsTopicEntry),
     focus ? createElement(GlobalFocusSurface) : null,
     createElement('div', { 'data-original-workbench': true }, createElement(WorkspaceWorkbench, { workspaceId: SCRATCH_WORKSPACE_ID, visible: workbenchVisible, viewTargets: targets })),
-    createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating }))
+    createElement(PmoTeamsTopicFloatingPanel, { floating, setFloating, projectionState }))
 }
 function panel() { return container.querySelector<HTMLElement>('[data-pmo-teams-topic-floating]')! }
 function entry() { return container.querySelector<HTMLButtonElement>('[data-pmo-teams-topic-launcher] button')! }
@@ -131,7 +132,7 @@ describe('one operative Mote hover surface', () => {
     expect(input.textContent).toBe('Neighbor unsent')
     expect(warm.mock.calls).toHaveLength(calls)
     const targets = pmoTeamsTopicFloatingViewTargets({ open: true, preview: false, targetTopicId: PMO_TEAMS_TOPIC_ID, targetTabId: defaultTab.id },
-      original.tabs, original.layouts[SCRATCH_WORKSPACE_ID], original.agentFocus.pmo.sessionId)
+      original.tabs, original.layouts[SCRATCH_WORKSPACE_ID], original.agentFocus.pmo.sessionId, null)
     if (availability === 'unplaced') {
       // The known original View stays available without inventing a Group
       // placement or lending input to the neighboring launcher.
@@ -304,7 +305,8 @@ describe('one operative Mote hover surface', () => {
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
     await pointer(panel(), 'out'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 210)) })
     expect(panel().dataset.motePresentation).toBe('pinned')
-    expect(JSON.parse(saved()!)).toEqual({ open: true, targetTopicId: quietMoteId, targetTabId: quietTab.id })
+    expect(JSON.parse(saved()!)).toEqual({ open: true, targetTopicId: quietMoteId, targetTabId: quietTab.id,
+      reference: { displayWorkspaceId: SCRATCH_WORKSPACE_ID, groupId: 'mote-group', tabId: quietTab.id, regionId: 'quiet-region' } })
     expect(launch).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled()
   })
 
