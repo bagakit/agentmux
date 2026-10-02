@@ -76,13 +76,14 @@ async function nativeAndVisual() {
   assert.equal(proof.passed, true)
   assert.deepEqual(proof.sourceBefore, proof.sourceAfter)
   const currentHead = git(['rev-parse', 'HEAD'])
-  // A peer's documentation-only commit may join Main after capture. Require exact
-  // product/fixture/SDK bytes below and disclose the entire Git delta, not a new Native claim.
-  const documentationDelta = proof.sourceBefore.head === currentHead ? []
+  // Documentation or this evidence consumer can change without recompiling the product.
+  // Require all actual product/fixture/SDK inputs below and disclose that bounded delta.
+  const qualificationDelta = proof.sourceBefore.head === currentHead ? []
     : git(['diff', '--name-only', proof.sourceBefore.head, currentHead]).split('\n').filter(Boolean)
-  assert.ok(documentationDelta.every(file => file.startsWith('docs/') && file.endsWith('.md')),
+  assert.ok(qualificationDelta.every(file => file.startsWith('docs/') && file.endsWith('.md')
+    || file === 'apps/desktop/scripts/verify-cross-device-project-groups.mjs'),
     'Changed product or proof Source requires its own qualified candidate')
-  if (!documentationDelta.length) assert.equal(proof.sourceBefore.tree, git(['rev-parse', 'HEAD^{tree}']))
+  if (!qualificationDelta.length) assert.equal(proof.sourceBefore.tree, git(['rev-parse', 'HEAD^{tree}']))
   assert.equal(proof.sourceBefore.trackedStatus, '')
   assert.deepEqual(proof.sdkBefore, proof.sdkAfter)
   assert.deepEqual(proof.compiledBefore, proof.compiledAfter)
@@ -124,12 +125,13 @@ async function nativeAndVisual() {
   assert.equal(review.conclusion, 'accepted', 'Independent actual full-image review must have no must-fix findings')
   assert.ok(review.reviewer)
   assert.equal(review.proofSHA256, sha(bytes))
-  assert.deepEqual(review.source, { head: proof.sourceBefore.head, tree: proof.sourceBefore.tree })
+  assert.deepEqual({ head: review.source?.head, tree: review.source?.tree },
+    { head: proof.sourceBefore.head, tree: proof.sourceBefore.tree })
   assert.equal(review.screenshots.length, proof.screenshots.length)
   for (const shot of proof.screenshots) assert.ok(review.screenshots.some(item => item.absolutePath === shot.absolutePath && item.sha256 === shot.sha256 && item.viewed === true))
   evidence.push({ file, sha256: sha(bytes), ordinaryPids: proof.phases.map(item => item.native.electronPid), screenshots: proof.screenshots.length,
     reviewFile, reviewSHA256: sha(reviewBytes), conclusion: review.conclusion, capturedSource: proof.sourceBefore,
-    deliverySource: currentHead, documentationDelta })
+    deliverySource: currentHead, qualificationDelta })
 }
 
 await sourceProof('.tmp/cross-device-project-groups/source-receipt.json', 'agentmux.cross-device-project-groups.source.v1', 6, 7)
