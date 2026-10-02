@@ -289,7 +289,7 @@
 
 重启验收必须启动隔离的真实 Electron 主进程和 Renderer，记录应用进程身份、持久化布局身份、焦点、草稿以及 Session/Run/Provider-native handle；至少发生一次真实退出，再由不同进程从同一 userData 根目录恢复。组件 remount、Store 序列化或只比较启动文件不能替代这条证据。恢复先重建 Tab/Region/focus，再尝试 reattach/resume 原 Session；Run 可以依法换代，但 Session、工作面和草稿不能被伪造成新对象。
 
-Runtime snapshot 为空、恢复握手超时、Provider 探测失败或布局暂时不可读时，原工作面继续可见并显示服务窗，记录失败步骤与下一步；只有 Core 明确给出 retired/unknown 等终局事实时才移除投影。探针只能操作自己创建的隔离资源，必须记录不同 PID 和前后身份匹配，并在结束时清理临时目录，不得停止用户已有 Run。
+Runtime snapshot 为空、恢复握手超时、Provider 探测失败或布局暂时不可读时，原工作面继续可见并显示服务窗，记录失败步骤与下一步；投影的移除资格沿本页[《联邦 Runtime 与远端恢复边界》](#联邦-runtime-与远端恢复边界)。探针只能操作自己创建的隔离资源，必须记录不同 PID 和前后身份匹配，并在结束时清理临时目录，不得停止用户已有 Run。
 
 ## 全局加载过程的统一入口盘点
 
@@ -309,7 +309,7 @@ Runtime snapshot 为空、恢复握手超时、Provider 探测失败或布局暂
 
 打开、刷新或恢复一个 Session 时，操作先绑定目标 Session/Run，再消费目标 Attachment 或精确 Subject 返回的权威 Run 事实；一个单目标操作不能为了生成单个 Session 画面而枚举全部历史 Run。启动快照、Agents 聚合和跨 Host 查找等确实需要全量事实的入口可以读取完整 Runtime projection，但它们不能成为单目标操作的隐式前置步骤。
 
-ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux Core 负责把目标 Run 与 AgentSession 组合成 Runtime Subject；Desktop 负责工作面恢复和服务窗。Runtime 暂时不可用或流程握手失败时，保留原 Tab、Region 和 Session 引用，明确显示失败步骤与恢复动作；只有 Core 给出终局 retired/unknown 事实时才移除投影。
+ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux Core 负责把目标 Run 与 AgentSession 组合成 Runtime Subject；Desktop 负责工作面恢复和服务窗。Runtime 暂时不可用或流程握手失败时，保留原 Tab、Region 和 Session 引用，明确显示失败步骤与恢复动作；投影的移除资格沿本页[《联邦 Runtime 与远端恢复边界》](#联邦-runtime-与远端恢复边界)。
 
 ## P00：新建 Agent 与 resume 必须可用
 
@@ -326,7 +326,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 用户先要求「彻底理解项目, 实现远程管理能力」，允许「可以用 $farm 的机器测试」，要求研究 `herdr`、`orca` 与 `paseo` 并在准备后讨论；现已授权彻底实现既有联邦 Runtime Feature。通用 Core 与 Desktop 必须能联邦管理本机和远端 Headless AgentMux；首个可用闭环连接已有远端服务，复用统一公共 RPC 与系统 SSH stdio，远端持有 Agent 语义与当地 ctxmux Run，不能让无 UI 客户端依赖 Desktop 才能创建、观察或管理 Agent。参考研究与 Farm 环境观察仍不能代替真实产品验收。
 
 - AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。
-- Desktop 只持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用、工作面布局和最后一次观察结果。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有 Core 明确给出终局 retired/unknown，才允许移除投影。
+- Desktop 只持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用、工作面布局和最后一次观察结果。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有原语义 Runtime owner 明确确认目标 Session/Run 的 retired 等终局事实，才允许按既有规则移除对应投影。unknown、unknown-session 与 unavailable 不属于终局，保留原 Tab、Region、Session 引用和服务窗。
 - `ExecutionHost`（文件、shell、SSH 等执行能力）与 `AgentMux Runtime endpoint` 是两种不同的产品能力。即使它们落在同一台远端机器上，也不能因为能访问工作区就假定 Agent Runtime 可用；两者的身份、能力和恢复状态分别呈现。
 - 远端管理的对象是 AgentMux Runtime，而不是把 Desktop 直接变成 ctxmux 的远程控制器。ctxmux 继续只负责 PTY、进程、Run、ordered bytes、Replay、Gap、Attachment 和权威运行时事实；AgentMux 负责 Agent 语义与 Session 恢复，Desktop 不在两层之间再保留一份实现。
 - 本地服务、SSH 与宿主提供的 HTTP 连接共用唯一类型化 JSON-RPC Runtime 服务与 Hosted SDK。传输只改变连接方式，不另建 Session、权限、历史、Attachment 或事件恢复实现；Headless 与带宿主能力的服务均组合同一个 Core 语义 owner。宿主私网、设备及 Desktop 转发能力仍由各自 owner 注入。
