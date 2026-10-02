@@ -26,5 +26,6 @@ export default defineConfig({
     }
   } }],
   test: { include: ['apps/desktop/test/**/*.{test,spec}.?(c|m)[jt]s?(x)'], exclude: defaultExclude,
-    setupFiles: [resolve(root, 'vitest.setup.ts')], passWithNoTests: false, maxWorkers: 1 }
+    setupFiles: [resolve(root, 'vitest.setup.ts'), resolve(root, 'apps/desktop/scripts/fixtures/mote-navigation-footer/atomic-move.setup.ts')],
+    passWithNoTests: false, maxWorkers: 1 }
 })

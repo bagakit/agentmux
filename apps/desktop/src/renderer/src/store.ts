@@ -2661,7 +2661,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     void saveWorkbenchSelection(false)
   },
   surveyToolsOpen: false,
-  setSurveyZoneSelection(surveyZoneSelection) { set({ surveyZoneSelection: persistedSurveyZoneSelection(surveyZoneSelection) }) },
+  setSurveyZoneSelection(selection) {
+    const surveyZoneSelection = persistedSurveyZoneSelection(selection)
+    // Re-emitting the current member preference is a refresh, not later navigation.
+    set(state => sameSpatialValue(state.surveyZoneSelection, surveyZoneSelection) ? state : { surveyZoneSelection })
+  },
   setSurveyZoneCollected(zoneId, collected) {
     const state = get()
     if ((state.surveyCollectedZones[zoneId] === true) === collected) return true
