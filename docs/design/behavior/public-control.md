@@ -17,7 +17,7 @@
 
 ## AgentMux 自操作与 Computer Use 边界
 
-- Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；`inspect`、`list`、`open`、`send`、`focus`、`arrange`、Demand/PMO 操作都走同一条 Control owner。不得通过截图、坐标点击、macOS Accessibility 或其他通用 Computer Use 旁路完成本产品已有的操作。
+- Agent 操作 AgentMux 自身时，必须使用 AgentMux 自有的 typed Control 协议与语义 CLI；Agent、空间、Goal 与应用操作按[对象命令](#对象优先-cli-与统一公共业务服务)接入同一公共业务服务，由各自原 owner 执行。不得通过截图、坐标点击、macOS Accessibility 或其他通用 Computer Use 旁路完成本产品已有的操作。
 - AgentMux 的产品运行、Session/Run 生命周期、Board/PMO 管理和发布验收不得把外部 Computer Use 工具作为前置条件。外部工具不可用、权限过期或观察失败时，保留产品自身的真实状态并给出诊断，不得阻断健康 Agent。
 - 内嵌 Browser 的网页操作继续使用已有 CDP/Browser Control；它是页面语义通道，不是 macOS 辅助功能，也不复制一套桌面自动化 Runtime。
 - 用户确认：「agentmux 应该有自己的 computer use 方案」。AgentMux 应向 Agent 提供自己拥有的 Computer Use 能力入口与真实执行反馈，用于桌面观察和操作；这是一条独立需求，不能把开发者临时调用外部工具算成已经交付。
@@ -26,11 +26,11 @@
 
 ## Agent 操作桌面主画面与保留对话输入
 
-用户希望「Agent CLI 能操作 AgentMux 桌面应用本身」，Agent 和用户交流时能切换界面；理想情况下，Mote 在浮窗里交流的同时，可以改变主画面当前聚焦的 Space 或某个 Goal，也方便 Agent 自行迭代、调试和观察。该能力沿本产品既有 typed Control 与 `focus`／`inspect.client` owner 接入，是桌面产品的语义导航；不把系统桌面 Computer Use、Browser 操作或 Agent／Run 生命周期并成另一条 Runtime。
+用户希望「Agent CLI 能操作 AgentMux 桌面应用本身」，Agent 和用户交流时能切换界面；理想情况下，Mote 在浮窗里交流的同时，可以改变主画面当前聚焦的 Space 或某个 Goal，也方便 Agent 自行迭代、调试和观察。该能力沿同一公共业务服务的 `app focus`／`app inspect`、`space focus` 与 `goal focus` 接入，具体呈现与输入仍由原 Client owner 执行；不把系统桌面 Computer Use、Browser 操作或 Agent／Run 生命周期并成另一条 Runtime。
 
 - **主画面与对话输入分别成立。** 选中主画面目标不等于真实 caret 已转移。默认导航保留仍在交流的 Mote 浮窗、同一对象／Tab／Region、原 View、真实 caret、草稿与组字，不关闭、重新创建、重选或自动发送其内容。只有调用者明确要求把输入交给精确目标时才尝试输入焦点转移；不能为证明主面导航成功先 blur 浮窗再恢复或挑一个编辑框。
   用户继续点击或输入浮窗，选择该原 Tab 内的精确 Region、原输入与逻辑 lane；浮窗自己的活动 Region、焦点标记与观察须跟随这次局部选择，主面保留的源焦点即使来自同一 Tab 也不能覆盖浮窗的局部选择。固定浮窗仍保留原有的输入与人工操作能力。不能因此清掉主面精确 Space／Zone 地址、改变无关 Workspace／Group 或保留的源焦点，或重新授权另一处 launcher 自动激活。人工在主面明确导航或新建 Tab 仍按原交互执行。
-- **用真实身份导航。** Space／Zone／Tab／Region 只沿[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的真实来源，Goal 使用既有 Demand 持久 ID。精确子目标可反推父层，父子不一致或多候选不能猜最近、第一张 Tab 或别人的 Agent。导航仅改变既有展示选择；不创建 worktree、Tab、AgentSession、任务或 PMO，不移动 Region，不改执行 cwd／Run／原生句柄，不停止健康 Session。
+- **用真实身份导航。** Space／Zone／Tab／Region 只沿[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)的真实来源，Goal 沿用原持久 ID。精确子目标可反推父层，父子不一致或多候选不能猜最近、第一张 Tab 或别人的 Agent。导航仅改变既有展示选择；不创建 worktree、Tab、AgentSession、任务或 PMO，不移动 Region，不改执行 cwd／Run／原生句柄，不停止健康 Session。
 - **选择、呈现、输入三种事实分开。** 回执与只读观察分别说明主 Surface、所选 Space／Zone／Tab／Region 或 Goal、实际可见／借到浮窗／受遮挡／等待恢复的呈现位置，以及真实输入所在位置；执行与 PMO 逻辑 lane 不能冒充 DOM caret。Mote 的临时悬停、固定开合、精确目标与真实输入状态来自原 owner，不复制浮窗状态或内容实例；同一 View 借到浮窗时，不能用主面选中 ID 代签主面正文已经可见。
   主面选中的原 View 正在 Mote 浮窗中时，原位置须持续就地说明已选中的位置、视图当前所在及关闭浮窗后的返回方式；不能只留下空白、底栏红点或默认收起的通知列表。说明不关闭、重新选择或复制浮窗，不抢原输入。
   用户确认关闭所选投影后，当前子选择沿真实布局在同一 Space／Zone 内更新；没有同父落点时保留父地址与空子选择，不能跳到别的 Topic。Runtime 暂缺或快照为空不等于投影已关闭，原 durable 引用仍须保留。
@@ -128,7 +128,7 @@
 用户确认对象优先的统一 CLI，保留 `agent open` 和 `space mv`。PMO 仍是协调工作方法／角色，不把原 PMO 查询改名为 Mote 查询；跨对象观察归 `app snapshot`，各对象的 inspect 归其对象，原 PMO activity 来自 Goal 的活动事实，归 `goal activity`。本节定义新的统一目标；旧顶层动词与原公开 Demand 词汇在对应能力落地时直接替换，不留兼容别名。已有能力的当前来源不等于本目标已经实现。
 
 - **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI、HTTP 与 SSH 共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
-- **原权威 owner 不变。** Core 保持无 Electron／React 依赖；Provider、AgentSession、权限、Hook 与语义恢复仍归 AgentMux 公共能力；ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Desktop 展示、配置、文件／Topic 与空间 handlers 由 Client 持有，通过同一服务接入；不新增一套 Runtime、Topic／Project／Space／Session registry、持久状态镜像或 CLI 专用业务判断。
+- **权威职责与空间来源。** Core 保持无 Electron／React 依赖，持有 Provider、AgentSession、权限、Hook、readiness、语义恢复，以及前端独立的持久空间身份、拓扑、布局、选择与全部绑定；空间与执行身份的含义见[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)。ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Client 消费 Core 空间事实，负责屏幕呈现与真实输入焦点；配置、编辑、文件／Topic 目录、Git 与 Browser 资源能力仍由原 Host／Client owner 提供，经同一公共服务接入。不新增一套 Runtime、Topic／Project／Space／Session registry、持久空间镜像或 CLI 专用业务判断。
 - **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配请求与响应，不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation。丢回执时按原 owner 的精确业务身份对账；未知不当从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
 - **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。
 
@@ -175,7 +175,7 @@
 
 动作回执分别表达资源/Git checkout、Workspace 登记、工作面放置、Core Session 创建与首句投递的真实事实。启动成功、PTY 接收字节、Core 既有协议投递确认和 Agent 接受/开始/完成任务不能相互代签。后续流程失败保留已创建资源、持久工作面与健康 Session；回执丢失或进程重启后能按精确身份查询已发生、未发生与未知的事实，未知不得触发重复创建或重投。恢复先保留原 durable Tab/Group/Region/布局/焦点及空间绑定，再尝试同 Session reattach/resume；Session 执行目录与展示 Zone 不同不能成为删除投影的理由，移除仍须 Core 的真实终局事实。流程握手、观察或布局失败不能停止健康 Run。
 
-布局已应用、localStorage 写入、宿主 flush 已请求与磁盘耐久性未确认分别报告；当前 flush 请求没有磁盘 ACK，不能因为 await IPC 就声称已经落盘，也不能因没有 ACK 阻断健康 Agent。源移除与目标落点沿同一持久工作面快照保存；真实私有普通进程重启后读回同一空间绑定、布局与 Session 引用，才证明恢复验收。CLI 回执保持现有 JSON 输出，身份可原样用于后续命令。
+布局已应用、客户端偏好已写入、宿主 flush 已请求与磁盘耐久性已确认分别报告；耐久性只能由 Core 的[持久空间状态 owner](../../architecture/spatial-state.md)完成耐久写入后确认，不能因为 localStorage 写入或 await IPC 就声称已经落盘。未取得确认时如实报告 unconfirmed，保留原工作面、未保存改动与健康 Agent；客户端偏好、草稿或呈现快照不能替代、覆盖 Core 的空间状态。源移除与目标落点沿同一次 Core 空间提交保存；真实私有普通进程重启后读回同一空间绑定、布局与 Session 引用，才证明恢复验收。CLI 回执保持现有 JSON 输出，身份可原样用于后续命令。
 
 具体 grammar、缺省规则、失败保留、请求对账及真实私有重启验收见 [Agent-first 的 Space 工作入口](#agent-first-的-space-工作入口)；CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace-worktree-cli-design.md`）。上一版 `worktree create/start` 主流程不再是当前方案；技术文档或 proposal 状态不能冒充功能交付。
 

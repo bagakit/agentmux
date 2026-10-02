@@ -162,12 +162,12 @@ The stable spatial graph is part of amux and is maintained by Core even on a rem
 
 | 概念 | 必须成立的含义与身份 | 权威事实归属 |
 | --- | --- | --- |
-| **Space** | 用户选择的持久工作上下文，包含 Folder、Topic 与 Mote。身份是 Host 与对象的绝对持久目录；名称、分类、当前 Session、是否打开 Tab 均不构成身份。Space 不等同于 Project。 | Folder 来自已有目录/项目记录，Topic/Mote 来自真实持久目录；发现复用这些来源，不建第二份 Space 注册表。 |
-| **Zone** | Space 内的一条工作分区/上下文，承载 Tab。用户明确「cli用zone，这个语义更好，因为对项目是worktree，假设不用git，或者是对mote之类的，zone不一定是worktree」。worktree、普通目录和 Topic/Mote 的 home 上下文均可绑定 Zone，不能把 Zone 限定为 Git 或全量改名 Workspace。 | 已有 Folder 的分区从所属 Workspace 绑定派生；Topic/Mote 的 home 从真实 Topic 身份及其 Tab 绑定派生。确有新增分区关联时由既有 durable 工作面 owner 保存，不复制目录、Git 或 Session 真相。 |
+| **Space** | 用户选择的持久工作上下文，包含 Folder、Topic 与 Mote。身份是 Host 与对象的绝对持久目录；名称、分类、当前 Session、是否打开 Tab 均不构成身份。Space 不等同于 Project。 | Core 保存原空间身份与绑定；Folder 的目录/项目记录、Topic/Mote 的真实持久目录由原 Host 提供。发现复用这些来源，不建第二份 Space 注册表。 |
+| **Zone** | Space 内的一条工作分区/上下文，承载 Tab。用户明确「cli用zone，这个语义更好，因为对项目是worktree，假设不用git，或者是对mote之类的，zone不一定是worktree」。worktree、普通目录和 Topic/Mote 的 home 上下文均可绑定 Zone，不能把 Zone 限定为 Git 或全量改名 Workspace。 | Core 保存稳定 Zone 身份、组成与全部空间绑定。Folder 的 Workspace、Topic/Mote 的 home 来源沿原 Host 的资源事实；展示地址与查询索引从 Core 空间图派生，不重新铸造 Zone，不复制目录、Git 或 Session 真相。 |
 | **Project** | 围绕项目目录组织的来源项目事实，可关联多个实际 checkout/Workspace；Git 能力按真实仓库事实提供。它是 Space 的可选项目上下文，不能冒充所有 Space，也不能用单个 worktree Workspace ID 冒充项目 ID。 | 已有 Host、项目根目录和 Workspace 分组来源；不另建项目注册表。 |
-| **Workspace** | 宿主在特定 Host 上登记的实际工作目录记录。folder/worktree、路径、仓库根与分支是该记录的事实；Scratch Workspace 是既有 Topic 收纳和布局容器，不是每个 Topic 的身份。 | Main 配置/目录 owner；Git checkout 事实由现有 Git owner 提供。 |
-| **Tab** | Zone 中的一张完整工作面，拥有持久身份、分割布局与多个 Region。首张 Tab 不以另一张 Tab 为存在前提。 | 唯一 durable Workbench/layout owner；Topic 绑定沿原 Tab.topicId 来源。 |
-| **Region** | Tab 布局的一块精确 leaf 位置，承载 Agent/Terminal、文件、Browser 或启动面。它是空间位置，不是 Session 身份。 | 同一 durable layout owner；移动、分割和关闭绑定明确 Region。 |
+| **Workspace** | 宿主在特定 Host 上登记的实际工作目录记录。folder/worktree、路径、仓库根与分支是该记录的事实；Scratch Workspace 是既有 Topic 收纳和布局容器，不是每个 Topic 的身份。 | 原宿主配置/目录 owner；Git checkout 事实由现有 Git owner 提供，Core 的空间绑定不改写资源事实。 |
+| **Tab** | Zone 中的一张完整工作面，拥有持久身份、分割布局与多个 Region。首张 Tab 不以另一张 Tab 为存在前提。 | Core 的同一持久空间图保存身份、布局、选择与全部展示绑定；Topic 来源身份仍由原目录 owner 提供。 |
+| **Region** | Tab 布局的一块精确 leaf 位置，承载 Agent/Terminal、文件、Browser 或启动面。它是空间位置，不是 Session 身份。 | Core 的同一持久空间图；移动、分割和关闭绑定明确 Region，Client 呈现与内容 owner 消费原位置。 |
 | **AgentSession** | Core 持有的 Agent 语义会话，包含 Provider/Executor、原生会话身份、执行目录与恢复事实。它可以在多个 Region 展示；空间归属不能改写其执行事实。 | AgentMux Core 的公开 API。 |
 | **Run** | ctxmux 持有的一次真实执行及其进程、PTY、ordered bytes、Replay 与 Attachment 事实。Session 与当前 Run 的绑定不把两个身份合并。 | ctxmux；client 只消费公开事实。 |
 
