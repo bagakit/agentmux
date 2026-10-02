@@ -76,21 +76,8 @@ Terminal 与 Activity 的 History 进入和返回行为只见交互合同[《Age
 - Board 卡片先读 Task 身份，再读 Project 和状态；Session 名称、Provider 与执行状态进入次级元信息，不抢 Task 标题层级。
 - 没有选中 Task 时主区占满可用宽度；不画空右栏、不画占位边框、不使用“从右到左”的方向性动画。只有多个 Region 真实存在时才显示 arrangement 控件。
 
-| 层级 | 视觉语言 | 用途 |
-| --- | --- | --- |
-| Primary | 实心品牌绿渐变、深色文字、顶部高光 | 页面唯一主操作 |
-| Secondary | 干净 Surface 填充、软高光、无常驻描边 | 次级操作与行内确认。**落地类名只有 `.small-button` 一个**，见下「一档控件只有一个类名」 |
-| Ghost / Icon | 透明底，hover 才提升 Surface | 图标按钮与工具栏动作 |
-| Selected | 单一几何信号；实心图标格或底部横条 | Project、Segment 与 Tab 选中态 |
-| Danger | 实心红色变体、深色文字、顶部高光 | 删除、移除等破坏性主操作 |
+共同控件层级、类名、工具栏布局和选中语言统一见[《控件语言》](shared-rules.md#控件语言)；这里保留 Space 与 Project Rail 的对象约束。
 
-补充规则：
-
-- 同一语义在不同容器中使用同一控件层级。
-- **一档控件只有一个类名。** 上表五档各自只有一个落地类名：Primary＝`.primary-button`、Secondary＝`.small-button`、Ghost/Icon＝`.icon-button`、Danger＝`.danger-button`。**不得按表里的档位名另造一个类名**——那个名字读起来像"就该存在"，于是没人会去查它有没有规则。实证：`.secondary-button` 被这样写出来过一次（启动页 Resume），全仓零规则，而 `base.css` 的全局 `button` 只重置 `font`/`color`、**不重置 `background`**，于是它落到 macOS 原生按钮样式——一颗浅灰实心药丸，在深色主题里比紧邻的品牌绿主操作还重，恰好推翻上表"Primary＝页面唯一主操作"。这条由 `apps/desktop/test/rendered-class-has-rule.test.ts` 守住：它的扫描面除 BEM 记号外**还收 `-button` 结尾的扁平类名**，渲染了却没有规则即红。扁平名此前整族在扫描面之外（判据只认 `__`/`--`），这不是漏登记而是结构性缺席，所以修的是判据形状而不是加一条豁免。
-- **`justify-content: space-between` 是一份「有几簇」的契约，不是"把东西摊开"的通用手法。** 它把自由空间**摊在子元素之间**，所以结果是子元素**个数**的纯函数：两簇时各抱一端（这才是它的用途），三个以上松散子元素则被甩向两极、中间留出大洞。这份"应该有几簇"的期待写在 CSS 里，而供给子元素的是另一个文件里的 JSX，两边没有任何东西对齐它们——**供错形状不报错，只是默默排错**，而本仓测试跑在 happy-dom 下不算布局，没有任何 gate 会红。因此：**space-between 只用于子元素集合固定且已知的容器**；凡是"一个留在左缘、其余聚到右缘"的工具栏与页脚，一律用 `justify-content: flex-end` 配首元素 `margin-right:auto`——它对 2、3、4 个子元素都成立，**契约本身被删掉了**，而不是被记在文档里等人遵守。这套写法本仓已有多处（`surfaces.css` 的 `.settings-pane-actions`、`dock.css` 的 `.workspace-composer > footer`、`board.css` 的 `.discussion-canvas__footer`）。实证：`.composer__toolbar` 与 `.settings-pane-toolbar` 都配了 `> div` 的两簇写法，各自有一个调用方老实给两簇、另一个调用方给四个松散子元素，于是同一条规则在两个界面上同时排错。
-- **选中态一律不用左侧竖条（inset 竖线）**。一条贴边的亮色竖线是"AI 生成的管理后台"最容易辨认的印记：它既不是填充也不是描边，只是一根贴在行左缘的装饰，在密集列表里连成一片噪音。选中由**单一几何信号**表达——干净的 Surface 填充，必要时配实心图标格。这条对所有列表行成立（Project Rail、Topic、Tree、Segment、Settings 分区），没有例外；`box-shadow: inset <n>px 0 ...` 与 `border-left: <n>px ...`（含 `border-inline-start`）这两种拼法都不得用于表达选中——它们在屏幕上是同一根线，禁的是那根线而不是某一种画法。这条由 `apps/desktop/test/surface-selection-contract.test.ts` 守住：它从 CSS 推出两种拼法的所有左缘竖条并在选中态类名上断言其不存在，加回一条会红；两个形状判定各自带一条自证（拿合法的容器分隔线与内容引用条当样本），因为一个认不出竖条的检查会因"没找到"而全绿。
-- **一列全同的图标不是信息，是宽度开销**。若某个列表里每一行的行首图标都相同（重复的 Topic 类型图标、纯文件列表的文件图标），去掉它——图标的价值在于区分，无可区分时它只在挤压标题的可读宽度。行首位置留给真正有区分度的东西（对象的手动或自动身份、状态、Provider 身份）或干脆留白；Space 的共用对象身份槽遵守[《Project Rail 与 Topic 行密度》](#project-rail-与-topic-行密度)。
 - Project Rail 的选中与活动分开：选中用中性 Surface 填充，活动用独立控件。项目图标、分组和目录的区分见文末“Projects”约束；分组文字仍比项目名轻，区别靠角色与结构。
 - 文件树目录右键菜单的“作为项目打开”使用现有菜单语言，不增加常驻图标或行高；行为见 [Desktop interaction](../agentmux-desktop-interaction.md)。
 - 分屏菜单的 `Move to New Tab` 继续表达搬动，完成后源处不留同一 Agent 的副本；不新增常驻重复视图提示。移动与额外投影的行为约束见 [Desktop interaction](../agentmux-desktop-interaction.md)。
