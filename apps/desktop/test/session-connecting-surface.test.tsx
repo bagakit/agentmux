@@ -60,7 +60,7 @@ it.each(['launcher', 'control'] as const)('captures the exact %s request before 
     const submitted = launch.mock.calls[0]![0]
     expect(submitted.prompt).toBe(prompt)
     const id = submitted.agentSessionId!
-    expect(useAppStore.getState().pendingAgentLaunches[id]?.request).toEqual({ executorId: 'reviewer', prompt })
+    expect(useAppStore.getState().pendingAgentLaunches[id]?.request).toEqual({ executorId: 'reviewer', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), prompt })
     await dom.render(pane(id))
     await act(async () => useAppStore.setState({ agentComposerDrafts: { [id]: 'not submitted' } }))
     expect(dom.container.querySelector('pre')?.textContent).toBe(prompt)
@@ -112,11 +112,11 @@ it('keeps late clipboard completion and copied feedback scoped to the original S
   vi.spyOn(api.ui, 'writeClipboardText').mockReturnValue(clipboard.promise)
   await dom.render(pane())
   await dom.click('[aria-label="Copy initial prompt"]')
-  expect(dom.container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true)
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Copy initial prompt"]')?.disabled).toBe(true)
   await act(async () => useAppStore.setState((state) => ({ pendingAgentLaunches: { ...state.pendingAgentLaunches,
     second: { events: [], overflowed: false, request: { executorId: 'reviewer', prompt: 'Second request' } } } })))
   await dom.render(pane('second'))
-  expect(dom.container.querySelector<HTMLButtonElement>('button')?.disabled).toBe(false)
+  expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Copy initial prompt"]')?.disabled).toBe(false)
   await act(async () => clipboard.resolve())
   expect(dom.container.querySelector('[aria-label="Copy initial prompt"]')?.textContent).not.toBe('Copied')
   expect(dom.container.querySelector('pre')?.textContent).toBe('Second request')
