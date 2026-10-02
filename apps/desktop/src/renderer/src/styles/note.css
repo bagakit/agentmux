@@ -70,3 +70,10 @@
 
 .note-block-content { position: relative; }
 .note-editor[data-note-empty="true"] .note-block-content::before { content: 'Start writing…'; position: absolute; inset: 0 auto auto 0; color: var(--text-3); font-size: var(--fs-title); pointer-events: none; }
+
+@container (max-width: 260px) {
+  .note-editor__tools { gap: var(--sp-1); }
+  .note-editor__tool-group { gap: 0; }
+  .note-editor__tool-group + .note-editor__tool-group { padding-left: var(--sp-1); }
+  .note-tool { min-width: 24px; width: 24px; padding: 0; }
+}

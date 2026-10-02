@@ -184,6 +184,7 @@ import {
   reduceFileOpened,
   reduceFileSurfaceOpened,
   fileOpenReferenceMatches,
+  fileOpenLauncherMatches,
   reduceFileRename,
   findFileRenameProjectionCollision,
   reconcileWorkbenchFileProjection,
@@ -2552,6 +2553,8 @@ let fileOpenNavigationUnsubscribe: (() => void) | undefined
 
 /** The existing Space and Survey selection facts captured by file display intents. */
 export function fileNavigationSelection(state: AppState): string {
+  // Survey owns its selection; a split changes the underlying Space layout, not user navigation.
+  if (state.mainSurface === 'survey') return JSON.stringify([state.mainSurface, state.activeWorkspaceId, state.surveyZoneSelection])
   const layout = state.activeWorkspaceId ? state.layouts[state.activeWorkspaceId] : undefined
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
@@ -5516,14 +5519,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const displayId = placement?.displayWorkspaceId ?? workspaceId
     const background = placement?.focus === false
     const canonicalTabId = workspaceId ? fileTabId(workspaceId, path) : null
-    const exactRegionId = placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
-    const originalTab = canonicalTabId && Object.hasOwn(navigation.tabs, canonicalTabId) ? navigation.tabs[canonicalTabId] : undefined
+    const exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
+    const destinationTabId = placement?.launcher?.tabId ?? placement?.reference?.tabId ?? canonicalTabId
+    const originalTab = destinationTabId ? navigation.tabs[destinationTabId] : undefined
     let expectedSurface = exactRegionId ? originalTab?.regions[exactRegionId] : undefined
     let result: FileOpenResult = { placement: { status: 'unconfirmed', tabId: null, regionId: null },
       data: { kind: 'unconfirmed', reason: null }, navigation: background ? 'background' : 'unconfirmed' }
     const rememberPlacement = () => {
       if (!canonicalTabId || !exactRegionId) return
-      const tab = get().tabs[placement?.reference?.tabId ?? canonicalTabId]
+      const tab = get().tabs[destinationTabId!]
       const surface = tab?.regions[exactRegionId]
       if (!expectedSurface && surface?.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path) expectedSurface = surface
     }
@@ -5533,15 +5537,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const resourceCurrent = () => {
       const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
       const currentLayout = displayId ? get().layouts[displayId] : undefined
-      const currentTab = canonicalTabId ? get().tabs[placement?.reference?.tabId ?? canonicalTabId] : undefined
+      const currentTab = canonicalTabId ? get().tabs[destinationTabId!] : undefined
       return (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
         currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
-        fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement)) &&
+        fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement) &&
+        fileOpenLauncherMatches(get(), workspaceId, path, tabGroupId, placement)) &&
         (!placement?.onResult || !expectedSurface || exactRegionId && currentTab?.regions[exactRegionId] === expectedSurface)
     }
     if (!resourceCurrent()) return false
     const confirmedExistingSpace = (state: AppState): ConfirmedExistingFileSpace | undefined => {
-      if (!placement || placement.reference || !canonicalTabId) return undefined
+      if (!placement || placement.reference || placement.launcher || !canonicalTabId) return undefined
       const tab = state.tabs[canonicalTabId]
       if (!tab) return undefined
       const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
@@ -5605,7 +5610,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (!placement?.projection) return
       if (placement.reference) { placement.projection.onSelect(placement.reference); return }
-      const tabId = fileTabId(workspaceId, path), tab = get().tabs[tabId]
+      const tabId = placement.launcher?.tabId ?? fileTabId(workspaceId, path), tab = get().tabs[tabId]
       if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
       placement.projection.onSelect({ displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: tab.layout.activeRegionId })
     }
@@ -5812,7 +5817,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     } finally {
       if (placement?.onResult) {
-        const tabId = placement.reference?.tabId ?? canonicalTabId
+        const tabId = destinationTabId
         const tab = tabId && Object.hasOwn(get().tabs, tabId) ? get().tabs[tabId] : undefined
         const surface = exactRegionId ? tab?.regions[exactRegionId] : undefined
         const member = displayId && tabId && get().layouts[displayId]?.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(tabId))
@@ -6264,7 +6269,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
   },
   async createNote(tabGroupId, launcher, initialContent, projection, retryIntentId) {
-    const captured = get(), openingIntent = fileOpenIntentVersion
+    const captured = get(), openingIntent = fileOpenIntentVersion, openingSelection = fileNavigationSelection(captured)
+    let navigationChanged = false
+    const stopWatching = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== openingSelection) navigationChanged = true })
+    try {
     const tab = launcher ? captured.tabs[launcher.tabId] : undefined
     const launcherSurface = launcher ? tab?.regions[launcher.regionId] : undefined
     if (launcher && launcherSurface?.kind !== 'launcher') throw new Error('Launcher Region is no longer available')
@@ -6320,9 +6328,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (named.result.status !== 'written') return receipt
     set(current => ({ workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspaceId) }))
     // Creation belongs to the captured request; a later navigation never grants it a new reveal intent.
-    if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== fileNavigationSelection(captured)) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
+    if (navigationChanged || fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== openingSelection) { receipt = { ...receipt, issue: 'The Note was created. Open the same file when ready; later navigation was preserved.' }; publish(); return receipt }
     if (!noteCreationResourceMatches(get().config, target)) { receipt = { ...receipt, issue: 'The Note was written to its captured resource, but the current resource is different. Restore that resource to check or open the same Note.' }; publish(); return receipt }
-    const placement = noteFilePlacement(target, projection)
+    const placement = noteFilePlacement(target, projection, receipt.launcher)
     if (!placement) { receipt = { ...receipt, issue: 'The exact Note display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
     try {
       receipt = { ...receipt, revealed: await get().openFile(receipt.path, target.groupId, undefined, target.workspaceId, undefined,
@@ -6330,6 +6338,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!receipt.revealed) receipt = { ...receipt, issue: 'The Note was created but could not be displayed. Open this same file; do not create another.' }
     } catch (error) { receipt = { ...receipt, issue: presentError(error) } }
     publish(); return receipt
+    } finally { stopWatching() }
   },
   async revealCreatedNote(launcherId, projection) {
     const retained = useLauncherState.getState().drafts[launcherId]?.noteCreation
@@ -6358,7 +6367,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (fileOpenIntentVersion !== openingIntent || fileNavigationSelection(get()) !== selected) {
       receipt = { ...receipt, issue: 'The same Note was checked. Later navigation was preserved; choose this file when ready.' }; publish(); return receipt
     }
-    const placement = noteFilePlacement(target, projection)
+    const placement = noteFilePlacement(target, projection, receipt.launcher)
     if (!resourceCurrent() || !placement) { receipt = { ...receipt, issue: 'The exact Note resource or display reference is unconfirmed. Its original file and draft are retained.' }; publish(); return receipt }
     try {
       receipt = { ...receipt, revealed: await get().openFile(receipt.path, target.groupId, undefined, target.workspaceId, undefined,
