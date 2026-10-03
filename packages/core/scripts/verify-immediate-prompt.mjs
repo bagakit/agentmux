@@ -1,10 +1,48 @@
 import assert from 'node:assert/strict'
+import ts from 'typescript'
 import { execFile } from 'node:child_process'
 import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { qualifySharedMainSource } from './qualify-shared-main-source.mjs'
+// Bind the definition-external caller to the actual declared execution slot.
+function qualifyExecutionCaller(clientSource, coordinatorSource) {
+ const parse = (name, source) => {
+  const file = ts.createSourceFile(name, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+  assert.equal(file.parseDiagnostics.length, 0, `Malformed production source ${name}`)
+  return file
+ }
+ const method = (file, className, name) => {
+  const classes = file.statements.filter(node => ts.isClassDeclaration(node) && node.name?.text === className)
+  assert.equal(classes.length, 1, `Expected one production class ${className}`)
+  const methods = classes[0].members.filter(node => ts.isMethodDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === name)
+  assert.equal(methods.length, 1, `Expected one production method ${className}.${name}`)
+  return methods[0]
+ }
+ const definition = method(parse('prompt-submission.ts', coordinatorSource), 'AgentPromptSubmissionCoordinator', 'submitInputPlan')
+ const slot = name => definition.parameters.findIndex(parameter => ts.isIdentifier(parameter.name) && parameter.name.text === name)
+ const executionSlot = slot('execution')
+ assert(executionSlot >= 0, 'Coordinator has no declared execution parameter')
+ const executionParameter = definition.parameters[executionSlot]
+ assert(ts.isTypeReferenceNode(executionParameter.type) && ts.isIdentifier(executionParameter.type.typeName) && executionParameter.type.typeName.text === 'AgentPromptExecution', 'Coordinator execution slot lost its public type')
+ assert(ts.isStringLiteral(executionParameter.initializer) && executionParameter.initializer.text === 'default', 'Coordinator execution default changed')
+ const consumer = method(parse('client.ts', clientSource), 'AgentMuxClient', 'submitPromptInternal')
+ const calls = []
+ const visit = node => {
+  if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'submitInputPlan' &&
+      ts.isPropertyAccessExpression(node.expression.expression) && node.expression.expression.name.text === 'promptSubmission' && node.expression.expression.expression.kind === ts.SyntaxKind.ThisKeyword) calls.push(node)
+  ts.forEachChild(node, visit)
+ }
+ assert(consumer.body, 'Actual production prompt consumer has no body')
+ visit(consumer.body)
+ assert.equal(calls.length, 1, 'Expected one actual Client -> Coordinator input-plan caller')
+ const isInputField = (node, field) => node && ts.isPropertyAccessExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'input' && node.name.text === field
+ assert(isInputField(calls[0].arguments[executionSlot], 'execution'), 'Production caller does not pass input.execution in the declared execution slot')
+ const futureSlot = slot('expectedFutureIntent')
+ if (futureSlot >= 0) assert(isInputField(calls[0].arguments[futureSlot], 'expectedFutureIntent'), 'Future intent replaced or skipped its distinct declared slot')
+ return { method: 'AgentMuxClient.submitPromptInternal -> AgentPromptSubmissionCoordinator.submitInputPlan', executionSlot, ...(futureSlot < 0 ? {} : { futureSlot }), callCount: calls.length }
+}
 const exec=promisify(execFile),root=fileURLToPath(new URL('../../../',import.meta.url)),core=join(root,'packages/core')
 const args=process.argv.slice(2);assert(args.every(a=>a==='--native'||a==='--no-mutations'),'Unknown immediate proof option')
 const evidence=join(root,'.tmp','verify-immediate-prompt');await mkdir(evidence,{recursive:true})
@@ -17,12 +55,14 @@ try{
  await run([join(core,'scripts/build.mjs')]);report.build=true
  // All witnesses are outside the symbol's defining file; an empty set is a failure.
  for(const [file,expressions]of[
-  ['packages/core/src/client.ts',[/planPromptInput\(outbound,[^\n]*execution/u,/submitInputPlan\([\s\S]*?input\.execution\)/u,/submitPromptInternal\([\s\S]*?execution: input\.execution/u]],
+  ['packages/core/src/client.ts',[/planPromptInput\(outbound,[^\n]*execution/u,/submitPromptInternal\([\s\S]*?execution: input\.execution/u]],
   ['packages/core/src/prompt-submission.ts',[/inspectPromptExecution\?\.\(screen\.snapshot\(\)\)/u,/readPromptExecutionEvidence\(nativeContext\)/u,/this\.applyInput\(session, submissionId/u,/screen\.geometryRevision !== frameRefresh\.resizeRevision/u,/frameRefresh: \{ \.\.\.frozen, acknowledged: true \}/u]],
   ['packages/core/src/screen-evidence.ts',[/for \(const step of terminalContinuationSteps\(observation\)\)/u,/\}, 'terminal'\)/u,/built\.seedFrameEvidence\(chunks, fence\)/u]],
   ['packages/core/src/agent-session-store.ts',[/prepare\.refresh === undefined/u,/terminalInputPhase\(refresh, 'prompt native frame refresh'\)/u]],
   ['packages/core/src/providers/codex.ts',[/refresh: '\\u001b\[I'/u,/readPromptExecutionEvidence: readCodexPromptExecutionEvidence/u,/inspectPromptExecution: inspectCodexPromptExecution/u]]
  ]){const source=await readFile(join(root,file),'utf8');for(const expression of expressions)assert(expression.test(source),`Missing production caller ${file} ${expression}`);report.callers.push({file,witnesses:expressions.length})}
+ report.executionCaller=qualifyExecutionCaller(await readFile(join(root,'packages/core/src/client.ts'),'utf8'),await readFile(join(root,'packages/core/src/prompt-submission.ts'),'utf8'))
+ const clientWitness=report.callers.find(caller=>caller.file==='packages/core/src/client.ts');assert(clientWitness);clientWitness.witnesses+=1
  assert(report.callers.length>=3)
  const typeConfig=join(evidence,'typecheck.json');await writeFile(typeConfig,JSON.stringify({extends:join(core,'tsconfig.json'),compilerOptions:{noEmit:true,composite:false,rootDir:root},include:[join(core,'test/immediate-prompt.test.ts'),join(core,'test/immediate-provider.test.ts'),join(core,'test/immediate-screen-recovery.test.ts')],exclude:[]},null,2))
  await run([join(root,'node_modules/typescript/bin/tsc'),'--project',typeConfig]);report.owningTypes=true
