@@ -49,6 +49,7 @@ const outputDmg = join(
   `${PRODUCT_NAME}-${manifest.version}-${process.platform}-${process.arch}.dmg`
 )
 const installRequested = process.argv.includes('--install')
+const appOnly = process.argv.includes('--app-only')
 const installIntent = process.argv.includes('--ui-only') ? 'ui-only' : 'full'
 // Runtime 变了就必须先做 Run/resume review——但 review 做完之后要有一条路能装。缺了这条路，
 // 任何 ctxmux 升级都永远装不上：门就不再是"先 review"，而是"不许升级"。
@@ -877,7 +878,8 @@ export async function installApplication(appPath, { intent = installIntent, home
   const next = join(applicationsRoot, `.${PRODUCT_NAME}.install-${process.pid}.app`)
   await mkdir(applicationsRoot, { recursive: true })
   await rm(next, { recursive: true, force: true })
-  await run('ditto', [appPath, next], { capture: true })
+  const sameVolume = (await stat(appPath)).dev === (await stat(applicationsRoot)).dev
+  await run(sameVolume ? 'cp' : 'ditto', sameVolume ? ['-cRp', appPath, next] : [appPath, next], { capture: true })
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
   let runtimeUpgrade = null, uiRuntime = null, before = null, semanticHost = null
   let native = { status: 'unchanged' }
@@ -1083,8 +1085,12 @@ async function main() {
     const signature = await verifyMacosSigning(stagedApp, signingPlan)
     const signedWorkspaceMoveHelperSha256 = await sha256(stagedWorkspaceMoveHelper)
 
-    await createDmg(stagedApp, stagedDmg, temporaryRoot)
-    await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
+    if (appOnly) {
+      await verifyPackagedRuntime(stagedApp, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
+    } else {
+      await createDmg(stagedApp, stagedDmg, temporaryRoot)
+      await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
+    }
     const finalSource = await sourceIdentity()
     assert(
       finalSource.commit === initialSource.commit &&
@@ -1095,19 +1101,19 @@ async function main() {
     await rm(releaseRoot, { recursive: true, force: true })
     await mkdir(releaseRoot, { recursive: true })
     await rename(stagedApp, outputApp)
-    await rename(stagedDmg, outputDmg)
+    if (!appOnly) await rename(stagedDmg, outputDmg)
     if (installRequested) reportInstallTransaction(await installApplication(outputApp))
-    await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
+    if (!appOnly) await run(process.execPath, [join(desktopRoot, 'scripts', 'report-desktop-package.mjs')])
     const [appHash, dmgHash, appSizeResult, dmgInfo] = await Promise.all([
       sha256(join(outputApp, 'Contents', 'MacOS', PRODUCT_NAME)),
-      sha256(outputDmg),
+      appOnly ? null : sha256(outputDmg),
       run('du', ['-sk', outputApp], { capture: true }),
-      stat(outputDmg)
+      appOnly ? null : stat(outputDmg)
     ])
     const appSize = appSizeResult.stdout.trim().split(/\s+/)[0]
     process.stdout.write([
       `app=${outputApp}`,
-      `dmg=${outputDmg}`,
+      `dmg=${appOnly ? 'not-requested' : outputDmg}`,
       `signature=${signature.kind === 'certificate' ? 'certificate-local-candidate' : 'adhoc-development-candidate'}`,
       `signature_team=${signature.teamId ?? 'none'}`,
       'authorization_continuity=unverified',
@@ -1115,9 +1121,9 @@ async function main() {
       `source_tree=${initialSource.tree}`,
       'source_status=clean',
       `app_executable_sha256=${appHash}`,
-      `dmg_sha256=${dmgHash}`,
+      `dmg_sha256=${dmgHash ?? 'not-requested'}`,
       `app_size_kib=${appSize}`,
-      `dmg_size_bytes=${dmgInfo.size}`,
+      `dmg_size_bytes=${dmgInfo?.size ?? 'not-requested'}`,
       'notarized=false'
     ].join('\n') + '\n')
   } finally {
