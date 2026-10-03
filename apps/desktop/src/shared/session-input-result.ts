@@ -17,7 +17,7 @@ export async function sessionInputWriteResult(write: () => Promise<void>): Promi
   }
 }
 
-/** Preserve the original typed failure after the Main→preload structured-clone boundary. */
+/** Restore the original typed failure in Renderer after IPC and contextBridge copy the envelope. */
 export function unwrapSessionInputWriteResult(result: SessionInputWriteResult): void {
   if (!result.ok) throw Object.assign(new Error(result.error.message), result.error)
 }

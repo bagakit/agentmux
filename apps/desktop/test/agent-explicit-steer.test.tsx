@@ -144,7 +144,7 @@ beforeEach(async () => {
   disposeIpc = await registerIpc({ window: { webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     progressLoops: { subscribe: () => () => {}, pauseTarget: async () => {} } as unknown as ContinuousProgressLoopManager,
     configStore: { get: async () => config } as unknown as ConfigStore,
-    scratchTopics: {} as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
+    scratchTopics: { setNameAudit: vi.fn() } as unknown as ScratchTopics, workspaceFiles: { dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
@@ -569,13 +569,38 @@ it.each([false, true])('real Core receipt preserves a later Composer draft (lost
   expect(client.agentSession(ID)).toMatchObject({ run: { runId: RUN }, semanticStatus: { state: 'working' } })
 })
 
-it('two preload consumers preserve their original conditions instead of rebinding the waiting message', async () => {
+it('concurrent Renderer calls join the same original operation after its first input has begun', async () => {
+  const gate = deferred()
+  const body = 'one original operation from two Renderer callers'
+  holdInput = async data => { if (data === body) await gate.promise }
+  await draft(body); await enter('metaKey')
+  await vi.waitFor(() => expect(writes).toEqual([body]))
+  const original = structuredClone(queue()[0]!)
+  const first = bridge.invoke.mock.calls.find(call => call[0] === 'sessions:submitPrompt')!
+  expect(first[3]).toBe(original.operationId)
+  let secondSettled = false
+  const second = api.sessions.submitPrompt(...first.slice(1) as Parameters<typeof api.sessions.submitPrompt>)
+    .finally(() => { secondSettled = true })
+  await vi.waitFor(() => expect(bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')).toHaveLength(2))
+  expect(secondSettled).toBe(false)
+  expect(writes).toEqual([body])
+  expect(queue()).toEqual([original])
+  expect(client.agentSession(ID).promptCompletionAdmission?.submissionId).toBe(original.operationId)
+  await act(async () => { gate.resolve(); await second }); await settled()
+  expect(writes).toEqual([body, '\r'])
+  const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
+  expect(calls).toEqual([first, first])
+  expect(queue()).toEqual([])
+  expect(client.agentSession(ID).promptCompletionAdmission?.submissionId).toBe(original.operationId)
+})
+
+it('two Renderer consumers preserve their original conditions instead of rebinding the waiting message', async () => {
   const gate = deferred()
   holdInput = async data => { if (data === 'IPC client one') await gate.promise }
   const session = useAppStore.getState().sessions[0]!
   if (session.kind !== 'agent') throw new Error('Missing Agent')
   const condition = agentPromptCondition(client.agentSession(ID))
-  const send = (text: string, operationId: string) => bridge.api!.sessions.submitPrompt(
+  const send = (text: string, operationId: string) => api.sessions.submitPrompt(
     session.control, text, operationId, condition, { allowUncertainTurn: true })
   const first = send('IPC client one', 'ipc-one')
   await vi.waitFor(() => expect(writes).toEqual(['IPC client one']))
@@ -586,7 +611,7 @@ it('two preload consumers preserve their original conditions instead of rebindin
   expect(await second).toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED', detail: 'unknown' })
   expect(writes).toEqual(['IPC client one', '\r'])
   expect(client.agentSession(ID).promptCompletionAdmission?.submissionId).toBe('ipc-one')
-  await bridge.api!.sessions.submitPrompt(session.control, 'new explicit client two intent', 'ipc-two-new',
+  await api.sessions.submitPrompt(session.control, 'new explicit client two intent', 'ipc-two-new',
     agentPromptCondition(client.agentSession(ID)), { allowUncertainTurn: true })
   expect(writes).toEqual(['IPC client one', '\r', 'new explicit client two intent', '\r'])
   expect(client.agentSession(ID).run).toEqual({ runId: RUN })

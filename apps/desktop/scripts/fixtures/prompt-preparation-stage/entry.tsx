@@ -2,6 +2,7 @@ import { flushSync } from 'react-dom'
 import { api } from '../../../src/renderer/src/lib/api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
+import { unwrapSessionInputWriteResult } from '../../../src/shared/session-input-result'
 
 // Preview read-only facts remain finite. The input function is the actual production
 // contextBridge/preload method, calling real Electron IPC and the owning Main handler.
@@ -10,7 +11,7 @@ if (!native?.sessions?.submitPrompt) throw new Error('Actual production preload 
 const errors: unknown[] = [], attempts: unknown[] = [], copies: unknown[] = []
 api.sessions.submitPrompt = async (...args) => {
   attempts.push(structuredClone(args))
-  try { await native.sessions.submitPrompt(...args) }
+  try { unwrapSessionInputWriteResult(await native.sessions.submitPrompt(...args)) }
   catch (error) {
     const e = error as Error & { code?: string; detail?: string; controlFailure?: unknown }
     errors.push({ message: e.message, code: e.code, detail: e.detail, controlFailure: e.controlFailure })
