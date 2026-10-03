@@ -429,6 +429,12 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
       </div>
+      {notebookDeletion.issue && !deleteNotebookOpen ? <div className="notebook-change-issue" role="status" title={`Deletion of ${deleteNotebookTarget?.name ?? 'the original notebook'} is unconfirmed. ${notebookDeletion.issue}`}>
+        {!sidebarCollapsed ? <span>Deletion of “{deleteNotebookTarget?.name}” is unconfirmed. {notebookDeletion.issue}</span> : null}
+        <button type="button" className={sidebarCollapsed ? 'survey-icon-button' : 'note-text-button'} aria-label="Check notebook deletion" onClick={() => setDeleteNotebookOpen(true)}>
+          {sidebarCollapsed ? <CircleHelp size={15} /> : 'Check deletion'}
+        </button>
+      </div> : null}
       <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
         {!activeNotebook ? <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New webpage" disabled={opening} onClick={() => void openBrowser('about:blank', true)}>
           <Globe2 size={14} /><span>Webpage</span>
