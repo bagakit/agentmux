@@ -46,6 +46,8 @@
 
 原日历提醒沿 [`schedule.*` 类型与严格 codec](../../packages/core/src/public-rpc-schedules.ts) 公开。真实 `schedule list|inspect|create|pause|resume|cancel` CLI、GUI trusted IPC 和公共服务消费同一 [ContinuousProgressLoopManager](../../apps/desktop/src/main/continuous-progress-loop-manager.ts) 与原持久化调度器；Core 在原 Session 提交锁下保存并准入同一未来消息，Main 只持日历资格。创建和变更按真实 caller 授权，回执带准确目标、版本、原 operation、磁盘持久化与 `connected-host` 执行范围；连着宿主才执行，不声称后台云定时。未知投递保留原 operation 并检查，不盲目重发；人工输入始终消费原 Core 通路。
 
+可选的安静跟进沿同一 `schedule.create.checkIn` 保存[显式策略](../../packages/core/src/agent-schedule.ts)，默认不启用；只接受已鉴权用户／设备的 opt-in，Agent caller 不能冒人开启。GUI 默认安静窗口从当地日界前两小时至日界后八小时、18 小时无人工交互、20 小时最小尝试间隔及每天一次；公共参数可明确设置 5 分钟至 30 天的两个间隔和每天 1–3 次预算，检查回执显示实际保存值。只有原 Core 的完整、可信人工消息及[严格当前 Native 读取](../design/behavior/agent-capabilities-and-messaging.md)才能确认静默与新答复；分页截断、较晚未知作者输入或来源观察失败仅抑制本次自动跟进并显示原因，不消耗到期安排，不关闭手动输入。预算按持久 claim 计，最终明确跳过且未送出的尝试不冒已问出问题。原静态指令请同一 Agent 依据本会话已确认上下文只问一个具体问题；输入回执不代签模型语言质量。
+
 输入应用、Prompt 投递、任务接受、Agent 状态和工作完成是不同事实，准确边界见 Core 接入说明与 owning 设计。初始 Prompt 的投递事实消费 `createAgentWithDelivery` 的同次返回；缺失回执不自行重启、重发或换目标。
 
 ## CLI 与服务的当前来源

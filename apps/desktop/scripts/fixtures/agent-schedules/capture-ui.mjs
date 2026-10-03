@@ -5,6 +5,7 @@ import fs from 'node:fs/promises'
 import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..'), require = createRequire(path.join(root, 'apps/desktop/package.json'))
+const checkIn = process.argv.includes('--checkin')
 const { build } = createRequire(require.resolve('vite'))('esbuild'), sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = path.join(root, '.tmp/agent-schedules/ui-renderer-' + globalThis.crypto.randomUUID()), compiled = path.join(directory, 'compiled')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
@@ -22,7 +23,7 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="ui-entry.css"></head><body><div id="root"></div><script type="module" src="ui-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'ui-main.cjs'), path.join(compiled, 'index.html'), directory], { temporaryRoot: directory, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'ui-main.cjs'), path.join(compiled, 'index.html'), directory, ...(checkIn ? ['--checkin'] : [])], { temporaryRoot: directory, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)

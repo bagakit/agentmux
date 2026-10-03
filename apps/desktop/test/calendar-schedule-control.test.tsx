@@ -6,6 +6,7 @@ import type { ContinuousProgressLoop } from '@agentmux/core'
 import { CalendarScheduleControl } from '../src/renderer/src/components/CalendarScheduleControl'
 import { ContinuousProgressControl } from '../src/renderer/src/components/ContinuousProgressControl'
 import { api } from '../src/renderer/src/lib/api'
+import { DEFAULT_AGENT_SCHEDULE_CHECK_IN } from '@agentmux/core/schedule'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -20,7 +21,7 @@ beforeEach(() => {
 async function mount(schedule?: ContinuousProgressLoop) {
   if (schedule) vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [schedule], executionScope: 'connected-host' })
   await dom.render(<CalendarScheduleControl target={target} />)
-  await vi.waitFor(() => expect(dom.container.querySelector('[data-schedule-state]')!.getAttribute('data-schedule-state')).not.toBe('unconfirmed'))
+  await vi.waitFor(() => schedule ? expect(dom.container.querySelector('[data-schedule-id]')).not.toBeNull() : expect(dom.container.querySelector('[data-schedule-state]')!.getAttribute('data-schedule-state')).not.toBe('unconfirmed'))
 }
 async function edit(selector: string, text: string) {
   const input = dom.container.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(selector)!
@@ -93,6 +94,50 @@ describe('original calendar control', () => {
     expect(dom.container.textContent).toContain('Manual messages remain available.')
     await clickText('Retry original operation')
     expect(create.mock.calls.map(call => call[0])).toEqual([original, original])
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+  it('quiet follow-up controls require explicit opt-in and preserve the editable original topic', async () => {
+    await mount(); await openForm()
+    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ ...params.target, calendar: params.calendar, prompt: params.prompt, ...(params.checkIn ? { checkIn: params.checkIn } : {}), creationOperationId: params.operationId })))
+    const checkbox = dom.container.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!
+    expect(checkbox.checked).toBe(false)
+    expect(api.schedule.create).not.toHaveBeenCalled()
+    await dom.click('[aria-label="Enable quiet follow-up"]'); await edit('textarea', 'Ask about my confirmed design decision')
+    expect(dom.container.textContent).toContain('at least 18h silence')
+    await clickText('Save arrangement')
+    expect(create.mock.calls[0]![0]).toMatchObject({ prompt: 'Ask about my confirmed design decision', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN })
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+  it('quiet follow-up controls distinguish accepted, unconfirmed and skipped attempts using the saved policy', async () => {
+    const checkInState = { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'real-human', humanCreatedAt: 1, claimAt: 2 } }
+    await mount(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'unknown', status: 'paused' }))
+    expect(dom.container.textContent).toContain('Previous follow-up is unconfirmed')
+    expect(dom.container.textContent).not.toContain('Waiting for your next confirmed reply')
+    await dom.render(<CalendarScheduleControl target={{ ...target }} />)
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'sent' })], executionScope: 'connected-host' })
+    await dom.render(<CalendarScheduleControl target={{ ...target }} />)
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('Waiting for your next confirmed reply'))
+    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState: { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1 }, lastOutcome: 'skipped', lastDecision: 'No new question was delivered' })], executionScope: 'connected-host' })
+    await dom.render(<CalendarScheduleControl target={{ ...target }} />)
+    await vi.waitFor(() => expect(dom.container.textContent).toContain('No new question was delivered'))
+    expect(dom.container.textContent).not.toContain('Waiting for your next confirmed reply')
+  })
+  it('quiet follow-up controls preserve a known paused arrangement and the new topic until its original cancellation', async () => {
+    await mount(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, status: 'paused' })); await openForm()
+    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ loopId: 'next-follow-up', ...params.target, calendar: params.calendar, prompt: params.prompt, ...(params.checkIn ? { checkIn: params.checkIn } : {}), creationOperationId: params.operationId })))
+    const cancel = vi.spyOn(api.schedule, 'cancel').mockImplementation(async params => receipt(saved({ status: 'stopped', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, revision: 2, lastMutation: { ...params, action: 'cancel' } })))
+    await dom.click('[aria-label="Enable quiet follow-up"]'); await edit('textarea', 'Keep this next topic until I decide')
+    await clickText('Save arrangement')
+    expect(create).not.toHaveBeenCalled()
+    expect(dom.container.textContent).toContain('A quiet follow-up is already saved for this Agent')
+    expect(dom.container.querySelector('[data-schedule-state]')!.getAttribute('data-schedule-state')).toBe('paused')
+    expect(dom.container.querySelector('textarea')!.value).toBe('Keep this next topic until I decide')
+    expect(dom.container.querySelector('textarea')!.disabled).toBe(false)
+    expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Enable quiet follow-up"]')!.disabled).toBe(false)
+    expect([...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Resume arrangement')!.disabled).toBe(false)
+    await clickText('Cancel arrangement'); await clickText('Save arrangement')
+    expect(cancel).toHaveBeenCalledTimes(1)
+    expect(create).toHaveBeenCalledExactlyOnceWith({ target, calendar: expect.any(Object), prompt: 'Keep this next topic until I decide', checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, operationId: expect.stringMatching(/^schedule-/) })
     expect(dom.draft()).toBe('Keep my draft')
   })
   it('does not let a late creation clear the new target or its later instruction', async () => {

@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
-import type { AgentScheduleCalendar } from './agent-schedule.js'
+import type { AgentScheduleCalendar, AgentScheduleCheckInPolicy, AgentScheduleCheckInState } from './agent-schedule.js'
 
 export type ContinuousProgressTarget = {
   hostId: string
@@ -16,6 +16,8 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
   taskSource?: ContinuousProgressTaskSource
   loopId: string
   calendar?: AgentScheduleCalendar
+  checkIn?: AgentScheduleCheckInPolicy
+  checkInState?: AgentScheduleCheckInState
   revision?: number
   creationOperationId?: string
   lastMutation?: { operationId: string; action: 'pause' | 'resume' | 'cancel'; expectedRevision: number }
@@ -78,11 +80,11 @@ export class ContinuousProgressScheduler {
 
   requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
-  createCalendar(input: ContinuousProgressTarget & { calendar: AgentScheduleCalendar; prompt: string; nextDue: number; operationId: string }): ContinuousProgressLoop {
+  createCalendar(input: ContinuousProgressTarget & { calendar: AgentScheduleCalendar; prompt: string; nextDue: number; operationId: string; checkIn?: AgentScheduleCheckInPolicy }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || !Number.isSafeInteger(input.nextDue)) throw new Error('An exact calendar target, message and next occurrence are required.')
     const loopId = this.id()
     const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
-      calendar: structuredClone(input.calendar), revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
+      calendar: structuredClone(input.calendar), ...(input.checkIn ? { checkIn: structuredClone(input.checkIn) } : {}), revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
     this.loops.set(loopId, loop)
     return structuredClone(loop)
   }

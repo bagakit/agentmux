@@ -11,6 +11,7 @@ const run = promisify(execFile), require = createRequire(import.meta.url), viteR
 const root = resolve(import.meta.dirname, '../../..'), fixture = join(root, 'apps/desktop/scripts/fixtures/agent-schedules')
 const taskIndex = process.argv.indexOf('--task'), task = taskIndex < 0 ? 'calendar' : process.argv[taskIndex + 1]
 if (task === 'presentation' || task === 'ui') { await (await import('./verify-agent-schedules-ui.mjs')).verifyScheduleUi(); process.exit(process.exitCode ?? 0) }
+if (task === 'checkin') { await (await import('./verify-agent-schedules-check-in.mjs')).verifyScheduleCheckIn(); process.exit(process.exitCode ?? 0) }
 assert.equal(task, 'calendar', 'This lane currently qualifies the calendar task only.')
 const evidence = join(root, '.tmp/agent-schedules/calendar'); await mkdir(evidence, { recursive: true })
 const sha = text => createHash('sha256').update(text).digest('hex')

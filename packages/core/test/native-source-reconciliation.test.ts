@@ -8,6 +8,10 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
+import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import { connectHostedAgentMux } from '../src/hosted-client.js'
+import type { AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
+import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import * as runner from '../src/process-runner.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentProviderNativeSessionDiscoveryContext } from '../src/types.js'
@@ -87,6 +91,81 @@ it('explicit current Page reads an existing different verified source without ne
  const page=await succeeds(f.client.sessionHistoryPage(SID,{...f.options,refreshNativeSource:true}))
  expect(page.source.nativeSessionId).toBe(NATIVE)
  expect(page.items[2]?.id).toBe('final-1')
+})
+
+function strictNativeProvider(client: AgentMuxClient): AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession' | 'readSessionHistoryPage'>> {
+ const provider = client.providers.get('codex')
+ if (!provider.discoverNativeSession || !provider.readSessionHistoryPage) throw new Error('This owning fixture requires the real native reader and discovery')
+ return provider as AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession' | 'readSessionHistoryPage'>>
+}
+it('requires a fresh current witness for automatic reads while ordinary retained history and the healthy Run stay available', async () => {
+ const f = await fixture(), bytes = await readFile(join(f.root, 'sessions.json'))
+ const discover = vi.spyOn(strictNativeProvider(f.client), 'discoverNativeSession').mockRejectedValue(new Error('Current source observation unavailable'))
+ const retained = await f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true })
+ expect(retained.source.nativeSessionId).toBe('retained-old')
+ await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })).rejects.toThrow('Current source observation unavailable')
+ expect((await f.read()).source.nativeSessionId).toBe('retained-old')
+ expect(await readFile(join(f.root, 'sessions.json'))).toEqual(bytes)
+ expect((await f.kernel.status(RUN)).state.type).toBe('running')
+ expect(discover).toHaveBeenCalledTimes(2)
+})
+
+it('rechecks the exact current Run witness after a strict provider page has finished', async () => {
+ const f = await fixture(), provider = strictNativeProvider(f.client), original = provider.readSessionHistoryPage!
+ vi.spyOn(provider, 'readSessionHistoryPage').mockImplementationOnce(async context => {
+   const page = await original(context)
+   f.status.mockResolvedValue({ ...f.run, pid: f.processId + 1 } as Awaited<ReturnType<CtxmuxRunAdapter['status']>>)
+   return page
+ })
+ await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })).rejects.toThrow('original Run process changed')
+ expect((await f.read()).source.nativeSessionId).toBe(NATIVE)
+})
+
+it('cancels only the strict current read while its original Run and retained reading survive', async () => {
+ const f = await fixture(), provider = strictNativeProvider(f.client), controller = new AbortController()
+ let began!: () => void, release!: () => void
+ const entered = new Promise<void>(resolve => { began = resolve }), hold = new Promise<void>(resolve => { release = resolve })
+ const original = provider.discoverNativeSession!
+ vi.spyOn(provider, 'discoverNativeSession').mockImplementationOnce(async context => { began(); await hold; return original(context) })
+ const reading = f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true, signal: controller.signal })
+ await entered; const failure = new Error('Only this automatic read was cancelled'); controller.abort(failure)
+ await expect(reading).rejects.toBe(failure); release()
+ expect((await f.read()).source.nativeSessionId).toBe('retained-old')
+ expect((await f.kernel.status(RUN)).state.type).toBe('running')
+})
+
+it('carries a borrowed strict current read and its cancellation through the exact finite Host field', async () => {
+ const f = await fixture()
+ vi.spyOn(f.kernel, 'identity').mockReturnValue({ daemonInstanceId: 'original-native-daemon', protocolVersion: 18, buildIdentity: 'private-current-source' })
+ const service = new AgentMuxHostedRuntimeService(f.client, null, () => hostedTestOwner(f.client)), invocations: Array<{ method: string; args: unknown[] }> = [], signals: AbortSignal[] = []
+ const port = {
+  call: async (method: string, params: unknown, options?: { signal?: AbortSignal }) => {
+   const decoded = JSON.parse(JSON.stringify(params)); if (method === 'runtime.invoke') { invocations.push(decoded.invocation); if (options?.signal) signals.push(options.signal) }
+   return JSON.parse(JSON.stringify(await service.call(method, decoded, options ?? {})))
+  },
+  subscribe: async (method: string, params: unknown, handlers: { onInitial(value: unknown): void; onEvent(value: unknown): void; signal?: AbortSignal }) => {
+   const stream = await service.subscribe(method, params, event => handlers.onEvent(JSON.parse(JSON.stringify(event))), handlers.signal ? { signal: handlers.signal } : {})
+   handlers.onInitial(JSON.parse(JSON.stringify(stream.initial))); await stream.start?.(); return { dispose: async () => await stream.dispose() }
+  }
+ } as unknown as AgentMuxHostedRpcPort
+ const borrowed = await connectHostedAgentMux({ rpc: port })
+ try {
+  const page = await borrowed.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true })
+  expect(page.source.nativeSessionId).toBe(NATIVE)
+  const controller = new AbortController(), provider = strictNativeProvider(f.client), original = provider.discoverNativeSession!
+  let began!: () => void, release!: () => void
+  const entered = new Promise<void>(resolve => { began = resolve }), hold = new Promise<void>(resolve => { release = resolve })
+  vi.spyOn(provider, 'discoverNativeSession').mockImplementationOnce(async context => { began(); await hold; return original(context) })
+  const reading = borrowed.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true, signal: controller.signal })
+  await entered; controller.abort(new Error('Only the original bounded reader'))
+  release(); await expect(reading).rejects.toThrow('Only the original bounded reader')
+  expect(signals).toEqual([controller.signal])
+  const wire = invocations.filter(invocation => invocation.method === 'sessionHistoryPage')
+  expect(wire).toHaveLength(2); expect(wire[1]!.args[1]).toMatchObject({ requireCurrentSource: true, refreshNativeSource: true })
+  expect(wire[1]!.args[1]).not.toHaveProperty('signal')
+  expect((await borrowed.sessionHistoryPage(SID, f.options)).source.nativeSessionId).toBe(NATIVE)
+  expect((await f.kernel.status(RUN)).state.type).toBe('running')
+ } finally { await borrowed.dispose(); await service.dispose() }
 })
 
 it('borrows the existing observation witness across save-only failure, invalidation and Pages without faking durable identity',async()=>{

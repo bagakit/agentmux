@@ -151,6 +151,7 @@ export class AgentMuxHostedRuntimeService {
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (this.consumer(id) !== original) throw new AgentMuxError('Host consumer changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
+    if (context.signal && invocation.method === 'sessionHistoryPage') invocation.args[1] = { ...invocation.args[1], signal: context.signal }
     const source = context.sourceDevice
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
