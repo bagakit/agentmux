@@ -59,6 +59,7 @@ type FileDestination = Pick<WorkbenchProjectionSelection, 'displayWorkspaceId' |
 /** User-authored discussion preparation. The returned original Launcher is never a running Session. */
 export function openMoteDiscussionDraft(owner: MoteWorkfaceScope, prompt: string, options: {
   reference?: WorkbenchProjectionSelection | null | undefined; destination?: FileDestination | null | undefined
+  agentMuxNote?: string | undefined
 } = {}): WorkbenchProjectionSelection | null {
   const state = useAppStore.getState()
   const fail = (message: string) => { useAppStore.getState().reportError(new Error(message)); return null }
@@ -84,7 +85,29 @@ export function openMoteDiscussionDraft(owner: MoteWorkfaceScope, prompt: string
     return fail('The new discussion Launcher is not confirmed. Your question and original work are kept; inspect the new Tab and retry.')
   }
   if ((current.agentComposerDrafts[region.regionId] ?? '') !== '') return fail('The new Launcher already has later input. That input is kept; paste your question there when ready.')
-  current.setAgentComposerDraft(region.regionId, prompt)
+  if (options.agentMuxNote !== undefined && current.agentComposerNotes[region.regionId] !== undefined)
+    return fail('The new Launcher already has later context. That context and your question are kept; review the Launcher before retrying.')
+  let changed = false
+  const unsubscribe = useAppStore.subscribe(next => {
+    if (next.tabs[tabId] !== tab || (next.agentComposerDrafts[region.regionId] ?? '') !== prompt ||
+      next.agentComposerNotes[region.regionId] !== undefined && next.agentComposerNotes[region.regionId] !== options.agentMuxNote) changed = true
+  })
+  try {
+    // Keep the original input owner, including its continuous-work pause semantics.
+    current.setAgentComposerDraft(region.regionId, prompt)
+    if (options.agentMuxNote !== undefined) {
+      let staged = false
+      useAppStore.setState(next => {
+        if (changed || next.tabs[tabId] !== tab || next.agentComposerDrafts[region.regionId] !== prompt ||
+          next.agentComposerNotes[region.regionId] !== undefined || !confirmedMoteReference(next, owner, {
+            reference: { displayWorkspaceId: destination.displayWorkspaceId, groupId: destination.groupId, tabId, regionId: region.regionId }
+          })) return next
+        staged = true
+        return { agentComposerNotes: { ...next.agentComposerNotes, [region.regionId]: options.agentMuxNote! } }
+      })
+      if (!staged || changed) return fail('The new Launcher changed while preparing its context. Later inputs and work are kept; review it before retrying.')
+    }
+  } finally { unsubscribe() }
   return { displayWorkspaceId: destination.displayWorkspaceId, groupId: destination.groupId, tabId, regionId: region.regionId }
 }
 
