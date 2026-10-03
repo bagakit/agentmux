@@ -42,6 +42,6 @@
 
 ## 历史与本机过程资料
 
-[事故复盘](casestudy/) 保留当时现场和改进动作；[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
+[事故复盘](casestudy/) 保留当时现场和改进动作，其中[终端丢色案例](casestudy/terminal-colors-lost-after-resume.md)说明长寿命 Runtime 的环境继承与显式 unset；[Benchmark 协议](benchmarks/agentmux-daemon-cutover.md) 定义测量方法，历史数值不成为当前预算或排名。
 
 **过程性文档不提交。** 调研、计划、评审、交接、交付清单、状态快照和原型留本机，目录与已有暂存文件的保全规则见[过程资料边界](process-directories.md)。它们帮助追溯，不取代长期设计或官方任务状态。受控仓库中的长期入口应独立可读；本机资料缺席须明确缺证，不把缺席伪装成通过。
