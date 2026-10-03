@@ -1,7 +1,9 @@
+import { codexQuestionRequest, codexQuestionAnswers, encodeCodexQuestionReply } from './codex-question.js'
 import { withCodexNativeRead } from './codex-native-read.js'
 import { AgentMuxError } from '../errors.js'
 import type {
   AgentProviderSessionHistoryContext,
+  AgentProviderSessionQuestionReplyContext,
   AgentProviderSessionHistoryPage,
   AgentSessionHistoryContentPart,
   AgentSessionHistoryCollaboration,
@@ -400,10 +402,22 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
   }
   const startedAt = timestamp(entry.startedAtMs)
   const completedAt = timestamp(entry.completedAtMs)
+  let questionRequest: AgentSessionHistoryItem['questionRequest']
+  let questionDiagnostic: AgentSessionHistoryItem['questionDiagnostic']
+  if (type === 'agentMessage') {
+    try { questionRequest = codexQuestionRequest(item) } catch (error) {
+      if (!(error instanceof AgentMuxError) || error.code !== 'INVALID_AGENT_SESSION_HISTORY_PAGE') throw error
+      questionDiagnostic = { code: error.code, message: error.message }
+    }
+  }
+  const questionAnswers = type === 'userMessage' ? codexQuestionAnswers(item.content) : undefined
   const messagePhase = type === 'agentMessage'
     ? knownValue(item.phase, { commentary: 'progress', final_answer: 'final' }) : undefined
   return { id, turnId, kind, contentParts,
     ...(messagePhase === undefined ? {} : { messagePhase }),
+    ...(questionRequest === undefined ? {} : { questionRequest }),
+    ...(questionDiagnostic === undefined ? {} : { questionDiagnostic }),
+    ...(questionAnswers === undefined ? {} : { questionAnswers }),
     ...(collaboration === undefined ? {} : { collaboration }),
     ...(kind === 'activity' ? { title: type } : {}),
     ...(startedAt === undefined ? {} : { startedAt }),
@@ -432,5 +446,36 @@ export async function readCodexSessionHistoryPage(
     if (result.nextCursor !== null && typeof result.nextCursor !== 'string') throw protocolError()
     return { source: { ...context.source }, items: result.data.map(value => itemEntry(value, context.source)).reverse(),
       nextCursor: result.nextCursor as string | null }
+  })
+}
+
+/** Resolve one exact indexed record with bounded anchors, then encode its Provider-owned reply. */
+export async function prepareCodexSessionQuestionReply(context: AgentProviderSessionQuestionReplyContext): Promise<string> {
+  return await withCodexNativeRead(context, 'history', async request => {
+    const metadata = object(object(await request('thread/read', {
+      threadId: context.source.nativeSessionId, includeTurns: false
+    })).thread)
+    if (metadata.id !== context.source.nativeSessionId) throw new AgentMuxError(
+      'Native question source changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+    if (metadata.historyMode !== 'paginated') throw new AgentMuxError(
+      'This native Session does not expose indexed question records.', 'AGENT_QUESTION_REPLY_UNSUPPORTED')
+    const anchor = object(await request('thread/items/list', {
+      threadId: context.source.nativeSessionId, turnId: context.turnId, limit: 1,
+      sortDirection: 'desc', cursor: { type: 'item', itemId: context.recordId }
+    }))
+    if (!Array.isArray(anchor.data) || anchor.data.length > 1) throw protocolError()
+    const previous = anchor.data[0] === undefined ? undefined : string(object(object(anchor.data[0]).item).id)
+    const page = object(await request('thread/items/list', {
+      threadId: context.source.nativeSessionId, turnId: context.turnId, limit: 1,
+      sortDirection: 'asc', ...(previous === undefined ? {} : { cursor: { type: 'item', itemId: previous } })
+    }))
+    if (!Array.isArray(page.data) || page.data.length !== 1) throw new AgentMuxError(
+      'The exact native question record is unavailable.', 'UNKNOWN_AGENT_QUESTION')
+    const entry = object(page.data[0]), item = object(entry.item)
+    if (entry.turnId !== context.turnId || item.id !== context.recordId || item.type !== 'agentMessage') throw new AgentMuxError(
+      'The native question lookup returned another record.', 'UNKNOWN_AGENT_QUESTION')
+    const questions = codexQuestionRequest(item)
+    if (!questions) throw new AgentMuxError('This record does not contain native asynchronous questions.', 'UNKNOWN_AGENT_QUESTION')
+    return encodeCodexQuestionReply(questions, context.answers)
   })
 }

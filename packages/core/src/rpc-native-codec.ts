@@ -207,6 +207,18 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break
+      case 'agent.question.reply': {
+        record(p, ['agentSessionId', 'source', 'recordId', 'questionIds', 'operationId', 'outcome'])
+        const source = record(p.source, ['providerId', 'nativeSessionId']), expected = record(input.source)
+        string(source.providerId); string(source.nativeSessionId)
+        if (!rpcSessionTargetMatches(input.agentSessionId, String(p.agentSessionId)) || p.recordId !== input.recordId ||
+          p.operationId !== input.operationId || p.outcome !== 'submitted' || source.providerId !== expected.providerId ||
+          source.nativeSessionId !== expected.nativeSessionId) fail()
+        array(p.questionIds, id => string(id))
+        const answers = input.answers as Array<{ questionId: string }>
+        if (!Array.isArray(answers) || JSON.stringify(p.questionIds) !== JSON.stringify(answers.map(answer => answer.questionId))) fail()
+        break
+      }
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
         record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['session', 'status', 'displayName', 'unavailable'])

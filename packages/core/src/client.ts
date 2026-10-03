@@ -149,10 +149,14 @@ import type {
   AgentSessionHistoryMetadata,
   AgentSessionHistoryPage,
   AgentSessionHistoryPageOptions,
+  AgentSessionQuestionReplyReceipt,
+  AgentSessionHistoryQuestionAnswer,
+  AgentSessionHistorySource,
   AgentSessionHistoryDescriptor,
   AgentSessionHistoryObservation,
   AgentSessionHistoryObservationOptions,
   AgentSessionHistoryObservationHandle,
+  AgentTerminalScreenSnapshot,
   AgentTerminalCapabilityState,
   AgentTerminalOutputChannelState,
   AgentTimelineItem,
@@ -265,6 +269,19 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
   agentMuxNote?: string
   prompt: string
+}
+
+/** Explicit manual answer to an exact Provider-owned asynchronous question record. */
+export type AgentMuxSessionQuestionReplyInput = Omit<AgentMuxAgentPromptInput,
+  'prompt' | 'agentMuxNote' | 'execution' | 'expectedCompletionId' | 'expectedInputByte' | 'expectedFutureIntent'> & {
+  source: AgentSessionHistorySource
+  turnId: string
+  recordId: string
+  answers: AgentSessionHistoryQuestionAnswer[]
+  /** Configured native invocation, just as for the existing public history reader. */
+  commandOverride?: string
+  args?: readonly string[]
+  env?: Readonly<Record<string, string | undefined>>
 }
 
 export type AgentMuxAgentMessageInput = {
@@ -3763,7 +3780,70 @@ export class AgentMuxClient {
     })
   }
 
-  private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string): Promise<void> {
+  /** Uses ordinary input admission, never a pending Hook or an A2A message envelope. */
+  async replySessionQuestion(input: AgentMuxSessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt> {
+    this.requireConnected()
+    const condition = validateAgentPromptCondition(input)
+    const session = this.requireAgentSession(input.agentSessionId)
+    if (!sameRun(session.run, condition.expectedRun)) throw new AgentMuxError(
+      'Agent Session changed before its question was answered.', 'STALE_AGENT_SESSION')
+    if (!input.source || input.source.providerId !== session.providerId ||
+      typeof input.source.nativeSessionId !== 'string' || !input.source.nativeSessionId ||
+      typeof input.turnId !== 'string' || !input.turnId || typeof input.recordId !== 'string' || !input.recordId ||
+      !Array.isArray(input.answers) || !input.answers.length || input.answers.some(answer =>
+        !answer || typeof answer.questionId !== 'string' || !answer.questionId || typeof answer.answer !== 'string' || !answer.answer.trim())) {
+      throw new AgentMuxError('A question reply requires an exact source, record and answers.', 'INVALID_AGENT_QUESTION_REPLY')
+    }
+    // Copy the original caller intent before any native read can suspend this method.
+    input = { ...input, ...condition, source: { ...input.source },
+      answers: input.answers.map(answer => ({ questionId: answer.questionId, answer: answer.answer })),
+      ...(input.sourceDevice ? { sourceDevice: { ...input.sourceDevice } } : {}),
+      ...(input.args ? { args: [...input.args] } : {}), ...(input.env ? { env: { ...input.env } } : {}) }
+    const lifetime = this.providerReadLifetime('history')
+    const { controller, read } = lifetime
+    const cancel = (): void => controller.abort(input.signal?.reason)
+    input.signal?.addEventListener('abort', cancel, { once: true })
+    try {
+      input.signal?.throwIfAborted()
+      const binding = await read(this.nativeHistoryBinding(input.agentSessionId, input, controller.signal, 'read'))
+      const { provider, handle } = binding
+      const source = { providerId: session.providerId, nativeSessionId: handle.sessionId }
+      if (source.providerId !== input.source.providerId || source.nativeSessionId !== input.source.nativeSessionId) {
+        throw new AgentMuxError('The question belongs to another native source.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
+      if (!provider.prepareSessionQuestionReply) throw new AgentMuxError(
+        'This Provider does not expose native question replies; ordinary input remains available.', 'AGENT_QUESTION_REPLY_UNSUPPORTED')
+      const prompt = await read(provider.prepareSessionQuestionReply({ source,
+        turnId: input.turnId, recordId: input.recordId, answers: input.answers,
+        command: resolveAgentExecutable(input.commandOverride, provider.executable),
+        args: input.args ?? [], env: input.env ?? {}, workspacePath: session.workspacePath,
+        ...(handle.transcriptPath === undefined ? {} : { transcriptPath: handle.transcriptPath }), signal: controller.signal }))
+      if (typeof prompt !== 'string' || !prompt.trim()) throw new AgentMuxError(
+        'The Provider returned an invalid question reply.', 'INVALID_AGENT_PROVIDER')
+      await read(binding.assertCurrent())
+      // Recheck source after joining the original input serializer, not before waiting in its queue.
+      await this.submitPromptInternal({ ...condition, agentSessionId: input.agentSessionId,
+        operationId: input.operationId, prompt,
+        ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
+        ...(input.sourceDevice === undefined ? {} : { sourceDevice: input.sourceDevice }),
+        ...(input.sourceChannel === undefined ? {} : { sourceChannel: input.sourceChannel }),
+        ...(input.signal === undefined ? {} : { signal: input.signal }),
+        ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) },
+        undefined, current => {
+          const native = current.nativeHandle
+          if (current.providerId !== source.providerId || native?.kind !== 'provider' || native.providerId !== source.providerId || native.sessionId !== source.nativeSessionId) {
+            throw new AgentMuxError('The question source changed before Input admission. Ordinary input remains available.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+          }
+        }, true)
+      return { agentSessionId: input.agentSessionId, source, recordId: input.recordId,
+        questionIds: input.answers.map(answer => answer.questionId), operationId: input.operationId, outcome: 'submitted' }
+    } finally {
+      input.signal?.removeEventListener('abort', cancel)
+      lifetime.close()
+    }
+  }
+
+  private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string, assertSession?: (session: AgentMuxAgentSession) => void, questionReply = false): Promise<void> {
     this.requireConnected()
     if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_PROMPT')
@@ -3802,9 +3882,20 @@ export class AgentMuxClient {
     if (!sameRun(session.run, condition.expectedRun)) {
       throw new AgentMuxError('Agent Session changed before prompt submission.', 'STALE_AGENT_SESSION')
     }
-    const plan = this.providers.get(session.providerId).planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
+    const provider = this.providers.get(session.providerId)
+    const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const renderObservation = new AbortController()
     const delivered = await this.serializeAgentInput(session, async (current, run) => {
+      let plan = ordinaryPlan
+      if (questionReply) {
+        let terminalScreen: AgentTerminalScreenSnapshot | undefined
+        await this.screenEvidence.wait(current, run.latestOutputBytes, false, screen => {
+          terminalScreen = screen.snapshot(); return true
+        }, { timeoutMs: SESSION_HISTORY_TIMEOUT_MS, timeoutMessage: 'Question input surface is unconfirmed; ordinary terminal input remains available.',
+          terminalMessage: 'The original question Run ended.', requireCompleteFrame: true,
+          ...(input.signal ? { signal: input.signal } : {}) })
+        plan = provider.planPromptInput(outbound, { intent: 'question-reply', ...(terminalScreen ? { terminalScreen } : {}) })
+      }
       const savedMessage = input.expectedFutureIntent ? current.futurePromptIntents?.[input.expectedFutureIntent.intentId]?.message : undefined
       // Timer transport is not the producer. Inherit only the original saved
       // authenticated source; retain this request's exact content for admission.
@@ -3814,7 +3905,7 @@ export class AgentMuxClient {
         ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
       } : message
       return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent)
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession)
     }, renderObservation)
     if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)

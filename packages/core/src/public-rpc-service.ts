@@ -1,4 +1,5 @@
 import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
+import { normalizeMessageChannel } from './message-origin.js'
 import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
@@ -30,7 +31,6 @@ import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './
 import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult,
   type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
-import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
@@ -42,7 +42,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
   'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
-  'observeAgentOutput' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
+  'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
   'runtimeDiagnostics' | 'runtimeIdentity' | 'observeRunStorage'> & {
@@ -92,6 +92,7 @@ const NATIVE_FIELDS = {
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
+  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -295,7 +296,7 @@ export class AgentMuxRpcService {
         ? await client.reopenAgent(input as unknown as Parameters<AgentMuxClient['reopenAgent']>[0])
         : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
     }
-    if (method === 'message.pending.edit' || method === 'message.pending.send') {
+    if (method === 'message.pending.edit' || method === 'message.pending.send' || method === 'agent.question.reply') {
       if (context.caller !== undefined || !context.principal ||
           !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' ||
           !context.principal.id.trim() || context.principal.id.includes('\0')) {
@@ -327,6 +328,17 @@ export class AgentMuxRpcService {
       return parseTopicResult(method, result, input) as AgentMuxRpcResult<M>
     }
     const p = rpcRecord(params)
+    if (method === 'agent.question.reply') {
+      const input = rpcRecord(params, NATIVE_FIELDS['agent.question.reply']) as AgentMuxRpcParams<'agent.question.reply'>
+      const target = await this.owner(rpcString(input.agentSessionId, 'Question Session ID'))
+      context.signal?.throwIfAborted()
+      if (target.client.forwardRpc) return await target.client.forwardRpc('agent.question.reply', { ...input, agentSessionId: target.agentSessionId }, context) as AgentMuxRpcResult<M>
+      await target.client.connect()
+      const sourceDevice = this.ports.operationSource?.(context)
+      return await target.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, authorHuman: true, sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
+        ...(sourceDevice ? { sourceDevice } : {}),
+        ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.history') {
       const input = rpcRecord(params, NATIVE_FIELDS['agent.history']) as AgentMuxRpcParams<'agent.history'>
       validateSessionHistoryReadInput(input)
