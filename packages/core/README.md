@@ -12,6 +12,25 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 `defaultLocalHostLabel(platform?)` 为新本机 Host 提供显示默认值，`LocalExecutionHost` 与宿主的新配置共同消费；传入或保存的 `label` 继续优先。该函数沿 [execution-host.ts](src/execution-host.ts) 导出，只处理名称，不探测能力或启动 Runtime；默认名称的系统规则见[机器目录分区合同](../../docs/design/behavior/spaces-and-layout.md#跨设备关联项目组)。
 
+
+## 原生对话读取
+
+`sessionHistoryPage(agentSessionId, { limit, cursor?, signal? })` 读取原 Session 的 Provider 原生记录；`observeSessionHistory(agentSessionId, onChange)` 观察该原生来源的变化，消费者据此重读最新页。两者独立于 Hook timeline，读取不向 Agent 输入内容或改变 Run。历史 cursor 是 Provider 生成的 opaque 值，不能用数组下标、正文或时间重新生成。
+
+| Provider | 原生来源与身份 | 更新观察 | Native Resume |
+| --- | --- | --- | --- |
+| Grok | `chat_history.jsonl`；原 Session ID、Workspace 与 `summary.info` 一致 | 同一经过核验的 JSONL，包含第一次落盘 | Session ID |
+| Pi | 原 `session_file` 的分支 JSONL；身份来自原生 session header 与受信 Hook binding | 同一 JSONL | 原 session file |
+| Antigravity | 主 CLI 持有的 `presence/<UUID>.lock`；同 UUID 的 compact/full transcript | 两个精确 transcript，共同清理 | Conversation UUID |
+| Cursor | 当前 Run 打开的原 `store.db` 与 native metadata；canonical conversation protobuf | DB/WAL/journal 原生 commit 的实际 revision | Conversation UUID |
+| TraeX | 当前 Run 打开的 rollout 与 `session_meta`；由原生 app-server 解释 indexed history | 同一 rollout | Session ID |
+
+上述是源码能力，不代表任意厂商版本、当前安装或所有真实运行场景已验收。Client 共同消费 `AgentSessionHistoryPage`，不按 Provider 另建阅读界面、轮询或消息账本。保存的用户输入、Agent 回复与过程记录保留各自原顺序、ID 和 content parts；未提供的作者、渠道、设备、时间与状态保持未知。终端输入须等原生 CLI 保存为记录后才能由原生读取接口取得，不能把尚未保存的终端编辑缓冲当成已提交消息。
+
+同一 SQLite 身份的写入竞争返回 `AGENT_SESSION_HISTORY_SNAPSHOT_CHANGED`，本次页不发布；观察保留，后续原生提交可恢复。主来源被替换或 native identity 不一致返回 `AGENT_SESSION_HISTORY_SOURCE_CHANGED`，只停止这个来源的观察。两种情况都不删除已有正文、原 Session 或健康 Run；调用者保留旧阅读窗口并显示明确的读取状态。无 WAL 的已关闭数据库沿同一只读 VFS 读取，不创建 native WAL/SHM。JSONL 来源替换按原来源边界处理，不能以相同路径或新 mtime 推断仍是原会话。
+
+CLI/RPC 复用原 `agent history` / `agent.history`；Native Resume 仍通过 Core Session 生命周期完成。Hook、Permission、Usage 和问题回答是各自独立声明的能力，不能因 history reader 可用而冒充已接入。
+
 ## Runtime 边界
 
 `@agentmux/core` 是 ctxmux 的 Client，不是 ctxmux 的宿主。ctxmux 自己的 daemon、CLI、
