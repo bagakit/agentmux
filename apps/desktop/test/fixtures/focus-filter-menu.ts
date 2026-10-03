@@ -10,7 +10,7 @@ export async function openFocusFilters(container: HTMLElement) {
   return document.querySelector<HTMLElement>('.focus-filter-menu')!
 }
 export async function chooseFocusFilter(container: HTMLElement, kind: 'project' | 'state', value: string) {
-  const menu=await openFocusFilters(container),item=menu.querySelector<HTMLElement>(`[data-focus-${kind}="${value}"]`)
+  const menu=await openFocusFilters(container),item=[...menu.querySelectorAll<HTMLElement>(`[data-focus-${kind}]`)].find(node => node.getAttribute(`data-focus-${kind}`) === value)
   expect(item).not.toBeNull();await act(async()=>item!.click());await act(async()=>{})
 }
 export async function focusFilterOptions(container: HTMLElement, kind: 'project' | 'state') {

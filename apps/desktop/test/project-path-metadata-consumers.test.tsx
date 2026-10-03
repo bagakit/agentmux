@@ -69,7 +69,7 @@ describe('typed project metadata consumers preserve canonical identities', () =>
     expect(lanes[0]!.hostId).toBe(host.id)
     const select = vi.fn()
     await dom.render(<><FocusContextRow context={contexts[0]!} selected={false} onSelect={select} />
-      <FocusProjectLanes lanes={lanes} selectedWorkspaceId="one" onSelect={select} renderLane={(_, heading) => heading} /></>)
+      <FocusProjectLanes lanes={lanes} selectedProjectKey="one" onSelect={select} renderLane={(_, heading) => heading} /></>)
     expect(element('.focus-context').title).toContain(expected)
     expect(element('.focus-project-lanes__axis').title).toContain(expected)
     await dom.click('.focus-context')

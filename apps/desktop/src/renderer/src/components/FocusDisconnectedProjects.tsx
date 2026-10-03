@@ -1,15 +1,15 @@
 import { ChevronRight, Unplug } from 'lucide-react'
 import { useLayoutEffect, useRef, type RefObject } from 'react'
 import type { FocusContext } from '../lib/focus-context'
-import type { FocusProjectLane } from '../lib/focus-project-lanes'
+import { focusProjectKey, type FocusProjectLane } from '../lib/focus-project-lanes'
 import { FocusProjectLanes } from './FocusProjectLanes'
 import { FocusContextRow } from './FocusContextRow'
 
 /** The same confirmed-offline directory in both the full and mixed Focus surfaces. */
-export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selectedId, projectId, expanded, canReturn, reveal, fallbackFocus, onExpand, onClose, onClearFilters, onProject, onSelect }: {
+export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selectedId, projectKey, expanded, canReturn, reveal, fallbackFocus, onExpand, onClose, onClearFilters, onProject, onSelect }: {
   lanes: readonly FocusProjectLane[]; contexts: ReadonlyMap<string, FocusContext>; selectedId: string | null
   visibleIds: ReadonlySet<string>; expanded: boolean; canReturn: boolean
-  projectId: string; reveal: { laneId: string; trigger: HTMLElement } | null
+  projectKey: string; reveal: { laneId: string; trigger: HTMLElement } | null
   fallbackFocus: RefObject<HTMLInputElement | null>
   onExpand(): void; onClose(): void; onClearFilters(): void
   onProject(id: string): void; onSelect(id: string): void
@@ -19,7 +19,7 @@ export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selecte
   const ids = new Set(lanes.flatMap(lane => lane.contextIds.filter(id => contexts.has(id))))
   const visibleLanes = lanes.filter(lane => lane.contextIds.some(id => contexts.has(id) && visibleIds.has(id)))
   const matchingCount = [...ids].filter(id => visibleIds.has(id)).length
-  const projectCount = new Set(lanes.map(lane => lane.projectId)).size
+  const projectCount = new Set(lanes.map(lane => focusProjectKey(lane.hostId, lane.projectId))).size
   useLayoutEffect(() => {
     if (!expanded || !reveal || !surface.current) return
     const target = [...surface.current.querySelectorAll<HTMLElement>('[data-lane-id]')].find(node => node.dataset.laneId === reveal.laneId)
@@ -60,7 +60,7 @@ export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selecte
       {expanded && canReturn ? <button type="button" className="focus-disconnected-projects__return" onClick={close}>Return to board</button> : null}
     </div>
     {expanded && matchingCount !== ids.size ? <p className="focus-disconnected-projects__matches">{matchingCount} of {ids.size} contexts match the current filters</p> : null}
-    {expanded && visibleLanes.length ? <FocusProjectLanes lanes={visibleLanes} selectedWorkspaceId={projectId} onSelect={onProject} renderLane={(lane, heading) => <>
+    {expanded && visibleLanes.length ? <FocusProjectLanes lanes={visibleLanes} selectedProjectKey={projectKey} onSelect={onProject} renderLane={(lane, heading) => <>
       {heading}<div className="focus-disconnected-projects__cards">{lane.contextIds.flatMap(id => {
         const context = visibleIds.has(id) ? contexts.get(id) : null
         return context ? [<FocusContextRow key={id} context={context} variant="directory" selected={id === selectedId} onSelect={onSelect} />] : []

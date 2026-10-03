@@ -433,3 +433,18 @@
 .conversation-avatar--mote { overflow: hidden; background: transparent; }
 .conversation-avatar--mote > .space-object-icon { width: 100%; height: 100%; border-radius: inherit; overflow: hidden; }
 .conversation-avatar--mote > .space-object-icon :is(svg, img) { width: 100%; height: 100%; }
+
+.focus-project-board__live[data-empty='true'] { flex: none; }
+.focus-retained-projects { flex: 0 1 auto; min-height: 32px; min-width: 0; display: flex; flex-direction: column; border-top: 1px solid var(--line-soft); }
+.focus-retained-projects__toggle { display: flex; flex: none; align-items: center; gap: 6px; min-height: 32px; padding: 4px 10px; border: 0; background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; text-align: left; }
+.focus-retained-projects__toggle[aria-expanded='true'] > svg:first-child { transform: rotate(90deg); }
+.focus-retained-projects__count { margin-left: auto; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.focus-retained-projects__rows { min-height: 0; max-height: min(34vh, 240px); overflow: auto; overscroll-behavior: contain; }
+.focus-retained-projects__rows[hidden] { display: none; }
+.focus-retained-projects__row { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; min-width: 0; min-height: 36px; width: 100%; padding: 6px 12px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.focus-retained-projects__identity { display: flex; align-items: center; gap: 6px; flex: 1 1 180px; min-width: 0; }
+.focus-retained-projects__identity > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.focus-retained-projects__date { color: var(--text-3); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
+.focus-retained-projects__row:hover, .focus-retained-projects__toggle:hover { background: var(--surface-2); color: var(--text); }
+.focus-retained-projects__row:focus-visible, .focus-retained-projects__toggle:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
+.focus-retained-projects__row:disabled { cursor: default; }

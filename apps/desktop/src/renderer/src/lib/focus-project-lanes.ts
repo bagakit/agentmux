@@ -1,3 +1,4 @@
+import type { AgentFocusHistoryEntry, AgentFocusHistoryIdentity } from './agent-focus'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceBranchesSnapshot } from '../../../shared/contracts'
 import type { WorkbenchTab } from './workbench-tabs'
 import type { FocusContext } from './focus-context'
@@ -60,7 +61,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     const branch = workspace?.branch ?? checkout?.branch
     if (branch) labels.push(branch)
     if (topicId) labels.push(topic?.title || topicId)
-    const id = JSON.stringify([workspaceId, row.workspacePath, topicId])
+    const id = JSON.stringify([row.hostId, workspaceId, row.workspacePath, topicId])
     const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
       name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
       path: row.workspacePath, hostId: row.hostId, topicId,
@@ -75,4 +76,28 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     priorities.set(id, Math.min(priorities.get(id) ?? priority, priority))
   }
   return [...lanes.values()].sort((a, b) => priorities.get(a.id)! - priorities.get(b.id)!)
+}
+
+/** Display identity is a Host/Project pair, independent of a checkout or view. */
+export const focusProjectKey = (hostId: string, projectId: string) => JSON.stringify([hostId, projectId])
+export type FocusRetainedProject = {
+  key: string; projectId: string; name: string; hostId: string
+  identity: AgentFocusHistoryIdentity; lastFocusedAt: number | null
+}
+/** Only retained observations contribute historical projects. Never fabricate
+ * current Contexts, control references or task activity from a focus visit. */
+export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryEntry[], lanes: readonly FocusProjectLane[]): FocusRetainedProject[] {
+  const current = new Set(lanes.map(lane => focusProjectKey(lane.hostId, lane.projectId)))
+  const projects = new Map<string, FocusRetainedProject>()
+  for (const entry of entries) {
+    const identity = entry.identity
+    if (identity?.kind !== 'agent' || !identity.hostId || !identity.project?.id || !identity.project.name) continue
+    const key = focusProjectKey(identity.hostId, identity.project.id)
+    if (current.has(key)) continue
+    const lastFocusedAt = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= 8_640_000_000_000_000 ? entry.focusedAt : null
+    const previous = projects.get(key)
+    if (previous && (previous.lastFocusedAt ?? -Infinity) >= (lastFocusedAt ?? -Infinity)) continue
+    projects.set(key, { key, projectId: identity.project.id, name: identity.project.name, hostId: identity.hostId, identity, lastFocusedAt })
+  }
+  return [...projects.values()].sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
 }
