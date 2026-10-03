@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { createServer } from 'node:net'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { inspectNotebook, notebookPageArchiveRoot } from '../src/notebook-catalog.js'
@@ -9,12 +9,12 @@ import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
 import { build } from 'esbuild'
 import { createHash } from 'node:crypto'
-import { AgentMuxNotebookStore, DEFAULT_NOTEBOOK_ID, type NotebookChange } from '../src/notebook-store.js'
+import { AgentMuxNotebookStore, DEFAULT_NOTEBOOK_ID, type NotebookChange, type NoteTrailEvent } from '../src/notebook-store.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 const directories: string[] = [], servers: AgentMuxControlServer[] = []
 const actor = { kind: 'user', id: 'test-user' } as const
-const resource = { hostId: 'local', workspaceId: 'resource', workspacePath: upstreamFixturePath("research"), path: 'original.note.json' }
+const resource = { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("research"), path: 'original.note.json' }
 const source = { sourceId: 'original-web-source', url: 'https://example.test/source', title: 'Original page', recordedAt: 100 }
 async function fixture() { const dir=await mkdtemp(join(tmpdir(),'amux-notebook-'));directories.push(dir);return {dir,store:new AgentMuxNotebookStore(join(dir,'notebooks.json'))} }
 async function apply(store:AgentMuxNotebookStore, operationId:string,change:NotebookChange) { return store.apply({operationId,expectedRevision:(await store.read()).revision,change},actor) }
@@ -139,7 +139,7 @@ describe('durable Notebook directory with no App or open Note',()=>{
 
 it('refuses an obsolete confirmed file-move receipt after another resource relocation and keeps foreign ownership', async () => {
   const {store} = await fixture(), actor = {kind:'user' as const,id:'original-user'}
-  const original = {hostId:'remote-host',workspaceId:'remote-workspace',workspacePath:upstreamFixturePath("remote/research"),path:'Original.note.json'}
+  const original = {hostId:'remote-host',workspaceId:'remote-workspace',workspacePath:fixturePath("remote/research"),path:'Original.note.json'}
   let state = await store.read()
   state = await store.apply({expectedRevision:state.revision,operationId:'remote-note',change:{kind:'register',noteId:'remote-note',title:'Original',resource:original}},actor)
   const current = {...original,path:'Current.note.json'}
@@ -226,4 +226,40 @@ it('derives inherited archive without rewriting child metadata and accepts old u
   expect(notebookPageArchiveRoot(restored.pages, 'child')?.noteId).toBe('child')
   expect(restored.trail.at(-1)?.before?.archivedAt).toBe(archived.pages.parent!.archivedAt)
   expect(restored.trail.at(-1)?.after.archivedAt).toBeUndefined()
+})
+
+
+it('deletes only a Notebook container through the shipping CLI, keeps every original page and survives a fresh process', async () => {
+  const { dir, store } = await fixture()
+  const server = new AgentMuxControlServer({ socketPath: join(dir, 'delete.sock'), notebookStore: store, coreClients: () => [] })
+  servers.push(server); await server.start()
+  const env = { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }
+  async function change(operationId: string, value: NotebookChange) {
+    const result = await run(cli, ['notebook', 'apply', '--revision', String((await store.read()).revision), '--operation-id', operationId, '--change-json', JSON.stringify(value)], env)
+    expect(result.code, result.stderr).toBe(0); return result.result.result.state
+  }
+  await change('book', { kind: 'create', notebookId: 'research', name: 'Research' })
+  await change('parent', { kind: 'register', notebookId: 'research', noteId: 'parent', title: 'Question', resource, source })
+  await change('child', { kind: 'register', notebookId: 'research', noteId: 'child', parentNoteId: 'parent', title: 'Evidence', resource: { ...resource, path: 'evidence.note.json' } })
+  await change('archive-child', { kind: 'archive', noteId: 'child' })
+  const before = await store.read()
+  const deleted = await change('delete-book', { kind: 'delete', notebookId: 'research' })
+  expect(deleted.notebooks.research).toBeUndefined()
+  expect(Object.keys(deleted.notebooks)).toEqual(['quick-notes'])
+  for (const page of Object.values(before.pages)) {
+    expect(deleted.pages[page.noteId]).toEqual({ ...page, notebookId: 'quick-notes', updatedAt: deleted.pages[page.noteId].updatedAt })
+  }
+  expect(deleted.trail.slice(-2).map((event: NoteTrailEvent) => ({ noteId: event.noteId, action: event.action, before: event.before?.notebookId, after: event.after.notebookId }))).toEqual([
+    { noteId: 'parent', action: 'moved', before: 'research', after: 'quick-notes' }, { noteId: 'child', action: 'moved', before: 'research', after: 'quick-notes' }
+  ])
+  expect(deleted.trail.at(-1)).toMatchObject({ before: { notebookName: 'Research' }, after: { notebookName: '随手记' } })
+  expect(await change('delete-book', { kind: 'delete', notebookId: 'research' })).toEqual(deleted)
+  const fresh = await run(worker, [join(dir, 'notebooks.json'), 'read']); expect(fresh.code, fresh.stderr).toBe(0); expect(fresh.result.pid).not.toBe(process.pid); expect(fresh.result.state).toEqual(deleted)
+  const listed = await run(cli, ['notebook', 'ls'], env); expect(listed.code, listed.stderr).toBe(0); expect(listed.result.result.state).toEqual(deleted)
+  const inspected = await run(cli, ['notebook', 'inspect', '--operation-id', 'delete-book'], env); expect(inspected.result.result.recordedOperation.fingerprint).toContain('delete')
+  for (const id of ['quick-notes', 'unknown-book', 'constructor', 'toString']) {
+    const refused = await run(cli, ['notebook', 'apply', '--revision', String(deleted.revision), '--operation-id', 'refuse-' + id, '--change-json', JSON.stringify({ kind: 'delete', notebookId: id })], env)
+    expect(refused.code).not.toBe(0); expect(await store.read()).toEqual(deleted)
+  }
+  await writeFile(resolve('.tmp/survey-notebook/delete-cli-receipt.json'), JSON.stringify({ before, deleted, fresh: fresh.result, listed: listed.result, inspected: inspected.result }, null, 2) + '\n')
 })

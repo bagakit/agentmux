@@ -1,5 +1,5 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
-import { ArrowUpRight, Check, ChevronRight, MoreHorizontal, Pencil, SlidersHorizontal } from 'lucide-react'
+import { ArrowUpRight, Check, ChevronRight, MoreHorizontal, Pencil, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { AgentMuxSpaceFact, AgentMuxZoneFact } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../../../shared/contracts'
@@ -7,7 +7,7 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 /** The selected Item's actions read the original owners; Radix owns disclosure and focus. */
-export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, compact }: {
+export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, compact, onDeleteNotebook }: {
   compact?: boolean
   visible: boolean
   title: string
@@ -18,6 +18,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
   relatedSpacesUnconfirmed?: boolean
   activityDetails: ReactNode
   onRename?: () => void
+  onDeleteNotebook?: (() => void) | undefined
   onSaveToTopic?: (scope: 'research' | 'panel') => void
   currentPanelAvailable?: boolean
   onCollectedChange(collected: boolean): void
@@ -43,6 +44,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
         <Menu.Item className="tab-context-menu__item" onSelect={() => onSaveToTopic('research')}><ArrowUpRight size={14} /><span>Save research to Topic…</span></Menu.Item>
         {currentPanelAvailable ? <Menu.Item className="tab-context-menu__item" onSelect={() => onSaveToTopic('panel')}><ArrowUpRight size={14} /><span>Save current panel to Topic…</span></Menu.Item> : null}
       </> : null}
+      {onDeleteNotebook ? <Menu.Item className="tab-context-menu__item" onSelect={onDeleteNotebook}><Trash2 size={14} /><span>Delete notebook…</span></Menu.Item> : null}
       <Menu.Separator className="tab-context-menu__separator" />
       {onManageBrowsers ? <Menu.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={onManageBrowsers}><SlidersHorizontal size={14} /><span>Browser tools</span></Menu.Item> : null}
       {workspace ? <Menu.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${displayPath(workspace.path, workspace.hostId)}`}
