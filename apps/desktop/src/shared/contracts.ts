@@ -1583,6 +1583,7 @@ export type AgentMuxDesktopApi = {
   continuousProgress: ContinuousProgressApi
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
+    observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
     launchAgent(input: AgentLaunchInput): Promise<AgentLaunchResult>
     creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentSession>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>

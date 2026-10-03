@@ -132,7 +132,8 @@ export function SessionPane({
       : pendingLaunch ? pendingLaunch.request?.hostId
       : retainedHistory?.state === 'retired' ? retainedHistory.hostId : recoveryCandidate?.hostId
   const configuredExecutionHost = useAppStore(state => state.config?.hosts.find(host => host.id === executionHostId))
-  const runtimeOwnershipWarnings = useAppStore((state) => state.runtimeOwnershipWarnings)
+  const runtimeHostUnavailable = useAppStore(state => (state.runtimeEndpointWarnings ?? []).some(
+    warning => warning.hostId === executionHostId && warning.availability !== 'connected'))
   const connectingExecutorId = pendingLaunch?.request?.executorId ?? (session?.kind === 'agent' ? session.executorId : recoveryCandidate?.executorId ?? retainedHistory?.history?.executorId)
   const connectingExecutor = useAppStore((state) => connectingExecutorId ? state.config?.executors[connectingExecutorId] : undefined)
   const connectingAppearance = useAppStore((state) => connectingExecutorId ? state.config?.executors?.[connectingExecutorId]?.avatar : undefined)
@@ -226,7 +227,7 @@ export function SessionPane({
   const startupDecision = session?.kind === 'agent' ? agentStartupRecoveryDecision({
     runState: session.processState,
     ...(session.semanticStatus ? { semanticStatus: session.semanticStatus } : {}),
-    canonical: !(runtimeOwnershipWarnings ?? []).includes(session.hostId),
+    canonical: !runtimeHostUnavailable,
     now: Date.now()
   }) : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&

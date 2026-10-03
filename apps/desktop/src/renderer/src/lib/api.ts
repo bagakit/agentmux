@@ -804,6 +804,13 @@ const mockApi: AgentMuxDesktopApi = {
     onChanged: () => () => {}
   },
   sessions: {
+    observeStorage: async (control) => ({
+      run: control.run,
+      runtime: { hostId: control.hostId, instanceId: 'preview-runtime', processId: null, buildIdentity: 'web-preview', protocolVersion: 22 },
+      observedAt: Date.now(),
+      status: 'unsupported',
+      message: 'The web preview has no Runtime storage owner. Storage capacity and persistence state are unknown.'
+    }),
     creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {

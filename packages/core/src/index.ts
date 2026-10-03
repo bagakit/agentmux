@@ -67,3 +67,5 @@ export * from './spatial-state.js'
 
 export { AgentMuxNotebookStore } from './notebook-store.js'
 export * from './notebook-catalog.js'
+
+export type { AgentMuxRunStorageFacts, AgentMuxRunStorageObservation } from './run-storage-observation.js'

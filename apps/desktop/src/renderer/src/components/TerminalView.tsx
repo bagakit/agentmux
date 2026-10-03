@@ -1728,6 +1728,7 @@ export function TerminalView({
               判定全在 lib/terminal-reveal.ts，这里只渲染结果。没有告示就连容器都不挂，
               否则一个空壳会盖在画布上吃掉指针事件。 */}
           <TerminalServiceNotices scope={noticeScope} visible={visible} available={!hydrating}
+            storageControl={session.control} continuationReason={continuationAbsence?.reason}
             reveal={revealNotice} replayGeometry={replayGeometryNotice}
             viewportSync={viewportSyncNotice} continuation={continuationNotice}
             causes={{

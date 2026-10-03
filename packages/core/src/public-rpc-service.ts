@@ -40,7 +40,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'observeAgentOutput' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
-  'runtimeDiagnostics' | 'runtimeIdentity'> & {
+  'runtimeDiagnostics' | 'runtimeIdentity' | 'observeRunStorage'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
@@ -96,7 +96,7 @@ const NATIVE_FIELDS = {
   'message.dispatch.report': ['sourceMessageId', 'replyMessageId', 'kind'],
   'app.snapshot': ['projectId', 'workspaceId', 'topicId', 'agentSessionId', 'goalId', 'executorId', 'status', 'since', 'limit', 'include'],
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
-  'system.doctor': ['workspacePath'], 'system.endpoint': [],
+  'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
 } as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod>, readonly string[]>
 
@@ -426,6 +426,13 @@ export class AgentMuxRpcService {
       }
       case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines',
         endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() } }; break
+      case 'system.storage': {
+        const hostId = rpcString(p.hostId, 'Host ID'), runId = rpcString(p.runId, 'Run ID')
+        const owner = (await this.clients()).find(entry => entry.hostId === hostId)
+        if (!owner) throw new AgentMuxError('The selected Host is unavailable for storage observation.', 'CONTROL_UNAVAILABLE')
+        const observation = await owner.client.observeRunStorage({ runId })
+        result = { ...observation, runtime: { ...observation.runtime, hostId } }; break
+      }
       case 'system.doctor': {
         const client = caller?.client ?? (await this.clients())[0]?.client
         if (!client) throw new AgentMuxError('No Core client owner is available.', 'CONTROL_UNAVAILABLE')

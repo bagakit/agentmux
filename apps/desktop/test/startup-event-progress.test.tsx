@@ -1,3 +1,4 @@
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -5,6 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { directoryIdentity, workspaceZoneId } from '../src/shared/space-addresses'
 import type { AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import type { RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
@@ -62,6 +64,8 @@ beforeEach(async () => {
   const tabs = Object.fromEntries(ids.map(id => [`tab-${id}`, createWorkbenchTab(`tab-${id}`, {
     kind: 'agent', regionId: `region-${id}`, workspaceId: 'workspace', sessionId: id, phase: 'attached'
   })]))
+  const spaceId = directoryIdentity('local', _hygiene_fixturePath("repo"))
+  for (const tab of Object.values(tabs)) tab.space = { spaceId, zoneId: workspaceZoneId(spaceId, 'workspace') }
   original = { tabs, layouts: { workspace: createWorkspaceLayout('original-group', Object.keys(tabs)) },
     agentFocus: { execution: { sessionId: ids[0]!, history: [{ sessionId: ids[0]!, focusedAt: 1 }] }, pmo: { sessionId: null } },
     agentComposerDrafts: { 'quiet-a': '原来的未发送草稿', 'busy-b': 'Original neighbor draft' } }

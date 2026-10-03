@@ -246,7 +246,7 @@ async function publishedSdkIdentity() {
   const manifestBytes = await readFile(join(repository, manifestPath)), manifest = JSON.parse(manifestBytes)
   const contract = JSON.parse(await readFile(join(repository, 'packages/core/src/ctxmux-artifact-contract.json'), 'utf8'))
   assert.equal(hash(manifestBytes), contract.manifests['darwin-arm64'])
-  assert.equal(manifest.source.commit, contract.source.commit); assert.equal(manifest.source.tree, contract.source.tree)
+  assert.equal(manifest.source.commit, contract.sources['darwin-arm64'].commit); assert.equal(manifest.source.tree, contract.sources['darwin-arm64'].tree)
   assert.equal(manifest.source.worktree_clean, true); assert.equal(manifest.sdk.protocol, contract.protocol)
   const archivePath = 'packages/core/vendor/ctxmux/darwin-arm64/' + manifest.sdk.archive.path
   const archive = join(repository, archivePath), archiveBytes = await readFile(archive)

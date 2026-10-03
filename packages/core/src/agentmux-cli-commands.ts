@@ -342,6 +342,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.workspaces.register', '--input <file|->', 'Register an existing directory; this does not run Git, focus or start an Agent.'),
   settings('settings.browser-links.ls', '', 'List remembered system-application link choices.'),
   settings('settings.browser-links.forget', '<scheme>|--input <file|->', 'Forget one exact remembered scheme decision.', 1),
+  command('system.storage', '--host HOST --run RUN', 'Read original Runtime storage failure, watermarks and effective capacity for one exact Run.', { '--host': 'data', '--run': 'data' }, f => ({ hostId: id(f, '--host'), runId: id(f, '--run') })),
   command('system.doctor', '[--workspace PATH]', 'Read original Runtime and Provider diagnostics through their owners.', { '--workspace': 'data' }, f => fields(f, { '--workspace': 'workspacePath' })),
   { ...command('system.endpoint', '[--stdio]', 'Discover the selected endpoint without connecting, or relay strict RPC stdio.', { '--stdio': 'boolean' }, f => ({ stdio: f.booleans.has('--stdio') })), local: true },
   empty('system.crash-log.inspect', 'Read retained original crash-log facts.'),

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { createHash } from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { chmod, cp, mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises'
@@ -20,16 +20,15 @@ afterEach(async () => {
 })
 
 describe('qualified Darwin and Linux Core package', () => {
-  it('binds every shipped native binary and SDK to one accepted source and protocol', async () => {
+  it('binds every shipped native binary and SDK to its platform source and shared protocol', async () => {
     const platforms = Object.keys(contract.manifests)
     expect(platforms).toEqual(['darwin-arm64', 'linux-x64'])
-    const sdkHashes = new Set<string>()
     for (const platform of platforms) {
       const artifactRoot = new URL(`../vendor/ctxmux/${platform}/`, import.meta.url)
       const bytes = await readFile(new URL('manifest.json', artifactRoot))
       expect(digest(bytes)).toBe(contract.manifests[platform as keyof typeof contract.manifests])
       const manifest = JSON.parse(bytes.toString())
-      expect(manifest.source).toMatchObject({ ...contract.source, worktree_clean: true })
+      expect(manifest.source).toMatchObject({ ...contract.sources[platform as keyof typeof contract.sources], worktree_clean: true })
       expect(manifest.product).toEqual({ version: contract.version, protocol: PROTOCOL_VERSION })
       expect(`${manifest.support.platform}-${manifest.support.architecture}`).toBe(platform)
       expect(manifest.binaries.map((entry: { name: string }) => entry.name)).toEqual(['ctxmux', 'ctxmuxd'])
@@ -40,9 +39,7 @@ describe('qualified Darwin and Linux Core package', () => {
         expect(digest(contents)).toBe(artifact.sha256)
         expect((await stat(path)).mode & 0o777).toBe(Number.parseInt(artifact.mode, 8))
       }
-      sdkHashes.add(manifest.sdk.archive.sha256)
     }
-    expect(sdkHashes.size).toBe(1)
   })
 
   it('admits precisely the qualified host pairs and rejects unsupported combinations', () => {
@@ -83,7 +80,7 @@ describe('qualified Darwin and Linux Core package', () => {
   }, 30_000)
 
   it('restores npm-normalized native modes from verified package contents', async () => {
-    const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/agentmux-native-install-"))
+    const root = await mkdtemp(fixturePath("tmp/agentmux-native-install-"))
     installationRoots.push(root)
     await cp(join(packageRoot, 'vendor'), join(root, 'vendor'), { recursive: true })
     await cp(join(packageRoot, 'bin'), join(root, 'bin'), { recursive: true })
@@ -97,6 +94,6 @@ describe('qualified Darwin and Linux Core package', () => {
     await execFileAsync(process.execPath, [join(root, 'bin/install-ctxmux.mjs')])
     for (const path of binaries) expect((await stat(path)).mode & 0o777).toBe(0o755)
     const result = await execFileAsync(join(root, 'bin/ctxmuxd'), ['--version'])
-    expect(result.stdout).toMatch(/^ctxmuxd 0\.1\.0 \(protocol 21[,)]/u)
+    expect(result.stdout).toMatch(new RegExp(`^ctxmuxd 0\\.1\\.0 \\(protocol ${PROTOCOL_VERSION}[,)]`, 'u'))
   }, 30_000)
 })

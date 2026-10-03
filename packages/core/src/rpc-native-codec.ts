@@ -240,6 +240,30 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh']); string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
       case 'system.subscription.cancel': record(p, ['disposed']); bool(p.disposed); break
+      case 'system.storage': {
+        const p = record(value, ['status', 'run', 'runtime', 'observedAt', 'storage', 'message'])
+        const request = rpcRecord(params), run = record(p.run, ['runId']), runtime = record(p.runtime)
+        if (run.runId !== request.runId || runtime.hostId !== request.hostId) fail()
+        string(run.runId); string(runtime.instanceId); string(runtime.buildIdentity); count(runtime.protocolVersion); count(p.observedAt)
+        member(p.status, ['observed', 'unsupported'])
+        if (p.status === 'unsupported') { text(p.message); if (p.storage !== undefined) fail(); break }
+        if (p.message !== undefined) fail()
+        const storage = record(p.storage, ['memory', 'persistence', 'policy'])
+        const memory = record(storage.memory, ['firstAvailableByte', 'latestOutputByte'])
+        count(memory.firstAvailableByte); count(memory.latestOutputByte)
+        if ((memory.firstAvailableByte as number) > (memory.latestOutputByte as number)) fail()
+        if (storage.persistence !== null) {
+          const owner = record(storage.persistence, ['firstFailure', 'actorStopped', 'queuedAppendCommands', 'offeredByte', 'confirmedByte'])
+          if (owner.firstFailure !== null) text(owner.firstFailure)
+          bool(owner.actorStopped)
+          for (const key of ['queuedAppendCommands', 'offeredByte', 'confirmedByte']) count(owner[key])
+        }
+        const policy = record(storage.policy, ['memoryPerRunBytes', 'memorySharedBytes', 'replayPerRunBytes', 'replaySharedBytes',
+          'databaseBytes', 'walCheckpointBytes', 'terminalHistoryRows', 'terminalCheckpointBytes'])
+        for (const key of ['memoryPerRunBytes', 'memorySharedBytes', 'replayPerRunBytes', 'replaySharedBytes',
+          'databaseBytes', 'walCheckpointBytes', 'terminalHistoryRows', 'terminalCheckpointBytes']) count(policy[key])
+        break
+      }
       case 'system.doctor': {
         record(p, ['ok', 'host', 'runtime', 'runtimeAction', 'runtimeStorage', 'runtimeStorageUnavailable', 'hosts', 'agents', 'integration']); bool(p.ok)
         const host = record(p.host); if (host.kind !== 'local') fail(); bool(host.reachable)
