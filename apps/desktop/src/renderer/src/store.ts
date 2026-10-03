@@ -1020,7 +1020,6 @@ type AppState = {
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
-  removeAgentSteer(sessionId: string, operationId: string): void
   archiveAgentSteer(sessionId: string, operationId: string, expectedText: string, archived: boolean): Promise<{ changed: boolean; entry: AgentSteerQueueEntry }>
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
@@ -7999,21 +7998,6 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await flushMessageWorkbench(false)
     } catch (error) { get().reportWorkbenchSaveFailure(error); throw error }
     return { changed, entry: result }
-  },
-  removeAgentSteer(sessionId, operationId) {
-    // A submitted request cannot be recalled by deleting its local projection.
-    if (get().agentSteerInFlight[sessionId] === operationId) return
-    set((state) => {
-      const current = state.agentSteerQueues[sessionId] ?? []
-      const next = current.filter((entry) => entry.operationId !== operationId)
-      if (next.length === current.length) return state
-      const agentSteerQueues = { ...state.agentSteerQueues }
-      if (next.length) agentSteerQueues[sessionId] = next
-      else delete agentSteerQueues[sessionId]
-      return { agentSteerQueues }
-    })
-    agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
-    void get().flushAgentSteerQueue(sessionId)
   },
   editQueuedAgentSteer(sessionId, operationId, expectedText, nextText) {
     if (!nextText.trim() || nextText.includes('\0')) {

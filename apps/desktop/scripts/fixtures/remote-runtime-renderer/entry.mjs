@@ -219,7 +219,11 @@ window.remoteSeedUnconfirmed = () => {
     text: 'Keep the original uncertain operation', runId: identity.run.runId, status: 'deferred',
     promptCondition: { expectedRun: identity.run, afterSubmissionId: session.promptSubmissionPredecessor }, error: 'The original delivery result is unknown.' }] } })
 }
-window.remoteRemoveUnconfirmed = () => useAppStore.getState().removeAgentSteer(identity.sessionId, 'private-original-unconfirmed')
+window.remoteArchiveUnconfirmed = async () => {
+  const entry = useAppStore.getState().agentSteerQueues[identity.sessionId]?.find(item => item.operationId === 'private-original-unconfirmed')
+  if (!entry) throw Error('The exact original unconfirmed record is required')
+  return await useAppStore.getState().archiveAgentSteer(identity.sessionId, entry.operationId, entry.text, true)
+}
 window.remoteResync = () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local', event: {
   type: 'agent-status', agentSessionId: 'controlled-membership-gap', state: 'working', evidence: { source: 'agentmux', observedAt: Date.now() }
 } })

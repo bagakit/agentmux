@@ -32,6 +32,7 @@ import { useComposerFeedback } from './ComposerFeedback'
 import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
+import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
@@ -87,7 +88,7 @@ export function AgentSessionComposer({
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
   const clearAgentComposerDraftIfUnchanged = useAppStore((state) => state.clearAgentComposerDraftIfUnchanged)
   const enqueueAgentSteer = useAppStore((state) => state.enqueueAgentSteer)
-  const removeAgentSteer = useAppStore((state) => state.removeAgentSteer)
+  const archiveAgentSteer = useAppStore((state) => state.archiveAgentSteer)
   const moveAgentSteer = useAppStore((state) => state.moveAgentSteer)
   const sendQueuedAgentSteer = useAppStore((state) => state.sendQueuedAgentSteer)
   // The queue entries, not a count — the badge shows the messages, and derives the count from them, so
@@ -268,9 +269,11 @@ export function AgentSessionComposer({
     <SessionMailbox key={sessionId} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
-        queued={queuedEntries.filter(entry => !entry.archived).map((entry) => ({
+        queued={queuedEntries.map((entry) => ({
           id: entry.operationId,
           text: entry.text,
+          ...(entry.archived ? { archived: true as const } : {}),
+          confirmed: Boolean(confirmedSteerDelivery(timeline, sessionId, entry.operationId)),
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),
           status: entry.status,
           editable: agentSteerCanEdit(entry, sendingId),
@@ -284,7 +287,9 @@ export function AgentSessionComposer({
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
           ...(entry.error ? { error: errorIdentity(entry.error) } : {}),
         }))}
-        onRemoveQueued={(operationId) => removeAgentSteer(sessionId, operationId)}
+        {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
+          await feedback.run(async () => { await archiveAgentSteer(sessionId, operationId, expectedText, archived) })
+        } } : {})}
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
