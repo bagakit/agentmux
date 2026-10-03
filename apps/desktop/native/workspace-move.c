@@ -13,6 +13,7 @@
 
 #if defined(__APPLE__)
 #include <sys/stdio.h>
+#include <CommonCrypto/CommonDigest.h>
 #else
 #error "Atomic confined no-replace Workspace move is unavailable on this platform"
 #endif
@@ -197,27 +198,161 @@ static void atomic_alias_swap(int root_fd, const char *source, const char *desti
   close(destination_fd);
 }
 
+/* Bounded file publication shares the original confined no-replace owner. */
+static int file_exists(int fd, const char *name) {
+  struct stat info;
+  if (fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) == 0) return 1;
+  if (errno == ENOENT) return 0;
+  fail_with_errno("file-publication-stat");
+}
+
+static int file_matches(int fd, const char *name, unsigned long long dev,
+                        unsigned long long ino, const char *digest, int sync_file) {
+  const int file = openat(fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
+  if (file < 0) return 0;
+  struct stat info;
+  unsigned char bytes[4097], output[CC_SHA256_DIGEST_LENGTH];
+  char actual[CC_SHA256_DIGEST_LENGTH * 2 + 1];
+  const int stat_result = fstat(file, &info);
+  int failure_errno = stat_result == 0 ? ESTALE : errno;
+  int valid = stat_result == 0 && S_ISREG(info.st_mode) && info.st_size <= 4096 &&
+    (dev == 0 || (unsigned long long)info.st_dev == dev) &&
+    (ino == 0 || (unsigned long long)info.st_ino == ino);
+  size_t length = 0;
+  while (valid && length < sizeof(bytes)) {
+    const ssize_t count = read(file, bytes + length, sizeof(bytes) - length);
+    if (count < 0) { if (errno == EINTR) continue; failure_errno = errno; valid = 0; break; }
+    if (count == 0) break;
+    length += (size_t)count;
+  }
+  if (length > 4096) valid = 0;
+  if (valid) {
+    CC_SHA256(bytes, (CC_LONG)length, output);
+    for (size_t index = 0; index < sizeof(output); index += 1) snprintf(actual + index * 2, 3, "%02x", output[index]);
+    valid = strcmp(actual, digest) == 0;
+  }
+  if (valid && sync_file && fsync(file) != 0) { failure_errno = errno; valid = 0; }
+  close(file);
+  if (!valid) errno = failure_errno;
+  return valid;
+}
+
+static void restore_claim(int fd, const char *pending, const char *current, const char *phase) {
+  /* Restoration also refuses to overwrite a fact that appeared at the old name. */
+  const int restored = atomic_move_no_replace(fd, pending, current);
+  fprintf(stderr, "claim-restored=%d\n", restored == 0);
+  if (restored == 0 && fsync(fd) != 0) fail_with_errno("file-restore-sync");
+  errno = ESTALE;
+  fail_with_errno(phase);
+}
+
+static void file_publication(int object_fd, const char *object_path, char **argv,
+                             int confirm, int before_barrier, int after_barrier, int sync_fault) {
+  char *parent = strdup(argv[4]);
+  if (!parent) fail_with_errno("file-publication-parent");
+  char *slash = strrchr(parent, '/');
+  if (!slash) { errno = EINVAL; fail_with_errno("file-publication-parent"); }
+  *slash = '\0';
+  if (strchr(parent, '/')) { errno = EINVAL; fail_with_errno("file-publication-direct-parent"); }
+  const char *current = strrchr(argv[4], '/') + 1;
+  const char *temporary = strrchr(argv[5], '/');
+  const char *pending = strrchr(argv[6], '/');
+  if (!temporary || !pending || strncmp(argv[5], parent, strlen(parent)) != 0 || argv[5][strlen(parent)] != '/' ||
+      strncmp(argv[6], parent, strlen(parent)) != 0 || argv[6][strlen(parent)] != '/' ||
+      strchr(argv[5] + strlen(parent) + 1, '/') || strchr(argv[6] + strlen(parent) + 1, '/')) {
+    errno = EINVAL; fail_with_errno("file-publication-siblings");
+  }
+  temporary += 1; pending += 1;
+  if (strcmp(current, temporary) == 0 || strcmp(current, pending) == 0 || strcmp(temporary, pending) == 0) {
+    errno = EINVAL; fail_with_errno("file-publication-distinct-names");
+  }
+  const int fd = openat(object_fd, parent, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) fail_with_errno("file-publication-open-parent");
+  struct stat meta, object;
+  if (fstat(fd, &meta) != 0 || fstat(object_fd, &object) != 0) fail_with_errno("file-publication-stat-parent");
+  if ((unsigned long long)meta.st_dev != parse_identity(argv[7], "parent device") ||
+      (unsigned long long)meta.st_ino != parse_identity(argv[8], "parent inode")) {
+    errno = ESTALE; fail_with_errno("file-publication-parent-changed");
+  }
+  const unsigned long long old_dev = parse_identity(argv[9], "old device"), old_ino = parse_identity(argv[10], "old inode");
+  const char *old_hash = argv[11], *new_hash = argv[12];
+  if (strlen(old_hash) != CC_SHA256_DIGEST_LENGTH * 2 || strlen(new_hash) != CC_SHA256_DIGEST_LENGTH * 2) {
+    errno = EINVAL; fail_with_errno("file-publication-digest");
+  }
+  if (confirm) {
+    if (!file_matches(fd, pending, old_dev, old_ino, old_hash, 0) || !file_matches(fd, current, 0, 0, new_hash, 1))
+      fail_with_errno("file-confirm-original-witness");
+    if (fsync(fd) != 0 || fsync(object_fd) != 0) fail_with_errno("file-confirm-sync");
+    commit_barrier(before_barrier, 3, 4, "before-file-confirm-barrier");
+    verify_entry(object_fd, parent, &meta, 1, "file-confirm-parent-changed");
+    if (atomic_move_no_replace(fd, pending, temporary) != 0) fail_with_errno("file-confirm-claim-pending");
+    if (!file_matches(fd, temporary, old_dev, old_ino, old_hash, 0) || !file_matches(fd, current, 0, 0, new_hash, 0))
+      restore_claim(fd, temporary, pending, "file-confirm-witness-changed");
+    /* Publication durability is confirmed before retiring its original witness. */
+    if (unlinkat(fd, temporary, 0) != 0) fail_with_errno("file-confirm-retire-witness");
+    if (fsync(fd) != 0) fprintf(stderr, "file-confirm-cleanup-sync-unknown\n");
+  } else {
+    const int already_claimed = file_exists(fd, pending);
+    if (already_claimed) {
+      if (!file_matches(fd, pending, old_dev, old_ino, old_hash, 0)) fail_with_errno("file-publish-pending-changed");
+      if (file_exists(fd, current)) {
+        if (!file_matches(fd, current, 0, 0, new_hash, 0)) fail_with_errno("file-publish-current-conflict");
+        close(fd); free(parent); return;
+      }
+    } else if (!file_matches(fd, current, old_dev, old_ino, old_hash, 0)) fail_with_errno("file-publish-original-changed");
+    if (!file_matches(fd, temporary, 0, 0, new_hash, 0)) fail_with_errno("file-publish-stage-changed");
+    commit_barrier(before_barrier, 3, 4, "before-file-claim-barrier");
+    verify_entry(object_fd, parent, &meta, 1, "file-publish-parent-changed");
+    if (!already_claimed) {
+      if (atomic_move_no_replace(fd, current, pending) != 0) fail_with_errno("file-publish-claim-original");
+      if (!file_matches(fd, pending, old_dev, old_ino, old_hash, 0))
+        restore_claim(fd, pending, current, "file-publish-claimed-conflict");
+      if (fsync(fd) != 0) fail_with_errno("file-publish-sync-claim");
+    }
+    commit_barrier(after_barrier, 5, 6, "after-file-claim-barrier");
+    verify_entry(object_fd, parent, &meta, 1, "file-publish-parent-changed-after-claim");
+    if (atomic_move_no_replace(fd, temporary, current) != 0) fail_with_errno("file-publish-no-replace");
+    if (sync_fault) { errno = EIO; fail_with_errno("file-publish-sync"); }
+    if (!file_matches(fd, current, 0, 0, new_hash, 1)) fail_with_errno("file-publish-readback");
+    if (fsync(fd) != 0 || fsync(object_fd) != 0) fail_with_errno("file-publish-sync");
+  }
+  struct stat visible;
+  if (lstat(object_path, &visible) != 0 || !S_ISDIR(visible.st_mode) || visible.st_dev != object.st_dev || visible.st_ino != object.st_ino) {
+    errno = ESTALE; fail_with_errno("file-publication-visible-object-changed");
+  }
+  verify_entry(object_fd, parent, &meta, 1, "file-publication-visible-parent-changed");
+  close(fd); free(parent);
+}
+
 int main(int argc, char **argv) {
   const int alias_swap = argc > 1 && strcmp(argv[1], "--alias-swap") == 0;
-  if (alias_swap) { argc -= 1; argv += 1; }
-  const int required = alias_swap ? 8 : 6;
-  if (argc < required || argc > required + 2) {
+  const int file_publish = argc > 1 && strcmp(argv[1], "--file-publish") == 0;
+  const int file_confirm = argc > 1 && strcmp(argv[1], "--file-confirm") == 0;
+  if (alias_swap || file_publish || file_confirm) { argc -= 1; argv += 1; }
+  const int required = file_publish || file_confirm ? 13 : alias_swap ? 8 : 6;
+  if (argc < required || argc > required + (file_publish || file_confirm ? 3 : 2)) {
     fprintf(
       stderr,
       "usage: workspace-move <root> <dev> <ino> <source> <destination> "
       "[--before-commit-barrier] [--after-commit-barrier]\n"
       "       workspace-move --alias-swap <root> <dev> <ino> <source> <destination> "
       "<source-dev> <source-ino> [--before-commit-barrier] [--after-commit-barrier]\n"
+      "       workspace-move --file-publish|--file-confirm <root> <dev> <ino> <current> <stage> <pending> "
+      "<parent-dev> <parent-ino> <old-dev> <old-ino> <old-sha256> <new-sha256> "
+      "[--before-commit-barrier] [--after-commit-barrier]\n"
     );
     return 64;
   }
   int before_commit_barrier = 0;
   int after_commit_barrier = 0;
+  int file_sync_fault = 0;
   for (int index = required; index < argc; index += 1) {
     if (strcmp(argv[index], "--before-commit-barrier") == 0) {
       before_commit_barrier = 1;
     } else if (strcmp(argv[index], "--after-commit-barrier") == 0) {
       after_commit_barrier = 1;
+    } else if (file_publish && strcmp(argv[index], "--file-sync-fault") == 0) {
+      file_sync_fault = 1;
     } else {
       errno = EINVAL;
       fail_with_errno("validate-barrier");
@@ -237,6 +372,12 @@ int main(int argc, char **argv) {
 
   validate_relative_path(argv[4]);
   validate_relative_path(argv[5]);
+  if (file_publish || file_confirm) {
+    validate_relative_path(argv[6]);
+    file_publication(root_fd, argv[1], argv, file_confirm, before_commit_barrier, after_commit_barrier, file_sync_fault);
+    close(root_fd);
+    return 0;
+  }
   if (alias_swap) {
     atomic_alias_swap(root_fd, argv[4], argv[5], parse_identity(argv[6], "source device"),
                       parse_identity(argv[7], "source inode"), before_commit_barrier, after_commit_barrier);

@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { once } from 'node:events'
 import { before, test } from 'node:test'
 import { migrateTopicDirectories } from '../scripts/migrate-topic-directories.mjs'
+import { directoryIdentityRecord } from '../src/main/scratch-directory-identity.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..')
 let artifacts, helper
@@ -26,7 +27,7 @@ before(async () => {
   artifacts = await mkdtemp(join(repository, '.tmp/topic-directory-native-'))
   helper = join(artifacts, 'workspace-move')
   run('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', join(repository, 'apps/desktop/native/workspace-move.c'), '-o', helper])
-  const files = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs']
+  const files = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/src/main/scratch-directory-identity.mjs']
   await writeFile(join(artifacts, 'source-inputs.json'), JSON.stringify({ files: Object.fromEntries(await Promise.all(files.map(async file => [file, hash(await readFile(join(repository, file)))]))), helperSha256: hash(await readFile(helper)) }, null, 2))
 })
 
@@ -122,7 +123,8 @@ test('actual helper and script retain cwd, every asset inode, dirty Git and dura
   assert.equal(git(canonical).replace('?? ' + metadataName + '\n', ''), oldGit)
   assert.equal(hash(await readFile(join(canonical, '.git/index'))), oldIndex)
   const savedIdentity = JSON.parse(await readFile(join(canonical, metadataName), 'utf8'))
-  assert.deepEqual(savedIdentity, { version: 1, identityDirectoryPath: old })
+  assert.deepEqual(savedIdentity, directoryIdentityRecord(old))
+  assert.equal(JSON.stringify(savedIdentity).includes(home), false)
   for (const result of results) {
     assert.deepEqual(result.errors, [])
     assert.ok(result.samples > 20 && result.original > 0 && result.alias > 0, JSON.stringify(result))
@@ -161,7 +163,7 @@ test('an explicitly selected home alias preserves its original logical identity 
   const report = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(report.success, true, JSON.stringify(report))
   assert.equal(report.objects[0].state, 'migrated')
-  assert.equal(JSON.parse(await readFile(join(actualHome, '.agentmux/motes', entityName('home-alias'), metadataName), 'utf8')).identityDirectoryPath, original)
+  assert.deepEqual(JSON.parse(await readFile(join(actualHome, '.agentmux/motes', entityName('home-alias'), metadataName), 'utf8')), directoryIdentityRecord(original))
   const second = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(second.success, true)
   assert.equal(second.objects[0].state, 'already-migrated')
@@ -206,7 +208,9 @@ test('strict identity schema accepts its two fields and rejects extra fields or 
   const validBefore = await inventory(valid)
   const accepted = await migrateTopicDirectories({ home: validHome, execute: true, helperPath: helper })
   assert.equal(accepted.success, true)
-  assert.deepEqual(await inventory(join(validHome, '.agentmux/motes', entityName('valid-record'))), validBefore)
+  const validAfter = await inventory(join(validHome, '.agentmux/motes', entityName('valid-record')))
+  assert.deepEqual(withoutIdentity(validAfter), withoutIdentity(validBefore))
+  assert.deepEqual(JSON.parse(await readFile(join(validHome, '.agentmux/motes', entityName('valid-record'), metadataName), 'utf8')), directoryIdentityRecord(valid))
   for (const shape of ['extra-field', 'oversized']) {
     const home = await homeFixture('invalid-' + shape), old = await entity(home, 'invalid-record', true)
     let record = JSON.stringify({ version: 1, identityDirectoryPath: old, ...(shape === 'extra-field' ? { extra: 'unexpected' } : {}) })
@@ -272,7 +276,8 @@ test('lost helper receipt after swap resumes only the exact alias and saved orig
   const resumed = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(resumed.success, true)
   assert.equal(resumed.objects[0].state, 'already-migrated')
-  assert.deepEqual(await inventory(canonical), before)
+  assert.deepEqual(withoutIdentity(await inventory(canonical)), withoutIdentity(before))
+  assert.deepEqual(JSON.parse(await readFile(join(canonical, metadataName), 'utf8')), directoryIdentityRecord(old))
   await writeFile(join(canonical, metadataName), JSON.stringify({ version: 1, identityDirectoryPath: canonical }))
   const invalidBefore = await inventory(canonical)
   const refused = await migrateTopicDirectories({ home, execute: true, helperPath: helper })

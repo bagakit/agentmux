@@ -3,6 +3,7 @@ import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from '
 import { createHash, randomUUID } from 'node:crypto'
 import { join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds } from './scratch-topic-directories.js'
+import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
 import { durableWriteFile, type AgentProviderId } from '@agentmux/core'
 import { nativeImage, type NativeImage } from 'electron'
 import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
@@ -213,6 +214,29 @@ export class ScratchTopics {
   private readonly moteStateWrites = new Map<string, Promise<unknown>>()
   constructor(private readonly createAvatarImage: (bytes: Buffer) => NativeImage = bytes => nativeImage.createFromBuffer(bytes)) {}
 
+  /** Advisory maintenance is a write operation; read/list and public discovery remain read-only. */
+  async normalizeDirectoryIdentities(workspace: WorkspaceRecord, options: DirectoryIdentityWriteOptions = {}): Promise<void> {
+    requireScratchWorkspace(workspace)
+    const issues: string[] = []
+    for (const topicId of await scratchStorageTopicIds(workspace.path)) {
+      try {
+        const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+        if (resolved) await normalizeDirectoryIdentity(resolved, join(workspace.path, scratchTopicDirectoryName(topicId)), options)
+      } catch (error) { issues.push(`${topicId}: ${errorCode(error) ?? 'DIRECTORY_IDENTITY_UNCONFIRMED'}: ${error instanceof Error ? error.message : String(error)}`) }
+    }
+    if (issues.length) throw new Error('Directory identity maintenance is unconfirmed. Existing files, workfaces and healthy Agent input remain available. Restore storage access and retry directory identity repair. ' + issues.join(' · '))
+  }
+
+  private async identityFact(workspace: WorkspaceRecord, topicId: string, directory: string): Promise<{ identityDirectoryPath?: string; readError?: string }> {
+    try { return { identityDirectoryPath: await scratchDirectoryIdentity(workspace.path, topicId, directory) } }
+    catch (error) {
+      return {
+        ...(error instanceof DirectoryIdentityUpgradeRequiredError ? { identityDirectoryPath: error.identityDirectoryPath } : {}),
+        readError: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
   private decodeAvatar(input: MoteAvatarInput): NativeImage {
     return decodeMoteAvatar(input, this.createAvatarImage)
   }
@@ -243,7 +267,9 @@ export class ScratchTopics {
   private async requireAvatarObject(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<void> {
     requireScratchWorkspace(workspace)
     const directory = await resolveScratchTopicDirectory(workspace.path, topicId)
-    if (!directory || directoryIdentity(workspace.hostId, await scratchDirectoryIdentity(workspace.path, topicId, directory)) !== objectKey) {
+    const identity = directory ? await this.identityFact(workspace, topicId, directory) : {}
+    if (identity.readError && !identity.identityDirectoryPath) throw new Error(identity.readError)
+    if (!directory || !identity.identityDirectoryPath || directoryIdentity(workspace.hostId, identity.identityDirectoryPath) !== objectKey) {
       throw new Error('This Mote directory changed while editing. Reopen its avatar editor to use the current object.')
     }
   }
@@ -360,7 +386,7 @@ export class ScratchTopics {
     const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
     if (!resolved) return null
     const physicalDirectoryPath = await scratchDirectoryAddress(workspace.path, topicId, resolved)
-    const identityDirectoryPath = await scratchDirectoryIdentity(workspace.path, topicId, physicalDirectoryPath)
+    const identity = await this.identityFact(workspace, topicId, physicalDirectoryPath)
     const content = await readRegularFile(join(resolved, 'topic.md'))
     const agentFiles = await readdir(join(resolved, '.agents'))
     let soul: ScratchTopicSnapshot['soul']
@@ -381,7 +407,7 @@ export class ScratchTopics {
       id: topicId,
       directoryPath: directoryName,
       physicalDirectoryPath,
-      identityDirectoryPath,
+      ...identity,
       topicPath: `${directoryName}/topic.md`,
       ...copy,
       ...(soul ? { soul } : {}),
