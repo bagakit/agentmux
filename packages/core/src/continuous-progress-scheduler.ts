@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
+import type { AgentScheduleCalendar } from './agent-schedule.js'
 
 export type ContinuousProgressTarget = {
   hostId: string
@@ -14,6 +15,12 @@ export type ContinuousProgressTaskSource = { root: string; ownerId: string; read
 export type ContinuousProgressLoop = ContinuousProgressTarget & {
   taskSource?: ContinuousProgressTaskSource
   loopId: string
+  calendar?: AgentScheduleCalendar
+  revision?: number
+  creationOperationId?: string
+  lastMutation?: { operationId: string; action: 'pause' | 'resume' | 'cancel'; expectedRevision: number }
+  futureIntentId?: string
+  lastOccurrenceAt?: number
   intervalMs: number
   prompt: string
   nextCheckAt: number
@@ -26,6 +33,7 @@ export type ContinuousProgressLoop = ContinuousProgressTarget & {
     /** First-claim content, kept with the operation through unknown delivery and cold resume. */
     prompt?: string
     agentMuxNote?: string
+    futureIntent?: { intentId: string; occurrenceAt: number }
   }
   lastCompletionId?: string
   lastTickId?: string
@@ -51,15 +59,15 @@ export class ContinuousProgressScheduler {
   }
 
   restore(records: readonly ContinuousProgressLoop[]): void {
-    this.loops = new Map(records.map((record) => [record.loopId, { ...record }]))
+    this.loops = new Map(records.map((record) => [record.loopId, structuredClone(record)]))
   }
 
-  list(): ContinuousProgressLoop[] { return [...this.loops.values()].map((loop) => ({ ...loop })) }
+  list(): ContinuousProgressLoop[] { return [...this.loops.values()].map((loop) => structuredClone(loop)) }
 
   create(input: ContinuousProgressTarget & { intervalMs: number; prompt: string; taskSource?: ContinuousProgressTaskSource }): ContinuousProgressLoop {
     if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim()) throw new Error('Continuous progress needs an exact target and a nonempty prompt.')
     if (!Number.isFinite(input.intervalMs) || input.intervalMs <= 0) throw new Error('Loop interval must be positive.')
-    if ([...this.loops.values()].some((loop) => loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
+    if ([...this.loops.values()].some((loop) => !loop.calendar && loop.hostId === input.hostId && loop.agentSessionId === input.agentSessionId && loop.status !== 'stopped')) {
       throw new Error(`A loop already exists for Agent ${input.agentSessionId}.`)
     }
     const now = this.now()
@@ -70,10 +78,19 @@ export class ContinuousProgressScheduler {
 
   requestCheck(loopId: string): ContinuousProgressLoop { return this.update(loopId, { nextCheckAt: this.now() }) }
 
+  createCalendar(input: ContinuousProgressTarget & { calendar: AgentScheduleCalendar; prompt: string; nextDue: number; operationId: string }): ContinuousProgressLoop {
+    if (!input.hostId || !input.agentSessionId || !input.providerId || !input.workspacePath || !input.prompt.trim() || !Number.isSafeInteger(input.nextDue)) throw new Error('An exact calendar target, message and next occurrence are required.')
+    const loopId = this.id()
+    const loop: ContinuousProgressLoop = { loopId, hostId: input.hostId, agentSessionId: input.agentSessionId, providerId: input.providerId, workspacePath: input.workspacePath,
+      calendar: structuredClone(input.calendar), revision: 1, creationOperationId: input.operationId, futureIntentId: `${loopId}-1`, intervalMs: 1000, prompt: input.prompt, nextCheckAt: input.nextDue, status: 'active' }
+    this.loops.set(loopId, loop)
+    return structuredClone(loop)
+  }
+
   pause(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'paused' }) }
   resume(loopId: string): ContinuousProgressLoop {
     const loop = this.require(loopId)
-    return this.update(loopId, { status: 'active', nextCheckAt: this.now() + loop.intervalMs })
+    return this.update(loopId, { status: 'active', nextCheckAt: loop.calendar ? loop.nextCheckAt : this.now() + loop.intervalMs })
   }
   stop(loopId: string): ContinuousProgressLoop { return this.update(loopId, { status: 'stopped' }) }
 
@@ -93,7 +110,7 @@ export class ContinuousProgressScheduler {
     const loop = this.require(loopId)
     if (loop.status !== 'active' || loop.nextCheckAt > now) return null
     const tickId = this.id()
-    const nextCheckAt = now + loop.intervalMs
+    const nextCheckAt = loop.calendar ? loop.nextCheckAt : now + loop.intervalMs
     const updated = { ...loop, lastTickId: tickId, lastTickAt: now, nextCheckAt }
     this.loops.set(loopId, updated)
     return { loop: { ...updated }, tickId }

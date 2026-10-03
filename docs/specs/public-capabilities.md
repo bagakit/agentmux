@@ -42,6 +42,8 @@
 
 原 Zone 文件的已保存正文沿[文件读取类型与严格 codec](../../packages/core/src/public-rpc-files.ts)公开。`file read` CLI → 公共服务 → Main 注入的 [FileReadOwner](../../apps/desktop/src/main/file-read-owner.ts) 解析准确 Zone／资源，再委托原 [WorkspaceFiles](../../apps/desktop/src/main/workspace-files.ts)；GUI 经 trusted `files:readPublic`／preload 消费同一 owner。结果保留完整原 revision、Host／Workspace／Zone 与原读取状态；观察未知不冒文件不存在，也不另建 Memory 存储。
 
+原日历提醒沿 [`schedule.*` 类型与严格 codec](../../packages/core/src/public-rpc-schedules.ts) 公开。真实 `schedule list|inspect|create|pause|resume|cancel` CLI、GUI trusted IPC 和公共服务消费同一 [ContinuousProgressLoopManager](../../apps/desktop/src/main/continuous-progress-loop-manager.ts) 与原持久化调度器；Core 在原 Session 提交锁下保存并准入同一未来消息，Main 只持日历资格。创建和变更按真实 caller 授权，回执带准确目标、版本、原 operation、磁盘持久化与 `connected-host` 执行范围；连着宿主才执行，不声称后台云定时。未知投递保留原 operation 并检查，不盲目重发；人工输入始终消费原 Core 通路。
+
 输入应用、Prompt 投递、任务接受、Agent 状态和工作完成是不同事实，准确边界见 Core 接入说明与 owning 设计。初始 Prompt 的投递事实消费 `createAgentWithDelivery` 的同次返回；缺失回执不自行重启、重发或换目标。
 
 ## CLI 与服务的当前来源

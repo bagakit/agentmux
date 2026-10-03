@@ -19,6 +19,7 @@ import type {
   AgentPromptInputPlan,
   AgentPromptExecution,
   AgentPromptMessageContent,
+  AgentFuturePromptOccurrence,
   AgentTerminalPromptDeliveryState,
   AgentTerminalPromptReadinessState
 } from './types.js'
@@ -117,7 +118,8 @@ export class AgentPromptSubmissionCoordinator {
     renderSignal?: AbortSignal,
     expectedInputByte?: number,
     message?: AgentPromptMessageContent,
-    execution: AgentPromptExecution = 'default'
+    execution: AgentPromptExecution = 'default',
+    expectedFutureIntent?: AgentFuturePromptOccurrence
   ): Promise<AgentPromptMessageContent | undefined> {
     try {
       return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -177,7 +179,7 @@ export class AgentPromptSubmissionCoordinator {
             this.deps.assertAgentRun(current, currentRun)
           }
           await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution)
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent)
           return structuredClone(message)
         } catch (error) {
           if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
@@ -215,8 +217,30 @@ export class AgentPromptSubmissionCoordinator {
     renderSignal?: AbortSignal,
     expectedInputByte?: number,
     message?: AgentPromptMessageContent,
-    execution: AgentPromptExecution = 'default'
+    execution: AgentPromptExecution = 'default',
+    expectedFutureIntent?: AgentFuturePromptOccurrence
   ): Promise<void> {
+    let confirmedFutureIdle = false
+    if (expectedFutureIntent !== undefined && session.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(session)) {
+      const provider = this.deps.providers.get(session.providerId)
+      const context = { args: run.args, workspacePath: session.workspacePath,
+        ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
+        ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
+      const evidence = await provider.readPromptExecutionEvidence?.(context)
+      const boundary = session.promptCompletionAdmission?.outputCursorBytes
+      if (evidence && evidence.state !== 'working' && provider.inspectPromptExecution && boundary !== undefined) {
+        let resizeRevision: number | undefined
+        await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => { resizeRevision = screen.geometryRevision; return true },
+          { timeoutMs: 2_000, requireCompleteFrame: true, timeoutMessage: 'Native screen geometry is unconfirmed.', terminalMessage: 'The original Agent Run ended.', ...(renderSignal ? { signal: renderSignal } : {}) })
+        await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => provider.inspectPromptExecution!(screen.snapshot()) === 'idle',
+          { timeoutMs: 2_000, requireCompleteFrame: true,
+            requireFrameAfterBoundary: true, checkpointFrameFence: { outputByte: boundary, resizeRevision: resizeRevision! },
+            timeoutMessage: 'The native idle frame is unconfirmed; the future message remains due.', terminalMessage: 'The original Agent Run ended before future-message admission.',
+            ...(renderSignal ? { signal: renderSignal } : {}) })
+        const latest = await provider.readPromptExecutionEvidence!(context)
+        confirmedFutureIdle = latest?.sourceId === evidence.sourceId && latest.id === evidence.id && latest.state !== 'working'
+      }
+    }
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       if (current.pendingInteraction) throw new AgentMuxError(
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
@@ -224,11 +248,24 @@ export class AgentPromptSubmissionCoordinator {
     const assertAdmission = (current: AgentMuxAgentSession): void => {
       if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
       assertInteraction(current)
-      if (expectedCompletionId === undefined) return
+      if (expectedCompletionId === undefined && expectedFutureIntent === undefined) return
       if (expectedInputByte === undefined) throw new AgentMuxError('Automatic prompt admission is missing its input fence.', 'INVALID_AGENT_PROMPT')
       if (run.acceptedInputBytes === null) throw new AgentMuxError('Automatic input fence is unconfirmed; the terminal remains available.', 'CTXMUX_INPUT_CURSOR_MISSING')
       if (run.acceptedInputBytes !== expectedInputByte) throw new AgentMuxError('Human input changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
-      if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId) {
+      if (expectedFutureIntent !== undefined) {
+        const saved = current.futurePromptIntents?.[expectedFutureIntent.intentId]
+        if (!saved?.active || saved.prompt !== prompt || promptMessageIdentity(saved.message) !== promptMessageIdentity(message) ||
+            (saved.lastOccurrenceAt !== undefined && saved.lastOccurrenceAt >= expectedFutureIntent.occurrenceAt)) {
+          throw new AgentMuxError('The saved future-message intent or occurrence no longer authorizes this Input.', 'AGENT_FUTURE_INTENT_CHANGED')
+        }
+        // A future message may use a consumed, still-idle native boundary; it cannot invent one.
+        if (agentTurnCompletionIdentity(current) === undefined && agentTurnEndBoundary(current) === undefined || current.semanticStatus?.state === 'working') {
+          throw new AgentMuxError('The Agent idle boundary is unconfirmed. The future message remains due.', 'AGENT_TURN_END_UNCONFIRMED')
+        }
+        if (current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !confirmedFutureIdle) {
+          throw new AgentMuxError('The previous admission consumed this idle boundary; a current native idle frame is unconfirmed. The future message remains due and manual input remains available.', 'AGENT_TURN_END_UNCONFIRMED')
+        }
+      } else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId) {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       }
     }
@@ -236,7 +273,7 @@ export class AgentPromptSubmissionCoordinator {
       // Native cancellation ends a turn without completing it successfully. Both input
       // plans consume that boundary in the same admission; composer observations do not prove it.
       const completionId = agentTurnCompletionIdentity(current)
-      const completed = completionId !== undefined && current.promptCompletionAdmission?.completionId !== completionId
+      const completed = completionId !== undefined && (current.promptCompletionAdmission?.completionId !== completionId || expectedFutureIntent !== undefined)
       const ended = agentTurnEndBoundary(current) !== undefined
       const uncertain = !completed && !ended &&
         (hasPreviousPrompt || current.semanticStatus?.state === 'working')
@@ -289,7 +326,7 @@ export class AgentPromptSubmissionCoordinator {
       const ended = agentTurnEndBoundary(current) !== undefined
       const observedAt = Date.now()
       const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(current), updatedAt: Math.max(current.updatedAt, observedAt), promptCompletionAdmission: {
-        submissionId, ...(completionId ? { completionId } : {}), operationId, startByte, endByte,
+        submissionId, ...(completionId ? { completionId } : {}), ...(expectedFutureIntent ? { futureIntent: { ...expectedFutureIntent } } : {}), operationId, startByte, endByte, outputCursorBytes: run.latestOutputBytes,
         intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan), execution,
           ...(message === undefined ? {} : { message: structuredClone(message) }) },
         acknowledged: false,
@@ -302,6 +339,10 @@ export class AgentPromptSubmissionCoordinator {
         submissionId, run: { ...current.run }, observedAt
       } } : {}) }
       delete next.terminalPromptSubmission
+      if (expectedFutureIntent) {
+        const saved = current.futurePromptIntents![expectedFutureIntent.intentId]!
+        next.futurePromptIntents = { ...current.futurePromptIntents, [expectedFutureIntent.intentId]: { ...saved, lastOccurrenceAt: expectedFutureIntent.occurrenceAt, lastOperationId: submissionId } }
+      }
       if (!uncertainTurn) delete next.terminalPromptDelivery
       return next
     }

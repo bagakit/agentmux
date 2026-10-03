@@ -1,6 +1,6 @@
 import type { BrowserResultArtifactChunk, BrowserResultReadOptions } from '../shared/browser-result-artifact'
 import type { BrowserTaskAssetRunInput, BrowserTaskContent, BrowserTaskBatchInput } from '../shared/browser-task-assets'
-import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
+import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
@@ -294,6 +294,19 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(CONTINUOUS_PROGRESS_CHANGED, wrapped)
       return () => ipcRenderer.off(CONTINUOUS_PROGRESS_CHANGED, wrapped)
     }
+  },
+  schedule: {
+    onChanged: listener => {
+      const wrapped = (_event: Electron.IpcRendererEvent, loop: ContinuousProgressLoop): void => listener(loop)
+      ipcRenderer.on(SCHEDULE_CHANGED, wrapped)
+      return () => ipcRenderer.off(SCHEDULE_CHANGED, wrapped)
+    },
+    list: (params: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => ipcRenderer.invoke('schedule:list', params),
+    inspect: (params: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => ipcRenderer.invoke('schedule:inspect', params),
+    create: (params: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => ipcRenderer.invoke('schedule:create', params),
+    pause: (params: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => ipcRenderer.invoke('schedule:pause', params),
+    resume: (params: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => ipcRenderer.invoke('schedule:resume', params),
+    cancel: (params: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => ipcRenderer.invoke('schedule:cancel', params)
   },
   sessions: {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),

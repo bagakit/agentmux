@@ -2,6 +2,7 @@ import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
 import { isFileMethod, parseFileReadParams, parseFileReadResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentMuxClient } from './client.js'
@@ -54,6 +55,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   notebookStore?: AgentMuxNotebookStore
   topics?: AgentMuxRpcTopicsOwner
   files?: AgentMuxRpcFilesOwner
+  schedules?: AgentMuxRpcSchedulesOwner
   spatialState?: AgentMuxSpatialStateStore
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
@@ -102,7 +104,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | import('./public-rpc-files.js').FileMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | import('./public-rpc-files.js').FileMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -309,6 +311,14 @@ export class AgentMuxRpcService {
       if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
       const result = this.ports.files ? await this.ports.files.read(input) : await this.ports.forwardControl!('file.read', input, context)
       return parseFileReadResult(result, input) as AgentMuxRpcResult<M>
+    }
+    if (isScheduleMethod(method)) {
+      const scheduleMethod: ScheduleMethod = method
+      const input = parseScheduleRpcParams(scheduleMethod, params)
+      context.signal?.throwIfAborted()
+      if (!this.ports.schedules && !this.ports.forwardControl) throw new AgentMuxError('The original Host arrangement owner is unavailable. Saved arrangements and Agents are retained.', 'CONTROL_UNAVAILABLE')
+      const result = this.ports.schedules ? await this.ports.schedules.call<ScheduleMethod>(scheduleMethod, input, context) : await this.ports.forwardControl!<ScheduleMethod>(scheduleMethod, input, context)
+      return validateScheduleRpcResult<ScheduleMethod>(scheduleMethod, result, input) as AgentMuxRpcResult<M>
     }
     if (isTopicMethod(method)) {
       const input = parseTopicParams(method, params)

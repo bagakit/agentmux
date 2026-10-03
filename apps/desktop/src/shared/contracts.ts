@@ -1411,6 +1411,7 @@ export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
 export const NATIVE_BROWSER_INPUT_CHANNEL = 'ui:nativeBrowserInput'
 export const NATIVE_OVERLAY_WARNING_CHANNEL = 'ui:nativeOverlayWarning'
 export const CONTINUOUS_PROGRESS_CHANGED = 'continuous-progress:changed'
+export const SCHEDULE_CHANGED = 'schedule:changed'
 /** Main -> renderer: Toolkit observation and execution lifecycle events. */
 export { TOOLKIT_CHANGED_CHANNEL, TOOLKIT_ENDED_CHANNEL } from './toolkit.js'
 /** Main -> renderer: a watched workspace file changed on disk; re-read it. */
@@ -1585,6 +1586,15 @@ export type AgentMuxDesktopApi = {
     ) => DesktopControlResult | Promise<DesktopControlResult>): () => void
   }
   continuousProgress: ContinuousProgressApi
+  schedule: {
+    onChanged(listener: (loop: import('@agentmux/core').ContinuousProgressLoop) => void): () => void
+    list(params: AgentMuxRpcParams<'schedule.list'>): Promise<AgentMuxRpcResult<'schedule.list'>>
+    inspect(params: AgentMuxRpcParams<'schedule.inspect'>): Promise<AgentMuxRpcResult<'schedule.inspect'>>
+    create(params: AgentMuxRpcParams<'schedule.create'>): Promise<AgentMuxRpcResult<'schedule.create'>>
+    pause(params: AgentMuxRpcParams<'schedule.pause'>): Promise<AgentMuxRpcResult<'schedule.pause'>>
+    resume(params: AgentMuxRpcParams<'schedule.resume'>): Promise<AgentMuxRpcResult<'schedule.resume'>>
+    cancel(params: AgentMuxRpcParams<'schedule.cancel'>): Promise<AgentMuxRpcResult<'schedule.cancel'>>
+  }
   sessions: {
     snapshot(): Promise<RuntimeSnapshot>
     observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>

@@ -2,12 +2,14 @@ import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
+  AGENTMUX_AGENT_MESSAGING_GUIDANCE,
   agentPromptPredecessor,
   validateAgentPromptCondition,
   type AgentPromptCondition,
   type AgentPromptExecution,
   type AgentMessageChannel,
   type AgentMuxAgentMessageInput,
+  type AgentMuxRpcCallContext,
   runtimeStorageUsage,
   agentInteractionResponseUnavailableReason,
   type AgentCapabilities,
@@ -1325,7 +1327,7 @@ export class RuntimeController {
     prompt: string,
     operationId: string,
     condition: AgentPromptCondition,
-    automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
+    automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution },
     authorHuman?: boolean,
     agentMuxNote?: string,
@@ -1352,7 +1354,7 @@ export class RuntimeController {
           agentSessionId: control.agentSessionId,
           ...capturedCondition,
           operationId,
-          ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
+          ...(automation ? { ...(automation.futureIntent ? { expectedFutureIntent: automation.futureIntent } : automation.completionId === undefined ? {} : { expectedCompletionId: automation.completionId }), ...(automation.inputByte === undefined ? {} : { expectedInputByte: automation.inputByte }), signal: automation.signal } : {}),
           prompt,
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
           sourceChannel,
@@ -1396,6 +1398,26 @@ export class RuntimeController {
   }
 
   private progressInputObserver: ((control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>) | undefined
+  async authorizeFutureIntent(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, context?: AgentMuxRpcCallContext): Promise<void> {
+    if (!context?.caller) return
+    const client = await this.connectedClient(target.hostId), recipient = await client.statusAgent(target.agentSessionId)
+    if (recipient.session.hostId !== target.hostId || recipient.session.providerId !== target.providerId || recipient.session.workspacePath !== target.workspacePath) {
+      throw new AgentMuxError('The original future-message target is unconfirmed. The arrangement and manual input are retained.', 'STALE_AGENT_SESSION')
+    }
+    const sender = await client.authorizeAgentCaller(context.caller.capability, context.caller.agentSessionId)
+    await client.authorizeAgentMessage({ capability: context.caller.capability, callerAgentSessionId: sender.agentSessionId,
+      senderAgentSessionId: sender.agentSessionId, senderSessionId: sender.agentSessionId, senderRunId: sender.run.runId,
+      recipientSessionId: recipient.session.agentSessionId, recipientRunId: recipient.session.run.runId })
+  }
+  async saveFutureIntent(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string; creationOperationId?: string; prompt: string }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void> {
+    const client = await this.connectedClient(loop.hostId)
+    const status = await client.statusAgent(loop.agentSessionId)
+    if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId || status.session.workspacePath !== loop.workspacePath || !loop.futureIntentId || !loop.creationOperationId) {
+      throw new AgentMuxError('The original future-message target or intent is unconfirmed. Manual input remains available.', 'STALE_AGENT_SESSION')
+    }
+    await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
+      prompt: loop.prompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE, active, ...(context?.caller ? { caller: context.caller } : {}) })
+  }
   setContinuousProgressInputObserver(observer: (control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>): () => void {
     this.progressInputObserver = observer
     return () => { if (this.progressInputObserver === observer) this.progressInputObserver = undefined }

@@ -4,6 +4,7 @@ import { AgentMuxError } from './errors.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseFileReadCommand } from './agentmux-cli-files.js'
+import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
 import type { AgentMuxRpcParams } from './public-rpc.js'
@@ -134,6 +135,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   empty('notebook.ls', 'Read the durable Notebook and Note directory without opening an App or a page.'),
   command('notebook.inspect', '(--notebook ID|--note ID|--operation-id ID)', 'Read an exact Notebook, Note source/history or original knowledge operation.',
     { '--notebook':'data','--note':'data',...OP }, f => { const selected=one(f,['--notebook','--note','--operation-id'],'Inspect');return {[selected==='--notebook'?'notebookId':selected==='--note'?'noteId':'operationId']:id(f,selected)} }),

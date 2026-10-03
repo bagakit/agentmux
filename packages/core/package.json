@@ -34,6 +34,10 @@
       "types": "./dist/public-rpc-files.d.ts",
       "import": "./dist/public-rpc-files.js"
     },
+    "./schedule": {
+      "types": "./dist/agent-schedule.d.ts",
+      "import": "./dist/agent-schedule.js"
+    },
     "./timeline": {
       "types": "./dist/session-timeline.d.ts",
       "import": "./dist/session-timeline.js"
