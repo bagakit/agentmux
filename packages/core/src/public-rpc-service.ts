@@ -27,6 +27,8 @@ import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './
 import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult,
   type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
+import { normalizeMessageChannel } from './message-origin.js'
+import { normalizeOperationDevice } from './operation-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
@@ -88,7 +90,7 @@ const NATIVE_FIELDS = {
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
-  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution'],
+  'agent.send': ['target', 'text', 'messageId', 'threadId', 'correlationId', 'replyTo', 'operationId', 'execution', 'sourceChannel'],
   'agent.discuss': ['executorId', 'providerId', 'text', 'operationId'],
   'agent.handoff': ['toAgentSessionId', 'taskId'], 'agent.output': ['agentSessionId', 'afterByte', 'follow'],
   'message.inbox.check': ['limit'], 'message.inbox.ack': ['generation', 'readerRun'],
@@ -568,8 +570,7 @@ export class AgentMuxRpcService {
               kind: p.kind as Parameters<AgentMuxClient['recordDispatchEvent']>[0]['kind'] })
         } break
       }
-      case 'agent.send': result = this.ports.forwardControl
-        ? await this.ports.forwardControl(method, params, context) : await this.send(p, caller, context); break
+      case 'agent.send': result = await this.send(p, caller, context); break
       case 'agent.output': throw new AgentMuxError('Agent output is a bounded byte subscription.', 'INVALID_CONTROL_REQUEST')
       case 'goal.activity': {
         if (this.ports.forwardControl) {
@@ -654,6 +655,9 @@ export class AgentMuxRpcService {
   }
   private async send(p: Record<string, unknown>, caller: Awaited<ReturnType<AgentMuxRpcService['authenticated']>>, context: AgentMuxRpcCallContext) {
     const target = rpcRecord(p.target)
+    const sourceChannel = normalizeMessageChannel(p.sourceChannel ?? 'api')
+    const observedDevice = this.ports.operationSource?.(context)
+    const sourceDevice = observedDevice === undefined ? undefined : normalizeOperationDevice(observedDevice)
     const operationId = rpcString(p.operationId, 'Operation ID'), text = rpcText(p.text, 'Message text')
     if (p.execution !== undefined && p.execution !== 'default' && p.execution !== 'immediate') throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
     const execution = p.execution ?? 'default'
@@ -664,9 +668,19 @@ export class AgentMuxRpcService {
       recipientId = (await this.owner(rpcString(target.agentSessionId, 'Recipient Session ID'))).agentSessionId
     } else if (target.kind === 'region' || target.kind === 'tab') {
       rpcRecord(target, ['kind', target.kind === 'region' ? 'regionId' : 'tabId'])
-      const inspected = await this.execute(this.request(target.kind === 'region' ? 'inspect.region' : 'inspect.tab', { target }))
-      const regions = inspected.operation === 'inspect.region' ? [inspected.region]
-        : inspected.operation === 'inspect.tab' ? inspected.tab.regions : []
+      const regions = await (async () => {
+        if (this.ports.execute) {
+          const inspected = await this.execute(this.request(target.kind === 'region' ? 'inspect.region' : 'inspect.tab', { target }))
+          return inspected.operation === 'inspect.region' ? [inspected.region]
+            : inspected.operation === 'inspect.tab' ? inspected.tab.regions : []
+        }
+        const inspected = await this.ports.forwardControl?.('space.inspect', {
+          target: target.kind === 'region' ? { regionId: rpcString(target.regionId, 'Region ID') } : { tabId: rpcString(target.tabId, 'Tab ID') }
+        }, context)
+        const presentation = inspected?.presentation
+        if (!presentation) throw new AgentMuxError('The original presentation owner is unavailable. No message was submitted.', 'CONTROL_UNAVAILABLE')
+        return target.kind === 'region' ? presentation.region ? [presentation.region] : [] : presentation.tab?.regions ?? []
+      })()
       const candidates = agentMuxMessageTargetCandidates(regions)
       if (candidates.length !== 1) throw Object.assign(new AgentMuxError('Target has no unique Agent Session.',
         candidates.length ? 'MESSAGE_TARGET_NOT_UNIQUE' : 'MESSAGE_TARGET_NOT_AGENT'), { candidates })
@@ -697,7 +711,7 @@ export class AgentMuxRpcService {
     // Both participant bindings came from their current Core owners. Public
     // inputs cannot supply sender or Run facts; rechecking a cached registry here
     // would reject a valid capability rotation or a recipient on another Host.
-    const queued = await appendGlobalMessage({ ...envelope, messageId, execution }, queuePath)
+    const queued = await appendGlobalMessage({ ...envelope, messageId, execution, sourceChannel, ...(sourceDevice ? { sourceDevice } : {}) }, queuePath)
     if (queued.delivery.state === 'delivered') return queued
     // An admitted envelope with an unconfirmed previous attempt is not a licence
     // to repeat input. Read its persisted receipt, preserving the current Run.
@@ -716,10 +730,10 @@ export class AgentMuxRpcService {
         ? { kind: 'agent-session', agentSessionId: recipientId } : target
       if (!this.ports.execute) await recipientOwner.client.submitAgentMessage({
         agentSessionId: recipientId, envelope: queued.envelope, condition: promptCondition,
-        execution,
+        execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}),
         ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) })
       else await this.execute(this.request('send', { requestId: operationId, target: exactTarget, text, promptCondition,
-        execution,
+        execution, ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}),
         message: queued.envelope, ...(caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}) }))
       return { ...await recordGlobalMessageDelivery(queued.messageId, 'delivered', Date.now(), undefined, queuePath), agentSessionId: recipientId }
     } catch (error) {

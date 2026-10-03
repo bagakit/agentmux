@@ -1,4 +1,9 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { DeviceAuthority } from '../../../apps/host/src/device-authority.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
@@ -30,7 +35,7 @@ afterEach(async () => {
 
 const RUN_ID = 'author-run'
 const AGENT_SESSION_ID = 'author-agent'
-const WORKSPACE = upstreamFixturePath("tmp/author-agent")
+const WORKSPACE = fixturePath("tmp/author-agent")
 
 function storedSession(extra: Partial<AgentMuxStoredAgentSession> = {}): AgentMuxStoredAgentSession {
   return {
@@ -430,4 +435,59 @@ describe('Frozen delivery channel and device over the original admission and dur
     expect(await store.loadTimeline(AGENT_SESSION_ID)).toEqual(before)
     expect(writes).toEqual(accepted)
   })
+})
+
+
+it('public owner keeps actual CLI/API channels and original transport devices through accepted input and cold FileStore reads', async () => {
+  const { client, store, writes } = await createFixtureClient()
+  const root = dirname(store.path)
+  const authority = await DeviceAuthority.open(join(root, 'devices.json'))
+  const paired = await authority.exchangeLink(new URL(authority.connectionLink('http://127.0.0.1').url).hash.slice('#connect='.length), 'Other device')
+  const source = authority.operationSource({ kind: 'user', id: 'unix-user' })!
+  const forwarded = vi.fn(async () => { throw new Error('Semantic send must stay with its original Core owner.') })
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [{ hostId: 'local', client }],
+    operationSource: context => authority.operationSource(context.principal), forwardControl: forwarded,
+    http: { host: '127.0.0.1', port: 0, authorize(request) {
+      const credential = request.headers.get('authorization')?.slice('Bearer '.length) ?? ''
+      const device = authority.authenticate(authority.hostId, credential)
+      return { principal: { kind: 'device', id: authority.hostId + ':' + device.deviceId } }
+    } } })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  try {
+    const remote = await connectAgentMuxRpc({ endpoint: { transport: 'http', url: `http://127.0.0.1:${server.httpAddress!.port}/`, token: paired.credential } })
+    try {
+      const remoteReceipt = await remote.call('agent.send', { target: { kind: 'agent-session', agentSessionId: AGENT_SESSION_ID }, operationId: 'original-remote-api', text: 'Other device native input' })
+      const originalDevice = { hostId: authority.hostId, deviceId: paired.device.deviceId, name: paired.device.name }
+      expect(remoteReceipt).toMatchObject({ sourceChannel: 'api', sourceDevice: originalDevice })
+      expect((await store.loadTimeline(AGENT_SESSION_ID)).items[0]).toMatchObject({ sourceChannel: 'api', sourceDevice: originalDevice })
+    } finally { await remote.dispose() }
+    const api = await rpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: AGENT_SESSION_ID },
+      operationId: 'api-original-device', text: 'API native input' })
+    expect(api.sourceChannel).toBe('api')
+    expect(api.sourceDevice).toEqual(source)
+    const cli = await runCompiledObjectCli(['agent', 'send', '--to-session', AGENT_SESSION_ID, '--text', 'CLI native input', '--operation-id', 'cli-original-device'],
+      objectCliEnvironment(root))
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result).toMatchObject({ sourceChannel: 'cli', sourceDevice: source, delivery: { state: 'delivered' } })
+    expect(forwarded).not.toHaveBeenCalled()
+    expect(writes).toHaveLength(3)
+    const cold = new AgentMuxFileAgentSessionStore(store.path)
+    const timeline = await cold.loadTimeline(AGENT_SESSION_ID)
+    const users = projectSessionUserMessages({ agentSessionId: AGENT_SESSION_ID, timeline })
+    expect(users).toHaveLength(3)
+    expect(users.map(item => item.source)).toEqual([
+      expect.objectContaining({ kind: 'captured', channel: 'api', device: { hostId: authority.hostId, deviceId: paired.device.deviceId, name: paired.device.name } }),
+      expect.objectContaining({ kind: 'captured', channel: 'api', device: source }),
+      expect.objectContaining({ kind: 'captured', channel: 'cli', device: source })
+    ])
+    const records = await new DurableAgentMuxMessageQueue(client.agentMessageQueuePath()).listAfter()
+    expect(records.map(item => [item.sourceChannel, item.sourceDevice])).toEqual([['api', { hostId: authority.hostId, deviceId: paired.device.deviceId, name: paired.device.name }], ['api',source], ['cli',source]])
+    await expect(rpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: AGENT_SESSION_ID },
+      operationId: 'forged-device', text: 'Forged origin', ...{ sourceDevice: { hostId: 'forged', deviceId: 'other', name: 'Fake' } } }))
+      .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(writes).toHaveLength(3)
+    await rpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: AGENT_SESSION_ID }, operationId: 'healthy-after-invalid', text: 'Healthy path stays available' })
+    expect(writes).toHaveLength(4)
+  } finally { await rpc.dispose(); await server.stop() }
 })

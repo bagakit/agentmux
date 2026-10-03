@@ -1,3 +1,4 @@
+import { normalizeMessageChannel } from './message-origin.js'
 import { isPendingMessageOperation, parsePendingMessage } from './pending-message-control.js'
 import { parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal } from '@agentmux/demand/goals'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
@@ -397,7 +398,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
         }
   }
   if (source.operation === 'send') {
-    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','execution','caller','message'], 'INVALID_CONTROL_REQUEST')
+    settingsFields(source, ['schemaVersion','requestId','operation','target','text','promptCondition','execution','sourceChannel','caller','message'], 'INVALID_CONTROL_REQUEST')
     if (source.execution !== undefined && source.execution !== 'default' && source.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution is invalid.', 'INVALID_CONTROL_REQUEST')
     }
@@ -416,6 +417,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, target,
       text: text(source.text, 'Message text'), promptCondition: validateAgentPromptCondition(source.promptCondition),
       ...(source.execution === undefined ? {} : { execution: source.execution }),
+      ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
       ...(owner ? { caller: owner } : {}), message }
   }
   if (source.operation === 'list.agents') {
