@@ -1,3 +1,4 @@
+import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
@@ -370,7 +371,8 @@ export function ActivityView({
   onContinue,
   onSelectAnnotation,
   describeSpeaker,
-  moteConversation = false
+  moteConversation = false,
+  renderMessageActions
 }: {
   sessionId: string
   items: AgentTimelineItem[]
@@ -400,6 +402,7 @@ export function ActivityView({
    */
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
+  renderMessageActions?: (source: ConversationReplySource) => ReactNode
 }) {
   const { unifiedItems, segments } = useMemo(() => {
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
@@ -726,6 +729,7 @@ export function ActivityView({
       /> : null}
       {nativeHistoryPage ? <ConversationNativeThread
         page={nativeHistoryPage}
+        {...(renderMessageActions ? { renderMessageActions } : {})}
         renderProcess={(props) => <NativeProcessObservation {...props} />}
         sessionId={sessionId}
         locatedMessageKey={locatedMessageKey}
@@ -784,6 +788,9 @@ export function ActivityView({
               ) : speaker ? (
                 <ConversationMessage
                   messageId={entry.item.id}
+                  {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
+                    !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
+                    ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
                   conversationSessionId={sessionId}
                   {...(entry.item.kind === 'user_message' || entry.item.sourceDevice ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
                   located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}

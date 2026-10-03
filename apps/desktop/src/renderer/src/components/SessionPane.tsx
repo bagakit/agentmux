@@ -1,3 +1,4 @@
+import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { AlertTriangle, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
@@ -667,6 +668,8 @@ export function SessionPane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.kind, missing, interruptionReason])
 
+  const renderMessageActions = useConversationReactions(sessionId, visible && !readOnly && surfaceKind === 'agent')
+
   const mailboxReading = {
     workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
@@ -860,7 +863,7 @@ export function SessionPane({
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
     readPastedImage, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
-    moteConversation: moteOwner !== null
+    moteConversation: moteOwner !== null, renderMessageActions
   }
   // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore) {
