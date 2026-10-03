@@ -1,7 +1,7 @@
 import { Info } from 'lucide-react'
 import { Fragment, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
-import { describeReadout, describeRulerAxis, describeSpan, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
+import { describeReadout, describeRulerAxis, describeRulerRange, describeSpan, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
 import type { RulerAxisItem, ConversationAxisMark } from '../lib/conversation-axis'
 import { conversationRulerDensity, rulerRecordQuote } from '../lib/conversation-ruler'
@@ -28,18 +28,11 @@ function readoutAnchor(
   })
 }
 
-/**
- * 面板要显示的内容。**一个面板、两种内容源**，不是两个面板。
- *
- * 主刻度悬停给的是「什么时候」（`RulerReadoutText`）；轴上的头像标记给的是「说了什么」（原话）。
- * 两者共用同一个浮层、同一套锚定几何、同一条关闭路径——因为它们回答的是同一个问题的两半，而且
- * 在屏幕上占的是同一个位置：两个各自管自己显隐的浮层会在标记与刻度都被指到时同时浮出来，互相
- * 叠住。用一个可辨别联合类型而不是两个可选字段：「既有时间又有原话」和「两者都没有」都不是合法
- * 状态，让类型直接说出这件事，而不是靠渲染时的 if 去防。
- */
+/** One passive readout for a recorded moment, sender quote or current reading interval. */
 type ReadoutBody =
   | { kind: 'moment'; text: RulerReadoutText }
   | { kind: 'quote'; name: string; quote: string }
+  | { kind: 'range' }
 
 type Readout = {
   body: ReadoutBody
@@ -54,12 +47,6 @@ type Readout = {
  * position to a real event through the shared {@link RulerScale} and ask the log to scroll there;
  * hover and focus read the same scale for the moment (or ordinal) at a position without ever moving
  * the selection.
- */
-/**
- * 导出**只为可判**：`renderToStaticMarkup` 不输出任何 handler，所以「hover 出面板 / Escape 关面板 /
- * 空引文不开面板」这三条接线在标记流上完全不可见。测试把这个组件当函数求值、从 element 树上取到那些
- * handler 并真的调用（先例：`ConversationAxis` 的点击接线就是这么判的）。
- * 生产调用者只有本文件的 {@link ActivityView}。
  */
 export function Ruler({
   items,
@@ -94,6 +81,7 @@ export function Ruler({
   }) => JSX.Element | null
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
+  const bandRef = useRef<HTMLSpanElement>(null)
   const [readout, setReadout] = useState<Readout | null>(null)
   const [trackWidth, setTrackWidth] = useState(0)
   useLayoutEffect(() => {
@@ -108,6 +96,7 @@ export function Ruler({
   const density = useMemo(() => conversationRulerDensity(items, trackWidth), [items, trackWidth])
   const axisLabel = describeRulerAxis(scale)
   const span = describeSpan(scale)
+  const range = band ? describeRulerRange(scale, band) : null
 
   const feedRect = (): DOMRect | null =>
     trackRef.current?.closest('.activity-feed')?.getBoundingClientRect() ?? null
@@ -119,6 +108,15 @@ export function Ruler({
     const trackRect = track.getBoundingClientRect()
     const anchor = readoutAnchor(trackRect, feed, pointerX)
     setReadout({ body: { kind: 'moment', text: describeReadout(scale.readoutOf(index), scale.count) }, ...anchor })
+  }
+
+  const showRange = (): void => {
+    const track = trackRef.current
+    const rect = bandRef.current?.getBoundingClientRect()
+    const feed = feedRect()
+    if (!track || !rect || !feed || !band) return
+    setReadout({ body: { kind: 'range' },
+      ...readoutAnchor(track.getBoundingClientRect(), feed, rect.left + rect.width / 2) })
   }
 
   /**
@@ -165,7 +163,7 @@ export function Ruler({
    * 是错的（同一帧内不存在第二个键盘事件），而它换来的是两份必须同步的状态。删掉了。
    */
   const closeReadout = (): boolean => {
-    const wasOpen = readout !== null
+    const wasOpen = readout !== null && (readout.body.kind !== 'range' || range !== null)
     setReadout(null)
     return wasOpen
   }
@@ -182,11 +180,21 @@ export function Ruler({
   }
 
   const handlePointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const rect = bandRef.current?.getBoundingClientRect()
+    if (rect && event.clientX >= rect.left && event.clientX <= rect.right &&
+      event.clientY >= rect.top && event.clientY <= rect.bottom) {
+      showRange()
+      return
+    }
     const at = scale.readoutAtFraction(fractionFromClientX(event.clientX))
     if (at) showReadout(at.index, event.clientX)
   }
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape') {
+      if (closeReadout()) { event.preventDefault(); event.stopPropagation() }
+      return
+    }
     const next = stepRulerSelection(selectedIndex, event.key, scale.count)
     if (next === null || next === selectedIndex) {
       // Home/End with an existing selection can equal current; still consume the navigation keys so
@@ -207,7 +215,7 @@ export function Ruler({
   }
 
   const handleFocus = (): void => {
-    if (selectedIndex === null) return
+    if (selectedIndex === null) { showRange(); return }
     const track = trackRef.current
     if (track) {
       const rect = track.getBoundingClientRect()
@@ -260,6 +268,7 @@ export function Ruler({
         </> : null}
         {band ? (
           <span
+            ref={bandRef}
             className="activity-ruler__band"
             data-axis={scale.axis}
             style={{ left: `min(${band.startFraction * 100}%, calc(100% - 3px))`, right: `${(1 - band.endFraction) * 100}%` }}
@@ -290,15 +299,26 @@ export function Ruler({
       >
         <Info size={12} />
       </span>
-      {readout ? (
+      {readout && (readout.body.kind !== 'range' || range) ? (
         <div
           className="activity-ruler__readout"
           data-placement={readout.placement}
           data-body={readout.body.kind}
           role="status"
-          style={{ left: readout.left, top: readout.top }}
+          style={{ left: readout.left, top: readout.top,
+            ...(readout.body.kind === 'range' ? { maxWidth: feedRect()?.width } : {}) }}
         >
-          {readout.body.kind === 'quote' ? (
+          {readout.body.kind === 'range' ? (range ? (
+            <>
+              <span className="activity-ruler__readout-time">
+                {range.axis === 'temporal' ? <>{range.from} – {range.to}</> : <>Records {range.from}–{range.to} of {range.total}</>}
+              </span>
+              <span className="activity-ruler__readout-offset">
+                {range.axis === 'temporal' && range.elapsed ? <>{range.elapsed} · </> : null}
+                {range.count} loaded record{range.count === 1 ? '' : 's'} in range
+              </span>
+            </>
+          ) : null) : readout.body.kind === 'quote' ? (
             <Fragment>
               <span className="activity-ruler__readout-speaker">{readout.body.name}</span>
               <span className="activity-ruler__readout-quote">{readout.body.quote}</span>

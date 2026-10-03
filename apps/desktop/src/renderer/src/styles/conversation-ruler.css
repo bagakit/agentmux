@@ -4,8 +4,26 @@
 .activity-ruler__span-range { row-gap:0; }
 .activity-ruler__stack { gap:0; }
 .activity-ruler__track { height:14px; }
-.activity-ruler__band { height:14px; min-width:3px; border-radius:3px; background:color-mix(in oklab,var(--green) 8%,transparent); box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--green) 65%,transparent); opacity:1; }
-.activity-ruler__band[data-axis='ordinal'] { background:color-mix(in oklab,var(--text-2) 7%,transparent); box-shadow:inset 0 0 0 1px color-mix(in oklab,var(--text-2) 55%,transparent); }
+.activity-ruler__band {
+  height:14px; min-width:3px; border-radius:3px;
+  color:color-mix(in oklab,var(--green) 65%,transparent);
+  background:color-mix(in oklab,var(--green) 14%,transparent);
+  transition:left var(--dur-fast) var(--ease-enter), right var(--dur-fast) var(--ease-enter);
+}
+.activity-ruler__band::before, .activity-ruler__band::after {
+  content:''; position:absolute; top:3px; bottom:3px; width:1px; border-radius:1px; background:currentColor;
+}
+.activity-ruler__band::before { left:1px; }
+.activity-ruler__band::after { right:1px; }
+.activity-ruler__band[data-axis='ordinal'] {
+  color:color-mix(in oklab,var(--text-2) 55%,transparent);
+  background:color-mix(in oklab,var(--text-2) 9%,transparent);
+}
+.activity-ruler__readout[data-body='range'] { box-sizing:border-box; }
+@media (prefers-reduced-motion: reduce) {
+  .activity-ruler__band { transition:none; }
+  .activity-ruler__readout { animation:none; }
+}
 .conversation-ruler__controls { grid-row:1; display:inline-flex; align-items:center; gap:3px; }
 .conversation-ruler__window { display:inline-flex; align-items:center; gap:3px; border:0; border-radius:4px; background:transparent; padding:3px 4px; color:var(--text-2); font:var(--fs-micro)/1.2 var(--font-sans); white-space:nowrap; }
 .conversation-ruler__window:hover { background:var(--surface-2); }
