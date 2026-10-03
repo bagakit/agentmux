@@ -88,8 +88,8 @@ async function fixture(storePath?: string) {
   }
   owner.screenEvidence.generation = () => 0
   owner.connected = true
-  const submit = (signal?: AbortSignal) => client.submitAgentPrompt({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
-    afterSubmissionId: null, operationId: 'original-send', prompt: 'ORIGINAL_BODY', execution: 'immediate', ...(signal ? { signal } : {}) })
+  const submit = (signal?: AbortSignal, operationId = 'original-send') => client.submitAgentPrompt({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+    afterSubmissionId: null, operationId, prompt: 'ORIGINAL_BODY', execution: 'immediate', ...(signal ? { signal } : {}) })
   return { client, owner, store, provider, preparation, entered, release, writes, submit,
     finalStatusFault: (kind: string) => { finalStatusFault = kind }, rawDuringFinalStatus: () => rawDuringFinalStatus,
     change: (kind: string) => { if (kind === 'source') source = 'source-other'; if (kind === 'pid') pid++; if (kind === 'cursor') cursor++;
@@ -98,6 +98,139 @@ async function fixture(storePath?: string) {
 }
 
 describe('original immediate transport preparation', () => {
+  it('releases a post-claim complete-frame observer for a protocol ACK without changing its frozen claim', async () => {
+    const f = await fixture()
+    let waiting!: () => void
+    const frameWait = new Promise<void>(resolve => { waiting = resolve })
+    const originalWait = f.owner.screenEvidence.wait
+    f.owner.screenEvidence.wait = async (...args: unknown[]) => {
+      const options = args[4] as { requireCompleteFrame?: boolean; signal?: AbortSignal }
+      if (!options.requireCompleteFrame) return await originalWait(...args)
+      waiting()
+      return await new Promise<number>((_resolve, reject) => {
+        const cancelled = () => reject(new AgentMuxError('frame observation cancelled', 'AGENT_PROMPT_READINESS_CANCELLED'))
+        options.signal?.addEventListener('abort', cancelled, { once: true })
+        if (options.signal?.aborted) cancelled()
+      })
+    }
+    try {
+      const submitted = f.submit().then(() => null, error => error)
+      await f.entered; f.release(); await frameWait
+      const frozen = structuredClone(f.client.agentSession('prepare').promptCompletionAdmission)
+      expect(frozen?.frameRefresh?.acknowledged).toBe(true)
+      expect(frozen?.frameRefresh?.inputByteRange).toEqual({ startByte: 0, endByte: 3 })
+      const ack = await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+        data: '\x1b[?1;2c', source: 'terminal-protocol' })
+      expect(ack.appliedByteRange).toEqual({ startByte: 3, endByte: 10 })
+      const error = await submitted
+      expect(error).toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+      expect(error.controlFailure?.disposition).not.toBe('not_applied')
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toEqual(frozen)
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[I', '\x1b[?1;2c'])
+    } finally { await f.close() }
+  })
+
+  it.each(['\x1b[?1;2c', '\x1b[1;1R'])('keeps preparation through an acknowledged protocol reply %j', async reply => {
+    const f = await fixture()
+    try {
+      const submitted = f.submit().then(() => null, error => error)
+      await f.entered
+      const ack = await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+        data: reply, source: 'terminal-protocol' })
+      expect(ack.appliedByteRange).toEqual({ startByte: 0, endByte: Buffer.byteLength(reply) })
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+      f.release()
+      expect(await submitted).toBeNull()
+      expect(f.writes.map(write => write.data)).toEqual([reply, '\x1b[I', 'ORIGINAL_BODY', '\r'])
+      await f.submit()
+      expect(f.writes.filter(write => write.data === 'ORIGINAL_BODY')).toHaveLength(1)
+    } finally { await f.close() }
+  })
+
+  it('folds consecutive acknowledged protocol ranges without treating either as human input', async () => {
+    const f = await fixture()
+    try {
+      const submitted = f.submit().then(() => null, error => error); await f.entered
+      for (const data of ['\x1b[?1;2c', '\x1b[1;1R']) await f.client.writeAgent({ agentSessionId: 'prepare',
+        expectedRun: { runId: 'prepare-run' }, data, source: 'terminal-protocol' })
+      f.release(); expect(await submitted).toBeNull()
+      const admission = f.client.agentSession('prepare').promptCompletionAdmission!
+      expect(admission.frameRefresh!.inputByteRange).toEqual({ startByte: 13, endByte: 16 })
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[?1;2c', '\x1b[1;1R', '\x1b[I', 'ORIGINAL_BODY', '\r'])
+    } finally { await f.close() }
+  })
+
+  it.each(['before', 'between', 'after'])('does not credit foreign input %s protocol ACKs', async position => {
+    const f = await fixture()
+    try {
+      const submitted = f.submit().then(() => null, error => error); await f.entered
+      if (position === 'before') f.change('cursor')
+      await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' })
+      if (position !== 'before') f.change('cursor')
+      if (position === 'between') await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[1;1R', source: 'terminal-protocol' })
+      f.release()
+      expect(await submitted).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(f.writes.some(write => write.data === 'ORIGINAL_BODY' || write.data === '\x1b[I')).toBe(false)
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it.each(['partial', 'wrong-run', 'wrong-pid', 'unacknowledged', 'unack-no-observed-bytes'])('does not use a %s protocol receipt as input authority', async fault => {
+    const f = await fixture()
+    const input = f.owner.kernel.input as (id: string, op: { operationId: string; expectedByte: number; data: string }) => Promise<any>
+    f.owner.kernel.input = async (id: string, op: { operationId: string; expectedByte: number; data: string }) => {
+      if (fault === 'unack-no-observed-bytes') throw new AgentMuxError('Protocol receipt unknown before observed bytes.', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown')
+      const result = await input(id, op)
+      if (fault === 'partial') return { ...result, appliedByteRange: { ...result.appliedByteRange, endByte: result.appliedByteRange.endByte - 1 } }
+      if (fault === 'wrong-run') return { ...result, run: { ...result.run, runId: 'foreign-run' } }
+      if (fault === 'wrong-pid') return { ...result, run: { ...result.run, pid: result.run.pid + 1 } }
+      throw new AgentMuxError('Protocol ACK lost.', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown')
+    }
+    try {
+      const submitted = f.submit().then(() => null, error => error); await f.entered
+      await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' }).catch(() => {})
+      f.release()
+      expect(await submitted).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(f.writes.map(write => write.data)).toEqual(fault === 'unack-no-observed-bytes' ? [] : ['\x1b[?1;2c'])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('human input still cancels preparation after a protocol ACK without waiting for the Provider', async () => {
+    const f = await fixture()
+    try {
+      const submitted = f.submit().then(() => null, error => error); await f.entered
+      await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' })
+      await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: 'REAL_HUMAN_INPUT', source: 'user' })
+      expect(await submitted).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED' })
+      f.release(); await new Promise(done => setImmediate(done))
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[?1;2c', 'REAL_HUMAN_INPUT'])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('a late protocol ACK belongs only to its original observer and cannot authorize a later preparation', async () => {
+    const f = await fixture(), cancel = new AbortController()
+    const input = f.owner.kernel.input as (id: string, op: { operationId: string; expectedByte: number; data: string }) => Promise<any>
+    let releaseAck!: () => void, started!: () => void
+    const enteredInput = new Promise<void>(resolve => { started = resolve })
+    const delayed = new Promise<void>(resolve => { releaseAck = resolve })
+    f.owner.kernel.input = async (id: string, op: { operationId: string; expectedByte: number; data: string }) => {
+      started(); await delayed; return await input(id, op)
+    }
+    try {
+      const first = f.submit(cancel.signal).then(() => null, error => error); await f.entered
+      const protocol = f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' })
+      await enteredInput; cancel.abort(); expect(await first).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED' })
+      const later = f.submit(undefined, 'later-send').then(() => null, error => error)
+      while (f.preparation.mock.calls.length < 2) await new Promise(done => setImmediate(done))
+      releaseAck(); await protocol; f.release()
+      expect(await later).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED' })
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[?1;2c'])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+    } finally { releaseAck(); await f.close() }
+  })
+
   it('waits before any input, then sends the original body once and rejoins its ACK without preparing again', async () => {
     const f = await fixture()
     try {
