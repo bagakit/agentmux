@@ -14,12 +14,13 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 let app: MoteAppFixture, initialIdeaContext: boolean
 const root = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = root + '/saved-direction.md', revision = 'sha256:' + 'f'.repeat(64)
 const panel = () => app.container.querySelector<HTMLElement>('[data-mote-details]')!
-const button = (name: string) => [...panel().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === name)!
+const button = (name: string) => [...panel().querySelectorAll<HTMLButtonElement>('button')].find(node => node.getAttribute('aria-label') === name || node.textContent === name)!
 const publicRead = (params: FileReadParams, content = params.path === 'SOUL.md' ? '# Latest saved SOUL\nUse concrete examples.' : '# The selected saved source.'): FileReadResult => ({
   resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + root, path: root + '/' + params.path },
   result: { status: 'read', document: { path: root + '/' + params.path, content, revision } }
 })
 const requestDraft = () => { const state = useAppStore.getState(), selection = state.workbenchSpaceSelection!; return state.agentComposerDrafts[selection.regionId!]! }
+const requestNote = () => { const state = useAppStore.getState(), selection = state.workbenchSpaceSelection!; return state.agentComposerNotes[selection.regionId!]! }
 async function type(selector: string, value: string) {
   const input = panel().querySelector<HTMLTextAreaElement>(selector)!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }); await settleMoteApp()
@@ -40,8 +41,9 @@ describe('original Ideas request and feedback owners', () => {
     await app.mount(); history.mockClear(); goals.mockClear(); await ideas(); expect(read).not.toHaveBeenCalled(); expect(history).not.toHaveBeenCalled(); expect(goals).not.toHaveBeenCalled()
     await moteClick(panel().querySelector<HTMLButtonElement>('.mote-details__note')!); expect(read).toHaveBeenCalledTimes(1)
     const before = useAppStore.getState(); await type('[aria-label="Idea direction"]', 'Find a useful next experiment.'); await moteClick(button('Prepare idea request'))
-    expect(read).toHaveBeenLastCalledWith(expect.objectContaining({ path: 'SOUL.md' })); expect(history).not.toHaveBeenCalled(); expect(goals).not.toHaveBeenCalled()
-    const request = requestDraft(); expect(request).toContain('Find a useful next experiment.'); expect(request).toContain('# Latest saved SOUL'); expect(request).toContain(path); expect(request).toContain(revision)
+    expect(read.mock.calls.slice(-2).map(call => call[0].path)).toEqual(['SOUL.md', 'saved-direction.md']); expect(history).not.toHaveBeenCalled(); expect(goals).not.toHaveBeenCalled()
+    expect(requestDraft()).toBe('Find a useful next experiment.')
+    const request = requestNote(); expect(request).toContain('Find a useful next experiment.'); expect(request).toContain('# Latest saved SOUL'); expect(request).toContain(path); expect(request).toContain(revision)
     expect(request).toContain('Explain why each relates'); expect(request).toContain('discussion starter'); expect(request).toContain('separate authorization')
     expect(Object.values(useAppStore.getState().tabs).filter(tab => !before.tabs[tab.id])).toHaveLength(1)
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(useAppStore.getState().sessions).toBe(before.sessions)
@@ -58,14 +60,15 @@ describe('original Ideas request and feedback owners', () => {
     vi.spyOn(api.demands, 'list').mockResolvedValue([goal('renderer-linked-goal', [exact.id]), goal('wrong-core-alias-goal', [exact.control.agentSessionId]), goal('neighbor-goal', ['neighbor-agent'])])
     await app.mount(); history.mockClear(); await ideas(); await type('[aria-label="Idea direction"]', 'Use my current exact context.'); await moteClick(panel().querySelector<HTMLInputElement>('[aria-label="Include exact discussion and linked Goals"]')!); await moteClick(button('Prepare idea request'))
     expect(history).toHaveBeenCalledExactlyOnceWith({ hostId: exact.control.hostId, agentSessionId: exact.control.agentSessionId }, { limit: 8 })
-    expect(requestDraft()).toContain('Original exact discussion fact.'); expect(requestDraft()).toContain('renderer-linked-goal'); expect(requestDraft()).not.toContain('wrong-core-alias-goal'); expect(requestDraft()).not.toContain('neighbor-goal')
-    expect(requestDraft()).toContain('rendererSessionId'); expect(requestDraft()).toContain('core-exact-mote'); expect(app.launch).not.toHaveBeenCalled()
+    expect(requestDraft()).toBe('Use my current exact context.')
+    expect(requestNote()).toContain('Original exact discussion fact.'); expect(requestNote()).toContain('renderer-linked-goal'); expect(requestNote()).not.toContain('wrong-core-alias-goal'); expect(requestNote()).not.toContain('neighbor-goal')
+    expect(requestNote()).toContain('rendererSessionId'); expect(requestNote()).toContain('core-exact-mote'); expect(app.launch).not.toHaveBeenCalled()
   })
   it('keeps a user-authored request usable when saved context is unknown without inventing its content', async () => {
     vi.spyOn(api.files, 'readPublic').mockResolvedValue({ resource: null, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: 'Original SOUL unavailable' } })
     vi.spyOn(api.sessions, 'historyPage').mockRejectedValue(new Error('Original history unavailable')); vi.spyOn(api.demands, 'list').mockRejectedValue(new Error('Original Goals unavailable'))
     await app.mount(); await ideas(); await type('[aria-label="Idea direction"]', 'Explore the question I wrote.'); await moteClick(panel().querySelector<HTMLInputElement>('[aria-label="Include exact discussion and linked Goals"]')!); await moteClick(button('Prepare idea request'))
-    expect(requestDraft()).toContain('Explore the question I wrote.'); expect(requestDraft()).toContain('Original SOUL unavailable'); expect(requestDraft()).toContain('Original history unavailable'); expect(requestDraft()).not.toContain('Exact note')
+    expect(requestDraft()).toBe('Explore the question I wrote.'); expect(requestNote()).toContain('Original SOUL unavailable'); expect(requestNote()).toContain('Original history unavailable'); expect(requestNote()).not.toContain('Exact note')
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
   })
   it('keeps later direction input and rejects a pending read rather than opening a stale request', async () => {
