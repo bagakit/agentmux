@@ -22,7 +22,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   const typedFirstHook = steerRecovery && arguments_.includes('--typed-response-first-hook')
   const startupFirstSend = steerRecovery && arguments_.includes('--startup-first-send')
   const startupRestoredOnly = steerRecovery && arguments_.includes('--startup-restored-first-send')
-  const finalQualification = steerRecovery && arguments_.includes('--steer-recovery-final')
+  const finalQualification = steerRecovery && (arguments_.includes('--steer-recovery-final') || !(diagnosticOnly || typedCrossCore || startupFirstSend || startupRestoredOnly))
   const startupQualification = startupFirstSend || startupRestoredOnly
   assert.ok(!(startupFirstSend && startupRestoredOnly), 'Startup proof triggers have distinct qualification scopes')
   assert.ok(!finalQualification || !(startupQualification || diagnosticOnly || typedCrossCore), 'Final GUI qualification has a distinct Source and Native scope')
