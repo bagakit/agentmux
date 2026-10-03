@@ -19,7 +19,7 @@ export function DeviceManagementSettings({ active, compact = false }: { active: 
     const epoch = ++generation.current
     if (!active) return
     void read(epoch)
-    const timer = setInterval(() => { void read(epoch) }, 5000)
+    const timer = setInterval(() => { void read(generation.current) }, 5000)
     return () => { generation.current++; clearInterval(timer) }
   }, [active])
   const link = async () => {
@@ -33,20 +33,20 @@ export function DeviceManagementSettings({ active, compact = false }: { active: 
       try { await api.ui.writeClipboardText(value.url); setNotice('链接已复制，在同一局域网的手机打开即可操作。') }
       catch { setNotice('链接已生成，请复制下方完整链接。') }
     } catch (error) { if (epoch === generation.current) setNotice(`暂时无法生成连接链接，可稍后重试。${presentError(error)}`) }
-    finally { pending.current = false; if (epoch === generation.current) setBusy(false) }
+    finally { pending.current = false; setBusy(false) }
   }
   const revoke = async (deviceId: string) => {
     if (pending.current) return
     pending.current = true; setBusy(true)
-    const epoch = generation.current
+    const epoch = ++generation.current
     try { await api.deviceManagement.revoke({ deviceId }); if (epoch === generation.current) { setNotice('已断开此设备，Agent 会话继续保留。'); await read(epoch) } }
     catch (error) { if (epoch === generation.current) { setNotice(`撤销结果尚未确认，请查看刷新后的设备状态。${presentError(error)}`); await read(epoch) } }
-    finally { pending.current = false; if (epoch === generation.current) setBusy(false) }
+    finally { pending.current = false; setBusy(false) }
   }
   if (!active) return null
   const devices = list?.devices.filter(device => device.revokedAt === undefined) ?? []
   return <section className="settings-group" data-device-view={compact ? "compact" : "settings"}>
-    <p className="settings-group-note">{devices.filter(device => device.online).length} 当前在线 · {devices.length} 已授权</p>
+    <p className="settings-group-note">{list ? `${devices.filter(device => device.online).length} 当前在线 · ${devices.length} 已授权` : '设备状态尚未核实'}</p>
     <p className="settings-group-note">复制连接链接，在同一局域网的手机打开即可操作这台 Mac 的 Agent。</p>
     <div className="settings-pane-toolbar">
       <button className="small-button" onClick={() => { void read() }}><RefreshCw size={16} />刷新设备状态</button>
