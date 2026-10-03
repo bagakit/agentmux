@@ -2,7 +2,7 @@ import type { PendingMessageControlRequest, PendingMessageControlResult } from '
 export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
 import { AgentMuxError } from './errors.js'
-import type { AgentExecutorId, AgentProviderId, AgentPromptExecution } from './types.js'
+import type { AgentExecutorId, AgentProviderId, AgentPromptExecution, AgentMessageChannel } from './types.js'
 import type { WorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import type { AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import type { AgentPromptCondition } from './agent-prompt-condition.js'
@@ -252,7 +252,7 @@ export type AgentMuxMessageTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'region'; regionId: string }
 export type AgentMuxControlSendRequest = RequestBase & {
-  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; execution?: AgentPromptExecution; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
+  operation: 'send'; target: AgentMuxMessageTarget; text: string; promptCondition: AgentPromptCondition; execution?: AgentPromptExecution; sourceChannel?: AgentMessageChannel; caller?: AgentMuxControlCaller; message: AgentMuxMessageEnvelope
 }
 export type AgentMuxControlFocusRequest = RequestBase & {
   operation: 'focus'; target: AgentMuxDesktopFocusTarget; inputPolicy: AgentMuxDesktopInputPolicy

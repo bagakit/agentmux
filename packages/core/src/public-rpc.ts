@@ -164,7 +164,7 @@ type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMux
   'agent.role.register': { role: string; providerId?: string }
   'agent.role.resolve': { role: string; workspacePath?: string }
   'agent.send': { target: AgentMuxMessageTarget; text: string; operationId: string;
-    execution?: AgentPromptExecution;
+    execution?: AgentPromptExecution; sourceChannel?: import('./types.js').AgentMessageChannel;
     messageId?: string; threadId?: string; correlationId?: string; replyTo?: string }
   'agent.discuss': { executorId: string; providerId?: string; text: string; operationId: string }
   'agent.handoff': { toAgentSessionId: string; taskId: string }

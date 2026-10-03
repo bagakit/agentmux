@@ -4290,6 +4290,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (condition.expectedRun.runId !== session.control.run.runId) throw controlFailure(
         'STALE_AGENT_SESSION', 'Message intent targets another Run.')
       await api.sessions.submitMessage(session.control, { envelope: request.message, condition,
+        ...(request.sourceChannel === undefined ? {} : { sourceChannel: request.sourceChannel }),
         ...(request.execution === undefined ? {} : { execution: request.execution }),
         ...(request.caller ? { caller: { agentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       return { operation: request.operation, agentSessionId: session.id }

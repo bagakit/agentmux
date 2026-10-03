@@ -3794,9 +3794,12 @@ export class AgentMuxClient {
 
   /** The one public A2A input owner: authenticated identity, durable intent, then source plus body. */
   async submitAgentMessage(input: AgentMuxAgentMessageInput): Promise<void> {
+    input = { ...input, ...(input.caller ? { caller: { ...input.caller } } : {}) }
     this.requireConnected()
     const envelope = validateAgentMuxMessageEnvelope(input.envelope)
     const condition = validateAgentPromptCondition(input.condition)
+    const sourceChannel = normalizeMessageChannel(input.sourceChannel ?? 'agent-message')
+    const sourceDevice = input.sourceDevice === undefined ? undefined : normalizeOperationDevice(input.sourceDevice)
     if (envelope.recipient.kind !== 'agent-session' || envelope.recipient.agentSessionId !== input.agentSessionId ||
       envelope.recipientSessionId !== input.agentSessionId ||
       envelope.recipientRunId !== null && envelope.recipientRunId !== condition.expectedRun.runId) {
@@ -3813,13 +3816,14 @@ export class AgentMuxClient {
       throw new AgentMuxError('Local ingress cannot claim an Agent author.', 'MESSAGE_SENDER_MISMATCH')
     }
     const queued = await this.messageQueue.append({ ...envelope,
+      sourceChannel, ...(sourceDevice ? { sourceDevice } : {}),
       ...(input.execution === undefined ? {} : { execution: input.execution }) })
     if (['delivered', 'accepted', 'replied'].includes(queued.delivery.state)) return
     if (queued.delivery.state !== 'queued') throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID')
     const originalCondition = await this.messageQueue.preparePrompt(envelope.messageId, async () => condition)
     await this.submitPromptInternal({ ...originalCondition, agentSessionId: input.agentSessionId,
       operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
-      sourceChannel: input.sourceChannel ?? 'agent-message', ...(input.sourceDevice ? { sourceDevice: input.sourceDevice } : {}), ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
+      ...(queued.sourceChannel ? { sourceChannel: queued.sourceChannel } : {}), ...(queued.sourceDevice ? { sourceDevice: queued.sourceDevice } : {}), ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 

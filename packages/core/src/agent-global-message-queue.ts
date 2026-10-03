@@ -9,7 +9,9 @@ import { ackDeliveryBatch, checkDeliveries, type ConsumerCursor, type DeliveryQu
 import { advanceDelivery, type AgentDeliveryState } from './agent-message.js'
 import type { AgentMuxMessageTarget } from './control.js'
 import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
-import type { AgentMuxRunRef, AgentPromptExecution } from './types.js'
+import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOperationDevice } from './types.js'
+import { normalizeMessageChannel } from './message-origin.js'
+import { normalizeOperationDevice } from './operation-device.js'
 
 export type AgentMuxMessageIdentity =
   | { readonly kind: 'agent-session'; readonly agentSessionId: string }
@@ -54,6 +56,8 @@ export type DurableAgentMuxMessage = {
   readonly promptCondition?: AgentPromptCondition | null
   /** This journal admission freezes the requested execution independently of the opaque envelope. */
   readonly execution?: AgentPromptExecution
+  readonly sourceChannel?: AgentMessageChannel
+  readonly sourceDevice?: AgentOperationDevice
 }
 
 export type AgentMuxDeliveryReader = {
@@ -84,11 +88,15 @@ export type AgentMuxMessageReceipt = {
   readonly envelope: AgentMuxMessageEnvelope
   readonly delivery: AgentMuxMessageDeliveryState
   readonly promptCondition?: AgentPromptCondition | null
+  readonly sourceChannel?: AgentMessageChannel
+  readonly sourceDevice?: AgentOperationDevice
 }
 
 export type AgentMuxMessageAppendInput = Omit<AgentMuxMessageEnvelope, 'schema' | 'messageId'> & {
   readonly messageId?: string
   readonly execution?: AgentPromptExecution
+  readonly sourceChannel?: AgentMessageChannel
+  readonly sourceDevice?: AgentOperationDevice
 }
 
 /** Readable recipient-side wrapper; envelope facts have already been validated by Core.
@@ -108,7 +116,7 @@ export type AgentMuxMessageQueueOptions = {
 const processQueueTails = new Map<string, Promise<void>>()
 
 export type AgentMuxMessageJournalRecord =
-  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution }
+  | { readonly kind: 'message'; readonly sequence: number; readonly envelope: AgentMuxMessageEnvelope; readonly promptCondition?: null; readonly execution?: AgentPromptExecution; readonly sourceChannel?: AgentMessageChannel; readonly sourceDevice?: AgentOperationDevice }
   | { readonly kind: 'prompt-condition'; readonly sequence: number; readonly messageId: string; readonly condition: AgentPromptCondition }
   | { readonly kind: 'delivery-issue'; readonly sequence: number; readonly messageId: string; readonly at: number; readonly reason: string }
   | { readonly kind: 'delivery'; readonly sequence: number; readonly messageId: string; readonly state: AgentDeliveryState; readonly at: number; readonly reason?: string }
@@ -332,7 +340,9 @@ export class DurableAgentMuxMessageQueue {
       const envelope = validateAgentMuxMessageEnvelope(record.envelope)
       const message = { sequence: record.sequence, envelope, delivery: Object.freeze({ state: 'queued' as const, at: envelope.createdAt }),
         ...(record.promptCondition === null ? { promptCondition: null } : {}),
-        ...(record.execution === undefined ? {} : { execution: record.execution }) }
+        ...(record.execution === undefined ? {} : { execution: record.execution }),
+        ...(record.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(record.sourceChannel) }),
+        ...(record.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(record.sourceDevice) }) }
       this.messages.set(envelope.messageId, message)
       this.operations.set(envelope.operationId, envelope.messageId)
       return
@@ -442,21 +452,26 @@ export class DurableAgentMuxMessageQueue {
       const messageId = input.messageId ?? randomUUID()
       if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') throw new AgentMuxError('Message execution is invalid.', 'INVALID_CONTROL_REQUEST')
       const execution = input.execution ?? 'default'
+      const sourceChannel = input.sourceChannel === undefined ? undefined : normalizeMessageChannel(input.sourceChannel)
+      const sourceDevice = input.sourceDevice === undefined ? undefined : normalizeOperationDevice(input.sourceDevice)
+      const sameOrigin = (existing: DurableAgentMuxMessage) => existing.sourceChannel === sourceChannel &&
+        JSON.stringify(existing.sourceDevice) === JSON.stringify(sourceDevice)
       const envelope = validateAgentMuxMessageEnvelope({ ...input, schema: 'agentmux.a2a.v1', messageId })
       const existingId = this.operations.get(envelope.operationId)
       if (existingId) {
         const existing = this.messages.get(existingId)!
-        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution) throw new AgentMuxError('Message operation already names another envelope or execution.', 'MESSAGE_ID_CONFLICT')
+        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message operation already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
       const existing = this.messages.get(messageId)
       if (existing) {
-        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution) throw new AgentMuxError('Message id already names another envelope or execution.', 'MESSAGE_ID_CONFLICT')
+        if (!sameEnvelope(existing.envelope, envelope) || (existing.execution ?? 'default') !== execution || !sameOrigin(existing)) throw new AgentMuxError('Message id already names another envelope, execution or source.', 'MESSAGE_ID_CONFLICT')
         return this.receipt(existing)
       }
       const maxMessages = this.options.maxMessages ?? DEFAULT_MAX_MESSAGES
       const maxBytes = this.options.maxBytes ?? DEFAULT_MAX_BYTES
-      const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution }
+      const record: JournalMessage = { kind: 'message', sequence: this.nextSequence, envelope, promptCondition: null, execution,
+        ...(sourceChannel === undefined ? {} : { sourceChannel }), ...(sourceDevice === undefined ? {} : { sourceDevice }) }
       const encodedBytes = Buffer.byteLength(`${JSON.stringify(record)}\n`)
       if (this.messages.size >= maxMessages || this.bytes + encodedBytes > maxBytes) throw new AgentMuxError('Message queue is full; durable append was refused.', 'MESSAGE_QUEUE_BACKPRESSURE')
       await this.appendRecord(record)
@@ -662,7 +677,9 @@ export class DurableAgentMuxMessageQueue {
       sequence: message.sequence,
       envelope: structuredClone(message.envelope),
       delivery: { ...message.delivery },
-      ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) })
+      ...(message.promptCondition === undefined ? {} : { promptCondition: structuredClone(message.promptCondition) }),
+      ...(message.sourceChannel === undefined ? {} : { sourceChannel: message.sourceChannel }),
+      ...(message.sourceDevice === undefined ? {} : { sourceDevice: { ...message.sourceDevice } })
     }
   }
 }
