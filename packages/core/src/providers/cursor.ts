@@ -5,7 +5,8 @@ import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.j
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { normalizeNativeHook, type AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
-import { cursorDataRoot, cursorWorkspaceSlug, readCursorSessionHistoryPage } from './cursor-native-history.js'
+import { cursorDataRoot, cursorWorkspaceSlug, readCursorSessionHistoryPage, observeCursorSessionHistory } from './cursor-native-history.js'
+import { discoverCursorNativeSession } from './cursor-native-session.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 
@@ -156,8 +157,9 @@ export function createCursorManagedHookPlan(
  */
 function cursorTrustStamp(workspacePath: string): string {
   const digest = createHash('sha256').update(resolve(workspacePath)).digest('hex').slice(0, 8)
-  //  起、按 hash 派生的秒偏移（上限约 136 年，落在合法 Date 区间内）。
-  return new Date(((50 * 365 + 12) * 86_400_000) + Number.parseInt(digest, 16) * 1_000).toISOString()
+  // 保留原固定锚点（Unix 零点后 50 个普通年和 12 个闰日），按 hash 派生秒偏移。
+  const anchor = (50 * 365 + 12) * 86_400_000
+  return new Date(anchor + Number.parseInt(digest, 16) * 1_000).toISOString()
 }
 
 export function createCursorProvider(defineAgentProvider: ProviderFactory): AgentProvider {
@@ -190,7 +192,9 @@ export function createCursorProvider(defineAgentProvider: ProviderFactory): Agen
     launchOptions: CURSOR_LAUNCH_OPTIONS,
     buildArgs: (prompt, args) => [...args, ...(prompt ? [prompt] : [])],
     hook: CURSOR_HOOKS,
+    discoverNativeSession: discoverCursorNativeSession,
     readSessionHistoryPage: readCursorSessionHistoryPage,
+    observeSessionHistory: observeCursorSessionHistory,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]
