@@ -772,7 +772,9 @@ async function quitInstalledApplication(appPath, originalOwners = [], semanticHo
  * 激活后的归属由实际 loaded Main、OS 出生事实和父子关系确认，并独立排除原 owner 仍存活的情况。
  */
 async function relaunchInstalledApplication(appPath) {
-  await run('open', ['-a', appPath], { capture: false, timeoutMs: 60_000 })
+  const guiEnvironment = { ...process.env }
+  delete guiEnvironment.ELECTRON_RUN_AS_NODE
+  await run('open', ['-a', appPath], { capture: false, timeoutMs: 60_000, env: guiEnvironment })
   const deadline = Date.now() + 60_000
   let pids = []
   while (Date.now() < deadline) {
