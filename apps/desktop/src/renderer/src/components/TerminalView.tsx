@@ -1,3 +1,4 @@
+import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
@@ -10,7 +11,7 @@ import { WebglAddon } from '@xterm/addon-webgl'
 import { Terminal } from '@xterm/xterm'
 import '@xterm/xterm/css/xterm.css'
 import { ChevronDown, ChevronUp, LoaderCircle, Search, X } from 'lucide-react'
-import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useMemo, Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { RuntimeEvent, SessionControl, SessionSnapshot, TerminalThemeId } from '../../../shared/contracts'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { api } from '../lib/api'
@@ -315,7 +316,10 @@ export function TerminalView({
   }, [linkPreview])
   useLayoutEffect(clearLinkPreview, [fontSize])
   const openHttpLink = useAppStore((state) => state.openHttpLink)
-  const openFile = useAppStore((state) => state.openFile)
+  const fileOrigin = useMemo(() => ({ ...linkOrigin, sessionId: session.id }), [linkOrigin, session.id])
+  const linkOpening = useSessionLinkOpening(fileOrigin)
+  const linkOpeningRef = useRef(linkOpening)
+  linkOpeningRef.current = linkOpening
   const reportError = useAppStore((state) => state.reportError)
   const workspaceIsLocal = useAppStore((state) =>
     state.config?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local'
@@ -532,6 +536,12 @@ export function TerminalView({
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
       })) return
+      const pendingFile = linkOpeningRef.current.request
+      if (pendingFile) linkOpeningRef.current.dismiss(pendingFile.id)
+      if (useAppStore.getState().mainSurface === 'agents') {
+        linkOpeningRef.current.activateHttp(url, event)
+        return
+      }
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
       // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
@@ -652,7 +662,11 @@ export function TerminalView({
                 link: match,
                 local: workspaceIsLocalRef.current,
                 openSystem: (path) => api.files.openSystem(linkOriginRef.current.workspaceId, path),
-                openFile: async (link) => { await openFile(link.path, linkOriginRef.current.tabGroupId, location, linkOriginRef.current.workspaceId) }
+                openFile: async (link) => {
+                  linkRequestRef.current = null
+                  setLinkRequest(null)
+                  linkOpeningRef.current.activateFile(link.path, location, event)
+                }
               }).catch(reportError)
             },
             hover: (event: MouseEvent) => {
@@ -1433,6 +1447,8 @@ export function TerminalView({
       if (inputGeometryRef.current === inputGeometry) inputGeometryRef.current = null
       clearTimeout(revealDeadline)
       clearLinkPreview()
+      const pendingLink = linkOpeningRef.current.request
+      if (pendingLink) linkOpeningRef.current.dismiss(pendingLink.id)
       setLinkRequest((current) => {
         const next = current?.terminalGeneration === terminalGeneration ? null : current
         linkRequestRef.current = next
@@ -1841,9 +1857,10 @@ export function TerminalView({
         </div>
       </TerminalContextMenu>
       <OpenDestinationPopover
-        request={linkRequest}
-        canSplit={Boolean(linkOrigin.tabId && linkOrigin.regionId)}
+        request={linkOpening.request ?? linkRequest}
+        canSplit={linkOpening.request ? linkOpening.canSplit : Boolean(linkOrigin.tabId && linkOrigin.regionId)}
         onDismiss={(requestId) => {
+          if (linkOpening.request) { linkOpening.dismiss(requestId); return }
           setLinkRequest((current) => {
             const next = dismissTerminalLinkRequest(current, requestId)
             if (linkRequestRef.current?.id === requestId) linkRequestRef.current = next
@@ -1851,6 +1868,7 @@ export function TerminalView({
           })
         }}
         onSelect={(destination) => {
+          if (linkOpening.request) { linkOpening.choose(destination); return }
           const request = linkRequest
           if (!request || linkRequestRef.current?.id !== request.id) return
           linkRequestRef.current = null

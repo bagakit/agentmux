@@ -202,6 +202,7 @@ import {
   reduceFileOpened,
   reduceFileSurfaceOpened,
   fileOpenReferenceMatches,
+  fileOpenSplitMatches,
   fileOpenLauncherMatches,
   reduceFileRename,
   findFileRenameProjectionCollision,
@@ -2761,7 +2762,7 @@ export function fileNavigationSelection(state: AppState): string {
   const tabId = layout ? findGroup(layout, layout.activeGroupId)?.activeTabId : undefined
   return JSON.stringify([state.mainSurface, state.activeWorkspaceId, layout?.activeGroupId, tabId,
     tabId ? state.tabs[tabId]?.layout.activeRegionId : undefined,
-    state.agentFocus.execution.sessionId, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
+    state.agentFocus.execution.sessionId, state.agentFocus.execution.reference, state.agentFocus.pmo.sessionId, state.workbenchSpaceSelection, state.surveyZoneSelection])
 }
 
 async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string): Promise<string> {
@@ -5874,13 +5875,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const displayId = placement?.displayWorkspaceId ?? workspaceId
     const background = placement?.focus === false
     const canonicalTabId = workspaceId ? fileTabId(workspaceId, path) : null
-    const exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
-    const destinationTabId = placement?.launcher?.tabId ?? placement?.reference?.tabId ?? canonicalTabId
+    let exactRegionId = placement?.launcher?.regionId ?? placement?.reference?.regionId ?? (canonicalTabId ? initialWorkbenchRegionId(canonicalTabId) : null)
+    const destinationTabId = placement?.split?.tabId ?? placement?.launcher?.tabId ?? placement?.reference?.tabId ?? canonicalTabId
     const originalTab = destinationTabId ? navigation.tabs[destinationTabId] : undefined
-    let expectedSurface = exactRegionId ? originalTab?.regions[exactRegionId] : undefined
+    const splitAnchor = placement?.split ? originalTab?.regions[placement.split.regionId] : undefined
+    let expectedSurface = placement?.split ? undefined : exactRegionId ? originalTab?.regions[exactRegionId] : undefined
     let result: FileOpenResult = { placement: { status: 'unconfirmed', tabId: null, regionId: null },
       data: { kind: 'unconfirmed', reason: null }, navigation: background ? 'background' : 'unconfirmed' }
     const rememberPlacement = () => {
+      if (placement?.split) {
+        const target = workbenchSurfaces(get().tabs[placement.split.tabId]!).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
+        if (target) exactRegionId = target.regionId
+      }
       if (!canonicalTabId || !exactRegionId) return
       const tab = get().tabs[destinationTabId!]
       const surface = tab?.regions[exactRegionId]
@@ -5909,13 +5915,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
         currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
         fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement) &&
+        fileOpenSplitMatches(get(), workspaceId, tabGroupId, placement, confirmedExistingSpace(get())) &&
+        (!placement.split || currentTab?.regions[placement.split.regionId] === splitAnchor) &&
         fileOpenLauncherMatches(get(), workspaceId, path, tabGroupId, placement)) &&
         (!placement?.onResult || !expectedSurface || exactRegionId && currentTab?.regions[exactRegionId] === expectedSurface)
     }
     if (!resourceCurrent()) return false
-    const confirmedExistingSpace = (state: AppState): ConfirmedExistingFileSpace | undefined => {
+    function confirmedExistingSpace(state: AppState): ConfirmedExistingFileSpace | undefined {
       if (!placement || placement.reference || placement.launcher || !canonicalTabId) return undefined
-      const tab = state.tabs[canonicalTabId]
+      const tab = state.tabs[placement.split?.tabId ?? canonicalTabId]
       if (!tab) return undefined
       const workspace = state.config?.workspaces.find(item => item.id === workspaceId)
       const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)
@@ -5926,7 +5934,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const region = tab.regions[id]
         return region?.kind === 'file' && region.workspaceId === workspaceId && region.path === path
       })
-      if (tab.workspaceId !== workspaceId || !file || !workspace ||
+      if (tab.workspaceId !== workspaceId || !placement.split && !file || !workspace ||
         workspace.hostId !== placement.resource.hostId || workspace.path !== placement.resource.path ||
         zone?.workspaceId !== workspaceId || zone.hostId !== workspace.hostId) {
         throw new Error('The existing File resource or Zone context is unconfirmed; its original Tab and body are retained.')
@@ -5964,7 +5972,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().setSurveyZoneCollected(placement.space.zoneId, true)
       }
       if (placement?.focus === true && placement.selection && resourceCurrent()) {
-        const choice = placement.selection
+        const choice = { ...placement.selection, ...(placement.split && exactRegionId ? { tabId: destinationTabId!, regionId: exactRegionId } : {}) }
         if (!choice.tabId || !choice.regionId || !choice.groupId) return
         set({ workbenchSpaceSelection: choice })
         get().focusRegion(choice.workspaceId, choice.tabId, choice.regionId, 'pointer', choice.groupId)
@@ -5979,9 +5987,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       if (!placement?.projection) return
       if (placement.reference) { placement.projection.onSelect(placement.reference); return }
-      const tabId = placement.launcher?.tabId ?? fileTabId(workspaceId, path), tab = get().tabs[tabId]
+      const tabId = placement.split?.tabId ?? placement.launcher?.tabId ?? fileTabId(workspaceId, path), tab = get().tabs[tabId]
       if (!tab || !tabGroupId || !findGroup(get().layouts[displayId!]!, tabGroupId)?.tabOrder.includes(tabId)) throw new Error('The exact Note display occurrence could not be confirmed.')
-      placement.projection.onSelect({ displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: tab.layout.activeRegionId })
+      const reference = { displayWorkspaceId: displayId!, groupId: tabGroupId, tabId, regionId: placement.split && exactRegionId ? exactRegionId : tab.layout.activeRegionId }
+      placement.projection.onSelect(reference)
+      if (placement.projection.presentationId === 'focus-workbench') result.navigation = get().mainSurface === 'agents' &&
+        sameWorkbenchProjectionSelection(get().agentFocus.execution.reference ?? null, reference) ? 'applied' : 'cancelled' 
     }
     const key = documentKey(workspaceId, path)
     // 书签文件（`.webloc`/`.url`）默认开进 Browser，不进 Monaco——用户原话「应该是默认 browser」。
@@ -6198,7 +6209,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const surface = exactRegionId ? tab?.regions[exactRegionId] : undefined
         const member = displayId && tabId && get().layouts[displayId]?.groups.some(group => group.id === tabGroupId && group.tabOrder.includes(tabId))
         if (expectedSurface && surface === expectedSurface && surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path && member) {
-          result.placement = { status: originalTab ? 'reused' : 'created', tabId: tabId!, regionId: exactRegionId! }
+          result.placement = { status: originalTab?.regions[exactRegionId!] ? 'reused' : 'created', tabId: tabId!, regionId: exactRegionId! }
         } else if (result.data.kind !== 'not-file') result.placement = { status: result.data.kind === 'failed' && !expectedSurface ? 'none' : 'unconfirmed', tabId: null, regionId: null }
         if (!background && result.navigation !== 'applied' && (result.data.kind === 'text' || result.data.kind === 'media-preview' || result.data.kind === 'binary-preview')) result.navigation = 'cancelled'
         placement.onResult(result)
@@ -7730,6 +7741,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     throw new Error(`Could not save the bookmark: ${lastReason}`)
   },
   async openHttpLink(origin, rawUrl, destination) {
+    const opening = get(), expectedFocus = opening.agentFocus.execution
+    const focusLink = destination !== 'tab' && opening.mainSurface === 'agents' && expectedFocus.sessionId === origin.sessionId
     const url = normalizeHttpLinkUrl(rawUrl)
     if (destination === 'system') {
       await api.ui.openExternal(url)
@@ -7827,8 +7840,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     })
     if (!planned) throw placementError ?? new Error('Link destination could not be created')
 
+    const plannedNavigation = fileNavigationSelection(get())
     try {
       await get().createBrowser(placementOrigin.tabGroupId!, { tabId, regionId }, url, undefined, pendingLauncher.workspaceId)
+      const current = get()
+      if (focusLink && fileNavigationSelection(current) === plannedNavigation && current.tabs[tabId]?.regions[regionId]?.kind === 'browser') {
+        current.selectExecutionFocusReference({ displayWorkspaceId: placementOrigin.workspaceId, groupId: placementOrigin.tabGroupId!, tabId, regionId }, expectedFocus)
+      }
     } catch (error) {
       set((current) => {
         const liveTab = current.tabs[tabId]

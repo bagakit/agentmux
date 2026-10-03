@@ -10,7 +10,7 @@ export function ConversationFiles({ files, openFile }: { files: readonly Convers
       const location = reference.line === undefined ? '' : `:${reference.line}${reference.column === undefined ? '' : `:${reference.column}`}`
       return <button type="button" className="conversation-file" key={JSON.stringify([reference.path, location])}
         title={`${reference.path}${location}`} aria-label={`Open ${reference.path}${location}`}
-        onClick={() => openFile(reference.path, referenceRevealLocation(reference))}>
+        onClick={event => openFile(reference.path, referenceRevealLocation(reference), event)}>
         <Icon size={16} aria-hidden="true" />
         <span className="conversation-file__label"><span className="conversation-file__name">{name}</span>
           <span className="conversation-file__path">{reference.path}{location}</span></span>

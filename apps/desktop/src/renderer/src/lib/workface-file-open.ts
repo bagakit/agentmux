@@ -43,12 +43,14 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
       zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path }
     const tabId = fileTabId(workspace.id, mapped.path), regionId = initialWorkbenchRegionId(tabId)
     const target = spatialDestination(catalog, { zoneId: zone.zoneId, ...(request.spaceId ? { spaceId: request.spaceId } : {}),
-      ...(request.displayWorkspaceId ? { displayWorkspaceId: request.displayWorkspaceId, groupId: request.groupId } : {}), newTab: true },
+      ...(request.displayWorkspaceId ? { displayWorkspaceId: request.displayWorkspaceId, groupId: request.groupId } : {}),
+      ...(request.tabId ? { tabId: request.tabId, ...(request.regionId ? { regionId: request.regionId } : {}), ...(request.split ? { split: request.split === 'up' ? 'above' as const : request.split === 'down' ? 'below' as const : request.split } : {}) } : { newTab: true }) },
       { tabId, regionId }, state.layouts).address
-    if (ports.closing(tabId)) throw new Error('The original File Tab is closing; its content is retained.')
+    if (ports.closing(request.tabId ?? tabId)) throw new Error('The original File Tab is closing; its content is retained.')
     const originalContext = zoneContext(state, topics, zone)
-    const beforeTab = Object.hasOwn(state.tabs, tabId) ? state.tabs[tabId] : undefined
-    if (beforeTab && beforeTab.space?.zoneId !== zone.zoneId) {
+    const destinationTabId = request.tabId ?? tabId
+    const beforeTab = Object.hasOwn(state.tabs, destinationTabId) ? state.tabs[destinationTabId] : undefined
+    if (!request.tabId && beforeTab && beforeTab.space?.zoneId !== zone.zoneId) {
       report.outcome = 'refused'
       report.issues.push(issue('placement', 'SPACE_PARENT_MISMATCH', 'The canonical File Tab already has another Zone context; no replacement or duplicate was created.'))
       return report
@@ -60,8 +62,9 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
       displayWorkspaceId: target.displayWorkspaceId,
       space: { spaceId: originalContext, zoneId: zone.zoneId }, resource: { hostId: workspace.hostId, path: workspace.path },
       focus: request.focus, fileOnly: true,
+      ...(request.tabId && request.regionId && request.split ? { split: { tabId: request.tabId, regionId: request.regionId, direction: request.split } } : {}),
       ...(request.focus ? { selection: { spaceId: target.spaceId, zoneId: zone.zoneId, workspaceId: target.displayWorkspaceId,
-        groupId: target.groupId, tabId, regionId, topicId: catalog.spaces.find(space => space.spaceId === target.spaceId)?.topicId ?? null } } : {}),
+        groupId: target.groupId, tabId: destinationTabId, regionId, topicId: catalog.spaces.find(space => space.spaceId === target.spaceId)?.topicId ?? null } } : {}),
       onResult: result => { actual = result }
     })
     if (!actual) throw new Error('The original File owner did not confirm a same-call result.')
@@ -71,7 +74,7 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
     report.placement = { ...actual.placement, locations: actual.placement.regionId ? afterCatalog.locations.filter(location =>
       location.regionId === actual!.placement.regionId && location.tabId === actual!.placement.tabId) : [] }
     const afterMember = applied.layouts[target.displayWorkspaceId]?.groups.find(group => group.id === target.groupId)?.tabOrder.includes(tabId) ?? false
-    report.changed = !beforeTab && actual.placement.status === 'created' || !beforeMember && afterMember
+    report.changed = actual.placement.status === 'created' || !beforeMember && afterMember
     if (actual.placement.status === 'created' || actual.placement.status === 'reused') {
       report.save = await ports.save(report.changed)
       if (report.save.reason) report.issues.push(issue('save', 'SPACE_SAVE_UNCONFIRMED', report.save.reason))

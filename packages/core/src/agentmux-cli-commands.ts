@@ -7,7 +7,7 @@ import { parseFileReadCommand } from './agentmux-cli-files.js'
 import { parseFileListParams } from './public-rpc-files.js'
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
-import { SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
+import { SPLIT_FLAG_DIRECTIONS, isSplitDirection } from './split-direction-ssot.js'
 import type { AgentMuxRpcParams } from './public-rpc.js'
 
 type FlagKind = 'boolean' | 'value' | 'data'
@@ -157,8 +157,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('topic.create', '--topic ID --title TEXT [--category UUID]', 'Create one exact Topic in a knowledge category without starting a Run.', { '--topic': 'data', '--title': 'data', '--category': 'data' }, f => ({ topicId: id(f, '--topic', true), title: value(f, '--title', true)!, ...fields(f, { '--category': 'categoryId' }) }), SAVE_NOTICE),
   command('topic.move', '--topic ID --category UUID --revision NUMBER', 'Move the whole Topic to one category, preserving content, Chat identities and execution.', { '--topic': 'data', '--category': 'data', '--revision': 'value' }, f => ({ topicId: id(f, '--topic', true), categoryId: id(f, '--category', true), expectedRevision: Number(value(f, '--revision', true)) }), SAVE_NOTICE),
   command('topic.knowledge.ls', '--topic ID [--limit N]', 'Discover saved entries and original document names in one exact ordinary Topic; documents retain bounded file.read targets.', { '--topic': 'data', '--limit': 'value' }, f => ({ topicId: id(f, '--topic', true), ...numbers(f, { '--limit': 'limit' }) })),
-  command('topic.knowledge.search', '--query TEXT [--topic ID] [--limit N]', 'Search saved entries and original document names and text. Read unavailable for incomplete coverage and observation for measured work and local history persistence.', { '--topic': 'data', '--query': 'data', '--limit': 'value' }, f => ({ query: value(f, '--query', true)!, ...fields(f, { '--topic': 'topicId' }), ...numbers(f, { '--limit': 'limit' }) })),
-  command('topic.knowledge.history', '[--topic ID] [--query TEXT] [--search UUID] [--limit N]', 'Read recent executed searches, exact query/scope, outcomes and retention gaps. Filters match original requests exactly; global searches have topicId null. No search or Agent execution is started.', { '--topic': 'data', '--query': 'data', '--search': 'data', '--limit': 'value' }, f => ({ ...fields(f, { '--topic': 'topicId', '--query': 'query', '--search': 'searchId' }), ...numbers(f, { '--limit': 'limit' }) })),
+  command('topic.knowledge.search', '--query TEXT [--topic ID] [--limit N]', 'Search saved entries and original document names and text; documents are original files, not classified knowledge. Read unavailable for omitted or partial work.', { '--topic': 'data', '--query': 'data', '--limit': 'value' }, f => ({ query: value(f, '--query', true)!, ...fields(f, { '--topic': 'topicId' }), ...numbers(f, { '--limit': 'limit' }) })),
   command('topic.knowledge.read', '--topic ID --entry UUID', 'Read one exact knowledge entry, its sources and content revision.', { '--topic': 'data', '--entry': 'data' }, f => ({ topicId: id(f, '--topic', true), entryId: id(f, '--entry', true) })),
   command('topic.knowledge.write', '--input FILE|-', 'Save a typed knowledge entry at its exact expectedRevision without starting or messaging an Agent.', { '--input': 'data' }, async f => await readControlJsonInput(value(f, '--input', true)!, 'Topic knowledge') as Record<string, unknown>, 'The JSON carries exact topicId/entryId, title, content, form, certainty, sources and expectedRevision (null to create). Read the original revision before editing. ' + SAVE_NOTICE),
   empty('topic.migrate.preview', 'Preview existing local Topic identities and exact category changes without writing.'),
@@ -293,7 +292,13 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     const tab = id(f, '--tab')
     return { ...operation(f), target: tab === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: tab }, mode: f.values.has('--preset') ? { kind: 'preset', preset: value(f, '--preset') } : { kind: f.booleans.has('--balance') ? 'balance' : 'active-first' } }
   }),
-  command('file.open', '--path PATH --zone ID [--space ID] [--display-workspace ID --group ID] [--focus]', 'Open a Zone-relative file through its existing document owner.', { '--path': 'data', '--zone': 'data', '--space': 'data', '--display-workspace': 'data', '--group': 'data', '--focus': 'boolean', ...OP }, f => ({ ...operation(f), path: value(f, '--path', true), ...selector(f), focus: focus(f) }), SAVE_NOTICE),
+  command('file.open', '--path PATH --zone ID [--space ID] [--display-workspace ID --group ID] [--tab ID --region ID --split left|right|up|down] [--focus]', 'Open a Zone-relative file in a new Tab or beside an exact anchor Region through its existing document owner.', { '--path': 'data', ...SELECTOR, '--split': 'value', '--focus': 'boolean', ...OP }, f => {
+    const regionPlacement = ['--tab', '--region', '--split'].some(flag => f.values.has(flag))
+    if (regionPlacement && !['--tab', '--region', '--split', '--display-workspace', '--group'].every(flag => f.values.has(flag))) invalid('File Region placement requires --tab, --region, --split, --display-workspace and --group together.')
+    const split = value(f, '--split')
+    if (split !== undefined && !isSplitDirection(split)) invalid('--split must be left, right, up or down.')
+    return { ...operation(f), path: value(f, '--path', true), ...selector(f), ...(split === undefined ? {} : { split }), focus: focus(f) }
+  }, 'Without --tab/--region/--split, open in a new Tab. A Region destination requires the exact existing Tab, anchor Region, Display Workspace and Group together. The returned placement names the actual File Region, which may differ from the anchor. --focus controls navigation independently; its default is background. ' + SAVE_NOTICE),
   command('file.read', '--zone ID --path PATH --host ID --workspace ID --workspace-path PATH [--space ID] [--max-bytes N]', 'Read the original Zone-relative file with its exact resource and saved revision. An optional byte cap refuses oversized bodies before reading them.',
     { '--zone': 'data', '--path': 'data', '--host': 'data', '--workspace': 'data', '--workspace-path': 'data', '--space': 'data', '--max-bytes': 'value' },
     f => parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,
