@@ -38,7 +38,18 @@ Update uses {"changes":{...},"expected":{...}}; expected covers changed fields.
 Delete input uses {"expected":{...}} with complete saved editable fields.
 Revisions are owner-issued, never editable. Performance is read-only.
 
-Saving, enabling an entry, inspect/script/ls and watch do not execute user scripts.
+Install a local extension directory with agentmux toolkit install ID --path <PACKAGE_DIRECTORY>
+and optional --cwd <WORKSPACE_DIRECTORY>. Omitted cwd is chosen by the Host. The saved record
+holds the directory reference and enabled/statusBar/args/cwd preferences. It does not import
+a source copy. Edit manifest.json, entry or helper files in that directory; the next explicit
+inspect/run/action captures the current files. Manifest schema is agentmux.toolkit.package.v1,
+with name, named icon, relative entry and optional actions {id,label,entry,args?}.
+ls reports package metadata availability and configRevision; inspect reports the effective
+definition revision, content SHA256 and exact source entries. Package and execution cwd
+are separate paths. A missing package retains its configuration and original execution facts.
+Stop still targets the retained admission; unavailable source cannot admit a new execution.
+
+Installing, saving, enabling an entry, inspect/script/ls and watch do not execute user scripts.
 Run captures the definition/result baseline once in the service and admits one execution.
 Full input can pin invocationId, expectedRevision and expectedLatestExecutionId. Stop input
 pins executionId (null means no active execution). After an unknown receipt inspect the
@@ -47,7 +58,7 @@ original identity; do not retry automatically. Closing watch releases only its r
 Saved actions have id, label, JavaScript ESM script and args, sharing the tool's fixed cwd.
 At most 16 actions share the definition budget. Action input pins invocationId,
 expectedRevision, sourceExecutionId and expectedAdmissionExecutionId (null if idle).
-Changed targets/newer results reject stale actions. Retained invocation replays its facts;
+Changed package files, targets or newer results reject stale actions. Retained invocation replays its facts;
 output cannot define actions. Scripts use the local user's files/environment/network;
 this capability does not provide a sandbox, secret storage, scheduling or remote execution.
 

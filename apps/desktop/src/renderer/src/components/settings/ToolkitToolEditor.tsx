@@ -1,6 +1,6 @@
 import { ArrowLeft, Code2, Folder, Play, Plus, Trash2, X } from 'lucide-react'
 import { lazy, Suspense, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
-import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields } from '@agentmux/core/control'
+import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { TOOLKIT_ICON_IDS } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon, toolkitIconLabels } from '../toolkit/ToolkitIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
@@ -12,7 +12,7 @@ import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './u
 const ScriptEditor = lazy(() => import('./ToolkitScriptEditor'))
 
 export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, onSave, onRemove, onRun, onBack }: {
-  id: string; entry: ToolkitDraft; active: boolean; nameInput: RefObject<HTMLInputElement | null>
+  id: string; entry: ToolkitDraft<ToolkitToolFields, ToolkitInlineToolConfiguration>; active: boolean; nameInput: RefObject<HTMLInputElement | null>
   save: ReturnType<ReturnType<typeof useToolkitDrafts>['saveFor']>
   onEdit(patch: Partial<ToolkitToolFields>): void; onSave(): void; onBack(): void
   onRemove(): Promise<boolean>; onRun(definition: ToolkitToolDefinition): Promise<string>

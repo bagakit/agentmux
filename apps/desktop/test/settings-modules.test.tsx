@@ -1,3 +1,4 @@
+const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -181,7 +182,8 @@ it('Browser module saves its authored automation value against the original fiel
 })
 
 
-it('finds the editable account starting point through ordinary auth and usage settings search without creating or running', async () => {
+it('finds the saved local Auth tool through ordinary auth and usage settings search without creating or running', async () => {
+  useAppStore.setState({ config: { ...composerConfig, toolkit: { tools: [{ id: 'auth', name: 'Auth', icon: 'key-round', enabled: true, statusBar: 'icon', script: 'console.log(1)', args: [], revision: 'saved-local', workspacePath: _hygiene_fixturePath("fixed") }] } } })
   const save = vi.spyOn(api.config, 'save').mockResolvedValue(undefined)
   const add = vi.spyOn(api.toolkit, 'add')
   const run = vi.spyOn(api.toolkit, 'run')
@@ -193,12 +195,12 @@ it('finds the editable account starting point through ordinary auth and usage se
     expect(connected('.settings-content__header h2').textContent).toBe('Toolkit')
     expect(connected<HTMLElement>('[data-settings-pane="toolkit"]').hidden).toBe(false)
   }
-  const start = connected<HTMLButtonElement>('[data-tool-template="account-usage"]')
-  expect(start.textContent).toBe('Account usage example')
-  expect(start.title).toBe('Review an editable starting point')
-  await act(async () => start.click())
-  expect(connected('[aria-label="Account usage template"] h3').textContent).toBe('Account usage')
-  expect(connected('.toolkit-template__source').textContent?.length).toBeGreaterThan(100)
+  const local = connected<HTMLButtonElement>('[data-tool-id="auth"]')
+  expect(local.textContent).toContain('Auth')
+  expect(local.textContent).toContain('Custom')
+  await act(async () => local.click())
+  expect(connected<HTMLInputElement>('.toolkit-editor__name input').value).toBe('Auth')
+  expect(dom.container.querySelector('[data-tool-template]')).toBeNull()
   expect(save).not.toHaveBeenCalled()
   expect(add).not.toHaveBeenCalled()
   expect(run).not.toHaveBeenCalled()

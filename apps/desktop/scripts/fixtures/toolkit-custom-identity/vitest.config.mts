@@ -12,7 +12,7 @@ const mutant = process.env.AGENTMUX_TOOLKIT_IDENTITY_MUTANT ?? 'baseline'
 const pane = 'apps/desktop/src/renderer/src/components/settings/ToolkitSettingsPane.tsx'
 const edits: Record<string, [string, string]> = {
   default: ['useState<string | null>(toolId ?? tools[0]?.id ?? null)', "useState<string | null>(toolId ?? 'performance')"],
-  pattern: ['onEdit={patch => resource.edit(selectedId, patch)}', 'onEdit={patch => resource.edit(selectedId, { ...patch, script: createAccountUsageTool().script })}'],
+  pattern: ['nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)}', 'nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, { ...patch, script: "console.log('overwritten')" })}'],
   retarget: ['setSelectedId(toolId)', 'setSelectedId(tools[0]?.id ?? null)']
 }
 assert.ok(mutant === 'baseline' || edits[mutant], 'Known actual product block mutation')

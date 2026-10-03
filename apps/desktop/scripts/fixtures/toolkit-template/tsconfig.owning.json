@@ -1,9 +1,0 @@
-{
-  "extends": "../toolkit-custom-ui/tsconfig.owning.json",
-  "files": [
-    "../../../src/renderer/src/components/settings/account-usage-template.ts",
-    "../../../src/renderer/src/components/settings/ToolkitSettingsPane.tsx",
-    "../../../src/renderer/src/global.d.ts"
-  ],
-  "include": ["../../../types/**/*.d.ts"]
-}

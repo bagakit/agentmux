@@ -923,6 +923,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   const operation: AgentMuxControlRequest['operation'] = source.operation
   if (isToolkitOperation(operation)) {
     const parsed = parseToolkitResult(operation, result)
+    settingsResourceBudget(source, 'CONTROL_PROTOCOL_ERROR')
     const { operation: _operation, ...payload } = parsed
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: payload } as AgentMuxControlSuccessReceipt
   }
@@ -1338,9 +1339,12 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   const operation = Object.getOwnPropertyDescriptor(source, 'operation')
   if (operation && !('value' in operation)) throw new AgentMuxError('Control receipt operation must be data.', 'CONTROL_PROTOCOL_ERROR')
   if (isToolkitOperation(operation?.value)) {
-    // Validate data descriptors before reading schemaVersion, ok or requestId.
-    settingsResourceRecord(source, 'CONTROL_PROTOCOL_ERROR')
+    // Validate header descriptors before reads; the original typed result codec
+    // owns nested retained executions, independently of the generic JSON depth.
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result', 'error'], 'CONTROL_PROTOCOL_ERROR')
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', source.ok === true ? 'result' : 'error'], 'CONTROL_PROTOCOL_ERROR')
+    const { result: _result, ...header } = source
+    settingsResourceRecord(header, 'CONTROL_PROTOCOL_ERROR')
   }
   if (isSpaceControlOperation(operation?.value)) {
     const ok = Object.getOwnPropertyDescriptor(source, 'ok')

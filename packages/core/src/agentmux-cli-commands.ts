@@ -14,6 +14,7 @@ type FlagSpec = Readonly<Record<string, FlagKind>>
 type Flags = { values: Map<string, string>; booleans: Set<string> }
 export interface AgentMuxCliCommand {
   method: string
+  rpcMethod?: string
   usage: string
   summary: string
   details?: string
@@ -126,6 +127,7 @@ function settings(method: string, usage: string, summary: string, positionalData
 }
 function toolkit(action: string, usage: string, summary: string, positionalData = 1): AgentMuxCliCommand {
   return { method: `toolkit.${action}`, usage, summary, positionalData,
+    ...(action === 'install' ? { rpcMethod: 'toolkit.create' } : {}),
     ...(action === 'watch' ? { stream: true } : {}), details: SAVE_NOTICE,
     parse: async args => (await parseToolkitCommand([action, ...args])).params }
 }
@@ -364,6 +366,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   toolkit('ls', '', 'List original saved Toolkit resources.', 0),
   toolkit('inspect', '<id>', 'Inspect current definition, execution and result facts.'),
   toolkit('create', '<id> --input <file|->', 'Create a complete tool using its original owner.'),
+  toolkit('install', '<id> --path <absolute-directory> [--cwd <absolute-directory>]', 'Save a local package reference and preferences without running it.'),
   toolkit('update', '<id> --input <file|->', 'Update {changes,expected?} without running the tool.'),
   toolkit('delete', '<id> [--input <file|->]', 'Delete a saved tool with original expected-field checks.'),
   toolkit('action', '<id> <action-id> --input <file|->', 'Run a saved action against its exact original result/admission baseline.', 2),
@@ -406,5 +409,6 @@ export async function parseAgentMuxCliInvocation(argv: readonly string[]): Promi
   const { args, endpoint } = agentMuxCliArguments(argv)
   const match = agentMuxCliMatch(args)
   if (!match) invalid('Unknown command. Run agentmux --help.')
-  return { command: match!.command, params: await match!.command.parse(match!.tail), ...(endpoint === undefined ? {} : { endpoint }) }
+  const command = match!.command.rpcMethod ? { ...match!.command, method: match!.command.rpcMethod } : match!.command
+  return { command, params: await match!.command.parse(match!.tail), ...(endpoint === undefined ? {} : { endpoint }) }
 }
