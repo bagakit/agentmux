@@ -24,6 +24,7 @@ import { applyConfigEdit } from '../../../shared/config-edit'
 import type { AgentCatalogEntry } from '@agentmux/core'
 import type { DesktopControlRequest, DesktopControlResult } from '../../../shared/contracts'
 import { applyAppLinkForget } from '../../../shared/browser-settings'
+import { resolveBrowserAddress } from '../../../shared/browser-address'
 import type { Demand, DemandActivity, DemandDecision } from '@agentmux/demand'
 import { BUILT_IN_AGENT_PROVIDER_IDS, builtInAgentProviderLabel } from '@agentmux/core/provider-id'
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
@@ -326,14 +327,7 @@ function requireMockBrowser(id: string): BrowserSnapshot {
   return browser
 }
 
-function normalizeMockBrowserUrl(value: string): string {
-  const input = value.trim()
-  if (!input || input === 'about:blank') return 'about:blank'
-  if (/\s/.test(input)) return `https://www.google.com/search?q=${encodeURIComponent(input)}`
-  if (/^[A-Za-z][A-Za-z\d+.-]*:\/\//.test(input)) return new URL(input).toString()
-  const local = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i.test(input)
-  return new URL(`${local ? 'http' : 'https'}://${input}`).toString()
-}
+
 
 let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState|null=null
 const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
@@ -1143,7 +1137,7 @@ const mockApi: AgentMuxDesktopApi = {
         id,
         navigationId: crypto.randomUUID(),
         profileId: rememberedProfileId ?? mockDefaultBrowserProfile.id,
-        url: url.trim() || 'about:blank',
+        url: resolveBrowserAddress(url),
         title: 'New Tab',
         loading: false,
         canGoBack: false,
@@ -1162,7 +1156,7 @@ const mockApi: AgentMuxDesktopApi = {
     navigate: async (id, rawUrl) => {
       const current = mockBrowsers.get(id)
       if (!current) throw new Error(`Unknown browser: ${id}`)
-      const url = normalizeMockBrowserUrl(rawUrl)
+      const url = resolveBrowserAddress(rawUrl)
       const browser = { ...current, url, title: url === 'about:blank' ? 'New Tab' : new URL(url).hostname, error: null }
       browser.navigationId = crypto.randomUUID()
       mockBrowsers.set(id, browser)

@@ -1,3 +1,4 @@
+const { fixtureFileUrl: _hygiene_fixtureFileUrl, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -373,12 +374,43 @@ describe('BrowserViewManager', () => {
     expect(manager.resourceProcessIds()).toEqual([])
   })
 
+  it('opens ordinary address text as search through actual create and navigate', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    try {
+      const opened = await manager.create('address-search', '天气', null, 'work')
+      const view = fixture.children[0]!
+      expect(opened.url).toBe('https://www.google.com/search?q=%E5%A4%A9%E6%B0%94')
+      expect(view.webContents.url).toBe(opened.url)
+      const searched = await manager.navigate(opened.id, 'skyvern')
+      expect(searched.url).toBe('https://www.google.com/search?q=skyvern')
+      expect(view.webContents.url).toBe(searched.url)
+      expect(searched.profileId).toBe('work')
+      expect(searched.id).toBe(opened.id)
+      expect(fixture.children).toEqual([view])
+      expect((await manager.navigate(opened.id, 'example.com:8443/a')).url).toBe('https://example.com:8443/a')
+      expect((await manager.navigate(opened.id, 'localhost:3000')).url).toBe('http://localhost:3000/')
+      const currentUrl = view.webContents.url
+      await expect(manager.navigate(opened.id, 'javascript:123')).rejects.toThrow('Unsupported browser URL protocol')
+      expect(view.webContents.url).toBe(currentUrl)
+      expect(fixture.children).toEqual([view])
+      for (const malformed of ['192.168.1.999', '[2001:db8::1]:99999', 'example.com:99999']) {
+        await expect(manager.navigate(opened.id, malformed)).rejects.toThrow('Invalid URL')
+        expect(view.webContents.url).toBe(currentUrl)
+        expect(await manager.create(opened.id, 'about:blank')).toMatchObject({ id: opened.id, profileId: 'work', url: currentUrl })
+        expect(fixture.children).toEqual([view])
+      }
+    } finally { manager.dispose() }
+  })
+
   it('normalizes only embeddable web URLs', () => {
     expect(normalizeBrowserUrl('example.com')).toBe('https://example.com/')
     expect(normalizeBrowserUrl('localhost:4173')).toBe('http://localhost:4173/')
     expect(normalizeBrowserUrl('agent runtime docs')).toBe('https://www.google.com/search?q=agent%20runtime%20docs')
     expect(normalizeBrowserUrl('about:blank')).toBe('about:blank')
     expect(normalizeBrowserUrl('file:///etc/passwd')).toBe('file:///etc/passwd')
+    expect(normalizeBrowserUrl((_hygiene_fixturePath("tmp/browser") + " page.html"))).toBe(_hygiene_fixtureFileUrl("tmp/browser%20page.html"))
+    expect(new URL(normalizeBrowserUrl('./browser page.html')).protocol).toBe('file:')
+    expect(new URL(normalizeBrowserUrl('../browser page.html')).protocol).toBe('file:')
     expect(() => normalizeBrowserUrl('javascript:alert(1)')).toThrow('Unsupported browser URL protocol')
     expect(() => assertAllowedBrowserUrl('mailto:hello@example.com')).toThrow('Unsupported browser URL protocol')
   })
