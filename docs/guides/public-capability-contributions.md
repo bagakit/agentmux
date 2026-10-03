@@ -29,6 +29,8 @@
 - **命令与发现。** 在 [AGENTMUX_CLI_COMMANDS](../../packages/core/src/agentmux-cli-commands.ts)及其现有领域 parser 修改注册、参数和说明；[help／skill](../../packages/core/src/agentmux-cli-help.ts)从注册来源生成。新身份和结果须可原样用于后续精确命令；核对受影响的对象 ls／inspect、聚合观察、名片及运行指引，不从名称、cwd、焦点或首候选猜目标，也不把无关字段机械加入全部发现入口。
 - **真实消费。** CLI 仅通过[公共客户端](../../packages/core/src/public-rpc-client.ts)调用服务；GUI 与其他客户端消费同一业务 owner 的事实，不要求 GUI 绕行 CLI，也不在 CLI 直接读写本地 Store。新增命令须接到实际业务，不能只注册 help 或用固定结果充当实现。
 
+命令注册的 `method` 持有对象与动作拼写，`usage` 只描述其后的参数；help／skill 由原生成器组合两者。必需输入不用可选括号，描述须与原 parser 一致。验证实际生成的总帮助、对象／动作帮助与技能输出，不能只检查命令名出现过；这些输出仍须保留该候选原权限、只读／副作用及恢复说明。
+
 一次请求的 JSON-RPC `id` 与原业务 `operationId` 分开。需要对账的副作用沿原操作身份查询；回执未知不当作未发生，不盲目重做。持续观察保原顺序、Gap 和完成事实；取消或断线只释放该 reader，不能停止原业务或健康 Agent。选择、实际呈现、输入、投递、任务接受和磁盘耐久性继续按[公共控制合同](../design/behavior/public-control.md)分别报告。
 
 ## 同一任务交付和验收
