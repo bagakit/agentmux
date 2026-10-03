@@ -29,6 +29,7 @@
 | UI 场景采图与独立审美评审 | [视觉验收指南](guides/agent-visual-e2e-review.md) |
 | Agent 用 CLI 操作原工作面 | [对象操作指南](guides/agentmux-cli-object-control.md) |
 | 整理具有长期价值的事故案例 | [事故案例写作指南](guides/incident-writing.md) |
+| 查看全部设置、管理入口及 GUI/CLI 范围 | [设置目录](settings-catalog.md) |
 | 新增设置能力 | [Settings 贡献约定](settings-module-contributions.md) |
 | Browser 展示媒体接口与资源 | [ABI](specs/browser-presentation-abi.md)、[资源合同](specs/browser-presentation-resource-contract.md) |
 

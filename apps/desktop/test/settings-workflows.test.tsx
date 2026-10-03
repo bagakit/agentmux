@@ -18,7 +18,7 @@ beforeEach(() => useAppStore.setState({ config: structuredClone(composerConfig),
   mainSurface: 'workbench', detectExecutors: async () => {}, checkHost: async () => {} }))
 async function section(id: string) { await dom.click(`nav [data-settings-target="${id}"]`) }
 const pane = (id: string) => dom.container.querySelector<HTMLElement>(`[data-settings-pane="${id}"]`)!
-const checkbox = () => pane('goals').querySelector<HTMLInputElement>('input[type=checkbox]')!
+const checkbox = () => pane('goals').querySelector<HTMLInputElement>('[aria-label="Collapse common actions"]')!
 async function save(id: string) { await dom.click(`[data-settings-pane="${id}"] [data-settings-save-bar] button`) }
 function transaction() {
   return vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {

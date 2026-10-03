@@ -4,6 +4,12 @@ be reached; do not read or write an alternative configuration. Settings inspect 
 it exposes the supported subset, not the entire client configuration. Saving configuration
 does not launch an Agent or certify Agent health. No Runtime is started or connected for help.
 
+Use settings inspect notes or settings inspect goals to discover reading and starting-view
+preferences, including their legal values and defaults. For example, settings set notes.fontSize 16
+adjusts note body text; settings set goals.defaultView board applies to newly opened Goals views.
+Views already open keep their current choices. settings set goals.showFinished true includes
+finished goals by default. These preferences do not edit note files or change Goal lifecycle.
+
 Resource input uses --input <file|->. Input is bounded UTF-8 JSON, read from a file or stdin (-). Create takes a field
 object; the ID occurs only in the positional argument. Update takes {"changes": {...},
 "expected": {...}} with nonempty changes and optional expected fields. Delete optionally

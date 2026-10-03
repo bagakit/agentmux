@@ -143,11 +143,19 @@ Settings 占据窗口内容区，status bar 始终可见、可交互，其低条
 
 用户的 My Profile 是本人称呼、头像和协作背景；Mote 的 Profile/SOUL 则是该 Mote 的身份与角色，互不覆盖。本人资料保存到原本机 ConfigOwner：称呼和 About 为有界自由文本，头像为有界静态 PNG/JPEG，默认不自动分享。用户明确启用 Share with new agents 后，准确已保存的称呼与 About 由现 Main 启动入口加入原通用 Agent 上下文；头像只用于界面，原用户请求、Topic 说明与启动说明保留。既有或恢复中的 Session 不热改上下文，也不自动发送新消息。关闭自动分享不构成访问隔离；有既有读取授权的 Agent 仍能通过 settings inspect profile 查询保存事实。Profile 不代表认证、不授予权限、不修改消息原作者记录；人类展示头像沿现展示语义，原 unknown 作者事实仍保持。字段草稿、expected、并发 clean 更新、同字段冲突、保存期间后续输入与失败保留沿原设置合同。
 
-Work 的 Space 调整原项目栏密度，Focus 调整近期活动窗口，Goals 调整常用操作的默认折叠状态。GUI 和公开 CLI 共用既有字段、唯一 Main ConfigOwner 与保存合同；Goals 的有效默认由 shared 单源提供，明确空的常用操作目录保持为空，修改折叠状态不得覆盖并发更新的引用、顺序或原 Prompt 正文。各分区切换仍保留已访问草稿，不引入新的订阅、轮询或对象探测。
+Work 的 Space 调整原项目栏密度，Focus 调整近期活动窗口与链接位置，Goals 调整初始视图、完成项显隐与常用操作折叠，Notes 调整正文阅读。GUI 和公开 CLI 共用字段、唯一 Main ConfigOwner 与保存合同；Goals 的有效默认由 shared 单源提供，明确空的常用操作目录保持为空，修改折叠状态不得覆盖并发更新的引用、顺序或原 Prompt 正文。各分区切换仍保留已访问草稿，不引入新的订阅、轮询或对象探测。
 
 Space 仅保 Topics 与 Projects 的具名管理入口：Topics 打开原 Space，Projects 在原设置 Shell 内进入 Environments。Mote 组的 Mote Club 沿原浮层 owner；Work 内 Survey 打开原研究工作面，Notes 打开原 Notebook 目录中的受保护“随手记”，使用 Core 的 DEFAULT_NOTEBOOK_ID 与已有 Notebook 呈现选择，不猜用户笔记、不创建新内容。显式 Notes 导航退出当前网页选择以展示 Notebook，保原探索与笔记内容；Mote 的显式点击允许原 Club 的读取、接回与焦点行为，新设置模块不另加启动或 Runtime 操作。首次挂载、搜索与 hover 不自动发现或执行对象。
 
-这些入口使用原内容管理面，不把其摘要冒称保存的全局偏好。Mote 的名称、头像、角色、SOUL 与协作内容留在准确 Mote 的 Profile；Topic/Project 的名称、分类、图标、绑定和 Wiki 留在原对象；Survey 的 Notebook、探索与研究产物留在原研究流程。不复制内容库或生成没有生产消费者的配置字段。Focus 的时间尺、时区、过滤与布局仍在 Focus 工作面调整；全局 Recent activity window 在 Settings 的 Focus 内调整，默认、范围与排序边界唯一见[《Focus 执行上下文》](focus-context.md#项目归属状态与离线目录)。这轮分组与管理入口是客户端编排，不增加 CLI/RPC 或 Main 配置域；原 scalar、Notebook 与 Mote 公共能力继续沿各自 owner。
+这些管理入口使用原内容管理面，不把其摘要冒称保存的全局偏好。Mote 的名称、头像、角色、SOUL 与协作内容留在准确 Mote 的 Profile；Topic/Project 的名称、分类、图标、绑定和 Wiki 留在原对象；Survey 的 Notebook、探索与研究产物留在原研究流程。不复制内容库或生成没有生产消费者的配置字段。Focus 的时间尺、时区、过滤与布局仍在 Focus 工作面调整；全局 Recent activity window 在 Settings 的 Focus 内调整，默认、范围与排序边界唯一见[《Focus 执行上下文》](focus-context.md#项目归属状态与离线目录)。管理入口编排不增加 CLI/RPC 或 Main 配置域；跨对象偏好沿现 scalar 公开能力，Notebook 与 Mote 公共能力继续沿各自 owner。
+
+### Notes 阅读与 Goals 默认视图
+
+Notes 提供独立正文字号与正文宽度。合法字号与宽度选项由 shared 单源定义，缺席使用原正文大小与标准宽度，不回填旧配置。字号只作用于 Note 正文及其原嵌入块，页头、来源与正文沿同一宽度对齐并受容器限制；不改变 App 正文、Source/Diff、工具栏或笔记内容、身份、来源及层级。修改呈现不重建原编辑器，不丢输入、caret 或块选择。
+
+Goals 提供新工作面的默认列表／看板与已完成目标显隐，原 toolbar 仍临时调整当前工作面。保存默认只影响新实例的初始视图，不覆盖已经打开的选择、搜索、筛选、选定目标和草稿；显式 Done／Cancelled 筛选可查看对应目标。隐藏是阅读选择，不删除或归档目标，不改变执行关联或运行任务。常用操作目录与折叠偏好保原独立含义。
+
+这些全局偏好沿 AppConfig 和唯一 Main ConfigOwner；GUI 复用原字段草稿、authored expected 与保存反馈，CLI 沿原 settings inspect／set 精确字段和 notes／goals 领域读取。发现、合法值、有效默认、无改动不写盘、durable 保存／发布回执保持同源；不另建 Work store、任意 path setter 或新的 Core 操作。只影响相关呈现，不新增订阅、轮询或 Runtime 行为。全部设置的人类入口见[设置目录](../../settings-catalog.md)，默认值与范围继续由源码及公开 inspect 持有。
 
 ### 编译期模块贡献
 
