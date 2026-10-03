@@ -251,6 +251,232 @@ function fakeWindow() {
 }
 
 describe('BrowserViewManager', () => {
+  it('T049 retains destroyed metadata and announces owner loss when resource cleanup throws', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-resource', 'https://original.example/path', 'workspace-a', 'work')
+    const view = fixture.children[0]!
+    manager.setViewport(current.id, 'mobile')
+    vi.spyOn(view.webContents, 'getURL').mockImplementation(() => { throw new Error('Dead URL read') })
+    vi.spyOn(view.webContents, 'getTitle').mockImplementation(() => { throw new Error('Dead title read') })
+    const cleanup = vi.spyOn(manager as any, 'revokePresentationCapture').mockImplementation(() => { throw new Error('capture cleanup unavailable') })
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView')
+    fixture.sent.length = 0
+    expect(() => view.webContents.close()).not.toThrow()
+    expect(detach).toHaveBeenCalledWith(view)
+    expect(fixture.sent).toEqual([{ type: 'unavailable', id: current.id, error: expect.stringContaining('capture cleanup unavailable') }])
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
+    cleanup.mockRestore()
+    expect(await manager.restore(current.id, { workspaceId: 'workspace-a' })).toMatchObject({ id: current.id, url: current.url, profileId: 'work', viewport: 'mobile' })
+    manager.close(current.id)
+  })
+
+  it('T049 retains a failed dead-view detach and reports it until explicit restore repairs cleanup', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-detach', 'https://original.example/path', 'workspace-a', 'work')
+    const view = fixture.children[0]!
+    const originalDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(() => { throw new Error('native detach blocked') })
+    fixture.sent.length = 0
+    expect(() => view.webContents.close()).not.toThrow()
+    expect(fixture.sent).toEqual([{ type: 'unavailable', id: current.id, error: expect.stringContaining('native detach blocked') }])
+    const views = fakeElectron.FakeWebContentsView.instances.length
+    expect(await manager.restore(current.id, { workspaceId: 'workspace-a' }).then(() => null, error => error.message)).toEqual(expect.stringContaining('native detach blocked'))
+    expect(fakeElectron.FakeWebContentsView.instances).toHaveLength(views)
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
+    detach.mockImplementation(originalDetach)
+    expect(await manager.restore(current.id, { workspaceId: 'workspace-a' })).toMatchObject({ id: current.id, url: current.url, profileId: 'work' })
+    expect(fixture.children).toHaveLength(1)
+    manager.close(current.id)
+  })
+
+  it('T049 release still closes a candidate after detach throws and keeps the healthy original', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-release', 'https://original.example/')
+    const original = fixture.children[0]!
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+    const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const candidate = fixture.children[1]!
+    const close = vi.spyOn(candidate.webContents, 'close')
+    const nativeDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(view => {
+      if (view === candidate) throw new Error('candidate detach blocked')
+      nativeDetach(view)
+    })
+    fixture.sent.length = 0
+    await expect(manager.release(current.id)).rejects.toThrow('candidate detach blocked')
+    expect((await switching).message).toContain('candidate detach blocked')
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(await manager.create(current.id, 'https://stale.example/')).toMatchObject({ id: current.id, profileId: 'default', url: current.url })
+    expect(fixture.sent).toEqual([])
+    detach.mockImplementation(nativeDetach)
+    await manager.release(current.id)
+    expect(fixture.children).toEqual([])
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
+    expect(await manager.restore(current.id)).toMatchObject({ id: current.id, profileId: 'default', url: current.url })
+    manager.close(current.id)
+  })
+
+  it('T049 close preserves a live candidate when both detach and close fail without retiring the original', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-close', 'https://original.example/')
+    const original = fixture.children[0]!
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+    const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const candidate = fixture.children[1]!
+    const nativeDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(view => {
+      if (view === candidate) throw new Error('candidate detach blocked')
+      nativeDetach(view)
+    })
+    const close = vi.spyOn(candidate.webContents, 'close').mockImplementation(() => { throw new Error('candidate close blocked') })
+    fixture.sent.length = 0
+    expect(() => manager.close(current.id)).toThrow('candidate close blocked')
+    const error = await switching
+    expect(error.message).toContain('candidate detach blocked')
+    expect(error.message).toContain('candidate close blocked')
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(candidate.webContents.isDestroyed()).toBe(false)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(fixture.sent).toEqual([])
+    expect(() => manager.close(current.id)).toThrow('candidate close blocked')
+    expect(close).toHaveBeenCalledTimes(2)
+    detach.mockImplementation(nativeDetach); close.mockRestore()
+    manager.close(current.id)
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    expect(original.webContents.isDestroyed()).toBe(true)
+    expect(fixture.sent.at(-1)).toEqual({ type: 'closed', id: current.id })
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 0 })
+  })
+
+  it('T049 destroyed original retains live failed candidate cleanup across guarded restore and close', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-retained', 'https://original.example/path', 'workspace-a', 'personal')
+    const original = fixture.children[0]!
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+    const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const candidate = fixture.children[1]!
+    const nativeDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(view => {
+      if (view === candidate) throw new Error('retained detach blocked')
+      nativeDetach(view)
+    })
+    const close = vi.spyOn(candidate.webContents, 'close').mockImplementation(() => { throw new Error('retained close blocked') })
+    fixture.sent.length = 0
+    expect(() => original.webContents.close()).not.toThrow()
+    expect((await switching).message).toContain('retained close blocked')
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(fixture.sent).toEqual([{ type: 'unavailable', id: current.id, error: expect.stringContaining('retained close blocked') }])
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(manager.usesProfile('personal')).toBe(true)
+    await expect(manager.restore(current.id, { workspaceId: 'workspace-foreign' })).rejects.toThrow('another Workspace')
+    await expect(manager.restore(current.id, { workspaceId: 'workspace-a', profileId: 'unknown' })).rejects.toThrow('Unknown browser profile')
+    expect(close).toHaveBeenCalledTimes(1)
+    const views = fakeElectron.FakeWebContentsView.instances.length
+    expect(await manager.restore(current.id, { workspaceId: 'workspace-a' }).then(() => null, error => error.message)).toEqual(expect.stringContaining('retained close blocked'))
+    expect(fakeElectron.FakeWebContentsView.instances).toHaveLength(views)
+    expect(() => manager.close(current.id)).toThrow('retained close blocked')
+    expect(fixture.sent.some((event: any) => event.type === 'closed')).toBe(false)
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 0, releasedBrowserViews: 1 })
+    detach.mockImplementation(nativeDetach); close.mockRestore()
+    expect(await manager.restore(current.id, { workspaceId: 'workspace-a' })).toMatchObject({ id: current.id, profileId: 'personal', url: current.url })
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    expect(manager.usesProfile('work')).toBe(false)
+    expect(fixture.children).toHaveLength(1)
+    manager.close(current.id)
+  })
+
+  it('T049 failed candidate loading keeps its failed-close reference for the next explicit operation', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-load-failure', 'https://original.example/')
+    const original = fixture.children[0]!
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => { throw new Error('candidate navigation failed') }
+    const switching = manager.switchProfile(current.id, 'work')
+    const candidate = fixture.children[1]!
+    const close = vi.spyOn(candidate.webContents, 'close').mockImplementation(() => { throw new Error('load cleanup close blocked') })
+    await expect(switching).rejects.toThrow('load cleanup close blocked')
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    await expect(manager.switchProfile(current.id, 'personal')).rejects.toThrow('load cleanup close blocked')
+    expect(close).toHaveBeenCalledTimes(2)
+    expect(fixture.children).toEqual([original])
+    close.mockRestore()
+    expect(await manager.switchProfile(current.id, 'personal')).toMatchObject({ id: current.id, profileId: 'personal' })
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    manager.close(current.id)
+  })
+
+  it('T049 keeps a candidate whose close returns without confirming destruction', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-unconfirmed', 'https://original.example/')
+    const original = fixture.children[0]!
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+    const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const candidate = fixture.children[1]!
+    const close = vi.spyOn(candidate.webContents, 'close').mockImplementation(() => {})
+    await expect(manager.release(current.id)).rejects.toThrow('not confirmed')
+    expect((await switching).message).toContain('not confirmed')
+    expect(candidate.webContents.isDestroyed()).toBe(false)
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    expect(close).toHaveBeenCalledTimes(1)
+    close.mockRestore()
+    await manager.release(current.id)
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    manager.close(current.id)
+  })
+
+  it('T049 cleanup failure unavailable reaches the actual Store without losing Region or sibling layout', async () => {
+    const { useAppStore } = await import('../src/renderer/src/store.js')
+    const { createWorkbenchTab, addWorkbenchRegion } = await import('../src/renderer/src/lib/workbench-tabs.js')
+    const { createWorkspaceLayout } = await import('@agentmux/layout')
+    const originalState = useAppStore.getState()
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const send = fixture.window.webContents.send
+    fixture.window.webContents.send = (channel, event) => { send(channel, event); useAppStore.getState().applyBrowserEvent(event as import('../src/shared/contracts.js').BrowserEvent) }
+    const current = await manager.create('cleanup-store', 'https://original.example/path', 'workspace-a', 'work')
+    const view = fixture.children[0]!
+    let tab = createWorkbenchTab('cleanup-store-tab', { ...current, kind: 'browser', browserId: current.id, regionId: 'cleanup-store-region', workspaceId: 'workspace-a' })
+    tab = addWorkbenchRegion(tab, 'cleanup-store-region', 'right', { kind: 'file', regionId: 'cleanup-store-sibling', workspaceId: 'workspace-a', path: 'draft.md' })
+    useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { 'workspace-a': createWorkspaceLayout('cleanup-store-group', [tab.id]) } })
+    const before = useAppStore.getState(), nativeDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(() => { throw new Error('Store native detach blocked') })
+    try {
+      expect(() => view.webContents.close()).not.toThrow()
+      const after = useAppStore.getState()
+      expect(after.tabs[tab.id]!.regions['cleanup-store-region']).toMatchObject({ browserId: current.id, url: current.url, profileId: 'work', error: expect.stringContaining('Store native detach blocked') })
+      expect(after.tabs[tab.id]!.layout).toBe(before.tabs[tab.id]!.layout)
+      expect(after.layouts).toBe(before.layouts)
+      expect(after.tabs[tab.id]!.regions['cleanup-store-sibling']).toBe(before.tabs[tab.id]!.regions['cleanup-store-sibling'])
+      detach.mockImplementation(nativeDetach)
+      expect(await manager.restore(current.id, { workspaceId: 'workspace-a' })).toMatchObject({ id: current.id, url: current.url, profileId: 'work' })
+      expect(useAppStore.getState().tabs[tab.id]!.regions['cleanup-store-region']).toMatchObject({ error: null })
+    } finally { detach.mockRestore(); manager.dispose(); useAppStore.setState(originalState, true) }
+  })
+
+  it('T049 late destroyed callbacks cannot release a newer or unrelated healthy owner', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-stale', 'https://original.example/')
+    await manager.create('cleanup-neighbor', 'https://neighbor.example/')
+    const old = fixture.children[0]!, neighbor = fixture.children[1]!
+    const lateDestroyed = old.webContents.listeners.get('destroyed')![0]!
+    old.webContents.close()
+    expect(await manager.restore(current.id)).toMatchObject({ id: current.id, url: current.url })
+    const newer = fixture.children.find(view => view !== neighbor)!
+    fixture.sent.length = 0
+    lateDestroyed()
+    expect(fixture.sent).toEqual([])
+    expect(newer.webContents.isDestroyed()).toBe(false)
+    expect(neighbor.webContents.isDestroyed()).toBe(false)
+    expect(manager.targets()).toHaveLength(2)
+    manager.close(current.id); manager.close('cleanup-neighbor')
+  })
+
+
   it('opens a restored Browser directly in its saved Profile without switching a healthy owner', async () => {
     const fixture = fakeWindow(), manager = browserManager(fixture.window)
     try {
@@ -1320,5 +1546,136 @@ describe('BrowserViewManager', () => {
     const sparse = Array.from({ length: 1 }) as never
     await expect(manager.setAnnotationMarkers('browser-markers', created.navigationId, sparse))
       .rejects.toThrow('marker 0 is invalid')
+  })
+})
+
+
+describe('BrowserViewManager direct candidate destruction', () => {
+  it('T049 direct destroyed candidate reports detach failure without losing the original or blindly retrying', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-direct-candidate', 'https://original.example/path', 'workspace-a', 'personal')
+    await manager.create('cleanup-direct-neighbor', 'https://neighbor.example/')
+    const original = fixture.children[0]!, neighbor = fixture.children[1]!
+    let finish!: () => void
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => {
+      await new Promise<void>(resolve => { finish = () => { contents.finishLoad(url); resolve() } })
+    }
+    const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const candidate = fixture.children[2]!
+    // Read the original Main record to verify this exact pending reference survives. No test owner
+    // supplies facts to the manager, and the actual native destroyed listener below drives cleanup.
+    const record = (manager as any).entries.get(current.id)
+    const pending = record.pendingSwitch
+    expect(pending.view).toBe(candidate)
+    const nativeDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(view => {
+      if (view === candidate) throw new Error('direct candidate detach blocked')
+      nativeDetach(view)
+    })
+    const close = vi.spyOn(candidate.webContents, 'close')
+    fixture.sent.length = 0
+    expect(() => candidate.webContents.close()).not.toThrow()
+    const failed = await switching
+    expect(failed.message).toContain('direct candidate detach blocked')
+    expect(fixture.sent).toEqual([{ type: 'updated', browser: expect.objectContaining({
+      id: current.id, url: current.url, profileId: 'personal', activity: expect.objectContaining({ warning: expect.stringContaining('direct candidate detach blocked') })
+    }) }])
+    expect(detach).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(record.pendingSwitch).toBe(pending)
+    expect(pending).toMatchObject({ attached: true, released: false })
+    expect((manager as any).releasedEntries.has(current.id)).toBe(false)
+    expect(manager.usesProfile('work')).toBe(true)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    expect(neighbor.webContents.isDestroyed()).toBe(false)
+    expect(await manager.create(current.id, 'https://stale.example/', 'workspace-a')).toMatchObject({ id: current.id, url: current.url, profileId: 'personal' })
+    finish()
+    await Promise.resolve(); await Promise.resolve()
+    expect(detach).toHaveBeenCalledTimes(1)
+    expect(record.pendingSwitch).toBe(pending)
+    expect(fixture.children).toEqual([original, neighbor, candidate])
+    detach.mockImplementation(nativeDetach)
+    const repaired = await manager.navigate(current.id, 'https://repaired.example/')
+    expect(repaired).toMatchObject({ id: current.id, profileId: 'personal', url: 'https://repaired.example/' })
+    expect(repaired.activity).not.toHaveProperty('warning')
+    expect(detach).toHaveBeenCalledTimes(2)
+    expect(detach.mock.calls[1]![0]).toBe(candidate)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect(record.pendingSwitch).toBeNull()
+    expect(pending).toMatchObject({ attached: false, released: true })
+    expect(manager.usesProfile('work')).toBe(false)
+    expect(fixture.children).toEqual([original, neighbor])
+    expect(neighbor.webContents.getURL()).toBe('https://neighbor.example/')
+    expect(manager.resourceOwnerCounts()).toEqual({ browserViews: 2, releasedBrowserViews: 0 })
+    manager.close(current.id); manager.close('cleanup-direct-neighbor')
+  })
+})
+
+
+describe('BrowserViewManager healthy page during failed candidate cleanup', () => {
+  it('T049 failed candidate cleanup keeps original navigation and reload usable with a persistent cause', async () => {
+    const fixture = fakeWindow(), manager = browserManager(fixture.window)
+    const current = await manager.create('cleanup-healthy-page', 'https://original.example/', 'workspace-a', 'personal')
+    const original = fixture.children[0]!
+    let finish!: () => void
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async (contents, url) => {
+      await new Promise<void>(resolve => { finish = () => { contents.finishLoad(url); resolve() } })
+    }
+    const switching = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const candidate = fixture.children[1]!, record = (manager as any).entries.get(current.id), pending = record.pendingSwitch
+    const nativeDetach = fixture.window.contentView.removeChildView
+    const detach = vi.spyOn(fixture.window.contentView, 'removeChildView').mockImplementation(view => {
+      if (view === candidate) throw new Error('healthy page candidate detach blocked')
+      nativeDetach(view)
+    })
+    const close = vi.spyOn(candidate.webContents, 'close').mockImplementation(() => { throw new Error('healthy page candidate close blocked') })
+    const load = vi.spyOn(original.webContents, 'loadURL'), reload = vi.spyOn(original.webContents, 'reload')
+    const navigated = await manager.navigate(current.id, 'https://navigated.example/').then(value => value, error => ({ failure: error.message }))
+    expect(navigated).toMatchObject({ id: current.id, url: 'https://navigated.example/', profileId: 'personal', activity: expect.objectContaining({ warning: expect.stringContaining('healthy page candidate close blocked') }) })
+    expect(load).toHaveBeenCalledWith('https://navigated.example/')
+    expect(detach).toHaveBeenCalledTimes(1)
+    expect(close).toHaveBeenCalledTimes(1)
+    expect((await switching).message).toContain('healthy page candidate close blocked')
+    expect(record.pendingSwitch).toBe(pending)
+    expect(candidate.webContents.isDestroyed()).toBe(false)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    const reloaded = await manager.reload(current.id).then(value => value, error => ({ failure: error.message }))
+    expect(reloaded).toMatchObject({ id: current.id, url: 'https://navigated.example/', activity: expect.objectContaining({ warning: expect.stringContaining('healthy page candidate detach blocked') }) })
+    expect(reload).toHaveBeenCalledTimes(1)
+    expect(detach).toHaveBeenCalledTimes(2)
+    expect(close).toHaveBeenCalledTimes(2)
+    finish(); await Promise.resolve(); await Promise.resolve()
+    expect(detach).toHaveBeenCalledTimes(2)
+    expect(close).toHaveBeenCalledTimes(2)
+    expect(record.pendingSwitch).toBe(pending)
+    await expect(manager.release(current.id)).rejects.toThrow('healthy page candidate close blocked')
+    expect(() => manager.close(current.id)).toThrow('healthy page candidate close blocked')
+    const views = fakeElectron.FakeWebContentsView.instances.length
+    await expect(manager.switchProfile(current.id, 'default')).rejects.toThrow('healthy page candidate close blocked')
+    expect(fakeElectron.FakeWebContentsView.instances).toHaveLength(views)
+    expect(record.pendingSwitch).toBe(pending)
+    expect(original.webContents.isDestroyed()).toBe(false)
+    detach.mockImplementation(nativeDetach); close.mockRestore()
+    const repaired = await manager.navigate(current.id, 'https://repaired.example/')
+    expect(repaired).toMatchObject({ id: current.id, url: 'https://repaired.example/', profileId: 'personal' })
+    expect(repaired.activity).not.toHaveProperty('warning')
+    expect(candidate.webContents.isDestroyed()).toBe(true)
+    expect(record.pendingSwitch).toBeNull()
+    expect(manager.usesProfile('work')).toBe(false)
+    // The same pending record owns only its published cleanup cause. A different existing
+    // resource warning remains visible when cleanup of another candidate succeeds.
+    fakeElectron.FakeWebContentsView.nextLoadURLImpl = async () => await new Promise<void>(() => {})
+    const nextSwitch = manager.switchProfile(current.id, 'work').catch(error => error as Error)
+    const nextCandidate = fixture.children[1]!
+    detach.mockImplementation(view => { if (view === nextCandidate) throw new Error('next candidate detach blocked'); nativeDetach(view) })
+    const nextClose = vi.spyOn(nextCandidate.webContents, 'close').mockImplementation(() => { throw new Error('next candidate close blocked') })
+    expect(await manager.reload(current.id)).toMatchObject({ activity: expect.objectContaining({ warning: expect.stringContaining('next candidate close blocked') }) })
+    expect((await nextSwitch).message).toContain('next candidate close blocked')
+    record.activity = { ...record.activity, warning: 'Independent upload staging warning' }
+    detach.mockImplementation(nativeDetach); nextClose.mockRestore()
+    expect(await manager.reload(current.id)).toMatchObject({ activity: expect.objectContaining({ warning: 'Independent upload staging warning' }) })
+    expect(nextCandidate.webContents.isDestroyed()).toBe(true)
+    expect(record.pendingSwitch).toBeNull()
+    manager.close(current.id)
   })
 })
