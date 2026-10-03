@@ -6,7 +6,8 @@ import type { SettingsPageId } from './settings-modules'
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences' },
-  { id: 'workflows', title: 'Workflows' },
+  { id: 'mote', title: 'Mote' },
+  { id: 'work', title: 'Work' },
   { id: 'toolkit', title: 'Mods' },
   { id: 'resources', title: 'Resources' },
   { id: 'connections', title: 'Connections' }

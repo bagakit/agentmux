@@ -13,6 +13,9 @@ import { devicesSettingsModule } from './modules/devices'
 import { toolkitSettingsModule } from './modules/toolkit'
 import { spaceSettingsModule } from './modules/space'
 import { goalsSettingsModule } from './modules/goals'
+import { moteSettingsModule } from './modules/mote'
+import { surveySettingsModule } from './modules/survey'
+import { notesSettingsModule } from './modules/notes'
 
 /** The only Renderer composition point. Order is the product's navigation order. */
 export const settingsModules = [
@@ -22,9 +25,12 @@ export const settingsModules = [
   browserSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,
+  moteSettingsModule,
   spaceSettingsModule,
   focusSettingsModule,
   goalsSettingsModule,
+  surveySettingsModule,
+  notesSettingsModule,
   toolkitSettingsModule,
   agentsSettingsModule,
   promptsSettingsModule,
