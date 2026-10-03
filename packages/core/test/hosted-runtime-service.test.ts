@@ -527,3 +527,22 @@ describe('semantic Host observation consumers', () => {
     await second.dispose(); await f.service.dispose()
   })
 })
+
+describe('transport-authenticated device origin', () => {
+  it('binds phone prompt attribution from context and refuses a wire-supplied device', async () => {
+    const f = fixture(), subscription = await f.subscribe('consumer-device', f.eventsA)
+    const sourceDevice = { hostId: 'original-host', deviceId: 'phone-1', name: 'iPhone' }
+    const recordDeviceOperation = vi.fn(async () => {})
+    const args = [{ agentSessionId: 'a123456789012345', expectedRun: { runId: 'original-run' }, operationId: 'phone-prompt', prompt: 'hello', authorHuman: true }]
+    try {
+      await f.service.call('runtime.invoke', { fence, consumerId: 'consumer-device', invocation: { method: 'submitAgentPrompt', args } }, { sourceDevice, recordDeviceOperation })
+      expect(f.core.submitAgentPrompt).toHaveBeenCalledWith({ ...args[0], sourceDevice })
+      expect(recordDeviceOperation.mock.calls.map(call => call[3])).toEqual(['unknown', 'confirmed'])
+      expect(recordDeviceOperation.mock.calls[0]![4]).toBe('phone-prompt')
+      await expect(f.service.call('runtime.invoke', { fence, consumerId: 'consumer-device', invocation: {
+        method: 'submitAgentPrompt', args: [{ ...args[0], sourceDevice: { ...sourceDevice, name: 'forged' } }]
+      } }, { sourceDevice })).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+      expect(f.core.submitAgentPrompt).toHaveBeenCalledTimes(1)
+    } finally { await subscription.dispose(); await f.service.dispose() }
+  })
+})

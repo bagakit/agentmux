@@ -234,3 +234,22 @@ it('shares the original device Authority with a native-only secret exchange and 
     auth?.dispose()
   } finally { await f.dispose() }
 })
+
+it('exchanges a one-time connection link directly into an independent secure device without approval', async () => {
+  const f = await fixture()
+  try {
+    const link = f.authority.connectionLink(f.origin)
+    const code = new URL(link.url).hash.slice('#connect='.length)
+    const result = await f.send('/_agentmux/device/connect', 'POST', { code, name: 'iPhone' })
+    expect(result.status).toBe(200)
+    expect(result.value.state).toBe('approved')
+    expect(result.cookies[0]).toContain('Secure; HttpOnly; SameSite=Strict')
+    expect(f.authority.requests()).toEqual([])
+    expect(f.authority.devices()).toHaveLength(1)
+    const repeated = await f.send('/_agentmux/device/connect', 'POST', { code, name: 'Other' })
+    expect(repeated.status).toBe(401)
+    expect(f.authority.devices()).toHaveLength(1)
+    const status = await f.send('/_agentmux/device/status', 'GET', undefined, { Cookie: result.cookies[0]!.split(';')[0]! })
+    expect(status.value.device.deviceId).toBe(result.value.device.deviceId)
+  } finally { await f.dispose() }
+})

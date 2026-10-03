@@ -6,7 +6,8 @@ import type { MacDeviceConfirmation } from './mac-device-confirmation.js'
 
 /** The sole Host lends its original Authority and OS confirmation to the finite public port. */
 export function createDeviceAdministration(authority: Promise<DeviceAuthority>,
-  confirm?: MacDeviceConfirmation, privateAccessState?: () => AgentMuxRpcPrivateAccessState): AgentMuxRpcDeviceAdministration {
+  confirm?: MacDeviceConfirmation, privateAccessState?: () => AgentMuxRpcPrivateAccessState,
+  consumeIntent?: (intent: string, context: AgentMuxRpcCallContext) => Promise<boolean>): AgentMuxRpcDeviceAdministration {
   const owner = authority.then(value => new DeviceManagement(value, confirm))
   // A malformed private identity belongs to device access, not Unix/Core startup.
   void owner.catch(() => {})
@@ -22,6 +23,15 @@ export function createDeviceAdministration(authority: Promise<DeviceAuthority>,
       try { if (privateAccessState) privateAccess = privateAccessState() }
       catch { /* Only this observation is unconfirmed; retain the authorized Authority facts. */ }
       return { ...facts, privateAccess }
+    },
+    'device.intent': async () => ({ confirmed: false }),
+    'device.link': async (params, context) => {
+      if (context.caller || context.transport !== 'unix' || context.principal?.kind !== 'user') throw new Error('Connection links require a local user.')
+      const facts = privateAccessState?.()
+      if (!facts || facts.state !== 'listening' || facts.assetIssue || !facts.mobileBuildDigest) throw new Error('The HTTPS phone entry is not available. Existing Sessions remain available.')
+      if (!params.intent || !consumeIntent || !await consumeIntent(params.intent, context)) throw new Error('This connection link requires an explicit action in the original Mac settings.')
+      context.signal?.throwIfAborted()
+      return (await authority).connectionLink(facts.origin)
     },
     'device.invite': async (params, context) => await (await owner).invite(params, context),
     'device.approve': async (params, context) => await (await owner).approve(params, context),

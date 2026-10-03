@@ -20,7 +20,7 @@ const original: AgentMuxRpcResult<'device.ls'> = { hostId, devices: [device], re
   privateAccess: { state: 'unconfigured', message: 'No private access manifest was selected.' } }
 let root: Root, container: HTMLDivElement
 const { api, copy } = vi.hoisted(() => ({
-  api: { ls: vi.fn(), invite: vi.fn(), approve: vi.fn(), reject: vi.fn(), revoke: vi.fn() }, copy: vi.fn()
+  api: { ls: vi.fn(), link: vi.fn(), invite: vi.fn(), approve: vi.fn(), reject: vi.fn(), revoke: vi.fn() }, copy: vi.fn()
 }))
 vi.mock('../src/renderer/src/lib/api', () => ({ api: { deviceManagement: api, ui: { writeClipboardText: copy } } }))
 const render = async (active = true) => { await act(async () => root.render(<DeviceManagementSettings active={active} />)) }
@@ -45,7 +45,7 @@ describe('Actual Desktop device management settings leaf', () => {
     await render(); expect(api.ls).toHaveBeenCalledWith({})
     expect(container.textContent).toContain(hostId); expect(container.textContent).toContain(device.deviceId)
     expect(container.textContent).toContain(pending.device.deviceId); expect(container.textContent).toContain('123456')
-    expect(container.textContent).toContain('这台设备可以操作本 Mac 的 Agent')
+    expect(container.textContent).toContain('操作本 Mac 的 Agent')
     expect(container.textContent).toContain(new Date(pending.expiresAt).toLocaleString())
   })
 
@@ -114,19 +114,19 @@ describe('Actual Desktop device management settings leaf', () => {
     } finally { await rm(directory, { recursive: true, force: true }) }
   })
 
-  it('holds a short invitation only in the active UI and copies explicitly before its actual expiry', async () => {
+  it('generates and copies a connection link once and retains it only in the active UI', async () => {
     const write = vi.spyOn(Storage.prototype, 'setItem')
-    await render(); api.invite.mockResolvedValue({ hostId, invitation: 'short-once-invitation', expiresAt: Date.now() + 60_000 })
-    await click('生成短时邀请')
-    expect(api.invite).toHaveBeenCalledWith({}); expect(copy).not.toHaveBeenCalled()
-    expect(container.querySelector<HTMLInputElement>('[aria-label="短时设备邀请"]')?.value).toBe('short-once-invitation')
-    await click('复制邀请'); expect(copy).toHaveBeenCalledWith('short-once-invitation')
+    await render(); api.link.mockResolvedValue({ hostId, url: 'https://192.168.1.20:7443/#connect=short-once-invitation', expiresAt: Date.now() + 60_000 })
+    await click('生成并复制连接链接')
+    expect(api.link).toHaveBeenCalledWith({}); expect(copy).toHaveBeenCalledOnce()
+    expect(container.querySelector<HTMLInputElement>('[aria-label="手机连接链接"]')?.value).toBe('https://192.168.1.20:7443/#connect=short-once-invitation')
+    await click('复制链接'); expect(copy).toHaveBeenCalledWith('https://192.168.1.20:7443/#connect=short-once-invitation')
     expect(write).not.toHaveBeenCalled()
     await render(false); await render()
-    expect(container.querySelector('[aria-label="短时设备邀请"]')).toBeNull()
-    api.invite.mockResolvedValue({ hostId, invitation: 'expired-invitation', expiresAt: 1 })
-    await click('生成短时邀请'); await click('复制邀请')
-    expect(copy).toHaveBeenCalledOnce(); expect(container.textContent).toContain('邀请已过期')
+    expect(container.querySelector('[aria-label="手机连接链接"]')).toBeNull()
+    api.link.mockResolvedValue({ hostId, url: 'https://192.168.1.20:7443/#connect=expired-invitation', expiresAt: 1 })
+    await click('生成并复制连接链接'); await click('复制链接')
+    expect(copy).toHaveBeenCalledTimes(3); expect(container.textContent).toContain('链接已过期')
   })
 
   it('does not retry a lost mutation reply and requires an original fact read before a new explicit operation', async () => {
@@ -179,7 +179,7 @@ describe('Actual Desktop device management settings leaf', () => {
     expect(api.ls).toHaveBeenCalledTimes(2)
     expect(container.textContent).toContain('Mac 已确认批准')
     expect(container.textContent).not.toContain('等待本机确认')
-    expect(button('生成短时邀请').disabled).toBe(false)
+    expect(button('生成并复制连接链接').disabled).toBe(false)
     expect(api.approve).toHaveBeenCalledOnce()
   })
 

@@ -1,4 +1,3 @@
-import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Capacitor } from '@capacitor/core'
 import { MobileConnectionRoot } from './connection/MobileConnectionRoot'
@@ -16,8 +15,13 @@ const nativeAccess = native ? createNativePrivateAccess() : null
 const root = document.getElementById('root')
 if (!root) throw new Error('Mobile root is missing')
 
-createRoot(root).render(<StrictMode><MobileConnectionRoot
+const parameters = new URLSearchParams(location.hash.slice(1))
+const connectionCode = parameters.get('connect') ?? undefined
+if (connectionCode) history.replaceState(null, '', location.pathname + location.search)
+
+createRoot(root).render(<MobileConnectionRoot
+  {...(connectionCode ? { connectionCode } : {})}
   platform={adapted?.platform ?? browser} native={native} connectClient={connectPrivateHostedClient}
   {...(adapted ? { focusComposer: adapted.focusComposer } : {})}
   {...(nativeAccess ? { nativeAccess } : {})} />
-</StrictMode>)
+)

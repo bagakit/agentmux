@@ -119,27 +119,24 @@ describe('Browser device admission and actual application connection caller', ()
     expect(JSON.stringify(value.snapshot())).not.toContain('must-never-reach-renderer')
   })
 
-  it('the mounted product attempts real address admission despite failed navigation storage and reports device approval separately', async () => {
-    const fetch = approvedFetch(); vi.stubGlobal('fetch', fetch)
+  it('opens a connection link automatically despite failed workface storage without another address form', async () => {
+    const f = sdkFixture(), fetch = vi.fn().mockResolvedValue(json({ state: 'approved', hostId, device }))
+    vi.stubGlobal('fetch', fetch)
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage unavailable') })
     const overlay = document.createElement('div'); document.body.append(overlay)
-    const view = await mount(<MobileConnectionRoot platform={createBrowserPlatform({ overlayContainer: () => overlay })} native={false} />)
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(2))
-    expect(view.element.querySelector('[data-connection="connected"]')).toBeNull()
-    await click(button(view.element, '设置连接'))
-    expect(overlay.textContent).toContain('设备授权已确认；会话连接仍待核实')
-    expect(overlay.textContent).not.toContain('仅静态记录')
-    const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('actual device storage unavailable') })
-    const input = overlay.querySelector<HTMLInputElement>('#mobile-host-address')!
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, origin)
-      input.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    await click(button(overlay, '保存地址'))
-    await vi.waitFor(() => expect(fetch).toHaveBeenCalledTimes(4))
-    expect(write).toHaveBeenCalled(); expect(view.element.textContent).toContain('仅临时采用')
-    expect(view.element.textContent).not.toContain('地址已保存在'); expect(overlay.textContent).toContain('设备授权已确认')
-    expect(view.element.querySelector('[data-connection="connected"]')).toBeNull()
+    const factory = vi.fn().mockResolvedValue(f.client)
+    const view = await mount(<MobileConnectionRoot platform={createBrowserPlatform({ overlayContainer: () => overlay })}
+      native={false} connectionCode="short-once-code" connectClient={factory} />)
+    await vi.waitFor(() => expect(factory).toHaveBeenCalledOnce())
+    expect(fetch).toHaveBeenCalledOnce()
+    expect(fetch.mock.calls[0]![0]).toBe(origin + '/_agentmux/device/connect')
+    expect(JSON.parse(fetch.mock.calls[0]![1].body)).toMatchObject({ code: 'short-once-code' })
+    expect(view.element.querySelector('[data-connection="connected"]')).not.toBeNull()
+    await click(button(view.element.querySelector('nav.mobile-navigation')!, '连接'))
+    expect(overlay.querySelector('#mobile-host-address')).toBeNull()
+    expect(overlay.querySelector('#mobile-device-invitation')).toBeNull()
     expect(overlay.textContent).toContain('身份仅在当前设备内存中保全')
+    expect(localStorage.getItem('short-once-code')).toBeNull()
   })
 
   it('the mounted caller refuses a different durable Host before calling any SDK and preserves the original draft and reference', async () => {

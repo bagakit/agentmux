@@ -193,6 +193,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             {...readingProps} />)}
         </section> : null}
       </div>
+      {reading.timeline?.items.filter(item => item.sourceDevice && item.kind === 'system_message').map(item => <ConversationMessage
+        key={item.id} messageId={item.id} conversationSessionId={agentSessionId!} content={item.content ?? item.title}
+        inputSource={{ kind: 'captured', submissionId: item.id, device: item.sourceDevice! }}
+        speaker={{ role: 'system', id: 'agentmux' }} createdAt={item.createdAt} {...readingProps} />)}
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : {})}

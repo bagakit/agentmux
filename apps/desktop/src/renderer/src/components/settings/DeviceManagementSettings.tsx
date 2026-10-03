@@ -5,7 +5,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
 
 type DeviceList = AgentMuxRpcResult<'device.ls'>
-type DeviceInvitation = AgentMuxRpcResult<'device.invite'>
+type DeviceInvitation = AgentMuxRpcResult<'device.link'>
 
 /** Person-only controls for the original Host Authority; a click is never a confirmation fact. */
 export function DeviceManagementSettings({ active }: { active: boolean }) {
@@ -16,6 +16,8 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   const [busy, setBusy] = useState(false)
   const [needsRead, setNeedsRead] = useState(false)
   const [accessReadUnconfirmed, setAccessReadUnconfirmed] = useState(false)
+  const needsReadRef = useRef(needsRead)
+  needsReadRef.current = needsRead
   const epoch = useRef(0), alive = useRef(false), working = useRef(false)
   const visible = useRef(active)
   visible.current = active
@@ -35,17 +37,18 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     alive.current = true; const expected = ++epoch.current
     setInvitation(null)
     if (active) void read(expected)
-    return () => { alive.current = false; epoch.current++ }
+    const timer = active ? setInterval(() => { if (!working.current && !needsReadRef.current) void read(epoch.current) }, 5000) : undefined
+    return () => { clearInterval(timer); alive.current = false; epoch.current++ }
   }, [active])
 
-  async function mutate(action: () => Promise<unknown>, success: string): Promise<void> {
+  async function mutate(action: () => Promise<unknown>, success: string | (() => string)): Promise<void> {
     if (!active || working.current || needsRead) return
     ++epoch.current
     working.current = true; setBusy(true)
     try {
       await action()
       if (!alive.current) return
-      setNotice(success)
+      setNotice(typeof success === 'function' ? success() : success)
       if (visible.current) await read(++epoch.current)
       else { ++epoch.current; setNeedsRead(true) }
     } catch (error) {
@@ -57,20 +60,25 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
     } finally { working.current = false; if (alive.current) setBusy(false) }
   }
   async function invite(): Promise<void> {
+    let message = '连接链接已复制。手机打开即可操作本 Mac 的 Agent，无需再次批准。'
     await mutate(async () => {
       const expected = epoch.current
-      const value = await api.deviceManagement.invite({})
-      if (alive.current && expected === epoch.current) setInvitation(value)
-    }, '短时一次邀请已生成。请在手机输入，然后在这台 Mac 核对确认码并批准设备。邀请本身不授予访问权限。')
+      const value = await api.deviceManagement.link({})
+      if (alive.current && expected === epoch.current) {
+        setInvitation(value)
+        try { await api.ui.writeClipboardText(value.url) }
+        catch (error) { message = `连接链接已生成但尚未复制，请点击复制链接重试。${presentError(error)}` }
+      }
+    }, () => message)
   }
   async function copyInvitation(): Promise<void> {
     if (!invitation || Date.now() >= invitation.expiresAt) {
-      setInvitation(null); setNotice('邀请已过期。请明确生成新邀请。'); return
+      setInvitation(null); setNotice('链接已过期。请生成新连接链接。'); return
     }
     try {
-      await api.ui.writeClipboardText(invitation.invitation)
-      setNotice('短时邀请已复制。请仅交给你要连接的设备，并在这台 Mac 核对确认码。')
-    } catch (error) { setNotice(`邀请尚未复制；原邀请保留至到期。${presentError(error)}`) }
+      await api.ui.writeClipboardText(invitation.url)
+      setNotice('连接链接已复制。请在要连接的手机打开。')
+    } catch (error) { setNotice(`链接尚未复制；原链接保留至到期。${presentError(error)}`) }
   }
   async function copyAccess(value: string, label: string): Promise<void> {
     try {
@@ -81,18 +89,18 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   if (!active) return null
   const disabled = busy || needsRead || !list
   return <section className="settings-group">
-    <header><span>手机与设备授权</span><small>{list ? `${list.devices.filter(device => device.revokedAt === undefined).length} 已授权` : '状态尚未核实'}</small></header>
-    <p className="settings-group-note">批准后，这台设备可以操作本 Mac 的 Agent。请核对手机与 Mac 的确认码；批准、拒绝、撤销和生成邀请均由这台 Mac 的系统对话框确认。</p>
+    <header><span>手机与设备授权</span><small>{list ? `${list.devices.filter(device => device.online).length} 当前在线 · ${list.devices.filter(device => device.revokedAt === undefined).length} 已授权` : '状态尚未核实'}</small></header>
+    <p className="settings-group-note">生成并复制连接链接，在手机打开即可继续操作本 Mac 的 Agent。链接 5 分钟内有效，仅能连接一台新设备。</p>
     {list && <p className="field-hint">Mac 身份：<code>{list.hostId}</code></p>}
     <div className="settings-pane-toolbar">
       <button className="small-button" disabled={busy} onClick={() => void read()}><RefreshCw size={13} />刷新设备状态</button>
-      <button className="small-button" disabled={disabled} onClick={() => void invite()}>{busy ? <LoaderCircle size={13} className="spin" /> : <ShieldCheck size={13} />}生成短时邀请</button>
+      <button className="small-button" disabled={disabled} onClick={() => void invite()}>{busy ? <LoaderCircle size={13} className="spin" /> : <ShieldCheck size={13} />}生成并复制连接链接</button>
     </div>
     {invitation && <div className="host-edit-grid">
-      <label className="host-edit-grid__wide"><span>短时一次邀请 · 到期 {new Date(invitation.expiresAt).toLocaleString()}</span>
-        <input type="password" aria-label="短时设备邀请" autoComplete="off" readOnly value={invitation.invitation} /></label>
-      <p className="field-hint host-edit-grid__wide">邀请所属 Mac：<code>{invitation.hostId}</code>。关闭此设置面后不保留邀请。</p>
-      <button className="small-button" disabled={busy} onClick={() => void copyInvitation()}><Copy size={13} />复制邀请</button>
+      <label className="host-edit-grid__wide"><span>连接链接 · 到期 {new Date(invitation.expiresAt).toLocaleString()}</span>
+        <input type="text" aria-label="手机连接链接" autoComplete="off" readOnly value={invitation.url} /></label>
+      <p className="field-hint host-edit-grid__wide">连接的 Mac：<code>{invitation.hostId}</code>。关闭设置后不在页面保留连接码。</p>
+      <button className="small-button" disabled={busy} onClick={() => void copyInvitation()}><Copy size={13} />复制链接</button>
     </div>}
     {list && <PrivateAccessDetails access={list.privateAccess} unconfirmed={accessReadUnconfirmed} onCopy={copyAccess} />}
     <div className="host-settings-list">
@@ -109,14 +117,16 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       </section>)}
       {list?.devices.map(device => <section className="host-settings-card" key={device.deviceId}>
         <header><span className="host-card__icon"><Smartphone size={16} /></span>
-          <div><strong><bdi>{device.name}</bdi></strong><small>{device.revokedAt === undefined ? '已授权' : '已撤销'} · {new Date(device.createdAt).toLocaleString()}</small></div>
+          <div><strong><bdi>{device.name}</bdi></strong><small>{device.revokedAt === undefined ? device.online ? '在线' : '离线' : '已撤销'} · {new Date(device.createdAt).toLocaleString()}</small></div>
           <span className="check-pill">{device.revokedAt === undefined ? '可操作本 Mac' : '授权已撤销'}</span>
           {device.revokedAt === undefined && <button className="small-button" disabled={disabled} onClick={() => void mutate(
             () => api.deviceManagement.revoke({ deviceId: device.deviceId }), 'Mac 已确认撤销此设备，结束它的读者；其他设备和原 Agent 会话保持。')}>撤销 <bdi>{device.name}</bdi></button>}
         </header><p className="field-hint">完整设备身份：<code>{device.deviceId}</code></p>
+      {device.operationIssue && <p role="status" className="field-hint">{device.operationIssue}</p>}
+      {device.operations?.length ? <details><summary>最近操作 · {device.operations.length} 条</summary><ol>{[...device.operations].reverse().map(operation => <li key={operation.id}><time>{new Date(operation.at).toLocaleString()}</time> · {operation.method} · <code>{operation.target}</code> · {operation.result === 'confirmed' ? '已提交' : operation.result === 'failed' ? '失败' : '结果未确认'}</li>)}</ol></details> : null}
       </section>)}
     </div>
-    {list && !list.requests.length && !list.devices.length && <p className="settings-group-note">暂无待确认或已授权设备。先生成短时邀请，在手机输入后核对确认码。</p>}
+    {list && !list.requests.length && !list.devices.length && <p className="settings-group-note">暂无已授权设备。生成并复制连接链接，在手机打开即可连接。</p>}
     {readIssue && <p className="settings-group-note" role="status">{readIssue}</p>}
     {notice && <p className="settings-group-note" role="status">{notice}</p>}
   </section>

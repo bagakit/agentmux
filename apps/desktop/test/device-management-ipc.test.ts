@@ -19,7 +19,7 @@ const failure = (promise: Promise<unknown>) => promise.catch(error => error)
 describe('Narrow registered trusted Desktop device IPC leaf', () => {
   it('registers only five fixed public calls and uses the original local Unix service with no principal assertion', async () => {
     const f = fixture()
-    expect([...f.handlers.keys()]).toEqual(['deviceManagement:ls', 'deviceManagement:invite', 'deviceManagement:approve', 'deviceManagement:reject', 'deviceManagement:revoke'])
+    expect([...f.handlers.keys()]).toEqual(['deviceManagement:link', 'deviceManagement:ls', 'deviceManagement:invite', 'deviceManagement:approve', 'deviceManagement:reject', 'deviceManagement:revoke'])
     const cases = [['ls', {}], ['invite', {}], ['approve', { deviceId: 'original-device', confirmationCode: '123456' }],
       ['reject', { deviceId: 'original-device' }], ['revoke', { deviceId: 'original-device' }]] as const
     for (const [method, input] of cases) {

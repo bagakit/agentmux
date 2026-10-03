@@ -131,6 +131,31 @@ export class PrivateConnection {
     this.attempt?.abort(); this.attempt = new AbortController()
     return ++this.epoch
   }
+  /** A link is consumed once; receipt loss is reconciled with the secure device Cookie. */
+  async connectLink(origin: string, code: string, name: string): Promise<void> {
+    if (!this.sameOrigin(origin)) return
+    const epoch = this.cancelAttempt(), signal = this.attempt!.signal
+    this.publish({ phase: 'connecting', origin, connection: { state: 'connecting', message: '正在连接你的 Mac…' } })
+    try {
+      const response = await this.request(`${PATH}/connect`, signal, { code, name })
+      if (epoch !== this.epoch) return
+      if (!response.ok) {
+        this.publish({ phase: 'unavailable', connection: { state: 'unavailable', message: '连接链接已过期、已使用或暂不可用。请在 Mac 设置生成新链接；原会话与草稿保留。' } })
+        return
+      }
+      const approved = record(await json(response), ['state', 'hostId', 'device'])
+      if (approved.state !== 'approved') throw new Error('Device exchange is unconfirmed')
+      this.publish({ hostId: text(approved.hostId) })
+      await this.connectApproved(device(approved.device), epoch, signal)
+    } catch {
+      if (epoch === this.epoch && !signal.aborted) {
+        // Never resend a one-time exchange. Only read the authenticated status.
+        await this.resume(origin)
+        if (this.value.phase === 'needs-approval') this.publish({ connection: { state: 'unavailable', message: '连接结果尚未确认，未重复使用连接码。请在 Mac 设置生成新链接；原会话保留。' } })
+      }
+    }
+  }
+
   async resume(origin: string): Promise<void> {
     if (!this.sameOrigin(origin)) return
     const epoch = this.cancelAttempt(), signal = this.attempt!.signal
@@ -146,7 +171,7 @@ export class PrivateConnection {
       if (epoch !== this.epoch) return
       if (status.status === 401) {
         this.publish({ phase: 'needs-approval', nativeRecovery: this.value.nativeRecovery === 'new-invitation' ? 'new-invitation' : null,
-          connection: { state: 'unavailable', message: '这台设备尚未获得 Mac 授权。请使用 Mac 的短时邀请，并在 Mac 上核对确认码。' } })
+          connection: { state: 'unavailable', message: '请在 Mac 设置生成并复制连接链接，在这台手机打开即可连接。' } })
         return
       }
       if (!status.ok) throw new Error('Device authorization unavailable')

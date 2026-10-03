@@ -22,7 +22,7 @@ describe('actual mobile shell and shared conversation caller', () => {
     expect(view.element.textContent).toContain(unavailable.message)
     expect(view.element.querySelector('.mobile-welcome')?.textContent).toContain('Agent 与会话由 Mac 管理')
     expect(view.element.querySelector('.mobile-welcome')?.textContent).not.toContain('仍在原处工作')
-    await click(button(view.element, '设置连接'))
+    await click(button(view.element, '查看连接状态'))
     expect(overlay.querySelector('[role="dialog"]')).not.toBeNull()
     const input = overlay.querySelector<HTMLInputElement>('#mobile-host-address')!
     expect(input).not.toBeNull()
@@ -111,7 +111,7 @@ describe('actual mobile shell and shared conversation caller', () => {
     const overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={null} connection={unavailable} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     const write = vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('device storage unavailable') })
-    await click(button(view.element, '设置连接'))
+    await click(button(view.element, '查看连接状态'))
     const input = overlay.querySelector<HTMLInputElement>('#mobile-host-address')!
     expect(input).not.toBeNull()
     await act(async () => {

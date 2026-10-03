@@ -1,9 +1,10 @@
+import { randomBytes } from 'node:crypto'
 import type { IpcMainInvokeEvent } from 'electron'
 import { connectAgentMuxRpc, defaultAgentMuxControlSocketPath, type AgentMuxRpcClient,
   type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
 
-type DeviceMethod = 'device.ls' | 'device.invite' | 'device.approve' | 'device.reject' | 'device.revoke'
-export type DeviceManagementIpcChannel = 'deviceManagement:ls' | 'deviceManagement:invite' | 'deviceManagement:approve' | 'deviceManagement:reject' | 'deviceManagement:revoke'
+type DeviceMethod = 'device.link' | 'device.ls' | 'device.invite' | 'device.approve' | 'device.reject' | 'device.revoke'
+export type DeviceManagementIpcChannel = 'deviceManagement:link' | 'deviceManagement:ls' | 'deviceManagement:invite' | 'deviceManagement:approve' | 'deviceManagement:reject' | 'deviceManagement:revoke'
 type DeviceCall = <M extends DeviceMethod>(method: M, params: AgentMuxRpcParams<M>) => Promise<AgentMuxRpcResult<M>>
 
 /** The original trusted Desktop can request a dialog; only the original Host confirms it. */
@@ -12,7 +13,12 @@ export function registerDeviceManagementIpc(options: {
   assertTrusted(channel: DeviceManagementIpcChannel, event: IpcMainInvokeEvent): void
   socketPath?: string
   connect?: typeof connectAgentMuxRpc
-}): void {
+}): { consume(intent: string): boolean } {
+  const intents = new Map<string, number>()
+  const consume = (intent: string) => {
+    const expiry = intents.get(intent); intents.delete(intent)
+    return expiry !== undefined && expiry > Date.now()
+  }
   const call: DeviceCall = async (method, params) => {
     const client: AgentMuxRpcClient = await (options.connect ?? connectAgentMuxRpc)({
       endpoint: { transport: 'unix', path: options.socketPath ?? defaultAgentMuxControlSocketPath() }
@@ -27,9 +33,17 @@ export function registerDeviceManagementIpc(options: {
       return await call(method, params as AgentMuxRpcParams<M>)
     })
   }
+  options.handleWithEvent('deviceManagement:link', async (event) => {
+    options.assertTrusted('deviceManagement:link', event)
+    for (const [key, expires] of intents) if (expires <= Date.now()) intents.delete(key)
+    const intent = randomBytes(32).toString('base64url')
+    intents.set(intent, Date.now() + 30_000)
+    try { return await call('device.link', { intent }) } finally { intents.delete(intent) }
+  })
   register('deviceManagement:ls', 'device.ls')
   register('deviceManagement:invite', 'device.invite')
   register('deviceManagement:approve', 'device.approve')
   register('deviceManagement:reject', 'device.reject')
   register('deviceManagement:revoke', 'device.revoke')
+  return { consume }
 }

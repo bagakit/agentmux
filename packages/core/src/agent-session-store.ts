@@ -1,3 +1,4 @@
+import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
@@ -1162,7 +1163,8 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(message.userContent === undefined ? {} : { userContent: bytes(message.userContent) }),
         ...(message.systemContext === undefined ? {} : { systemContext: bytes(message.systemContext) }),
         ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'prompt message author') }),
-        ...(message.authorHuman === true ? { authorHuman: true as const } : {})
+        ...(message.authorHuman === true ? { authorHuman: true as const } : {}),
+        ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) })
       }
     })() }) }
 }

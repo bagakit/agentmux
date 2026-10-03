@@ -44,7 +44,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)
   const addressSaveRequested = useRef(false)
   const [sheet, setSheet] = useState<'connection' | 'attachments' | null>(null)
-  const [hostDraft, setHostDraft] = useState(workface.hostUrl)
+  const [hostDraft, setHostDraft] = useState(workface.hostUrl || (!native && location.protocol === 'https:' ? location.origin : ''))
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
   const [attachment, setAttachment] = useState<LocalAttachment | null>(null)
   const [choosingFile, setChoosingFile] = useState(false)
@@ -138,7 +138,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <div className="mobile-connection-illustration" aria-hidden="true"><span><Monitor size={34} strokeWidth={1.25} /></span><i /><span><Smartphone size={30} strokeWidth={1.25} /></span></div>
           <span className="mobile-eyebrow">AGENTMUX · 随身继续</span>
           <h1>让对话继续</h1><p>连接你的 Mac，查看会话。<br />Agent 与会话由 Mac 管理。</p>
-          <button className="mobile-primary" onClick={() => setSheet('connection')}><Link2 size={17} />设置连接<ArrowUpRight size={17} /></button>
+          <button className="mobile-primary" onClick={() => setSheet('connection')}><Link2 size={17} />查看连接状态<ArrowUpRight size={17} /></button>
           <div className="mobile-onboarding-steps"><div><span>01</span><p><strong>Mac 保持在线</strong><small>手机与 Mac 在同一私网</small></p></div><div><span>02</span><p><strong>确认这台设备</strong><small>在 Mac 上批准独立授权</small></p></div><div><span>03</span><p><strong>继续原会话</strong><small>阅读、撰写与回应请求</small></p></div></div>
         </section>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
@@ -165,11 +165,12 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <button className="mobile-secondary" onClick={() => { setAttachment(null); setSheet(null) }}>移除本地选择</button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
-          <label className="mobile-address-label" htmlFor="mobile-host-address">Mac 的 HTTPS 地址</label>
-          <input id="mobile-host-address" className="mobile-address-input" type="url" inputMode="url" autoCapitalize="none" autoCorrect="off" spellCheck={false} placeholder="https://192.168.1.20:端口" value={hostDraft} onChange={event => setHostDraft(event.target.value)} />
-          <p>使用 Mac 显示的局域网 IP 与端口；手机与 Mac 需在同一 Wi-Fi。</p>
-          <button className="mobile-primary" onClick={saveAddress}>{canPersist ? '保存地址' : '临时采用地址'}<ChevronRight size={17} /></button>
-          <div className="mobile-sheet-checks"><p><ShieldCheck size={17} /><span>保存地址只记录这台 Mac；设备授权要在 Mac 上确认。</span></p><p><Monitor size={17} /><span>Mac 需要保持在线。睡眠或离线不会被当成 Agent 已退出。</span></p></div>
+          {native || !connectionPanel ? <>
+            <label className="mobile-address-label" htmlFor="mobile-host-address">Mac 的 HTTPS 地址</label>
+            <input id="mobile-host-address" className="mobile-address-input" type="url" value={hostDraft} onChange={event => setHostDraft(event.target.value)} />
+            <button className="mobile-primary" onClick={saveAddress}>{canPersist ? '保存地址' : '临时采用地址'}</button>
+          </> : <p>Mac：{location.origin} · {label}</p>}
+          <p className="mobile-sheet-note">Mac 保持在线即可继续使用原会话。</p>
           {connectionPanel}
           <MobileRecoveryPanel {...(native ? { exportFile: exportNativeWorkfaceFile } : {})} />
           <p className="mobile-sheet-note">{connectionPanel ? '设备授权和会话连接分别核实。' : '此处只记录 Mac 地址，设备授权需要独立确认。'}重新安装后需要重新确认 Mac 和设备授权。{connection.message}</p>

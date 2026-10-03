@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
-import { AgentMuxError, durableWriteFile, type TrustedDevice } from '@agentmux/core'
+import { AgentMuxError, durableWriteFile, type TrustedDevice, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
 
 const INVITATION_LIFETIME_MS = 5 * 60_000
 const PENDING_LIFETIME_MS = 5 * 60_000
@@ -66,6 +66,8 @@ function stateFrom(value: unknown): AuthorityState {
 
 /** Device admission belongs to the Host; it never owns a Session, Run or attachment. */
 export class DeviceAuthority {
+  private readonly activityIssues = new Map<string, string>()
+  private readonly links = new Map<string, number>()
   private readonly invitations = new Map<string, number>()
   private readonly pending = new Map<string, PendingDevice>()
   private readonly readers = new Map<string, Set<AbortController>>()
@@ -88,10 +90,42 @@ export class DeviceAuthority {
   }
 
   get hostId(): string { return this.state.hostId }
-  devices(): readonly TrustedDevice[] { return this.state.devices.map(publicDevice) }
+  devices(): readonly TrustedDevice[] { return this.state.devices.map(device => ({ ...publicDevice(device),
+    online: (this.readers.get(device.deviceId)?.size ?? 0) > 0,
+    ...(device.lastSeenAt === undefined ? {} : { lastSeenAt: device.lastSeenAt }), operations: device.operations ?? [], ...(this.activityIssues.has(device.deviceId) ? { operationIssue: this.activityIssues.get(device.deviceId)! } : {}) })) }
+
+  operationSource(principal?: { kind: string; id: string }): AgentOperationDevice | undefined {
+    if (principal?.kind === 'user') return { hostId: this.hostId, deviceId: 'local', name: '本机 Mac' }
+    if (principal?.kind !== 'device' || !principal.id.startsWith(this.hostId + ':')) return undefined
+    const deviceId = principal.id.slice(this.hostId.length + 1)
+    const device = this.state.devices.find(d => d.deviceId === deviceId && d.revokedAt === undefined)
+    return device ? { hostId: this.hostId, deviceId, name: device.name } : undefined
+  }
+
+  noteActivityIssue(deviceId: string): void {
+    this.activityIssues.set(deviceId, '设备操作记录保存尚未确认。已执行的操作不会重做；请检查本机存储和原会话结果。')
+  }
+
+  async recordOperation(source: AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string): Promise<void> {
+    if (source.hostId !== this.hostId || source.deviceId === 'local') return
+    const first = args[0]
+    const target = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
+      : first && typeof first === 'object' && 'runId' in first ? String(first.runId)
+      : typeof first === 'string' && !/^(write|paste)/.test(method) ? first.slice(0, 160) : 'Host'
+    await this.change(state => ({ ...state, devices: state.devices.map(device => {
+      if (device.deviceId !== source.deviceId) return device
+      const operations = [...(device.operations ?? [])]
+      const id = operationId
+      const operation: DeviceOperation = { id, method, target, at: this.now(), result }
+      const index = operations.findIndex(o => o.id === id)
+      if (index >= 0) operations[index] = operation; else operations.push(operation)
+      return { ...device, lastSeenAt: this.now(), operations: operations.slice(-100) }
+    }) }))
+  }
 
   private prune(): void {
     const time = this.now()
+    for (const [key, expiresAt] of this.links) if (expiresAt <= time) this.links.delete(key)
     for (const [key, expiresAt] of this.invitations) if (expiresAt <= time) this.invitations.delete(key)
     for (const [id, pending] of this.pending) if (pending.expiresAt <= time) this.pending.delete(id)
   }
@@ -103,6 +137,28 @@ export class DeviceAuthority {
     const invitation = secret(), expiresAt = this.now() + INVITATION_LIFETIME_MS
     this.invitations.set(digest(invitation), expiresAt)
     return { hostId: this.hostId, invitation, expiresAt }
+  }
+
+  connectionLink(origin: string): { hostId: string; url: string; expiresAt: number } {
+    this.prune()
+    if (this.links.size >= MAX_INVITATIONS) throw new AgentMuxError('Too many active connection links.', 'CONTROL_OWNER_BUSY')
+    const code = secret(), expiresAt = this.now() + INVITATION_LIFETIME_MS
+    this.links.set(digest(code), expiresAt)
+    return { hostId: this.hostId, url: `${origin}/#connect=${code}`, expiresAt }
+  }
+
+  async exchangeLink(code: string, name: string): Promise<{ device: TrustedDevice; credential: string }> {
+    this.prune()
+    if (typeof code !== 'string' || code.length !== 43 || !name || name.length > 128) throw denied()
+    const hash = digest(code), expires = this.links.get(hash)
+    if (!expires || expires <= this.now()) throw denied()
+    this.links.delete(hash)
+    const credential = secret(), device = { deviceId: randomUUID(), name, createdAt: this.now() }
+    await this.change(state => {
+      if (state.devices.length >= MAX_DEVICES) throw new AgentMuxError('Device admission is full.', 'CONTROL_OWNER_BUSY')
+      return { ...state, devices: [...state.devices, { ...device, credentialHash: digest(credential) }] }
+    })
+    return { device, credential }
   }
 
   begin(hostId: string, invitation: string, name: string): DevicePairingRequest {
