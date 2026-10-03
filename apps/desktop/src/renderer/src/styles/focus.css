@@ -107,26 +107,35 @@
 .focus-context-menu { width: 232px; max-width: calc(100vw - 16px); }
 .focus-context-menu__identity { min-width: 0; padding: 4px 8px 8px; }
 .focus-context-menu__identity strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; line-height: 18px; }
-.focus-context-hover { position: fixed; z-index: var(--layer-popover); width: min(320px, calc(100vw - 20px)); max-height: min(480px, calc(100vh - 20px)); overflow: auto; overscroll-behavior: contain; padding: 12px; border-radius: var(--radius); background: var(--overlay-surface); box-shadow: var(--elev-3), var(--hl-strong), 0 0 0 1px var(--scrim-2); color: var(--text-2); pointer-events: auto; user-select: text; font-size: var(--fs-meta); line-height: 1.5; }
-.focus-context-hover header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 9px; }
+.focus-context-hover { position: fixed; z-index: var(--layer-popover); width: min(380px, calc(100vw - 20px)); max-height: min(620px, calc(100vh - 20px)); overflow: auto; overscroll-behavior: contain; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-3), var(--hl-strong); color: var(--text-2); pointer-events: auto; user-select: text; font-size: var(--fs-meta); line-height: 1.55; animation: focus-context-hover-enter 120ms ease-out; }
+.focus-context-hover header { display: flex; align-items: baseline; gap: 12px; margin-bottom: 12px; }
 .focus-context-hover header strong { flex: 1; min-width: 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
-.focus-context-hover header > span { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover header > span { flex: none; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-hover p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.focus-context-hover__activity { color: var(--text-3); }
 .focus-context-hover__recap { margin-top: 10px; }
-.focus-context-hover__recap > small { display: block; margin-bottom: 4px; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-context-hover__inputs { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); }
+.focus-context-hover__recap > small { display: block; margin-bottom: 6px; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__recap > .focus-context-hover__prose { max-height: 220px; overflow: auto; overscroll-behavior: contain; }
+.focus-context-hover__prose .md { gap: 6px; }
+.focus-context-hover__prose .md-code { font-size: inherit; }
+.focus-context-hover__prose .md-block-code { margin: 0; padding: 8px; font-size: var(--fs-micro); }
+.focus-context-hover__prose .md-link--readonly { color: inherit; cursor: text; text-decoration: underline; text-decoration-color: var(--text-3); }
+.focus-context-hover__prose .md-list { padding-left: 18px; }
+.focus-context-hover__inputs { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); }
 .focus-context-hover__inputs h4 { margin: 0; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .focus-context-hover__coverage { color: var(--text-3); font-size: var(--fs-micro); }
-.focus-context-hover__inputs ol { margin: 8px 0 0; padding: 0; list-style: none; }
-.focus-context-hover__inputs li + li { margin-top: 10px; }
-.focus-context-hover__input-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 3px 7px; margin-bottom: 3px; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-context-hover__input-meta strong { min-width: 0; color: var(--text-2); font-weight: 500; overflow-wrap: anywhere; }
-.focus-context-hover__input-meta time { margin-left: auto; }
-.focus-context-hover__inputs li p { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.focus-context-hover__inputs > ol { display: flex; flex-direction: column; gap: 7px; margin: 8px 0 0; padding: 0; list-style: none; }
+.focus-context-hover__inputs > ol > li { min-width: 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-1); }
+.focus-context-hover__input-meta { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 2px 8px; margin-bottom: 5px; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__input-meta strong { min-width: 0; color: var(--text-2); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-context-hover__input-meta time { grid-column: 2; grid-row: 1; font-variant-numeric: tabular-nums; }
+.focus-context-hover__source { grid-column: 1 / -1; opacity: .8; }
 .focus-context-hover__inputs .focus-context-hover__notice { margin-top: 8px; color: var(--text-3); font-size: var(--fs-micro); }
-.focus-context-hover footer { display: flex; flex-direction: column; gap: 3px; margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.focus-context-hover footer { display: flex; flex-direction: column; gap: 2px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .focus-context-hover footer strong { color: var(--text-2); font-weight: 500; }
 .focus-context-hover footer code { font: var(--fs-micro)/1.4 var(--font-mono); }
+@keyframes focus-context-hover-enter { from { opacity: 0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .focus-context-hover { animation: none; } }
 .focus-disconnected-entry { position: relative; width: 32px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; cursor: pointer; }
 .focus-disconnected-entry:has(.focus-context-group__count) > svg { position: absolute; left: 2px; bottom: 0; }
 .focus-disconnected-entry .focus-context-group__count { position: absolute; top: 0; right: 0; height: 12px; line-height: 12px; }
