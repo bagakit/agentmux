@@ -132,6 +132,6 @@ it('binds Topic/Mote identity to trusted facts, keeping ownership ids and full p
  await seedTopic();const state=useAppStore.getState();const rows=createFocusProjectionSelector()(state).contexts
  expect(rows.map(item=>item.id)).toEqual(['topic-agent']);const lanes=deriveFocusProjectLanes(rows,state.config,{topics:{[SCRATCH_WORKSPACE_ID]:[ordinary,mote]},worktrees:[]})
  expect(lanes.map(item=>[item.projectId,item.workspaceId,item.objectKind,item.labels])).toEqual([[SCRATCH_WORKSPACE_ID,SCRATCH_WORKSPACE_ID,'topic',['Scratch project','Fix scrolling']]])
- await act(async()=>root.render(createElement(FocusProjectLanes,{lanes,selectedWorkspaceId:'all',onSelect:vi.fn(),renderLane:(_lane,heading)=>heading})))
+ await act(async()=>root.render(createElement(FocusProjectLanes,{lanes,selectedProjectKey:'all',onSelect:vi.fn(),renderLane:(_lane,heading)=>heading})))
  expect(container.querySelector('.focus-project-lanes__axis')!.getAttribute('title')).toContain(ordinary.directoryPath)
 })

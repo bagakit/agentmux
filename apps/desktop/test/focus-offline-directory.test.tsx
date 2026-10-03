@@ -47,11 +47,11 @@ beforeEach(async () => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
-it('opens a full directory on the first all-offline render without returning to an empty board', async () => {
-  await mount(); expect(directory()).not.toBeNull(); expect(directory().dataset.expanded).toBe('true')
+it('keeps all-offline project titles until explicitly opening the same full directory and returning', async () => {
+  await mount(); expect(directory()).not.toBeNull(); expect(directory().dataset.expanded).toBe('false'); await reveal(); expect(directory().dataset.expanded).toBe('true')
   expect(rows().map(node => node.dataset.sessionId).sort()).toEqual(['retained-one', 'retained-two'])
   expect(rows().every(node => node.classList.contains('focus-context--directory'))).toBe(true)
-  expect(button('Return to board')).toBeNull()
+  expect(button('Return to board')).not.toBeNull()
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBeNull()
 })
 it('keeps mixed offline in its compact rail until explicitly entering the same full directory', async () => {
@@ -64,12 +64,12 @@ it('keeps mixed offline in its compact rail until explicitly entering the same f
 })
 it('filters the directory by the original global query and exposes a useful zero-match action', async () => {
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, session('same-project', 'disconnected', 'interrupted', _hygiene_fixturePath("earlier"))], agentNames: { ...state.agentNames, 'same-project': 'Check untouched work' } })))
-  await mount(); await search('directory design'); expect(rows().map(node => node.dataset.sessionId)).toEqual(['retained-two'])
+  await mount(); await reveal(); await search('directory design'); expect(rows().map(node => node.dataset.sessionId)).toEqual(['retained-two'])
   await search('no-such-context'); expect(rows()).toHaveLength(0); expect(directory().textContent).toContain('No matching')
   await click(button('Clear filters')!); expect(rows()).toHaveLength(3)
 })
 it('honours project and state filtering while full offline ownership and totals remain unchanged', async () => {
-  await mount(); await chooseFocusFilter(container, 'project', 'earlier'); expect(rows().map(node => node.dataset.sessionId)).toEqual(['retained-two'])
+  await mount(); await reveal(); await chooseFocusFilter(container, 'project', JSON.stringify(['local', 'earlier'])); expect(rows().map(node => node.dataset.sessionId)).toEqual(['retained-two'])
   await chooseFocusFilter(container, 'state', 'working'); expect(rows()).toHaveLength(0)
   await click(button('Clear filters')!); expect(rows()).toHaveLength(2)
   expect(useAppStore.getState().sessions).toHaveLength(2)
@@ -77,7 +77,7 @@ it('honours project and state filtering while full offline ownership and totals 
 it('makes the original observed recap and its provenance readable with a truthful activity time', async () => {
   const time = Date.UTC(_hygiene_fixtureYear, 9, 5, 12, 15)
   await act(async () => useAppStore.setState({ timelines: { 'retained-one': { agentSessionId: 'retained-one', revision: 1, items: [{ id: 'reply', agentSessionId: 'retained-one', kind: 'assistant_message', status: 'complete', source: 'native-hook', createdAt: time, updatedAt: time, title: 'Response', content: 'Verified scroll continuity while keeping the same Session.' }] } } }))
-  await mount(); const actual = row('retained-one'); expect(actual.textContent).toContain('Verified scroll continuity')
+  await mount(); await reveal(); const actual = row('retained-one'); expect(actual.textContent).toContain('Verified scroll continuity')
   expect(actual.querySelector('.focus-context__excerpt-source')?.textContent).toContain('Last assistant message · timeline')
   expect(actual.querySelector('time')?.getAttribute('dateTime')).toBe(new Date(time).toISOString())
   expect(row('retained-two').querySelector('time')).toBeNull()
@@ -107,14 +107,14 @@ it('does not steal a later deliberate focus when closing the offline directory',
 })
 it('uses the original navigation without replacing Session, controls, tabs or unsent drafts', async () => {
   const start = useAppStore.getState(), launches = vi.spyOn(api.sessions, 'launchAgent'), resumes = vi.spyOn(api.sessions, 'resume'), stops = vi.spyOn(api.sessions, 'stop')
-  await mount(); await click(row('retained-one'))
+  await mount(); await reveal(); await click(row('retained-one'))
   const current = useAppStore.getState(); expect(current.agentFocus.execution.sessionId).toBe('retained-one')
   expect(current.sessions).toBe(start.sessions); expect(current.tabs).toBe(start.tabs); expect(current.agentComposerDrafts).toBe(start.agentComposerDrafts)
   expect(current.sessions.map(item => item.control)).toEqual(start.sessions.map(item => item.control)); expect(launches).not.toHaveBeenCalled(); expect(resumes).not.toHaveBeenCalled(); expect(stops).not.toHaveBeenCalled()
 })
 it('does not add history or hierarchy reads when unrelated output bytes change', async () => {
   const history = vi.spyOn(api.sessions, 'historyPage'), timeline = vi.spyOn(api.sessions, 'timeline')
-  await mount(); const original = row('retained-one'), branches = vi.mocked(api.workspaces.listBranches).mock.calls.length, icons = vi.mocked(api.workspaces.appearance).mock.calls.length
+  await mount(); await reveal(); const historyReads = history.mock.calls.length, timelineReads = timeline.mock.calls.length; const original = row('retained-one'), branches = vi.mocked(api.workspaces.listBranches).mock.calls.length, icons = vi.mocked(api.workspaces.appearance).mock.calls.length
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(item => ({ ...item, latestOutputBytes: item.latestOutputBytes + 20, status: { ...item.status, observedAt: 500 } })) })))
-  expect(row('retained-one')).toBe(original); expect(history).not.toHaveBeenCalled(); expect(timeline).not.toHaveBeenCalled(); expect(api.workspaces.listBranches).toHaveBeenCalledTimes(branches); expect(api.workspaces.appearance).toHaveBeenCalledTimes(icons)
+  expect(row('retained-one')).toBe(original); expect(history).toHaveBeenCalledTimes(historyReads); expect(timeline).toHaveBeenCalledTimes(timelineReads); expect(api.workspaces.listBranches).toHaveBeenCalledTimes(branches); expect(api.workspaces.appearance).toHaveBeenCalledTimes(icons)
 })

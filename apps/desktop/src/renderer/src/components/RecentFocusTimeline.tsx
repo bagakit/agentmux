@@ -525,9 +525,10 @@ function FocusWorkingObservation({ segment, track, anchor, time, onClose }: {
   </Dialog.Portal></Dialog.Root>
 }
 
-export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, contexts, lanes, hierarchy, onSelect }: {
+export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, currentSessionId, contexts, lanes, hierarchy, onSelect, historyWindowRequest }: {
   entries: readonly AgentFocusHistoryEntry[]; currentSessionId: string | null; contexts: readonly FocusContext[]
   lanes?: readonly FocusProjectLane[]; hierarchy?: FocusHierarchyFacts; onSelect(sessionId: string): void
+  historyWindowRequest?: { at: number; sequence: number } | undefined
 }) {
   const [mode, setMode] = useState<'compact' | 'expanded' | 'collapsed'>('compact')
   const [hours, setHours] = useState<number>(4)
@@ -535,6 +536,11 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const [dateDraft, setDateDraft] = useState<string | null>(null)
   const [dateError, setDateError] = useState<string | null>(null)
   const [dateChoice, setDateChoice] = useState<FocusDateChoice | null>(null)
+  useEffect(() => {
+    if (!historyWindowRequest) return
+    setAnchor(historyWindowRequest.at); setMode(current => current === 'collapsed' ? 'compact' : current)
+    setObservation(null); setDateDraft(null); setDateError(null); setDateChoice(null)
+  }, [historyWindowRequest])
   const ruler = useAppStore(state => state.focusTimelineRuler)
   const saveRuler = useAppStore(state => state.setFocusTimelineRuler)
   // System can change while the app is alive. Resolve it once per existing render
@@ -713,7 +719,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   }, [inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId, cancelPreviewIntent])
   const readonlyReading = !!inputReference && !inputControl
   const readingEnabled = mode !== 'collapsed' && documentVisible && !!inputReference
-  const historical = anchor !== null || earlier || readonlyReading
+  const historical = earlier || readonlyReading
   const [latest, setLatest] = useState<LatestInputs>(EMPTY_LATEST_INPUTS)
   // The viewport filters a bounded snapshot; it is not another reading intent.
   const readingScope = JSON.stringify([inputReference?.hostId, inputReference?.agentSessionId, inputControl?.run.runId, historical ? 'snapshot' : 'latest', readonlyReading])
