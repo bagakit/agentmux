@@ -27,14 +27,14 @@ function transaction() {
   })
 }
 
-it('real catalog and complete Shell expose Workflows once; object keywords reach actionable Space', async () => {
-  expect(settingsNavGroups('').find(group => group.id === 'workflows')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals'])
-  for (const word of ['workflows', 'mote', 'topic', 'project', 'survey']) expect(visibleSettingsSections(word).some(module => module.id === 'space')).toBe(true)
+it('real catalog and complete Shell expose Work once; object keywords reach their owning modules', async () => {
+  expect(settingsNavGroups('').find(group => group.id === 'work')?.items.map(module => module.id)).toEqual(['space', 'focus', 'goals', 'survey', 'notes'])
+  for (const word of ['work', 'topic', 'project']) expect(visibleSettingsSections(word).some(module => module.id === 'space')).toBe(true)
   await dom.render(<SettingsPanel onClose={() => {}} />)
-  expect(dom.container.querySelectorAll('#settings-overview-workflows')).toHaveLength(1)
+  expect(dom.container.querySelectorAll('#settings-overview-work')).toHaveLength(1)
   expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
   await section('space')
-  expect(pane('space').querySelectorAll('[data-workflows-manage]')).toHaveLength(4)
+  expect(pane('space').querySelectorAll('[data-workflows-manage]')).toHaveLength(2)
   expect(pane('space').querySelectorAll('input[name=space-rail-density]')).toHaveLength(3)
   expect(pane('space').textContent).toContain('Saved: Comfortable')
   expect(dom.container.querySelector('[data-settings-pane="goals"]')).toBeNull()
@@ -56,11 +56,11 @@ it('real Shell route to Environments and back preserves visited Space draft with
 it('named management buttons consume original surface/floating owner without changing saved config or healthy Runs', async () => {
   const close = vi.fn(), write = transaction(), initial = useAppStore.getState()
   await dom.render(<SettingsPanel onClose={close} initialSection="space" />)
-  await dom.click('[data-workflows-manage=survey]')
+  await section('survey'); await dom.click('[data-settings-pane=survey] .small-button')
   expect(useAppStore.getState().mainSurface).toBe('survey')
-  await dom.click('[data-workflows-manage=topics]')
+  await section('space'); await dom.click('[data-workflows-manage=topics]')
   expect(useAppStore.getState().mainSurface).toBe('workbench')
-  await dom.click('[data-workflows-manage=motes]')
+  await section('mote'); await dom.click('[data-settings-pane=mote] .small-button')
   expect(readPmoTeamsTopicFloatingState().open).toBe(true)
   requestPmoTeamsTopicFloatingClose()
   expect(close).toHaveBeenCalledTimes(3)

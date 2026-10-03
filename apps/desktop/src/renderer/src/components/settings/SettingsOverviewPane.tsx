@@ -26,7 +26,7 @@ export function SettingsOverviewPane<Module extends SettingsModule>({ config, gr
       </div>
       <div className="settings-overview__groups">
         {groups.map((group) => <section key={group.id} className="settings-overview__group" aria-labelledby={`settings-overview-${group.id}`}>
-          <header><h3 id={`settings-overview-${group.id}`}>{group.title}</h3><small>Saved configuration</small></header>
+          <header><h3 id={`settings-overview-${group.id}`}>{group.title}</h3></header>
           <div className="settings-overview__entries">
             {group.items.map((item) => {
               const Icon = item.icon

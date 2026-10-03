@@ -14,9 +14,9 @@ async function saveCollapsed(collapsed: boolean, expected: boolean): Promise<voi
 }
 
 export const goalsSettingsModule = {
-  id: 'goals', group: 'workflows', title: 'Goals', icon: Target,
+  id: 'goals', group: 'work', title: 'Goals', icon: Target,
   description: 'How common actions appear when you open Goals.',
-  keywords: 'workflows work goals common actions collapsed expanded prompt library',
+  keywords: 'work goals common actions collapsed expanded prompt library',
   savedSummary: config => resolveGoalsCommonActions(config.goalsCommonActions).collapsed ? 'Common actions collapsed' : 'Common actions expanded',
   Pane({ config, onClose }) {
     return <GoalsSettingsPane collapsed={config.goalsCommonActions?.collapsed} onSave={saveCollapsed}
