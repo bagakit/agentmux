@@ -481,6 +481,116 @@ async function programOwner(f: Awaited<ReturnType<typeof fixture>>, uploads: imp
   return { page, journal, evidence, refs, journalFile, journalSaves }
 }
 
+
+// Execute the original Desktop branches, preload invokes and registered Main callbacks.
+// Only the UI/IPC frame and empty embedded-page context are Source fixture inputs.
+async function sourceBrowserExecutor(f: Awaited<ReturnType<typeof fixture>>, o: Awaited<ReturnType<typeof programOwner>>) {
+  const { readFileSync } = await import('node:fs')
+  const ts = (await import('typescript')).default
+  function ast(path: string) {
+    const source = readFileSync(new URL(path, import.meta.url), 'utf8')
+    return ts.createSourceFile(path, source, ts.ScriptTarget.Latest, true)
+  }
+  function select(source: import('typescript').SourceFile, predicate: (node: import('typescript').Node) => boolean) {
+    const nodes: import('typescript').Node[] = []
+    const walk = (node: import('typescript').Node): void => { if (predicate(node)) nodes.push(node); ts.forEachChild(node, walk) }
+    walk(source); return nodes
+  }
+  function compiled(source: string, dependencies: Record<string, unknown>) {
+    const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText
+    return new Function(...Object.keys(dependencies), output)(...Object.values(dependencies))
+  }
+  const frame = {}; const config = { browser: { agentAutomation: true } }
+  const requireTrustedSender = vi.fn((_channel: string, event: unknown) => { if (event !== frame) throw new Error('Untrusted Source frame') })
+  const workspace = (_config: unknown, id: string) => { if (id !== 'fixture-workspace') throw new Error('Unknown original Source Workspace'); return { id } }
+  const getterSource = ast('../src/main/browser-view-manager.ts')
+  const methods = select(getterSource, node => ts.isMethodDeclaration(node) && ['getOperation', 'stopOperationById'].includes(node.name.getText(getterSource)))
+  expect(methods, 'Original BVM journal getter and stop method must be present').toHaveLength(2)
+  const journalOwner = compiled(`return ({ entries: new Map(), operationJournal, ${methods.map(node => node.getText(getterSource)).join(',\n')} });`, { operationJournal: o.journal })
+  const browsers = { targets: () => [], getOperation: (id: string) => journalOwner.getOperation(id),
+    runScript: vi.fn(async () => { throw new Error('Unexpected embedded-page run') }),
+    stopOperationById: vi.fn(async (id: string) => journalOwner.stopOperationById(id)) }
+  const main = ast('../src/main/ipc.ts')
+  const callbacks = new Map<string, (...args: unknown[]) => Promise<unknown>>()
+  for (const channel of ['browser:listTargets', 'browser:runScript', 'browser:stopOperationById', 'browser:getOperation']) {
+    const nodes = select(main, node => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'handleWithEvent' &&
+      !!node.arguments[0] && ts.isStringLiteralLike(node.arguments[0]) && node.arguments[0].text === channel)
+    expect(nodes, `Original Main registration must be unique: ${channel}`).toHaveLength(1)
+    const call = nodes[0] as import('typescript').CallExpression
+    callbacks.set(channel, compiled(`return ${call.arguments[1]!.getText(main)};`, { requireTrustedSender, config, workspace,
+      browsers, externalBrowsers: o.page, externalBridge: f.bridge }))
+  }
+  const preload = ast('../src/preload/index.ts')
+  const names = ['listTargets', 'runScript', 'stopOperationById', 'getOperation']
+  const properties = select(preload, node => ts.isPropertyAssignment(node) && names.includes(node.name.getText(preload)))
+  expect(properties, 'Original preload Browser invokes must all be present').toHaveLength(4)
+  const api = { browser: compiled(`return ({ ${properties.map(node => node.getText(preload)).join(',\n')} });`, {
+    ipcRenderer: { invoke: (channel: string, ...args: unknown[]) => {
+      const callback = callbacks.get(channel)
+      if (!callback) throw new Error(`No original Main callback ${channel}`)
+      return callback(frame, ...args)
+    } }
+  }) }
+  const store = ast('../src/renderer/src/store.ts')
+  const controlMethods = ['browser.targets', 'browser.run', 'browser.stop', 'browser.operation']
+  const branches = select(store, node => ts.isIfStatement(node) && ts.isBinaryExpression(node.expression) &&
+    node.expression.left.getText(store) === 'request.operation' && ts.isStringLiteralLike(node.expression.right) && controlMethods.includes(node.expression.right.text))
+  expect(branches, 'Original Renderer Browser branches must be unique and nonempty').toHaveLength(4)
+  const execute = compiled(`return async request => { ${branches.map(node => node.getText(store)).join('\n')}\nthrow new Error('No original Browser branch'); };`, {
+    api, requireActive: () => {}, get: () => ({ sessions: [] })
+  }) as (request: import('../../../packages/core/src/control.js').AgentMuxControlRequest) => Promise<import('../../../packages/core/src/control.js').AgentMuxControlResult>
+  return { execute, requireTrustedSender, browsers }
+}
+
+// The actual executable CLI and public service delegate to this fixture's production
+// owner. Chrome APIs remain Source doubles; no installed App or OS focus is certified.
+async function sourcePublicCli(f: Awaited<ReturnType<typeof fixture>>, o: Awaited<ReturnType<typeof programOwner>>) {
+  const { spawn } = await import('node:child_process')
+  const { symlink } = await import('node:fs/promises')
+  const { dirname } = await import('node:path')
+  const { createRequire } = await import('node:module')
+  const { fileURLToPath } = await import('node:url')
+  const { AgentMuxControlServer } = await import('../../../packages/core/src/control-host.js')
+  const { objectCliReceipt } = await import('../../../packages/core/test/helpers/object-cli-receipt.js')
+  const require = createRequire(new URL('../../../packages/core/package.json', import.meta.url))
+  const directory = dirname(f.path)
+  const cli = join(directory, 'agentmux.mjs')
+  await symlink(fileURLToPath(new URL('../../../packages/core/node_modules', import.meta.url)), join(directory, 'node_modules'), 'dir')
+  await require('esbuild').build({ entryPoints: [fileURLToPath(new URL('../../../packages/core/src/agentmux.ts', import.meta.url))],
+    outfile: cli, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent',
+    plugins: [{ name: 'keep-existing-dependencies-external', setup(build: import('esbuild').PluginBuild) {
+      build.onResolve({ filter: /[/\\]node_modules[/\\]/ }, args => ({ path: args.path, external: true }))
+    } }] })
+  const seen: string[] = []
+  const desktop = await sourceBrowserExecutor(f, o)
+  const server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), coreClients: () => [], async execute(request) {
+    seen.push(request.operation)
+    return await desktop.execute(request)
+  } })
+  await server.start()
+  async function run(args: string[], input = '') {
+    return await new Promise<{ code: number; stdout: string; stderr: string }>((resolve, reject) => {
+      const child = spawn(process.execPath, [cli, ...args], { cwd: directory,
+        env: { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))),
+          AGENTMUX_RUNTIME_DIRECTORY: directory, AGENTMUX_STATE_DIRECTORY: join(directory, 'state') }, stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = ''; let stderr = ''
+      child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+      const timeout = setTimeout(() => { child.kill(); reject(new Error('Source public stop CLI exceeded its bounded request.')) }, 10_000)
+      child.on('error', error => { clearTimeout(timeout); reject(error) })
+      child.on('close', code => { clearTimeout(timeout); resolve({ code: code ?? -1, stdout, stderr }) })
+      child.stdin.end(input)
+    })
+  }
+  function receipt(output: Awaited<ReturnType<typeof run>>) {
+    expect(output.code, output.stderr).toBe(0)
+    const value = objectCliReceipt(JSON.parse(output.stdout))
+    expect(value.ok).toBe(true)
+    if (!value.ok) throw new Error(value.error.message)
+    return value
+  }
+  return { run, receipt, seen, desktop, stop: () => server.stop() }
+}
+
 describe('external page owner uses the existing program and journal', () => {
   it('passes the independent-document fact through the real SDK dispatcher into the original Workspace upload store', async () => {
     const { mkdir, writeFile } = await import('node:fs/promises')
@@ -608,6 +718,8 @@ describe('external page owner uses the existing program and journal', () => {
     expect(binding.status).toBe('revoked')
     const report = await run
     expect(report.outcome.kind).toBe('stopped')
+    expect(report.outcome).toEqual({ kind: 'stopped', message: 'The shared-tab operation was stopped. Sharing must be granted explicitly before another action.' })
+    expect(binding.warning).toBe('Sharing of this original tab ended. Grant control explicitly before another action.')
     // The runner aborts promptly; the original page callback can persist its final
     // step later. Wait for that actual terminal step and its real file saves before
     // removing this fixture, rather than racing durableWriteFile or retrying rm.
@@ -619,6 +731,63 @@ describe('external page owner uses the existing program and journal', () => {
     expect(f.bridge.list()).toHaveLength(1)
     expect(f.api.tabs.create).not.toHaveBeenCalled(); release.dispose()
   })
+
+  it('keeps explicit stop actor-neutral through the actual public CLI and retains another shared target', async () => {
+    const f = await fixture(); const binding = await f.share(); const other = await f.share(2)
+    const o = await programOwner(f); const cli = await sourcePublicCli(f, o)
+    const started = deferred(); const stopped = deferred()
+    const release = await o.journal.subscribe('public-stop-original', 0, event => {
+      if (event.event.type === 'step-started') started.resolve()
+      if (event.event.type === 'step-finished' && event.event.step.status === 'stopped') stopped.resolve()
+    })
+    try {
+      for (const args of [['--help'], ['--help', 'browser'], ['--help', 'browser', 'stop'], ['--skill']]) {
+        const output = await cli.run(args)
+        expect(output.code, output.stderr).toBe(0)
+        expect(output.stdout).toContain('Stop an active Browser operation; return retained state if finished.')
+        if (args.length === 3) {
+          expect(output.stdout).toContain('other targets retain their grants')
+          expect(output.stdout).toContain('Reader cancellation only detaches the reader')
+          expect(output.stdout).toContain('For an active operation on an external shared tab, explicit stop ends only that original tab')
+          expect(output.stdout).toContain('A finished operation returns its retained terminal state without ending its sharing grant')
+        }
+      }
+      const listed = cli.receipt(await cli.run(['browser', 'targets', '--workspace', 'fixture-workspace']))
+      expect(listed.result).toEqual({ targets: f.bridge.list() })
+      const run = cli.run(['browser', 'run', '--browser', binding.id, '--operation-id', 'public-stop-original'], 'await waitForLoad(5000); return 1')
+      await started.promise
+      const stoppedReceipt = cli.receipt(await cli.run(['browser', 'stop', '--operation-id', 'public-stop-original']))
+      expect(stoppedReceipt.result).toMatchObject({ runOperation: { id: 'public-stop-original', browserId: binding.id, operator: { id: 'agent:unknown', name: 'Agent' } } })
+      expect(binding.status).toBe('revoked')
+      expect(binding.warning).toBe('Sharing of this original tab ended. Grant control explicitly before another action.')
+      expect(other.status).toBe('ready')
+      const report = cli.receipt(await run)
+      expect(report.result).toMatchObject({ outcome: { kind: 'stopped', message: 'The shared-tab operation was stopped. Sharing must be granted explicitly before another action.' } })
+      await stopped.promise
+      const inspected = cli.receipt(await cli.run(['browser', 'inspect', '--operation-id', 'public-stop-original']))
+      expect(inspected.result).toMatchObject({ runOperation: { phase: 'stopped', operator: { id: 'agent:unknown', name: 'Agent' },
+        summary: 'The shared-tab operation was stopped. Sharing must be granted explicitly before another action.' } })
+      const after = cli.receipt(await cli.run(['browser', 'targets']))
+      expect(after.result).toMatchObject({ targets: [expect.objectContaining({ id: binding.id, status: 'revoked', warning: binding.warning }),
+        expect.objectContaining({ id: other.id, status: 'ready' })] })
+      const continued = cli.receipt(await cli.run(['browser', 'run', '--browser', other.id, '--operation-id', 'public-other-continues'], 'return await snapshot()'))
+      expect(continued.result).toMatchObject({ outcome: { kind: 'completed' }, runOperation: { browserId: other.id, phase: 'completed' } })
+      expect(f.api.debugger.sendCommand.mock.calls.some(([target, method]) => target.tabId === 2 && method === 'Accessibility.getFullAXTree')).toBe(true)
+      expect(await o.page.stopOperationById('public-other-continues')).toBeNull()
+      const finished = cli.receipt(await cli.run(['browser', 'stop', '--operation-id', 'public-other-continues']))
+      expect(finished.result).toMatchObject({ runOperation: { id: 'public-other-continues', phase: 'completed', browserId: other.id } })
+      expect(other.status).toBe('ready')
+      await vi.waitFor(() => expect(f.worker.grants.has(1)).toBe(false))
+      expect(f.worker.grants.has(2)).toBe(true)
+      expect(f.bridge.list()).toHaveLength(2)
+      expect(f.api.tabs.create).not.toHaveBeenCalled(); expect(f.api.tabs.update).not.toHaveBeenCalled(); expect(f.api.windows.update).not.toHaveBeenCalled()
+      expect(cli.seen).toEqual(['browser.targets', 'browser.run', 'browser.stop', 'browser.operation', 'browser.targets', 'browser.run', 'browser.stop'])
+      expect(cli.desktop.requireTrustedSender.mock.calls.map(([channel]) => channel)).toEqual(['browser:listTargets', 'browser:runScript', 'browser:stopOperationById', 'browser:getOperation', 'browser:listTargets', 'browser:runScript', 'browser:stopOperationById'])
+      expect(cli.desktop.browsers.runScript).not.toHaveBeenCalled(); expect(cli.desktop.browsers.stopOperationById).toHaveBeenCalledExactlyOnceWith('public-other-continues')
+    } finally { release.dispose(); await cli.stop() }
+    await Promise.all(o.journalSaves.mock.results.map(result => result.value))
+  }, 20_000)
+
   it('observes the original navigation load before allowing the next SDK read', async () => {
     const f = await fixture(); const binding = await f.share(); const o = await programOwner(f)
     const navigated = deferred(); const original = f.api.debugger.sendCommand.getMockImplementation()!
