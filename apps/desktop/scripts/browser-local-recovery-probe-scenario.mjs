@@ -136,7 +136,7 @@ export async function showDiagnostic(ctx, actual, diagnostic, label) {
     if(!nextAction)return reject('next-action-missing');
     if(!sample.nextAction.clientRects)return reject('next-action-no-client-rects');
     if(sample.nextAction.visibility==='hidden')return reject('next-action-hidden');
-    message.scrollIntoView({block:'nearest'});
+    root.scrollIntoView({block:'nearest'});
     sample.scrollApplied=true;sample.message.bounds=bounds(message);sample.nextAction.bounds=bounds(nextAction);sample.rail.bounds=bounds(rail);
     const rect=message.getBoundingClientRect();if(!rail)return reject('rail-missing');
     const r=rail.getBoundingClientRect(),left=Math.max(rect.x,r.x,0),top=Math.max(rect.y,r.y,0),right=Math.min(rect.right,r.right,innerWidth),bottom=Math.min(rect.bottom,r.bottom,innerHeight);
@@ -145,6 +145,8 @@ export async function showDiagnostic(ctx, actual, diagnostic, label) {
     sample.nextAction.intersection={x:nextLeft,y:nextTop,width:Math.max(0,nextRight-nextLeft),height:Math.max(0,nextBottom-nextTop)};
     if(right<=left||bottom<=top)return reject('message-no-intersection');
     if(nextRight<=nextLeft||nextBottom<=nextTop)return reject('next-action-no-intersection');
+    if(right-left+0.5<rect.width||bottom-top+0.5<rect.height)return reject('message-clipped');
+    if(nextRight-nextLeft+0.5<nextRect.width||nextBottom-nextTop+0.5<nextRect.height)return reject('next-action-clipped');
     sample.readable=true;sample.reason='readable';sample.ui={intersection:{x:left,y:top,width:right-left,height:bottom-top},text:message.textContent,nextAction:nextAction.textContent,nextActionIntersection:{x:nextLeft,y:nextTop,width:nextRight-nextLeft,height:nextBottom-nextTop},nextActionBounds:{x:nextRect.x,y:nextRect.y,width:nextRect.width,height:nextRect.height},bounds:{x:rect.x,y:rect.y,width:rect.width,height:rect.height},operationId:timeline?.dataset.operationId};return sample;
   })()`)
     // Keep only the last real DOM reply, including failure branches. The canonical's
@@ -158,6 +160,8 @@ export async function showDiagnostic(ctx, actual, diagnostic, label) {
   // URL can differ after a failed navigation or ordinary restart. Resolve the actual
   // original run's stage/Native geometry first; never guess its owner from the old URL.
   const owner = await currentNativeOwner(ctx)
+  // A DOM scroll can precede its paint. Observe two real frames before capturing this same UI.
+  await ctx.probe.cdp.evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
   await ctx.capture(ctx.probe, `${label}-local-recovery-${ctx.receipt.localRecovery.kind}-diagnostic`, 'operations', owner.url.split('#')[0])
 }
 
