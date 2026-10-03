@@ -11,11 +11,18 @@ import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
+import { topicContentSpaceId, topicContentZoneId } from '../src/shared/topic-categories'
 
 const initial = useAppStore.getState()
 const folder = (id: string, name: string, path: string) => ({ id, name, path, hostId: 'local', kind: 'folder' as const })
 const alpha = folder('alpha', 'Alpha', _hygiene_fixturePath("work/alpha"))
 const core = folder('core', 'Core', _hygiene_fixturePath("work/alpha/core"))
+const scratch = folder(SCRATCH_WORKSPACE_ID, 'Topics', _hygiene_fixturePath("topics"))
+const topics = [
+  { id: 'view:a', title: 'Harness archive', summary: 'Knowledge decisions', collaborators: [], directoryPath: _hygiene_fixturePath("topics/topic-a"), topicPath: _hygiene_fixturePath("topics/topic-a/topic.md") },
+  { id: 'view:b', title: 'Release planning', summary: 'Ship the editor', collaborators: [], directoryPath: _hygiene_fixturePath("topics/topic-b"), topicPath: _hygiene_fixturePath("topics/topic-b/topic.md") }
+]
+const categories = ['Knowledge', 'Delivery'].map((title, i) => ({ categoryId: 'category-' + i, spaceId: 'category-space-' + i, title, hostId: 'local', directoryPath: _hygiene_fixturePath("topics/category-") + i, revision: 'original' }))
 const groupKey = JSON.stringify(['local', _hygiene_fixturePath("work")])
 const alphaKey = `project:${workspaceProjectId(alpha)}`
 let root: Root
@@ -46,10 +53,7 @@ async function key(target: HTMLElement, value: string) {
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
-  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([
-    { id: 'view:a', title: 'Harness archive', summary: 'Knowledge decisions', collaborators: [], directoryPath: 'topic-a', topicPath: 'topic-a/topic.md' },
-    { id: 'view:b', title: 'Release planning', summary: 'Ship the editor', collaborators: [], directoryPath: 'topic-b', topicPath: 'topic-b/topic.md' }
-  ])
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
   const sessions: SessionSnapshot[] = ['waiting', 'error', 'working', 'running', 'done'].map((state, index) => ({
     id: `agent-${index}`, label: `Agent ${index}`, agentSessionUpdatedAt: 1,
     kind: 'agent', providerId: 'codex', executorId: 'codex', hostId: 'local', workspacePath: alpha.path,
@@ -59,7 +63,9 @@ beforeEach(async () => {
     control: { kind: 'agent', hostId: 'local', agentSessionId: `agent-${index}`, run: { runId: `run-${index}` } }
   }))
   const tab = createWorkbenchTab('retained-tab', { regionId: 'retained-region', kind: 'agent', phase: 'attached', workspaceId: alpha.id, sessionId: sessions[0]!.id })
-  useAppStore.setState({ config: { ...initial.config!, version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {}, workspaces: [folder(SCRATCH_WORKSPACE_ID, 'Topics', _hygiene_fixturePath("topics")), alpha, core, folder('beta', 'Beta', _hygiene_fixturePath("work/beta"))] }, sessions, tabs: { [tab.id]: tab }, layouts: { alpha: createWorkspaceLayout('main', [tab.id]) }, activeWorkspaceId: alpha.id, collapsedProjectGroups: {}, pinnedItems: { [SCRATCH_WORKSPACE_ID]: ['view:b'], [workspaceProjectId(core)]: ['dev'] }, scratchTopicOrder: [], workspaceFileRevisions: {}, selectWorkspace, openScratchTopic: openTopic })
+  useAppStore.setState({ config: { ...initial.config!, version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {}, workspaces: [scratch, alpha, core, folder('beta', 'Beta', _hygiene_fixturePath("work/beta"))] }, sessions, tabs: { [tab.id]: tab }, layouts: { alpha: createWorkspaceLayout('main', [tab.id]) }, activeWorkspaceId: alpha.id, collapsedProjectGroups: {}, pinnedItems: { [SCRATCH_WORKSPACE_ID]: ['view:b'], [workspaceProjectId(core)]: ['dev'] }, scratchTopicOrder: [], workspaceFileRevisions: {}, selectWorkspace, openScratchTopic: openTopic,
+    topicCategories: categories,
+    spaceZoneBindings: Object.fromEntries(topics.map((topic, i) => [topicContentZoneId(scratch, topic), { workspaceId: scratch.id, spaceId: topicContentSpaceId(scratch, topic), zoneId: topicContentZoneId(scratch, topic), topicId: topic.id, contentKind: 'topic' as const, relations: { [categories[i]!.spaceId]: true as const } }])) })
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   await act(async () => root.render(createElement(WorkspaceSidebar)))
   original = preserved()
@@ -75,7 +81,8 @@ it('reveals matching descendants through all original disclosures and restores c
   expect([...container.querySelectorAll('[data-workspace-id]')].map((node) => node.getAttribute('data-workspace-id'))).toEqual(['alpha', 'core'])
   expect(preserved()).toEqual(original)
   await search('decisions')
-  expect([...container.querySelectorAll('.space-topic-row .project-rail-row__identity')].map((node) => node.textContent)).toEqual(['Harness archive'])
+  expect([...container.querySelectorAll('[data-space-parent="space:topics"] strong')].map((node) => node.textContent)).toEqual(['Knowledge'])
+  expect(container.querySelectorAll('.space-topic-row')).toHaveLength(0)
   await search('nothing-available')
   expect([...container.querySelectorAll('[role="status"]')].map((node) => node.textContent)).toEqual(['No matching Motes', 'No matching Topics', 'No matching Folders'])
   expect(container.querySelectorAll('[data-workspace-id]')).toHaveLength(0)
@@ -93,13 +100,14 @@ it('moves through rendered objects, first/last and disclosure parents without ac
   const topics = button('[data-space-nav="space:topics"]')
   topics.focus()
   await key(topics, 'ArrowRight')
-  expect(document.activeElement?.querySelector('.project-rail-row__identity')?.textContent).toBe('Release planning')
+  expect(document.activeElement?.querySelector('strong')?.textContent).toBe('Knowledge')
   await key(document.activeElement as HTMLElement, 'ArrowLeft')
   expect(document.activeElement).toBe(topics)
   await key(topics, 'ArrowLeft')
-  expect(container.querySelectorAll('.space-topic-row')).toHaveLength(0)
+  expect(container.querySelectorAll('[data-space-parent="space:topics"]')).toHaveLength(0)
   await key(topics, 'ArrowRight')
-  expect(container.querySelectorAll('.space-topic-row')).toHaveLength(2)
+  expect(container.querySelectorAll('[data-space-parent="space:topics"]')).toHaveLength(2)
+  expect(container.querySelectorAll('.space-topic-row')).toHaveLength(0)
   await key(topics, 'End')
   expect(document.activeElement).toBe(button('[data-workspace-id="beta"]'))
   await key(document.activeElement as HTMLElement, 'ArrowUp')
@@ -120,13 +128,15 @@ it('retains exact opening owners and leaves text editing keys in the find input'
   const input = container.querySelector<HTMLInputElement>('[aria-label="Find Spaces"]')!
   input.focus(); await key(input, 'End'); await key(input, 'ArrowDown')
   expect(document.activeElement).toBe(input)
-  await act(async () => button('.space-topic-row').click())
-  expect(openTopic).toHaveBeenCalledExactlyOnceWith('view:a', SCRATCH_WORKSPACE_ID)
+  await act(async () => button('[data-space-nav="topic-category:category-0"]').click())
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: categories[0]!.spaceId, zoneId: null, topicId: null })
+  expect(openTopic).not.toHaveBeenCalled()
   await key(input, 'Escape')
   expect(input.value).toBe('')
   await act(async () => button('[data-workspace-id="core"]').click())
   expect(selectWorkspace).toHaveBeenCalledExactlyOnceWith('core')
-  expect(button('[data-workspace-id="alpha"]').getAttribute('aria-current')).toBe('page')
+  expect(preserved().tabs).toBe(original.tabs)
+  expect(preserved().layouts).toBe(original.layouts)
 })
 
 it('preserves both attention categories, full exact counts, and the same summary when Folders collapses', async () => {

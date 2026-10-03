@@ -558,7 +558,9 @@ describe('shared surface tool dock resize', () => {
   it('renames Topic titles inline while keeping stable Topic directories out of generic Rename', () => {
     // 改名移进了右键菜单，但功能不退化：菜单项仍走同一个 beginRename/commitRename。
     expect(topicContextMenuSource).toContain('<span>Rename Topic</span>')
-    expect(topicsPanelSource).toContain('onRename={() => beginRename(topic)}')
+    expect(topicsPanelSource).toContain('onRename: () => beginRename(topic)')
+    expect(topicsPanelSource).toContain('<TopicActionsMenu title={topic.title} {...menuActions} />')
+    expect(topicsPanelSource).toContain('...menuActions')
     expect(topicsPanelSource).toContain('void commitRename(topic)')
     // Escape 取消已经搬进 lib/topic-rename.ts 的按键决策点（那里同时拦下冒泡，
     // 否则空格与方向键会被 dnd-kit 的 KeyboardSensor 吞掉）。这里只断言接线还在，
