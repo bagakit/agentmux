@@ -81,6 +81,8 @@ type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
       decision?: Omit<import('./control.js').AgentMuxDemandDecision, 'recordedAt' | 'sourceSessionId'> }
   : M extends 'goal.focus' ? { goalId: string; input?: 'preserve' | 'target' }
   : M extends 'settings.browser-links.forget' ? { input: unknown }
+  : M extends 'settings.prompts.inspect' ? { id: string; keyword?: never } | { keyword: string; id?: never }
+  : M extends 'settings.executors.inspect' ? { id: string }
   : M extends `settings.${'executors' | 'prompts'}.update` ? { id: string; input: unknown }
   : M extends `settings.${'executors' | 'prompts'}.delete` ? { id: string; input?: unknown }
   : M extends 'toolkit.update' | 'toolkit.delete' | 'toolkit.run' | 'toolkit.stop'

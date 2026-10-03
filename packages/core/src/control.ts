@@ -320,7 +320,8 @@ export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
 }
 export type AgentMuxControlSettingsResourceRequest = RequestBase & (
   | { operation: 'settings.resource.list'; resource: AgentMuxControlSettingsResourceKind }
-  | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; id: string }
+  | { operation: 'settings.resource.get'; resource: AgentMuxControlSettingsResourceKind; id: string; keyword?: never }
+  | { operation: 'settings.resource.get'; resource: 'prompts'; keyword: string; id?: never }
   | { operation: 'settings.resource.add'; resource: AgentMuxControlSettingsResourceKind; id: string; value: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.resource.update'; resource: AgentMuxControlSettingsResourceKind; id: string; changes: AgentMuxControlSettingsResourceFields; expected?: AgentMuxControlSettingsResourceFields }
   | { operation: 'settings.resource.remove'; resource: AgentMuxControlSettingsResourceKind; id: string; expected?: AgentMuxControlSettingsResourceFields }

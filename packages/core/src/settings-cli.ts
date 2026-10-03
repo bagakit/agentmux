@@ -19,6 +19,10 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
   if (resource === 'executors' || resource === 'prompts') {
     const method = `settings.${resource}.${action}`
     if (action === 'ls' && args.length === 2) return { method, params: {} }
+    if (resource === 'prompts' && action === 'inspect' && args.length === 4 && id === '--keyword') {
+      if (!args[3]?.length) invalid('An exact Prompt keyword is required.')
+      return { method, params: { keyword: args[3] } }
+    }
     if (!id?.length) invalid('An exact resource ID is required.')
     if (resource === 'executors' && action === 'refresh' && args.length === 5 && args[3] === '--host' && args[4]?.length) {
       return { method, params: { executorId: id, hostId: args[4] } }
