@@ -74,7 +74,7 @@
 .agent-interaction__tier--danger { background: var(--red); }
 
 /* Native questions stay in the original conversation flow; feedback earns emphasis through content. */
-.agent-interaction--async { margin: var(--sp-2) 0 var(--sp-3); padding: 10px 12px; box-shadow: var(--hl); background: var(--surface-1); }
+.agent-interaction--async { box-sizing: border-box; width: min(calc(100% - var(--sp-4)), 760px); margin: var(--sp-2) var(--sp-2) var(--sp-3); padding: 10px 12px; box-shadow: var(--hl); background: var(--surface-1); }
 .agent-question__header { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 4px 12px; font-size: var(--fs-micro); line-height: 1.5; color: var(--text-2); }
 .agent-question__header > span { display: inline-flex; align-items: center; gap: 5px; }
 .agent-question__state { color: var(--text-3); }
