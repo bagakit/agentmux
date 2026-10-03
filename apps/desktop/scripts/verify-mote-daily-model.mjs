@@ -20,18 +20,18 @@ async function bound(locator) {
 /** Normal Task qualification consumes genuine evidence; a prepared harness cannot pass it. */
 export async function verifyRealMoteModel(locatorPath = '.tmp/mote-daily-model/approved.json') {
   const locator = await readFile(resolve(repository, locatorPath), 'utf8').then(JSON.parse).catch(error => {
-    if (error.code === 'ENOENT') throw Error('T-006 is pending: genuine six-turn raw evidence and independent usefulness approval are required; --prepare does not qualify a model')
+    if (error.code === 'ENOENT') throw Error('T-008 is pending: genuine five-input raw evidence and independent usefulness approval are required; --prepare does not qualify a model')
     throw error
   })
   const raw = await bound(locator.raw), review = await bound(locator.review), manifest = await bound(locator.sourceManifest)
-  assert.equal(raw.schema, 'agentmux.mote.real-model.v1'); assert.equal(raw.taskId, 'T-006'); assert.equal(raw.passed, true)
-  assert.equal(raw.modelTurns, 6); assert.equal(raw.authFilesRead, true); assert.equal(raw.authCopied, true)
+  assert.equal(raw.schema, 'agentmux.mote.real-model.v1'); assert.equal(raw.taskId, 'T-008'); assert.equal(raw.passed, true)
+  assert.equal(raw.modelTurns, 5); assert.equal(raw.authFilesRead, true); assert.equal(raw.authCopied, true)
   assert.equal(raw.userRunTouched, false)
-  assert.equal(raw.owner?.passed, true); assert.equal(raw.owner?.modelTurns, 6)
-  assert.equal(raw.owner.attemptedModelRequests, 6); assert.equal(raw.owner.admittedModelRequests, 6)
-  assert.equal(raw.owner.completedModelTurns, 6); assert.equal(raw.owner.inputRequests.length, 6)
+  assert.equal(raw.owner?.passed, true); assert.equal(raw.owner?.modelTurns, 5)
+  assert.equal(raw.owner.attemptedModelRequests, 5); assert.equal(raw.owner.admittedModelRequests, 5)
+  assert.equal(raw.owner.completedModelTurns, 5); assert.equal(raw.owner.inputRequests.length, 5)
   assert.deepEqual(raw.owner.rejectedInputs, [])
-  assert.equal(raw.modelBudget.attemptedModelRequests, 6); assert.equal(raw.modelBudget.gateClosed, true)
+  assert.equal(raw.modelBudget.attemptedModelRequests, 5); assert.equal(raw.modelBudget.gateClosed, true)
   assert.equal(raw.guardian, undefined); assert.equal(raw.modelRequestsUnknown, undefined)
   assert.equal(raw.cleanup?.authCopyRemoved, true); assert.equal(raw.cleanup?.privateRuntimeRemoved, true)
   assert.deepEqual(raw.cleanup.errors, []); assert.deepEqual(raw.owner.cleanup.errors, [])
@@ -43,7 +43,7 @@ export async function verifyRealMoteModel(locatorPath = '.tmp/mote-daily-model/a
   assert.ok(raw.owner.cleanup.nativeConfirmation.runs.every(run => run.state.type !== 'running'))
   assert.equal(raw.nativeCleanupConfirmation.stopped, true)
   assert.ok(raw.nativeCleanupConfirmation.runs.length > 0 && raw.nativeCleanupConfirmation.runs.every(run => run.state.type !== 'running'))
-  assert.equal(review.status, 'approved'); assert.ok(review.taskIds?.includes('T-006'))
+  assert.equal(review.status, 'approved'); assert.ok(review.taskIds?.includes('T-008'))
   assert.equal(review.sourceGate?.sha256, locator.raw.sha256)
   assert.equal(review.sourceManifestSha256, locator.sourceManifest.sha256)
   assert.equal(review.realModelQualification, true, 'Source/UI review cannot substitute for real-model review')
@@ -68,7 +68,7 @@ export async function verifyRealMoteModel(locatorPath = '.tmp/mote-daily-model/a
       'Affected actual Source changed: ' + file)
   }
   const turns = raw.owner.turns
-  assert.equal(turns.length, 6)
+  assert.equal(turns.length, 5)
   for (const [index, turn] of turns.entries()) {
     const attempt = raw.owner.attempts[index], request = raw.owner.inputRequests[index]
     assert.equal(turn.number, index + 1)
@@ -90,14 +90,21 @@ export async function verifyRealMoteModel(locatorPath = '.tmp/mote-daily-model/a
     assert.equal(hash(await readFile(resolve(repository, dirname(locator.raw.path), turn.screenshot.path))), turn.screenshot.sha256)
   }
   assert.equal(new Set(turns.slice(0, 3).map(turn => turn.agent.control.agentSessionId)).size, 3, 'A/B/C must be new original discussions')
-  assert.notEqual(turns[5].agent.control.agentSessionId, turns[4].agent.control.agentSessionId)
+  assert.equal(raw.owner.feedbackBeforeDiscussionC?.result.status, 'read')
+  assert.ok(raw.owner.feedbackBeforeDiscussionC.result.document.content.trim())
+  assert.equal(review.functionalOutcomes?.length, 6)
+  assert.deepEqual(review.functionalOutcomes.map(one => one.id).sort(), [
+    'tool-save-readback', 'neutral-material-reuse', 'corrected-fact',
+    'saved-behavior-feedback', 'calendar-sourced-idea', 'confirmed-goal-result'
+  ].sort())
+  assert.ok(review.functionalOutcomes.every(one => one.qualified === true))
   assert.ok(raw.owner.currentReads.length >= 4 && raw.owner.editorSaves.length === 2)
   assert.ok(raw.owner.realOutcome?.result.status === 'read' && raw.owner.realOutcome.result.document.content.trim())
   assert.equal(raw.owner.humanChoice.humanConfirmed, true); assert.ok(raw.owner.humanChoice.authorizationEvidence.trim())
   assert.ok(raw.owner.arrangement.creationOperationId && raw.owner.arrangement.calendar)
   assert.equal(raw.owner.workfaceChecks.length, 3); assert.ok(raw.owner.workfaceChecks.every(one => one.preserved === true))
   assert.equal(raw.owner.originalUnsentDraftsPreserved, true)
-  console.log(JSON.stringify({ passed: true, taskId: 'T-006', realModelQualified: true, modelTurns: 6, raw: locator.raw, review: locator.review }))
+  console.log(JSON.stringify({ passed: true, taskId: 'T-008', realModelQualified: true, modelTurns: 5, raw: locator.raw, review: locator.review }))
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -108,7 +115,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
       authorizationSha256: option('--authorization-sha256'), evidence: option('--evidence') })
     else await verifyRealMoteModel(option('--approved'))
   } catch (error) {
-    console.error(JSON.stringify({ passed: false, taskId: 'T-006', qualification: 'pending or failed; no Source/fixture replacement for genuine model evidence', error: error.message }))
+    console.error(JSON.stringify({ passed: false, taskId: 'T-008', qualification: 'pending or failed; no Source/fixture replacement for genuine model evidence', error: error.message }))
     process.exitCode = 1
   }
 }
