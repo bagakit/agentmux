@@ -48,19 +48,19 @@ function FocusContextInputs({ context }: { context: FocusContext }) {
     : reader.sourceChanged ? 'Message source changed' : reader.windowFrozen ? 'Reading window paused'
       : reader.windowIncomplete ? 'Reading window incomplete' : null
   return <section className="focus-context-hover__inputs" aria-label="Recent user messages">
-    <h4>Recent user messages</h4>
-    <small className="focus-context-hover__coverage">Current reading window{ordered ? '' : ' · Order unavailable'}</small>
+    <h4>Recent inputs</h4>
+    {!ordered ? <small className="focus-context-hover__coverage">Current reading window · Order unavailable</small> : null}
     {messages.length ? <ol>{messages.map(message => {
       const raw = message.content.trim()
       const body = parseAgentMuxMessagePrefix(raw)?.body.trim() || raw
       const reading = { text: body ? clampStep(body.slice(0, 1000), 'head', 360) : 'Non-text input', truncated: body.length > 360 }
       const recorded = message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt) : null
       const date = recorded && Number.isFinite(recorded.getTime()) ? recorded : null
+      const time = date ? date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Time unknown'
+      const provenance = `${message.source.kind === 'native' ? 'Native record' : 'Submission record'} · Current reading window · Record time, not a verified sender time · ${clampStep(raw.slice(0, 1000), 'head', 360)}`
       return <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
       <div className="focus-context-hover__input-meta"><strong>{describe(speakerOfUserMessage(message)).name}</strong>
-        <span className="focus-context-hover__source" title={`${message.source.kind === 'native' ? 'Native record' : 'Submission record'} · ${clampStep(raw.slice(0, 1000), 'head', 360)}`}>{message.source.kind === 'native' ? 'Native record' : 'Submission record'}</span>
-        <time dateTime={date?.toISOString()} title="Record time, not a verified sender time">{date
-          ? date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Time unknown'}</time></div>
+        <time dateTime={date?.toISOString()} title={provenance} aria-label={`${time} · ${provenance}`}>{time}</time></div>
       <ReadingBody reading={reading} />
       {reading.truncated ? <small className="focus-context-hover__coverage">Excerpt</small> : null}
     </li>})}</ol> : <p className="focus-context-hover__coverage">{reader.loading ? 'Loading recent messages…' : 'No user messages in the available reading window.'}</p>}
@@ -74,6 +74,8 @@ export function useFocusContextHover(context: FocusContext, requested: boolean) 
   const active = useWorkbenchPresentationActive()
   const enabled = requested && active
   const displayPath = usePathDisplay()
+  const path = displayPath(context.workspacePath, context.hostId)
+  const location = [context.workspaceName, path, context.originAddress, context.id].filter(Boolean).join('\n')
   const anchor = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null)
   const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -151,8 +153,7 @@ export function useFocusContextHover(context: FocusContext, requested: boolean) 
       <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} />
     </section> : null}
     {context.kind === 'agent' ? <FocusContextInputs key={`${context.hostId}:${context.id}:${context.runId}`} context={context} /> : null}
-    <footer><strong>{context.workspaceName}</strong><span>{displayPath(context.workspacePath, context.hostId)}</span>
-      {context.originAddress ? <span>{context.originAddress}</span> : null}<code>{context.id}</code></footer>
+    <footer title={location} aria-label={location}><strong>{context.workspaceName}</strong><span>{path}</span></footer>
   </div>, host) : null
   return { anchor, describedBy: open ? id : undefined, preview, close, suppressRestoredFocus,
     triggerEvents: { onPointerEnter: showSoon, onPointerLeave: hideSoon, onFocus: () => { if (!restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close } }
