@@ -1973,8 +1973,13 @@ it('reconciles the same Notebook deletion after a lost reply without removing la
   await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog [role="status"]')?.textContent).toContain('Deletion reply lost'))
   const first = vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0]
   expect(first.change).toEqual({ kind: 'delete', notebookId: id })
+  await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+  expect(dom.container.querySelector('.notebook-change-issue')?.textContent).toContain('Disposable book')
   const { changeNotebook } = await import('../src/renderer/src/lib/notebook-library')
   await act(async () => { await changeNotebook({ kind: 'create', notebookId: 'later-book', name: 'Later choice' }, 'later-book-create'); useAppStore.getState().setSurveyNotebook('later-book') })
+  await dom.click('[aria-label="Hide Survey items"]')
+  await dom.click('[aria-label="Check notebook deletion"]')
+  expect(document.querySelector('.confirmation-dialog__subject')?.textContent).toBe('Disposable book')
   await confirmDeleteNotebook()
   await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
   expect(vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0].operationId).toBe(first.operationId)
