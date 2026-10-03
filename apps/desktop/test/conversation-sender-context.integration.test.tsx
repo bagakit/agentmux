@@ -1,3 +1,4 @@
+import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -9,7 +10,7 @@ import type { AgentMuxClient } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import * as senderDetails from '../src/renderer/src/lib/conversation-sender-details'
 import { DECLARED_ID, RAW_IDS, RECIPIENT_ID, TRUSTED_ID, publicNativeInputs } from '../scripts/fixtures/conversation-sender-context/public-inputs.fixture'
@@ -115,9 +116,9 @@ it('uses a real public Claude native page and the one projector, keeping equal b
 
 it('routes the same public native page through actual History and preserves its original raw IDs and unknown author facts', async () => {
   const f = await fixture()
-  await act(async () => root.render(<SessionHistoryView control={f.control} label="Recipient agent" visible workspaceRoot={f.workspacePath} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
-  for (let i = 0; i < 80 && host.querySelectorAll('.session-history [data-native-record-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
-  const rows = [...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')]
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control, label: "Recipient agent", visible: true, workspaceRoot: f.workspacePath, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
+  for (let i = 0; i < 80 && host.querySelectorAll('.activity-feed [data-native-record-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+  const rows = [...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')]
   expect(rows.map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS])
   expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(RAW_IDS.map(() => `Message from Agent ${DECLARED_ID}`))
   expect(f.messages.slice(0, 2).map(message => message.author)).toEqual([{ kind: 'unknown' }, { kind: 'unknown' }])
@@ -203,8 +204,8 @@ it('actual SessionPane History carries the same native source and precise lazy r
   const f = await fixture(), appearance = vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null }), read = vi.spyOn(senderDetails, 'currentConversationSenderDetails')
   await drawPane(f); const body = message(f.messages[0]!.id).querySelector('.log-turn__text')!
   await act(async () => host.querySelector<HTMLButtonElement>('[data-leaf="header"] button')!.click()); await settle()
-  for (let i = 0; i < 80 && host.querySelectorAll('.session-history [data-native-record-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
-  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS])
+  for (let i = 0; i < 80 && host.querySelectorAll('.activity-feed [data-native-record-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS])
   expect(body.isConnected).toBe(true); expect(read).not.toHaveBeenCalled(); expect(appearance.mock.calls).toEqual([['sender-project']])
   const turn = message(RAW_IDS[0]); await toggle(turn)
   expect(value(turn, 'Source')).toBe('Provider native input · claude'); expect(value(turn, 'Record')).toBe(RAW_IDS[0]); expect(value(turn, 'Session')).toBe(DECLARED_ID)
@@ -252,7 +253,7 @@ it('keeps the same expanded actual native tool part and original Markdown node t
   expect(turn.querySelector('.log-turn__text')).toBe(body); expect(turn.querySelector('.conversation-tool-trace__row')).toBe(row); expect(row.getAttribute('aria-expanded')).toBe('true')
   await act(async () => host.querySelector<HTMLButtonElement>('[data-leaf="header"] button')!.click()); await settle()
   expect(body.isConnected).toBe(true); expect(row.isConnected).toBe(true)
-  const back = host.querySelector<HTMLButtonElement>('.session-history__toolbar button')!; expect(back.textContent).toContain('Activity'); await act(async () => back.click()); await settle()
+  const back = host.querySelector<HTMLButtonElement>('.activity-feed__reading button')!; expect(back.textContent).toContain('Activity'); await act(async () => back.click()); await settle()
   expect(turn.querySelector('.log-turn__text')).toBe(body); expect(turn.querySelector('.conversation-tool-trace__row')).toBe(row); expect(row.getAttribute('aria-expanded')).toBe('true')
   expect(output.isConnected).toBe(true)
   expect(useAppStore.getState().agentComposerDrafts[RECIPIENT_ID]).toBe('Keep the original unsent reply draft.')

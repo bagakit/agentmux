@@ -27,7 +27,7 @@ import { installNativePopover } from './fixtures/mote-workface'
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div data-terminal /> }))
 vi.mock('../src/renderer/src/components/AgentSessionComposer', () => ({ AgentSessionComposer: () => <div data-composer /> }))
 vi.mock('../src/renderer/src/components/AgentRegionHeader', () => ({ AgentRegionHeader: () => <header>PMO</header> }))
-vi.mock('../src/renderer/src/components/SessionHistoryView', () => ({ SessionHistoryView: () => null }))
+
 vi.mock('../src/renderer/src/components/SessionResultReview', () => ({ SessionResultReview: () => null }))
 vi.mock('../src/renderer/src/components/AgentLifecycleFeedback', () => ({ AgentLifecycleFeedback: () => null }))
 vi.mock('react-resizable-panels', async () => {

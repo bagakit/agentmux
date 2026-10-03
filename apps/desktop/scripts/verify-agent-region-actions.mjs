@@ -13,7 +13,7 @@ const privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-region-actions-"
 const evidence = join(repository, '.tmp/agent-region-actions'), fixture = join(desktop, 'scripts/fixtures/agent-region-actions')
 const result = { schema: 'agentmux.region-actions-delivery.v1', passed: false, sourceBefore: {}, sourceAfter: {}, cleanup: {}, userRunTouched: false }
 const sourceFiles = [import.meta.filename, ...['main.cjs','entry.tsx','index.html'].map(name => join(fixture, name)),
-  ...['components/WorkspaceWorkbench.tsx','components/AgentRegionHeader.tsx','components/RegionContextMenu.tsx','components/SessionPane.tsx','components/SessionHistoryView.tsx','components/TerminalView.tsx','store.ts','lib/workbench-tabs.ts','lib/workbench-surface-kinds.ts'].map(name => join(desktop, 'src/renderer/src', name)),
+  ...['components/WorkspaceWorkbench.tsx','components/AgentRegionHeader.tsx','components/RegionContextMenu.tsx','components/SessionPane.tsx','components/ActivityView.tsx','components/TerminalView.tsx','store.ts','lib/workbench-tabs.ts','lib/workbench-surface-kinds.ts'].map(name => join(desktop, 'src/renderer/src', name)),
   ...['verify-workbench-persistence-restart.mjs','probe-process.mjs','probe-owned-run.mjs'].map(name => join(desktop, 'scripts', name))]
 const styles = (await readdir(join(desktop, 'src/renderer/src/styles'))).filter(name => name.endsWith('.css'))
 assert.ok(styles.length > 0, 'Actual styles must be included in the input binding')

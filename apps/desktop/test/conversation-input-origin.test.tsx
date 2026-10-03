@@ -1,4 +1,5 @@
 import { fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { activityReadingProps } from './helpers/activity-reading-props'
 import { act } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, writeFile, rm } from 'node:fs/promises'
@@ -10,7 +11,7 @@ import { describeConversationInputSource } from '@agentmux/client-ui/conversatio
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+
 import { FocusMessagePreview } from '../src/renderer/src/components/FocusMessagePreview'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
@@ -20,7 +21,7 @@ import type { FocusContext } from '../src/renderer/src/lib/focus-context'
 vi.mock('../src/renderer/src/components/WindowOverlayHost',async importOriginal=>({...await importOriginal<typeof import('../src/renderer/src/components/WindowOverlayHost')>(),WindowOverlayPortal:({children}:{children:import('react').ReactNode})=>children}))
 vi.mock('@floating-ui/dom',()=>({autoUpdate:()=>()=>{},computePosition:async()=>({x:0,y:0}),offset:()=>({}),shift:()=>({}),size:()=>({})}))
 const dom=composerDOM()
-const channelLabels:Record<AgentMessageChannel,string>={terminal:'Terminal','message-tool':'Message Tool',cli:'CLI',api:'API','agent-message':'Agent message',reaction:'快捷回复'}
+const channelLabels:Record<AgentMessageChannel,string>={terminal:'Terminal','message-tool':'Message Tool',cli:'CLI',api:'API','agent-message':'Agent message',reaction:'快捷回复','question-reply':'Question reply'}
 const sender:AgentOperationDevice={hostId:'source-host',deviceId:'device-local',name:'This Mac'}
 const receivingHost='execution-host'
 const describeSpeaker=()=>({name:'Builder',providerId:'claude' as const})
@@ -93,11 +94,11 @@ describe('One recorded input origin across common reading surfaces',()=>{
  it('keeps native origin honest through actual History, retaining the existing hidden read gate',async()=>{
   const read=vi.spyOn(api.sessions,'historyPage').mockImplementation(async()=>native.page)
   const props={control:{hostId:receivingHost,agentSessionId:'native-agent'},label:'Original history',workspaceRoot:'',openWorkspaceFile:vi.fn(),openHttpLink:vi.fn()}
-  await dom.render(<SessionHistoryView {...props} visible={false}/>);expect(read).not.toHaveBeenCalled()
-  await dom.render(<SessionHistoryView {...props} visible/>);await vi.waitFor(()=>expect(dom.container.querySelectorAll('[data-native-record-id]')).toHaveLength(2))
+  await dom.render(<ActivityView {...activityReadingProps({ ...props, visible: false })} />);expect(read).not.toHaveBeenCalled()
+  await dom.render(<ActivityView {...activityReadingProps({ ...props, visible: true })} />);await vi.waitFor(()=>expect(dom.container.querySelectorAll('[data-native-record-id]')).toHaveLength(2))
   await openInfo();expect(fact(dom.container,'当前执行 Host')).toBe(receivingHost);expect(fact(dom.container,'输入渠道')).toBe('渠道未记录')
   const body=dom.container.querySelector('.log-turn__text')!
-  await dom.render(<SessionHistoryView {...props} visible={false}/>);expect(dom.container.querySelector('.log-turn__text')).toBe(body);expect(read).toHaveBeenCalledTimes(1)
+  await dom.render(<ActivityView {...activityReadingProps({ ...props, visible: false })} />);expect(dom.container.querySelector('.log-turn__text')).toBe(body);expect(read).toHaveBeenCalledTimes(1)
  })
  it('passes public input origin and the receiving Context through actual Focus without a reader',async()=>{
   const{message}=await submit('api')

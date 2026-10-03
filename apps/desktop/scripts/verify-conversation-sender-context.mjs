@@ -34,7 +34,7 @@ async function loaded(receipt) { const data = (await bound(receipt.loaded)).toSt
 const own = await command(proof.owning, 0), ownReport = await report(proof.owning.report, 13, 1)
 assert.equal(ownReport.numPassedTests, 13); assert.equal(ownReport.numFailedTests, 0)
 const graph = await loaded(own)
-for (const name of ['ConversationInputDetails.tsx', 'ConversationMessage.tsx', 'ActivityView.tsx', 'SessionHistoryView.tsx', 'SessionPane.tsx', 'ProjectIcon.tsx', 'conversation-sender-details.ts']) {
+for (const name of ['ConversationInputDetails.tsx', 'ConversationMessage.tsx', 'ActivityView.tsx', 'SessionPane.tsx', 'ProjectIcon.tsx', 'conversation-sender-details.ts']) {
   const matches = graph.filter(row => row.path.endsWith(`/${name}`)); assert.equal(matches.length, 1, `${name} must be actually loaded once`)
   assert.equal(matches[0].sha256, proof.source[matches[0].path]?.sha256, name)
 }
@@ -68,7 +68,7 @@ const caller = JSON.parse(await bound(proof.callers)); assert.ok(caller.matches.
 for (const row of caller.matches) { assert.ok(!row.path.includes('/test/')); assert.ok(row.consumerKind === 'jsx' || row.consumerKind === 'call'); assert.ok((await bytes(row.path)).toString().includes(row.text)) }
 assert.ok(caller.matches.some(row => row.path.endsWith('/ConversationMessage.tsx') && row.symbol === 'ConversationInputDetails' && row.consumerKind === 'jsx'))
 assert.ok(caller.matches.some(row => row.path.endsWith('/SessionPane.tsx') && row.symbol === 'currentConversationSenderDetails' && row.consumerKind === 'call'))
-for (const name of ['ActivityView.tsx', 'SessionHistoryView.tsx']) assert.ok(caller.matches.some(row => row.path.endsWith(`/${name}`) && row.symbol === 'ConversationMessage.inputSource'))
+for (const name of ['ActivityView.tsx']) assert.ok(caller.matches.some(row => row.path.endsWith(`/${name}`) && row.symbol === 'ConversationMessage.inputSource'))
 const scene = JSON.parse(await bound(proof.publicScene)); assert.equal(scene.schema, 'agentmux.conversation-sender-public-scene.v1')
 assert.equal(scene.page.items.length, 2); assert.deepEqual(scene.page.items.map(item => item.id), ['original-native-first', 'original-native-second'])
 assert.equal(scene.messages.length, 4); assert.equal(scene.messages[0].content, scene.messages[1].content)
