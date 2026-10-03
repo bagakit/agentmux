@@ -311,22 +311,26 @@
 .composer-pending { position: fixed; display: flex; flex-direction: column; width: max-content; max-width: min(360px, calc(100vw - 16px)); min-width: 0; margin: 0; padding: 0; background: transparent; color: var(--text); font-size: var(--fs-meta); pointer-events: auto; visibility: hidden; }
 .composer-pending[hidden] { display: none; }
 .composer-pending[data-positioned='true'] { visibility: visible; }
-.composer-pending__cards { position: relative; display: grid; max-height: 160px; min-height: 0; margin: 0; padding: 4px 4px 8px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
-.composer-pending__card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 5px; box-sizing: border-box; height: 28px; min-height: 28px; width: calc(100% - var(--queue-depth) * 8px); margin: -8px 0 0 auto; padding: 1px 3px 1px 7px; border: 1px solid var(--line-soft); border-radius: 7px; background: color-mix(in srgb, var(--surface-2) 72%, transparent); backdrop-filter: blur(6px) saturate(130%); box-shadow: 0 4px 2px rgb(0 0 0 / 15%), 0 7px 14px rgb(0 0 0 / 14%); transform: perspective(600px) rotateX(calc(4deg + var(--queue-depth) * 2deg)) rotateY(calc(var(--queue-depth) * -.35deg)) translateZ(calc(var(--queue-depth) * -8px)); transform-origin: calc(var(--queue-pivot-x, 100%) - var(--queue-offset-x, 0px)) calc(var(--queue-pivot-y, 100%) - var(--queue-offset-y, 0px)); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
-/* Native view progress moves each original card through depth without owning scroll. */
-.composer-pending__card { animation: composer-pending-depth linear both; animation-duration: auto; animation-timeline: view(block); animation-range: entry 0% exit 100%; }
-@keyframes composer-pending-depth {
-  0% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(-26px); }
-  20% { transform: perspective(520px) rotateX(20deg) rotateY(-4deg) translateZ(-12px); }
-  45%, 55% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(6px); }
-  80% { transform: perspective(520px) rotateX(-20deg) rotateY(4deg) translateZ(-12px); }
-  100% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(-26px); }
+.composer-pending__cards { position: relative; display: grid; max-height: 180px; min-height: 0; margin: 0; padding: 6px 0 6px 4px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
+/* Only layout reads card bounds; native scroll changes two shared values. The
+   projection stays behind the common right-bottom pivot, inside the scrollport. */
+.composer-pending__card {
+  --queue-view-y: calc(var(--queue-offset-y, 0px) + var(--queue-card-height, 28px) / 2 - var(--queue-scroll-y, 0px) - var(--queue-viewport-height, 160px) / 2);
+  --queue-view-depth: clamp(0, calc(max(var(--queue-view-y), calc(-1 * var(--queue-view-y))) / var(--queue-viewport-height, 160px)), 1);
+  --queue-view-tilt: clamp(0, calc((var(--queue-scroll-y, 0px) + var(--queue-viewport-height, 160px) - var(--queue-offset-y, 0px) - var(--queue-card-height, 28px)) / 28px), 1);
+  position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 5px; box-sizing: border-box; height: 28px; min-height: 28px; width: 100%; margin: 0 0 0 auto; padding: 1px 3px 1px 7px; border: 1px solid var(--line-soft); border-radius: 7px;
+  background: color-mix(in srgb, var(--surface-2) var(--queue-material, 72%), transparent); backdrop-filter: blur(10px) saturate(130%); box-shadow: 0 3px 5px rgb(0 0 0 / 13%);
+  transform: perspective(600px) rotateX(calc((3deg + var(--queue-depth) * .45deg + var(--queue-view-depth) * 5deg) * var(--queue-view-tilt))) translateZ(calc(-3px - var(--queue-depth) * 2px - var(--queue-view-depth) * 10px));
+  transform-origin: calc(var(--queue-pivot-x, 100%) - var(--queue-offset-x, 0px)) calc(var(--queue-pivot-y, 100%) - var(--queue-offset-y, 0px));
+  transition: transform 180ms ease-out, opacity 140ms ease-out, border-color 140ms ease-out, box-shadow 140ms ease-out;
 }
 .composer-pending__card:first-child { margin-top: 0; }
-.composer-pending__card[data-selected='true'] { animation-name: none; z-index: 1; transform: perspective(520px) rotateX(0deg) translateZ(8px); border-color: var(--line); box-shadow: 0 7px 18px rgb(0 0 0 / 22%); }
+.composer-pending__card[data-selected='true'] { z-index: 1; transform: perspective(600px) rotateX(0deg) translateZ(0px); border-color: var(--line); box-shadow: 0 2px 4px rgb(0 0 0 / 18%); }
 .composer-pending__card:only-child { animation-name: none; transform: none; }
 .composer-pending__preview { padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: text; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 16px; }
 .composer-pending__preview:disabled { opacity: 1; cursor: default; }
+.composer-pending__preview:enabled:is(:hover, :focus-visible) { text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 3px; }
+.composer-pending__card:hover .composer-pending__preview:enabled { text-decoration: underline; text-decoration-color: var(--text-3); text-underline-offset: 3px; }
 .composer-pending__state { display: inline-flex; align-items: center; color: var(--text-2); }
 .composer-pending__actions { display: flex; align-items: center; gap: 0; }
 .composer-pending__actions .composer-tool, .composer-pending__send { position: relative; display: grid; place-items: center; flex: none; width: 24px; height: 24px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--text-2); cursor: pointer; }
@@ -345,7 +349,7 @@
 .composer-pending__card[data-busy='true'] .composer-pending__state > svg { animation: composer-pending-spin 1s linear infinite; }
 @keyframes composer-pending-spin { to { transform: rotate(360deg); } }
 @keyframes composer-pending-copied { from { opacity: .35; transform: scale(.65); } to { opacity: 1; transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .composer-pending__card { animation-name: none; transition: none; } .composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .composer-pending__card { --queue-view-depth: 0; --queue-view-tilt: 0; animation-name: none; transition: none; } .composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; } }
 
 .composer-queued-editor { display: grid; gap: 6px; min-width: 0; }
 .composer-queued-editor label { display: grid; gap: 5px; font-size: var(--fs-meta); color: var(--text-2); }
@@ -353,21 +357,32 @@
 .composer-queued-editor textarea:focus { outline: 1px solid var(--focus-line); }
 .composer-queued-editor p { margin: 0; color: var(--amber); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .composer-queued-editor__actions { display: flex; justify-content: end; gap: 6px; }
-/* Pointer distance is presentation only: one mask, no per-card geometry walk. */
+/* Whole-card distance uses cached layout bounds, never a pointer geometry walk. */
 @media (hover: hover) and (pointer: fine) {
-  .composer-pending { mask-image: radial-gradient(circle at var(--queue-pointer-x, -500px) var(--queue-pointer-y, -500px), #000 24px, rgb(0 0 0 / 65%) 130px, rgb(0 0 0 / 38%) 240px); }
-  .composer-pending:has(:focus-visible), .composer-pending:has([data-editing='true']) { mask-image: none; }
+  .composer-pending__card {
+    --queue-distance: max(0px, calc(var(--queue-offset-x, 0px) - var(--queue-pointer-x, -500px)), calc(var(--queue-pointer-x, -500px) - var(--queue-offset-x, 0px) - var(--queue-card-width, 360px)), calc(var(--queue-offset-y, 0px) - var(--queue-scroll-y, 0px) - var(--queue-pointer-y, -500px)), calc(var(--queue-pointer-y, -500px) - var(--queue-offset-y, 0px) + var(--queue-scroll-y, 0px) - var(--queue-card-height, 28px)));
+    --queue-material: clamp(72%, calc(94% - max(0px, calc(var(--queue-distance) - 64px)) / 220px * 22%), 94%);
+    opacity: clamp(.42, calc(1 - max(0px, calc(var(--queue-distance) - 64px)) / 220px), 1);
+  }
+  .composer-pending__card:has(:focus-visible), .composer-pending__card[data-editing='true'] { --queue-material: 94%; opacity: 1; }
 }
 @media (hover: none), (pointer: coarse) {
-  .composer-pending { mask-image: none; }
-  .composer-pending__card { background: color-mix(in srgb, var(--surface-2) 46%, transparent); backdrop-filter: blur(6px) saturate(140%); }
+  .composer-pending__card { opacity: 1; background: color-mix(in srgb, var(--surface-2) 72%, transparent); backdrop-filter: blur(12px) saturate(140%); }
 }
 @media (forced-colors: active), (prefers-reduced-transparency: reduce) {
-  .composer-pending { mask-image: none; }
-  .composer-pending__card { background: var(--surface-2); backdrop-filter: none; }
+  .composer-pending__card { opacity: 1; background: var(--surface-2); backdrop-filter: none; }
 }
 .composer-pending__more.composer-tool { width: auto; min-width: 24px; padding: 0 3px; font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .composer-pending__more > span { position: relative; white-space: nowrap; }
-.composer-pending__card[data-editing='true'] { height: auto; max-height: 180px; overflow: auto; grid-template-columns: auto minmax(0, 1fr); padding: 7px; }
-.composer-pending__card[data-editing='true'] > .composer-pending__actions { grid-column: 1 / -1; justify-content: end; }
-
+.composer-pending__card[data-editing='true'] { height: auto; max-height: calc(var(--queue-viewport-height, 180px) - 12px); overflow: auto; grid-template-columns: auto minmax(0, 1fr); padding: 7px; }
+.composer-pending__card[data-editing='true'] > .composer-pending__state { align-self: start; margin-top: 3px; }
+.composer-pending__card[data-editing='true'] > .composer-pending__actions { position: absolute; left: 7px; bottom: 7px; }
+.composer-pending__card[data-editing='true'] .composer-pending__dismiss, .composer-pending__card[data-editing='true'] .composer-pending__send { display: none; }
+.composer-pending__card .composer-queued-editor label { font-size: 0; gap: 0; }
+.composer-pending__card .composer-queued-editor textarea { min-height: 48px; padding: 2px 0; border: 0; border-radius: 0; background: transparent; font-size: var(--fs-meta); resize: none; }
+.composer-pending__card .composer-queued-editor textarea:focus { outline: 0; }
+.composer-pending__card .composer-queued-editor__actions { gap: 4px; min-height: 24px; padding-left: 64px; }
+.composer-pending__card[data-editing='true']:focus-within { border-color: var(--focus-line); }
+.composer-pending__card .composer-queued-editor__actions > button { min-height: 24px; padding: 0 6px; font: inherit; border-radius: 4px; }
+.composer-pending__card .composer-mailbox__send { background: transparent; color: var(--green-text); }
+.composer-pending__card .composer-mailbox__send:disabled { color: var(--text-3); }
