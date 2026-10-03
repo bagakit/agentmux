@@ -23,7 +23,7 @@ let root: Root, container: HTMLDivElement, stylesheet: HTMLStyleElement, base: E
 let measuredWidth = 1336, observers: Array<{ callback: ResizeObserverCallback; observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }>
 const metrics = (counts: FocusLaneCounts, slots: number) => {
   const m = counts.filter(count => count > 0).length
-  return { width: slots * 182 + 4 + 24 * (4 - m) + 32 + 8 - m * 2, padding: 4, gap: 2, cardGap: 2 }
+  return { width: slots * 182 + 4 + Math.max(0, m - 1) * 2 - m * 2, padding: 4, gap: 2, cardGap: 2 }
 }
 function oracle(counts: FocusLaneCounts, slots: number) {
   let best = Infinity
@@ -68,7 +68,8 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 const mount = () => act(async () => root.render(createElement(GlobalFocusSurface)))
 const groups = () => container.querySelector<HTMLElement>('.focus-project-board__live > .focus-project-lanes .focus-project-lanes__groups')!
 const section = (bucket: string) => groups().querySelector<HTMLElement>(`[data-bucket="${bucket}"]`)!
-const columns = () => ['attention', 'working', 'results', 'idle'].map(bucket => Number(section(bucket).style.getPropertyValue('--focus-card-columns')))
+const columns = () => ['attention', 'working', 'results', 'idle'].map(bucket => Number(section(bucket)?.style.getPropertyValue('--focus-card-columns') ?? 0))
+const titleState = (bucket: string) => container.querySelector<HTMLElement>(`.focus-project-board__live .focus-project-lanes__status-rail [data-bucket="${bucket}"]`)!
 const card = (id: string) => container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`)!
 const listObservers = () => observers.filter(observer => observer.observe.mock.calls.some(([element]) => (element as HTMLElement).classList.contains('focus-project-lanes__rows')))
 
@@ -86,7 +87,7 @@ it('matches an independently enumerated optimum across nonempty integer budgets'
 })
 it('actual Global projects 12/5/1 into optimal five, six and seven readable slots in fixed order', async () => {
   await seed(); await mount()
-  expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle', 'disconnected'])
+  expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working', 'results', 'idle'])
   const counts = [0, 12, 5, 1] as const
   for (const slots of [5, 6, 7]) {
     measuredWidth = metrics(counts, slots).width
@@ -94,8 +95,10 @@ it('actual Global projects 12/5/1 into optimal five, six and seven readable slot
     expect(Number(groups().dataset.focusCardSlots)).toBe(slots)
     expect(actualRows(counts, columns())).toBe(oracle(counts, slots))
     expect(groups().querySelectorAll('.focus-context')).toHaveLength(18)
-    expect(section('attention').style.getPropertyValue('--focus-group-width')).toBe('24px')
-    expect(section('disconnected').querySelectorAll('.focus-context')).toHaveLength(0)
+    expect(section('attention')).toBeNull()
+    expect(titleState('attention').getAttribute('aria-label')).toBe('Attention · 0')
+    expect(section('disconnected')).toBeNull()
+    expect(titleState('disconnected').querySelectorAll('.focus-context')).toHaveLength(0)
   }
   expect(listObservers()).toHaveLength(1)
 })
@@ -140,8 +143,9 @@ it('necessary wrapping retains one readable subcolumn and authoritative observat
   await mount()
   expect(columns()).toEqual([0, 1, 1, 1])
   expect(card('healthy-lost').closest('[data-bucket="idle"]')).not.toBeNull()
-  expect(section('disconnected').querySelectorAll('.focus-context')).toHaveLength(0)
-  expect(section('disconnected').querySelector('button')?.textContent).toBe('1')
+  expect(section('disconnected')).toBeNull()
+  expect(titleState('disconnected').querySelectorAll('.focus-context')).toHaveLength(0)
+  expect(titleState('disconnected').querySelector('button')?.textContent).toBe('1')
 })
 // Counter transferred from the independent reviewer. Its private .tmp location
 // could not resolve React (0 tests); this package-local test runs the original

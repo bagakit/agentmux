@@ -2,10 +2,10 @@ export type FocusLaneCounts = readonly [number, number, number, number]
 export type FocusLaneMetrics = { width: number; padding: number; gap: number; cardGap: number }
 export type FocusLaneLayout = { columns: readonly number[]; widths: readonly number[]; maxRows: number; slots: number }
 
-/** The four content states share readable card slots; empty and offline rails never grow. */
+/** Only content uses card slots; zero states and offline entries live in the title. */
 export function allocateFocusLaneColumns(counts: FocusLaneCounts, metrics: FocusLaneMetrics, previous?: readonly number[]): FocusLaneLayout {
   const nonempty = counts.filter(count => count > 0).length
-  const available = metrics.width - metrics.padding - (4 - nonempty) * 24 - 32 - 4 * metrics.gap
+  const available = metrics.width - metrics.padding - Math.max(0, nonempty - 1) * metrics.gap
   const slots = Math.max(0, Math.floor((available + nonempty * metrics.cardGap) / (180 + metrics.cardGap)))
   let columns: readonly number[] = counts.map(count => count ? 1 : 0)
   let maxRows = Math.max(0, ...counts)
@@ -27,5 +27,5 @@ export function allocateFocusLaneColumns(counts: FocusLaneCounts, metrics: Focus
   const cardWidth = slots >= nonempty && used
     ? Math.min(320, Math.max(180, (available + nonempty * metrics.cardGap) / used - metrics.cardGap))
     : 180
-  return { columns, widths: columns.map(column => column ? column * cardWidth + (column - 1) * metrics.cardGap : 24), maxRows, slots }
+  return { columns, widths: columns.map(column => column ? column * cardWidth + (column - 1) * metrics.cardGap : 0), maxRows, slots }
 }
