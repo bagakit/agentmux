@@ -11,7 +11,7 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { qualifySharedMainSource } from '../../../packages/core/scripts/qualify-shared-main-source.mjs'
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop'),require=createRequire(import.meta.url),exec=promisify(execFile)
 const mode=process.argv[2],base='4b38c4cf540de04f9de2ea70793a965b2e96c30d'
-assert.ok(['--mutations','--source','--native','--card-mutations'].includes(mode))
+assert.ok(['--mutations','--source','--native','--card-mutations','--scroll-mutations','--scroll-edit-restored'].includes(mode))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const typedPaths=['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/ComposerOutbox.tsx','apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx','apps/desktop/src/renderer/src/store.ts','packages/client-ui/src/components/AgentComposer.tsx','apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/components/ComposerQueuedMessageEditor.tsx']
 const styles=['packages/client-ui/src/styles/composer.css','packages/client-ui/src/styles/conversation-message.css'],dependencyPaths=['patches/@xterm__xterm@6.1.0-beta.303.patch','pnpm-lock.yaml']
@@ -65,14 +65,14 @@ async function mounted(label,red){
  return{code,assertionRed:red,discovery,log:label+'.log'}
 }
 async function nativeMutation(label,red,expectedFailure=/actual original terminal cursor remains in its viewport/){
- const d=await prepareXterm(),bannerSnapshot=join(privateRoot,'fixture-settings-banner.png');await writeFile(bannerSnapshot,execFileSync('git',['show',base+':apps/desktop/resources/settings-banner.png'],{cwd:root,maxBuffer:4*1024*1024}));let code=0,output='';try{const r=await exec(process.execPath,[join(privateRoot,'apps/desktop/scripts/verify-composer-pending-delivery.mjs'),'--native'],{cwd:privateRoot,env:{...process.env,AGENTMUX_PENDING_PRISTINE:d.pristine,AGENTMUX_PENDING_BASE_PATCH:d.baselinePatchPath,AGENTMUX_PENDING_BANNER_SNAPSHOT:bannerSnapshot},timeout:120000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'')}
+ const d=await prepareXterm(),bannerSnapshot=join(privateRoot,'fixture-settings-banner.png');await writeFile(bannerSnapshot,execFileSync('git',['show',base+':apps/desktop/resources/settings-banner.png'],{cwd:root,maxBuffer:4*1024*1024}));let code=0,output='';try{const r=await exec(process.execPath,[join(privateRoot,'apps/desktop/scripts/verify-composer-pending-delivery.mjs'),'--native'],{cwd:privateRoot,env:{...process.env,AGENTMUX_PENDING_PRISTINE:d.pristine,AGENTMUX_PENDING_BASE_PATCH:d.baselinePatchPath,AGENTMUX_PENDING_BANNER_SNAPSHOT:bannerSnapshot},timeout:120000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'');await writeFile(join(evidence,label+'.execution-error.json'),JSON.stringify({name:e.name,message:e.message,code:e.code??null,signal:e.signal??null,killed:e.killed??false,stdoutBytes:Buffer.byteLength(e.stdout??''),stderrBytes:Buffer.byteLength(e.stderr??'')},null,2))}
  await writeFile(join(evidence,label+'.log'),output)
  const summaries=output.trim().split('\n').filter(line=>line.startsWith('{"mode":"--native"'));assert.equal(summaries.length,1)
  const summary=JSON.parse(summaries[0]),proofDirectory=join(privateRoot,summary.evidence),receipt=JSON.parse(await readFile(join(proofDirectory,'receipt.json'),'utf8'))
  await cp(proofDirectory,join(evidence,label),{recursive:true})
  const rendered=JSON.parse(await readFile(join(proofDirectory,'candidate/render.json'),'utf8'))
  assert.equal(receipt.privateRootRemoved,true);assert.equal(receipt.userRunTouched,false);assert.ok(rendered.frames.length)
- if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,108);assert.deepEqual(rendered.rendererErrors,[])}
+ if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,136);assert.deepEqual(rendered.rendererErrors,[])}
  return{code,assertionRed:red,frames:rendered.frames.length,evidence:label,receipt}
 }
 async function cardMutations(){
@@ -85,7 +85,7 @@ async function cardMutations(){
  const cases=[
   {name:'normal-flow-height-restored',edits:[{file:styles[0],from:'.composer-pending { position: fixed;',to:'.composer-pending { position: relative;'},{file:typedPaths[3],from:'return <WindowOverlayPortal>',to:'return <>'},{file:typedPaths[3],from:'</WindowOverlayPortal>',to:'</>'}],failure:/original editor geometry exactly|zero normal-flow height|original terminal rectangle|original unfinished terminal prompt|zero terminal rows/},
   {name:'intrinsic-width-removed',from:'width: max-content; max-width: min(360px,',to:'width: 360px; max-width: min(360px,',failure:/Short pending card sizes to its content/},
-  {name:'real-card-depth-flattened',from:'transform: perspective(520px) rotateX(calc(6deg + var(--queue-depth) * 4deg)) rotateY(calc(var(--queue-depth) * -3deg)) translateZ(calc(var(--queue-depth) * -8px));',to:'transform: none;',failure:/Real queued cards preserve depth while idle/},
+  {name:'real-card-depth-flattened',edits:[{file:styles[0],from:'transform: perspective(520px) rotateX(calc(6deg + var(--queue-depth) * 4deg)) rotateY(calc(var(--queue-depth) * -3deg)) translateZ(calc(var(--queue-depth) * -8px));',to:'transform: none;'},{file:styles[0],from:'animation: composer-pending-depth linear both;',to:'animation: none;'}],failure:/Real queued cards preserve depth while idle|cardBefore.animation/},
   {name:'real-card-traversal-capped',file:typedPaths[3],from:'{queued.map((entry, index) => {',to:'{queued.slice(0, 4).map((entry, index) => {',failure:/Every queued operation has its own real card/},
   {name:'nonhead-send-borrows-head',file:typedPaths[3],from:'onSend?.(entry.id)',to:'onSend?.(queued[0]!.id)',failure:/Nonhead Send submits only that original card/},
   {name:'copy-borrows-head-text',file:typedPaths[3],from:'onCopy?.(entry.text)',to:'onCopy?.(queued[0]!.text)',failure:/Each card copies its own complete original text/},
@@ -99,7 +99,12 @@ async function cardMutations(){
   {name:'edit-save-bypasses-owner',file:typedPaths[7],from:'await onSave(entry.id, original, text); onCancel()',to:'onCancel()',failure:/Save preserves original operation, Run, time and order/},
   {name:'edit-rejection-discards-draft',file:typedPaths[7],from:'catch (failure) { setError(presentError(failure)); textareaRef.current?.focus({ preventScroll: true }) }',to:'catch (failure) { onCancel() }',failure:/Actual Renderer fact did not arrive/}
  ]
- for(const item of cases){
+ cases.push({name:'scroll-depth-frozen',from:"@keyframes composer-pending-depth {\n  0% { transform: perspective(520px) rotateX(20deg) rotateY(-4deg) translateZ(-26px); }\n  45%, 55% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(6px); }\n  100% { transform: perspective(520px) rotateX(-20deg) rotateY(4deg) translateZ(-26px); }\n}",to:"@keyframes composer-pending-depth {\n  0% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(6px); }\n  45%, 55% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(6px); }\n  100% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(6px); }\n}",failure:/same original card changes depth and tilt|actual depth and X tilt/},
+ {name:'edit-navigation-borrows-card-focus',file:typedPaths[3],from:'if (editingId || isImeOwnedKeyboardEvent(event)) return',to:'if (isImeOwnedKeyboardEvent(event)) return',failure:/Editing native card-action navigation retains the original Copy focus/});
+ const activeCases=mode==='--scroll-edit-restored'?cases.filter(item=>item.name==='edit-navigation-borrows-card-focus'):mode==='--scroll-mutations'?cases.filter(item=>['real-card-depth-flattened','scroll-depth-frozen','edit-navigation-borrows-card-focus'].includes(item.name)):cases;
+ assert.equal(activeCases.length,mode==='--scroll-edit-restored'?1:mode==='--scroll-mutations'?3:17);
+ result.mutationScope=activeCases.map(item=>item.name);
+ for(const item of activeCases){
   const edits=item.edits??[{file:item.file??styles[0],from:item.from,to:item.to}],changed=new Map()
   for(const edit of edits){const bytes=changed.get(edit.file)??originals[edit.file];assert.equal(bytes.split(edit.from).length,2);changed.set(edit.file,bytes.replace(edit.from,edit.to))}
   for(const [file,bytes]of changed)await writeFile(join(privateRoot,file),bytes)
@@ -108,7 +113,7 @@ async function cardMutations(){
   result.mutations.push({name:item.name,files,red,exactRestoration:true});console.log(JSON.stringify({mutation:item.name,assertionRed:true,exactRestoration:true}))
  }
  result.restored=await nativeMutation('card-original-restored',false)
- assert.equal(result.mutations.length,cases.length)
+ assert.equal(result.mutations.length,activeCases.length)
 }
 async function mutations(){
  await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
@@ -189,6 +194,6 @@ async function native(){
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const lines=[]
  const outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,'capture'],{temporaryRoot:processRoot,cwd:root,env,timeoutMs:90000,onLine:l=>lines.push(l)})
  await writeFile(join(directory,'process.log'),lines.join('\n'));const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'));assert.equal(outcome.timedOut,false);assert.equal(outcome.exitCode,0,rendered.failure?.message);assert.equal(rendered.passed,true);assert.ok(rendered.frames.length)
- assert.equal(rendered.frames.length,108);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
+ assert.equal(rendered.frames.length,136);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
 }
-try{if(mode==='--card-mutations')await cardMutations();else if(mode==='--mutations')await mutations();else if(mode==='--source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{result.sharedSourceChangesDuringProof=[];for(const [p,b]of Object.entries(originals)){const current=hash(await readFile(join(root,p)));if(current!==hash(b))result.sharedSourceChangesDuringProof.push({path:p,capturedSha256:hash(b),currentSha256:current})}if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}
+try{if(mode==='--card-mutations'||mode==='--scroll-mutations'||mode==='--scroll-edit-restored')await cardMutations();else if(mode==='--mutations')await mutations();else if(mode==='--source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{result.sharedSourceChangesDuringProof=[];for(const [p,b]of Object.entries(originals)){const current=hash(await readFile(join(root,p)));if(current!==hash(b))result.sharedSourceChangesDuringProof.push({path:p,capturedSha256:hash(b),currentSha256:current})}if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}

@@ -16,6 +16,7 @@ const dom = composerDOM()
 const queue = (id: string, text: string) => ({ operationId: id, runId: 'run-agent-1', text, status: 'queued' as const, promptCondition: null, enqueuedAt: 123 })
 const strip = () => document.querySelector<HTMLElement>('.composer-pending:not([hidden])')!
 const card = (id: string) => strip().querySelector<HTMLElement>(`[data-operation-id="${id}"].composer-pending__card`)!
+const reader = () => strip().querySelector<HTMLElement>('.composer-pending__reading')!
 beforeEach(() => {
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   useAppStore.setState({ agentSteerInFlight: {}, agentSteerInFlightPhase: {}, timelines: {}, noticeReadReceipts: {} })
@@ -25,36 +26,48 @@ async function mount() {
   useAppStore.setState({ agentSteerQueues: { 'agent-1': [queue('head', 'Head exact body'), queue('tail', 'Tail original\nSecond exact line')] } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
 }
-it('hover preserves compact cards without a separate heading or large body/state disclosure', async () => {
+it('hover reveals one original full-body reader and header More while cards keep three glyph actions', async () => {
   await mount()
   expect(strip().querySelectorAll('.composer-pending__card')).toHaveLength(2)
   const originalDraft = dom.container.querySelector('[role="textbox"]')
   await act(async () => card('tail').dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
   expect(strip().dataset.operationId).toBe('tail')
-  expect(strip().querySelector('.composer-pending__heading')).toBeNull()
-  expect(strip().querySelector('.composer-pending__reading')).toBeNull()
+  expect(strip().querySelector('.composer-pending__heading [aria-label="在 Outbox 查看待发消息和操作"]')).not.toBeNull()
+  expect(strip().querySelectorAll('.composer-pending__reading')).toHaveLength(1)
+  expect(reader().dataset.readingId).toBe('tail')
+  expect(reader().querySelector('.composer-pending__body')!.textContent).toBe('Tail original\nSecond exact line')
+  expect(reader().querySelector('.composer-pending__reading-state')!.textContent).toContain('排队中')
+  for (const entry of strip().querySelectorAll('.composer-pending__card')) {
+    expect(entry.querySelectorAll('.composer-pending__actions button')).toHaveLength(3)
+    expect(entry.querySelector('[aria-label="发送这条待发消息"]')).not.toBeNull()
+    expect(entry.querySelector('[aria-label="复制这条待发消息"]')).not.toBeNull()
+    expect(entry.querySelector('[aria-label="编辑这条待发消息"]')).not.toBeNull()
+    expect(entry.querySelector('[aria-label="在 Outbox 查看待发消息和操作"]')).toBeNull()
+    expect(entry.querySelector('.composer-pending__preview')!.hasAttribute('title')).toBe(false)
+  }
   expect(strip().querySelector('svg.lucide-circle-help')).toBeNull()
-  expect(strip().querySelector('svg.lucide-pencil')).toBeNull()
+  expect(strip().querySelector('svg.lucide-pencil')).not.toBeNull()
   expect(dom.container.querySelector('[role="textbox"]')).toBe(originalDraft)
   expect(dom.draft()).toBe('Keep my draft')
 })
-it('the original body is an inline edit entry and saves the exact nonhead operation without submitting', async () => {
+it('the Edit glyph opens the unique reader editor and saves the exact nonhead operation without submitting', async () => {
   await mount()
   const original = useAppStore.getState().agentSteerQueues['agent-1']!.map(entry => ({ ...entry }))
   const save = vi.spyOn(useAppStore.getState(), 'editQueuedAgentSteer')
   const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
-  const body = card('tail').querySelector<HTMLButtonElement>('button.composer-pending__preview')
-  expect(body).not.toBeNull()
-  expect(body!.disabled).toBe(false)
-  await act(async () => body!.click())
-  const textarea = card('tail').querySelector<HTMLTextAreaElement>('textarea')!
+  const edit = card('tail').querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')!
+  expect(card('tail').querySelector('button.composer-pending__preview')).toBeNull()
+  expect(edit.disabled).toBe(false)
+  await act(async () => edit.click())
+  expect(strip().querySelectorAll('.composer-pending__reading')).toHaveLength(1)
+  const textarea = reader().querySelector<HTMLTextAreaElement>('textarea')!
   expect(textarea.value).toBe(original[1]!.text)
-  expect(strip().querySelector('.composer-pending__reading')).toBeNull()
+  expect(card('tail').querySelector('textarea')).toBeNull()
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Edited exact tail\nFull line')
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  await act(async () => card('tail').querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
+  await act(async () => reader().querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
   expect(save).toHaveBeenLastCalledWith('agent-1', 'tail', original[1]!.text, 'Edited exact tail\nFull line')
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([original[0], { ...original[1], text: 'Edited exact tail\nFull line' }])
   expect(send).not.toHaveBeenCalled()
@@ -62,8 +75,8 @@ it('the original body is an inline edit entry and saves the exact nonhead operat
 })
 it('editing owns textarea navigation and does not move queue focus from its still available Copy action', async () => {
   await mount()
-  await act(async () => card('tail').querySelector<HTMLButtonElement>('.composer-pending__preview')!.click())
-  const textarea = card('tail').querySelector<HTMLTextAreaElement>('textarea')!
+  await act(async () => card('tail').querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')!.click())
+  const textarea = reader().querySelector<HTMLTextAreaElement>('textarea')!
   const originalText = textarea.value
   const originalQueue = useAppStore.getState().agentSteerQueues['agent-1']
   textarea.focus(); textarea.setSelectionRange(2, 6)
@@ -110,14 +123,14 @@ it('the rendered editor and public RPC/compiled CLI consume the same original St
     return JSON.parse(result.stdout).result
   }
   try {
-    await act(async () => card('tail').querySelector<HTMLButtonElement>('.composer-pending__preview')!.click())
-    const textarea = card('tail').querySelector<HTMLTextAreaElement>('textarea')!
+    await act(async () => card('tail').querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')!.click())
+    const textarea = reader().querySelector<HTMLTextAreaElement>('textarea')!
     const text = 'UI revised tail\nFull original identity'
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, text)
       textarea.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await act(async () => card('tail').querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
+    await act(async () => reader().querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
     const listed = await cli(['ls', '--session', 'agent-1'])
     expect(listed.messages.map((item: { pendingId: string }) => item.pendingId)).toEqual(['head', 'tail'])
     expect(listed.messages[1]).toMatchObject({ pendingId: target.operationId, text, runId: target.runId, enqueuedAt: target.enqueuedAt })

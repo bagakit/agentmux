@@ -10,7 +10,7 @@ const queued = (operationId: string, runId = 'run-agent-1') => ({operationId, ru
 const strip = () => document.querySelector<HTMLElement>('.composer-pending:not([hidden])')
 const selectedCard = () => [...strip()!.querySelectorAll<HTMLElement>('.composer-pending__card')].find(card => card.dataset.operationId === strip()!.dataset.operationId)!
 async function pendingClick(selector: string) {
-  const owner = selectedCard()
+  const owner = selector === '[aria-label="在 Outbox 查看待发消息和操作"]' ? strip()!.querySelector('.composer-pending__heading')! : selectedCard()
   await act(async () => owner.querySelector<HTMLButtonElement>(selector)!.click())
 }
 const editor = () => dom.container.querySelector('[role="textbox"]')!
@@ -96,7 +96,7 @@ it('100 distinct cards are discoverable and middle/tail hover, copy, send and Mo
   for (const index of [0, 49, 99]) {
     await act(async () => cards[index]!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
     expect(strip()!.dataset.operationId).toBe(entries[index]!.operationId)
-    expect(cards[index]!.querySelector('.composer-pending__preview')!.textContent).toBe(entries[index]!.text.replace(/\s+/g, ' ').trim()); expect(strip()!.querySelector('.composer-pending__reading')).toBeNull()
+    expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe(entries[index]!.text)
     await pendingClick('[aria-label="复制这条待发消息"]')
     expect(clipboard).toHaveBeenLastCalledWith(entries[index]!.text)
   }
@@ -144,7 +144,7 @@ it('editing a nonhead never-admitted card saves through the original queue owner
   await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
   expect(save).toHaveBeenLastCalledWith('agent-1', 'edit-tail', entries[1]!.text, 'Edited tail\nFull second line')
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([entries[0], { ...entries[1], text: 'Edited tail\nFull second line' }])
-  expect(strip()!.querySelector('textarea')).toBeNull();expect(selectedCard().querySelector('.composer-pending__preview')!.textContent).toBe('Edited tail Full second line')
+  expect(strip()!.querySelector('textarea')).toBeNull();expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe('Edited tail\nFull second line')
   expect(send).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();expect(dom.draft()).toBe('Keep my draft')
 })
 it('a rejected compare-and-swap keeps the local edit draft and original delivery record; IME Escape does not dismiss', async () => {
@@ -175,22 +175,20 @@ it('opening and closing the original Mailbox retains the floating edit draft whi
   expect(strip()!.querySelector('textarea')).toBe(textarea);expect(textarea.value).toBe('Unsaved local edit survives Mailbox');expect(dom.draft()).toBe('Keep my draft')
 })
 
-it('compact rows expose original actions and state without a second hover reader', async () => {
+it('compact rows have three original actions, no native full-text tooltip, and one reader and live announcement', async () => {
   useAppStore.setState({agentSteerQueues:{'agent-1':[queued('head'),queued('tail')]}})
   await mount()
   for (const card of strip()!.querySelectorAll('.composer-pending__card')) {
-    expect(card.querySelector('[aria-label="\u53d1\u9001\u8fd9\u6761\u5f85\u53d1\u6d88\u606f"]')).not.toBeNull()
-    expect(card.querySelector('[aria-label="\u590d\u5236\u8fd9\u6761\u5f85\u53d1\u6d88\u606f"]')).not.toBeNull()
-    expect(card.querySelector('[aria-label="\u5728 Outbox \u67e5\u770b\u5f85\u53d1\u6d88\u606f\u548c\u64cd\u4f5c"]')).not.toBeNull()
+    expect(card.querySelectorAll('.composer-pending__actions button')).toHaveLength(3)
     expect(card.querySelector('.composer-pending__preview')!.hasAttribute('title')).toBe(false)
-    expect(card.querySelector('.composer-pending__state')!.getAttribute('aria-label')).toBe('\u6392\u961f\u4e2d')
-    expect(card.querySelector('svg.lucide-pencil')).toBeNull()
+    expect(card.querySelector('.composer-pending__state')!.getAttribute('aria-label')).toBe('排队中')
+    expect(card.querySelector('[role="status"]')).toBeNull()
   }
   await act(async () => strip()!.querySelector('[data-queue-index="1"]')!.dispatchEvent(new PointerEvent('pointermove',{bubbles:true})))
-  expect(strip()!.querySelector('.composer-pending__reading')).toBeNull()
-  expect(strip()!.querySelector('.composer-pending__heading')).toBeNull()
+  expect(strip()!.querySelectorAll('.composer-pending__body')).toHaveLength(1)
+  expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe('Original tail')
   expect(strip()!.querySelectorAll('[role="status"]')).toHaveLength(1)
-  expect(selectedCard().querySelector('.composer-pending__preview')!.textContent).toBe('Original tail')
+  expect(strip()!.querySelector('.composer-pending__reading-state')!.textContent).toContain('排队中')
 })
 
 it('copy shows a visible check only after the real clipboard owner accepts the original full body', async () => {
