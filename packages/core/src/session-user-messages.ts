@@ -89,7 +89,8 @@ export function projectSessionUserMessages(params: {
 
       const source: AgentSessionUserMessageSource = {
         kind: 'captured',
-        submissionId: item.id
+        submissionId: item.id,
+        ...(item.sourceDevice ? { device: { ...item.sourceDevice } } : {})
       }
 
       const deliveryStatus = item.status === 'complete'

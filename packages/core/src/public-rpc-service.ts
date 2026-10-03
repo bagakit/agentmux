@@ -58,6 +58,11 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   snapshot?(params: AgentMuxRpcSnapshotParams): Promise<Partial<AgentMuxRpcSnapshot>>
   /** Original Host Authority and native confirmation owner; never constructed here. */
   deviceAdministration?: AgentMuxRpcDeviceAdministration
+  /** Original Desktop consumes its in-memory, trusted IPC user intent. */
+  deviceIntent?(intent: string): boolean
+  /** Original Host supplies transport-authenticated operation attribution. */
+  operationSource?(context: AgentMuxRpcCallContext): import('./types.js').AgentOperationDevice | undefined
+  recordDeviceOperation?(source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string): Promise<void>
   /** Borrow the Host's original SDK business owner; never connect a second Runtime. */
   hostedRuntime?(): Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> |
     Promise<Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'>>
@@ -251,6 +256,7 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Device management requires a local Unix user request and original Host confirmation. Nothing was submitted.', 'CONTROL_PERMISSION_DENIED')
       }
       const input = parseAgentMuxRpcDeviceParams(method, params)
+      if (method === 'device.intent') return { confirmed: this.ports.deviceIntent?.((input as { intent: string }).intent) ?? false } as AgentMuxRpcResult<M>
       if (!this.ports.deviceAdministration) throw new AgentMuxError('The original Host device administration owner is unavailable.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted()
       return parseAgentMuxRpcDeviceResult(method, await this.ports.deviceAdministration.call(method, input, context), input) as AgentMuxRpcResult<M>
@@ -259,6 +265,8 @@ export class AgentMuxRpcService {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.call(method, hosted.params, {
         ...(context.signal ? { signal: context.signal } : {}),
+        ...(this.ports.operationSource?.(context) ? { sourceDevice: this.ports.operationSource!(context) } : {}),
+        ...(this.ports.recordDeviceOperation ? { recordDeviceOperation: this.ports.recordDeviceOperation } : {}),
         ...(context.afterResponse ? { afterResponse: context.afterResponse } : {})
       }) as AgentMuxRpcResult<M>
     }

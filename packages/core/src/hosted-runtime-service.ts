@@ -12,7 +12,8 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
 ])
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
-type Context = { signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
+type Context = { sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
+  recordDeviceOperation?: (source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => Promise<void>; signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
 type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[]): void; fail(error: unknown): void;
   start(): Promise<void>; close(): void; readonly initialId: string; readonly closed: boolean; readonly eventDestination?: Reader }
 function reader(emit: Emit, initial: unknown, onFailure: () => void): Reader {
@@ -150,7 +151,23 @@ export class AgentMuxHostedRuntimeService {
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (this.consumer(id) !== original) throw new AgentMuxError('Host consumer changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (context.signal && invocation.method === 'submitAgentPrompt') invocation.args[0] = { ...invocation.args[0], signal: context.signal }
+    const source = context.sourceDevice
+    // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
+    for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
+      throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
+    const modifying = /^(submit|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|answer|cancel)/.test(invocation.method)
+    const first = invocation.args[0] as unknown
+    const sessionId = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
+      : typeof first === 'string' && invocation.method.endsWith('Agent') ? first : undefined
+    if (source && invocation.method === 'submitAgentPrompt') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
+    const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
+    const recordActivity = async (result: 'confirmed' | 'failed' | 'unknown') => {
+      if (!source || !modifying) return
+      try { await context.recordDeviceOperation?.(source, invocation.method, invocation.args, result, operationId) } catch { /* Recording failure cannot disable the original input capability. */ }
+    }
+    await recordActivity('unknown')
     let value: unknown
+    try {
     if (invocation.method === 'releaseRunAttachment') {
       const release = original.runs.get(invocation.args[0].runId)
       original.runs.delete(invocation.args[0].runId); await release?.()
@@ -173,6 +190,10 @@ export class AgentMuxHostedRuntimeService {
       const operation = this.client[invocation.method] as (...args: unknown[]) => unknown
       value = await operation.apply(this.client, invocation.args)
     }
+    } catch (error) { await recordActivity('unknown'); throw error }
+    await recordActivity('confirmed')
+    if (source && modifying && sessionId && invocation.method !== 'submitAgentPrompt')
+      await this.client.recordDeviceOperation(sessionId, operationId, invocation.method, source, 'confirmed')
     return { value: encodeHostedValue(value) }
   }
   private async acquire(target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',

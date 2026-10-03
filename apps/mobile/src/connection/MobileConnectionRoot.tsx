@@ -22,8 +22,9 @@ function confirmDeviceHost(host: { origin: string; hostId: string }): string | n
 }
 
 /** The only application connection owner. It receives the genuine public SDK factory. */
-export function MobileConnectionRoot({ platform, native, nativeAccess, focusComposer, connectClient }: {
+export function MobileConnectionRoot({ platform, native, nativeAccess, focusComposer, connectClient, connectionCode }: {
   platform: ClientUiPlatform; native: boolean; focusComposer?: () => boolean
+  connectionCode?: string
   connectClient?: AuthorizedHostedClientFactory
   nativeAccess?: NativePrivateAdmission
 }) {
@@ -33,14 +34,19 @@ export function MobileConnectionRoot({ platform, native, nativeAccess, focusComp
   const [target, setTarget] = useState<string | null>(null)
   useEffect(() => {
     const release = controller.observe(setSnapshot)
-    if (!native && location.protocol === 'https:') void controller.resume(location.origin)
+    if (!native && location.protocol === 'https:') {
+      if (connectionCode) {
+        const name = /iPhone/.test(navigator.userAgent) ? 'iPhone' : /iPad/.test(navigator.userAgent) ? 'iPad' : /Android/.test(navigator.userAgent) ? 'Android' : '浏览器'
+        void controller.connectLink(location.origin, connectionCode, name)
+      } else void controller.resume(location.origin)
+    }
     if (native && nativeAccess) {
       const saved = getDeviceWorkface().snapshot().record
       const origin = saved.host?.origin ?? saved.hostUrl
       if (origin) void controller.resume(origin)
     }
     return () => { release(); controller.stop() }
-  }, [controller, native, nativeAccess])
+  }, [controller, native, nativeAccess, connectionCode])
   const savedHost = useCallback((address: string) => {
     setTarget(address); void controller.resume(address)
   }, [controller])

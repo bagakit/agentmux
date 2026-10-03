@@ -255,6 +255,7 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   operationId: string
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
+  sourceDevice?: import('./types.js').AgentOperationDevice
   /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
   agentMuxNote?: string
   prompt: string
@@ -3711,7 +3712,8 @@ export class AgentMuxClient {
     const message: AgentPromptMessageContent = {
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
-      ...(authorAgentSessionId ? { authorAgentSessionId } : input.authorHuman === true ? { authorHuman: true } : {})
+      ...(authorAgentSessionId ? { authorAgentSessionId } : input.authorHuman === true ? { authorHuman: true } : {}),
+      ...(input.sourceDevice ? { sourceDevice: input.sourceDevice } : {})
     }
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
@@ -4816,7 +4818,17 @@ export class AgentMuxClient {
     if (message.userContent) await this.recordMessageAfterSideEffect(session, `prompt:${operationId}`,
       title, message.userContent, now, 'user', { status,
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
-        ...(message.authorHuman ? { authorHuman: true } : {}) })
+        ...(message.authorHuman ? { authorHuman: true } : {}),
+        ...(message.sourceDevice ? { sourceDevice: message.sourceDevice } : {}) })
+  }
+
+  /** Transport owner records an operation on its exact Session without duplicating Runtime state. */
+  async recordDeviceOperation(agentSessionId: string, operationId: string, method: string,
+    sourceDevice: import('./types.js').AgentOperationDevice, result: 'confirmed' | 'failed' | 'unknown'): Promise<void> {
+    const session = this.requireAgentSession(agentSessionId)
+    await this.recordMessageAfterSideEffect(session, `device-operation:${operationId}`, '设备操作',
+      `${method} · ${result === 'confirmed' ? '已提交' : result === 'failed' ? '失败' : '结果未确认'}`,
+      Date.now(), 'agentmux', { sourceDevice, ...(result === 'failed' ? { status: 'failed' as const } : {}) })
   }
 
   private async recordMessageAfterSideEffect(
@@ -4826,7 +4838,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
+    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -4841,6 +4853,7 @@ export class AgentMuxClient {
         updatedAt: observedAt,
         title,
         content,
+        ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),
         ...(source === 'user' && delivery.authorAgentSessionId
           ? { authorAgentSessionId: delivery.authorAgentSessionId }
           : source === 'user' && delivery.authorAgentSessionId === undefined && delivery.authorHuman === true

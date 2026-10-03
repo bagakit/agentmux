@@ -129,7 +129,7 @@ describe('one durable mobile workface owner', () => {
     const overlay = document.createElement('div'); document.body.appendChild(overlay)
     const view = await mount(<MobileApp client={null} connection={{ state: 'unavailable', message: '原 Mac 未连接' }}
       platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
-    await click(button(view.element, '设置连接'))
+    await click(button(view.element, '查看连接状态'))
     expect(button(overlay, '导出工作面文件').disabled).toBe(false)
     expect(button(overlay, '选择工作面文件').disabled).toBe(false)
     expect(overlay.querySelector('input[type="file"]')).not.toBeNull()

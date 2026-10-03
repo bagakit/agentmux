@@ -47,7 +47,7 @@ describe('Host device authority', () => {
     expect(authority.claim(pending.hostId, pending.deviceId, pending.claim)).toEqual({ state: 'waiting' })
     expect(() => authority.begin(invitation.hostId, invitation.invitation, 'Replay')).toThrow()
     await expect(authority.approve(pending.deviceId, 'incorrect-code')).rejects.toThrow()
-    expect(authority.devices()).toEqual([])
+    expect(authority.devices()).toMatchObject([])
     await authority.approve(pending.deviceId, pending.confirmationCode)
     const claimed = authority.claim(pending.hostId, pending.deviceId, pending.claim)
     expect(claimed.state).toBe('approved')
@@ -66,7 +66,7 @@ describe('Host device authority', () => {
     authority.reject(pending.deviceId)
     await expect(authority.approve(pending.deviceId, pending.confirmationCode)).rejects.toThrow()
     expect(() => authority.claim(pending.hostId, pending.deviceId, pending.claim)).toThrow()
-    expect(authority.devices()).toEqual([])
+    expect(authority.devices()).toMatchObject([])
   })
 
   it('persists stable Host and separate device identities without persisting any raw secret', async () => {
@@ -79,7 +79,7 @@ describe('Host device authority', () => {
     expect((await stat(path)).mode & 0o777).toBe(0o600)
     const reopened = await DeviceAuthority.open(path)
     expect(reopened.hostId).toBe(authority.hostId)
-    expect(reopened.devices()).toEqual([iphone.device, android.device])
+    expect(reopened.devices()).toMatchObject([iphone.device, android.device])
     expect(reopened.authenticate(reopened.hostId, iphone.credential)).toEqual(iphone.device)
     expect(reopened.authenticate(reopened.hostId, android.credential)).toEqual(android.device)
     expect(iphone.credential).not.toBe(android.credential)
@@ -111,7 +111,7 @@ describe('Host device authority', () => {
     await Promise.all(pending.map(value => authority.approve(value.deviceId, value.confirmationCode)))
     await Promise.all(pending.map(value => authority.revoke(value.deviceId)))
     const reopened = await DeviceAuthority.open(path)
-    expect(reopened.devices()).toEqual(pending.map(value => ({ deviceId: value.deviceId, name: authority.devices()
+    expect(reopened.devices()).toMatchObject(pending.map(value => ({ deviceId: value.deviceId, name: authority.devices()
       .find(device => device.deviceId === value.deviceId)!.name, createdAt: 10_000, revokedAt: 10_000 })))
     for (const value of pending) expect(() => authority.claim(value.hostId, value.deviceId, value.claim)).toThrow()
   })
@@ -124,7 +124,7 @@ describe('Host device authority', () => {
     await expect(authority.approve(pending.deviceId, pending.confirmationCode)).rejects.toThrow()
     expect(() => authority.claim(pending.hostId, pending.deviceId, pending.claim)).toThrow()
     expect(authority.requests()).toEqual([])
-    expect(authority.devices()).toEqual([])
+    expect(authority.devices()).toMatchObject([])
   })
 
   it('admits only one remaining durable slot when two confirmed requests race', async () => {
@@ -141,7 +141,7 @@ describe('Host device authority', () => {
     expect(outcomes.map(value => value.status)).toEqual(['fulfilled', 'rejected'])
     const reopened = await DeviceAuthority.open(path)
     expect(reopened.devices()).toHaveLength(100)
-    expect(reopened.devices().slice(0, 99)).toEqual(existing.map(({ credentialHash: _hash, ...device }) => device))
+    expect(reopened.devices().slice(0, 99)).toMatchObject(existing.map(({ credentialHash: _hash, ...device }) => device))
     expect(reopened.devices()[99]?.deviceId).toBe(requests[0]!.deviceId)
   })
 
@@ -157,13 +157,13 @@ describe('Host device authority', () => {
     try {
       expect(() => authority.reject(pending.deviceId)).toThrow('Device approval is being saved')
       expect(authority.claim(pending.hostId, pending.deviceId, pending.claim)).toEqual({ state: 'waiting' })
-      expect(authority.devices()).toEqual([])
+      expect(authority.devices()).toMatchObject([])
     } finally { resume() }
     await approving
     expect(() => authority.reject(pending.deviceId)).toThrow('already approved')
     await authority.revoke(pending.deviceId)
     expect(() => authority.claim(pending.hostId, pending.deviceId, pending.claim)).toThrow()
-    expect((await DeviceAuthority.open(path)).devices()).toEqual([{ deviceId: pending.deviceId, name: 'iPhone',
+    expect((await DeviceAuthority.open(path)).devices()).toMatchObject([{ deviceId: pending.deviceId, name: 'iPhone',
       createdAt: 10_000, revokedAt: 10_000 }])
   })
 
@@ -174,4 +174,29 @@ describe('Host device authority', () => {
     await expect(DeviceAuthority.open(path)).rejects.toThrow()
     expect(await readFile(path, 'utf8')).toBe(damaged)
   })
+})
+
+it('keeps device activity durable, deduplicates online readers and bounds related activity without recording prompt text', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agentmux-link-activity-'))
+  try {
+    const path = join(directory, 'devices.json'), owner = await DeviceAuthority.open(path)
+    const link = owner.connectionLink('https://127.0.0.1:7443')
+    const admitted = await owner.exchangeLink(new URL(link.url).hash.slice(9), 'iPhone')
+    const first = owner.observe(admitted.device), second = owner.observe(admitted.device)
+    expect(owner.devices().filter(device => device.online)).toHaveLength(1)
+    first.dispose(); expect(owner.devices()[0]!.online).toBe(true)
+    second.dispose(); expect(owner.devices()[0]!.online).toBe(false)
+    const source = owner.operationSource({ kind: 'device', id: owner.hostId + ':' + admitted.device.deviceId })!
+    await owner.recordOperation(source, 'submitAgentPrompt', [{ agentSessionId: 'a123456789012345', prompt: 'private body' }], 'unknown', 'original-op')
+    await owner.recordOperation(source, 'submitAgentPrompt', [{ agentSessionId: 'a123456789012345' }], 'confirmed', 'original-op')
+    expect(owner.devices()[0]!.operations).toHaveLength(1)
+    const reopened = await DeviceAuthority.open(path)
+    expect(reopened.hostId).toBe(owner.hostId)
+    expect(reopened.authenticate(owner.hostId, admitted.credential).deviceId).toBe(admitted.device.deviceId)
+    expect(reopened.devices()[0]!.operations?.[0]).toMatchObject({ id: 'original-op', target: 'a123456789012345', result: 'confirmed' })
+    expect(await readFile(path, 'utf8')).not.toContain('private body')
+    for (let i = 0; i < 103; i++) await owner.recordOperation(source, 'writeAgent', [{ agentSessionId: 'a123456789012345', data: 'secret' }], 'confirmed', `op-${i}`)
+    expect(owner.devices()[0]!.operations).toHaveLength(100)
+    expect(await readFile(path, 'utf8')).not.toContain('secret')
+  } finally { await rm(directory, { recursive: true, force: true }) }
 })

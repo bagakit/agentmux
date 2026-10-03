@@ -238,6 +238,9 @@ export function ConversationMessage({
         {status === 'unverified' ? (
           <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
         ) : null}
+        {inputSource && speaker?.role !== 'agent' ? <span className="log-turn__context"
+          title={inputSource.kind === 'captured' && inputSource.device ? `${inputSource.device.hostId} · ${inputSource.device.deviceId}` : '历史未记录设备来源'}>
+          来自 {(inputSource.kind === 'captured' ? inputSource.device?.name : undefined) ?? '未知设备'}</span> : null}
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
           ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {renderClock(createdAt)}

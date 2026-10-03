@@ -794,9 +794,12 @@ export type AgentSessionHistoryObservationHandle = {
 export type AgentProviderSessionHistoryObservationContext = Omit<AgentProviderSessionHistoryContext,
   'cursor' | 'limit'> & { onChange(observation: AgentProviderSessionHistoryObservation): void }
 
+/** Authenticated operation origin supplied by the Host, independent of message authorship. */
+export type AgentOperationDevice = { hostId: string; deviceId: string; name: string }
+
 export type AgentSessionUserMessageSource =
   | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
-  | { kind: 'captured'; submissionId: string }
+  | { kind: 'captured'; submissionId: string; device?: AgentOperationDevice }
 
 export type AgentSessionUserMessageAuthor =
   | { kind: 'human' }
@@ -892,6 +895,7 @@ export type AgentPromptMessageContent = {
   systemContext?: string
   authorAgentSessionId?: string
   authorHuman?: true
+  sourceDevice?: AgentOperationDevice
 }
 
 export type AgentTerminalHandshakeState = {
@@ -1416,6 +1420,7 @@ export type AgentTimelineItem = {
   authorAgentSessionId?: string
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
+  sourceDevice?: AgentOperationDevice
   content?: string
   toolName?: string
   toolInput?: string

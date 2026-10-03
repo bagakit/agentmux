@@ -8,7 +8,12 @@ export interface TrustedDevice {
   readonly name: string
   readonly createdAt: number
   readonly revokedAt?: number
+  readonly online?: boolean
+  readonly lastSeenAt?: number
+  readonly operationIssue?: string
+  readonly operations?: readonly DeviceOperation[]
 }
+export interface DeviceOperation { readonly id: string; readonly method: string; readonly target: string; readonly at: number; readonly result: 'confirmed' | 'failed' | 'unknown' }
 /** Facts supplied by the original Host; the public parser never executes this locator. */
 export interface AgentMuxRpcCertificatePreparation {
   readonly executable: string
@@ -63,6 +68,8 @@ export function parseAgentMuxRpcPrivateAccessState(value: unknown, hostId: strin
 export type AgentMuxRpcDeviceParameterMap = {
   'device.ls': Record<string, never>
   'device.invite': Record<string, never>
+  'device.link': { intent?: string }
+  'device.intent': { intent: string }
   'device.approve': { deviceId: string; confirmationCode: string }
   'device.reject': { deviceId: string }
   'device.revoke': { deviceId: string }
@@ -72,6 +79,8 @@ export type AgentMuxRpcDeviceResultMap = {
     requests: readonly { device: TrustedDevice; confirmationCode: string; expiresAt: number }[];
     privateAccess: AgentMuxRpcPrivateAccessState }
   'device.invite': { hostId: string; invitation: string; expiresAt: number }
+  'device.link': { hostId: string; url: string; expiresAt: number }
+  'device.intent': { confirmed: boolean }
   'device.approve': { hostId: string; device: TrustedDevice }
   'device.reject': { hostId: string; deviceId: string; state: 'denied' }
   'device.revoke': { hostId: string; device: TrustedDevice }
@@ -85,6 +94,7 @@ export interface AgentMuxRpcDeviceAdministration {
     context: AgentMuxRpcCallContext): Promise<AgentMuxRpcDeviceResult<M>>
 }
 export const AGENTMUX_RPC_DEVICE_METHODS = {
+  'device.link': 'long', 'device.intent': 'short',
   'device.ls': 'short', 'device.invite': 'long', 'device.approve': 'long',
   'device.reject': 'long', 'device.revoke': 'long'
 } as const satisfies Record<AgentMuxRpcDeviceMethod, 'short' | 'long'>
@@ -103,6 +113,11 @@ function confirmationCode(value: unknown, code: string): void {
 }
 /** No caller-supplied confirmation or transport fact is admitted. */
 export function parseAgentMuxRpcDeviceParams<M extends AgentMuxRpcDeviceMethod>(method: M, value: unknown): AgentMuxRpcDeviceParams<M> {
+  if (method === 'device.link' || method === 'device.intent') {
+    const p = rpcRecord(value, ['intent'])
+    if (method === 'device.intent' || p.intent !== undefined) identifier(p.intent, 'INVALID_CONTROL_REQUEST')
+    return p as AgentMuxRpcDeviceParams<M>
+  }
   const keys = method === 'device.approve' ? ['deviceId', 'confirmationCode']
     : method === 'device.reject' || method === 'device.revoke' ? ['deviceId'] : []
   const p = rpcRecord(value, keys)
@@ -114,15 +129,39 @@ export function parseAgentMuxRpcDeviceParams<M extends AgentMuxRpcDeviceMethod>(
 /** Strict public results contain no Authority credential, hash or claim. */
 export function parseAgentMuxRpcDeviceResult<M extends AgentMuxRpcDeviceMethod>(method: M, value: unknown,
   params: AgentMuxRpcDeviceParams<M>): AgentMuxRpcDeviceResult<M> {
+  if (method === 'device.intent') {
+    const p = rpcRecord(value, ['confirmed'], 'CONTROL_PROTOCOL_ERROR')
+    if (typeof p.confirmed !== 'boolean') throw new AgentMuxError('Device intent result is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return p as AgentMuxRpcDeviceResult<M>
+  }
+  if (method === 'device.link') {
+    const p = rpcRecord(value, ['hostId', 'url', 'expiresAt'], 'CONTROL_PROTOCOL_ERROR')
+    identifier(p.hostId, 'CONTROL_PROTOCOL_ERROR')
+    const url = new URL(p.url as string)
+    if (url.protocol !== 'https:' || url.username || url.password || url.search || !url.hash.startsWith('#connect=') || !Number.isSafeInteger(p.expiresAt))
+      throw new AgentMuxError('Device connection link is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return p as AgentMuxRpcDeviceResult<M>
+  }
   const code = 'CONTROL_PROTOCOL_ERROR'
   const fail = (): never => { throw new AgentMuxError('Device management result is malformed or belongs to another device.', code) }
   const time = (v: unknown): number => { if (!Number.isSafeInteger(v) || (v as number) < 0) fail(); return v as number }
   const device = (v: unknown): TrustedDevice => {
-    const d = rpcRecord(v, ['deviceId', 'name', 'createdAt', 'revokedAt'], code)
+    const d = rpcRecord(v, ['deviceId', 'name', 'createdAt', 'revokedAt', 'online', 'lastSeenAt', 'operationIssue', 'operations'], code)
     identifier(d.deviceId, code)
     if (typeof d.name !== 'string' || !d.name || d.name.length > 128) fail()
     const createdAt = time(d.createdAt)
     if (d.revokedAt !== undefined && time(d.revokedAt) < createdAt) fail()
+    if (d.operationIssue !== undefined && (typeof d.operationIssue !== 'string' || d.operationIssue.length > 4096)) fail()
+    if (d.online !== undefined && typeof d.online !== 'boolean') fail()
+    if (d.lastSeenAt !== undefined) time(d.lastSeenAt)
+    if (d.operations !== undefined) {
+      if (!Array.isArray(d.operations) || d.operations.length > 100) fail()
+      for (const value of d.operations as unknown[]) {
+        const o = rpcRecord(value, ['id', 'method', 'target', 'at', 'result'], code)
+        identifier(o.id, code); identifier(o.method, code); identifier(o.target, code); time(o.at)
+        if (!['confirmed', 'failed', 'unknown'].includes(o.result as string)) fail()
+      }
+    }
     return d as unknown as TrustedDevice
   }
   const keys = method === 'device.ls' ? ['hostId', 'devices', 'requests', 'privateAccess']

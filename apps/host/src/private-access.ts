@@ -116,9 +116,16 @@ export class PrivateAccess {
   /** No remote approve/revoke endpoint. The Mac user operates the original local Authority. */
   async route(request: Request): Promise<Response | null> {
     const path = new URL(request.url).pathname
-    if (path !== DEVICE_PATH && path !== `${DEVICE_PATH}/status` && path !== `${DEVICE_PATH}/claim`) return null
+    if (path !== DEVICE_PATH && path !== `${DEVICE_PATH}/status` && path !== `${DEVICE_PATH}/claim` && path !== `${DEVICE_PATH}/connect`) return null
     try {
       const native = this.requireOrigin(request)
+      if (path === `${DEVICE_PATH}/connect` && request.method === 'POST') {
+        const input = await body(request, ['code', 'name'])
+        const connected = await this.authority.exchangeLink(input.code!, input.name!)
+        const state = { state: 'approved', hostId: this.authority.hostId, device: connected.device }
+        if (native) return json(200, { ...state, credential: connected.credential })
+        return json(200, state, [cookieHeader(DEVICE_COOKIE, `${this.authority.hostId}.${connected.credential}`, 30 * 86400)])
+      }
       if (path === DEVICE_PATH && request.method === 'GET') return json(200, { hostId: this.authority.hostId })
       if (path === `${DEVICE_PATH}/status` && request.method === 'GET') {
         return json(200, { hostId: this.authority.hostId, device: this.device(request, native) })

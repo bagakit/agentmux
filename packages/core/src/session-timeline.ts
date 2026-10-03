@@ -1,3 +1,4 @@
+import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { isAgentActivityStatusSource, semanticStatusStale } from './agent-status-freshness.js'
 import { applyNormalizedTimelineMutation, MAX_TIMELINE_ITEMS_PER_WINDOW } from './session-timeline-reducer.js'
@@ -188,6 +189,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     title: text(source.title, 'Timeline item title'),
     ...optionalField(source, 'content'),
     ...authorAgent,
+    ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),
     ...(authorAgent.authorAgentSessionId === undefined && source.authorHuman === true ? { authorHuman: true } : {}),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),

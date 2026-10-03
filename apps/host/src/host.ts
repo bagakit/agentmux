@@ -80,7 +80,18 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       expiresAt: tls.expiresAt, ...(assets ? { mobileBuildDigest: assets.buildDigest } : {}), ...(assetIssue ? { assetIssue } : {}), ...sources }
   }
   const service = {
-    deviceAdministration: createDeviceAdministration(authorityReady, options.deviceConfirmation, privateAccessState),
+    operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
+    recordDeviceOperation: async (source: import('@agentmux/core').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => {
+      if (authority) {
+        try { await authority.recordOperation(source, method, args, result, operationId) }
+        catch { authority.noteActivityIssue(source.deviceId) }
+      }
+    },
+    deviceAdministration: createDeviceAdministration(authorityReady, options.deviceConfirmation, privateAccessState, async (intent, context) => {
+      const desktop = await desktopClient(context)
+      try { return (await desktop.call('device.intent', { intent }, context.signal ? { signal: context.signal } : {})).confirmed }
+      finally { await desktop.dispose() }
+    }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
       const desktop = await desktopClient(context)
       try { return await desktop.call(method, params, context.signal ? { signal: context.signal } : {}) }

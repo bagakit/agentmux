@@ -35,6 +35,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'spatial:read': 'spatial state',
   'spatial:commit': 'spatial state',
   'deviceManagement:ls': 'device administration',
+  'deviceManagement:link': 'device administration',
   'deviceManagement:invite': 'device administration',
   'deviceManagement:approve': 'device administration',
   'deviceManagement:reject': 'device administration',
