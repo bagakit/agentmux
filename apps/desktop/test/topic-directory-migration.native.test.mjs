@@ -6,7 +6,7 @@ import { join, resolve, dirname, basename } from 'node:path'
 import { once } from 'node:events'
 import { before, test } from 'node:test'
 import { migrateTopicDirectories } from '../scripts/migrate-topic-directories.mjs'
-import { directoryIdentityRecord } from '../src/main/scratch-directory-identity.mjs'
+import { directoryIdentityRecord, moteDirectoryName } from '../src/main/scratch-directory-identity.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..')
 let artifacts, helper
@@ -117,7 +117,7 @@ test('actual helper and script retain cwd, every asset inode, dirty Git and dura
   }
   assert.equal(receipt.success, true, JSON.stringify(receipt))
   assert.equal(receipt.objects[0].state, 'migrated')
-  const canonical = join(home, '.agentmux/motes', entityName('live'))
+  const canonical = join(home, '.agentmux/motes', moteDirectoryName('launcher:live'))
   assert.equal(await readlink(old), '../motes/' + entityName('live'))
   assert.equal(inode(await stat(old, { bigint: true })), before['.'])
   assert.deepEqual(withoutIdentity(await inventory(canonical)), before)
@@ -164,7 +164,7 @@ test('an explicitly selected home alias preserves its original logical identity 
   const report = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(report.success, true, JSON.stringify(report))
   assert.equal(report.objects[0].state, 'migrated')
-  assert.deepEqual(JSON.parse(await readFile(join(actualHome, '.agentmux/motes', entityName('home-alias'), metadataName), 'utf8')), retainedRecord(original))
+  assert.deepEqual(JSON.parse(await readFile(join(actualHome, '.agentmux/motes', moteDirectoryName('launcher:home-alias'), metadataName), 'utf8')), retainedRecord(original))
   const second = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(second.success, true)
   assert.equal(second.objects[0].state, 'already-migrated')
@@ -209,9 +209,9 @@ test('strict identity schema accepts its two fields and rejects extra fields or 
   const validBefore = await inventory(valid)
   const accepted = await migrateTopicDirectories({ home: validHome, execute: true, helperPath: helper })
   assert.equal(accepted.success, true)
-  const validAfter = await inventory(join(validHome, '.agentmux/motes', entityName('valid-record')))
+  const validAfter = await inventory(join(validHome, '.agentmux/motes', moteDirectoryName('launcher:valid-record')))
   assert.deepEqual(withoutIdentity(validAfter), withoutIdentity(validBefore))
-  assert.deepEqual(JSON.parse(await readFile(join(validHome, '.agentmux/motes', entityName('valid-record'), metadataName), 'utf8')), retainedRecord(valid))
+  assert.deepEqual(JSON.parse(await readFile(join(validHome, '.agentmux/motes', moteDirectoryName('launcher:valid-record'), metadataName), 'utf8')), retainedRecord(valid))
   for (const shape of ['extra-field', 'oversized']) {
     const home = await homeFixture('invalid-' + shape), old = await entity(home, 'invalid-record', true)
     let record = JSON.stringify({ version: 1, identityDirectoryPath: old, ...(shape === 'extra-field' ? { extra: 'unexpected' } : {}) })
@@ -272,11 +272,12 @@ test('lost helper receipt after swap resumes only the exact alias and saved orig
   const child = spawn(helper, [...await aliasArgs(home, old, 'motes/' + entityName('committed')), '--after-commit-barrier'], { stdio: ['ignore', 'ignore', 'pipe', 'ignore', 'ignore', 'pipe', 'pipe'] })
   await once(child.stdio[5], 'data')
   const closed = once(child, 'close'); child.kill('SIGTERM'); await closed
-  const canonical = join(home, '.agentmux/motes', entityName('committed'))
-  assert.deepEqual(await inventory(canonical), before)
+  const middle = join(home, '.agentmux/motes', entityName('committed'))
+  assert.deepEqual(await inventory(middle), before)
   const resumed = await migrateTopicDirectories({ home, execute: true, helperPath: helper })
   assert.equal(resumed.success, true)
-  assert.equal(resumed.objects[0].state, 'already-migrated')
+  assert.equal(resumed.objects[0].state, 'migrated')
+  const canonical = join(home, '.agentmux/motes', moteDirectoryName('launcher:committed'))
   assert.deepEqual(withoutIdentity(await inventory(canonical)), withoutIdentity(before))
   assert.deepEqual(JSON.parse(await readFile(join(canonical, metadataName), 'utf8')), retainedRecord(old))
   await writeFile(join(canonical, metadataName), JSON.stringify({ version: 1, identityDirectoryPath: canonical }))

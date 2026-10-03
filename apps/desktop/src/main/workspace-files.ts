@@ -2,7 +2,7 @@ import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
 import type { FileNameListing } from '@agentmux/core'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
-import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './scratch-topic-directories.js'
+import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
@@ -974,6 +974,10 @@ export class WorkspaceFiles {
     const physicalPrimary = await resolveScratchTopicDirectory(primary.path, PMO_TEAMS_TOPIC_ID)
     const protectedAddress = physicalPrimary ?? resolve(await canonical(primary.path), primaryName)
     let protectedEntry = address === protectedAddress || protectedAddress.startsWith(address + sep)
+    if (physicalPrimary) for (const path of await scratchConfirmedDirectoryPaths(primary.path, PMO_TEAMS_TOPIC_ID, physicalPrimary)) {
+      const entry = resolve(await canonical(dirname(path)), basename(path))
+      if (address === entry || entry.startsWith(address + sep)) protectedEntry = true
+    }
     // The original config path must also remain reachable if it uses a backing-root alias.
     for (let entry = resolve(primary.path, primaryName); !protectedEntry && dirname(entry) !== entry; entry = dirname(entry)) {
       protectedEntry = address === resolve(await canonical(dirname(entry)), basename(entry))

@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { basename, dirname, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
+import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { durableWriteFile, type AgentProviderId } from '@agentmux/core'
 import { nativeImage, type NativeImage } from 'electron'
 import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
@@ -216,24 +217,42 @@ export class ScratchTopics {
   private readonly titleWrites = new Map<string, Promise<unknown>>()
   private nameAudit: NameChangeAudit | undefined
   setNameAudit(audit: NameChangeAudit): void { this.nameAudit = audit }
+  private directoryMaintenanceIssue: { directory: string; message: string; shortenMotes: boolean } | undefined
   constructor(private readonly createAvatarImage: (bytes: Buffer) => NativeImage = bytes => nativeImage.createFromBuffer(bytes)) {}
 
   /** Advisory maintenance is a write operation; read/list and public discovery remain read-only. */
-  async normalizeDirectoryIdentities(workspace: WorkspaceRecord, options: DirectoryIdentityWriteOptions = {}): Promise<void> {
+  async normalizeDirectoryIdentities(workspace: WorkspaceRecord, options: DirectoryIdentityWriteOptions & { shortenMotes?: boolean } = {}): Promise<void> {
     requireScratchWorkspace(workspace)
-    const ids = await scratchStorageTopicIds(workspace.path), issues: string[] = [...ids.issues ?? []]
-    for (const topicId of ids) {
-      try {
-        const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
-        if (resolved) {
-          const context = await scratchIdentityContext(workspace.path, topicId)
-          const existing = await inspectDirectoryIdentity(resolved, context)
-          if (existing) await normalizeDirectoryIdentity(resolved, context, options)
-          else await retainDirectoryIdentity(resolved, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, resolved) }, options)
-        }
-      } catch (error) { issues.push(`${topicId}: ${errorCode(error) ?? 'DIRECTORY_IDENTITY_UNCONFIRMED'}: ${error instanceof Error ? error.message : String(error)}`) }
+    const issues: string[] = []
+    try {
+      if (options.shortenMotes) {
+        const maintenance = await migrateTopicDirectories({ scratchRoot: workspace.path, execute: true, motesOnly: true,
+          ...(options.helperPath ? { helperPath: options.helperPath } : {}) })
+        issues.push(...maintenance.issues.map(item => `${item.code}: ${item.message}`),
+          ...maintenance.objects.filter(item => item.issue).map(item => `${item.id}: ${item.issue!.code}: ${item.issue!.message}`))
+      }
+      const ids = await scratchStorageTopicIds(workspace.path)
+      issues.push(...ids.issues ?? [])
+      for (const topicId of ids) {
+        try {
+          const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+          if (resolved) {
+            const context = await scratchIdentityContext(workspace.path, topicId)
+            const existing = await inspectDirectoryIdentity(resolved, context)
+            if (existing) await normalizeDirectoryIdentity(resolved, context, options)
+            else await retainDirectoryIdentity(resolved, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, resolved) }, options)
+          }
+        } catch (error) { issues.push(`${topicId}: ${errorCode(error) ?? 'DIRECTORY_IDENTITY_UNCONFIRMED'}: ${error instanceof Error ? error.message : String(error)}`) }
+      }
+      if (issues.length) throw new Error('Directory identity maintenance is unconfirmed. Existing files, workfaces and healthy Agent input remain available. Restore storage access and retry directory identity repair. ' + issues.join(' · '))
+      if (!this.directoryMaintenanceIssue?.shortenMotes || options.shortenMotes) this.directoryMaintenanceIssue = undefined
+    } catch (error) {
+      // Service observation only: never an identity, filesystem catalog or per-object capability flag.
+      // A narrower metadata retry cannot replace an unconfirmed shortening operation.
+      if (!(this.directoryMaintenanceIssue?.directory === workspace.path && this.directoryMaintenanceIssue.shortenMotes && !options.shortenMotes))
+        this.directoryMaintenanceIssue = { directory: workspace.path, message: error instanceof Error ? error.message : String(error), shortenMotes: options.shortenMotes === true }
+      throw error
     }
-    if (issues.length) throw new Error('Directory identity maintenance is unconfirmed. Existing files, workfaces and healthy Agent input remain available. Restore storage access and retry directory identity repair. ' + issues.join(' · '))
   }
 
   private async identityFact(workspace: WorkspaceRecord, topicId: string, directory: string): Promise<{ identityDirectoryPath?: string; readError?: string }> {
@@ -410,7 +429,8 @@ export class ScratchTopics {
       }
     }))
     const result: ScratchTopicList = snapshots.filter((snapshot): snapshot is ScratchTopicSnapshot => snapshot !== null)
-    if (topicIds.issues?.length) result.issues = topicIds.issues
+    const issues = [...topicIds.issues ?? [], ...(this.directoryMaintenanceIssue?.directory === workspace.path ? [this.directoryMaintenanceIssue.message] : [])]
+    if (issues.length) result.issues = [...new Set(issues)]
     return result
   }
 

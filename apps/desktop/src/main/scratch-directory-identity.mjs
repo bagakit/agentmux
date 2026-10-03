@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process'
 
 export const SCRATCH_DIRECTORY_IDENTITY_PATH = '.agentmux/directory-identity.json'
 export const SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH = '.agentmux/directory-identity.pending.json'
+export const SCRATCH_DIRECTORY_ALIAS_PENDING_PATH = '.agentmux/directory-identity.pending.alias'
 const defaultHelper = resolve(import.meta.dirname, '../../resources/bin/agentmux-workspace-move')
 const directoryName = /^topic--(launcher|session|view)--([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
 const invalid = message => Object.assign(new Error(message), { code: 'DIRECTORY_IDENTITY_INVALID' })
@@ -106,20 +107,32 @@ export async function inspectDirectoryIdentity(directory, original) {
   const after = await lstat(metadata, { bigint: true })
   if (!after.isDirectory() || after.isSymbolicLink() || !same(parent, after)) throw invalid('Directory identity metadata changed while reading.')
   if (!current && !pending) {
-    if ((await readdir(metadata)).some(name => name === 'directory-identity.pending.json' || /^directory-identity\..+\.tmp$/.test(name)))
+    if ((await readdir(metadata)).some(name => name === 'directory-identity.pending.json' || name === 'directory-identity.pending.alias' || /^directory-identity\..+\.tmp$/.test(name)))
       throw invalid('Directory identity publication is unfinished and its original witness is unavailable. Its existing files and workfaces are kept; inspect the same object before retrying.')
     return null
   }
   const witness = pending ?? current
   if (pending && current && (pending.identityDirectoryPath !== current.identityDirectoryPath || pending.topicId !== current.topicId))
     throw invalid('Pending and current records do not witness the same original object.')
-  return { ...witness, needsUpgrade: Boolean(pending || current.needsUpgrade), parent, current, pending }
+  const entries = await readdir(metadata)
+  const aliasStage = entries.some(name => name === 'directory-identity.pending.alias' || name.startsWith('directory-identity.pending.alias.'))
+  const aliasPending = aliasStage ||
+    Boolean(pending && current && same(pending.info, current.info))
+  return { ...witness, needsUpgrade: Boolean(pending || current.needsUpgrade || aliasPending), aliasPending, aliasStage, parent, current, pending }
 }
 
 export async function readDirectoryIdentity(directory, original) {
   const inspected = await inspectDirectoryIdentity(directory, original)
+  if (inspected?.aliasPending) throw new DirectoryAliasConfirmationRequiredError(inspected.identityDirectoryPath)
   if (inspected?.needsUpgrade) throw new DirectoryIdentityUpgradeRequiredError(inspected.identityDirectoryPath)
   return inspected?.identityDirectoryPath ?? null
+}
+
+export class DirectoryAliasConfirmationRequiredError extends DirectoryIdentityUpgradeRequiredError {
+  constructor(original) {
+    super(original)
+    this.message = 'Directory relocation is unconfirmed. Its original identity, files and healthy Agent work are kept. Retry the same directory maintenance repair to confirm the original aliases and durable storage.'
+  }
 }
 
 async function runFilePublication(mode, directory, root, before, temporary, options) {
@@ -161,6 +174,8 @@ async function syncDirectory(path) {
 export async function normalizeDirectoryIdentity(directory, original, options = {}) {
   const before = await inspectDirectoryIdentity(directory, original)
   if (!before) return { state: 'unchanged' }
+  // A readable current record cannot retire an alias operation's same-inode witness.
+  if (before.aliasPending) throw new DirectoryAliasConfirmationRequiredError(before.identityDirectoryPath)
   if (!before.needsUpgrade) {
     const handle = await open(join(directory, SCRATCH_DIRECTORY_IDENTITY_PATH), constants.O_RDONLY | constants.O_NOFOLLOW)
     try { await handle.sync() } finally { await handle.close() }

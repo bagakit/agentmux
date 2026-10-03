@@ -10,7 +10,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { scratchDirectoryIdentity, scratchIdentityContext } from '../src/main/scratch-topic-directories'
-import { directoryIdentityRecord, normalizeDirectoryIdentity, SCRATCH_DIRECTORY_IDENTITY_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH } from '../src/main/scratch-directory-identity.mjs'
+import { directoryIdentityRecord, normalizeDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_IDENTITY_PATH, SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH } from '../src/main/scratch-directory-identity.mjs'
 import { observeClientRpcSnapshot } from '../src/main/rpc-client-observations'
 import { originalTopicAddress, directoryIdentity, homeZoneId, spatialSources } from '../src/shared/space-addresses'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
@@ -55,7 +55,7 @@ it('new actual migrations save only relative full-ID v3 metadata while keeping t
   expect(bytes).not.toContain(h.home)
   expect(JSON.parse(bytes).identityDirectoryName).toBe(h.mote.directoryPath)
   const after = await h.topics.read(h.workspace, h.mote.id)
-  expect(after).toMatchObject({ identityDirectoryPath: h.original, physicalDirectoryPath: h.directory, moteArchive: archive })
+  expect(after).toMatchObject({ identityDirectoryPath: h.original, physicalDirectoryPath: join(h.home, '.agentmux/motes', moteDirectoryName(h.mote.id)), moteArchive: archive })
   expect(after?.readError).toBeUndefined()
   expect((await stat(h.directory)).ino).toBe(inode)
   expect(await readFile(join(h.directory, 'SOUL.md'))).toEqual(content)
@@ -63,16 +63,16 @@ it('new actual migrations save only relative full-ID v3 metadata while keeping t
 }, 20_000)
 
 it.each([false, true])('repairs canonical old records with deleted or retained legacy alias, stays readonly in preview and idempotent; alias=%s', async alias => {
-  const h = await fixture(); await v1(h)
+  const h = await fixture(), helperPath = await helper(h); await v1(h)
   if (alias) await symlink('../motes/' + h.mote.directoryPath, h.original)
   const before = await readFile(h.record), soul = await readFile(join(h.directory, 'SOUL.md')), inode = (await stat(h.directory)).ino
   const dry = await migrateTopicDirectories({ home: h.home })
   expect(dry.success).toBe(true); expect(await readFile(h.record)).toEqual(before)
-  const first = await migrateTopicDirectories({ home: h.home, execute: true })
+  const first = await migrateTopicDirectories({ home: h.home, execute: true, helperPath })
   expect(first.success).toBe(true)
   const upgraded = await readFile(h.record), updated = await stat(h.record)
   expect(JSON.parse(upgraded.toString())).toEqual(directoryIdentityRecord({ topicId: h.mote.id, roots: { scratch: [h.workspace.path], topics: [join(h.home, '.agentmux/topics')], motes: [join(h.home, '.agentmux/motes')] }, original: h.original }))
-  const second = await migrateTopicDirectories({ home: h.home, execute: true })
+  const second = await migrateTopicDirectories({ home: h.home, execute: true, helperPath })
   expect(second.success).toBe(true); expect(await readFile(h.record)).toEqual(upgraded)
   expect((await stat(h.record)).ino).toBe(updated.ino); expect((await stat(h.record)).mtimeMs).toBe(updated.mtimeMs)
   expect((await stat(h.directory)).ino).toBe(inode); expect(await readFile(join(h.directory, 'SOUL.md'))).toEqual(soul)
@@ -224,6 +224,10 @@ it('actual public service and fresh Source CLI preserve a cold Mote recovery war
 
 it('executes the original IPC startup statements: committed Runtime/input is never held by pending or failed metadata maintenance', async () => {
   const source = await readFile(resolve(import.meta.dirname, '../src/main/ipc.ts'), 'utf8')
+  if (process.env.AGENTMUX_DIRECTORY_IDENTITY_PROOF) {
+    const { createHash } = await import('node:crypto')
+    await appendFile(process.env.AGENTMUX_DIRECTORY_IDENTITY_PROOF, JSON.stringify({ consumer: 'actual-startup-statements', file: 'apps/desktop/src/main/ipc.ts', sha256: createHash('sha256').update(source).digest('hex') }) + '\n')
+  }
   const file = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true)
   const register = file.statements.find(item => ts.isFunctionDeclaration(item) && item.name?.text === 'registerIpc') as ts.FunctionDeclaration
   expect(register?.body).toBeTruthy()
@@ -238,7 +242,8 @@ it('executes the original IPC startup statements: committed Runtime/input is nev
   const events: string[] = [], warnings: string[] = []
   let rejectWrite!: (error: Error) => void
   const pending = new Promise<void>((_, reject) => { rejectWrite = reject })
-  const args = { runtime: { commit: () => events.push('input-ready') }, scratchTopics: { normalizeDirectoryIdentities: () => {
+  const args = { runtime: { commit: () => events.push('input-ready') }, scratchTopics: { normalizeDirectoryIdentities: (_workspace: unknown, options: unknown) => {
+    expect(options).toEqual({ shortenMotes: true })
     events.push('metadata-write'); return pending
   } } }
   const config = { workspaces: [{ id: SCRATCH_WORKSPACE_ID }] }
