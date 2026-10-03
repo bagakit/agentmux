@@ -1,6 +1,6 @@
 import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act, type ReactNode } from 'react'
+import { act, Profiler, type ReactNode } from 'react'
 import type { Root } from 'react-dom/client'
 import { beforeEach, afterEach, it, expect, vi, type MockInstance } from 'vitest'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -31,6 +31,19 @@ class VisibleObserver {
   for (const element of elements) expect(this.targets.has(element)).toBe(true)
   this.callback([...this.targets].map(target => ({ target, isIntersecting: elements.includes(target) }) as IntersectionObserverEntry), this as unknown as IntersectionObserver)
  }
+ hideAll() {
+  expect(this.targets.size).toBeGreaterThan(0)
+  this.callback([...this.targets].map(target => ({ target, isIntersecting: false }) as IntersectionObserverEntry), this as unknown as IntersectionObserver)
+ }
+}
+class MeasuringObserver {
+ static instances: MeasuringObserver[] = []
+ targets = new Set<Element>()
+ constructor(readonly callback: ResizeObserverCallback) { MeasuringObserver.instances.push(this) }
+ observe(element: Element) { this.targets.add(element) }
+ unobserve(element: Element) { this.targets.delete(element) }
+ disconnect() { this.targets.clear() }
+ measure(element: Element) { this.callback([{ target: element }] as ResizeObserverEntry[], this as unknown as ResizeObserver) }
 }
 function record(n: number) {
  const user = n % 6 === 0
@@ -53,7 +66,7 @@ function expectedSpan(items: ReturnType<typeof conversationRulerRecords>, visibl
 }
 beforeEach(async () => {
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
- vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
+ vi.stubGlobal('ResizeObserver', MeasuringObserver); MeasuringObserver.instances = []
  vi.stubGlobal('IntersectionObserver', VisibleObserver); VisibleObserver.instances = []
  Element.prototype.scrollIntoView = vi.fn()
  useAppStore.setState({ sessions: [], timelines: {}, agentNames: {} })
@@ -199,4 +212,66 @@ it('keeps a known single older record historical and untimed ordinal records unc
  expect(container.querySelector('.conversation-axis__mark')?.hasAttribute('data-era')).toBe(false)
  expect(container.querySelector('.conversation-ruler__cutoff')).toBeNull()
  expect(container.querySelector('.conversation-ruler__recent')).toBeNull()
+})
+
+
+it('keeps the original visible reading band during sticky-header measurement handoff', async () => {
+ await render(view()); const user = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => observer().show([user])); await flush()
+ const before = spanText(), band = container.querySelector('.activity-ruler__band')
+ expect(band).not.toBeNull(); expect(before).toBe(expectedSpan(conversationRulerRecords(sid, page, []), new Set([conversationRulerRecords(sid, page, [])[0]!.id])))
+ const header = container.querySelector<HTMLElement>('.activity-ruler')!
+ vi.spyOn(header, 'getBoundingClientRect').mockReturnValue({ height: 80 } as DOMRect)
+ const measure = MeasuringObserver.instances.find(instance => instance.targets.has(header))!
+ expect(measure).toBeDefined()
+ await act(async () => measure.measure(header)); await flush()
+ // No replacement IO callback has arrived yet: an empty transfer placeholder is not viewport truth.
+ expect(spanText()).toBe(before)
+ expect(container.querySelector('.activity-ruler__band')).toBe(band)
+ expect(container.querySelector('[data-native-record-id="ruler-0"]')).toBe(user)
+ expect(observer().options?.rootMargin).toBe('-80px 0px 0px 0px')
+ await act(async () => observer().show([container.querySelector<HTMLElement>('[data-native-record-id="ruler-20"]')!])); await flush()
+ expect(spanText()).toBe(expectedSpan(conversationRulerRecords(sid, page, [])))
+})
+
+it('retains visible records, body node and Range while a new native reply arrives', async () => {
+ await render(view()); const user = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => observer().show([user])); await flush()
+ const before = spanText(), band = container.querySelector('.activity-ruler__band')
+ const walker = document.createTreeWalker(user, NodeFilter.SHOW_TEXT); let text: Text | null = null
+ while (walker.nextNode()) if (walker.currentNode.textContent?.includes('User 0')) { text = walker.currentNode as Text; break }
+ expect(text).not.toBeNull(); const range = document.createRange(); range.setStart(text!, 0); range.setEnd(text!, 4); window.getSelection()!.addRange(range)
+ await writeFile(join(home, 'conversation.jsonl'), Array.from({ length: 23 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+ const updated = await client.sessionHistoryPage(sid, { limit: 30 }); expect(updated.items).toHaveLength(23)
+ await render(view(updated))
+ expect(spanText()).toBe(before); expect(container.querySelector('.activity-ruler__band')).toBe(band)
+ expect(container.querySelector('[data-native-record-id="ruler-0"]')).toBe(user)
+ expect(text!.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('User')
+ await act(async () => observer().show([container.querySelector<HTMLElement>('[data-native-record-id="ruler-22"]')!])); await flush()
+ expect(spanText()).toBe(expectedSpan(conversationRulerRecords(sid, updated, [])))
+})
+
+it('does not rerender the parent for an unchanged shell membership or ruler-only child mutation', async () => {
+ const commits = vi.fn(); await render(<Profiler id="activity" onRender={commits}>{view()}</Profiler>)
+ const user = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => observer().show([user])); await flush(); const before = commits.mock.calls.length
+ await act(async () => observer().show([user])); await flush()
+ expect(commits.mock.calls.length).toBe(before)
+ const ornament = document.createElement('span'); container.querySelector('.activity-ruler')!.append(ornament); await flush()
+ expect(commits.mock.calls.length).toBe(before)
+ ornament.remove(); await flush(); expect(commits.mock.calls.length).toBe(before)
+})
+
+it('discards retired viewport callbacks while honestly clearing a truly empty current viewport', async () => {
+ await render(view()); const oldObserver = observer(), oldUser = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => oldObserver.show([oldUser])); await flush()
+ const next = { ...page, agentSessionId: 'ruler-managed-other' }; await render(view(next))
+ const currentObserver = observer(), currentUser = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => currentObserver.show([currentUser])); await flush()
+ const before = spanText(), band = container.querySelector('.activity-ruler__band'); expect(band).not.toBeNull()
+ await act(async () => oldObserver.callback([{ target: oldUser, isIntersecting: true }] as unknown as IntersectionObserverEntry[], oldObserver as unknown as IntersectionObserver)); await flush()
+ expect(spanText()).toBe(before); expect(container.querySelector('.activity-ruler__band')).toBe(band)
+ await act(async () => currentObserver.hideAll()); await flush()
+ expect(container.querySelector('.activity-ruler__band')).toBeNull()
+ expect(spanText()).toBe(expectedSpan(conversationRulerRecords(next.agentSessionId, next, [])))
 })
