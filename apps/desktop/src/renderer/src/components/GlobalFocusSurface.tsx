@@ -27,7 +27,7 @@ import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { WorkspaceWorkbench } from './WorkspaceWorkbench'
-import type { WorkbenchViewTargets } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
 
@@ -233,11 +233,11 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
       }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
       {executionRows.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
-          <div className="focus-project-board__live" hidden={disconnectedExpanded} inert={disconnectedExpanded}>
+          <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" hidden={disconnectedExpanded} inert={disconnectedExpanded}>
             {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedWorkspaceId={project} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
-          </div>
-          <FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={selectedId} projectId={project} expanded={disconnectedExpanded} canReturn={!onlyDisconnected} reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} />
+          </div></WorkbenchPresentationContext.Provider>
+          <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={selectedId} projectId={project} expanded={disconnectedExpanded} canReturn={!onlyDisconnected} reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} /></WorkbenchPresentationContext.Provider>
         </div>
       </div>}
       </div>

@@ -1,15 +1,62 @@
 import { useCallback, useId, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/dom'
+import { useShallow } from 'zustand/react/shallow'
+import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
+import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import type { FocusContext } from '../lib/focus-context'
+import { useSessionUserMessages } from '../lib/session-user-messages'
+import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { useAppStore } from '../store'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { getWindowOverlayHost } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 // One transient reading surface, with no identity data or retained registry.
 let dismissCurrentPreview: (() => void) | null = null
 
-/** Only facts already held by the card; opening this surface performs no I/O. */
-export function useFocusContextHover(context: FocusContext, enabled: boolean) {
+/** Mounted only inside the open preview; all input facts use the shared reader. */
+function FocusContextInputs({ context }: { context: FocusContext }) {
+  const control = useAppStore(state => {
+    const session = state.sessions.find(session => session.id === context.id && session.hostId === context.hostId && session.control.run.runId === context.runId)
+    return session?.kind === 'agent' && session.control.hostId === context.hostId && session.control.agentSessionId === context.id ? session.control : undefined
+  })
+  const reader = useSessionUserMessages(control)
+  const ordered = reader.messages.every(message => message.recordedAt !== undefined && Number.isFinite(message.recordedAt))
+  // Missing times retain the public source order; they cannot establish a cross-source chronology.
+  const messages = (ordered ? [...reader.messages].sort((a, b) => a.recordedAt! - b.recordedAt!) : reader.messages).slice(-3)
+  const names = useAppStore(useShallow(state => messages.map(message => {
+    if (message.author.kind !== 'agent') return ''
+    const id = message.author.agentSessionId
+    const sender = state.sessions.find(session => session.id === id && session.kind === 'agent')
+    return sender ? agentDisplayName({ userName: state.agentNames[id], firstPrompt: firstPromptFromTimeline(state.timelines[id]), fallbackLabel: sender.label, providerLabel: sender.providerId ?? 'Agent' }) : id
+  })))
+  const describe = createSpeakerResolver({ lookupAgent: id => {
+    const index = messages.findIndex(message => message.author.kind === 'agent' && message.author.agentSessionId === id)
+    return index >= 0 ? { label: names[index]! } : undefined
+  } })
+  const notice = !control || reader.error || reader.observationError ? 'Recent message reading unavailable'
+    : reader.sourceChanged ? 'Message source changed' : reader.windowFrozen ? 'Reading window paused'
+      : reader.windowIncomplete ? 'Reading window incomplete' : null
+  return <section className="focus-context-hover__inputs" aria-label="Recent user messages">
+    <h4>Recent user messages</h4>
+    <small className="focus-context-hover__coverage">Current reading window{ordered ? '' : ' · Order unavailable'}</small>
+    {messages.length ? <ol>{messages.map(message => <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
+      <div className="focus-context-hover__input-meta"><strong>{describe(speakerOfUserMessage(message)).name}</strong>
+        <span>{message.source.kind === 'native' ? 'Native record' : 'Submission record'}</span>
+        <time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt)
+          ? new Date(message.recordedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : 'Time unknown'}</time></div>
+      <p>{message.content.trim() ? clampStep(message.content.trim().slice(0, 1000), 'head', 360) : 'Non-text input'}</p>
+    </li>)}</ol> : <p className="focus-context-hover__coverage">{reader.loading ? 'Loading recent messages…' : 'No user messages in the available reading window.'}</p>}
+    {notice ? <p className="focus-context-hover__notice" role="status" title={reader.error?.message ?? reader.observationError?.message}>
+      {notice}. Open the Agent to read History.</p> : null}
+  </section>
+}
+
+/** Intent reveals held card facts and one scoped, read-only input preview. */
+export function useFocusContextHover(context: FocusContext, requested: boolean) {
+  const active = useWorkbenchPresentationActive()
+  const enabled = requested && active
   const displayPath = usePathDisplay()
   const anchor = useRef<HTMLButtonElement>(null), panel = useRef<HTMLDivElement>(null)
   const intent = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -84,6 +131,7 @@ export function useFocusContextHover(context: FocusContext, enabled: boolean) {
     <header><strong>{context.name}</strong><span>{context.stateLabel}</span></header>
     {!context.detailIsRecap ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
     {context.recap ? <section className="focus-context-hover__recap"><small>{context.recap.source} · {context.recap.origin}</small><p>{context.recap.text}</p></section> : null}
+    {context.kind === 'agent' ? <FocusContextInputs key={`${context.hostId}:${context.id}:${context.runId}`} context={context} /> : null}
     <footer><strong>{context.workspaceName}</strong><span>{displayPath(context.workspacePath, context.hostId)}</span>
       {context.originAddress ? <span>{context.originAddress}</span> : null}<code>{context.id}</code></footer>
   </div>, host) : null
