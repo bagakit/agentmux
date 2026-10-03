@@ -330,7 +330,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 
 ## 联邦 Runtime 与远端恢复边界
 
-用户先要求「彻底理解项目, 实现远程管理能力」，允许「可以用 $farm 的机器测试」，要求研究 `herdr`、`orca` 与 `paseo` 并在准备后讨论；现已授权彻底实现既有联邦 Runtime Feature。通用 Core 与 Desktop 必须能联邦管理本机和远端 Headless AgentMux；首个可用闭环连接已有远端服务，复用统一公共 RPC 与系统 SSH stdio，远端持有 Agent 语义与当地 ctxmux Run，不能让无 UI 客户端依赖 Desktop 才能创建、观察或管理 Agent。参考研究与 Farm 环境观察仍不能代替真实产品验收。
+用户先要求「彻底理解项目, 实现远程管理能力」，要求研究 `herdr`、`orca` 与 `paseo` 并在准备后讨论；现已授权彻底实现既有联邦 Runtime Feature。通用 Core 与 Desktop 必须能联邦管理本机和远端 Headless AgentMux；首个可用闭环连接已有远端服务，复用统一公共 RPC 与系统 SSH stdio，远端持有 Agent 语义与当地 ctxmux Run，不能让无 UI 客户端依赖 Desktop 才能创建、观察或管理 Agent。参考研究与具体远端测试环境观察仍不能代替真实产品验收。
 
 - AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。
 - Desktop 只持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用、工作面布局和最后一次观察结果。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有原语义 Runtime owner 明确确认目标 Session/Run 的 retired 等终局事实，才允许按既有规则移除对应投影。unknown、unknown-session 与 unavailable 不属于终局，保留原 Tab、Region、Session 引用和服务窗。

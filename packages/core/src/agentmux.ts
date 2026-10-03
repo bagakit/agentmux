@@ -128,7 +128,7 @@ async function main(): Promise<number> {
       finally { process.off('SIGINT', stop); process.off('SIGTERM', stop) }
     } else {
       const { token: _secret, ...publicEndpoint } = endpoint as typeof endpoint & { token?: string }
-      write({ ok: true, operation: method, result: { protocol: 'jsonrpc-2.0', framing: 'json-lines', endpoint: publicEndpoint } })
+      write({ ok: true, operation: method, result: { protocol: 'jsonrpc-2.0', framing: 'json-lines', endpoint: publicEndpoint, connection: 'not-attempted' } })
     }
     return 0
   }

@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, rm, mkdir, writeFile, readFile } from 'node:fs/promises'
 import { stat } from 'node:fs/promises'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -22,10 +22,10 @@ const connectAgentMuxRpc: typeof SourceConnect = process.env.AGENTMUX_TEST_RPC_C
   ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_RPC_CLIENT_ENTRY).href)).connectAgentMuxRpc : SourceConnect
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-const catalog = { spaces: [{ spaceId: 'space', kind: 'folder' as const, name: '中文 Space', hostId: 'local', directoryPath: upstreamFixturePath("fixture"), projectId: 'project' }],
+const catalog = { spaces: [{ spaceId: 'space', kind: 'folder' as const, name: '中文 Space', hostId: 'local', directoryPath: fixturePath("fixture"), projectId: 'project' }],
   zones: [], tabs: [], regions: [], bindings: [], locations: [] }
 async function endpoint(options: ConstructorParameters<typeof AgentMuxControlServer>[0] = {}) {
-  const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-rpc-wire-")), path = join(root, 'owner.sock')
+  const root = await mkdtemp(fixturePath("tmp/amx-rpc-wire-")), path = join(root, 'owner.sock')
   const owner = new AgentMuxControlServer({ coreClients: () => [], execute: async () => ({ operation: 'space.ls', catalog }), ...options, socketPath: path })
   await owner.start(); cleanups.push(async () => { await owner.stop(); await rm(root, { recursive: true, force: true }) })
   return { root, path, owner }
@@ -40,7 +40,7 @@ async function raw(path: string, request: unknown): Promise<any> {
 }
 describe('one public JSON-RPC service over bounded transports', () => {
   it('preserves finite fractional filesystem Wiki timestamps through the actual snapshot boundary', async () => {
-    const topic = { id: 'topic', topicId: 'topic', workspaceId: 'scratch', hostId: 'local', path: upstreamFixturePath("scratch/topic"), spaceId: 'space',
+    const topic = { id: 'topic', topicId: 'topic', workspaceId: 'scratch', hostId: 'local', path: fixturePath("scratch/topic"), spaceId: 'space',
       kind: 'topic' as const, directoryPath: 'topic', topicPath: 'topic/Topic.md', title: 'Topic', summary: '', collaborators: [],
       wiki: { path: 'topic/Wiki.md', content: '# Wiki', version: 'original', source: 'user' as const, enabled: true, updatedAt: 123.75 } }
     const h = await endpoint({ snapshot: async () => ({ topics: [topic] }) })
@@ -55,7 +55,7 @@ describe('one public JSON-RPC service over bounded transports', () => {
   })
   it('bounds ordinary HTTP and Unix responses identically without truncating facts or losing the owner', async () => {
     const h = await endpoint({ http: { host: '127.0.0.1', port: 0, token: 'private-budget' }, snapshot: async () => ({ topics: [
-      { id: 'topic', topicId: 'topic', workspaceId: 'scratch', hostId: 'local', path: upstreamFixturePath("scratch/topic"), spaceId: 'space', kind: 'topic',
+      { id: 'topic', topicId: 'topic', workspaceId: 'scratch', hostId: 'local', path: fixturePath("scratch/topic"), spaceId: 'space', kind: 'topic',
         directoryPath: 'topic', topicPath: 'topic/Topic.md', title: 'Topic', summary: 'x'.repeat(AGENTMUX_RPC_MAX_MESSAGE_BYTES + 1), collaborators: [] }
     ] }) })
     for (const endpoint of [{ transport: 'unix' as const, path: h.path }, { transport: 'http' as const,
@@ -253,7 +253,7 @@ describe('one public JSON-RPC service over bounded transports', () => {
   })
   it('rejects a foreign RPC response identity, malformed candidate sets and old wire responses', async () => {
     for (const result of ['foreign-id', 'old-envelope', 'missing-candidates']) {
-      const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-rpc-invalid-")), path = join(root, 'bad.sock')
+      const root = await mkdtemp(fixturePath("tmp/amx-rpc-invalid-")), path = join(root, 'bad.sock')
       const server = createServer(socket => socket.once('data', chunk => {
         const request = JSON.parse(chunk.toString())
         socket.end(JSON.stringify(result === 'old-envelope' ? { schemaVersion: 5, requestId: request.id, ok: true, operation: 'space.ls', result: { catalog } }
@@ -269,11 +269,11 @@ describe('one public JSON-RPC service over bounded transports', () => {
   it('rejects malformed native DTOs and foreign Session/Run facts over the real client transport', async () => {
     const sdk = await rpcOwnerFixture(); cleanups.push(sdk.close)
     const session = sdk.client.agentSession('caller'), current = await sdk.client.statusAgent('caller')
-    const cases = [{}, { session: { ...session, agentSessionId: 'other' }, status: null, displayName: { override: null, availability: 'unavailable' }, unavailable: [] },
-      { session, status: { ...current, run: { ...current.run, runId: 'foreign' } }, displayName: { override: null, availability: 'unavailable' }, unavailable: [] }]
+    const cases = [{}, { routeHostId: 'local', session: { ...session, agentSessionId: 'other' }, status: null, displayName: { override: null, availability: 'unavailable' }, unavailable: [] },
+      { routeHostId: 'local', session, status: { ...current, run: { ...current.run, runId: 'foreign' } }, displayName: { override: null, availability: 'unavailable' }, unavailable: [] }]
     expect(cases).toHaveLength(3)
     for (const result of cases) {
-      const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-rpc-native-invalid-")), path = join(root, 'bad.sock')
+      const root = await mkdtemp(fixturePath("tmp/amx-rpc-native-invalid-")), path = join(root, 'bad.sock')
       const server = createServer(socket => socket.once('data', chunk => { const request = JSON.parse(chunk.toString()); socket.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }) + '\n') }))
       await new Promise<void>(yes => server.listen(path, yes)); const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path } })
       try { await expect(client.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'caller' } })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' }) }
@@ -287,7 +287,7 @@ describe('one public JSON-RPC service over bounded transports', () => {
       { requestedAfterByte: 1, firstAvailableByte: 3 }, { requestedAfterByte: 0, firstAvailableByte: 0 }]
     expect(gaps).toHaveLength(4)
     for (const gap of gaps) {
-      const root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-rpc-gap-")), path = join(root, 'gap.sock')
+      const root = await mkdtemp(fixturePath("tmp/amx-rpc-gap-")), path = join(root, 'gap.sock')
       const server = createServer(socket => socket.once('data', chunk => { const request = JSON.parse(chunk.toString())
         socket.end(JSON.stringify({ jsonrpc: '2.0', id: request.id, result: { subscriptionId: 'reader', method: 'agent.output',
           initial: { session, run, gap, terminal: { type: 'not-requested' }, resizeRevision: 7 } } }) + '\n')
@@ -311,10 +311,10 @@ describe('one public JSON-RPC service over bounded transports', () => {
     } finally { await client.dispose() }
   })
   it('SSH shares the remote Unix owner through the standard CLI stdio entry, not a second Runtime', () => {
-    const endpoint = agentMuxRpcEndpoint('ssh://private-host/?socket=%2Ftmp%2Fprivate-owner.sock&command=agentmux')
+    const endpoint = agentMuxRpcEndpoint('ssh://private-host/?socket=' + encodeURIComponent(fixturePath('tmp/private-owner.sock')) + '&command=agentmux')
     expect(endpoint.transport).toBe('ssh'); if (endpoint.transport !== 'ssh') throw new Error('Expected SSH')
     expect(agentMuxRpcSshArguments(endpoint)).toEqual(['-T', '-o', 'BatchMode=yes', '-o', 'ClearAllForwardings=yes', '--', 'private-host',
-      ("'agentmux' '--endpoint' 'unix:" + (upstreamFixturePath("tmp/private-owner.sock")) + "' 'system' 'endpoint' '--stdio'")])
+      ("'agentmux' '--endpoint' 'unix:" + (fixturePath("tmp/private-owner.sock")) + "' 'system' 'endpoint' '--stdio'")])
   })
   it('allows bounded cold SSH child startup before an admitted finite owner receipt', async () => {
     const h = await endpoint(), bin = join(h.root, 'bin'), ready = join(h.root, 'ssh-child.pid')
@@ -355,7 +355,7 @@ fs.writeFileSync(${JSON.stringify(ready)}, String(process.pid))
     } finally { await client.dispose(); vi.useRealTimers() }
   })
   it('snapshot supplies the original catalog target and keeps independent Workspace metadata', async () => {
-    const workspace = { workspaceId: 'w', projectId: 'project', hostId: 'local', path: upstreamFixturePath("fixture"), name: 'Work', kind: 'root', repoPath: null, branch: null }
+    const workspace = { workspaceId: 'w', projectId: 'project', hostId: 'local', path: fixturePath("fixture"), name: 'Work', kind: 'root', repoPath: null, branch: null }
     const seen: AgentMuxControlRequest[] = []
     const h = await endpoint({ snapshot: async () => ({ workspaces: [workspace] }), execute: async request => {
       seen.push(parseAgentMuxControlRequest(request)); return { operation: 'space.ls', catalog }

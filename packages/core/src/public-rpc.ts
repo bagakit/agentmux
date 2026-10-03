@@ -110,7 +110,10 @@ export type AgentMuxRpcGoalFilters = {
   goalId?: string; projectId?: string; agentSessionId?: string; executorId?: string;
   status?: string; since?: number; limit?: number
 }
+/** Route identity belongs to the selected service; native Session facts stay unchanged. */
+export type AgentMuxRpcAgentObservation = Awaited<ReturnType<AgentMuxClient['statusAgent']>> & { routeHostId: string }
 export type AgentMuxRpcAgentInspection = {
+  routeHostId: string
   session: ReturnType<AgentMuxClient['agentSession']>
   status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null
   unavailable: AgentMuxRpcUnavailable[]
@@ -127,7 +130,7 @@ export type AgentMuxRpcSnapshot = {
   spaces: import('./space-control.js').AgentMuxSpaceFact[]; zones: import('./space-control.js').AgentMuxZoneFact[];
   executors: Extract<AgentMuxControlResult, { operation: 'list.agents' }>['agents'];
   agents: import('./control.js').AgentMuxControlActiveAgent[];
-  sessions: Awaited<ReturnType<AgentMuxClient['statusAgent']>>[]; goals: AgentMuxRpcGoal[];
+  sessions: AgentMuxRpcAgentObservation[]; goals: AgentMuxRpcGoal[];
   decisions: Array<{ goalId: string; decisions: import('./control.js').AgentMuxDemandDecision[] }>;
   activity: Array<{ goalId: string; message: string; updatedAt: number }>;
   unavailable: Array<AgentMuxRpcUnavailable & { source: string }>
@@ -198,8 +201,8 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
     view: import('./agent-self-context.js').SelfViewOutcome; topic: string;
     messaging: typeof import('./agent-messaging-guidance.js').AGENTMUX_AGENT_MESSAGING_RULES; unavailable: AgentMuxRpcUnavailable[] }
-  'agent.ls': { sessions: Awaited<ReturnType<AgentMuxClient['statusAgent']>>[];
-    errors: Array<{ agentSessionId: string | null; hostId?: string; code: string; message: string }> }
+  'agent.ls': { sessions: AgentMuxRpcAgentObservation[];
+    errors: Array<{ agentSessionId: string | null; hostId: string; code: string; message: string }> }
   'agent.inspect': AgentMuxRpcAgentInspection
   'agent.context': import('./agent-context.js').AgentContextPage
   'agent.question.reply': import('./types.js').AgentSessionQuestionReplyReceipt
@@ -222,7 +225,7 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'goal.activity': { activity: Array<{ goalId: string; message: string; updatedAt: number }> }
   'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
-  'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint }
+  'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint; connection: 'responded' }
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams

@@ -194,7 +194,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       if (!f.values.has('--operation-id') || !f.values.has('--retired-at')) invalid('--operation-id and --retired-at are required.')
       return { agentSessionId: id(f, '--session', true), operationId: value(f, '--operation-id', true)!, ...numbers(f, { '--retired-at': 'expectedRetiredAt' }) }
     }),
-  command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect Core identity and current Desktop display facts separately.',
+  command('agent.inspect', '(--session ID|--run ID|--provider-native ID --provider ID|--acp-native ID --adapter ID)', 'Inspect the service routeHostId, original Core identity and Desktop display facts separately.',
     { '--session': 'data', '--run': 'data', '--provider-native': 'data', '--provider': 'data', '--acp-native': 'data', '--adapter': 'data' }, f => ({ target: inspectTarget(f) })),
   command('agent.history', '--host ID --session ID --source captured|native [--limit N] [--cursor CURSOR] [--max-bytes N]',
     'Read exact retained Session history without operating its Run.',
@@ -229,7 +229,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       return { ...operation(f), content: selected === '--executor'
         ? { kind: 'new-agent', executorId: id(f, selected), ...fields(f, { '--prompt': 'prompt' }) }
         : { kind: 'agent-session', agentSessionId: id(f, selected, true) }, destination: dest, focus: focus(f) }
-    }, `Use --zone ZONE --new-tab for an existing Zone. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; Space is a presentation. No existing Tab anchor is required. ${SAVE_NOTICE}`),
+    }, `Use --zone ZONE --new-tab for an existing Zone. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; its Host and directory determine execution. Space is a presentation and cannot choose or change an existing Session Host or cwd. No existing Tab anchor is required. ${SAVE_NOTICE}`),
   command('agent.rename', '--session ID (--name TEXT|--clear)', 'Set or clear the original Session display override.', { '--session': 'data', '--name': 'data', '--clear': 'boolean', ...OP }, f => ({ ...operation(f), agentSessionId: id(f, '--session', true), name: name(f) }), SAVE_NOTICE),
   command('agent.view', '--session ID [--mode terminal|activity]', 'Read or change all presentations of one exact SID without taking focus.', { '--session': 'data', '--mode': 'value', ...OP }, f => ({ agentSessionId: id(f, '--session', true), ...fields(f, { '--mode': 'mode' }), ...(f.values.has('--mode') ? operation(f) : {}) }), 'Without --mode this is read-only. A known durable Agent projection remains usable while Core facts are unknown; no healthy Run is stopped.'),
   { ...command('agent.output', '--session ID [--after-byte N] [--follow]', 'Read replay or follow ordered raw output bytes, with cursor and Gap facts.', { '--session': 'data', '--after-byte': 'value', '--follow': 'boolean' }, f => ({ agentSessionId: id(f, '--session'), ...numbers(f, { '--after-byte': 'afterByte' }), follow: f.booleans.has('--follow') }), 'Replay and live bytes use bounded base64 notifications, never reconstructed terminal text. Without --follow, the reader ends after replay. Ctrl-C cancels this reader, not the Agent Run.'), stream: true },
@@ -356,7 +356,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.browser-links.forget', '<scheme>|--input <file|->', 'Forget one exact remembered scheme decision.', 1),
   command('system.storage', '--host HOST --run RUN', 'Read original Runtime storage failure, watermarks and effective capacity for one exact Run.', { '--host': 'data', '--run': 'data' }, f => ({ hostId: id(f, '--host'), runId: id(f, '--run') })),
   command('system.doctor', '[--workspace PATH]', 'Read original Runtime and Provider diagnostics through their owners.', { '--workspace': 'data' }, f => fields(f, { '--workspace': 'workspacePath' })),
-  { ...command('system.endpoint', '[--stdio]', 'Discover the selected endpoint without connecting, or relay strict RPC stdio.', { '--stdio': 'boolean' }, f => ({ stdio: f.booleans.has('--stdio') })), local: true },
+  { ...command('system.endpoint', '[--stdio]', 'Describe the selected endpoint with connection=not-attempted, or relay strict RPC stdio.', { '--stdio': 'boolean' }, f => ({ stdio: f.booleans.has('--stdio') })), local: true },
   empty('system.crash-log.inspect', 'Read retained original crash-log facts.'),
   empty('system.crash-log.reveal', 'Reveal the retained crash-log through the client owner.'),
   empty('system.metrics.get', 'Read per-source bounded metrics with availability and observation times.'),
