@@ -96,7 +96,7 @@ const mockExecutors: Record<string, AgentExecutorConfig> = Object.fromEntries(
 let mockConfig: AppConfig = {
   version: CONFIG_VERSION,
   hosts: [
-    { id: 'local', kind: 'local', label: 'This Mac' },
+    { id: 'local', kind: 'local', label: 'This Computer' },
     {
       id: 'studio',
       kind: 'ssh',
@@ -381,9 +381,9 @@ const mockApi: AgentMuxDesktopApi = {
   hosts: { check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
     detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }) },
   deviceManagement: {
-    link: async () => { throw new Error('Connection links require the original Mac Host.') },
-    ls: async () => { throw new Error('Device state requires the original Mac Host. This preview cannot read authorization.') },
-    revoke: async () => { throw new Error('Revoking a device requires confirmation on the original Mac.') }
+    link: async () => { throw new Error('Connection links require the original desktop Host.') },
+    ls: async () => { throw new Error('Device state requires the original desktop Host. This preview cannot read authorization.') },
+    revoke: async () => { throw new Error('Revoking a device requires confirmation on the original desktop.') }
   },
   demands: {
     list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),

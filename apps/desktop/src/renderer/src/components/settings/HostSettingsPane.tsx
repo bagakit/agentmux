@@ -1,4 +1,5 @@
-import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Monitor, Plus, RadioTower, Trash2 } from 'lucide-react'
+import { ArrowLeft, CheckCircle2, ChevronDown, Info, LoaderCircle, Plus, RadioTower, Trash2 } from 'lucide-react'
+import { HostIcon } from '../HostBadge'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
 import { HostConnectionLibrary, type HostConnectionPanel } from './HostConnectionLibrary'
@@ -65,7 +66,7 @@ export function HostSettingsPane({ config, onSave, active }: {
   function filterHosts(query: string): void {
     const normalized = query.trim().toLowerCase()
     setFilter({ query, snapshot: hosts.filter((host) =>
-      `${host.label} ${host.id} ${host.kind === 'ssh' ? `${host.hostname} ${host.user ?? ''}` : 'local this mac'}`.toLowerCase().includes(normalized)
+      `${host.label} ${host.id} ${host.kind === 'ssh' ? `${host.hostname} ${host.user ?? ''}` : 'local computer'}`.toLowerCase().includes(normalized)
     ).map((host) => host.id) })
   }
   function selectHost(id: string): void {
@@ -156,8 +157,8 @@ export function HostSettingsPane({ config, onSave, active }: {
             return {
               id: host.id, name: host.label,
               projectCount: workspaces,
-              detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local · This Mac'}${workspaces ? ` · ${workspaces} ${workspaces === 1 ? 'project' : 'projects'}` : ''}`,
-              mark: host.kind === 'ssh' ? <RadioTower size={18} /> : <Monitor size={18} />,
+              detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local machine'}${workspaces ? ` · ${workspaces} ${workspaces === 1 ? 'project' : 'projects'}` : ''}`,
+              mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check?.state === 'ready' ? <CheckCircle2 size={13} /> : <Info size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
           })} />
@@ -169,8 +170,8 @@ export function HostSettingsPane({ config, onSave, active }: {
           return (
             <section className="host-settings-card" key={host.id} data-resource-editor={host.id} data-host-view={panel} tabIndex={-1}>
               <header className="settings-resource-editor__header">
-                <span className="host-card__icon">{host.kind === 'ssh' ? <RadioTower size={16} /> : <Monitor size={16} />}</span>
-                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'This Mac'}</small></div>
+                <span className="host-card__icon"><HostIcon kind={host.kind} size={16} /></span>
+                <div><strong>{host.label}</strong><small>{host.kind === 'ssh' ? `${host.user ? `${host.user}@` : ''}${host.hostname || 'hostname required'}${host.port ? `:${host.port}` : ''}` : 'Local machine'}</small></div>
                 {check ? (
                   <span role="status" className={`check-pill check-pill--${check.state === 'error' ? check.result?.outcome ?? 'check-failed' : check.state}`}>
                     {check.state === 'checking' ? <LoaderCircle className="spin" size={13} /> :
@@ -195,7 +196,7 @@ export function HostSettingsPane({ config, onSave, active }: {
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this Mac’s installed agents and registered projects. No SSH configuration needed.</p></div>}
+              ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div>}
               {sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )

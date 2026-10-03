@@ -10,6 +10,8 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 `connectLocalAgentMux` 不提供逐调用 socket/state 参数。[runtime-paths.ts](src/runtime-paths.ts) 持有进程级路径策略：默认 Endpoint 与持久状态使用稳定宿主 namespace，持久状态在用户目录；`AGENTMUX_RUNTIME_DIRECTORY` 与 `AGENTMUX_STATE_DIRECTORY` 可指定绝对路径。产物身份变化不另建 Runtime。只启动经过 hash、mode 和公开 `--version` 合同验证的随包 `ctxmuxd`。已有服务按公开 Runtime identity、协议与所需 capability 核验；归属记录未知只限制清理权限，兼容服务上的健康 Run 继续可用。bootstrap 读取原始 `runtimeInfo()`，随后每次业务 dispatch 都在承载该业务帧的同一连接上匹配 expected Runtime identity；身份变化在发送前明确拒绝，不猜已经送达或自动重放。
 
+`defaultLocalHostLabel(platform?)` 为新本机 Host 提供显示默认值，`LocalExecutionHost` 与宿主的新配置共同消费；传入或保存的 `label` 继续优先。该函数沿 [execution-host.ts](src/execution-host.ts) 导出，只处理名称，不探测能力或启动 Runtime；默认名称的系统规则见[机器目录分区合同](../../docs/design/behavior/spaces-and-layout.md#跨设备关联项目组)。
+
 ## Runtime 边界
 
 `@agentmux/core` 是 ctxmux 的 Client，不是 ctxmux 的宿主。ctxmux 自己的 daemon、CLI、
