@@ -105,42 +105,81 @@ async function extractSdk(artifact, directory) {
   return join(directory, 'package/dist/index.js')
 }
 
+// Match the public SDK's disposable foreground-observation wait. This is a
+// per-request read budget, not a Run lifetime or a shared inventory deadline.
+const OBSERVATION_REQUEST_WAIT_MS = 30_000
+async function inspectRead(stage, socketPath, target, read) {
+  const started = Date.now()
+  let timer
+  try {
+    return await Promise.race([Promise.resolve().then(read), new Promise((_, reject) => {
+      timer = setTimeout(() => reject(new Error('The read response did not arrive within this request wait.')),
+        OBSERVATION_REQUEST_WAIT_MS)
+    })])
+  } catch (cause) {
+    const detail = { stage, socketPath, ...target, elapsedMs: Date.now() - started,
+      requestWaitMs: OBSERVATION_REQUEST_WAIT_MS }
+    throw Object.assign(new Error(`Runtime inspection is unconfirmed: ${JSON.stringify(detail)}. ${cause.message}. ` +
+      'Existing processes remain under their original owners; retry this observation.', { cause }),
+      { code: 'RUNTIME_INSPECTION_UNCONFIRMED', detail })
+  } finally { clearTimeout(timer) }
+}
+
 async function inspect(sdk, socket, core, runIds) {
   const { stdout } = await exec(process.execPath, [script, '--inspect', sdk, socket,
     ...(core ? [core] : []), ...(runIds ? [JSON.stringify(runIds)] : [])], {
-    timeout: 10_000, maxBuffer: 1024 * 1024,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
   return JSON.parse(stdout)
 }
 
-// Only metadata leaves the bounded helper process. It owns any sockets it opens;
-// terminating that helper on a deadline cannot signal the daemon or a Run.
+// Only metadata leaves this private helper. A failed per-request observation
+// exits this process and releases its own wires; it cannot signal any Run.
 async function inspectPublicRuntime(sdkPath, socketPath, corePath, runIds) {
   const sdk = await import(pathToFileURL(sdkPath).href)
   const client = new sdk.CtxmuxClient({ socketPath })
-  const runtime = await client.runtimeInfo()
+  const runtime = await inspectRead('runtimeInfo', socketPath, {}, () => client.runtimeInfo())
+  const identity = { runtimeId: runtime.runtimeId, daemonInstanceId: runtime.daemonInstanceId }
   if (corePath) {
-    // The candidate's existing Core predicate owns compatibility. An observation
-    // never calls Core.connect, which may legitimately start a missing daemon.
-    const { assertAgentMuxRuntimeCompatibility } = await import(pathToFileURL(corePath).href)
-    assertAgentMuxRuntimeCompatibility(runtime)
+    await inspectRead('compatibility', socketPath, identity, async () => {
+      const { assertAgentMuxRuntimeCompatibility } = await import(pathToFileURL(corePath).href)
+      assertAgentMuxRuntimeCompatibility(runtime)
+    })
   }
-  const scope = runIds === undefined ? null : new Set(runIds)
+  // Each status request is fenced to the identity established above.
+  const scopedClient = new sdk.CtxmuxClient({ socketPath, expectedRuntimeIdentity: runtime })
   const running = []
-  let cursor = null
-  if (scope === null || scope.size > 0) do {
-    const page = await client.listPage(cursor, 128)
-    for (const summary of page.runs) {
-      if (summary.state.type !== 'running' || (scope && !scope.has(summary.id))) continue
-      const run = await client.status(summary.id)
-      if (run.state.type === 'running') running.push({ id: run.id, pid: run.pid, backend: run.backend,
-        acceptedInputBytes: run.applied_input_bytes, outputBytes: run.latest_output_bytes,
-        currentSize: run.current_size })
-    }
-    fail(page.nextCursor === null || page.nextCursor !== cursor, 'Runtime inventory cursor did not advance.')
-    cursor = page.nextCursor
-  } while (cursor !== null)
+  const readRun = async (id, allowMissing) => {
+    const run = await inspectRead('status', socketPath, { ...identity, runId: id }, async () => {
+      try { return await scopedClient.status(id) }
+      catch (error) {
+        if (allowMissing && error instanceof sdk.CtxmuxProtocolError && error.code === 'run_not_found') return null
+        throw error
+      }
+    })
+    if (run === null) return
+    await inspectRead('status identity', socketPath, { ...identity, runId: id }, () => {
+      fail(run.id === id, 'The Runtime returned another Run instead of the requested identity.')
+    })
+    if (run.state.type === 'running') running.push({ id: run.id, pid: run.pid, backend: run.backend,
+      acceptedInputBytes: run.applied_input_bytes, outputBytes: run.latest_output_bytes,
+      currentSize: run.current_size })
+  }
+  if (runIds !== undefined) {
+    for (const id of new Set(runIds)) await readRun(id, true)
+  } else {
+    // Native exec preflight has no outgoing Region scope and must retain its
+    // whole running inventory. Ordinary UI installation never enters this path.
+    let cursor = null
+    do {
+      const page = await inspectRead('listPage', socketPath, { ...identity, cursor }, () => scopedClient.listPage(cursor, 128))
+      for (const summary of page.runs) if (summary.state.type === 'running') await readRun(summary.id, false)
+      await inspectRead('inventory cursor', socketPath, { ...identity, cursor }, () => {
+        fail(page.nextCursor === null || page.nextCursor !== cursor, 'Runtime inventory cursor did not advance.')
+      })
+      cursor = page.nextCursor
+    } while (cursor !== null)
+  }
   process.stdout.write(JSON.stringify({ protocol: sdk.PROTOCOL_VERSION, runtime, running }))
 }
 
@@ -265,8 +304,8 @@ async function assertRunsKept(plan, inspection, sdk) {
   // Status the exact original IDs, including Runs that naturally exited while the
   // GUI was closing. A natural exit is not an installation-induced interruption.
   const { stdout } = await exec(process.execPath, [script, '--status', sdk, plan.old.socketPath,
-    JSON.stringify(plan.before.running.map((entry) => entry.id))], {
-    timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    JSON.stringify(plan.before.running.map((entry) => entry.id)), JSON.stringify(inspection.runtime)], {
+    maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
   const statuses = JSON.parse(stdout)
   fail(statuses.length === plan.before.running.length, 'Original Run inventory is incomplete after handoff.')
@@ -334,7 +373,7 @@ export async function prepareUiRuntime(currentApp, candidateApp, observation) {
 /** Re-read the exact original service and Runs without Native mutation. */
 export async function confirmUiRuntime(plan) {
   const { stdout } = await exec(process.execPath, [script, '--identity', plan.newSdk, plan.old.socketPath], {
-    timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
   const after = JSON.parse(stdout)
   const originalRuns = await assertRunsKept(plan, after, plan.newSdk)
@@ -486,16 +525,21 @@ if (process.argv[1] && resolve(process.argv[1]) === script) {
   } finally { await client.dispose() }
 } else if (process.argv[2] === '--identity') {
   const sdk = await import(pathToFileURL(process.argv[3]).href)
-  const runtime = await new sdk.CtxmuxClient({ socketPath: process.argv[4] }).runtimeInfo()
+  const runtime = await inspectRead('runtimeInfo', process.argv[4], {}, () =>
+    new sdk.CtxmuxClient({ socketPath: process.argv[4] }).runtimeInfo())
   process.stdout.write(JSON.stringify({ protocol: sdk.PROTOCOL_VERSION, runtime }))
 } else if (process.argv[2] === '--inspect') await inspectPublicRuntime(process.argv[3], process.argv[4], process.argv[5],
   process.argv[6] === undefined ? undefined : JSON.parse(process.argv[6]))
   else if (process.argv[2] === '--status') {
     const { CtxmuxClient } = await import(pathToFileURL(process.argv[3]).href)
-    const client = new CtxmuxClient({ socketPath: process.argv[4] })
+    const client = new CtxmuxClient({ socketPath: process.argv[4],
+      expectedRuntimeIdentity: JSON.parse(process.argv[6]) })
     const statuses = []
     for (const id of JSON.parse(process.argv[5])) {
-      const run = await client.status(id)
+      const run = await inspectRead('status', process.argv[4], { runId: id }, () => client.status(id))
+      await inspectRead('status identity', process.argv[4], { runId: id }, () => {
+        fail(run.id === id, 'The Runtime returned another Run instead of the requested identity.')
+      })
       statuses.push({ id: run.id, pid: run.pid, state: run.state, acceptedInputBytes: run.applied_input_bytes,
         outputBytes: run.latest_output_bytes, currentSize: run.current_size })
     }
