@@ -479,3 +479,29 @@ describe('original immediate transport preparation', () => {
     } finally { await consumer?.dispose(); await hosted.dispose(); await f.close() }
   })
 })
+
+
+describe('mobile original-request authenticated source rejoin', () => {
+  it('settles the same acknowledged source without another input and rejects a changed authenticated device', async () => {
+    const f = await fixture()
+    const input = vi.fn(f.owner.kernel.input as (...args: unknown[]) => Promise<unknown>)
+    f.owner.kernel.input = input
+    try {
+      f.release()
+      const sourceDevice = { hostId: 'original-host', deviceId: 'original-mobile', name: 'Phone' }
+      const request = { agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, afterSubmissionId: null,
+        operationId: 'mobile-original-operation', prompt: 'original mobile body', execution: 'immediate' as const,
+        authorHuman: true as const, sourceDevice }
+      await f.client.submitAgentPrompt(request)
+      const originalCalls = input.mock.calls.length
+      expect(originalCalls).toBeGreaterThan(0)
+      await f.client.submitAgentPrompt({ ...request, afterSubmissionId: request.operationId })
+      expect(input).toHaveBeenCalledTimes(originalCalls)
+      await expect(f.client.submitAgentPrompt({ ...request, afterSubmissionId: request.operationId,
+        sourceDevice: { ...sourceDevice, deviceId: 'different-authenticated-device' } }))
+        .rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
+      expect(input).toHaveBeenCalledTimes(originalCalls)
+      expect(f.client.agentSession('prepare').promptCompletionAdmission?.intent?.message?.sourceDevice).toEqual(sourceDevice)
+    } finally { await f.close() }
+  })
+})

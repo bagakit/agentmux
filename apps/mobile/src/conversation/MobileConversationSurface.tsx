@@ -2,7 +2,7 @@ import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } fr
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentMuxInteractionResponse } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
@@ -19,6 +19,21 @@ import { MobileMailbox } from './MobileMailbox'
 import './conversation.css'
 
 export type { MobileConnection } from './use-hosted-conversation'
+function originalPromptRequest(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
+  attempt: PromptAttempt | undefined) {
+  const admission = session?.promptCompletionAdmission, intent = admission?.intent, message = intent?.message
+  if (!session || session.agentSessionId !== agentSessionId || !attempt || attempt.phase !== 'unknown'
+    || !attempt.operationId || !attempt.runId || session.run.runId !== attempt.runId
+    || admission?.submissionId !== attempt.operationId || admission.notApplied === true
+    || intent?.run.runId !== attempt.runId || !attempt.draft.trim()
+    || intent.prompt !== expandSemanticReferences(attempt.draft) || message?.userContent !== intent.prompt
+    || message.authorHuman !== true || message.authorAgentSessionId !== undefined || message.systemContext !== undefined
+    || (intent.execution !== 'default' && intent.execution !== 'immediate')) return undefined
+  // The Host supplies this call's authenticated device; Core checks it against the original message.
+  return { agentSessionId: session.agentSessionId, operationId: attempt.operationId, expectedRun: { ...intent.run },
+    afterSubmissionId: attempt.operationId, prompt: intent.prompt, authorHuman: true as const, execution: intent.execution,
+    ...(intent.execution === 'immediate' ? { allowUncertainTurn: true } : {}) }
+}
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink'> & {
   client: AgentMuxHostedClient | null
@@ -124,6 +139,30 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         : `Core 已拒绝这条输入，草稿已保留。${errorMessage(error)}`
       local.save()
       redraw(value => value + 1)
+    }
+  }
+
+  async function retryOriginalPrompt(): Promise<void> {
+    const original = attempts.current.get(draftKey)
+    if (!available || !client || !agentSessionId || original?.phase !== 'unknown') return
+    const originalClient = client, originalId = agentSessionId, originalKey = draftKey
+    try {
+      // Re-read at the action boundary; the UI projection alone cannot authorize a stale retry.
+      const input = originalPromptRequest(originalClient.agentSession(originalId), originalId, original)
+      if (!input) throw new Error('Core 当前不能确认一致的原请求；原输入与当前草稿保留，请刷新核对。')
+      original.phase = 'sending'
+      original.message = '正在核对并续做原请求…'
+      local.save(); redraw(value => value + 1)
+      await originalClient.submitAgentPrompt(input)
+      if (!mounted.current || attempts.current.get(originalKey) !== original) return
+      confirmPrompt(originalKey, original)
+      if (current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
+    } catch (error) {
+      if (!mounted.current || attempts.current.get(originalKey) !== original) return
+      // A refused retry says nothing about the earlier attempt, even with this call's CF0.
+      original.phase = 'unknown'
+      original.message = `原请求结果仍未确认；原正文与当前草稿保留，不会自动重投。${errorMessage(error)}`
+      local.save(); redraw(value => value + 1)
     }
   }
 
@@ -247,6 +286,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {attempt && attempt.phase !== 'confirmed' ? <aside className="mobile-send-status" data-phase={attempt.phase} aria-live="polite">
           <div className="mobile-send-status__summary">
             <span>{attempt.phase === 'sending' ? '正在发送…' : attempt.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
+            {available && originalPromptRequest(session, agentSessionId, attempt) ? <button type="button" onClick={() => { void retryOriginalPrompt() }}>重试原请求</button> : null}
             {attempt.phase !== 'sending' ? <button type="button" onClick={() => { void reading.refresh() }}>刷新</button> : null}
             {attempt.phase !== 'sending' && onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
             {attempt.phase !== 'sending' ? <details><summary>详情</summary><p>{attempt.message}</p></details> : null}
