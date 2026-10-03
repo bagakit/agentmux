@@ -1,7 +1,7 @@
 import { lstat, mkdir, readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { basename, join, resolve } from 'node:path'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
-import { inspectDirectoryIdentity, readDirectoryIdentity, moteDirectoryName, type DirectoryIdentityContext } from './scratch-directory-identity.mjs'
+import { inspectDirectoryIdentity, readDirectoryIdentity, moteDirectoryName, SCRATCH_DIRECTORY_ALIAS_PENDING_PATH, type DirectoryIdentityContext } from './scratch-directory-identity.mjs'
 export { SCRATCH_DIRECTORY_IDENTITY_PATH } from './scratch-directory-identity.mjs'
 
 function missing(error: unknown): boolean { return (error as NodeJS.ErrnoException).code === 'ENOENT' }
@@ -38,13 +38,14 @@ export async function resolveScratchTopicDirectory(scratchRoot: string, topicId:
   const long = scratchTopicDirectoryName(topicId), short = moteDirectoryName(topicId)
   const candidates = [...new Set([...context.roots.scratch, ...context.roots.topics, ...context.roots.motes].map(root => join(root, long))
     .concat(context.roots.motes.map(root => join(root, short))))]
-  const physical = new Set<string>(), aliases: string[] = []
+  const physical = new Set<string>(), aliases: string[] = [], stages: { path: string; dev: bigint; ino: bigint; link: string }[] = []
   for (const directory of candidates) {
     let info
-    try { info = await lstat(directory) } catch (error) { if (missing(error)) continue; throw error }
+    try { info = await lstat(directory, { bigint: true }) } catch (error) { if (missing(error)) continue; throw error }
     if (info.isSymbolicLink()) {
-      const target = resolve(directory, '..', await readlink(directory))
-      if (!candidates.includes(target) || target === directory) throw new Error('The retained Topic alias escapes its confirmed object addresses.')
+      const link = await readlink(directory), target = resolve(directory, '..', link)
+      if (target === directory) { stages.push({ path: directory, dev: info.dev, ino: info.ino, link }); continue }
+      if (!candidates.includes(target)) throw new Error('The retained Topic alias escapes its confirmed object addresses.')
       aliases.push(directory)
     } else {
       if (!info.isDirectory()) throw new Error('The Topic path is not a regular directory.')
@@ -58,6 +59,16 @@ export async function resolveScratchTopicDirectory(scratchRoot: string, topicId:
   }
   if (physical.size > 1) throw new Error('Topic directory locations conflict. Preserve both directories and resolve the conflict before retrying.')
   const object = [...physical][0]
+  for (const stage of stages) {
+    if (!object) throw new Error('The staged directory has no confirmed original object.')
+    const saved = await inspectDirectoryIdentity(object, context)
+    const witness = await lstat(join(object, SCRATCH_DIRECTORY_ALIAS_PENDING_PATH), { bigint: true })
+    if (!saved?.pending || !saved.current || saved.pending.info.dev !== saved.current.info.dev || saved.pending.info.ino !== saved.current.info.ino ||
+        saved.pending.bytes !== saved.current.bytes || !witness.isSymbolicLink() || witness.dev !== stage.dev || witness.ino !== stage.ino ||
+        await readlink(join(object, SCRATCH_DIRECTORY_ALIAS_PENDING_PATH)) !== stage.link)
+      throw new Error('The staged address is not witnessed by the same original operation. Existing bytes and working capability are kept.')
+    // This same-operation stage is not a published address or execution cwd.
+  }
   for (const alias of aliases) if (!object || await realpath(alias) !== object) throw new Error('The retained alias does not reach the same confirmed Topic object.')
   if (!object && context.issues?.length) throw new Error(context.issues.join(' · '))
   return object ?? null
@@ -86,7 +97,11 @@ export async function scratchConfirmedDirectoryPaths(scratchRoot: string, topicI
   const context = await scratchIdentityContext(scratchRoot, topicId), paths: string[] = []
   for (const [role, roots] of Object.entries(context.roots)) for (const root of roots) for (const name of [scratchTopicDirectoryName(topicId), ...(role === 'motes' ? [moteDirectoryName(topicId)] : [])]) {
     const path = join(root, name)
-    try { if (await realpath(path) === physical) paths.push(path) } catch (error) { if (!missing(error)) throw error }
+    try {
+      const info = await lstat(path)
+      if (info.isSymbolicLink() && resolve(path, '..', await readlink(path)) === path) continue
+      if (await realpath(path) === physical) paths.push(path)
+    } catch (error) { if (!missing(error)) throw error }
   }
   // Reconfirm the whole original object; an arbitrary alias cannot add authority.
   if (await resolveScratchTopicDirectory(scratchRoot, topicId) !== physical) throw new Error('The object changed while confirming its retained addresses.')

@@ -4,6 +4,10 @@ import { createHash } from 'node:crypto'
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
+if (process.argv[process.argv.indexOf('--task') + 1] === 'T-002') {
+ await import('./verify-mote-directory-short-maintenance.mjs')
+ process.exit(process.exitCode ?? 0)
+}
 const base=resolve(import.meta.dirname,'../../..'),out=join(base,'.tmp/mote-directory-short-name');await mkdir(out,{recursive:true})
 const attempt=await mkdtemp(join(out,'attempt-')),isolated=join(attempt,'source'),hash=b=>createHash('sha256').update(b).digest('hex')
 const task=process.argv[process.argv.indexOf('--task')+1];assert.ok(['T-001','T-004'].includes(task),'Only approved T-001/T-004 scopes share this qualification')
