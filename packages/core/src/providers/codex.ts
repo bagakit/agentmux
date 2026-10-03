@@ -113,7 +113,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       payload: buildPromptInputPayload(prompt),
       renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
       submit: '\r',
-      ...(context?.execution === 'immediate' ? { prepare: { interrupt: '\u001b', endEvent: 'Interrupt' } } : {})
+      ...(context?.execution === 'immediate' ? { prepare: { refresh: '\u001b[I', interrupt: '\u001b', endEvent: 'Interrupt' } } : {})
     }),
     interaction: createNumberedTerminalInteractionProtocol({
       questionEvents: ['PreToolUse'],

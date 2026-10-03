@@ -11,6 +11,11 @@ import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentSession } from './types.js'
 import { terminalContinuationSteps } from './terminal-continuation.js'
 
+// One-time frame metadata lookback, in bytes, independent of retained history.
+// It reuses the existing 64 KiB initial observation budget; a missing complete
+// pair stays unknown until a real later frame, never a guessed frame or a Run cap.
+const FRAME_OBSERVATION_LOOKBACK_BYTES = 64 * 1024
+
 type ScreenEvidenceDeps = {
   kernel: CtxmuxRunAdapter
   providers: AgentProviderRegistry
@@ -18,16 +23,16 @@ type ScreenEvidenceDeps = {
 
 /**
  * 有界屏幕证据 owner（f-23q8faabh / T-002）：每个活跃 Session 只保留一份长命增量 xterm 屏幕
- * 和一条持久 Attachment。提交与 readiness 观察共享它——只有首次（或失效重建时）从 byte 0
- * 重放一次以恢复完整屏幕，此后所有观察都在已消费游标之后增量续读，验证路径的重放字节量
- * 相对会话历史长度有界。ctxmux 仍是唯一字节权威：这里只有屏幕状态与帧游标，没有第二份
+ * 和一条持久 Attachment。提交与 readiness 观察共享 Runtime 的保真 checkpoint 与有序续读，
+ * 首次与失效重建都消费公开 terminal continuation，此后只在已消费游标之后增量续读；
+ * 不为屏幕授权重放整段会话历史。ctxmux 仍是唯一字节权威：这里只有屏幕状态与帧游标，没有第二份
  * Run 字节史。失效（gap / Run 退出 / 观察错误 / resize / Run 更换）是粘性的，下一次观察
  * 丢弃重建。
  */
 export class AgentScreenEvidenceStore {
   private readonly evidence = new Map<string, {
     runId: string
-    originalAttributes: boolean
+    frameFence?: { outputByte: number; resizeRevision: number }
     evidence: AgentTerminalScreenEvidence
     close: () => void
   }>()
@@ -35,7 +40,7 @@ export class AgentScreenEvidenceStore {
   private readonly builds = new Map<string, Promise<AgentTerminalScreenEvidence>>()
 
   /**
-   * 每个 Session 的作废世代。单调递增，只比相等：`build()` 在握手前记下世代，登记前再比一次。
+   * 每个 Session 的屏幕授权世代（作废或已观测 resize）。单调递增，只比相等：`build()` 在握手前记下世代，登记前再比一次。
    *
    * 为什么不能只靠 `evidence` / `builds` 两张表：作废（`discard` / `discardAll`）只能撤回**已登记**
    * 的证据，而一次 `build()` 从 `observeOutput` 发出到拿到 Attachment 之间是异步的。掉线正好落在
@@ -63,8 +68,7 @@ export class AgentScreenEvidenceStore {
       signal?: AbortSignal
       requireFrameAfterBoundary?: boolean
       requireCompleteFrame?: boolean
-      /** Cell attributes needed for native authorization must come from original bytes. */
-      requireOriginalAttributes?: boolean
+      checkpointFrameFence?: { outputByte: number; resizeRevision: number }
     }
   ): Promise<number> {
     const observation = new AbortController()
@@ -86,8 +90,8 @@ export class AgentScreenEvidenceStore {
       observation.signal.throwIfAborted()
       const evidence = await this.ensure(
         session,
-        options.requireOriginalAttributes || requireOutputAfterBoundary ? 0 : Math.max(0, outputBoundaryByte - 64 * 1024),
-        options.requireOriginalAttributes === true
+        Math.max(0, outputBoundaryByte - FRAME_OBSERVATION_LOOKBACK_BYTES),
+        options.checkpointFrameFence
       )
       // A cancelled handshake may finish later; it must not install an orphan waiter.
       observation.signal.throwIfAborted()
@@ -117,19 +121,19 @@ export class AgentScreenEvidenceStore {
   private async ensure(
     session: AgentMuxAgentSession,
     startByte: number,
-    originalAttributes: boolean
+    frameFence?: { outputByte: number; resizeRevision: number }
   ): Promise<AgentTerminalScreenEvidence> {
     for (;;) {
       const existing = this.evidence.get(session.agentSessionId)
       if (existing && existing.runId === session.run.runId && !existing.evidence.failed &&
-          (!originalAttributes || existing.originalAttributes)) {
+        (!frameFence || existing.frameFence?.outputByte === frameFence.outputByte && existing.frameFence.resizeRevision === frameFence.resizeRevision)) {
         return existing.evidence
       }
       const building = this.builds.get(session.agentSessionId)
       if (!building) break
       await building.catch(() => {})
     }
-    const build = this.build(session, startByte, originalAttributes)
+    const build = this.build(session, startByte, frameFence)
     this.builds.set(session.agentSessionId, build)
     try {
       return await build
@@ -143,7 +147,7 @@ export class AgentScreenEvidenceStore {
   private async build(
     session: AgentMuxAgentSession,
     startByte: number,
-    originalAttributes: boolean
+    frameFence?: { outputByte: number; resizeRevision: number }
   ): Promise<AgentTerminalScreenEvidence> {
     this.discard(session.agentSessionId)
     const generation = this.generations.get(session.agentSessionId) ?? 0
@@ -160,6 +164,11 @@ export class AgentScreenEvidenceStore {
       } else if (event.type === 'gap') {
         forward({ type: 'gap' })
       } else if (event.type === 'resized') {
+        // External Runtime clients can resize this Run without Core's discard.
+        // Fence an already-read authorization synchronously; ordered resize
+        // still updates this one incremental screen and clears its old frame.
+        if (evidence && !evidence.failed) this.generations.set(session.agentSessionId,
+          (this.generations.get(session.agentSessionId) ?? 0) + 1)
         forward({ type: 'resized', cols: event.cols, rows: event.rows,
           throughByte: event.throughByte, resizeRevision: event.resizeRevision })
       } else if (event.type === 'error') {
@@ -167,7 +176,7 @@ export class AgentScreenEvidenceStore {
       } else if (event.type === 'exit') {
         forward({ type: 'exit' })
       }
-    }, originalAttributes ? 'raw' : 'terminal')
+    }, 'terminal')
     // 握手期间被作废了（掉线 / Run 更换）：这条 Attachment 挂在已经死掉的连线上，登记它就是留一具
     // `failed === false` 的尸体给 `ensure()` 复用。关掉它并抛，让调用方走与「观察被取消」相同的出口。
     if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
@@ -194,10 +203,27 @@ export class AgentScreenEvidenceStore {
       matcher ? { start: matcher.frameStart, end: matcher.frameEnd } : null,
       continuation.type === 'basic-vt' ? continuation.checkpoint.throughByte
         : observation.gap?.firstAvailableByte ?? startByte,
-      originalAttributes && startByte === 0 && observation.gap === null && observation.resizeRevision === 0,
+      startByte === 0 && observation.gap === null && observation.resizeRevision === 0,
       continuation.type === 'basic-vt' ? continuation.checkpoint.resizeRevision : observation.resizeRevision
     )
     try {
+      if (continuation.type === 'basic-vt' && matcher && (continuation.checkpoint.resizeRevision === 0 ||
+        frameFence?.resizeRevision === continuation.checkpoint.resizeRevision)) {
+        // The seed owns cells/geometry, while real ordered bytes own frame
+        // completion. Bound this one-time scan independently of history length.
+        const fence = continuation.checkpoint.throughByte
+        const frames = await this.deps.kernel.replay(session.run.runId, Math.max(0, fence - FRAME_OBSERVATION_LOOKBACK_BYTES), 'raw')
+        if (frames.gap === null && frames.run.latestOutputBytes >= fence) {
+          const chunks = frames.replay.filter(chunk => chunk.startByte < fence).map(chunk => ({
+            startByte: chunk.startByte, endByte: Math.min(chunk.endByte, fence),
+            dataBytes: chunk.dataBytes.subarray(0, Math.min(chunk.endByte, fence) - chunk.startByte)
+          }))
+          built.seedFrameEvidence(chunks, fence)
+        }
+      }
+      if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {
+        throw new AgentMuxError('Terminal screen observation was cancelled.', 'AGENT_PROMPT_READINESS_CANCELLED')
+      }
       for (const step of terminalContinuationSteps(observation)) {
         if (step.type === 'resized') built.accept({ ...step, cols: step.size.cols, rows: step.size.rows })
         else built.accept(step)
@@ -217,7 +243,7 @@ export class AgentScreenEvidenceStore {
     })
     this.evidence.set(session.agentSessionId, {
       runId: session.run.runId,
-      originalAttributes,
+      ...(frameFence ? { frameFence: { ...frameFence } } : {}),
       evidence: built,
       close: () => {
         unsubscribe()
@@ -228,8 +254,8 @@ export class AgentScreenEvidenceStore {
   }
 
   /**
-   * 当前 session 的 discard 世代计数。每次 `discard(sessionId)` +1（也包括 `build()` 首行的
-   * 隐式 discard）。**这是 admission 用来判「本轮读屏期间是否发生过 discard」的唯一稳定标识**：
+   * 当前 session 的屏幕授权世代。每次 `discard(sessionId)` 或在线 resize +1（也包括 `build()` 首行的
+   * 隐式 discard）。**这是 admission 用来判「本轮读屏期间是否发生过 discard / resize」的唯一稳定标识**：
    *
    *   const g = store.generation(sid)
    *   await store.wait(...)                     // predicate 或 timeout

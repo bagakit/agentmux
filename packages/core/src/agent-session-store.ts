@@ -1143,7 +1143,8 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
     kind: plan.kind, payload: bytes(plan.payload), renderedText: bytes(plan.renderedText), submit: bytes(plan.submit),
     ...(plan.prepare === undefined ? {} : { prepare: (() => {
       const prepare = record(plan.prepare, 'prompt input prepare')
-      return { interrupt: bytes(prepare.interrupt), endEvent: bytes(prepare.endEvent) }
+      return { interrupt: bytes(prepare.interrupt), endEvent: bytes(prepare.endEvent),
+        ...(prepare.refresh === undefined ? {} : { refresh: bytes(prepare.refresh) }) }
     })() })
   }
   else throw new AgentMuxError('Frozen prompt input plan is invalid.', 'INVALID_AGENT_SESSION_STORE')
@@ -1225,6 +1226,13 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
         ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
         ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
         ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
+        ...(admission.frameRefresh === undefined ? {} : { frameRefresh: (() => {
+          const refresh = record(admission.frameRefresh, 'prompt native frame refresh')
+          return { ...terminalInputPhase(refresh, 'prompt native frame refresh'),
+            outputCursorBytes: timestamp(refresh.outputCursorBytes, 'refresh output fence'),
+            resizeRevision: timestamp(refresh.resizeRevision, 'refresh geometry revision'),
+            nativeSourceId: string(refresh.nativeSourceId, 'refresh native source') }
+        })() }),
         ...(admission.uncertainTurn === undefined ? {} : {
           uncertainTurn: (() => {
             if (typeof admission.uncertainTurn !== 'boolean') throw new AgentMuxError('Invalid prompt admission turn risk fact.', 'INVALID_AGENT_SESSION_STORE')

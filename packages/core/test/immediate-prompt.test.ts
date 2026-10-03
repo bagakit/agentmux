@@ -11,7 +11,7 @@ import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import type { AgentPromptExecutionEvidence, AgentMuxStoredAgentSession, AgentMuxClientEvent } from '../src/types.js'
 import type { AgentScreenEvidenceStore } from '../src/screen-evidence.js'
 
-async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
+async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: string) {
   let stored: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'private-immediate', providerId: 'fixture', executorId: 'fixture',
     hostId: 'local', workspacePath: upstreamFixturePath("private/workspace"), run: { runId: 'private-run' }, retiredRuns: [], hookBindingId: 'b', hookToken: 't', createdAt: 1, updatedAt: 1,
     semanticStatus: { state: 'working', source: 'native-hook', observedAt: 1 } }
@@ -28,12 +28,15 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
   const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
     planPromptInput: (prompt, context) => ({ kind: 'render-then-submit', payload: prompt, renderedText: prompt, submit: '\r',
-      ...(context?.execution === 'immediate' ? { prepare: { interrupt, endEvent } } : {}) }),
+      ...(context?.execution === 'immediate' ? { prepare: { interrupt, endEvent, ...(refresh ? { refresh } : {}) } } : {}) }),
     verifyPromptExecutionTransport: async () => {
       if (sourceDrift) native = { ...native!, sourceId: 'replaced-native-source' }
       return transport
     },
-    readPromptExecutionEvidence: async () => native,
+    readPromptExecutionEvidence: async () => {
+      if (resizeDuringRead && screenEvidence.wait.mock.calls.length) { generation++; resizeDuringRead = false }
+      return native
+    },
     inspectPromptExecution: snapshot => {
       const line = snapshot.lines[snapshot.cursor.row]
       if (line?.text.trimEnd() !== '>') return 'unavailable'
@@ -41,7 +44,7 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
     } })
   const providers = new AgentProviderRegistry([provider]), events: AgentMuxClientEvent[] = [], publisher = new AgentMuxClientEventPublisher()
   publisher.onEvent(event => events.push(event))
-  let cursor = 0, transport = true, loseInterruptAck = false, wrongEnd = false, race = false, sourceDrift = false
+  let cursor = 0, transport = true, loseRefreshAck = false, loseInterruptAck = false, wrongEnd = false, race = false, sourceDrift = false
   const receipt = new Map<string, { startByte: number; endByte: number }>(), writes: string[] = []
   const run = () => ({ runId: 'private-run', nativeService: null, lifecycleOperationId: null, program: 'fixture', args: [], workspacePath: upstreamFixturePath("private/workspace"), pid: 123,
     state: { type: 'running' as const }, cols: 100, rows: 30, latestOutputBytes: screen.throughByte, firstAvailableByte: 0, acceptedInputBytes: cursor })
@@ -54,14 +57,18 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
       writes.push(operation.data)
       const range = { startByte: cursor, endByte: cursor + Buffer.byteLength(operation.data) }
       cursor = range.endByte; receipt.set(operation.operationId, range)
-      if (operation.data === interrupt) {
+      if (operation.data === refresh) {
+        await draw(screen.snapshot().lines[14]!.text.slice(2), native?.state === 'working')
+        if (loseRefreshAck) { loseRefreshAck = false; throw new AgentMuxError('private lost refresh ACK', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown') }
+      } else if (operation.data === interrupt) {
         native = { sourceId: 'private-native', id: 'cancelled', nativeTurnId: wrongEnd ? 'turn-other' : 'turn-1', state: 'ended', endReason: 'interrupted' }
         await draw('', false)
         if (loseInterruptAck) { loseInterruptAck = false; throw new AgentMuxError('private lost interrupt ACK', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown') }
       } else if (operation.data !== '\r') await draw(operation.data, false)
       return { run: run(), appliedByteRange: range }
     }) }
-  const screenEvidence = { wait: vi.fn(async (...args: Parameters<AgentScreenEvidenceStore['wait']>) => {
+  let generation = 0, resizeDuringRead = false
+  const screenEvidence = { generation: () => generation, wait: vi.fn(async (...args: Parameters<AgentScreenEvidenceStore['wait']>) => {
     if (!args[3](screen)) throw new AgentMuxError('private screen unconfirmed', 'AGENT_PROMPT_RENDER_TIMEOUT')
     return screen.throughByte
   }) }
@@ -75,9 +82,9 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt') {
     return owner.submitInputPlan(stored, run(), operationId, 'ONLY_AUTHORIZED_MESSAGE', provider.planPromptInput('ONLY_AUTHORIZED_MESSAGE', { execution }),
       condition, undefined, undefined, true, undefined, undefined, { userContent: 'ONLY_AUTHORIZED_MESSAGE' }, execution)
   }
-  return { registry, store, screen, writes, kernel, submit, run, events, draw, coordinator,
+  return { registry, store, screen, writes, kernel, submit, run, events, draw, coordinator, screenEvidence, provider,
     restart: () => { owner = coordinator() }, native: (evidence: AgentPromptExecutionEvidence | null) => { native = evidence },
-    fault: (kind: string) => { if (kind === 'ack') loseInterruptAck = true; if (kind === 'turn') wrongEnd = true; if (kind === 'race') race = true; if (kind === 'transport') transport = false; if (kind === 'source') sourceDrift = true } }
+    fault: (kind: string) => { if (kind === 'external-resize') resizeDuringRead = true; if (kind === 'refresh-ack') loseRefreshAck = true; if (kind === 'ack') loseInterruptAck = true; if (kind === 'turn') wrongEnd = true; if (kind === 'race') race = true; if (kind === 'transport') transport = false; if (kind === 'source') sourceDrift = true } }
 }
 
 describe('single authorized native immediate preparation', () => {
@@ -139,4 +146,99 @@ describe('single authorized native immediate preparation', () => {
       expect(f.writes).toEqual(['\x1b']);expect(f.registry.get('private-immediate').terminalPromptSubmission?.submit.acknowledged).toBe(false)
     }finally{f.screen.dispose()}
   })
+})
+
+
+describe('explicit Provider-owned non-submitting refresh', () => {
+ it.each(['\x1b[I', '\x05'])('freezes and rejoins one refresh %s after lost ACK before interrupting', async refresh => {
+  const f = await fixture('\x1b', 'Interrupt', refresh)
+  try {
+   f.fault('refresh-ack'); await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+   const frozen = normalizeStoredAgentSession(f.registry.get('private-immediate')).promptCompletionAdmission!
+   expect(frozen.frameRefresh).toMatchObject({ acknowledged: false, nativeSourceId: 'private-native', resizeRevision: 0, inputByteRange: { startByte: 0, endByte: Buffer.byteLength(refresh) } })
+   expect(f.writes).toEqual([refresh]); expect(f.registry.get('private-immediate').terminalPromptSubmission).toBeUndefined()
+   f.restart(); await f.submit()
+   expect(f.writes).toEqual([refresh, '\x1b', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
+   const settled = normalizeStoredAgentSession(f.registry.get('private-immediate'))
+   expect(settled.promptCompletionAdmission!.frameRefresh).toMatchObject({ ...frozen.frameRefresh, acknowledged: true })
+   expect(settled.terminalPromptSubmission!.prepare!.interrupt!.inputByteRange.startByte).toBe(Buffer.byteLength(refresh))
+   const finalWait = f.screenEvidence.wait.mock.calls.find(call => call[4].checkpointFrameFence && call[4].requireCompleteFrame)
+   expect(finalWait?.[4]).toMatchObject({ requireCompleteFrame: true, requireFrameAfterBoundary: true })
+   await f.submit(); expect(f.writes).toHaveLength(4)
+  } finally { f.screen.dispose() }
+ })
+ it('keeps a draft after refresh and permits ordinary input with its current condition', async () => {
+  const f = await fixture('\x1b', 'Interrupt', '\x1b[I')
+  try {
+   await f.draw('UNAUTHORIZED_DRAFT', true)
+   await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+   expect(f.writes).toEqual(['\x1b[I']); expect(f.screen.composerText('>')).toBe('UNAUTHORIZED_DRAFT')
+   expect(f.registry.get('private-immediate').promptCompletionAdmission!.frameRefresh!.acknowledged).toBe(true)
+   await f.submit('default', 'ordinary', agentPromptCondition(f.registry.get('private-immediate')))
+   expect(f.writes).toEqual(['\x1b[I', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
+  } finally { f.screen.dispose() }
+ })
+ it('rejects changed geometry after refresh before emitting interrupt or owned payload', async () => {
+  const f = await fixture('\x1b', 'Interrupt', '\x1b[I')
+  try {
+   const input = f.kernel.input.getMockImplementation()!
+   f.kernel.input.mockImplementation(async (...args) => {
+    const result = await input(...args)
+    if(args[1].data === '\x1b[I' && f.screen.geometryRevision === 0) f.screen.resize(100, 30, f.screen.throughByte, 1)
+    return result
+   })
+   await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+   expect(f.writes).toEqual(['\x1b[I'])
+   await f.submit(); expect(f.writes).toEqual(['\x1b[I', '\x1b[I', '\x1b', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
+   expect(f.registry.get('private-immediate').promptCompletionAdmission!.frameRefresh!.resizeRevision).toBe(1)
+  } finally { f.screen.dispose() }
+ })
+ it('refuses automatic refresh authorization before any native input', async () => {
+  const f = await fixture('\x1b', 'Interrupt', '\x1b[I')
+  try {
+   const s = f.registry.get('private-immediate')
+   await expect(f.coordinator().submitInputPlan(s, f.run(), 'automatic', 'ONLY_AUTHORIZED_MESSAGE', f.provider.planPromptInput('ONLY_AUTHORIZED_MESSAGE', { execution: 'immediate' }), agentPromptCondition(s), 'completed', undefined, true, undefined, 0, undefined, 'immediate')).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+   expect(f.writes).toEqual([])
+  } finally { f.screen.dispose() }
+ })
+})
+
+
+it('rejects a public Runtime resize between native screen observation and admission', async () => {
+ const f=await fixture('\x1b', 'Interrupt', '\x1b[I')
+ try {
+  f.fault('external-resize'); await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+  expect(f.writes).toEqual(['\x1b[I']); expect(f.registry.get('private-immediate').terminalPromptSubmission).toBeUndefined()
+  await f.submit('default','ordinary',agentPromptCondition(f.registry.get('private-immediate')))
+  expect(f.writes).toEqual(['\x1b[I', 'ONLY_AUTHORIZED_MESSAGE', '\r'])
+ } finally { f.screen.dispose() }
+})
+
+it('cold interruption recovery carries its durable geometry fence without a second refresh', async () => {
+ const f=await fixture('\x1b', 'Interrupt', '\x1b[I')
+ try {
+  f.fault('ack'); await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+  const frozen=f.registry.get('private-immediate')
+  f.screenEvidence.wait.mockImplementation(async (...args: Parameters<AgentScreenEvidenceStore['wait']>) => {
+   if(args[4].timeoutMessage==='Native interruption or empty composer is unconfirmed.') {
+    expect(args[4].checkpointFrameFence).toEqual({outputByte:frozen.terminalPromptSubmission!.outputCursorBytes,resizeRevision:frozen.promptCompletionAdmission!.frameRefresh!.resizeRevision})
+   }
+   if(!args[3](f.screen)) throw new AgentMuxError('private cold frame missing','AGENT_PROMPT_RENDER_TIMEOUT')
+   return f.screen.throughByte
+  })
+  f.restart(); await f.submit(); expect(f.writes).toEqual(['\x1b[I','\x1b','ONLY_AUTHORIZED_MESSAGE','\r'])
+ } finally { f.screen.dispose() }
+})
+
+
+it('a different ordinary intent recovers lost harmless refresh ACK and preserves the original unsent intent', async () => {
+ const f=await fixture('\x1b', 'Interrupt', '\x1b[I')
+ try {
+  await f.draw('UNAUTHORIZED_DRAFT',true); f.fault('refresh-ack')
+  await expect(f.submit()).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED'})
+  expect(f.registry.get('private-immediate').promptCompletionAdmission!.frameRefresh!.acknowledged).toBe(false)
+  f.restart(); await f.submit('default','ordinary',agentPromptCondition(f.registry.get('private-immediate')))
+  expect(f.writes).toEqual(['\x1b[I','ONLY_AUTHORIZED_MESSAGE','\r'])
+  expect(f.registry.get('private-immediate').terminalPromptSubmission!.submissionId).toBe('ordinary')
+ } finally { f.screen.dispose() }
 })

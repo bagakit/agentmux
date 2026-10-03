@@ -466,7 +466,7 @@ export type AgentPromptInputPlan =
       renderedText: string
       submit: string
       /** Provider-owned control, applied before any payload, never after submit. */
-      prepare?: { interrupt: string; endEvent: string }
+      prepare?: { interrupt: string; endEvent: string; refresh?: string }
     }
 
 export type AgentHookStrategy =
@@ -859,6 +859,8 @@ export type AgentMuxAgentSession = {
       /** Producer facts frozen with the first wire; tags in user text never establish these. */
       message?: AgentPromptMessageContent
     }
+    /** Authorized non-submitting native redraw, independent of prompt delivery. */
+    frameRefresh?: AgentTerminalInputPhaseState & { outputCursorBytes: number; resizeRevision: number; nativeSourceId: string }
     acknowledged?: boolean
     notApplied?: boolean
     uncertainTurn?: boolean
