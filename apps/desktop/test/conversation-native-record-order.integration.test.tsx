@@ -46,7 +46,7 @@ function typedPage(c=control,items:AgentSessionHistoryPage['items']=[]):AgentSes
 const hookStep=(id:string,time:number):AgentTimelineItem=>({id,agentSessionId:ID,kind:'tool_call',source:'native-hook',status:'complete',createdAt:time,updatedAt:time,title:'Read '+id,toolName:'Read',toolInput:id})
 const initial=useAppStore.getState();let host:HTMLDivElement;let root:Root;let fixture:Awaited<ReturnType<typeof nativeHistoryFixture>>;let read:MockInstance<typeof api.sessions.historyPage>;let writes:MockInstance[]=[]
 beforeEach(async()=>{
- vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});vi.stubGlobal('IntersectionObserver',class{observe(){}disconnect(){}})
+ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ResizeObserver',class{observe(){}disconnect(){}});vi.stubGlobal('IntersectionObserver',class{observe(){}unobserve(){}disconnect(){}})
  localStorage.clear();host=document.createElement('div');document.body.append(host);root=createRoot(host);observed.hook=null
  fixture=await nativeHistoryFixture('claude',jsonl(nativeRecords));seed()
  read=vi.spyOn(api.sessions,'historyPage').mockImplementation((c,options)=>fixture.client.sessionHistoryPage(c.agentSessionId,options))
@@ -68,6 +68,10 @@ function orderedData(provider:'claude'|'pi',fixtureRoot:string){
  return jsonl(provider==='claude'?values.map(([uuid,type,content,time])=>({sessionId:'native-main',uuid,type,message:{role:type,content},...(time===undefined?{}:{timestamp:new Date(time).toISOString()})})):[{type:'session',version:3,id:'native-main',cwd:fixtureRoot},...values.map(([id,role,content,time],index)=>({type:'message',id,parentId:index===0?null:values[index-1]![0],message:{role,content},...(time===undefined?{}:{timestamp:new Date(time).toISOString()})}))])
 }
 function healthy(){expect(useAppStore.getState().sessions.map(s=>[s.id,s.control,s.processState])).toEqual([[ID,control,'running']]);expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT)}
+async function openProcessGroups(): Promise<void> {
+  for (const head of host.querySelectorAll<HTMLButtonElement>('.conversation-native-thread .wf-head[aria-expanded="false"]'))
+    await act(async () => head.click())
+}
 describe('native record order through actual public readers and SessionPane',()=>{
  for(const provider of ['claude','pi'] as const)it(provider+' retains native user/assistant record order despite reversed or missing timestamps and equal bodies',async()=>{
   await fixture.close();fixture=await nativeHistoryFixture(provider,(fixtureRoot)=>orderedData(provider,fixtureRoot));useAppStore.setState({timelines:{[ID]:{agentSessionId:ID,revision:1,items:[]}}})
@@ -76,7 +80,7 @@ describe('native record order through actual public readers and SessionPane',()=
   if(provider==='claude'&&process.env.AGENTMUX_NATIVE_ORDER_PAGE)writeFileSync(process.env.AGENTMUX_NATIVE_ORDER_PAGE,JSON.stringify(observed.hook!.nativeHistoryPage,null,2)+'\n')
   expect(observed.hook!.messages.map(x=>x.rawId)).toEqual(['u-before','u-after'])
   expect(recordOrder()).toEqual(orderRecords)
-  expect(host.querySelector('[role="slider"]')).toBeNull()
+  expect(host.querySelector('[role="slider"]')?.getAttribute('aria-label')).toContain('3 events')
   expect(host.textContent).toContain('First recorded answer.');expect(host.textContent).toContain('Second recorded answer.')
   expect(host.querySelectorAll('[data-native-record-id="a-after"] [data-trace-kind]')).toHaveLength(2)
   expect(read.mock.calls.map(([c,o])=>[c,o])).toEqual([[control,{limit:30}]])
@@ -90,15 +94,15 @@ describe('native record order through actual public readers and SessionPane',()=
   const system:AgentTimelineItem={...systemBase,id:'system',createdAt:8,updatedAt:8,kind:'system_message',source:'agentmux',content:'Recorded runtime context.'}
   const items=[hookStep('one',1),hookStep('two',2),captured,hookStep('three',4),hookStep('four',5),failed,pending,system]
   useAppStore.setState({timelines:{[ID]:{agentSessionId:ID,revision:1,items}}})
-  await render(<>{pane()}<Witness/></>);await waitFor(()=>expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(4))
+  await render(<>{pane()}<Witness/></>);await waitFor(()=>expect(observed.hook!.nativeHistoryPage!.items).toHaveLength(4)); await openProcessGroups(); expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(4)
   const observations=host.querySelector('.activity-log')!;const segments=[...observations.querySelectorAll('.activity-log__segment')]
   expect(segments).toHaveLength(6);expect(segments[0]!.textContent).toContain('2 steps');expect(segments[2]!.textContent).toContain('2 steps')
   expect(segments[1]!.querySelector('.log-turn')?.getAttribute('data-speaker-relation')).toBe('other-agent')
   expect(segments[3]!.querySelector('.log-turn')?.getAttribute('data-status')).toBe('failed')
   expect(segments[4]!.querySelector('.log-turn')?.getAttribute('data-status')).toBe('unverified')
   expect(segments[5]!.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('system')
-  expect(host.querySelectorAll('.wf-card--observation')).toHaveLength(2)
-  expect(host.querySelector('[role="slider"]')?.getAttribute('aria-label')).toContain('8 events')
+  expect(observations.querySelectorAll('.wf-card--observation')).toHaveLength(2);expect(host.querySelectorAll('.conversation-native-thread .wf-card--observation')).toHaveLength(1)
+  expect(host.querySelector('[role="slider"]')?.getAttribute('aria-label')).toContain('4 events')
   expect(host.querySelectorAll('[data-native-record-id="u"]')).toHaveLength(1)
   expect(observations.querySelector('[data-message-id="captured:steer"]')!.textContent).toContain('A legitimate native prompt.')
   expect(host.querySelector('.activity-feed__observation-source')?.textContent).toContain('Separate recorded source')
@@ -120,7 +124,8 @@ describe('native record order through actual public readers and SessionPane',()=
   expect(read.mock.calls).toHaveLength(0);healthy()
  })
  it('retains native record nodes, expanded prose, Range, scroll and draft across cover/Return and exact-page refresh',async()=>{
-  await render(<>{pane()}<Witness/></>);await waitFor(()=>expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(4))
+  await render(<>{pane()}<Witness/></>);await waitFor(()=>expect(observed.hook!.nativeHistoryPage!.items).toHaveLength(4)); await openProcessGroups(); expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(4)
+  const process=host.querySelector<HTMLButtonElement>('[data-native-record-id="r"] .log-row[aria-expanded="false"]')!;await act(async()=>process.click())
   const detail=host.querySelector<HTMLDetailsElement>('[data-native-record-id="r"] details')!
   await act(async()=>{detail.open=true;detail.dispatchEvent(new Event('toggle'))})
   const text=detail.querySelector('p')!.firstChild!,range=document.createRange();range.setStart(text,0);range.setEnd(text,7)

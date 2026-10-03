@@ -23,8 +23,17 @@ beforeEach(() => {
 afterEach(async () => {
   await act(async () => root.unmount())
   for (const close of cleanups.splice(0)) await close()
-  document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); readGroups.clear()
 })
+const readGroups = new Set<string>()
+async function openNewProcessGroups() {
+  for (const head of container.querySelectorAll<HTMLButtonElement>('.conversation-native-thread .wf-head')) {
+    const id = head.closest<HTMLElement>('[data-observation-id]')!.dataset.observationId!
+    if (readGroups.has(id)) continue
+    readGroups.add(id)
+    if (head.getAttribute('aria-expanded') === 'false') await act(async () => head.click())
+  }
+}
 async function actualProducer() {
   const producer = await createHistoryPublicProcessProducer(); cleanups.push(() => producer.close())
   fixture.historyPage.mockImplementation((control, options) => {
@@ -37,6 +46,7 @@ async function mount(control = { hostId: 'local', agentSessionId: 'synthetic-his
     label="Private reader" visible={visible} workspaceRoot={_hygiene_fixturePath("private")}
     openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} onClose={fixture.onClose} />))
   await act(async () => { await Promise.all(fixture.historyPage.mock.results.map(result => result.value)) })
+  await openNewProcessGroups()
 }
 function article(id: string): HTMLElement {
   const found = Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')).find(node => node.dataset.nativeRecordId === id)
@@ -47,6 +57,7 @@ async function action(label: string) {
   expect(found, `reachable ${label}`).toBeDefined(); await act(async () => {
     found!.click(); await Promise.all(fixture.historyPage.mock.results.map(result => result.value))
   })
+  await openNewProcessGroups()
 }
 async function openRecord(id: string) {
   const row = article(id), toggle = row.querySelector<HTMLButtonElement>('.log-row[aria-expanded]')!
