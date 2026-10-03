@@ -132,7 +132,7 @@
 - **公共业务协议先于 CLI。** 所有产品业务先由一套公开、类型化的 JSON-RPC 服务合同定义；CLI、HTTP 与 SSH 共用同一方法、授权、业务结果和错误事实。传输只承担请求／响应与流的输送，CLI 只解析参数、调用服务并呈现回执，不直接读写本机 Store 决定 Session、角色、Goal、消息或空间业务。公共方法不能要求调用者是 Electron／React 客户端，也不能要求当前 UI 焦点或本地目录才能解释精确目标。
 - **权威职责与空间来源。** Core 保持无 Electron／React 依赖，持有 Provider、AgentSession、权限、Hook、readiness、语义恢复，以及前端独立的持久空间身份、拓扑、布局、选择与全部绑定；空间与执行身份的含义见[《统一概念与空间寻址》](spaces-and-layout.md#统一概念与空间寻址)。ctxmux 独占 Run、PTY、ordered bytes、Replay、Gap 与 Attachment。Client 消费 Core 空间事实，负责屏幕呈现与真实输入焦点；配置、编辑、文件／Topic 目录、Git 与 Browser 资源能力仍由原 Host／Client owner 提供，经同一公共服务接入。不新增一套 Runtime、Topic／Project／Space／Session registry、持久空间镜像或 CLI 专用业务判断。
 - **请求关联与业务操作身份分开。** JSON-RPC 关联 ID 只匹配请求与响应，不冒充 AgentSession／Run、持久创建身份或 Browser／Toolkit 等 operation ID。现有 operation 级查询、停止与输出流是业务能力，可由 JSON-RPC 方法调用，不因采用 RPC 而取消或混为 transport cancellation。丢回执时按原 owner 的精确业务身份对账；未知不当从未发生，不重复启动、移动或重投首句。健康 Agent 保留、重启恢复和流程降级继续沿原合同，不以 wire／握手失败关闭健康 Run。
-- **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。
+- **同一公开表达。** 下列对象命令树约束实际 CLI、help、技能输出、运行时指引、复制名片与 RPC 方法语义；不能只换 help 或把原本跨域能力藏到另一个别名。对象发现的结果须可原样用于精确输入，AgentSession、执行资源与展示位置分开返回；公开 Goal 词汇替换 Demand，沿用同一个原持久身份、已保存内容及关联，不造新 Goal、不改 ID 或用户数据。 help／skill 的命令语法只出现一次对象与动作，必需与可选参数须与实际 parser 一致；示例替换真实参数值后应能沿该命令调用，不能把注册名再次写入参数说明或仅列一个无法使用的入口。
 
 统一命令树目标如下；表中每个动作仍须服从其原业务 owner 的权限、只读／副作用和恢复边界，是用户已授权实施的公开目标，不是当前已验收能力清单。
 
@@ -150,7 +150,7 @@
 | `mote` | `playbook pmo` |
 | `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
 | `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
-| `device` | `ls`、`invite`、`approve`、`reject`、`revoke`；仅本机管理请求，变更必须有原设备 Authority 验证的实际用户确认 |
+| `device` | `ls`、`link`、`revoke`：仅本机用户管理；`hello`：已认证 Relay 设备命名自身，权限与连接方式见[手机版 Relay 连接](#手机版-relay-连接) |
 | `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
 
 - **PMO 全局发现完整保留。** `app snapshot` 聚合原 PMO 跨对象观察：真实 Project 资源、Workspace、Topic／Mote／Space／Zone、配置 Executor、活动 Agent、Core Session、Goal、决策与活动事实；按各自来源保留已知、不可用和 unknown，不把不可用伪装成空列表。对象发现必须覆盖原 `list projects/active-agents/sessions` 与 PMO 全局观察的事实，不能只剩调用者的当前 Space／Workspace。配置 Executor 由 `settings executors` 发现，Agent 与 Session 由 `agent` 发现，空间与其资源绑定由 `space` 发现，各项 inspect 按对象提供；Project／Workspace 资源发现由原权威来源供给聚合及关联观察，不能从 Space 名称或单条 Workspace ID 伪造 Project。`goal activity` 只取原 Goal 活动来源，不把 Runtime 日志或跨域 snapshot 当成 Goal 已发生的活动。
