@@ -2,6 +2,7 @@ import { conversationReplySourceKey, type ConversationReplySource } from '@agent
 import type { AgentMuxPendingMessage } from '@agentmux/core/control'
 import type { AgentPromptExecution } from '@agentmux/core'
 import { changeNotebook, type NoteNotebookContext } from './lib/notebook-library'
+import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { validateProjectGroup } from './lib/cross-device-project-groups'
 import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/control'
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
@@ -6617,10 +6618,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const originalResource = captured.config?.workspaces.find(item => item.id === workspaceId)
     if (!originalResource) throw new Error('The Note resource Workspace is unavailable.')
+    const notebookContext = notebook ?? { notebookId: projection?.presentationId === 'survey-workbench' && captured.mainSurface === 'survey' && captured.surveyNotebookId
+      ? captured.surveyNotebookId : DEFAULT_NOTEBOOK_ID }
     const noteId = retrying ? previous.noteId : crypto.randomUUID(), blockId = retrying ? previous.blockIds[0]! : crypto.randomUUID(), draft = retrying ? previous.draft : initialContent ?? ''
     let receipt: NoteCreationReceipt = { intentId: retrying ? previous.intentId : crypto.randomUUID(), createdAt: retrying ? previous.createdAt : Date.now(), noteId, blockIds: [blockId], draft, path: '', status: 'pending', revealed: false,
       ...(launcher ? { launcher } : {}),
-      ...(retrying && previous.notebook ? { notebook: previous.notebook } : notebook ? { notebook } : {}),
+      notebook: retrying && previous.notebook ? previous.notebook : notebookContext,
       target: { workspaceId, hostId: originalResource.hostId, workspacePath: originalResource.path, directoryPath: null, relativeDirectory: null, zoneId: tab?.space?.zoneId ?? null,
         sourceSpaceId: tab?.space?.spaceId ?? null, displayWorkspaceId: noteCreationDisplayWorkspace(captured, { workspaceId, groupId, ...(projection ? { displayWorkspaceId: projection.displayWorkspaceId } : {}), ...(launcher ? { launcher } : {}) }), groupId },
       ...(projection && launcher ? { presentation: { presentationId: projection.presentationId, entity: projection.entity,
