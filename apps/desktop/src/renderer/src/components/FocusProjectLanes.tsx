@@ -1,3 +1,5 @@
+import { HostBadge } from './HostBadge'
+import { hostIdentityProjection } from '../lib/region-execution-host'
 import { ChevronRight, GitBranch, Hash } from 'lucide-react'
 import type { ReactNode, Ref } from 'react'
 import type { FocusProjectLane } from '../lib/focus-project-lanes'
@@ -13,6 +15,7 @@ export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, render
 }) {
   const displayPath = usePathDisplay()
   const icons = useAppStore(state => state.spaceObjectIcons)
+  const hosts = useAppStore(state => state.config?.hosts)
   return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
       {lanes.map(lane => <article className={`focus-project-lanes__row${selectedWorkspaceId === lane.projectId ? ' is-selected' : ''}`} data-project-id={lane.projectId} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
@@ -23,6 +26,7 @@ export function FocusProjectLanes({ lanes, selectedWorkspaceId, onSelect, render
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}
                 {lane.labels.map((label, index) => <span className="focus-project-lanes__label" key={index}>{index ? <ChevronRight size={10} /> : null}{index && lane.topicId && index === lane.labels.length - 1 ? <Hash size={11} /> : index ? <GitBranch size={11} /> : null}<strong>{label}</strong></span>)}</>}
+            <HostBadge context="Host" host={hostIdentityProjection(lane.hostId, hosts?.find(host => host.id === lane.hostId))} />
           </button>
           {lane.summary ? <span className="focus-project-lanes__summary" title={lane.summary}>{lane.summary}</span> : null}
           {lane.recovery ? <span className="focus-project-lanes__recovery">{lane.recovery === 'removed' ? 'Worktree removed' : 'Workspace unregistered'}</span> : null}

@@ -1,3 +1,5 @@
+import { HostBadge } from './HostBadge'
+import { hostIdentityProjection } from '../lib/region-execution-host'
 import { Folder, Link2, Pencil, Unlink } from 'lucide-react'
 import type { CSSProperties } from 'react'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
@@ -69,9 +71,10 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
             <button type="button" className="icon-button" aria-label={`Dissolve ${group.name}`} title="Dissolve project group" onClick={() => onDissolve(group)}><Unlink size={12} /></button></span>
         </div>
         {folded ? null : shown.map(member => {
-          const hostLabel = hosts?.find(host => host.id === member.hostId)?.label ?? member.hostId ?? 'Device unconfirmed'
+          const hostIdentity = hostIdentityProjection(member.hostId, hosts?.find(host => host.id === member.hostId))
+          const hostLabel = hostIdentity.label
           const selected = active && member.id === activeProjectId
-          const label = `${member.name} · ${hostLabel}${member.project ? '' : ' · Registration unavailable'}`
+          const label = `${member.name} · ${hostLabel} · ${hostIdentity.id ?? 'Unknown Host'}${member.project ? '' : ' · Registration unavailable'}`
           const target = member.hostId ? folderSpaceIconTarget({ hostId: member.hostId, repoPath: member.path, name: member.name }) : null
           const manualIcon = target ? icons[target.key] ?? null : null
           return <div key={member.id} className="project-group__member-shell">
@@ -83,7 +86,7 @@ export function ProjectGroupsTree({ projects, query, activeProjectId, onCreate, 
             {member.project || manualIcon ? <SpaceObjectIcon kind="folder" name={member.name} manualIcon={manualIcon}
               {...(member.project ? { workspaceId: member.project.preferredWorkspaceId } : {})} folderIdentityKey={target?.key}
               lastActivityAt={lastActivityByProject.get(member.id)} visible={visible} /> : <span className="project-rail-row__icon" aria-hidden="true" title="Project registration unavailable"><Folder size={14} /></span>}
-            <span className="project-rail-row__identity"><strong>{member.name}</strong><small>{hostLabel}{member.project ? '' : ' · Unavailable'}</small></span>
+            <span className="project-rail-row__identity"><strong>{member.name}</strong><small><HostBadge context="Host" host={hostIdentity} />{member.project ? '' : ' · Unavailable'}</small></span>
           </button>
           {(sessionsByProject.get(member.id) ?? []).some(session => session.kind === 'agent') ? <ProjectActivity compact sessions={sessionsByProject.get(member.id)!} contexts={activityContextsForWorkspaces(member.project?.workspaces ?? [])} /> : null}
           </div>

@@ -1,0 +1,5 @@
+.host-identity { display: inline-flex; align-items: center; gap: var(--sp-1); flex: 0 1 auto; min-width: 0; max-width: 18ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 14px; white-space: nowrap; vertical-align: middle; }
+.host-identity > svg { flex: none; }
+.host-identity > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.focus-project-lanes__axis > .host-identity { margin-left: var(--sp-2); max-width: 14ch; }
+.project-group__member .host-identity { max-width: 100%; }

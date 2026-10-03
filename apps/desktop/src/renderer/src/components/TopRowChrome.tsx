@@ -1,5 +1,7 @@
+import { HostBadge } from './HostBadge'
+import { hostIdentityProjection } from '../lib/region-execution-host'
 import { createContext, useContext, useEffect, useState } from 'react'
-import { PanelLeft, PanelsTopLeft, RadioTower, Settings2 } from 'lucide-react'
+import { PanelLeft, PanelsTopLeft, Settings2 } from 'lucide-react'
 import { useAppStore } from '../store'
 import { FocusNavigationButton } from './FocusNavigationButton'
 import { SettingsNavigation } from './SettingsNavigation'
@@ -120,6 +122,7 @@ export function ToolsToggle() {
 // title tooltip，永不平铺。host-pill 仅在非 local 时出现。
 export function TopBreadcrumb() {
   const { mainSurface, workspace } = useSurfaceIdentity()
+  const hosts = useAppStore(state => state.config?.hosts)
   const displayPath = usePathDisplay()
   const hostId = workspace?.hostId
   if (mainSurface === 'agents') {
@@ -143,7 +146,7 @@ export function TopBreadcrumb() {
         <strong title={workspace ? displayPath(workspace.path, workspace.hostId) : undefined}>{branch}</strong>
       ) : null}
       {remoteHost ? (
-        <span className="host-pill"><RadioTower size={11} /> {remoteHost}</span>
+        <HostBadge context="Host" className="host-pill" showLocal={false} host={hostIdentityProjection(remoteHost, hosts?.find(host => host.id === remoteHost))} />
       ) : null}
     </div>
   )

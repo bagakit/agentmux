@@ -87,7 +87,11 @@
 .board-state span { font-size: var(--fs-meta); line-height: 1.5; }
 .board-state--error > svg { color: var(--red); }
 .board-toolbar { display: grid; flex: none; align-items: end; gap:var(--sp-4); margin-bottom:var(--sp-4); padding:var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
-.board-toolbar--matrix { grid-template-columns: minmax(220px, 1fr) 138px 138px auto auto auto; }
+.board-toolbar--matrix { display: flex; flex-wrap: wrap; }
+.board-toolbar--matrix > .board-search { flex: 1 1 220px; min-width: min(220px, 100%); }
+.board-toolbar--matrix > label:not(.board-search) { flex: 0 1 138px; min-width: 0; max-width: 100%; }
+.board-toolbar--matrix > label select { min-width: 0; width: 100%; }
+.board-toolbar--matrix > :is(.board-host-scope, .board-filter-count, button) { flex: none; }
 .board-toolbar > label:not(.board-search) { display: grid; gap:var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
 .board-toolbar select { height: 30px; padding:0 var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-0); font-size: var(--fs-meta); }
 .board-search { height: 30px; position: relative; display: flex; align-items: center; }

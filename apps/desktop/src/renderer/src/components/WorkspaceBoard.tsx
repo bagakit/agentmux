@@ -1,3 +1,5 @@
+import { HostBadge } from './HostBadge'
+import { hostIdentityProjection } from '../lib/region-execution-host'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { AgentAvatar } from './AgentAvatar'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -12,7 +14,6 @@ import {
   LoaderCircle,
   MessageSquarePlus,
   NotebookText,
-  RadioTower,
   RefreshCw,
   Search,
   SquareTerminal,
@@ -125,6 +126,7 @@ function RunCard({ session, onOpen }: { session: SessionSnapshot; onOpen: () => 
 
 export function WorkspaceBoard() {
   const displayPath = usePathDisplay()
+  const hosts = useAppStore(state => state.config?.hosts)
   const sessions = useAppStore((state) => state.sessions)
   const selectWorkspace = useAppStore((state) => state.selectWorkspace)
   const selectSession = useAppStore((state) => state.selectSession)
@@ -247,7 +249,7 @@ export function WorkspaceBoard() {
         {kind === 'branch' ? (
           <label><span>Binding</span><select aria-label="Filter by binding" value={binding} onChange={(event) => setBinding(event.target.value as BranchBindingFilter)}><option value="all">All branches</option><option value="bound">Worktrees</option><option value="unbound">Unbound</option></select></label>
         ) : null}
-        <span className="board-host-scope"><RadioTower size={11} /> {hostId === 'local' ? 'This Mac' : hostId}</span>
+        <HostBadge context="Host" className="board-host-scope" host={hostIdentityProjection(hostId, hosts?.find(host => host.id === hostId))} />
         <span className="board-filter-count">{filteredRows.length} / {rows.length}</span>
         {hasFilters ? <button className="small-button" onClick={clearFilters}><X size={11} /> Reset</button> : kind === 'branch' ? <button className="small-button" type="button" onClick={() => void refresh()} disabled={loading}>{loading ? <LoaderCircle className="spin" size={12} /> : <RefreshCw size={12} />} Refresh</button> : null}
       </div>
