@@ -51,6 +51,26 @@ Never automatically replay a device revocation.`
 const COMMON = `Public methods use the same typed JSON-RPC service over Unix, HTTP, encrypted Relay or SSH.
 Select one transport with agentmux --endpoint <descriptor> <object> <action>.
 Run system endpoint to discover the default without connecting.
+Endpoint, Host route and execution identity are separate:
+--endpoint selects one AgentMux service, not an execution destination.
+--host on commands that support it selects a Host ID known to that service; it is not an SSH address.
+local means the receiving Core service's own machine, including when that service is remote.
+agent ls and agent inspect return routeHostId for that service and retain session.hostId unchanged.
+Use routeHostId with agent context --host; its hostId is the route and sourceHostId is the original source.
+Keep the same endpoint for discovery and follow-up. Host IDs are not global machine IDs.
+
+Direct remote service (build-node is a normal SSH alias):
+  agentmux --endpoint 'ssh://user@build-node/' agent ls
+  agentmux --endpoint 'ssh://user@build-node/' agent context --host local --session SID
+Via this service's configured remote Host (use the actual returned routeHostId):
+  agentmux agent ls
+  agentmux agent context --host build-host --session SID
+Find configured route IDs with agentmux settings hosts ls. A listed configuration is not a connection check.
+system endpoint reports connection=not-attempted and does not verify reachability or Agent health.
+An RPC system.endpoint response reports connection=responded; this certifies that response only.
+SSH uses the remote agentmux system endpoint --stdio bridge and requires an existing remote service.
+The ssh URI may specify URI-encoded socket and command query parameters; system SSH owns aliases and credentials.
+
 RPC wire IDs only correlate transport messages; --operation-id is the business identity.
 Ordinary commands print one canonical JSON receipt; readers print complete ordered JSON frames.
 Typed errors retain their code and details. Partial/unknown facts are not successful writes.

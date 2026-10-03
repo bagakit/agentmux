@@ -207,7 +207,7 @@ export class AgentMuxRpcService {
     const agentSessionId = resolveAgentSessionId(id, [...entries.map(entry => entry.agentSessionId), ...retainedIdentities])
     const owners = entries.filter(entry => entry.agentSessionId === agentSessionId)
     if (owners.length === 0) throw new AgentMuxError(`Unknown Agent Session: ${id}`, 'UNKNOWN_AGENT_SESSION')
-    if (owners.length !== 1) throw new AgentMuxError('Agent Session has multiple authoritative owners.', 'AMBIGUOUS_AGENT_SESSION')
+    if (owners.length !== 1) throw new AgentMuxError(`Agent Session ${JSON.stringify(agentSessionId)} has multiple authoritative route Hosts: ${owners.map(owner => JSON.stringify(owner.hostId)).join(', ')}. Select the original service endpoint explicitly; no owner was chosen.`, 'AMBIGUOUS_AGENT_SESSION')
     return { ...owners[0]!, unavailable: issues }
   }
   private async authenticated(context: AgentMuxRpcCallContext) {
@@ -464,7 +464,7 @@ export class AgentMuxRpcService {
         if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
         result = resolveSpatialRegion(state.graph,{tabId,regionId,direction:p.direction as import('./spatial-layout.js').SplitDirection}); break
       }
-      case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines',
+      case 'system.endpoint': result = { protocol: 'jsonrpc-2.0', framing: 'json-lines', connection: 'responded',
         endpoint: this.ports.endpoint ?? { transport: 'unix', path: defaultAgentMuxControlSocketPath() } }; break
       case 'system.storage': {
         const hostId = rpcString(p.hostId, 'Host ID'), runId = rpcString(p.runId, 'Run ID')
@@ -483,7 +483,7 @@ export class AgentMuxRpcService {
       case 'agent.context': {
         const input = parseAgentContextParams(p)
         const scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
-        if (scopes.length !== 1) throw new AgentMuxError('Context requires one exact original Host owner.', scopes.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
+        if (scopes.length !== 1) throw new AgentMuxError(`Context route Host ${JSON.stringify(input.hostId)} is ${scopes.length ? 'ambiguous' : 'not configured'} in this service. Use settings hosts ls or agent ls on the same endpoint; local means the receiving Core service.`, scopes.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
         const scope = scopes[0]!
         if (scope.client.forwardRpc) {
           // Configured Host names are routes on this client. The remote Core owns
@@ -494,7 +494,7 @@ export class AgentMuxRpcService {
           break
         }
         const descriptor = (await scope.client.sessionHistorySources()).find(source => source.agentSessionId === input.agentSessionId && source.hostId === input.hostId)
-        if (!descriptor) throw new AgentMuxError('The exact original Session is not retained on this Host.', 'UNKNOWN_AGENT_SESSION')
+        if (!descriptor) throw new AgentMuxError(`Session ${JSON.stringify(input.agentSessionId)} is not retained on route Host ${JSON.stringify(input.hostId)}. Rediscover it with agent ls on the same endpoint.`, 'UNKNOWN_AGENT_SESSION')
         context.signal?.throwIfAborted()
         result = await readAgentContext(scope.client, input, descriptor)
         break
@@ -503,7 +503,7 @@ export class AgentMuxRpcService {
         const target = rpcRecord(p.target)
         if (target.kind === 'self') { this.requireCaller(caller); rpcRecord(target, ['kind']) }
         const clients = await this.clients()
-        const sessions: Array<{ client: AgentMuxRpcCorePort; session: ReturnType<AgentMuxClient['agentSession']> }> = []
+        const sessions: Array<{ routeHostId: string; client: AgentMuxRpcCorePort; session: ReturnType<AgentMuxClient['agentSession']> }> = []
         const lookupIssues: AgentMuxRpcUnavailable[] = []
         const selected = target.kind === 'self' ? caller! : target.kind === 'agent-session' ? await this.owner(rpcString(target.agentSessionId, 'Session ID')) : null
         const lookup = selected ? { kind: 'agent-session' as const, agentSessionId: selected.agentSessionId } : target
@@ -517,7 +517,7 @@ export class AgentMuxRpcService {
         const knownRun = lookup.kind === 'run' ? clients.filter(({ client }) => !this.endpointUnverified(client) &&
           client.agentSessions().some(session => session.run.runId === rpcRecord(lookup.run, ['runId']).runId)) : []
         const lookupScopes = knownRun.length === 1 ? knownRun : clients
-        if (selected) sessions.push({ client: selected.client, session: selected.session })
+        if (selected) sessions.push({ routeHostId: selected.hostId, client: selected.client, session: selected.session })
         else for (const scope of lookupScopes) {
           // Native bindings may be written by another owner after this client connected.
           // The durable Session facts, not a cached registry, admit this exact lookup.
@@ -529,7 +529,7 @@ export class AgentMuxRpcService {
                   handle.providerId === rpcString(lookup.providerId, 'Provider ID') && handle.sessionId === rpcString(lookup.sessionId, 'Native Session ID')
                 : lookup.kind === 'acp-native' ? handle?.kind === 'acp' &&
                   handle.adapterId === rpcString(lookup.adapterId, 'Adapter ID') && handle.sessionId === rpcString(lookup.sessionId, 'Native Session ID') : false
-              if (matches) sessions.push({ client: scope.client, session })
+              if (matches) sessions.push({ routeHostId: scope.hostId, client: scope.client, session })
             }
           } catch (error) { lookupIssues.push(unavailable(error)) }
         }
@@ -538,7 +538,7 @@ export class AgentMuxRpcService {
             lookupIssues.some(issue => issue.code === 'RUNTIME_UNAVAILABLE') ? 'RUNTIME_UNAVAILABLE' : 'AGENT_SESSION_STORE_READ_UNCONFIRMED')
         }
         if (sessions.length !== 1) throw new AgentMuxError('Session lookup is unknown or ambiguous.', sessions.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_AGENT_SESSION')
-        const { client, session } = sessions[0]!
+        const { routeHostId, client, session } = sessions[0]!
         const issues: AgentMuxRpcUnavailable[] = [...(selected?.unavailable ?? []), ...lookupIssues]
         let status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null = null
         try {
@@ -551,7 +551,7 @@ export class AgentMuxRpcService {
           if (alias.operation !== 'agent.inspect') throw new AgentMuxError('Agent alias result is mismatched.', 'CONTROL_PROTOCOL_ERROR')
           displayName = { override: alias.override, availability: 'observed' }
         } catch (error) { issues.push(unavailable(error)) }
-        result = { session, status, displayName, unavailable: issues }; break
+        result = { routeHostId, session, status, displayName, unavailable: issues }; break
       }
       case 'whoami': {
         if (this.ports.forwardControl) {
@@ -683,9 +683,9 @@ export class AgentMuxRpcService {
       try {
         const observed = await scope.client.statusAgent(session.agentSessionId)
         if (observed.session.run.runId !== session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
-        return { session: observed }
+        return { session: { ...observed, routeHostId: scope.hostId } }
       }
-      catch (error) { return { error: { agentSessionId: session.agentSessionId as string | null, ...cause(error, 'LIST_SESSION_FAILED') } } }
+      catch (error) { return { error: { agentSessionId: session.agentSessionId as string | null, hostId: scope.hostId, ...cause(error, 'LIST_SESSION_FAILED') } } }
     }))))
     const results = scopes.flatMap((scope, index) => scope.status === 'fulfilled' ? scope.value
       : [{ error: { agentSessionId: null, hostId: clients[index]!.hostId, ...cause(scope.reason, 'AGENT_SESSION_STORE_READ_UNCONFIRMED') } }])
@@ -849,7 +849,7 @@ export class AgentMuxRpcService {
       try { const sessions = await this.sessions({ agentSessionId: p.agentSessionId, executorId: p.executorId,
         status: p.status, since: p.since, limit: p.limit })
         observation.sessions = sessions.sessions
-        observation.unavailable.push(...sessions.errors.map(error => ({ source: 'sessions', ...unavailable(new AgentMuxError(error.message, error.code)) })))
+        observation.unavailable.push(...sessions.errors.map(error => ({ source: 'sessions', ...unavailable(new AgentMuxError(`Host ${JSON.stringify(error.hostId)}${error.agentSessionId === null ? '' : ` Session ${JSON.stringify(error.agentSessionId)}`}: ${error.message}`, error.code)) })))
       } catch (error) { observation.unavailable.push({ source: 'sessions', ...unavailable(error) }) }
     }
     if (this.ports.snapshot) {

@@ -68,8 +68,8 @@ export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown>
   })
   return p
 }
-function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSession>): void {
-  const p = record(value, ['session', 'run', 'capabilities', 'observation']), session = parseRpcAgentSession(p.session)
+function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSession>, routed = false): void {
+  const p = record(value, [...(routed ? ['routeHostId'] : []), 'session', 'run', 'capabilities', 'observation']), session = parseRpcAgentSession(p.session)
   const run = record(p.run)
   if (run.runId !== session.run.runId || run.agentSessionId !== session.agentSessionId || run.kind !== 'agent' ||
     run.providerId !== session.providerId || run.executorId !== session.executorId || run.workspacePath !== session.workspacePath) fail()
@@ -221,7 +221,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       }
       case 'agent.history': return parseAgentSessionHistoryReadPage(value, input as AgentSessionHistoryReadInput)
       case 'agent.inspect': case 'whoami': {
-        record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['session', 'status', 'displayName', 'unavailable'])
+        record(p, method === 'whoami' ? ['session', 'status', 'view', 'topic', 'messaging', 'unavailable'] : ['routeHostId', 'session', 'status', 'displayName', 'unavailable'])
         const session = parseRpcAgentSession(p.session), target = method === 'whoami' ? { kind: 'self' } : record(input.target)
         if (target.kind === 'agent-session' && !rpcSessionTargetMatches(target.agentSessionId, session.agentSessionId) ||
           target.kind === 'self' && !rpcSessionTargetMatches('self', session.agentSessionId, credentials) ||
@@ -232,7 +232,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
             ('providerId' in handle ? handle.providerId !== target.providerId : handle.adapterId !== target.adapterId)) fail()
         }
         if (p.status !== null) status(p.status, session); issues(p.unavailable)
-        if (method === 'agent.inspect') { const name = record(p.displayName, ['override', 'availability']); if (name.override !== null) text(name.override); member(name.availability, ['observed', 'unavailable']) }
+        if (method === 'agent.inspect') { string(p.routeHostId); const name = record(p.displayName, ['override', 'availability']); if (name.override !== null) text(name.override); member(name.availability, ['observed', 'unavailable']) }
         else { text(p.topic); const messaging = record(p.messaging, Object.keys(AGENTMUX_AGENT_MESSAGING_RULES))
           for (const [key, rule] of Object.entries(AGENTMUX_AGENT_MESSAGING_RULES)) if (messaging[key] !== rule) fail()
           const view = record(p.view); bool(view.attached)
@@ -252,7 +252,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
           session.run.runId === session.reopenedFrom.run.runId) fail()
         break
       }
-      case 'agent.ls': record(p, ['sessions', 'errors']); array(p.sessions, item => status(item)); array(p.errors, item => { const error = record(item, ['agentSessionId', 'hostId', 'code', 'message']); string(error.agentSessionId, true); if (error.agentSessionId === null || error.hostId !== undefined) string(error.hostId); string(error.code); text(error.message) }); break
+      case 'agent.ls': record(p, ['sessions', 'errors']); array(p.sessions, item => { string(record(item).routeHostId); status(item, undefined, true) }); array(p.errors, item => { const error = record(item, ['agentSessionId', 'hostId', 'code', 'message']); string(error.agentSessionId, true); string(error.hostId); string(error.code); text(error.message) }); break
       case 'agent.role.ls': record(p, ['bindings']); array(p.bindings, item => role(item)); break
       case 'agent.role.register': case 'agent.role.resolve': { record(p, ['binding']); const binding = role(p.binding)
         if (binding.role !== input.role || input.workspacePath !== undefined && binding.workspacePath !== input.workspacePath ||
@@ -289,7 +289,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         controlResult('list.projects', { projects: p.projects }); controlResult('list.agents', { agents: p.executors }); controlResult('list.active-agents', { agents: p.agents })
         parseRpcControlResult('goal.ls', { goals: p.goals })
         parseRpcControlResult('space.ls', { catalog: { spaces: p.spaces, zones: p.zones, tabs: [], regions: [], bindings: [], locations: [] } })
-        array(p.sessions, item => status(item)); activity(p.activity); issues(p.unavailable, true)
+        array(p.sessions, item => { string(record(item).routeHostId); status(item, undefined, true) }); activity(p.activity); issues(p.unavailable, true)
         array(p.decisions, item => { const d = record(item, ['goalId', 'decisions']); string(d.goalId); parseRpcControlResult('goal.decisions', d, { goalId: d.goalId }) })
         array(p.workspaces, item => { const w = record(item, ['workspaceId', 'hostId', 'name', 'projectId', 'path', 'kind', 'repoPath', 'branch'])
           for (const key of ['workspaceId', 'hostId', 'path', 'kind']) string(w[key]); text(w.name); for (const key of ['projectId', 'repoPath', 'branch']) string(w[key], true) })
@@ -337,7 +337,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         array(p.locations,item => { const l = record(item); if (l.tabId !== record(params).tabId || !p.region || l.regionId !== record(p.region).regionId) fail() })
         break
       }
-      case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
+      case 'system.endpoint': { record(p, ['protocol', 'framing', 'endpoint', 'connection']); member(p.connection, ['responded']); if (p.protocol !== 'jsonrpc-2.0' || p.framing !== 'json-lines') fail()
         const endpoint = record(p.endpoint); member(endpoint.transport, ['unix', 'http', 'ssh', 'relay']); if (endpoint.transport === 'relay') { parseConnectionOffer(endpoint.offer) } else string(endpoint.transport === 'unix' ? endpoint.path : endpoint.transport === 'http' ? endpoint.url : endpoint.host); break }
       case 'system.subscription.cancel': record(p, ['disposed']); bool(p.disposed); break
       case 'system.storage': {

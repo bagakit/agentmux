@@ -126,7 +126,7 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 
 ## RPC 与远程调用
 
-命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint，不创建服务。
+命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint 与 `connection: "not-attempted"`，不连接、不创建服务，也不证明机器可达或 Agent 健康。直接 RPC 调用该方法得到 `connection: "responded"`，只证明本次服务响应。
 
 ```sh
 agentmux system endpoint
@@ -135,7 +135,20 @@ agentmux --endpoint 'http://127.0.0.1:8787/' app snapshot
 agentmux --endpoint 'ssh://user@host/' app inspect
 ```
 
-HTTP 服务默认关闭，宿主必须显式配置监听地址与授权 token；HTTP client 从 `AGENTMUX_RPC_HTTP_TOKEN` 取得 token。Agent 的 Session capability 仍在同一服务里验证。SSH 需要远端已有服务和 `agentmux` 可执行文件；远端 `rpc-stdio` 只做转发。SSH endpoint 可以通过 `socket` 或 `command` 查询参数选择远端 socket 或可执行文件，值按 URI 编码。
+HTTP 服务默认关闭，宿主必须显式配置监听地址与授权 token；HTTP client 从 `AGENTMUX_RPC_HTTP_TOKEN` 取得 token。Agent 的 Session capability 仍在同一服务里验证。SSH 需要远端已有服务和 `agentmux` 可执行文件；远端 `system endpoint --stdio` 只做转发。SSH endpoint 可以通过 `socket` 或 `command` 查询参数选择远端 socket 或可执行文件，值按 URI 编码。
+
+`--endpoint` 选择公共服务；命令支持的 `--host` 选择该服务认识的 Host 路由 ID，不是 SSH 地址。`local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。`agent ls` 每个观察及 `agent inspect` 返回 `routeHostId`，原 `session.hostId` 保留；用发现出的路由 ID 继续 `agent context --host`，其 `sourceHostId` 与 descriptor 保留源服务身份。发现和后续操作须使用同一 endpoint，Host ID 不能跨 endpoint 当作全局机器身份。`settings hosts ls` 是配置发现，不代表已连接。
+
+```sh
+# Direct service: local is the remote Core service's machine.
+agentmux --endpoint 'ssh://user@build-node/' agent ls
+agentmux --endpoint 'ssh://user@build-node/' agent context --host local --session SID
+# Via the default service: use its discovered routeHostId, such as build-host.
+agentmux agent ls
+agentmux agent context --host build-host --session SID
+```
+
+Project／Zone 的真实资源决定 `agent open` 的执行机器；展示 Space 或 Region 不改变已有 Session 的 Host／cwd。未知 Host、Session 未发现、owner 歧义与服务不可达保留各自错误，不自动选择首项或重路由。
 
 订阅取消只释放该 reader，保留原 Agent/Run。持续输出携带完整帧、原始 bytes 的 base64 与 cursor；丢失回执后读原操作号，不盲目再发送首任务。
 

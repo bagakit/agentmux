@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { loadAgentSessions } from '../src/agent-session-store.js'
 import { pathToFileURL } from 'node:url'
 import { describe, it, expect, vi, afterEach } from 'vitest'
@@ -75,7 +75,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     })
     const service = new AgentMuxRpcService({ coreClients: h.coreClients })
     const listed = await service.call('agent.ls', {})
-    expect(listed.sessions).toHaveLength(1); expect(listed.errors).toEqual([{ agentSessionId: 'caller', code: 'CONTROL_UNAVAILABLE', message: 'Private Run snapshot unavailable' }])
+    expect(listed.sessions).toHaveLength(1); expect(listed.errors).toEqual([{ agentSessionId: 'caller', hostId: 'local', code: 'CONTROL_UNAVAILABLE', message: 'Private Run snapshot unavailable' }])
     const inspected = await service.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'recipient' } })
     expect(inspected.session.agentSessionId).toBe('recipient'); expect(inspected.displayName).toEqual({ override: null, availability: 'unavailable' })
     expect(inspected.unavailable).toHaveLength(1)
@@ -178,7 +178,7 @@ describe('public service uses the original Core and Desktop business owners', ()
     const cases: Array<[Parameters<typeof parseRpcControlResult>[0], unknown, unknown]> = [
       ['agent.view', { agentSessionId: 'wanted' }, { ...common, scope: 'agent-session', agentSessionId: 'foreign', storedOverride: null, effectiveMode: null, sessionFacts: 'unconfirmed', regions: [], locations: [], outcome: 'unknown' }],
       ['file.view', { regionId: 'wanted' }, { ...common, scope: 'file-region', regionId: 'foreign', tabId: null, workspaceId: null, storedOverride: null, effectiveMode: null, supportedModes: null, data: 'unconfirmed', content: { status: 'unconfirmed', reason: null }, locations: [], outcome: 'unknown' }],
-      ['file.open', { path: 'wanted.md', zoneId: 'wanted', focus: false }, { ...common, requestedPath: 'wanted.md', resource: { hostId: 'local', workspaceId: 'w', workspacePath: upstreamFixturePath("fixture"), zoneId: 'foreign', zonePath: upstreamFixturePath("fixture"), path: 'wanted.md' }, placement: { status: 'none', tabId: null, regionId: null, locations: [] }, data: { kind: 'not-file', reason: null }, navigation: 'background', outcome: 'refused', save: saved }],
+      ['file.open', { path: 'wanted.md', zoneId: 'wanted', focus: false }, { ...common, requestedPath: 'wanted.md', resource: { hostId: 'local', workspaceId: 'w', workspacePath: fixturePath("fixture"), zoneId: 'foreign', zonePath: fixturePath("fixture"), path: 'wanted.md' }, placement: { status: 'none', tabId: null, regionId: null, locations: [] }, data: { kind: 'not-file', reason: null }, navigation: 'background', outcome: 'refused', save: saved }],
       ['space.swap', { regionId: 'wanted', withRegionId: 'other' }, { ...common, scope: 'tab-layout', regionId: 'wanted', withRegionId: 'foreign', tabId: null, workspaceId: null, beforeOrder: [], afterOrder: [], activeRegionId: null, locations: [], outcome: 'unknown' }]
     ]
     expect(cases).toHaveLength(4)

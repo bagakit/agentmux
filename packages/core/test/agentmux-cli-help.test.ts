@@ -145,7 +145,7 @@ describe('compiled object-first CLI help and discovery', () => {
     const endpoint = await run(['system', 'endpoint'])
     expect(endpoint.code, endpoint.stderr).toBe(0)
     expect(JSON.parse(endpoint.stdout)).toEqual({ ok: true, operation: 'system.endpoint', result: {
-      protocol: 'jsonrpc-2.0', framing: 'json-lines', endpoint: { transport: 'unix', path: join(root, 'control.sock') }
+      protocol: 'jsonrpc-2.0', framing: 'json-lines', connection: 'not-attempted', endpoint: { transport: 'unix', path: join(root, 'control.sock') }
     } })
     const version = await run(['--version'])
     expect(version.code).toBe(0)
