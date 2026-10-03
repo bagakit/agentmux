@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage } from '@agentmux/core'
 import { Ruler } from '../src/renderer/src/components/ConversationRuler'
+import { ConversationAxis } from '../src/renderer/src/components/ConversationAxis'
 import { createRulerScale, describeRulerRange, rulerBand } from '../src/renderer/src/lib/activity-ruler'
 import { conversationRulerRecords } from '../src/renderer/src/lib/conversation-ruler'
 
@@ -135,4 +136,32 @@ it('preserves surrounding body, connected Range, caret and draft across range up
   expect(selection.getRangeAt(0).startContainer).toBe(text); expect(selection.toString()).toBe('Original')
   expect(document.activeElement).toBe(editor); expect([editor.selectionStart, editor.selectionEnd]).toEqual([3, 3])
   expect(editor.value).toBe('Original draft'); expect(feed.scrollTop).toBe(91); expect(select).not.toHaveBeenCalled()
+})
+
+
+it('keeps the original participant host when the actual axis window becomes empty', async () => {
+  let shown = records()
+  const axes: NonNullable<Parameters<typeof Ruler>[0]['axes']> = ({ width, onPeek, onPeekEnd }) =>
+    <ConversationAxis items={shown} belongs={() => true} label="Participants" size={16} width={width}
+      describe={() => ({ name: 'Execution Agent' })} selectedIndex={null} onSelect={select}
+      onPeek={onPeek} onPeekEnd={onPeekEnd} />
+  await view(1, 3, null, { axes })
+  const host = container.querySelector('.activity-ruler__participants'), originalTrack = track()
+  expect(host).not.toBeNull()
+  expect(host!.querySelector('[aria-label="Participants"]')).not.toBeNull()
+  shown = [] // Process-only overview: no fake participant or accessible empty group.
+  await view(1, 3, null, { axes })
+  expect(container.querySelector('.activity-ruler__participants')).toBe(host)
+  expect(host!.querySelector('[aria-label="Participants"]')).toBeNull()
+  expect(host!.childElementCount).toBe(0)
+  expect(track()).toBe(originalTrack)
+  expect(container.querySelectorAll('.activity-ruler [role="slider"]')).toHaveLength(1)
+})
+
+it('adds no participant host without an actual presentation capability', async () => {
+  await view()
+  expect(container.querySelector('.activity-ruler__participants')).toBeNull()
+  await view(1, 3, null, { axes: () => null })
+  expect(container.querySelector('.activity-ruler__participants')).toBeNull()
+  expect(track().getAttribute('role')).toBe('slider')
 })
