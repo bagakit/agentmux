@@ -476,13 +476,13 @@ export function ActivityView({
   const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems),
     [sessionId, nativeHistoryPage, unifiedItems])
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('1h')
-  const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow), [rulerRecords, rulerWindow])
+  const [visible, setVisible] = useState<Set<string>>(new Set())
+  const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
   const activity = useMemo(() => projectAgentActivityHistory(items), [items])
   const [selectedRecordId, setSelectedRecordId] = useState<string | null>(null)
   const selectedRecord = rulerRecords.find(record => record.id === selectedRecordId)
   const selectedIndex = selectedRecord?.target.kind === 'observed' ? selectedRecord.target.index : null
   const rulerSelectedIndex = ruler.items.findIndex(record => record.id === selectedRecordId)
-  const [visible, setVisible] = useState<Set<string>>(new Set())
   const scale = ruler.scale
   const band = useMemo(() => {
     const indices = ruler.items.flatMap((record, index) => visible.has(record.id) ? [index] : [])

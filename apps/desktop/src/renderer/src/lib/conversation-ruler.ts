@@ -28,25 +28,27 @@ export function conversationRulerRecords(sessionId: string | undefined, page: Ag
     seen.add(record.id)
     const source = JSON.stringify([native.source.providerId, native.source.nativeSessionId])
     const user = users.get(record.id)
-    records.push({ id: JSON.stringify(['native', source, record.id]), kind: 'ruler-record', record,
+    records.push({ id: JSON.stringify(['native', sessionId, source, record.id]), kind: 'ruler-record', record,
       ...(record.startedAt === undefined ? {} : { recordedAt: record.startedAt }),
       speaker: user ? speakerOfUserMessage(user) : record.kind === 'assistant-message' ? { role: 'agent', id: sessionId! } : null,
       target: { kind: 'native', source, recordId: record.id } })
   }
   observed.forEach((record, index) => {
     const at = 'createdAt' in record ? record.createdAt : record.recordedAt
-    records.push({ id: JSON.stringify(['observed', record.id]), kind: 'ruler-record', record,
+    records.push({ id: JSON.stringify(['observed', sessionId, record.id]), kind: 'ruler-record', record,
       ...(at === undefined ? {} : { recordedAt: at }), speaker: speakerOf(record), target: { kind: 'observed', index } })
   })
   return records
 }
 
-export function conversationRulerWindow(records: readonly RulerRecord[], window: RulerWindow) {
+export function conversationRulerWindow(records: readonly RulerRecord[], window: RulerWindow, visible?: ReadonlySet<string>) {
   const known = records.filter(r => r.recordedAt !== undefined && Number.isFinite(r.recordedAt))
   const untimed = records.filter(r => r.recordedAt === undefined || !Number.isFinite(r.recordedAt))
   const latest = known.reduce((last, r) => Math.max(last, r.recordedAt!), -Infinity)
+  const firstVisible = known.reduce((first, record) => visible?.has(record.id) ? Math.min(first, record.recordedAt!) : first, Infinity)
+  const end = Number.isFinite(firstVisible) ? Math.min(latest, firstVisible + RULER_WINDOWS[window]) : latest
   // All-unknown records remain navigable in source order, without a fabricated time domain.
-  const items = known.length === 0 ? [...records] : known.filter(r => r.recordedAt! >= latest - RULER_WINDOWS[window])
+  const items = known.length === 0 ? [...records] : known.filter(r => r.recordedAt! >= end - RULER_WINDOWS[window] && r.recordedAt! <= end)
     .sort((a, b) => a.recordedAt! - b.recordedAt!)
   const scale = createRulerScale(items.map(r => r.recordedAt), 1)
   return { items, untimed: known.length ? untimed : [], scale,
