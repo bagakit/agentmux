@@ -1,6 +1,6 @@
 import { ArrowUp, Check, CircleHelp, Clock3, Copy, LoaderCircle, TriangleAlert, X } from 'lucide-react'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
-import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { queuedMessageState, type ComposerQueuedMessage, type ArchiveQueuedMessage } from './ComposerOutbox'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
@@ -106,7 +106,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     card?.scrollIntoView({ block: 'nearest' })
   }, [editingId, selectedId, active?.id, suppressed])
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     const anchor = anchorRef.current, floating = surfaceRef.current
     if (suppressed || !queued.length || !anchor?.isConnected || !floating) return
     const composer = anchor.closest<HTMLElement>('.composer')
