@@ -456,6 +456,14 @@ export type AgentPromptExecutionEvidence = {
   endReason?: 'interrupted' | 'completed'
 }
 
+/** Opaque Provider fact captured before native resume, bound by Core to its new Run. */
+export type AgentNativePromptPredecessor = {
+  run: AgentMuxRunRef
+  previousRun: AgentMuxRunRef
+  sourceId: string
+  evidenceId: string
+}
+
 export type AgentPromptInputPlan =
   | { kind: 'single-phase'; data: string }
   | {
@@ -878,6 +886,7 @@ export type AgentMuxAgentSession = {
   semanticStatus?: AgentStatus
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
+  nativePromptPredecessor?: AgentNativePromptPredecessor
   hookReceipt?: AgentHookReceipt
   /**
    * 最近一个 turn 的真实原生 token 用量，随收尾事件的 hook 回执到达并被覆盖式更新（只保留最新一

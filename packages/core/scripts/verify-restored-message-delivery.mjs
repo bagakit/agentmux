@@ -1,17 +1,19 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { readFile, writeFile, mkdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir, copyFile, rename } from 'node:fs/promises'
+import { constants } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
 const execute = promisify(execFile), root = fileURLToPath(new URL('../../../', import.meta.url)), core = join(root, 'packages/core')
 const args = process.argv.slice(2)
+const resumeBoundary = args.includes('--resume-boundary'), expectedTests = resumeBoundary ? 21 : 12
 assert(args.every(a => ['--native', '--source', '--mutations', '--resume-boundary'].includes(a)), 'Unknown restored delivery proof option')
 const evidence = join(root, '.tmp/verify-restored-message-delivery'); await mkdir(evidence, { recursive: true })
 const report = { schema: 'agentmux.restored-message-delivery.v1', passed: false, callers: [], mutations: [] }
 const run = (argv, options = {}) => execute(process.execPath, argv, { cwd: root, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' }, maxBuffer: 8 * 1024 * 1024, ...options })
-const tests = () => run([join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', join(core, 'scripts/restored-message-delivery.vitest.config.mts')])
+const tests = () => run([join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', join(core, `scripts/${resumeBoundary ? 'restored-prompt-predecessor' : 'restored-message-delivery'}.vitest.config.mts`)])
 try {
   await run([join(core, 'scripts/build.mjs')]); report.build = true
   for (const [file, patterns] of [
@@ -19,15 +21,20 @@ try {
     ['packages/core/src/providers/codex-prompt-execution-evidence.ts', [/openNativeProcessImage\(nativePid, signal\)/u, /nativeProcessBirth\(nativePid, verificationSignal\) === nativeBirth/u]],
     ['packages/core/src/prompt-submission.ts', [/provider\.verifyPromptExecutionTransport\(\{ \.\.\.nativeContext/u]],
     ['packages/core/src/agentmux-cli-commands.ts', [/command\('agent\.send'/u, /execution/u]],
-    ['packages/core/test/fixtures/immediate-native-worker.mjs', [/createCodexPromptExecutionTransportVerifier\(\)/u]]
+    ['packages/core/test/fixtures/immediate-native-worker.mjs', [/createCodexPromptExecutionTransportVerifier\(\)/u]],
+    ...(resumeBoundary ? [
+      ['packages/core/src/client.ts', [/provider\.readPromptExecutionEvidence\(/u, /if \(nativePromptEvidence\) next\.nativePromptPredecessor =/u]],
+      ['packages/core/src/prompt-submission.ts', [/session\.nativePromptPredecessor\?\.run\.runId === session\.run\.runId/u, /session\.retiredRuns\.at\(-1\)\?\.runId === session\.nativePromptPredecessor\.previousRun\.runId/u]],
+      ['packages/core/src/agent-session-store.ts', [/run\.runId !== currentRun\.runId/u, /priorRuns\.at\(-1\)\?\.runId !== previousRun\.runId/u]]
+    ] : [])
   ]) {
     const text = await readFile(join(root, file), 'utf8'); for (const pattern of patterns) assert(pattern.test(text), `Missing caller ${file} ${pattern}`)
     report.callers.push({ file, witnesses: patterns.length })
   }
   assert(report.callers.length >= 3)
-  const types = join(evidence, 'typecheck.json'); await writeFile(types, JSON.stringify({ extends: join(core, 'tsconfig.json'), compilerOptions: { noEmit: true, composite: false, rootDir: root }, include: [join(core, 'test/restored-message-delivery.test.ts'), join(core, 'test/native-process-image.test.ts')], exclude: [] }))
+  const types = join(evidence, 'typecheck.json'); await writeFile(types, JSON.stringify({ extends: join(core, 'tsconfig.json'), compilerOptions: { noEmit: true, composite: false, rootDir: root }, include: [join(core, 'test/restored-message-delivery.test.ts'), join(core, 'test/native-process-image.test.ts'), ...(resumeBoundary ? [join(core, 'test/restored-prompt-predecessor.test.ts')] : [])], exclude: [] }))
   await run([join(root, 'node_modules/typescript/bin/tsc'), '--project', types]); report.owningTypes = true
-  const green = await tests(); await writeFile(join(evidence, 'tests.log'), green.stdout + green.stderr); assert(/12 passed/u.test(green.stdout)); report.tests = 12
+  const green = await tests(); await writeFile(join(evidence, 'tests.log'), green.stdout + green.stderr); assert(green.stdout.includes(`${expectedTests} passed`)); report.tests = expectedTests
   if (args.includes('--mutations')) for (const [name, file, before, after] of [
     ['current-writer-version', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', "if (version !== '0.160.1')", 'if (false)'],
     ['historical-version-gate', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', "if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return false", "if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId || (meta.payload)?.cli_version !== '0.160.1') return false"],
@@ -36,15 +43,26 @@ try {
     ['writer-birth', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'await nativeProcessBirth(nativePid, verificationSignal) === nativeBirth', 'true'],
     ['writer-source', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', '!context.nativeSourceId || sourceIdentity(handle.sessionId, source) !== context.nativeSourceId', 'false'],
     ['mapped-image-current', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', '      await image.assertCurrent(verificationSignal)\n      if (version', '      /* deliberately trust a replaced mapped image */\n      if (version'],
-    ['post-probe-unique-writer', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'afterOwners.length === 1 && afterOwners[0] === nativePid', 'true']
+    ['post-probe-unique-writer', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'afterOwners.length === 1 && afterOwners[0] === nativePid', 'true'],
+    ...(resumeBoundary ? [
+      ['resume-predecessor-producer', 'packages/core/src/client.ts', 'if (nativePromptEvidence) next.nativePromptPredecessor = {', 'if (false) next.nativePromptPredecessor = {'],
+      ['resume-evidence-identity', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'predecessor?.evidenceId === evidence.id', 'predecessor !== undefined'],
+      ['resume-source-identity', 'packages/core/src/providers/codex-prompt-execution-evidence.ts', 'if (predecessor && predecessor.sourceId !== sourceId) return null', 'if (false) return null'],
+      ['resume-current-run-store', 'packages/core/src/agent-session-store.ts', 'run.runId !== currentRun.runId || priorRuns.at(-1)?.runId !== previousRun.runId', 'false']
+    ] : [])
   ]) {
     const path = join(root, file), original = await readFile(path, 'utf8'); assert.equal(original.split(before).length - 1, 1, `One exact mutation target: ${name}`)
+    // Preallocate exact original bytes before touching source. Atomic restore
+    // remains possible when the counterfactual exhausts disk space.
+    const backup = path + '.amux-verify-original'
+    await copyFile(path, backup, constants.COPYFILE_EXCL)
     let red
     try {
       await writeFile(path, original.replace(before, after)); red = await tests().then(value => ({ ...value, code: 0 }), error => error)
       assert.notEqual(red.code, 0, `Mutation survived ${name}`); assert(/\d+ failed|FAIL\s+packages\/core\/test/u.test(red.stdout + red.stderr), `No owning assertion ${name}`)
-    } finally { await writeFile(path, original) }
-    assert(/12 passed/u.test((await tests()).stdout)); await writeFile(join(evidence, name + '.log'), red.stdout + red.stderr)
+    } finally { await rename(backup, path) }
+    assert.equal(await readFile(path, 'utf8'), original, `Exact source restore: ${name}`)
+    assert((await tests()).stdout.includes(`${expectedTests} passed`)); await writeFile(join(evidence, name + '.log'), red.stdout + red.stderr)
     report.mutations.push({ name, result: 'RED/restore GREEN' })
   }
   await run([join(core, 'scripts/build.mjs')])

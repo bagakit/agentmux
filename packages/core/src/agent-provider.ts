@@ -32,6 +32,7 @@ import type {
   AgentPromptExecution,
   AgentPromptExecutionContext,
   AgentPromptExecutionEvidence,
+  AgentNativePromptPredecessor,
   AgentTerminalScreenSnapshot,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
@@ -80,6 +81,8 @@ export type AgentProviderPromptExecutionContext = {
   args: readonly string[]
   workspacePath: string
   nativeHandle?: Readonly<AgentNativeSessionHandle>
+  /** Only the exact current Core Run can consume its pre-resume native evidence. */
+  nativePromptPredecessor?: Readonly<AgentNativePromptPredecessor>
 }
 
 export type AgentProvider = {

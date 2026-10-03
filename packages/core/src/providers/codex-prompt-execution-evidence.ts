@@ -116,6 +116,16 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
     const meta = JSON.parse(header.subarray(0, headerEnd).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown } }
     if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return null
     const sourceId = sourceIdentity(handle.sessionId, stat)
+    const predecessor = context.nativePromptPredecessor
+    // The retained source must be exactly the one Core observed before this Run
+    // started. A replacement cannot inherit an initial-idle authorization.
+    if (predecessor && predecessor.sourceId !== sourceId) return null
+    const currentEvidence = (evidence: AgentPromptExecutionEvidence): AgentPromptExecutionEvidence =>
+      predecessor?.evidenceId === evidence.id
+        ? { sourceId, id: createHash('sha256').update(JSON.stringify([
+          'resumed-native-initial', predecessor.run.runId, sourceId, predecessor.evidenceId
+        ])).digest('base64url'), state: 'idle' }
+        : evidence
     const start = Math.max(0, size - TAIL_BYTES)
     const tail = Buffer.alloc(size - start)
     await file.read(tail, 0, tail.length, start)
@@ -136,14 +146,14 @@ export async function readCodexPromptExecutionEvidence(context: AgentProviderPro
       if ((!boundary && !turnRecord) || !event) continue
       if (typeof event.turn_id !== 'string' || !event.turn_id || !Number.isSafeInteger(item.ordinal)) return null
       const state = !boundary || event.type === 'task_started' ? 'working' : 'ended'
-      return { sourceId, id: createHash('sha256').update(JSON.stringify([sourceId, item.ordinal, item.type, event.type, event.turn_id])).digest('base64url'),
+      return currentEvidence({ sourceId, id: createHash('sha256').update(JSON.stringify([sourceId, item.ordinal, item.type, event.type, event.turn_id])).digest('base64url'),
         nativeTurnId: event.turn_id, state,
         ...(event.type === 'task_complete' ? { endReason: 'completed' as const } :
-          event.type === 'turn_aborted' && event.reason === 'interrupted' ? { endReason: 'interrupted' as const } : {}) }
+          event.type === 'turn_aborted' && event.reason === 'interrupted' ? { endReason: 'interrupted' as const } : {}) })
     }
     // A complete, small new transcript with no turn can prove initial idle. A
     // retained suffix cannot make the same assertion.
-    return start === 0 ? { sourceId, id: sourceId, state: 'idle' } : null
+    return start === 0 ? currentEvidence({ sourceId, id: sourceId, state: 'idle' }) : null
   } catch (error) {
     if (error instanceof SyntaxError) return null
     throw error
