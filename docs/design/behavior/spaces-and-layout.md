@@ -332,7 +332,7 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 
 ## 跨设备关联项目组
 
-出现 Remote 时，Space 中的本机目录分区明确标为本机（例如 `This Mac`），各 Remote 以可读机器名称呈现自己的 Folders 分区，与本机并列；未出现 Remote 时保留 `Folders`。不能把 Remote 埋成混合 Folders 内的路径组。目录按原 Host 身份归属，不能混入其他机器的分区。设备暂不可用仍保留其原目录投影，折叠与过滤不改变资源或 Session。
+出现 Remote 时，Space 中的本机目录分区使用可读的本机名称，各 Remote 以可读机器名称呈现自己的 Folders 分区，与本机并列；未出现 Remote 时保留 `Folders`。不能把 Remote 埋成混合 Folders 内的路径组。已保存或用户自定义的 Host 名称优先，不因系统差异自动重写。新本机默认名称按已知系统表达：macOS 为 `This Mac`，Windows 为 `This PC`，其他系统或没有平台事实时为 `This Computer`；呈现消费原 Host 名称，不从名称、页面或项目猜平台。目录按原 Host 身份归属，不能混入其他机器的分区。设备暂不可用仍保留其原目录投影，折叠与过滤不改变资源或 Session。
 
 Space 中通过 Git 仓库来源提示已登记项目的跨设备关联，用户手动选择成员创建独立项目组，并可随时解散。Git 识别只提供建议：优先使用 `origin` 的 fetch 来源；没有 `origin` 时只有唯一 remote 才可确定来源。HTTPS、SSH 与 scp 的等价仓库来源统一比较，不以同名、目录名或相同提交猜项目身份，不把 fork 的共同 upstream 当成同一项目。来源歧义、非 Git、无 remote 和连接未知分别如实表达；识别不 fetch、不改 Git，也不阻断手动编组。
 

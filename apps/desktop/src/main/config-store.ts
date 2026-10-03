@@ -2,7 +2,7 @@ import { mkdir, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
-import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
+import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile } from '@agentmux/core'
 import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { PROMPT_REACTION_ICONS, isPromptReactionCode } from '@agentmux/core/prompt-reaction'
@@ -356,7 +356,7 @@ void _schemaEnumsAreExactlyTheirUnions
 
 export const DEFAULT_CONFIG: AppConfig = {
   version: CONFIG_VERSION,
-  hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+  hosts: [{ id: 'local', kind: 'local', label: defaultLocalHostLabel() }],
   executors: {
     codex: { label: 'Codex', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: true },
     claude: { label: 'Claude', providerId: 'claude', command: 'claude', args: [], env: {}, injectAgentMuxGuide: true },

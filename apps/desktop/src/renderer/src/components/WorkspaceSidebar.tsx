@@ -1,4 +1,4 @@
-import { HostBadge } from './HostBadge'
+import { HostBadge, HostIcon } from './HostBadge'
 import { hostIdentityProjection } from '../lib/region-execution-host'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import { projectGroupsFor } from '../lib/cross-device-project-groups'
@@ -123,7 +123,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
     const hostIds = [...new Set(['local', ...(config?.hosts.map(host => host.id) ?? []), ...projects.map(project => project.hostId)])]
     const remote = hostIds.some(id => id !== 'local')
     return hostIds.map(hostId => ({ hostId, key: folderSectionKey(hostId),
-      label: hostId === 'local' && !remote ? 'Folders' : config?.hosts.find(host => host.id === hostId)?.label ?? (hostId === 'local' ? 'This Mac' : hostId),
+      label: hostId === 'local' && !remote ? 'Folders' : hostIdentityProjection(hostId, config?.hosts.find(host => host.id === hostId)).label,
       projects: projects.filter(project => project.hostId === hostId),
       groups: shownGroups.filter(group => group.hostId === hostId)
     }))
@@ -388,7 +388,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
           const folderSessions = [...new Map(section.projects.flatMap(project => sessionsByProject.get(project.id) ?? []).map(session => [session.id, session])).values()]
           return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
-          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <Folders size={14} />}
+          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : folderSections.length > 1 ? <HostIcon kind="local" size={14} /> : <Folders size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed && folderSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={folderSessions}
