@@ -3898,6 +3898,11 @@ export class AgentMuxClient {
     const provider = this.providers.get(session.providerId)
     const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const renderObservation = new AbortController()
+    const transportQualification = input.execution === 'immediate'
+      ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
+        const run = await this.requireCurrentAgentRun(session)
+        return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal)
+      }, input.signal) : undefined
     const delivered = await this.serializeAgentInput(session, async (current, run) => {
       let plan = ordinaryPlan
       if (questionReply) {
@@ -3918,7 +3923,7 @@ export class AgentMuxClient {
         ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
       } : message
       return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession)
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification)
     }, renderObservation)
     if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
@@ -5494,6 +5499,40 @@ export class AgentMuxClient {
     }
   }
 
+  /** Read-only qualification shares cancellation with input observers, but never occupies the byte lane. */
+  private async observeAgentInputPreparation<T>(session: AgentMuxAgentSession, timeoutMs: number,
+    read: (signal: AbortSignal) => Promise<T>, requestedSignal?: AbortSignal): Promise<T> {
+    const lane = this.agentInputTails.get(session.agentSessionId) ?? {
+      tail: Promise.resolve(), renderObservations: new Set<{ run: AgentMuxRunRef; controller: AbortController }>() }
+    const controller = new AbortController()
+    const cancelRequested = () => controller.abort(requestedSignal?.reason)
+    if (requestedSignal?.aborted) cancelRequested()
+    else requestedSignal?.addEventListener('abort', cancelRequested, { once: true })
+    const observation = { run: session.run, controller }
+    lane.renderObservations.add(observation)
+    this.agentInputTails.set(session.agentSessionId, lane)
+    const timeout = setTimeout(() => controller.abort(new AgentMuxError('Native input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED')), timeoutMs)
+    let abort!: () => void
+    const cancelled = new Promise<never>((_resolve, reject) => {
+      abort = () => reject(controller.signal.reason ?? new AgentMuxError('Native input preparation was cancelled.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED'))
+      controller.signal.addEventListener('abort', abort, { once: true })
+      if (controller.signal.aborted) abort()
+    })
+    try { return await Promise.race([read(controller.signal), cancelled]) }
+    finally {
+      clearTimeout(timeout)
+      controller.signal.removeEventListener('abort', abort)
+      requestedSignal?.removeEventListener('abort', cancelRequested)
+      lane.renderObservations.delete(observation)
+      if (this.agentInputTails.get(session.agentSessionId) === lane && lane.renderObservations.size === 0) {
+        const tail = lane.tail
+        void tail.finally(() => {
+          if (this.agentInputTails.get(session.agentSessionId) === lane && lane.tail === tail && lane.renderObservations.size === 0) this.agentInputTails.delete(session.agentSessionId)
+        })
+      }
+    }
+  }
+
   private async serializeAgentInput<T>(
     requestedSession: AgentMuxAgentSession,
     operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => Promise<T>,
@@ -5536,7 +5575,7 @@ export class AgentMuxClient {
       throw error
     } finally {
       if (observation) lane.renderObservations.delete(observation)
-      if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === tail) {
+      if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === tail && lane.renderObservations.size === 0) {
         this.agentInputTails.delete(agentSessionId)
       }
     }

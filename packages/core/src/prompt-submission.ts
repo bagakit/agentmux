@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { AgentProviderRegistry, type AgentProviderPromptExecutionContext } from './agent-provider.js'
+import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
@@ -28,6 +28,32 @@ const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 
 /** Bound the optional initial-composer observation; expiry never disables prompt input. */
 const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
+
+/** One original pre-input observation, not durable authorization or another submission owner. */
+export type AgentPromptTransportQualification = Readonly<{
+  agentSessionId: string
+  run: AgentMuxRunRef
+  processId: number | null
+  nativeHandleIdentity: string
+  submissionId: string
+  promptDigest: string
+  inputByte: number
+  deadline: number
+  transport: AgentProviderPreparedPromptTransport
+}>
+
+/** Abandon only a read-only observation when its original preparation expires or is cancelled. */
+async function observePromptTransport<T>(signal: AbortSignal, read: () => Promise<T>): Promise<T> {
+  signal.throwIfAborted()
+  let abort!: () => void
+  const cancelled = new Promise<never>((_resolve, reject) => {
+    abort = () => reject(signal.reason)
+    signal.addEventListener('abort', abort, { once: true })
+    if (signal.aborted) abort()
+  })
+  try { return await Promise.race([read(), cancelled]) }
+  finally { signal.removeEventListener('abort', abort) }
+}
 
 function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
   return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
@@ -105,6 +131,47 @@ export class AgentPromptSubmissionCoordinator {
     this.readinessCancels.get(agentSessionId)?.()
   }
 
+  /** Called outside the input lane. A claimed/unknown original operation is never prepared anew. */
+  async qualifyInputTransport(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string,
+    prompt: string, signal: AbortSignal): Promise<AgentPromptTransportQualification | undefined> {
+    const provider = this.deps.providers.get(session.providerId)
+    if (!provider.preparePromptExecutionTransport) return undefined
+    const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+    const previous = current.promptCompletionAdmission
+    const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
+      !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
+    if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId || unfinished) return undefined
+    const deadline = Date.now() + 40_000
+    try {
+      this.deps.assertAgentRun(current, run)
+      if (run.state.type !== 'running' || run.acceptedInputBytes === null) {
+        throw new AgentMuxError('The original Run input fence is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+      }
+      const context: AgentProviderPromptExecutionContext = { args: run.args, workspacePath: current.workspacePath, signal,
+        ...(current.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
+        ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}),
+        ...(current.nativePromptPredecessor?.run.runId === current.run.runId &&
+          current.retiredRuns.at(-1)?.runId === current.nativePromptPredecessor.previousRun.runId
+          ? { nativePromptPredecessor: current.nativePromptPredecessor } : {}) }
+      const evidence = await provider.readPromptExecutionEvidence?.(context)
+      const transport = await provider.preparePromptExecutionTransport({ ...context, signal,
+        ...(evidence ? { nativeSourceId: evidence.sourceId } : {}) })
+      if (!evidence || !transport || transport.nativeSourceId !== evidence.sourceId) {
+        throw new AgentMuxError('The original native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+      }
+      signal.throwIfAborted()
+      return { agentSessionId: current.agentSessionId, run: current.run, processId: run.pid,
+        nativeHandleIdentity: JSON.stringify(current.nativeHandle ?? null), submissionId,
+        promptDigest: createHash('sha256').update(prompt).digest('base64url'), inputByte: run.acceptedInputBytes,
+        deadline, transport }
+    } catch (error) {
+      await this.publishDeliveryDegrade(current, { state: 'unverified', mode: 'degraded',
+        reason: 'immediate-context-unconfirmed', submissionId, run: current.run, observedAt: Date.now() })
+      throw new AgentMuxError('Immediate input preparation is unconfirmed. The original message and healthy terminal are kept.',
+        'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', error instanceof AgentMuxError ? error.code : 'unknown')
+    }
+  }
+
   async submitInputPlan(
     session: AgentMuxAgentSession,
     run: CtxmuxAdapterRun,
@@ -120,7 +187,8 @@ export class AgentPromptSubmissionCoordinator {
     message?: AgentPromptMessageContent,
     execution: AgentPromptExecution = 'default',
     expectedFutureIntent?: AgentFuturePromptOccurrence,
-    assertSession?: (session: AgentMuxAgentSession) => void
+    assertSession?: (session: AgentMuxAgentSession) => void,
+    transportQualification?: AgentPromptTransportQualification
   ): Promise<AgentPromptMessageContent | undefined> {
     try {
       return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -180,7 +248,7 @@ export class AgentPromptSubmissionCoordinator {
             this.deps.assertAgentRun(current, currentRun)
           }
           await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession)
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession, transportQualification)
           return structuredClone(message)
         } catch (error) {
           if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
@@ -220,7 +288,8 @@ export class AgentPromptSubmissionCoordinator {
     message?: AgentPromptMessageContent,
     execution: AgentPromptExecution = 'default',
     expectedFutureIntent?: AgentFuturePromptOccurrence,
-    assertSession?: (session: AgentMuxAgentSession) => void
+    assertSession?: (session: AgentMuxAgentSession) => void,
+    transportQualification?: AgentPromptTransportQualification
   ): Promise<void> {
     let confirmedFutureIdle = false
     if (expectedFutureIntent !== undefined && session.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(session)) {
@@ -245,11 +314,23 @@ export class AgentPromptSubmissionCoordinator {
     }
     const assertInteraction = (current: AgentMuxAgentSession): void => {
       assertSession?.(current)
+      if (transportQualification && (transportQualification.agentSessionId !== current.agentSessionId ||
+          !sameRun(transportQualification.run, current.run) ||
+          transportQualification.nativeHandleIdentity !== JSON.stringify(current.nativeHandle ?? null))) {
+        throw new AgentMuxError('The original native Session changed during input preparation.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+      }
       if (current.pendingInteraction) throw new AgentMuxError(
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     }
     const assertAdmission = (current: AgentMuxAgentSession): void => {
       if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
+      if (transportQualification) {
+        const firstInput = current.promptCompletionAdmission?.submissionId !== submissionId || !current.promptCompletionAdmission.frameRefresh
+        if (renderSignal?.aborted || Date.now() >= transportQualification.deadline || run.pid !== transportQualification.processId ||
+            firstInput && run.acceptedInputBytes !== transportQualification.inputByte) {
+          throw new AgentMuxError('The original input boundary changed before admission.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        }
+      }
       assertInteraction(current)
       if (expectedCompletionId === undefined && expectedFutureIntent === undefined) return
       if (expectedInputByte === undefined) throw new AgentMuxError('Automatic prompt admission is missing its input fence.', 'INVALID_AGENT_PROMPT')
@@ -445,13 +526,36 @@ export class AgentPromptSubmissionCoordinator {
     }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
     let preparationGeneration: number | undefined
+    const verifyTransport = async (nativeSourceId: string | undefined, firstInputFence: boolean): Promise<void> => {
+      const qualified = transportQualification
+      if (qualified && (qualified.agentSessionId !== session.agentSessionId || !sameRun(qualified.run, session.run) ||
+          qualified.processId !== run.pid || qualified.nativeHandleIdentity !== JSON.stringify(session.nativeHandle ?? null) ||
+          qualified.submissionId !== submissionId || qualified.promptDigest !== createHash('sha256').update(prompt).digest('base64url') ||
+          qualified.transport.nativeSourceId !== nativeSourceId || Date.now() >= qualified.deadline)) {
+        throw new AgentMuxError('Original transport preparation no longer matches this message.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+      }
+      const remaining = qualified ? qualified.deadline - Date.now() : 8_000
+      const signals = [AbortSignal.timeout(Math.max(1, remaining)), ...(renderSignal ? [renderSignal] : []), ...(signal ? [signal] : [])]
+      const context = { ...nativeContext, ...(nativeSourceId ? { nativeSourceId } : {}), signal: AbortSignal.any(signals) }
+      const confirmed = await observePromptTransport(context.signal, async () => qualified
+        ? await qualified.transport.verifyCurrentTransport(context)
+        : !provider.verifyPromptExecutionTransport || await provider.verifyPromptExecutionTransport(context))
+      if (!confirmed) throw new AgentMuxError('The native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+      if (qualified) {
+        const fresh = await observePromptTransport(context.signal, () => this.deps.kernel.status(run.runId))
+        this.deps.assertAgentRun(session, fresh)
+        context.signal.throwIfAborted()
+        if (fresh.state.type !== 'running' || fresh.pid !== qualified.processId ||
+            firstInputFence && fresh.acceptedInputBytes !== qualified.inputByte) {
+          throw new AgentMuxError('Input or process identity changed during preparation.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        }
+        run = fresh
+      }
+    }
     if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {
       try {
         const transportEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
-        if (provider.verifyPromptExecutionTransport && !await provider.verifyPromptExecutionTransport({ ...nativeContext,
-          ...(transportEvidence ? { nativeSourceId: transportEvidence.sourceId } : {}) })) {
-          throw new AgentMuxError('The native input transport can receive unowned pending input.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
-        }
+        await verifyTransport(transportEvidence?.sourceId, session.promptCompletionAdmission?.submissionId !== submissionId || !session.promptCompletionAdmission.frameRefresh)
         const observation: { context: 'idle' | 'interruptible' | 'unavailable' } = { context: 'unavailable' }
         let frameRefresh = session.promptCompletionAdmission?.submissionId === submissionId
           ? session.promptCompletionAdmission.frameRefresh : undefined
@@ -478,13 +582,15 @@ export class AgentPromptSubmissionCoordinator {
           // An acknowledged refresh at an older geometry can be renewed. An
           // uncertain request always rejoins its original Runtime receipt first.
           if (!frameRefresh || frameRefresh.acknowledged && frameRefresh.resizeRevision !== resizeRevision) {
+            if (transportQualification) await verifyTransport(transportEvidence.sourceId, frameRefresh === undefined)
             const refreshedRun = await this.deps.kernel.status(run.runId)
             this.deps.assertAgentRun(session, refreshedRun)
             run = refreshedRun
             if (run.acceptedInputBytes === null) throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
             const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'refresh',
               JSON.stringify([plan.prepare.refresh, transportEvidence.sourceId, resizeRevision]))
-            const startByte = run.acceptedInputBytes, endByte = startByte + Buffer.byteLength(plan.prepare.refresh)
+            const startByte = transportQualification && frameRefresh === undefined ? transportQualification.inputByte : run.acceptedInputBytes
+            const endByte = startByte + Buffer.byteLength(plan.prepare.refresh)
             const frozen = await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
               assertAdmission(stored)
               const next = claimInput(stored, operationId, startByte, endByte, false)
@@ -542,6 +648,7 @@ export class AgentPromptSubmissionCoordinator {
         if (provider.verifyPromptExecutionTransport && transportEvidence?.sourceId !== nativeEvidence?.sourceId) {
           throw new AgentMuxError('Native execution source changed during transport authorization.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
         }
+        if (transportQualification) await verifyTransport(nativeEvidence?.sourceId, frameRefresh === undefined)
         const nativeTurnId = nativeEvidence?.nativeTurnId ?? observed.hookReceipt?.nativeTurnId
         if (context === 'interruptible' && (!nativeTurnId || (provider.readPromptExecutionEvidence
           ? nativeEvidence?.state !== 'working' : observed.hookReceipt?.lifecycleEvent === 'turn-end'))) {

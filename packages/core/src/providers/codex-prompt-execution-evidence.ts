@@ -49,7 +49,7 @@ export function createCodexPromptExecutionTransportVerifier(): (context: AgentPr
     if (!context.processId || !Number.isSafeInteger(context.processId) || context.processId <= 0) return false
     const handle = context.nativeHandle
     if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return false
-    const signal = AbortSignal.timeout(8_000)
+    const signal = context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000)
     const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
     let source
     try {
@@ -81,7 +81,8 @@ export function createCodexPromptExecutionTransportVerifier(): (context: AgentPr
         void fact.result.catch(() => { if (versionFact === fact) versionFact = undefined })
       }
       const version = await versionFact.result
-      const verificationSignal = AbortSignal.timeout(8_000)
+      context.signal?.throwIfAborted()
+      const verificationSignal = context.signal ? AbortSignal.any([context.signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000)
       await image.assertCurrent(verificationSignal)
       if (version !== '0.160.1') {
         throw new AgentMuxError(`The current native writer version ${version} does not support verified immediate execution. Ordinary input remains available.`, 'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
