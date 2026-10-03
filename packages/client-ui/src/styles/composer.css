@@ -345,7 +345,7 @@
 .composer-pending__card[data-busy='true'] .composer-pending__state > svg { animation: composer-pending-spin 1s linear infinite; }
 @keyframes composer-pending-spin { to { transform: rotate(360deg); } }
 @keyframes composer-pending-copied { from { opacity: .35; transform: scale(.65); } to { opacity: 1; transform: scale(1); } }
-@media (prefers-reduced-motion: reduce) { .composer-pending__card { transition: none; } .composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy > svg { animation: none; } }
+@media (prefers-reduced-motion: reduce) { .composer-pending__card { transition: none; } .composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; } }
 
 .composer-queued-editor { display: grid; gap: 6px; min-width: 0; }
 .composer-queued-editor label { display: grid; gap: 5px; font-size: var(--fs-meta); color: var(--text-2); }
