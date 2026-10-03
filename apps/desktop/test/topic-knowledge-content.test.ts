@@ -228,7 +228,10 @@ describe('Knowledge entries retain exact source identity through original file C
       expect(global.unavailable).toContainEqual(expect.objectContaining({ code: 'TOPIC_SCOPE_UNCONFIRMED' }))
       const globalCli = await runCompiledObjectCli(['topic', 'knowledge', 'search', '--query', 'source-block'], env)
       expect(globalCli.code, globalCli.stderr).toBe(0)
-      expect(JSON.parse(globalCli.stdout)).toMatchObject({ ok: true, operation: 'topic.knowledge.search', result: global })
+      expect(JSON.parse(globalCli.stdout)).toMatchObject({ ok: true, operation: 'topic.knowledge.search', result: {
+        entries: global.entries, documents: global.documents, unavailable: global.unavailable,
+        observation: { record: { query: 'source-block', topicId: null, outcome: 'partial', counters: { entryMatches: 1 } } }
+      } })
       expect(await f.state.read()).toEqual(originalState)
       expect(await readFile(join(privateDirectory, ENTRY + '.json'), 'utf8')).toBe(privateBytes)
       expect(await readFile(join(directory, 'topic.md'), 'utf8')).toBe(originalTopic)
