@@ -50,7 +50,9 @@
 
 [`AGENTMUX_CLI_COMMANDS`](../../packages/core/src/agentmux-cli-commands.ts) 是对象命令的共同注册来源，`parseAgentMuxCliInvocation` 从它解析参数，[help 与运行时技能](../../packages/core/src/agentmux-cli-help.ts) 从它生成说明。[agentmux.ts](../../packages/core/src/agentmux.ts) 处理 endpoint、调用与流输出，业务查询、角色绑定和消息编排进入 [`AgentMuxRpcService`](../../packages/core/src/public-rpc-service.ts)，不在 CLI 直接读写本地业务事实。公共方法、参数、结果与订阅类型归 [public-rpc.ts](../../packages/core/src/public-rpc.ts)；Main 在 [ipc.ts](../../apps/desktop/src/main/ipc.ts) 注入原 owner 的真实能力。
 
-当前 [Server](../../packages/core/src/public-rpc-server.ts) 与 [Client](../../packages/core/src/public-rpc-client.ts) 使用同一 JSON-RPC 2.0 合同，支持默认 Unix socket、显式启用的 HTTP／SSE，以及 SSH stdio 转发到既有 Unix 服务。Hosted SDK 通过该服务管理远端 Core Session；它与 ctxmux 的原生 Remote Run 协议是不同接入层，连接条件和分层边界见 [系统接入边界](../architecture/system-ownership.md#当前接入边界)。[对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 持有行为约束；本页不复制对象树，也不以服务入口存在代签所有宿主能力或安装后的可用性。
+当前 [Server](../../packages/core/src/public-rpc-server.ts) 与 [Client](../../packages/core/src/public-rpc-client.ts) 使用同一 JSON-RPC 2.0 合同，支持默认 Unix socket、显式启用的 HTTP／SSE，SSH stdio 转发到既有 Unix 服务，以及端到端加密 Relay 帧传输。Hosted SDK 通过该服务管理远端 Core Session；它与 ctxmux 的原生 Remote Run 协议是不同接入层，连接条件和分层边界见 [系统接入边界](../architecture/system-ownership.md#当前接入边界)。[对象优先 CLI 与统一公共业务服务](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务) 持有行为约束；本页不复制对象树，也不以服务入口存在代签所有宿主能力或安装后的可用性。
+
+手机连接的来源为 [Relay framing](../../packages/core/src/public-rpc-relay.ts)、[有限浏览器 Hosted adapter](../../packages/core/src/relay-hosted.ts)、[设备领域类型及严格解析](../../packages/core/src/public-rpc-device.ts)和 [Host 原 Authority 组合](../../apps/host/src/host.ts)。`agentmux device link` 返回当前完整公有 offer 链接，`device ls` 回读连接与设备事实，`device revoke --device ID` 撤销精确设备；设备命名只沿已认证的 `device hello --name NAME`。GUI 复用原服务，Relay 与手机页面由本机 Host 提供。接入、身份、重连与权限约束唯一沿[《手机版 Relay 连接》](../design/behavior/public-control.md#手机版-relay-连接)，构建成功不代替真机验收。
 
 核对能力按同一对象寻找业务类型、实际 owner、服务接线、CLI／Client 消费及验证证据；查看事实、修改状态与执行 Agent 的副作用须各自明确。CLI 与 GUI 是同一业务 owner 的消费面，不成为事实镜像。运行中的 help 只说明该执行版本公开什么；源码、构建、安装与当前实例的身份需分别核对。
 

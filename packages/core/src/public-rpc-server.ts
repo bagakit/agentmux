@@ -54,6 +54,7 @@ export class AgentMuxControlServer {
   private server: Server | undefined
   private httpServer: HttpServer | undefined
   private readonly sockets = new Set<Socket>()
+  private readonly externalReaders = new Set<() => void>()
   private readonly service: AgentMuxRpcService
   private readonly dispatcher: AgentMuxRpcDispatcher
   private endpointIdentity: { dev: number; ino: number } | undefined
@@ -118,10 +119,11 @@ export class AgentMuxControlServer {
       } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
       this.endpointIdentity = undefined
     }
+    for (const release of [...this.externalReaders]) release()
     await this.service.dispose()
   }
   private connection(send: (frame: AgentMuxRpcFrame) => void | Promise<void>, close: () => void,
-    transport: 'unix' | 'http', principal: AgentMuxRpcPrincipal = this.localPrincipal, authority?: AgentMuxRpcHttpAuthorization) {
+    transport: 'unix' | 'http' | 'relay', principal: AgentMuxRpcPrincipal = this.localPrincipal, authority?: AgentMuxRpcHttpAuthorization) {
     const controller = new AbortController()
     const subscriptions = new Map<string, { method: AgentMuxRpcStreamMethod; dispose(): void | Promise<void> }>()
     const context: AgentMuxRpcConnection = {
@@ -144,6 +146,31 @@ export class AgentMuxControlServer {
     authority?.signal?.addEventListener('abort', revoked, { once: true })
     if (authority?.signal?.aborted) connection.dispose()
     return connection
+  }
+  /** The original Host authenticates a device before lending this common dispatcher to a framed transport. */
+  openAuthenticatedFrames(options: {
+    authorization: AgentMuxRpcHttpAuthorization
+    send(frame: AgentMuxRpcFrame): void | Promise<void>
+    close(): void
+  }): { receive(frame: unknown): Promise<void>; dispose(): void } {
+    const authorization = options.authorization
+    if (authorization.principal.kind !== 'device' || !authorization.principal.id || authorization.signal?.aborted) {
+      throw new AgentMuxError('Relay RPC requires the original Host authenticated device.', 'CONTROL_PERMISSION_DENIED')
+    }
+    const channel = this.connection(options.send, options.close, 'relay', authorization.principal, authorization)
+    const dispose = () => { this.externalReaders.delete(dispose); channel.dispose() }
+    this.externalReaders.add(dispose)
+    return {
+      dispose,
+      receive: async value => {
+        if (channel.context.signal.aborted) return
+        const context = { ...channel.context, afterResponse: [] as Array<() => void | Promise<void>> }
+        const response = await this.dispatcher.receive(value, context)
+        if (context.signal.aborted) return
+        if (response) await channel.context.send(response as AgentMuxRpcFrame)
+        for (const flush of context.afterResponse) await flush()
+      }
+    }
   }
   private accept(socket: Socket): void {
     this.sockets.add(socket)

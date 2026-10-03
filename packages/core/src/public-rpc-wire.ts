@@ -16,7 +16,7 @@ export type AgentMuxRpcConnection = {
   /** Trusted transport identity; JSON params cannot mint or replace it. */
   principal?: AgentMuxRpcPrincipal
   /** Actual receiving hop; a frame cannot assert its own provenance. */
-  transport?: 'unix' | 'http'
+  transport?: 'unix' | 'http' | 'relay'
   signal: AbortSignal
   stream: boolean
   send(frame: AgentMuxRpcFrame): void | Promise<void>

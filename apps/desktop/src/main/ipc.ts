@@ -429,7 +429,7 @@ export async function registerIpc(args: {
   const requireTrustedSender = (channel: PrivilegedChannel, event: IpcMainInvokeEvent): void =>
     assertSenderTrusted(senderTrust(channel, event.sender, args.window.webContents))
 
-  const deviceIntents = registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })
+  registerDeviceManagementIpc({ handleWithEvent, assertTrusted: requireTrustedSender })
 
   const resolveInputHistoryScope = (target: BrowserInputHistoryTarget): BrowserInputHistoryScope => {
     let scope: BrowserInputHistoryScope
@@ -1298,7 +1298,6 @@ export async function registerIpc(args: {
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
-    deviceIntent: intent => deviceIntents.consume(intent),
     execute: executeControl,
     spatialState,
     topics: topicKnowledge,

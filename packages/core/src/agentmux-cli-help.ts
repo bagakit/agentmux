@@ -41,16 +41,14 @@ needs those selectors; a resource ID alone does not prove a unique display locat
 If a reply is lost or unknown, read agentmux space inspect --operation-id OPERATION first.
 An unknown operation remains unconfirmed; do not blindly retry the move or create another Agent.`
 
-const DEVICE_GUIDE = `Device administration accepts local Unix user requests only.
-Managed Agents, ordinary approved devices, HTTP and SSH cannot administer devices.
-A Unix connection identifies the request origin; it is not user approval.
-The original Host presents an actual local OS confirmation before any authorization change.
-No CLI confirmation flag or JSON approval field can replace that decision.
-After a missing reply, read agentmux device ls and compare the exact deviceId facts.
-Do not automatically retry device invite, approve, reject or revoke.
-A current read cannot certify an earlier lost confirmation or mutation receipt.`
+const DEVICE_GUIDE = `Device ls/link/revoke require a local Unix user; managed Agents and remote clients cannot administer devices.
+Device link returns the current complete public offer URL; open it on a phone on the same local network.
+Device hello names only the device bound to its completed encrypted handshake.
+No pairing code, local OS approval or certificate installation is part of the connection flow.
+After a missing revocation reply, read agentmux device ls and compare the exact deviceId facts.
+Never automatically replay a device revocation.`
 
-const COMMON = `Public methods use the same typed JSON-RPC service over Unix, HTTP or SSH.
+const COMMON = `Public methods use the same typed JSON-RPC service over Unix, HTTP, encrypted Relay or SSH.
 Select one transport with agentmux --endpoint <descriptor> <object> <action>.
 Run system endpoint to discover the default without connecting.
 RPC wire IDs only correlate transport messages; --operation-id is the business identity.

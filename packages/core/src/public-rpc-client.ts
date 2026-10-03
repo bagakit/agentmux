@@ -1,3 +1,9 @@
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+import { loadOrCreateRelayKeyPair } from './rpc-relay-keypair.js'
+import { openAgentMuxRpcRelayRequest } from './public-rpc-relay.js'
+import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
+import { type KeyPair } from '@agentmux/relay/e2ee'
 import { randomUUID } from 'node:crypto'
 import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection } from 'node:net'
@@ -52,6 +58,10 @@ export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<stri
   }
   let url: URL
   try { url = new URL(value) } catch { throw new AgentMuxError('Invalid RPC endpoint URI.', 'INVALID_CLI_ARGUMENT') }
+  if (url.hash.startsWith('#offer=')) {
+    try { const offer = parseConnectionOfferUrl(value); if (offer) return { transport: 'relay', offer } }
+    catch (error) { throw new AgentMuxError(error instanceof Error ? error.message : 'Invalid Relay offer.', 'INVALID_CLI_ARGUMENT') }
+  }
   if (url.protocol === 'http:' || url.protocol === 'https:') {
     if (url.username || url.password || url.hash || url.pathname !== '/' || url.search) throw new AgentMuxError('HTTP RPC endpoint must identify its root service.', 'INVALID_CLI_ARGUMENT')
     return { transport: 'http', url: url.href, ...(env.AGENTMUX_RPC_HTTP_TOKEN ? { token: env.AGENTMUX_RPC_HTTP_TOKEN } : {}) }
@@ -66,7 +76,7 @@ export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<stri
       ...(url.port ? { port: Number(url.port) } : {}), ...(params.has('socket') ? { socketPath: params.get('socket')! } : {}),
       ...(params.has('command') ? { command: params.get('command')! } : {}) }
   }
-  throw new AgentMuxError('RPC endpoint transport must be unix, http or ssh.', 'INVALID_CLI_ARGUMENT')
+  throw new AgentMuxError('RPC endpoint must be unix, http, ssh or a Relay connection-offer URL.', 'INVALID_CLI_ARGUMENT')
 }
 function timeout(method: AgentMuxRpcMethod): number {
   return Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)
@@ -92,7 +102,8 @@ export function agentMuxRpcSshArguments(endpoint: Extract<AgentMuxRpcEndpoint, {
 }
 type Reader = { dispose(): Promise<void> }
 async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCRequest, onFrame: (frame: unknown) => void,
-  onEnd: (error?: Error) => void, signal: AbortSignal): Promise<Reader> {
+  onEnd: (error?: Error) => void, signal: AbortSignal, relayKeyPair?: KeyPair): Promise<Reader> {
+  if (endpoint.transport === 'relay') return await openAgentMuxRpcRelayRequest({ offer: endpoint.offer, ...(relayKeyPair ? { keyPair: relayKeyPair } : {}) }, request, onFrame, onEnd, signal)
   const encoded = rpcEncode(request)
   if (endpoint.transport === 'http') {
     if (!endpoint.token) throw new AgentMuxError('HTTP RPC requires explicit authorization.', 'AGENT_CAPABILITY_INVALID')
@@ -235,7 +246,7 @@ class RpcClient implements AgentMuxRpcClient {
   private ssh: AgentMuxRpcSshTransport | undefined
   private closed = false
   constructor(private readonly endpoint: AgentMuxRpcEndpoint, private readonly credentials?: AgentMuxRpcCredentials,
-    private readonly runtimeFence?: AgentMuxRuntimeFence) {}
+    private readonly runtimeFence?: AgentMuxRuntimeFence, private readonly relayKeyPair?: KeyPair) {}
   private async exchange<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     handlers?: AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, signal?: AbortSignal, options: AgentMuxRpcCallOptions = {}): Promise<{ response: JSONRPCResponse; reader: Reader; subscriptionId?: string }> {
     if (this.closed) throw new AgentMuxError('RPC client is disposed.', 'CONTROL_CANCELLED')
@@ -253,9 +264,7 @@ class RpcClient implements AgentMuxRpcClient {
     const abort = () => controller.abort()
     signal?.addEventListener('abort', abort, { once: true })
     let deadline: ReturnType<typeof setTimeout> | undefined
-    const deviceRecovery = () => method === 'device.invite'
-      ? 'Read agentmux device ls for original device facts. The lost invitation token cannot be recovered; do not automatically request another invitation.'
-      : 'Read agentmux device ls and inspect the exact device ID facts before an explicit new request. Do not automatically retry device management.'
+    const deviceRecovery = () => 'Read agentmux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
     const armDeadline = () => {
       // Finite intents remain with their admitted owner until its receipt, an
       // explicit cancellation or transport failure. Only reader opening is timed.
@@ -319,7 +328,7 @@ class RpcClient implements AgentMuxRpcClient {
         if (this.endpoint.transport === 'ssh') {
           if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined })
           opening = this.ssh.open(payload, receive, end, controller.signal, armDeadline)
-        } else { armDeadline(); opening = openRequest(this.endpoint, payload, receive, end, controller.signal) }
+        } else { armDeadline(); opening = openRequest(this.endpoint, payload, receive, end, controller.signal, this.relayKeyPair) }
         reader = await opening
       } catch (error) { end(transportError(error)); return }
       finalReader = { dispose: async () => { end(new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED')); await reader!.dispose() } }
@@ -334,8 +343,8 @@ class RpcClient implements AgentMuxRpcClient {
     return { response, reader: finalReader!, ...(subscriptionId === undefined ? {} : { subscriptionId }) }
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options: AgentMuxRpcCallOptions = {}): Promise<AgentMuxRpcResult<M>> {
-    if (isAgentMuxRpcDeviceMethod(method) && this.endpoint.transport !== 'unix') {
-      throw new AgentMuxError('Device management requires the local Unix endpoint and original Host confirmation. Nothing was connected or submitted.', 'CONTROL_PERMISSION_DENIED')
+    if (isAgentMuxRpcDeviceMethod(method) && method !== 'device.hello' && this.endpoint.transport !== 'unix') {
+      throw new AgentMuxError('Device management requires the local Unix endpoint and a local user. Nothing was connected or submitted.', 'CONTROL_PERMISSION_DENIED')
     }
     if (isAgentMuxRpcStream(method, rpcRecord(params))) throw new AgentMuxError('This method returns a subscription; use subscribe().', 'INVALID_CONTROL_REQUEST')
     const exchange = await this.exchange(method, params, undefined, options.signal, options)
@@ -349,7 +358,9 @@ class RpcClient implements AgentMuxRpcClient {
     this.ssh?.dispose(); this.ssh = undefined
     await Promise.all([...this.readers].map(reader => reader.dispose())); this.readers.clear() }
 }
-export async function connectAgentMuxRpc(options: { endpoint?: AgentMuxRpcEndpoint; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence } = {}): Promise<AgentMuxRpcClient> {
+export async function connectAgentMuxRpc(options: { endpoint?: AgentMuxRpcEndpoint; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence; relayKeyPair?: KeyPair } = {}): Promise<AgentMuxRpcClient> {
   if (options.credentials) { rpcRecord(options.credentials, ['agentSessionId', 'capability']); rpcString(options.credentials.agentSessionId, 'Caller Session ID'); rpcString(options.credentials.capability, 'Caller capability') }
-  return new RpcClient(options.endpoint ?? agentMuxRpcEndpoint(), options.credentials, options.runtimeFence)
+  const endpoint = options.endpoint ?? agentMuxRpcEndpoint()
+  const relayKeyPair = endpoint.transport === 'relay' ? options.relayKeyPair ?? await loadOrCreateRelayKeyPair(join(homedir(), '.agentmux', 'relay-client-keypair.json')) : undefined
+  return new RpcClient(endpoint, options.credentials, options.runtimeFence, relayKeyPair)
 }

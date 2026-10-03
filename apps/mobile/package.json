@@ -27,7 +27,8 @@
     "@xterm/xterm": "6.1.0-beta.303",
     "lucide-react": "^0.468.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "@agentmux/relay": "workspace:*"
   },
   "devDependencies": {
     "@capacitor/cli": "8.5.2",

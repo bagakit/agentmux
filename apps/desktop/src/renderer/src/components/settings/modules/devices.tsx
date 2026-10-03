@@ -8,8 +8,8 @@ export const devicesSettingsModule = {
   title: 'Phones & devices',
   description: 'Connect devices to this Mac and manage their access.',
   icon: Smartphone,
-  keywords: 'phone mobile device invite pairing access certificate private network 手机 设备 授权 邀请',
-  savedSummary: () => 'Pairing & access',
+  keywords: 'phone mobile device connection relay access network 手机 设备 连接 局域网',
+  savedSummary: () => 'Connection & devices',
   Pane({ active }) {
     return <div className="settings-pane-stack settings-devices-pane"><DeviceManagementSettings active={active} /></div>
   }

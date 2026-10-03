@@ -4,80 +4,45 @@ import { AgentMuxFileAgentSessionStore, AgentMuxError,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
-  type AgentProvider, type AgentMuxRpcHttpOptions, type AgentMuxRpcPrivateAccessState } from '@agentmux/core'
+  type AgentProvider, type AgentMuxRpcMobileAccessState } from '@agentmux/core'
 import { DeviceAuthority } from './device-authority.js'
-import { PrivateAccess } from './private-access.js'
-import { readPrivateTls, type PrivateTlsIdentity } from './private-tls.js'
-import { loadPrivateMobileAssets } from './private-access-assets.js'
-import { isPrivateAccessConfigurationPath, type PrivateAccessConfiguration } from './private-access-configuration.js'
-import { readCertificatePreparation } from './certificate-preparation.js'
+import { networkInterfaces } from 'node:os'
+import { startLocalRelay } from '@agentmux/relay/local'
+import { startRelayTransport, type RelayTransportController, type RelayLogger } from '@agentmux/relay/server'
+import { connectionOfferUrl, isLocalNetworkHost } from '@agentmux/relay/offer'
+import { exportPublicKey } from '@agentmux/relay/e2ee'
+import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
+import { loadMobileAssets } from './mobile-assets.js'
 import { createDeviceAdministration } from './device-administration.js'
-import type { MacDeviceConfirmation } from './mac-device-confirmation.js'
-
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
   socketPath?: string
   desktopSocketPath?: string
-  privateAccess?: PrivateAccessConfiguration
-  /** A startup manifest failure belongs to mobile access, never Core startup. */
-  privateAccessIssue?: string
-  /** Only the original startup entry supplies its selected, validated manifest source. */
-  privateAccessConfigurationPath?: string
-  /** A Host-owned OS collaborator; never accepted from public RPC params. */
-  deviceConfirmation?: MacDeviceConfirmation
+  mobileBuildDirectory?: string
+  mobilePort?: number
 }
 
 /** The Node Host owns the original Core. Desktop and phones only own client connections. */
 export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
-  const privateConfigured = options.privateAccess !== undefined
-  const configurationPath = isPrivateAccessConfigurationPath(options.privateAccessConfigurationPath)
-    ? options.privateAccessConfigurationPath : undefined
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
-  let authority: DeviceAuthority | undefined, access: PrivateAccess | undefined
-  let assets: Awaited<ReturnType<typeof loadPrivateMobileAssets>> | undefined, assetIssue: string | undefined
-  let privateIssue = options.privateAccessIssue, tls: PrivateTlsIdentity | undefined
-  let privateInitialized = false
-  let resolvePrivate!: () => void
-  const privateReady = new Promise<void>(resolve => { resolvePrivate = resolve })
+  let authority: DeviceAuthority | undefined
+  let relay: RelayTransportController | undefined
+  let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
+  let mobileState: AgentMuxRpcMobileAccessState = { state: 'starting', message: '正在启动手机连接' }
+  let offerUrl: (() => string) | undefined
   let resolveAuthority!: (value: DeviceAuthority) => void, rejectAuthority!: (error: unknown) => void
   const authorityReady = new Promise<DeviceAuthority>((resolve, reject) => { resolveAuthority = resolve; rejectAuthority = reject })
   void authorityReady.catch(() => {})
-  const mobileUnavailable = () => new Response(JSON.stringify({ error: { code: 'CONTROL_UNAVAILABLE',
-    message: 'Private mobile access is unavailable. The original Unix Host and Agent Sessions remain available.' } }),
-  { status: 503, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' } })
-  let http: AgentMuxRpcHttpOptions | undefined
-  if (options.privateAccess && !privateIssue) {
-    try {
-      tls = await readPrivateTls(options.privateAccess)
-      if (!Buffer.isBuffer(tls.tls.key) || !Buffer.isBuffer(tls.tls.cert)) throw new Error('Private certificate bytes are unavailable.')
-      // Retain the verified TLS policy while adapting the common server's string key/cert port.
-      const wireTls = { ...tls.tls, key: tls.tls.key.toString('utf8'), cert: tls.tls.cert.toString('utf8') }
-      http = { host: tls.host, port: tls.port, tls: wireTls,
-        route: async request => { await privateReady; return access ? await access.route(request) ?? assets?.route(request) ?? null : mobileUnavailable() },
-        authorize: async request => { await privateReady; return access?.authorize(request) ?? null } }
-    } catch (error) { privateIssue = error instanceof Error ? error.message : 'Private TLS preparation is unavailable.' }
-  }
   const desktopClient = async (context: AgentMuxRpcCallContext) => await connectAgentMuxRpc({
     endpoint: { transport: 'unix', path: desktopPath },
     ...(context.caller ? { credentials: context.caller } : {})
   })
-  const privateAccessState = (): AgentMuxRpcPrivateAccessState => {
-    const certificatePreparation = readCertificatePreparation()
-    const sources = { ...(configurationPath ? { configurationPath } : {}),
-      ...(certificatePreparation ? { certificatePreparation } : {}) }
-    const failure = privateIssue ?? runtime?.server.httpUnavailable?.message
-    if (failure) return { state: 'unavailable', message: failure, ...sources }
-    if (!privateInitialized) return { state: 'unavailable', message: 'Private access initialization is not yet confirmed. Unix diagnostics remain available.', ...sources }
-    if (!privateConfigured) return { state: 'unconfigured',
-      message: 'Private mobile access is not configured. Prepare the explicit private IP/TLS manifest to enable it; Unix and Agent Sessions remain available.', ...sources }
-    if (!access || !tls || !authority || !runtime?.server.httpAddress) return { state: 'unavailable',
-      message: 'The configured private listener is not confirmed. The original Unix Host and Agent Sessions remain available.', ...sources }
-    return { state: 'listening', message: 'Private HTTPS is listening. Device approval and phone system trust require their own confirmation.',
-      origin: access.origin, issuerHostId: authority.hostId, certificateFingerprint: tls.certificateFingerprint,
-      expiresAt: tls.expiresAt, ...(assets ? { mobileBuildDigest: assets.buildDigest } : {}), ...(assetIssue ? { assetIssue } : {}), ...sources }
+  const mobileAccessState = (): AgentMuxRpcMobileAccessState => {
+    try { return { ...mobileState, ...(offerUrl ? { origin: new URL(offerUrl()).origin } : {}) } }
+    catch { return { ...mobileState, message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
@@ -87,10 +52,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
         catch { authority.noteActivityIssue(source.deviceId) }
       }
     },
-    deviceAdministration: createDeviceAdministration(authorityReady, options.deviceConfirmation, privateAccessState, async (intent, context) => {
-      const desktop = await desktopClient(context)
-      try { return (await desktop.call('device.intent', { intent }, context.signal ? { signal: context.signal } : {})).confirmed }
-      finally { await desktop.dispose() }
+    deviceAdministration: createDeviceAdministration(authorityReady, mobileAccessState, () => {
+      if (!offerUrl || mobileState.state !== 'connected') throw new AgentMuxError(mobileState.message, 'CONTROL_UNAVAILABLE')
+      return offerUrl()
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
       const desktop = await desktopClient(context)
@@ -111,46 +75,80 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       } catch (error) { await desktop.dispose(); throw error }
     }
   }
+  let initializingMobile = false
+  const initializeMobile = async () => {
+    if (initializingMobile || local) return
+    initializingMobile = true
+    try {
+    if (authority && options.store instanceof AgentMuxFileAgentSessionStore) {
+      try {
+        const keyPair = await loadOrCreateRelayKeyPair(join(dirname(options.store.path), 'agentmux-relay-keypair.json'))
+        const assets = await loadMobileAssets(options.mobileBuildDirectory!)
+        local = await startLocalRelay({ serverId: authority.hostId, port: options.mobilePort ?? 8443, route: assets.route })
+        const owner = authority, originalServer = runtime!.server
+        offerUrl = () => {
+          const addresses = Object.entries(networkInterfaces()).sort(([a], [b]) => Number(!/^(en|eth|wlan)/.test(a)) - Number(!/^(en|eth|wlan)/.test(b))).flatMap(([, list]) => list ?? []).filter(a => a.family === 'IPv4' && !a.internal && isLocalNetworkHost(a.address))
+          const address = addresses.find(a => !a.address.startsWith('169.254.')) ?? addresses[0]
+          if (!address) throw new AgentMuxError('当前没有可用的局域网地址；Agent 会话仍可使用。', 'CONTROL_UNAVAILABLE')
+          const endpoint = `${address.address}:${local!.port}`
+          return connectionOfferUrl(`http://${endpoint}/`, { v: 2, serverId: owner.hostId, daemonPublicKeyB64: exportPublicKey(keyPair.publicKey), relay: { endpoint, useTls: false } })
+        }
+        const logger: RelayLogger = { child: () => logger, info: () => {}, debug: () => {}, warn: () => {} }
+        relay = startRelayTransport({ logger, serverId: owner.hostId, daemonKeyPair: keyPair,
+          relayEndpoint: `127.0.0.1:${local.port}`, relayUseTls: false, createWebSocket: local.hostWebSocket,
+          onState: state => { mobileState = { state, message: state === 'connected' ? '手机连接已就绪' : state === 'starting' ? '正在连接，自动重试中' : '连接中断，自动重连中；原会话保留。' } },
+          attachSocket: async (socket, metadata) => {
+            if (!metadata?.peerPublicKeyB64) throw new AgentMuxError('Encrypted peer identity is unavailable.', 'CONTROL_PERMISSION_DENIED')
+            const device = await owner.authorizeKey(metadata.peerPublicKeyB64), observation = owner.observe(device)
+            const frames = originalServer.openAuthenticatedFrames({ authorization: { principal: { kind: 'device', id: `${owner.hostId}:${device.deviceId}` }, signal: observation.signal },
+              send: async frame => { await socket.send(JSON.stringify(frame)) }, close: () => socket.close() })
+            let queue = Promise.resolve(), queuedBytes = 0, queuedCount = 0
+            socket.on('message', data => {
+              const text = typeof data === 'string' ? data : data instanceof ArrayBuffer ? new TextDecoder('utf-8', { fatal: true }).decode(data) : Buffer.isBuffer(data) ? data.toString('utf8') : String(data)
+              const bytes = Buffer.byteLength(text)
+              if (queuedBytes + bytes > 8 * 1024 * 1024 || queuedCount >= 128) { socket.close(4008, 'Device request budget exceeded'); return }
+              queuedBytes += bytes; queuedCount++
+              queue = queue.then(async () => { await frames.receive(JSON.parse(text)) })
+                .catch(() => { socket.close(4002, 'Invalid RPC frame') })
+                .finally(() => { queuedBytes -= bytes; queuedCount-- })
+            })
+            socket.once('close', () => { frames.dispose(); observation.dispose() })
+            socket.on('error', () => socket.close())
+          } })
+      } catch (error) {
+        await relay?.stop(); await local?.stop(); relay = undefined; local = undefined; offerUrl = undefined
+        mobileState = { state: 'unavailable', message: `手机连接暂不可用：${error instanceof Error ? error.message : String(error)}。原 Agent 会话可继续使用。` }
+      }
+    }
+    } finally { initializingMobile = false }
+  }
   try {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
-      ...(options.providers ? { providers: options.providers } : {}), ...(http ? { http } : {}), service })
+      ...(options.providers ? { providers: options.providers } : {}), service })
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))
         resolveAuthority(authority)
       } catch (error) {
-        privateIssue = 'The original device authority cannot be read. Its bytes are retained; restore that identity to recover mobile access. Unix and Agent Sessions remain available.'
+        mobileState = { state: 'unavailable', message: '原设备身份文件无法读取；文件与 Agent 会话保留，请恢复原身份。' }
         rejectAuthority(error)
       }
     } else {
-      rejectAuthority(new AgentMuxError('Device access requires the original durable File Store.', 'CONTROL_UNAVAILABLE'))
-      if (options.privateAccess) privateIssue = 'Mobile access requires the original durable File Store. The existing Unix Host remains available.'
+      rejectAuthority(new AgentMuxError('Mobile access requires the original durable File Store.', 'CONTROL_UNAVAILABLE'))
+      mobileState = { state: 'unavailable', message: '手机连接需要原持久化存储；现有 Agent 会话可继续使用。' }
     }
-    if (tls && authority && !privateIssue && !runtime?.server.httpUnavailable) {
-      try {
-        access = new PrivateAccess(authority, tls)
-        if (options.privateAccess?.mobileBuildDirectory) {
-          try { assets = await loadPrivateMobileAssets(options.privateAccess.mobileBuildDirectory, access.origin) }
-          catch { assetIssue = 'The selected mobile build cannot be read. Authenticated RPC and the original Unix Host remain available; rebuild the explicit mobile artifact to restore its page.' }
-        }
-      } catch {
-        privateIssue = 'Private device access could not be initialized. The original Unix Host and Agent Sessions remain available; inspect the retained private identity and TLS configuration.'
-      }
-    }
-    privateInitialized = true
-    resolvePrivate()
-  } catch (error) {
-    rejectAuthority(error); resolvePrivate()
-    await runtime?.stop()
-    throw error
-  }
-  let disposed = false
+    await initializeMobile()
 
-  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, privateAccessState, deviceAuthority: () => authorityReady, async dispose() {
-    if (disposed) return; disposed = true
-    await runtime!.stop()
+  } catch (error) { rejectAuthority(error); await runtime?.stop(); throw error }
+  let disposed = false
+  const retryMobile = setInterval(() => { if (!disposed && !local) void initializeMobile() }, 5000)
+  retryMobile.unref()
+
+  return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState, deviceAuthority: () => authorityReady, async dispose() {
+    if (disposed) return; disposed = true; clearInterval(retryMobile)
+    await relay?.stop(); await local?.stop(); await runtime!.stop()
   } }
 }
 

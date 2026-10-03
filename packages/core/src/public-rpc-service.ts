@@ -65,7 +65,6 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Original Host Authority and native confirmation owner; never constructed here. */
   deviceAdministration?: AgentMuxRpcDeviceAdministration
   /** Original Desktop consumes its in-memory, trusted IPC user intent. */
-  deviceIntent?(intent: string): boolean
   /** Original Host supplies transport-authenticated operation attribution. */
   operationSource?(context: AgentMuxRpcCallContext): import('./types.js').AgentOperationDevice | undefined
   recordDeviceOperation?(source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string): Promise<void>
@@ -81,7 +80,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
 export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
   runtimeFence?: AgentMuxRuntimeFence; afterResponse?: Array<() => void | Promise<void>>;
   /** Actual receiving hop, supplied only by the transport owner. */
-  transport?: 'unix' | 'http' }
+  transport?: 'unix' | 'http' | 'relay' }
 export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = AgentMuxRpcStreamMethod> = {
   initial: AgentMuxRpcStreamInitial<M>; start?(): void | Promise<void>; dispose(): void | Promise<void>
 }
@@ -256,13 +255,10 @@ export class AgentMuxRpcService {
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
     if (isAgentMuxRpcDeviceMethod(method)) {
-      // Unix provenance permits a request, never substitutes for Host OS confirmation.
-      if (context.caller !== undefined || context.transport !== 'unix' || context.principal?.kind !== 'user' ||
-        !context.principal.id || context.principal.id.includes('\0')) {
-        throw new AgentMuxError('Device management requires a local Unix user request and original Host confirmation. Nothing was submitted.', 'CONTROL_PERMISSION_DENIED')
-      }
+      const local = context.caller === undefined && context.transport === 'unix' && context.principal?.kind === 'user'
+      const device = context.caller === undefined && context.transport === 'relay' && context.principal?.kind === 'device'
+      if (method === 'device.hello' ? !device : !local) throw new AgentMuxError('This device operation requires its authorized transport principal.', 'CONTROL_PERMISSION_DENIED')
       const input = parseAgentMuxRpcDeviceParams(method, params)
-      if (method === 'device.intent') return { confirmed: this.ports.deviceIntent?.((input as { intent: string }).intent) ?? false } as AgentMuxRpcResult<M>
       if (!this.ports.deviceAdministration) throw new AgentMuxError('The original Host device administration owner is unavailable.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted()
       return parseAgentMuxRpcDeviceResult(method, await this.ports.deviceAdministration.call(method, input, context), input) as AgentMuxRpcResult<M>

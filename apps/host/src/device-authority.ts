@@ -1,12 +1,8 @@
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { AgentMuxError, durableWriteFile, type TrustedDevice, type DeviceOperation, type AgentOperationDevice } from '@agentmux/core'
 
-const INVITATION_LIFETIME_MS = 5 * 60_000
-const PENDING_LIFETIME_MS = 5 * 60_000
-const MAX_INVITATIONS = 16
-const MAX_PENDING = 32
 const MAX_DEVICES = 100
 
 interface DeviceRecord extends TrustedDevice { readonly credentialHash: string }
@@ -16,29 +12,7 @@ interface AuthorityState {
   readonly devices: readonly DeviceRecord[]
 }
 
-interface PendingDevice {
-  readonly device: TrustedDevice
-  readonly claimHash: string
-  readonly confirmationCode: string
-  readonly expiresAt: number
-  state: 'waiting' | 'approving' | 'approved' | 'denied'
-  credential?: string
-}
-
-export interface DevicePairingRequest {
-  readonly hostId: string
-  readonly deviceId: string
-  readonly confirmationCode: string
-  readonly claim: string
-  readonly expiresAt: number
-}
-
-function secret(): string { return randomBytes(32).toString('base64url') }
 function digest(value: string): string { return createHash('sha256').update(value).digest('hex') }
-function equalDigest(a: string, b: string): boolean {
-  return /^[a-f0-9]{64}$/u.test(a) && /^[a-f0-9]{64}$/u.test(b)
-    && timingSafeEqual(Buffer.from(a, 'hex'), Buffer.from(b, 'hex'))
-}
 function publicDevice(device: TrustedDevice): TrustedDevice {
   return { deviceId: device.deviceId, name: device.name, createdAt: device.createdAt,
     ...(device.revokedAt === undefined ? {} : { revokedAt: device.revokedAt }) }
@@ -67,9 +41,6 @@ function stateFrom(value: unknown): AuthorityState {
 /** Device admission belongs to the Host; it never owns a Session, Run or attachment. */
 export class DeviceAuthority {
   private readonly activityIssues = new Map<string, string>()
-  private readonly links = new Map<string, number>()
-  private readonly invitations = new Map<string, number>()
-  private readonly pending = new Map<string, PendingDevice>()
   private readonly readers = new Map<string, Set<AbortController>>()
   private saveTail: Promise<void> = Promise.resolve()
 
@@ -123,68 +94,34 @@ export class DeviceAuthority {
     }) }))
   }
 
-  private prune(): void {
-    const time = this.now()
-    for (const [key, expiresAt] of this.links) if (expiresAt <= time) this.links.delete(key)
-    for (const [key, expiresAt] of this.invitations) if (expiresAt <= time) this.invitations.delete(key)
-    for (const [id, pending] of this.pending) if (pending.expiresAt <= time) this.pending.delete(id)
-  }
-
-  /** Local Host approval UI/CLI only. An invitation is not a device credential. */
-  invite(): { hostId: string; invitation: string; expiresAt: number } {
-    this.prune()
-    if (this.invitations.size >= MAX_INVITATIONS) throw new AgentMuxError('Too many active device invitations.', 'CONTROL_OWNER_BUSY')
-    const invitation = secret(), expiresAt = this.now() + INVITATION_LIFETIME_MS
-    this.invitations.set(digest(invitation), expiresAt)
-    return { hostId: this.hostId, invitation, expiresAt }
-  }
-
-  connectionLink(origin: string): { hostId: string; url: string; expiresAt: number } {
-    this.prune()
-    if (this.links.size >= MAX_INVITATIONS) throw new AgentMuxError('Too many active connection links.', 'CONTROL_OWNER_BUSY')
-    const code = secret(), expiresAt = this.now() + INVITATION_LIFETIME_MS
-    this.links.set(digest(code), expiresAt)
-    return { hostId: this.hostId, url: `${origin}/#connect=${code}`, expiresAt }
-  }
-
-  async exchangeLink(code: string, name: string): Promise<{ device: TrustedDevice; credential: string }> {
-    this.prune()
-    if (typeof code !== 'string' || code.length !== 43 || !name || name.length > 128) throw denied()
-    const hash = digest(code), expires = this.links.get(hash)
-    if (!expires || expires <= this.now()) throw denied()
-    this.links.delete(hash)
-    const credential = secret(), device = { deviceId: randomUUID(), name, createdAt: this.now() }
+  /** Admission follows a completed encrypted handshake; never accepts a business-supplied identity. */
+  async authorizeKey(publicKey: string): Promise<TrustedDevice> {
+    if (!/^[A-Za-z0-9+/]{43}=$/.test(publicKey)) throw denied()
+    const hash = digest(publicKey)
+    const retained = this.state.devices.find(device => device.credentialHash === hash)
+    if (retained) { if (retained.revokedAt !== undefined) throw denied(); return publicDevice(retained) }
+    let admitted: TrustedDevice | undefined
     await this.change(state => {
-      if (state.devices.length >= MAX_DEVICES) throw new AgentMuxError('Device admission is full.', 'CONTROL_OWNER_BUSY')
-      return { ...state, devices: [...state.devices, { ...device, credentialHash: digest(credential) }] }
+      const existing = state.devices.find(device => device.credentialHash === hash)
+      if (existing) { if (existing.revokedAt !== undefined) throw denied(); admitted = publicDevice(existing); return state }
+      if (state.devices.length >= MAX_DEVICES) throw new AgentMuxError('Device admission is full. Existing Sessions remain available.', 'CONTROL_OWNER_BUSY')
+      admitted = { deviceId: randomUUID(), name: `设备 ${hash.slice(0, 6)}`, createdAt: this.now() }
+      return { ...state, devices: [...state.devices, { ...admitted, credentialHash: hash }] }
     })
-    return { device, credential }
+    return admitted!
   }
 
-  begin(hostId: string, invitation: string, name: string): DevicePairingRequest {
-    this.prune()
-    if (hostId !== this.hostId || typeof invitation !== 'string' || invitation.length !== 43) throw denied()
-    const hash = digest(invitation), expiresAt = this.invitations.get(hash)
-    if (!expiresAt || expiresAt <= this.now()) throw denied()
-    if (this.pending.size >= MAX_PENDING || this.state.devices.length >= MAX_DEVICES) {
-      throw new AgentMuxError('Device admission is full. The original trusted devices are retained.', 'CONTROL_OWNER_BUSY')
-    }
-    const trimmed = typeof name === 'string' ? name.trim() : ''
-    if (!trimmed || trimmed.length > 128) throw new AgentMuxError('Give this device a name of 1 to 128 characters.', 'INVALID_CONTROL_REQUEST')
-    // Consume synchronously before publishing a request; a second exchange cannot race it.
-    this.invitations.delete(hash)
-    const claim = secret(), deviceId = randomUUID(), confirmationCode = randomBytes(4).readUInt32BE() % 1_000_000
-    const pending: PendingDevice = { device: { deviceId, name: trimmed, createdAt: this.now() },
-      claimHash: digest(claim), confirmationCode: String(confirmationCode).padStart(6, '0'),
-      expiresAt: this.now() + PENDING_LIFETIME_MS, state: 'waiting' }
-    this.pending.set(deviceId, pending)
-    return { hostId: this.hostId, deviceId, claim, confirmationCode: pending.confirmationCode, expiresAt: pending.expiresAt }
-  }
-
-  requests(): readonly { device: TrustedDevice; confirmationCode: string; expiresAt: number }[] {
-    this.prune()
-    return [...this.pending.values()].filter(value => value.state === 'waiting').map(value => ({
-      device: publicDevice(value.device), confirmationCode: value.confirmationCode, expiresAt: value.expiresAt }))
+  async hello(deviceId: string, name: string): Promise<TrustedDevice> {
+    const trimmed = name.trim()
+    if (!trimmed || trimmed.length > 128) throw new AgentMuxError('Device name is invalid.', 'INVALID_CONTROL_REQUEST')
+    let device: TrustedDevice | undefined
+    await this.change(state => ({ ...state, devices: state.devices.map(record => {
+      if (record.deviceId !== deviceId || record.revokedAt !== undefined) return record
+      device = publicDevice({ ...record, name: trimmed, lastSeenAt: this.now() })
+      return { ...record, name: trimmed, lastSeenAt: this.now() }
+    }) }))
+    if (!device) throw denied()
+    return device
   }
 
   private async change(update: (state: AuthorityState) => AuthorityState): Promise<void> {
@@ -195,58 +132,6 @@ export class DeviceAuthority {
     })
     this.saveTail = save.catch(() => {})
     await save
-  }
-
-  /** A local user confirms the code displayed on both devices. There is no remote approve port. */
-  async approve(deviceId: string, confirmationCode: string): Promise<TrustedDevice> {
-    this.prune()
-    const pending = this.pending.get(deviceId)
-    if (!pending || pending.state !== 'waiting' || pending.confirmationCode !== confirmationCode) throw denied()
-    pending.state = 'approving'
-    const credential = secret()
-    try {
-      await this.change(state => {
-        if (pending.expiresAt <= this.now() || pending.state !== 'approving') throw denied()
-        if (state.devices.length >= MAX_DEVICES) {
-          throw new AgentMuxError('Device admission is full. The original trusted devices are retained.', 'CONTROL_OWNER_BUSY')
-        }
-        return { ...state, devices: [...state.devices, { ...pending.device, credentialHash: digest(credential) }] }
-      })
-      pending.credential = credential; pending.state = 'approved'
-      return publicDevice(pending.device)
-    } catch (error) { if (pending.state === 'approving') pending.state = 'waiting'; throw error }
-  }
-
-  reject(deviceId: string): void {
-    const pending = this.pending.get(deviceId)
-    if (pending?.state === 'approving') {
-      throw new AgentMuxError('Device approval is being saved. Wait for its result, then revoke the device if approved.', 'CONTROL_OWNER_BUSY')
-    }
-    if (pending?.state === 'approved') {
-      throw new AgentMuxError('This device is already approved. Revoke its authorization to disconnect it.', 'CONTROL_OWNER_BUSY')
-    }
-    if (pending) pending.state = 'denied'
-  }
-
-  /** The transport consumes this once into HttpOnly Cookie or the native secret bridge, never Renderer JSON. */
-  claim(hostId: string, deviceId: string, claim: string):
-    { state: 'waiting' } | { state: 'approved'; device: TrustedDevice; credential: string } {
-    this.prune()
-    const pending = this.pending.get(deviceId)
-    if (hostId !== this.hostId || !pending || !equalDigest(pending.claimHash, digest(claim)) || pending.state === 'denied') throw denied()
-    if (pending.state !== 'approved') return { state: 'waiting' }
-    if (!pending.credential || !this.state.devices.some(device => device.deviceId === deviceId && device.revokedAt === undefined)) throw denied()
-    const credential = pending.credential
-    this.pending.delete(deviceId)
-    return { state: 'approved', device: publicDevice(pending.device), credential }
-  }
-
-  authenticate(hostId: string, credential: string): TrustedDevice {
-    if (hostId !== this.hostId || typeof credential !== 'string' || credential.length !== 43) throw denied()
-    const hash = digest(credential)
-    const device = this.state.devices.find(device => device.revokedAt === undefined && equalDigest(device.credentialHash, hash))
-    if (!device) throw denied()
-    return publicDevice(device)
   }
 
   /** A continuing request/stream observes revocation without affecting any other device or Run. */
@@ -273,7 +158,6 @@ export class DeviceAuthority {
       revoked = publicDevice({ ...device, revokedAt: device.revokedAt ?? Math.max(this.now(), device.createdAt) })
       return { ...state, devices: state.devices.map(value => value.deviceId === deviceId ? { ...value, ...revoked } : value) }
     })
-    this.pending.delete(deviceId)
     const readers = this.readers.get(deviceId)
     this.readers.delete(deviceId)
     for (const reader of readers ?? []) reader.abort(denied())

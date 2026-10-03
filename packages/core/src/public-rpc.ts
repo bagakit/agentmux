@@ -100,6 +100,7 @@ export type AgentMuxRpcCredentials = { agentSessionId: string; capability: strin
 /** Transport-approved local user/device identity; never supplied by business params. */
 export type AgentMuxRpcPrincipal = Readonly<{ kind: 'user' | 'device'; id: string }>
 export type AgentMuxRpcEndpoint =
+  | { transport: 'relay'; offer: import('@agentmux/relay/offer').ConnectionOffer }
   | { transport: 'unix'; path: string }
   | { transport: 'http'; url: string; token?: string }
   | { transport: 'ssh'; host: string; port?: number; user?: string; identityFile?: string; command?: string; socketPath?: string }

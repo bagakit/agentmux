@@ -33,3 +33,7 @@ SOFTWARE.
 ## fs-native-extensions
 
 fs-native-extensions 1.5.1, Copyright 2023 Holepunch Inc., is a runtime dependency licensed under Apache-2.0. The license text is reproduced in [Core notices](packages/core/THIRD_PARTY_NOTICES.md) and included in the dependency package. Its require-addon loader and transitive loader dependencies retain their own licenses in the distributed packages.
+
+## Paseo Relay
+
+The source in `packages/relay` includes code from Paseo, copyright (c) 2025-present Mohamed Boudra, licensed under Apache License 2.0. The pinned upstream revision and adaptations are recorded in `packages/relay/NOTICE`; the full license is retained in `packages/relay/LICENSE`.

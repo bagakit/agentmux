@@ -232,7 +232,7 @@ app.whenReady().then(async () => {
           const inviteSelector = '[aria-label="短时设备邀请"]'
           await click(`js:[...document.querySelectorAll('${devices} button')].find(n=>n.textContent.includes('生成短时邀请'))`)
           await until(`document.querySelector(${JSON.stringify(inviteSelector)})`)
-          assert.equal((await business()).filter(kind => kind === 'device.invite-intent').length, 1)
+          assert.equal((await business()).filter(kind => kind === 'device.link').length, 1)
           await sectionRoute('hosts')
           const continuity = await read(`({pane:document.querySelector(${JSON.stringify(pane)})===window.__connectionsOriginalPane,name:document.querySelector(${JSON.stringify(nameSelector)})===window.__connectionsOriginalName,value:window.__connectionsOriginalName.value})`)
           assert.deepEqual(continuity, { pane: true, name: true, value: 'Retained Host draft' })
@@ -243,7 +243,7 @@ app.whenReady().then(async () => {
           await sectionRoute('devices')
           await until(`window.connectionsProof.calls.filter(c=>c.kind==='device.ls').length===${reads + 1}`)
           assert.equal(await read(`!!document.querySelector(${JSON.stringify(inviteSelector)})`), false, 'Short invitation clears on leaving; return does not auto-generate')
-          assert.equal((await business()).filter(kind => kind === 'device.invite-intent').length, 1)
+          assert.equal((await business()).filter(kind => kind === 'device.link').length, 1)
           result.interactions.push({ kind: 'native-renderer-device-active-and-invitation-lifetime', continuity, readsBeforeReturn: reads, readsAfterReturn: reads + 1, invitation: 'controlled UI intent only; no OS approval qualification' })
         }
         assert.equal((await business()).filter(kind => /approve|reject|revoke/.test(kind)).length, 0, 'No automatic device authorization mutation')

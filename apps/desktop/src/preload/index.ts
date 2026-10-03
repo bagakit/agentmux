@@ -105,9 +105,6 @@ const api: AgentMuxPreloadApi = {
   deviceManagement: {
     link: (params) => ipcRenderer.invoke('deviceManagement:link', params),
     ls: (params) => ipcRenderer.invoke('deviceManagement:ls', params),
-    invite: (params) => ipcRenderer.invoke('deviceManagement:invite', params),
-    approve: (params) => ipcRenderer.invoke('deviceManagement:approve', params),
-    reject: (params) => ipcRenderer.invoke('deviceManagement:reject', params),
     revoke: (params) => ipcRenderer.invoke('deviceManagement:revoke', params)
   },
   workspaces: {

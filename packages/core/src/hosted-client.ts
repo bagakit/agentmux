@@ -1,3 +1,4 @@
+import { randomClientRequestId } from './client-request-id.js'
 import { AgentMuxError } from './errors.js'
 import { AgentMuxClientEventPublisher } from './client-event-publisher.js'
 import type { AgentMuxClientEvent, AgentMuxAgentSession, AgentMuxRunAttachment, AgentMuxRunRef,
@@ -19,7 +20,7 @@ export async function connectHostedAgentMux(options: {
   rpc: AgentMuxHostedRpcPort; consumerId?: string; waitForReady?: boolean; expectedStorePath?: string;
   expectedRuntimeId?: string; forwardRpc?: AgentMuxHostedForwardRpc
 }): Promise<AgentMuxHostedClient> {
-  const consumerId = options.consumerId ?? globalThis.crypto.randomUUID(), rpc = options.rpc
+  const consumerId = options.consumerId ?? randomClientRequestId(), rpc = options.rpc
   const publisher = new AgentMuxClientEventPublisher()
   let bootstrap: AgentMuxHostedBootstrap | undefined, stream: AgentMuxHostedSubscription | undefined
   let connecting: Promise<void> | undefined, disposed = false, retry: ReturnType<typeof setTimeout> | undefined
@@ -82,7 +83,7 @@ export async function connectHostedAgentMux(options: {
         message: `${error.message} Existing Session references are retained; reconnect this endpoint to restore observation.` } } : {}),
       evidence: { source: 'run-process', observedAt: Date.now() } })
   }
-  const connectionFailure = (error: unknown): void => connectionState(reconnectAttempts >= 8 ? 'unrecoverable' : 'lost', error)
+  const connectionFailure = (error: unknown): void => connectionState(error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID' ? 'unrecoverable' : 'lost', error)
   const attachmentUnavailable = (reading: Reading, error: unknown, step: string): void => {
     reading.unavailable = { code: error instanceof AgentMuxError ? error.code : 'RUNTIME_ATTACHMENT_UNAVAILABLE',
       message: `${step}: ${error instanceof Error ? error.message : String(error)} This reader stopped after byte ${reading.afterByte}; the original Run is retained. Refresh this observation if independent reread does not recover it.` }
@@ -205,11 +206,11 @@ export async function connectHostedAgentMux(options: {
   }
   const reconnect = (): void => {
     if (disposed || retry) return
-    if (reconnectAttempts >= 8) { connectionState('unrecoverable'); return }
+    // Retry observation until this consumer is disposed; never replay an invocation.
     retry = setTimeout(() => {
       retry = undefined
       reconnectAttempts++
-      void connect().catch(error => { connectionFailure(error); reconnectDelay = Math.min(reconnectDelay * 2, 5000); reconnect() })
+      void connect().catch(error => { connectionFailure(error); if (error instanceof AgentMuxError && error.code === 'AGENT_CAPABILITY_INVALID') return; reconnectDelay = Math.min(reconnectDelay * 2, 30000); reconnect() })
     }, reconnectDelay)
     retry.unref?.()
   }
@@ -515,7 +516,7 @@ export async function connectHostedAgentMux(options: {
       return 'attachment' in value ? value.attachment : value
     }
     if (method === 'readRunReplay') return await watchAttachment({ kind: 'terminal-run', runId: (args[0] as AgentMuxRunRef).runId },
-      (args[1] as number | undefined) ?? 0, (args[2] as 'raw' | 'terminal' | undefined) ?? 'raw', false, undefined, `replay:${globalThis.crypto.randomUUID()}`, true)
+      (args[1] as number | undefined) ?? 0, (args[2] as 'raw' | 'terminal' | undefined) ?? 'raw', false, undefined, `replay:${randomClientRequestId()}`, true)
     const value = await invoke(method, args)
     if (value && typeof value === 'object') {
       const result = value as { agentSessionId?: string; session?: AgentMuxAgentSession }

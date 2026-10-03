@@ -63,7 +63,7 @@ export function assertSemanticHostOwner(app, identity, row, mode) {
     typeof identity.storePath === 'string' && isAbsolute(identity.storePath), 'The original Semantic Host namespace is unconfirmed; retry this installation when its public endpoint responds.')
   const expected = `${scope(app).executable} ${join(app, 'Contents/Resources/app/out/main/agentmux-host.js')} --store ${identity.storePath}`
   const suffix = row?.command?.slice(expected.length)
-  const argvMatches = row?.command === expected || row?.command?.startsWith(expected + ' --private-access ') && isAbsolute(suffix.slice(' --private-access '.length))
+  const argvMatches = row?.command === expected
   fail(row && row.pid === identity.hostProcessId && row.uid === process.getuid() && argvMatches,
     'The public Semantic Host does not match the original installed namespace; no process was signalled.')
   fail(mode && mode.pid === row.pid && mode.uid === row.uid && mode.birth === row.birth && mode.ppid === row.ppid &&

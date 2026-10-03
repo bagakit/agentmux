@@ -1,3 +1,4 @@
+import { isLocalNetworkHost } from '@agentmux/relay/offer'
 import type { PromptAttempt, ResponseAttempt } from '../conversation/local-drafts'
 
 export const DEVICE_WORKFACE_KEY = 'agentmux-mobile-workface-v1'
@@ -41,7 +42,7 @@ function entries(value: unknown): Array<[string, unknown]> {
 function body(value: unknown): value is string { return typeof value === 'string' && new TextEncoder().encode(value).byteLength <= 65536 }
 function origin(value: unknown): value is string {
   if (typeof value !== 'string' || value.length > 2048) return false
-  try { const url = new URL(value); return url.protocol === 'https:' && url.origin === value
+  try { const url = new URL(value); return (url.protocol === 'https:' || url.protocol === 'http:' && isLocalNetworkHost(url.hostname)) && url.origin === value
     && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/' } catch { return false }
 }
 export function parseDraftRecord(value: unknown): DraftRecord {
@@ -116,7 +117,7 @@ export class DeviceWorkfaceStore {
   confirmHost(host: NonNullable<DeviceWorkface['host']>): void {
     this.refresh()
     if (!origin(host.origin) || !id(host.hostId)) throw invalid()
-    if (this.value.host && (this.value.host.origin !== host.origin || this.value.host.hostId !== host.hostId)) {
+    if (this.value.host && (this.value.host.hostId !== host.hostId)) {
       throw new DeviceHostMismatchError('当前 Mac 与已保全工作面的原 Host 身份不同。原会话、草稿和未确认输入仍保留；请接回原 Mac，或明确建立另一份设备工作面。')
     }
     this.update({ ...this.value, host: { ...host } })
