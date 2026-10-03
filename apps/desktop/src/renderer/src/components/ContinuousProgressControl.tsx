@@ -35,14 +35,14 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
     setLoops([]); setError(undefined); setBusy(false); setPrompt(''); setInterval('30'); setBindSource(false); setSourceRoot(''); setSourceId(''); setReaderPath('')
     const before = updates.current
     const dispose = api.continuousProgress.onChanged(loop => {
-      if (!alive || loop.hostId !== target.hostId || loop.agentSessionId !== target.agentSessionId ||
+      if (!alive || loop.calendar || loop.hostId !== target.hostId || loop.agentSessionId !== target.agentSessionId ||
           loop.providerId !== target.providerId || loop.workspacePath !== target.workspacePath) return
       updates.current++
       setLoops(previous => [...previous.filter(value => value.loopId !== loop.loopId), loop])
       setObservedTarget(target)
     })
     void api.continuousProgress.list(target).then(result => {
-      if (alive && updates.current === before) { setLoops(result); setObservedTarget(target) }
+      if (alive && updates.current === before) { setLoops(result.filter(loop => !loop.calendar)); setObservedTarget(target) }
     }, failure => { if (alive) setError(failure instanceof Error ? failure.message : String(failure)) })
     return () => { alive = false; dispose() }
   }, [target])

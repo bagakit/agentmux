@@ -155,11 +155,12 @@ export class AgentMuxHostedRuntimeService {
     // Wire arguments cannot assert authenticated provenance. The original Host supplies it.
     for (const arg of invocation.args) if (arg && typeof arg === 'object' && 'sourceDevice' in arg)
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
-    const modifying = /^(submit|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|answer|cancel)/.test(invocation.method)
+    const modifying = /^(submit|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
     const sessionId = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
       : typeof first === 'string' && invocation.method.endsWith('Agent') ? first : undefined
     if (source && (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage')) invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
+    if (source && invocation.method === 'saveAgentFuturePromptIntent') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
     const recordActivity = async (result: 'confirmed' | 'failed' | 'unknown') => {
       if (!source || !modifying) return

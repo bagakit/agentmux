@@ -250,6 +250,8 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   execution?: import('./types.js').AgentPromptExecution
   /** Conditional automation: abandon if this Run/turn completion no longer applies. */
   expectedCompletionId?: string
+  /** Exact saved future-message intent; never authorizes interruption or uncertain turns. */
+  expectedFutureIntent?: import('./types.js').AgentFuturePromptOccurrence
   /** New automatic admission only: final Native cursor must equal this observed input fence. */
   expectedInputByte?: number
   /** Cancellation before admission; an already claimed input transaction finishes or reconciles. */
@@ -3729,16 +3731,52 @@ export class AgentMuxClient {
     await this.submitPromptInternal(input)
   }
 
+  /** Save an exact future message through the same durable Session owner as Input. */
+  async saveAgentFuturePromptIntent(input: { agentSessionId: string; intentId: string; operationId: string; prompt: string; agentMuxNote?: string; active: boolean;
+    caller?: { agentSessionId: string; capability: string }; sourceDevice?: import('./types.js').AgentOperationDevice }): Promise<void> {
+    this.requireConnected()
+    if ('authorHuman' in input || 'authorAgentSessionId' in input) throw new AgentMuxError('Future-message authors come from the original authenticated owner.', 'MESSAGE_SENDER_MISMATCH')
+    const intentId = safeId(input.intentId, 'Future message intent id')
+    const operationId = safeId(input.operationId, 'Future message operation id')
+    if (typeof input.active !== 'boolean' || !input.prompt.trim()) throw new AgentMuxError('A future message needs exact content and an explicit active state.', 'INVALID_AGENT_PROMPT')
+    const composed = composeAgentPrompt(input.prompt, input.agentMuxNote)
+    assertAgentPromptSize(composed.text)
+    const session = this.requireAgentSession(input.agentSessionId)
+    await this.store.withPromptSubmission(session.agentSessionId, async () => {
+      let authorAgentSessionId: string | undefined
+      if (input.caller) {
+        const sender = await this.authorizeAgentCaller(input.caller.capability, input.caller.agentSessionId)
+        await this.authorizeAgentMessage({ capability: input.caller.capability, callerAgentSessionId: sender.agentSessionId,
+          senderAgentSessionId: sender.agentSessionId, senderSessionId: sender.agentSessionId, senderRunId: sender.run.runId,
+          recipientSessionId: session.agentSessionId, recipientRunId: session.run.runId })
+        authorAgentSessionId = sender.agentSessionId
+      }
+      await this.updateExactAgentSession(session.agentSessionId, session.run, current => {
+      const intents = { ...current.futurePromptIntents }, previous = intents[intentId]
+      if (previous && (previous.operationId !== operationId || previous.prompt !== composed.text)) throw new AgentMuxError('Future intent identity was reused with different content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+      if (!previous && Object.keys(intents).length >= 256) throw new AgentMuxError('This Session has reached its retained future-message limit. Existing messages and manual input remain available.', 'AGENT_FUTURE_INTENT_LIMIT')
+      intents[intentId] = { ...previous, operationId, prompt: composed.text, active: input.active,
+        message: previous?.message ?? { userContent: input.prompt, ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
+          ...(authorAgentSessionId ? { authorAgentSessionId } : {}), ...(input.sourceDevice ? { sourceDevice: structuredClone(input.sourceDevice) } : {}) } }
+      return { ...current, futurePromptIntents: intents, updatedAt: Date.now() }
+      })
+    })
+  }
+
   private async submitPromptInternal(input: AgentMuxAgentPromptInput, authorAgentSessionId?: string): Promise<void> {
     this.requireConnected()
     if (input.execution !== undefined && input.execution !== 'default' && input.execution !== 'immediate') {
       throw new AgentMuxError('Prompt execution intent is invalid.', 'INVALID_AGENT_PROMPT')
     }
-    if (input.execution === 'immediate' && input.expectedCompletionId !== undefined) {
+    if (input.execution === 'immediate' && (input.expectedCompletionId !== undefined || input.expectedFutureIntent !== undefined)) {
       throw new AgentMuxError('Automatic admission cannot authorize native interruption.', 'INVALID_AGENT_PROMPT')
     }
     const content = input.prompt
-    if (input.expectedInputByte !== undefined && (input.expectedCompletionId === undefined ||
+    if (input.expectedFutureIntent !== undefined && (input.expectedCompletionId !== undefined || input.authorHuman === true || input.allowUncertainTurn ||
+        !input.expectedFutureIntent.intentId || !Number.isSafeInteger(input.expectedFutureIntent.occurrenceAt) || input.expectedFutureIntent.occurrenceAt < 0 || input.expectedInputByte === undefined)) {
+      throw new AgentMuxError('A saved future message requires its exact occurrence and input fence.', 'INVALID_AGENT_PROMPT')
+    }
+    if (input.expectedInputByte !== undefined && ((input.expectedCompletionId === undefined && input.expectedFutureIntent === undefined) ||
         !Number.isSafeInteger(input.expectedInputByte) || input.expectedInputByte < 0)) {
       throw new AgentMuxError('Automatic prompt admission requires its completion and finite input fence together.', 'INVALID_AGENT_PROMPT')
     }
@@ -3767,8 +3805,16 @@ export class AgentMuxClient {
     const plan = this.providers.get(session.providerId).planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const renderObservation = new AbortController()
     const delivered = await this.serializeAgentInput(session, async (current, run) => {
+      const savedMessage = input.expectedFutureIntent ? current.futurePromptIntents?.[input.expectedFutureIntent.intentId]?.message : undefined
+      // Timer transport is not the producer. Inherit only the original saved
+      // authenticated source; retain this request's exact content for admission.
+      const admittedMessage = input.expectedFutureIntent ? {
+        ...(message.userContent ? { userContent: message.userContent } : {}), ...(message.systemContext ? { systemContext: message.systemContext } : {}),
+        ...(savedMessage?.authorAgentSessionId ? { authorAgentSessionId: savedMessage.authorAgentSessionId } : {}),
+        ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
+      } : message
       return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, message, input.execution)
+        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent)
     }, renderObservation)
     if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
     await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)

@@ -1230,6 +1230,11 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       return {
         ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
         ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
+        ...(admission.outputCursorBytes === undefined ? {} : { outputCursorBytes: timestamp(admission.outputCursorBytes, 'prompt admission output boundary') }),
+        ...(admission.futureIntent === undefined ? {} : { futureIntent: (() => {
+          const future = record(admission.futureIntent, 'future prompt occurrence')
+          return { intentId: string(future.intentId, 'future intent id'), occurrenceAt: timestamp(future.occurrenceAt, 'future occurrence') }
+        })() }),
         ...(admission.intent === undefined ? {} : { intent: promptInputIntent(admission.intent) }),
         ...(admission.frameRefresh === undefined ? {} : { frameRefresh: (() => {
           const refresh = record(admission.frameRefresh, 'prompt native frame refresh')
@@ -1253,6 +1258,21 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
           return admission.notApplied
         })() }),
         operationId: string(admission.operationId, 'promptCompletionAdmission.operationId'), startByte, endByte }
+    })() }),
+    ...(source.futurePromptIntents === undefined ? {} : { futurePromptIntents: (() => {
+      const intents = record(source.futurePromptIntents, 'future prompt intents')
+      if (Object.keys(intents).length > 256) throw new AgentMuxError('Future intent records exceed the bounded Session store.', 'INVALID_AGENT_SESSION_STORE')
+      return Object.fromEntries(Object.entries(intents).map(([id, value]) => {
+        string(id, 'future intent id')
+        const intent = record(value, 'future prompt intent'), message = record(intent.message, 'future prompt source')
+        if (typeof intent.active !== 'boolean' || message.authorHuman !== undefined) throw new AgentMuxError('Future prompt origin or active state is invalid.', 'INVALID_AGENT_SESSION_STORE')
+        return [id, { operationId: string(intent.operationId, 'future intent operation'), prompt: text(intent.prompt, 'future prompt', MAX_STORE_BYTES), active: intent.active,
+          message: { userContent: text(message.userContent, 'future prompt content', MAX_STORE_BYTES), ...(message.systemContext === undefined ? {} : { systemContext: text(message.systemContext, 'future prompt context', MAX_STORE_BYTES) }),
+            ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'future prompt author') }),
+            ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }) },
+          ...(intent.lastOccurrenceAt === undefined ? {} : { lastOccurrenceAt: timestamp(intent.lastOccurrenceAt, 'last future occurrence') }),
+          ...(intent.lastOperationId === undefined ? {} : { lastOperationId: string(intent.lastOperationId, 'last future operation') }) }]
+      }))
     })() }),
     ...(source.terminalPromptSubmission === undefined
       ? {}

@@ -856,14 +856,19 @@ export type AgentMuxAgentSession = {
   terminalHandshake?: AgentTerminalHandshakeState
   terminalCapability?: AgentTerminalCapabilityState
   terminalPromptReadiness?: AgentTerminalPromptReadinessState
+  /** Host-saved future messages. Civil calendars remain Host facts; Core owns admission. */
+  futurePromptIntents?: Record<string, AgentFuturePromptIntent>
   /** Latest claimed prompt range; successful completion is consumed by the same admission. */
   promptCompletionAdmission?: {
     /** Logical identity when captured at admission; operationId always binds the Run and bytes. */
     submissionId?: string
     completionId?: string
+    futureIntent?: AgentFuturePromptOccurrence
     operationId: string
     startByte: number
     endByte: number
+    /** Original native output boundary retained for passive future-message idle confirmation. */
+    outputCursorBytes?: number
     /** Frozen before dispatch; missing input facts are unknown, never reconstructed. */
     intent?: {
       run: AgentMuxRunRef
@@ -910,6 +915,16 @@ export type AgentPromptMessageContent = {
   authorHuman?: true
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
+}
+
+export type AgentFuturePromptOccurrence = { intentId: string; occurrenceAt: number }
+export type AgentFuturePromptIntent = {
+  operationId: string
+  prompt: string
+  message: AgentPromptMessageContent
+  active: boolean
+  lastOccurrenceAt?: number
+  lastOperationId?: string
 }
 
 export type AgentTerminalHandshakeState = {

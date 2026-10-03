@@ -75,6 +75,19 @@ agentmux file read --zone '<zone-id>' --path 'saved.md' --host '<host-id>' --wor
 
 先从 `space ls`／`space inspect` 的原 Zone 资源确认 Host、Workspace 与目录；这些是文件资源，不是当前显示 Workspace。`--path` 相对该 Zone；可加 `--space` 核对原绑定，多处合法绑定不会改变文件身份。结果的 `resource` 与 `result` 分别表达准确来源和原 Files 的读取事实：文本保留完整 `sha256` revision，二进制、已删除、目录和原错误保持原状态。`unknown` 表示这次观察未确认，保留原引用并重新发现／读取；不解释为文件已删除，也不影响原文件编辑或健康 Agent。
 
+日历提醒使用显式 JSON，沿原 Session／调度 owner 执行：
+
+```sh
+agentmux schedule list
+agentmux schedule inspect --data request.json
+agentmux schedule create --data request.json
+agentmux schedule pause --data request.json
+agentmux schedule resume --data request.json
+agentmux schedule cancel --data request.json
+```
+
+`--data` 接受文件或 `-` 标准输入。创建包含 `target: {hostId, agentSessionId, providerId, workspacePath}`、非空 `prompt`、`operationId` 和 `calendar`。日历显式给出 IANA `timezone`、本地 `time`、`kind`（`once|daily|weekly|monthly|yearly`）及 `policies: {gap:'skip', fold:'earlier'|'later', monthEnd:'clamp', overdue:'latest'}`；各周期的日期字段以公共类型为准。检查在 `scheduleId` 与原 `operationId` 中选一个；暂停／恢复／取消包含 `scheduleId`、已读 `expectedRevision` 与本次 `operationId`。每次变更核真实 caller，不允许用 timer 冒人类作者。未知回执先检查原 operation；不自动重发。保存不等于已投递，投递不等于 Agent 完成；断开宿主时不会假装仍在云端执行。
+
 ## 改显示名，再读取当前值
 
 ```sh
@@ -99,6 +112,7 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 | 打开 Terminal／Browser，操作已开的 Browser | `terminal open`、`browser open`、`browser` |
 | 按 Zone 目录后台打开或复用文件 | `file open` |
 | 读取准确 Zone 原文件的已保存正文与完整版本 | `file read` |
+| 检查、创建或暂停准确 Session 的日历提醒 | `schedule list\|inspect\|create\|pause\|resume\|cancel` |
 | 读取或切换 Agent／File Region 正文模式 | `agent view`、`file view` |
 | 交换同一 Tab 的两个 Region 位置 | `space swap` |
 | 提升 Region 为 Tab、调整布局 | `space promote/arrange` |

@@ -30,6 +30,12 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
  */
 export const PRIVILEGED_SENDER_LABELS = {
   'files:readPublic': 'original file read',
+  'schedule:list': 'Agent arrangement',
+  'schedule:inspect': 'Agent arrangement',
+  'schedule:create': 'Agent arrangement',
+  'schedule:pause': 'Agent arrangement',
+  'schedule:resume': 'Agent arrangement',
+  'schedule:cancel': 'Agent arrangement',
   'topics:call': 'Topic content',
   'notebook:read': 'notebook directory',
   'notebook:apply': 'notebook changes',

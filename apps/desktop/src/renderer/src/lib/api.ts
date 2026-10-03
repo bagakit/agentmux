@@ -804,6 +804,15 @@ const mockApi: AgentMuxDesktopApi = {
     pauseForInput: async () => {},
     onChanged: () => () => {}
   },
+  schedule: {
+    onChanged: () => () => {},
+    list: async () => { throw new Error('Arrangement discovery requires the connected desktop Host. Existing work is retained.') },
+    inspect: async () => { throw new Error('Arrangement inspection requires the connected desktop Host. The original reference is retained.') },
+    create: async () => { throw new Error('Saving an arrangement requires the connected desktop Host. The message is retained.') },
+    pause: async () => { throw new Error('Pausing an arrangement requires the connected desktop Host. Its state is unconfirmed.') },
+    resume: async () => { throw new Error('Resuming an arrangement requires the connected desktop Host. Its state is unconfirmed.') },
+    cancel: async () => { throw new Error('Cancelling an arrangement requires the connected desktop Host. Its state is unconfirmed.') }
+  },
   sessions: {
     observeStorage: async (control) => ({
       run: control.run,

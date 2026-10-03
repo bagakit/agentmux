@@ -6,7 +6,7 @@ import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
-import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
+import { CONTINUOUS_PROGRESS_CHANGED, SCHEDULE_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
 import type { ContinuousProgressLoopManager } from './continuous-progress-loop-manager.js'
 import { inspectDesktopClient } from './client-observation.js'
@@ -344,7 +344,9 @@ export async function registerIpc(args: {
     return result.occupied
   })
   const disposeProgressChanges = args.progressLoops.subscribe((loop) => {
-    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONTINUOUS_PROGRESS_CHANGED, loop)
+    if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) {
+      args.window.webContents.send(loop.calendar ? SCHEDULE_CHANGED : CONTINUOUS_PROGRESS_CHANGED, loop)
+    }
   })
   const acceptControl = (event: IpcMainEvent, response: DesktopControlResponse): void => {
     // 发送者判据走 senderTrust（被行为测试直接质询）；这个频道的处置是**静默返回**而非抛，所以那半件
@@ -885,10 +887,34 @@ export async function registerIpc(args: {
   })
   const progressTargetMatches = (loop: ContinuousProgressTarget, target: ContinuousProgressTarget): boolean =>
     loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
+  handleWithEvent('schedule:list', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => {
+    requireTrustedSender('schedule:list', event)
+    return args.progressLoops.call('schedule.list', input)
+  })
+  handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => {
+    requireTrustedSender('schedule:inspect', event)
+    return args.progressLoops.call('schedule.inspect', input)
+  })
+  handleWithEvent('schedule:create', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => {
+    requireTrustedSender('schedule:create', event)
+    return args.progressLoops.call('schedule.create', input)
+  })
+  handleWithEvent('schedule:pause', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => {
+    requireTrustedSender('schedule:pause', event)
+    return args.progressLoops.call('schedule.pause', input)
+  })
+  handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => {
+    requireTrustedSender('schedule:resume', event)
+    return args.progressLoops.call('schedule.resume', input)
+  })
+  handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
+    requireTrustedSender('schedule:cancel', event)
+    return args.progressLoops.call('schedule.cancel', input)
+  })
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
     requireTrustedSender('continuousProgress:list', event)
     await args.progressLoops.start()
-    return args.progressLoops.list().filter(loop => progressTargetMatches(loop, target))
+    return args.progressLoops.list().filter(loop => !loop.calendar && progressTargetMatches(loop, target))
   })
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
@@ -899,7 +925,7 @@ export async function registerIpc(args: {
   handleWithEvent('continuousProgress:action', async (event, target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => {
     requireTrustedSender('continuousProgress:action', event)
     await args.progressLoops.start()
-    const loop = args.progressLoops.list().find(loop => loop.loopId === loopId && progressTargetMatches(loop, target))
+    const loop = args.progressLoops.list().find(loop => !loop.calendar && loop.loopId === loopId && progressTargetMatches(loop, target))
     if (!loop) throw new Error('This loop does not belong to the requested target.')
     if (action === 'pause') return await args.progressLoops.pause(loopId)
     if (action === 'stop') return await args.progressLoops.stopLoop(loopId)
@@ -1277,6 +1303,7 @@ export async function registerIpc(args: {
     spatialState,
     topics: topicKnowledge,
     files: publicFiles,
+    schedules: args.progressLoops,
     notebookStore,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),

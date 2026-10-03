@@ -91,7 +91,9 @@ function startPrimaryInstance(): void {
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     undefined,
-    (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal)
+    (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal),
+    { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
+      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context) }
   )
   void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
   const configStore = new ConfigStore()
