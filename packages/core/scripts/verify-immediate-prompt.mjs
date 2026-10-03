@@ -4,13 +4,16 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
+import { qualifySharedMainSource } from './qualify-shared-main-source.mjs'
 const exec=promisify(execFile),root=fileURLToPath(new URL('../../../',import.meta.url)),core=join(root,'packages/core')
 const args=process.argv.slice(2);assert(args.every(a=>a==='--native'||a==='--no-mutations'),'Unknown immediate proof option')
 const evidence=join(root,'.tmp','verify-immediate-prompt');await mkdir(evidence,{recursive:true})
 const report={schema:'agentmux.immediate-prompt-verification.v1',passed:false,callers:[],mutations:[]}
 const run=async(argv,options={})=>exec(process.execPath,argv,{cwd:root,env:{...process.env,pnpm_config_verify_deps_before_run:'false'},maxBuffer:8*1024*1024,...options})
 const tests=()=>run([join(root,'node_modules/vitest/vitest.mjs'),'run','--config',join(core,'scripts/immediate-prompt.vitest.config.mts')])
+const selectedSource=['packages/core/src','packages/core/scripts/build.mjs','packages/core/package.json','packages/core/tsconfig.json','packages/core/tsconfig.build.json','tsconfig.base.json']
 try{
+ report.sourceQualification=await qualifySharedMainSource(root,selectedSource)
  await run([join(core,'scripts/build.mjs')]);report.build=true
  // All witnesses are outside the symbol's defining file; an empty set is a failure.
  for(const [file,expressions]of[
@@ -41,7 +44,7 @@ try{
   ['refresh-ack-persistence','packages/core/src/prompt-submission.ts','frameRefresh: { ...frozen, acknowledged: true }','frameRefresh: { ...frozen, acknowledged: false }']
  ]
  assert(mutations.length>=7)
- for(const [name,file,before,after]of mutations){const path=join(root,file),source=await readFile(path,'utf8');assert.equal(source.split(before).length-1,1,`Mutation must have one exact production target: ${name}`)
+ for(const [name,file,before,after]of mutations){await qualifySharedMainSource(root,selectedSource,report.sourceQualification?.commit);const path=join(root,file),source=await readFile(path,'utf8');assert.equal(source.split(before).length-1,1,`Mutation must have one exact production target: ${name}`)
   let red
   try{await writeFile(path,source.replace(before,after));red=await tests().then(result=>({...result,code:0}),error=>error);assert.notEqual(red.code,0,`Survived production mutation ${name}`);assert(/\d+ failed|FAIL\s+packages\/core\/test\/immediate/u.test(red.stdout+red.stderr),`Mutation did not reach an owning assertion ${name}`)}finally{await writeFile(path,source)}
   const restored=await tests();assert(/30 passed/.test(restored.stdout));report.mutations.push({name,result:'RED/restore GREEN'});await writeFile(join(evidence,name+'.log'),(red.stdout??'')+(red.stderr??''))
@@ -49,6 +52,7 @@ try{
  }
  // Restore source build identity after mutations; compilation is also the production
  // package consumed by the isolated native fixture.
+ await qualifySharedMainSource(root,selectedSource,report.sourceQualification?.commit)
  await run([join(core,'scripts/build.mjs')])
  if(args.includes('--native')){
   const native=await run([join(core,'test/fixtures/immediate-native-worker.mjs'),evidence],{timeout:90_000});await writeFile(join(evidence,'native.log'),native.stdout+native.stderr);const proof=JSON.parse(await readFile(join(evidence,'native-proof.json'),'utf8'));assert(proof.passed&&proof.cleanup.privateRunStopped&&proof.cleanup.privateDaemonStopped);report.native=proof

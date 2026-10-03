@@ -8,15 +8,19 @@ import { dirname, join, relative, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
 import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
+import { qualifySharedMainSource } from '../../../packages/core/scripts/qualify-shared-main-source.mjs'
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop'),require=createRequire(import.meta.url),exec=promisify(execFile)
 const mode=process.argv[2],base='4b38c4cf540de04f9de2ea70793a965b2e96c30d'
 assert.ok(['--mutations','--source','--native','--card-mutations'].includes(mode))
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const typedPaths=['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/ComposerOutbox.tsx','apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx','apps/desktop/src/renderer/src/store.ts','packages/client-ui/src/components/AgentComposer.tsx','apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/components/ComposerQueuedMessageEditor.tsx']
-const styles=['packages/client-ui/src/styles/composer.css','packages/client-ui/src/styles/conversation-message.css'],dependencyPaths=['patches/@xterm__xterm@6.1.0-beta.303.patch','pnpm-lock.yaml'], originals=Object.fromEntries(await Promise.all([...typedPaths,...styles,...dependencyPaths].map(async p=>[p,await readFile(join(root,p),'utf8')])))
+const styles=['packages/client-ui/src/styles/composer.css','packages/client-ui/src/styles/conversation-message.css'],dependencyPaths=['patches/@xterm__xterm@6.1.0-beta.303.patch','pnpm-lock.yaml']
+const qualificationHelper='packages/core/scripts/qualify-shared-main-source.mjs',selectedSource=['apps/desktop/src',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/src'),...dependencyPaths,'apps/desktop/scripts/fixtures/composer-pending-delivery','package.json','pnpm-workspace.yaml','tsconfig.base.json','apps/desktop/package.json','apps/desktop/tsconfig.json','packages/client-ui/tsconfig.json',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/package.json')]
+const sourceQualification=await qualifySharedMainSource(root,selectedSource)
+const originals=Object.fromEntries(await Promise.all([...typedPaths,...styles,...dependencyPaths].map(async p=>[p,await readFile(join(root,p),'utf8')])))
 const privateRoot=await realpath(await mkdtemp(join(tmpdir(),'amx-pending-delivery-'))),evidence=join(root,'.tmp/composer-pending-delivery',mode.slice(2)+'-'+globalThis.crypto.randomUUID())
 await mkdir(evidence,{recursive:true})
-const result={schema:'agentmux.composer-pending-delivery-proof.v1',mode,base,passed:false,userRunTouched:false,sharedSourceWritten:false,aestheticReview:'not-performed',productSources:Object.fromEntries(Object.entries(originals).map(([p,b])=>[p,hash(b)])),mutations:[]}
+const result={schema:'agentmux.composer-pending-delivery-proof.v1',mode,base,passed:false,userRunTouched:false,sharedSourceWritten:false,aestheticReview:'not-performed',sourceQualification,productSources:Object.fromEntries(Object.entries(originals).map(([p,b])=>[p,hash(b)])),mutations:[]}
 let dependency
 async function prepareXterm(){
  if(dependency)return dependency
@@ -72,6 +76,8 @@ async function nativeMutation(label,red,expectedFailure=/actual original termina
  return{code,assertionRed:red,frames:rendered.frames.length,evidence:label,receipt}
 }
 async function cardMutations(){
+ await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
+ await mkdir(join(privateRoot,'packages/core/scripts'),{recursive:true});await cp(join(root,qualificationHelper),join(privateRoot,qualificationHelper))
  for(const dir of ['apps/desktop/src','apps/desktop/test/helpers','apps/desktop/scripts','apps/desktop/resources','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
  for(const p of ['package.json','pnpm-workspace.yaml','pnpm-lock.yaml','tsconfig.base.json','apps/desktop/package.json','apps/desktop/tsconfig.json',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/package.json')])await cp(join(root,p),join(privateRoot,p))
  for(const p of ['node_modules','apps/desktop/node_modules',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/node_modules')])await symlink(join(root,p),join(privateRoot,p),'dir')
@@ -105,6 +111,8 @@ async function cardMutations(){
  assert.equal(result.mutations.length,cases.length)
 }
 async function mutations(){
+ await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
+ await mkdir(join(privateRoot,'packages/core/scripts'),{recursive:true});await cp(join(root,qualificationHelper),join(privateRoot,qualificationHelper))
  for(const dir of ['apps/desktop/src','apps/desktop/test','apps/desktop/scripts','apps/desktop/resources','apps/desktop/browser-extension','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
  for(const p of ['package.json','pnpm-workspace.yaml','pnpm-lock.yaml','tsconfig.base.json','vitest.setup.ts','apps/desktop/package.json','apps/desktop/tsconfig.json',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/package.json')])await cp(join(root,p),join(privateRoot,p))
  for(const p of ['node_modules','apps/desktop/node_modules',...['core','client-ui','demand','layout'].map(p=>'packages/'+p+'/node_modules')])await symlink(join(root,p),join(privateRoot,p),'dir')
@@ -128,6 +136,7 @@ async function mutations(){
  result.mutations.push({name:'absolute-scroll-old-dimensions',files:dependencyPaths,originalSha256:hash(patchOriginal),mutatedSha256:hash(patchChanged),lockOriginalSha256:hash(lockOriginal),lockMutatedSha256:hash(lockChanged),red:dimensionsRed,restored:dimensionsRestored})
 }
 async function source(){
+ await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
  const ts=await import('typescript');await dependencySource(ts);const app=ts.getParsedCommandLineOfConfigFile(join(desktop,'tsconfig.json'),{},ts.sys),shared=ts.getParsedCommandLineOfConfigFile(join(root,'packages/client-ui/tsconfig.json'),{},ts.sys)
  assert.ok(app.fileNames.length&&shared.fileNames.length)
  const paths={'@agentmux/client-ui/components/*':['packages/client-ui/src/components/*.tsx'],'@agentmux/client-ui/terminal/*':['packages/client-ui/src/terminal/*.ts'],'@agentmux/client-ui/platform':['packages/client-ui/src/platform.tsx'],'@agentmux/client-ui':['packages/client-ui/src/index.ts'],'@agentmux/client-ui/*':['packages/client-ui/src/lib/*.ts'],'@agentmux/layout':['packages/layout/src/index.ts']}
@@ -164,6 +173,7 @@ async function source(){
  result.mutations.push({name:'actual-invalid-queued-prop',originalSha256:hash(original),mutatedSha256:hash(changed),red,restoredOwnedDiagnostics:owned})
 }
 async function native(){
+ await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
  const d=await prepareXterm()
  const {build}=await import('vite'),fixture=join(desktop,'scripts/fixtures/composer-pending-delivery'),directory=join(evidence,'candidate'),processRoot=join(privateRoot,'native'),outDir=join(processRoot,'out'),main=join(processRoot,'main.cjs'),wrapper=join(processRoot,'xterm.mjs')
  await mkdir(directory,{recursive:true});await mkdir(processRoot,{recursive:true});const mainBytes=await readFile(join(fixture,'main.cjs'));await writeFile(main,mainBytes)

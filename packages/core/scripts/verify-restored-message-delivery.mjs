@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { createHash } from 'node:crypto'
+import { qualifySharedMainSource } from './qualify-shared-main-source.mjs'
 const execute = promisify(execFile), root = fileURLToPath(new URL('../../../', import.meta.url)), core = join(root, 'packages/core')
 const args = process.argv.slice(2)
 const resumeBoundary = args.includes('--resume-boundary'), expectedTests = resumeBoundary ? 21 : 12
@@ -14,7 +15,9 @@ const evidence = join(root, '.tmp/verify-restored-message-delivery'); await mkdi
 const report = { schema: 'agentmux.restored-message-delivery.v1', passed: false, callers: [], mutations: [] }
 const run = (argv, options = {}) => execute(process.execPath, argv, { cwd: root, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' }, maxBuffer: 8 * 1024 * 1024, ...options })
 const tests = () => run([join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', join(core, `scripts/${resumeBoundary ? 'restored-prompt-predecessor' : 'restored-message-delivery'}.vitest.config.mts`)])
+const selectedSource = ['packages/core/src', 'packages/core/scripts/build.mjs', 'packages/core/package.json', 'packages/core/tsconfig.json', 'packages/core/tsconfig.build.json', 'tsconfig.base.json']
 try {
+  report.sourceQualification = await qualifySharedMainSource(root, selectedSource)
   await run([join(core, 'scripts/build.mjs')]); report.build = true
   for (const [file, patterns] of [
     ['packages/core/src/providers/codex.ts', [/verifyPromptExecutionTransport: createCodexPromptExecutionTransportVerifier\(\)/u]],
@@ -51,6 +54,7 @@ try {
       ['resume-current-run-store', 'packages/core/src/agent-session-store.ts', 'run.runId !== currentRun.runId || priorRuns.at(-1)?.runId !== previousRun.runId', 'false']
     ] : [])
   ]) {
+    await qualifySharedMainSource(root, selectedSource, report.sourceQualification?.commit)
     const path = join(root, file), original = await readFile(path, 'utf8'); assert.equal(original.split(before).length - 1, 1, `One exact mutation target: ${name}`)
     // Preallocate exact original bytes before touching source. Atomic restore
     // remains possible when the counterfactual exhausts disk space.
@@ -65,6 +69,7 @@ try {
     assert((await tests()).stdout.includes(`${expectedTests} passed`)); await writeFile(join(evidence, name + '.log'), red.stdout + red.stderr)
     report.mutations.push({ name, result: 'RED/restore GREEN' })
   }
+  await qualifySharedMainSource(root, selectedSource, report.sourceQualification?.commit)
   await run([join(core, 'scripts/build.mjs')])
   if (args.includes('--native')) {
     assert.equal(process.platform, 'darwin'); assert.equal(process.arch, 'arm64')
