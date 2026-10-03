@@ -86,6 +86,8 @@ export function objectCliSeed(method: string, input: string): string[] {
     'message.pending.ls': ['--session', ids.agent],
     'message.pending.edit': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before', '--text', '--help'],
     'message.pending.send': ['--session', ids.agent, '--pending-id', 'PENDING'],
+    'message.pending.archive': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before'],
+    'message.pending.restore': ['--session', ids.agent, '--pending-id', 'PENDING', '--expected-text', 'before'],
     'device.ls': [], 'device.link': [], 'device.hello': ['--name', 'DEVICE'], 'device.revoke': ['--device', 'DEVICE'],
     'agent.open': ['--executor', 'E', '--zone', ids.zone, '--new-tab', '--operation-id', 'BUSINESS'],
     'agent.rename': ['--session', ids.agent, '--name', '--help'], 'agent.view': ['--session', ids.agent],

@@ -971,6 +971,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'message.pending.ls': 'short',
   'message.pending.edit': 'short',
   'message.pending.send': 'long',
+  'message.pending.archive': 'short',
+  'message.pending.restore': 'short',
   'browser.subscribe': 'short'
   , 'demand.list': 'short'
   , 'demand.show': 'short'

@@ -34,8 +34,8 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
     if (notice) notices.push({ id, occurrence: JSON.stringify(identity), notice,
       ...(observedAt === undefined ? {} : { observedAt }) })
   }
-  const problem = queue.find(entry => entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
-    !steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState))
+  const problem = queue.find(entry => !entry.archived && (entry.status === 'deferred' || entry.status === 'failed' || entry.status === 'restoring' ||
+    !steerEntryTargetsRun(entry, session.control.run.runId) || !steerQueueCanEverDrain(session.processState)))
   if (problem) notices.push({ id: 'queue', occurrence: JSON.stringify([...identity, problem.operationId]),
     notice: { kind: 'process-degraded', notice: {
       step: problem.status === 'restoring' && sendingId === problem.operationId
