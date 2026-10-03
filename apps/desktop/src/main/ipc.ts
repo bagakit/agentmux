@@ -890,7 +890,7 @@ export async function registerIpc(args: {
     loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
   // The original Unix transport supplies the local user principal after the
   // original trusted Renderer check; the request cannot assert human provenance.
-  const callSchedule = async <M extends import('@agentmux/core').ScheduleMethod>(method: M, input: import('@agentmux/core').ScheduleParamsMap[M]) => {
+  const callSchedule = async <M extends import('@agentmux/core').ScheduleMethod>(method: M, input: import('@agentmux/core').AgentMuxRpcParams<M>) => {
     const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
     try { return await client.call(method, input) }
     finally { await client.dispose() }
