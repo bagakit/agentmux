@@ -2035,7 +2035,11 @@ export class AgentMuxClient {
             return
           }
           notify({ ...observation, agentSessionId })
-          if (observation.kind === 'unavailable') controller.abort(new AgentMuxError(observation.message, observation.code))
+          // A bounded read failure is observation uncertainty, not a lost
+          // source. Providers may recover on the next exact native event.
+          if (observation.kind === 'unavailable' && observation.code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED') {
+            controller.abort(new AgentMuxError(observation.message, observation.code))
+          }
         }
       }).then((handle) => {
         observer = handle
