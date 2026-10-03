@@ -598,7 +598,7 @@ function SurfaceContent({
         visible={nativeSurfacesVisible}
         released={browserReleased}
         yieldToFocusRing={focus.nativeViewYieldsToRing}
-        presentationTargetId={browserPresentation.tabHostId}
+        presentationTargetId={primaryPresentationHostId ?? browserPresentation.tabHostId}
         controlPanelOpen={browserPresentation.survey ? browserPresentation.controlsOpen : undefined}
         onControlConfirmation={browserPresentation.onBrowserControlConfirmation}
       />
