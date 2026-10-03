@@ -12,7 +12,7 @@ export async function executeSettingsControl(
 ): Promise<Extract<AgentMuxControlResult, { operation: 'settings.get' | 'settings.set' }>> {
   if (request.operation === 'settings.get') {
     const selected = request.target === undefined || request.target === '' ? settings :
-      request.target === 'profile' || request.target === 'focus' || request.target === 'goalsCommonActions' || request.target === 'appearance' || request.target === 'notifications' || request.target === 'browser' || request.target === 'browser.toolbar' || request.target === 'toolkit' || request.target === 'toolkit.performance'
+      request.target === 'profile' || request.target === 'focus' || request.target === 'notes' || request.target === 'goals' || request.target === 'goalsCommonActions' || request.target === 'appearance' || request.target === 'notifications' || request.target === 'browser' || request.target === 'browser.toolbar' || request.target === 'toolkit' || request.target === 'toolkit.performance'
       ? settings.filter((setting) => setting.key.startsWith(`${request.target}.`))
       : settings.filter((setting) => setting.key === request.target)
     if (!selected.length) throw unsupported(request.target ?? '')

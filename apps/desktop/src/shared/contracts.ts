@@ -524,6 +524,8 @@ export type AppConfig = {
   /** Local human presentation and explicitly shared context for new Agent launches. */
   profile?: import('./user-profile').UserProfile
   focus?: import('./focus-preferences').FocusPreferences
+  notes?: import('./notes-preferences').NotesPreferences
+  goals?: import('./goals-preferences').GoalsPreferences
   // Optional so the field can land without a version bump or a migration: `ConfigStore.get` fills the
   // explicit default when it is absent (same shape as the scratch-workspace back-fill), and every read
   // goes through resolveNotificationModeId, which also defaults. Absence therefore never means "off".

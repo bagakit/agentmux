@@ -1,25 +1,25 @@
 import { Target } from 'lucide-react'
-import { resolveGoalsCommonActions } from '../../../../../shared/goals-preferences'
+import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from '../../../../../shared/goals-preferences'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
 import { GoalsSettingsPane } from '../GoalsSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-async function saveCollapsed(collapsed: boolean, expected: boolean): Promise<void> {
+async function saveGoals(collapsed: boolean, expected: boolean, preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void> {
   const current = useAppStore.getState().config
   if (!current) throw new Error('Configuration is unavailable. Your Goals choice is kept; reload configuration and retry saving.')
   const directory = resolveGoalsCommonActions(current.goalsCommonActions)
-  await api.config.save({ ...current, goalsCommonActions: { ...directory, collapsed } },
-    { ...current, goalsCommonActions: { ...directory, collapsed: expected } })
+  await api.config.save({ ...current, goals: { ...current.goals, ...preferences }, goalsCommonActions: { ...directory, collapsed } },
+    { ...current, goals: { ...current.goals, ...expectedPreferences }, goalsCommonActions: { ...directory, collapsed: expected } })
 }
 
 export const goalsSettingsModule = {
   id: 'goals', group: 'work', title: 'Goals', icon: Target,
-  description: 'How common actions appear when you open Goals.',
-  keywords: 'work goals common actions collapsed expanded prompt library',
-  savedSummary: config => resolveGoalsCommonActions(config.goalsCommonActions).collapsed ? 'Common actions collapsed' : 'Common actions expanded',
+  description: 'Choose a starting view and keep your goals in sight.',
+  keywords: 'work goals default view list board finished history common actions collapsed expanded prompt library',
+  savedSummary: config => { const saved = resolveGoalsPreferences(config.goals); return `${saved.defaultView === 'board' ? 'Board' : 'List'} · ${saved.showFinished ? 'Including finished' : 'Active goals'}` },
   Pane({ config, onClose }) {
-    return <GoalsSettingsPane collapsed={config.goalsCommonActions?.collapsed} onSave={saveCollapsed}
+    return <GoalsSettingsPane collapsed={config.goalsCommonActions?.collapsed} preferences={config.goals} onSave={saveGoals}
       onOpenGoals={() => { onClose(); useAppStore.getState().setMainSurface('board') }} />
   }
 } as const satisfies SettingsModule

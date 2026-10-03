@@ -29,6 +29,8 @@ import { INITIAL_TOOLKIT_PACKAGES } from '../../resources/toolkit/initial-packag
 import { bootstrapToolkitPackages } from './toolkit-package-bootstrap.js'
 import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_LIMIT, validProfileAvatar } from '../shared/user-profile.js'
 import { FOCUS_RECENT_ACTIVITY_HOURS } from '../shared/focus-preferences.js'
+import { NOTE_CONTENT_WIDTHS, validNoteFontSize } from '../shared/notes-preferences.js'
+import { GOALS_VIEW_IDS } from '../shared/goals-preferences.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
@@ -243,6 +245,8 @@ const configSchema = z
     appearance: appearanceSchema,
     browser: browserSchema,
     focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), linkDestination: z.enum(['region', 'tab']).optional() }).strict().optional(),
+    notes: z.object({ fontSize: z.number().refine(validNoteFontSize).optional(), contentWidth: z.enum(NOTE_CONTENT_WIDTHS).optional() }).strict().optional(),
+    goals: z.object({ defaultView: z.enum(GOALS_VIEW_IDS).optional(), showFinished: z.boolean().optional() }).strict().optional(),
     profile: z.object({
       displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),
       about: z.string().max(USER_PROFILE_ABOUT_LIMIT),

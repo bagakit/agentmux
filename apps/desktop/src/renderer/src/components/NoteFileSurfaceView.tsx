@@ -15,6 +15,7 @@ import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { NoteFileView } from './NoteFileView'
+import { noteReadingStyle } from '../lib/note-reading-style'
 
 type SourceChoice = { source: NoteSource; blockId: string; location: AgentMuxSpaceLocation; displayName: string; tabName: string; position: string }
 
@@ -120,7 +121,7 @@ export function NoteFileSurfaceView({ tabId, surface }: { tabId: string; surface
   }
   const originalResource = config?.workspaces.find(item => item.id === surface.workspaceId)
   if (!document) return null
-  return <div className="note-surface">
+  return <div className="note-surface" style={noteReadingStyle(config?.notes)}>
 
     {directoryFacts?.issues.length ? <div className="note-knowledge-notice" role="status">{directoryFacts.issues.map((issue, index) => <div key={index}>{issue}</div>)}</div> : null}
     {!blockPresentation ? <div className="note-knowledge-notice" role="status">Block selection recovery is unconfirmed for this display. Editing continues; restore its exact display position to resume selection recovery.</div> : null}
