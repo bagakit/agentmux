@@ -43,7 +43,7 @@
 
 ### Revision-aware 保存与外部冲突
 
-- Desktop Main 的 `WorkspaceFiles` 独占 Workspace Root confinement、磁盘 revision、同目录临时写入、同步、mode 保留、原子替换、单文件观察和磁盘错误事实。Shared contract 与 preload 只暴露 typed read、write、observe 和 move 能力。
+- Desktop Main 的 `WorkspaceFiles` 独占 Workspace Root confinement、磁盘 revision、同目录临时写入、同步、mode 保留、原子替换、单文件观察和磁盘错误事实。Shared contract 与 preload 暴露类型化文件合同，读取、发现、保存与观察均沿同一 `WorkspaceFiles` 所有者。
 - Read 返回内容和不透明 revision。Write 必须携带 expected revision，返回 `written | conflict | error | unknown`；替换后回执缺失是 unknown，不能解释成明确未写入。Remote workspace 无法满足同一原子保存合同时返回 typed unsupported。
 - 临时写入或替换失败会清理临时文件并保持原文件字节不变。普通文件系统 revision 是 optimistic concurrency signal；最终 revision 复核与原子替换之间仍存在外部进程竞争窗口，不宣称强跨进程 compare-and-swap。
 - Renderer 持有 Monaco buffer、dirty、保存 generation、observation generation、document lifetime 和冲突交互。每文件保存串行化；保存期间继续输入时旧 written 回执只更新落盘 revision，不清除更新后的 buffer 或 dirty。
@@ -108,9 +108,7 @@ History 的单行阅读、分支颜色与连线唯一见密度 SSOT[《Explorer 
 - Source Editor 的 minimap 直接使用 Monaco 的当前模型能力，提供可记住选择的开关，缺省关闭；仅在需要的源码编辑器中消费，不为 Markdown 预览、图片或媒体加载另一份编辑引擎。切换偏好就地更新原编辑器，保留选择、阅读位置、草稿与保存状态；窄 Region 中仍可关闭，不因辅助导航拿走正文输入或关闭操作。
 - 目录渲染和热路径成本随实际可见行及相关目录事实增长。窗口化必须保留原路径、展开、选择、键盘导航、内联编辑、菜单与移动事务；用户滚动和键盘移动均能到达整棵已加载树，不因行未挂载失去动作资格。
 
-- 用户要求「内置的 browser 应该要支持打开本地文件进行预览」，不能只接收网络 URL。
-- 对能识别的网页、图片、文本等常见格式，应提供适合该格式的预览与编辑体验，而不是都落到同一种通用显示。
-- 具体编辑能力与格式边界先参考成熟产品，再形成对应 Feature 的评审任务；`local-file-preview-editors` 保留历史需求与验收记录，后续格式预览维护沿本节的同一 File / Browser 所有者闭合，不混入既有版本安装验收。
+- 内置 Browser 支持打开本地文件进行预览；HTML 与相对资源沿原隔离 Browser，格式与目标边界见[本地链接的真实格式预览与二进制保全](#本地链接的真实格式预览与二进制保全)。
 
 ### Terminal 本机临时产物预览
 

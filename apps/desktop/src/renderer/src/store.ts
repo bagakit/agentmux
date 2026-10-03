@@ -1489,122 +1489,104 @@ async function refreshFileDocument(
 }
 
 /**
- * Load the document for a file Region that has one persisted but not loaded.
- *
- * A file surface is only `{regionId,kind,workspaceId,path}` — the restore path rebuilds the layout,
- * but nothing in a surface holds content, and `EditorPane` renders its unavailable state for any
- * surface whose `documents[key]` is missing. Every other way a file surface appears (Explorer click,
- * terminal link, chat link) loads the document as part of opening it; restore was the one entrance
- * that produced a surface with no document behind it, so the user saw a Tab that is present and
- * reports "unavailable" — which reads as a broken file rather than an unloaded one.
- *
- * This is called by the pane that would otherwise render that unavailable state, rather than by a
- * startup sweep, so that a file Region in a Workspace the user has not switched back to yet is
- * covered too: a sweep can only resolve paths against the active Workspace, and would leave those
- * Tabs broken until the next restart with no later trigger (`selectWorkspace` does not load).
- *
- * Do not read this as "only the visible Tab reads its file". Hidden Tabs stay mounted on purpose —
- * that is what keeps a terminal instance alive across Tab switches (see hidden-tab-terminal-retention),
- * and `ownerPresent: false` also keeps a document-less file surface out of the memory-budget parking
- * set, so `released` is false and this does fire. So a cold start reads every persisted file Region in
- * the Workspace's Tab group, not just the active one. That is affordable — one `files.read` per open
- * file Region, the same read a click would do — and it is what makes every restored Tab work on first
- * click instead of only the one that happened to be active. If that cost ever stops being affordable,
- * the fix is to gate the read on real visibility, NOT to move it back into a startup sweep.
- *
- * It reads through the same `api.files` seam as a click, but must not reuse `openFile`: that one
- * also *opens* — it targets the active group, can move the Tab, and writes reveal targets. Here the
- * Tab already exists exactly where the user left it, so only the document is missing.
+ * Attach content to an existing visible File on demand, without opening, moving or revealing it.
+ * EditorPane admits visibility; this owner deduplicates reads and preserves original resource,
+ * document lifetime and failure facts. Source, preview and Retry use the same FileDocument.
  */
 async function loadPersistedFileDocument(workspaceId: string, path: string, resource?: { hostId: string; path: string }): Promise<void> {
   const key = documentKey(workspaceId, path)
   const state = useAppStore.getState()
-  // Three ways this is already answered: the document is here, a read is in flight, or a previous read
-  // recorded why it cannot be loaded. The third is the one that has to live here rather than only in
-  // the calling pane — otherwise every caller would need to remember the stop condition, and a known
-  // unreadable path would be re-read once per caller.
   if (state.documents[key] || fileOpenRequests.has(key) || state.documentIssues[key]) return
+  const original = resource ?? state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+  if (!original) {
+    useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
+      kind: 'read-error', code: 'WORKSPACE_FILE_RESOURCE_UNAVAILABLE', message: 'The original file Workspace is unavailable.'
+    }))
+    return
+  }
+  const originalResource = { hostId: original.hostId, path: original.path }
+  let resourceRebound = false, observedConfig = state.config
+  let releaseResource = () => {}
   const resourceCurrent = () => {
     const current = useAppStore.getState().config?.workspaces.find(workspace => workspace.id === workspaceId)
-    return !resource || current?.hostId === resource.hostId && current.path === resource.path
+    return !resourceRebound && current?.hostId === originalResource.hostId && current.path === originalResource.path
   }
   if (!resourceCurrent()) return
   const openedLifetime = advanceDocumentLifetime(key)
-  const request = Promise.resolve().then(async () => {
+  let observationRequested = false
+  const ownsRequest = () => documentLifetime(key) === openedLifetime && fileOpenRequests.get(key) === request
+  const admitted = () => ownsRequest() && resourceCurrent() && !useAppStore.getState().documents[key]
+  const releaseObservation = async () => {
+    // Close/new lifetime already owns disposal. Never dispatch an old unobserve to a new reader.
+    if (!ownsRequest() || !observationRequested) return
+    observationRequested = false
+    await api.files.unobserve(workspaceId, path)
+  }
+  const request: Promise<boolean> = Promise.resolve().then(async () => {
     try {
-      // Capture the invalidation counter BEFORE reading, the same way `openFile` does. A watcher can
-      // report the file changed while this read is in flight, and that report lands nowhere:
-      // `refreshFileDocument` early-returns while `documents[key]` is still absent. Without the
-      // comparison below, the pane would hold content one revision stale with no `changed` flag until
-      // the next disk change — the first save would still be caught by the revision check, but the
-      // user would be told "changed on disk" about a change that happened before they ever saw the file.
+      // Invalidation during this read must refresh the attached revision once it has an owner.
       const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
-      if (!resourceCurrent()) return false
+      if (!admitted()) return false
+      observationRequested = true
       await api.files.observe(workspaceId, path)
-      if (!resourceCurrent()) { await api.files.unobserve(workspaceId, path); return false }
+      if (!admitted()) { await releaseObservation(); return false }
       const result = await api.files.read(workspaceId, path)
-      if (!resourceCurrent()) { await api.files.unobserve(workspaceId, path); return false }
-      if (documentLifetime(key) !== openedLifetime) {
-        await api.files.unobserve(workspaceId, path)
-        return false
-      }
+      if (!admitted()) { await releaseObservation(); return false }
       if (result.status === 'binary') {
-        await api.files.unobserve(workspaceId, path)
-        useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path, {
+        await releaseObservation()
+        if (!admitted()) return false
+        useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
           kind: 'binary', revision: result.revision, byteLength: result.byteLength
         }))
         return true
       }
       if (result.status !== 'read') {
-        await api.files.unobserve(workspaceId, path)
-        // Say which failure it was. A file deleted while the app was closed is the same fact as one
-        // deleted while open, so it lands in the same existing issue kind — whose failure state already
-        // offers Reveal (falling back to the nearest surviving ancestor). Recording it also tells the
-        // pane to stop asking: without an issue there is nothing to distinguish "not loaded yet" from
-        // "cannot be loaded", and the pane would re-read a known-bad path on every dependency change.
-        useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path,
+        await releaseObservation()
+        if (!admitted()) return false
+        // Preserve the existing honest issue and its Retry/Reveal routes; do not move the Files dock.
+        useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path,
           result.status === 'deleted'
             ? { kind: 'deleted' }
             : result.status === 'directory'
-              // The persisted path is now a directory. Not a read error — the same "this is not a
-              // document" fact the click path reports, without hijacking the Files dock the way a
-              // deliberate click does: nothing the user just did warrants moving their tool panel.
               ? { kind: 'read-error', code: 'WORKSPACE_FILE_IS_DIRECTORY', message: `Not a file: ${path}` }
               : { kind: 'read-error', code: result.code, message: result.message }))
         return false
       }
-      // A Workspace removed from config between restarts, or a second load that won this race, must
-      // not install a document for a surface that is no longer there.
-      if (documentLifetime(key) !== openedLifetime || useAppStore.getState().documents[key]) {
-        await api.files.unobserve(workspaceId, path)
-        return false
-      }
-      useAppStore.setState((state) => reduceDocumentAttached(state, workspaceId, path, result.document))
-      // Only now can a refresh land: `refreshFileDocument` needs the document to already be here.
-      // Dropping the open request first is what lets it run — it takes the same in-flight slot.
+      useAppStore.setState(state => reduceDocumentAttached(state, workspaceId, path, result.document))
+      // The attached document now owns observation; refresh takes the same in-flight slot.
+      releaseResource()
       if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
       if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
         await refreshFileDocument(workspaceId, path, openedLifetime)
       }
       return true
     } catch (error) {
-      // An IPC fault, not a read verdict. Record it as a read error for the same reason the verdict
-      // paths do: it is the pane's only stop condition, and without one this surface sits on the
-      // generic unavailable state with no way to tell the user what went wrong. Retry is the Retry
-      // button on that state, not a silent loop.
-      await api.files.unobserve(workspaceId, path).catch(() => undefined)
-      useAppStore.setState((state) => reduceDocumentLoadFailed(state, workspaceId, path, {
-        kind: 'read-error',
-        code: 'WORKSPACE_FILE_READ_FAILED',
+      if (!admitted()) return false
+      await releaseObservation().catch(() => undefined)
+      if (!admitted()) return false
+      useAppStore.setState(state => reduceDocumentLoadFailed(state, workspaceId, path, {
+        kind: 'read-error', code: 'WORKSPACE_FILE_READ_FAILED',
         message: error instanceof Error ? error.message : String(error)
       }))
       useAppStore.getState().reportError(error)
       return false
     } finally {
+      releaseResource()
       if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
     }
   })
   fileOpenRequests.set(key, request)
+  releaseResource = useAppStore.subscribe(state => {
+    if (state.config === observedConfig) return
+    observedConfig = state.config
+    if (resourceCurrent()) return
+    resourceRebound = true
+    // Dispatch disposal before releasing the slot. Main removes its old observation synchronously
+    // and disposes that promise, so a subsequent current read can observe independently.
+    void releaseObservation().catch(() => undefined)
+    if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
+    releaseResource()
+  })
   await request
 }
 
@@ -6041,32 +6023,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const joinedRequest = Boolean(request)
         if (!request) {
           const openedLifetime = advanceDocumentLifetime(key)
+          const ownsRead = () => documentLifetime(key) === openedLifetime && fileOpenRequests.get(key) === request
+          const releaseObservation = async () => { if (ownsRead()) await api.files.unobserve(workspaceId, path) }
           request = Promise.resolve().then(async () => {
             try {
-              if (!resourceCurrent()) return false
+              if (!ownsRead() || !resourceCurrent()) return false
               const invalidationSequence = fileInvalidationSequences.get(key) ?? 0
               await api.files.observe(workspaceId, path)
-              if (!resourceCurrent()) return false
+              if (!ownsRead() || !resourceCurrent()) return false
               const result = await api.files.read(workspaceId, path)
-              if (!resourceCurrent()) return false
+              if (!ownsRead() || !resourceCurrent()) return false
               if (result.status === 'directory') {
                 // The shared producer owns the verdict, not any caller's navigation.
-                await api.files.unobserve(workspaceId, path)
+                await releaseObservation()
                 return 'directory' as const
               }
               if (result.status !== 'read' && result.status !== 'binary') {
-                await api.files.unobserve(workspaceId, path)
+                await releaseObservation()
                 throw new Error(result.status === 'deleted'
                   ? `File was deleted: ${path}`
                   : result.message)
               }
               if (documentLifetime(key) !== openedLifetime) {
-                await api.files.unobserve(workspaceId, path)
+                await releaseObservation()
                 return false
               }
               const currentLayout = get().layouts[displayId!]
               if (!currentLayout) {
-                await api.files.unobserve(workspaceId, path)
+                await releaseObservation()
                 return false
               }
               const targetGroupId = tabGroupId ?? (findGroup(currentLayout, layout.activeGroupId)
@@ -6101,18 +6085,19 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 }
               })
               rememberPlacement()
-              if (result.status === 'binary' || format && !format.sourceEditable) await api.files.unobserve(workspaceId, path)
+              if (result.status === 'binary' || format && !format.sourceEditable) await releaseObservation()
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
               if ((fileInvalidationSequences.get(key) ?? 0) !== invalidationSequence) {
                 await refreshFileDocument(workspaceId, path, openedLifetime)
               }
               return true
             } catch (error) {
+              if (!ownsRead() || !resourceCurrent()) return false
               result.data = { kind: 'failed', reason: presentError(error) }
               get().reportError(error)
               return false
             } finally {
-              if (resourceRebound && documentLifetime(key) === openedLifetime) await api.files.unobserve(workspaceId, path)
+              if (resourceRebound && documentLifetime(key) === openedLifetime) await releaseObservation()
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
             }
           })
