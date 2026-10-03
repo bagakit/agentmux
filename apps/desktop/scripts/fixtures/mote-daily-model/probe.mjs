@@ -49,7 +49,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
     { module: writeModule, exports: writeModule.exports, sameRun: identityModule.exports.sameRun, AgentMuxError: errorModule.exports.AgentMuxError }, { filename: clientFile })
   const originalCoreWriteSource = { [clientFile]: hash(clientSource), [identityFile]: hash(identitySource), [errorFile]: hash(errorSource) }
   const counters = []
-  const scenarios = ['held-action-manager-drain-late-ack', 'failed-ack-stops-immediately', 'spent-five-refuses-next-input', 'trusted-terminal-protocol-zero-model-budget']
+  const scenarios = ['held-action-manager-drain-late-ack', 'failed-ack-stops-immediately', 'spent-four-refuses-next-input', 'trusted-terminal-protocol-zero-model-budget']
   if (selectedScenario) assert.ok(scenarios.includes(selectedScenario), 'Unknown Source-only counter')
   for (const scenario of selectedScenario ? [selectedScenario] : scenarios) {
     const root = await mkdtemp(_hygiene_fixturePath("tmp/amm-model-guard-")), output = join(evidence, scenario)
@@ -157,8 +157,8 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
       '../../../src/main/continuous-progress-delivery': { deliverContinuousProgress() {} },
       '../../../../../packages/core/src/durable-write': durableModule.exports
     }
-    const instrumentation = scenario === 'spent-five-refuses-next-input'
-      ? { anchor: 'attemptedModelRequests: 0, admittedModelRequests: 0, completedModelTurns: 0', replacement: 'attemptedModelRequests: 5, admittedModelRequests: 0, completedModelTurns: 0' } : null
+    const instrumentation = scenario === 'spent-four-refuses-next-input'
+      ? { anchor: 'attemptedModelRequests: 0, admittedModelRequests: 0, completedModelTurns: 0', replacement: 'attemptedModelRequests: 4, admittedModelRequests: 0, completedModelTurns: 0' } : null
     let loaded = owner
     if (instrumentation) { assert.equal(loaded.split(instrumentation.anchor).length, 2); loaded = loaded.replace(instrumentation.anchor, instrumentation.replacement) }
     const module = { exports: {} }
@@ -166,7 +166,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
       runInNewContext(compile(loaded), { module, exports: module.exports, require: name => name in modules ? modules[name] : require(name),
         process: { pid: process.pid, env: { AGENTMUX_RUNTIME_DIRECTORY: root + '/runtime', CODEX_HOME: root + '/codex-home' } },
         Buffer, structuredClone, AbortController, AbortSignal, setTimeout: timer, clearTimeout, console }, { filename: ownerFile })
-      if (scenario === 'spent-five-refuses-next-input' || scenario === 'trusted-terminal-protocol-zero-model-budget') releaseManager()
+      if (scenario === 'spent-four-refuses-next-input' || scenario === 'trusted-terminal-protocol-zero-model-budget') releaseManager()
       const passed = await module.exports.runModelOwner({ root, evidence: output, html: 'source-counter', preload: 'source-counter',
         command: 'source-counter', codexArgs: [], nativeReadArgs: [], cli: 'source-counter', hook: 'source-counter', decisionFile: 'source-counter' })
       assert.equal(passed, false, 'A source counter cannot qualify a model journey')
@@ -183,7 +183,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
         assert.equal(raw.rejectedInputs.length, 2); assert.ok(raw.rejectedInputs.every(one => one.method === 'writeAgent'))
         assert.ok(calls.indexOf('manager.stop.requested') < calls.indexOf('protocol.ack.released'))
         assert.ok(calls.indexOf('protocol.ack.released') < calls.indexOf('ipc.dispose'), 'Entire protocol observation must settle before owner cleanup')
-      } else if (instrumentation) { assert.equal(originalCalls, 0); assert.equal(budget.attemptedModelRequests, 5); assert.equal(raw.rejectedInputs.length, 1) }
+      } else if (instrumentation) { assert.equal(originalCalls, 0); assert.equal(budget.attemptedModelRequests, 4); assert.equal(raw.rejectedInputs.length, 1) }
       else {
         assert.equal(originalCalls, 1); assert.equal(raw.modelTurns, 1); assert.equal(nativeStopped, true)
         assert.ok(calls.indexOf('native.stop') < calls.indexOf('manager.stop.drained'))
@@ -195,7 +195,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
         budgetSha256: hash(await readFile(join(output, 'model-budget.json'))), qualification: 'Source closure counter with explicit doubles; no Native/model' })
     } finally { for (const id of timers) clearTimeout(id); await rm(root, { recursive: true, force: true }) }
   }
-  const receipt = { schema: 'agentmux.mote.model-source-guards.v1', taskId: 'T-008', passed: true,
+  const receipt = { schema: 'agentmux.mote.model-source-guards.v1', taskId: 'T-009', passed: true,
     ownerSource: { path: ownerFile, sha256: hash(owner) }, originalEvidenceWriter: { path: durableFile, sha256: hash(durableSource) },
     originalCoreWriteSource, originalCoreExtraction: 'Original writeAgent/sameRun/error definitions; explicit connected/session/writeAgentInput ports, no Native process',
     counters, acceleratedDeadlineMs: 40, productionDeadlineMs: 120000, authFilesRead: false, authCopied: false,
@@ -207,12 +207,12 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
 /** Only the Root-issued grant is read here. No seed/auth file or process is touched. */
 export async function readModelAuthorization(file, expectedSha256) {
   assert.ok(file && /^[a-f0-9]{64}$/.test(expectedSha256 ?? ''),
-    'T-008 is pending: Root must provide its explicit private authorization artifact and exact SHA before auth reads or model launch')
+    'T-009 is pending: Root must provide its explicit private authorization artifact and exact SHA before auth reads or model launch')
   const bytes = await readFile(file)
   assert.equal(hash(bytes), expectedSha256, 'Root private authorization bytes changed')
   const grant = JSON.parse(bytes)
   assert.equal(grant.schema, 'agentmux.mote.real-model-run-trigger.v1')
-  assert.equal(grant.taskId, 'T-008'); assert.equal(grant.rootApproved, true); assert.equal(grant.runTriggerIssued, true)
+  assert.equal(grant.taskId, 'T-009'); assert.equal(grant.rootApproved, true); assert.equal(grant.runTriggerIssued, true)
   const bound = async locator => {
     assert.ok(locator?.path && /^[a-f0-9]{64}$/.test(locator.sha256 ?? ''), 'Root trigger needs exact user/source/review locators')
     const bytes = await readFile(locator.path); assert.equal(hash(bytes), locator.sha256, 'Root trigger evidence changed')
@@ -222,27 +222,29 @@ export async function readModelAuthorization(file, expectedSha256) {
   assert.equal(user.schema, 'agentmux.mote-real-model-user-authorization.v1')
   assert.equal(user.status, 'user-authorized-execution-awaits-source-review'); assert.equal(user.runTriggerIssued, false)
   assert.equal(user.maxModelTurns, 6); assert.equal(user.maxTurnMs, 120000)
-  assert.equal(review.status, 'approved'); assert.ok(review.taskIds?.includes('T-008'))
+  assert.equal(review.status, 'approved'); assert.ok(review.taskIds?.includes('T-009'))
   assert.equal(review.sourceManifestSha256, grant.sourceManifest.sha256)
   assert.equal(review.sourceGate?.sha256, manifest.sourcePreparation.sha256)
   const prepared = await bound(manifest.sourcePreparation)
   assert.equal(prepared.sourcePreparation?.passed, true); assert.equal(prepared.passed, false)
   assert.equal(prepared.modelTurns, 0); assert.equal(prepared.authFilesRead, false); assert.equal(prepared.authCopied, false)
   assert.deepEqual(manifest.harnessSource, prepared.harnessSource); assert.deepEqual(manifest.source, prepared.source)
-  assert.equal(grant.providerId, 'codex'); assert.equal(grant.maxModelTurns, grant.continuation ? 3 : 5); assert.equal(grant.turnTimeoutMs, 120000)
-  assert.equal(grant.priorActualModelTurns, grant.continuation ? 4 : 2)
-  assert.equal(user.supplementalAuthorization?.maxActualModelTurnsTotal, 7)
-  assert.ok(grant.priorActualModelTurns + grant.maxModelTurns <= user.supplementalAuthorization.maxActualModelTurnsTotal)
-  if (grant.continuation) {
-    const previous = await bound(grant.continuation.receipt), budget = await bound(grant.continuation.budget)
-    assert.equal(previous.passed, false); assert.equal(previous.modelTurns, 2); assert.equal(previous.nativeCleanupConfirmation.stopped, true)
-    assert.equal(budget.attemptedModelRequests, 2); assert.equal(budget.completedModelTurns, 2); assert.equal(budget.gateClosed, true)
-    assert.ok(previous.nativeCleanupConfirmation.runs.every(run => run.cwd.startsWith(grant.continuation.root + '/') && run.state.type !== 'running'))
-    assert.ok(grant.continuation.root.startsWith(_hygiene_fixturePath("tmp/amx-real-codex-")))
-    assert.equal(grant.continuation.turnHashes.length, 2)
-    assert.equal(grant.continuation.evidence, dirname(grant.continuation.receipt.path))
-    for (const [file, sha256] of Object.entries(grant.continuation.originalState)) assert.equal(hash(await readFile(join(grant.continuation.root, file))), sha256)
-  }
+  assert.equal(grant.providerId, 'codex'); assert.equal(grant.maxModelTurns, 4); assert.equal(grant.turnTimeoutMs, 120000)
+  assert.equal(grant.priorActualModelTurns, 4)
+  const cumulative = await bound(grant.cumulativeAuthorization), ledger = await bound(grant.cumulativeLedger)
+  assert.equal(cumulative.schema, 'agentmux.mote-cumulative-user-authorization.v1')
+  assert.equal(cumulative.userAnswer, '允许，累计最多 8 回合')
+  assert.equal(cumulative.maxActualModelTurnsTotal, 8); assert.equal(cumulative.maxTurnMs, 120000)
+  assert.equal(ledger.schema, 'agentmux.mote-model-cumulative-ledger.v1')
+  assert.equal(ledger.priorActualInputs, 4); assert.equal(ledger.remainingInputs, 4); assert.equal(ledger.maxActualInputs, 8)
+  assert.deepEqual(ledger.userAuthorization, grant.cumulativeAuthorization)
+  assert.equal(ledger.attempts.length, 4)
+  const prior = await Promise.all(ledger.attempts.map(async one => {
+    const raw = await bound(one); assert.equal(raw.modelTurns, one.actualInputs); assert.equal(raw.passed, false); return one.actualInputs
+  }))
+  assert.deepEqual(prior, [1, 1, 2, 0]); assert.equal(prior.reduce((sum, value) => sum + value, 0), grant.priorActualModelTurns)
+  assert.ok(grant.priorActualModelTurns + grant.maxModelTurns <= cumulative.maxActualModelTurnsTotal)
+  assert.equal(grant.continuation, undefined, 'Only a fresh original private journey is admitted')
   assert.deepEqual(grant.credentialFiles, ['auth.json', 'config.toml'])
   assert.equal(grant.copyIsolatedSeed, true)
   assert.ok(typeof grant.seedPath === 'string' && grant.seedPath.startsWith('/'))
@@ -262,7 +264,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
   await mkdir(evidence, { recursive: true })
   const disk = await statfs(evidence); assert.ok(disk.bavail * disk.bsize > 150 * 1024 * 1024, 'Private Source preparation needs 150 MiB; nothing has launched')
   const buildRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amm-source-"))), source = join(buildRoot, 'source')
-  const receipt = { schema: 'agentmux.mote.real-model.v1', taskId: 'T-008', passed: false, status: 'pending',
+  const receipt = { schema: 'agentmux.mote.real-model.v1', taskId: 'T-009', passed: false, status: 'pending',
     sourcePinnedMain: mainRef, source: {}, sourceOrigins: {}, harnessSource: {}, compiledImports: {}, compiledOutputs: {}, generatedInputs: {},
     authFilesRead: false, authCopied: false, userRunTouched: false, modelTurns: 0,
     authorization: permission ? { sha256: permission.sha256, userAuthorization: permission.grant.userAuthorization,
@@ -352,6 +354,33 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
     await writeFile(join(source, 'package.json'), '{"type":"module"}\n')
     const require = createRequire(join(repositoryRoot, 'apps/desktop/package.json'))
     const esbuild = createRequire(require.resolve('vite'))('esbuild'), aliases = []
+    // A fresh Main may declare an installed dependency absent from this old
+    // worktree's links. Resolve only exact declared versions from the existing
+    // private package store; never change shared node_modules or fetch packages.
+    const desktopManifestPath = join(source, 'apps/desktop/package.json')
+    const desktopManifestBytes = await readFile(desktopManifestPath)
+    const desktopManifest = JSON.parse(desktopManifestBytes)
+    receipt.source['apps/desktop/package.json'] = hash(desktopManifestBytes)
+    receipt.privateDependencyAliases = []
+    const packageStore = join(dependencyRoot, 'node_modules/.pnpm'), installed = await readdir(packageStore)
+    for (const [name, version] of Object.entries(desktopManifest.dependencies ?? {})) {
+      if (version.startsWith('workspace:')) continue // Original owning-source aliases below.
+      try { require.resolve(name); continue } catch {}
+      assert.match(version, /^\d+\.\d+\.\d+$/, 'Missing declared dependency needs an exact installed version: ' + name)
+      const prefix = name.replace('/', '+') + '@' + version
+      const candidates = installed.filter(one => one === prefix || one.startsWith(prefix + '_'))
+      const confirmed = []
+      for (const candidate of candidates) {
+        const directory = join(packageStore, candidate, 'node_modules', name)
+        const bytes = await readFile(join(directory, 'package.json')).catch(error => { if (error.code === 'ENOENT') return null; throw error })
+        if (!bytes) continue
+        const manifest = JSON.parse(bytes)
+        if (manifest.name === name && manifest.version === version) confirmed.push({ directory, manifestSha256: hash(bytes) })
+      }
+      assert.equal(confirmed.length, 1, 'Missing dependency must resolve to one exact existing installed package: ' + name)
+      aliases.push({ find: name, replacement: confirmed[0].directory })
+      receipt.privateDependencyAliases.push({ name, version, ...confirmed[0], sharedLinksChanged: false, packagesFetched: false })
+    }
     for (const name of ['core', 'demand', 'layout', 'relay', 'client-ui']) {
       const root = join(source, 'packages', name), manifestPath = join(root, 'package.json')
       const manifest = JSON.parse(await readFile(manifestPath, 'utf8')); receipt.source[relative(source, manifestPath)] = hash(await readFile(manifestPath))
@@ -377,7 +406,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
     await bind(join(source, 'apps/desktop/native/workspace-move.c'))
     receipt.helper = { source: 'apps/desktop/native/workspace-move.c', sourceSha256: receipt.source['apps/desktop/native/workspace-move.c'], binarySha256: hash(await readFile(helper)), invoked: false }
     const plugin = { name: 'real-mote-pinned-source', setup(builder) {
-      builder.onResolve({ filter: /^@agentmux\// }, args => { const one = aliases.find(alias => alias.find.test(args.path)); return one ? { path: args.path.replace(one.find, one.replacement) } : null })
+      builder.onResolve({ filter: /^@agentmux\// }, args => { const one = aliases.find(alias => alias.find instanceof RegExp && alias.find.test(args.path)); return one ? { path: args.path.replace(one.find, one.replacement) } : null })
       builder.onResolve({ filter: /^\.\.\/\.\.\/dist\/index\.js$/ }, args => args.importer.endsWith('/test/helpers/real-codex-fixture.ts')
         ? { path: join(source, 'packages/core/src/index.ts') } : null)
       builder.onLoad({ filter: /\.(ts|tsx|mjs|js|json)$/ }, async args => {
@@ -429,7 +458,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       assert.deepEqual(receipt.source, permission.manifest.source, 'Actual compiled Source differs from Root-approved model graph')
       // A trigger is consumed before the first seed stat/read. A failed attempt never silently spends another budget.
       await writeFile(join(repositoryRoot, '.tmp/mote-daily-model', 'run-trigger-' + permission.sha256 + '.used.json'),
-        JSON.stringify({ sha256: permission.sha256, taskId: 'T-008', consumedAt: Date.now(), evidence }), { flag: 'wx', mode: 0o600 })
+        JSON.stringify({ sha256: permission.sha256, taskId: 'T-009', consumedAt: Date.now(), evidence }), { flag: 'wx', mode: 0o600 })
       receipt.authAccessAttempted = true
       // A partial original copy failure is unknown until the original private destinations are observed.
       receipt.authFilesRead = null; receipt.authCopied = null
@@ -437,22 +466,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       process.env.TMPDIR = _hygiene_fixturePath("tmp")
       const fixture = await import(pathToFileURL(realScope).href)
       try {
-        if (permission.grant.continuation) {
-          const original = permission.grant.continuation, retained = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_CTYPE', 'LC_ALL', 'TERM']
-          for (const key of Object.keys(process.env)) if (!retained.includes(key)) delete process.env[key]
-          const root = original.root
-          Object.assign(process.env, { HOME: join(root, 'home'), CODEX_HOME: join(root, 'codex-home'), TMPDIR: join(root, 'tmp'),
-            AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
-            AGENTMUX_AGENT_SESSION_STORE: join(root, 'agent-sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'global-messages.ndjson') })
-          scope = new fixture.RealCodexScope(root, originalEnvironment)
-          // Original stores, native index and UI storage remain in place. Only
-          // the already-authorized disposable credential files are copied again.
-          for (const name of permission.grant.credentialFiles) {
-            await cp(join(permission.grant.seedPath, name), join(root, 'codex-home', name)); await chmod(join(root, 'codex-home', name), 0o600)
-          }
-          receipt.originalPhase = { receipt: original.receipt, budget: original.budget, sourceManifest: original.sourceManifest,
-            sourceReview: original.sourceReview, priorModelInputs: 2 }
-        } else scope = await fixture.prepareRealCodexScope(value => { scope = value })
+        scope = await fixture.prepareRealCodexScope(value => { scope = value })
       }
       catch (error) {
         if (scope) {
@@ -495,24 +509,13 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       receipt.artifact.privateCopySha256 = receipt.artifact.sha256
       const sdk = await import(pathToFileURL(join(source, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')).href)
       nativeObserver = new sdk.CtxmuxClient({ socketPath: join(runtimeRoot, 'runtime/ctxmux.sock') })
-      if (permission.grant.continuation) {
-        // A stale socket is removed only after the original endpoint refuses a
-        // read. A serving daemon or an unknown failure cannot be replaced.
-        await nativeObserver.list().then(() => { throw Error('Original private Native is still serving; do not replace it') }, error => {
-          assert.equal(error.code, 'ECONNREFUSED', 'Original private socket state is unconfirmed')
-        })
-        await unlink(join(runtimeRoot, 'runtime/ctxmux.sock'))
-      }
       await scope.startNative(privateArtifact)
       nativeStarted = true
       const args = [...fixture.privateCodexConfigArgs, '--dangerously-bypass-hook-trust', '--no-alt-screen', '--ask-for-approval', 'never',
         '--sandbox', 'workspace-write', '--config', 'model_reasoning_effort="low"']
       const parameters = { html: join(buildRoot, 'renderer/index.html'), preload, root: runtimeRoot, evidence,
         command: executable, codexArgs: args, nativeReadArgs: [...fixture.privateCodexConfigArgs], cli: join(source, 'packages/core/bin/agentmux'),
-        hook: join(source, 'packages/core/bin/agentmux-hook.js'), decisionFile: permission.grant.decisionFile,
-        ...(permission.grant.continuation ? { continuation: { evidence: permission.grant.continuation.evidence,
-          receiptSha256: permission.grant.continuation.receipt.sha256, budgetSha256: permission.grant.continuation.budget.sha256,
-          turnHashes: permission.grant.continuation.turnHashes } } : {}) }
+        hook: join(source, 'packages/core/bin/agentmux-hook.js'), decisionFile: permission.grant.decisionFile }
       const main = ("const{app}=require('electron');const input=" + (JSON.stringify(parameters)) + (";app.setPath('userData',input.root+'/desktop');app.setPath('sessionData',input.root+'/desktop-session');app.setPath('home',input.root+'" + _hygiene_fixturePath("home") + "');app.on('window-all-closed',()=>{});app.whenReady().then(async()=>{const{runModelOwner}=await import(") + (JSON.stringify(pathToFileURL(owner).href)) + ");const passed=await runModelOwner(input);app.exit(passed?0:1)}).catch(error=>{console.error(error);app.exit(1)});")
       const mainFile = join(buildRoot, 'main.cjs'); await writeFile(mainFile, main); receipt.compiledOutputs.generatedMain = hash(main)
       processProbe = await import(pathToFileURL(join(source, 'apps/desktop/scripts/probe-process.mjs')).href)
@@ -527,7 +530,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
           const budget = await readBudget()
           if (!budget) return
           const expired = budget.attempts?.find(one => one.phase !== 'completed' && one.deadlineAt && Date.now() >= one.deadlineAt)
-          if (!expired && budget.attemptedModelRequests <= 5) return
+          if (!expired && budget.attemptedModelRequests <= 4) return
           // A sealed input gate alone does not prove the Native Run ended. Stop and
           // confirm it before allowing the owner time to retain its original result.
           if (expired && budget.gateClosed && Date.now() < expired.deadlineAt + 45000) {
@@ -544,7 +547,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
         })().catch(error => { receipt.guardianError = error.message }).finally(() => { guardianBusy = false })
       }, 50)
       receipt.process = await processProbe.runProbeProcess(require('electron'), [mainFile], { temporaryRoot: buildRoot, cwd: source,
-        env, timeoutMs: 5 * 120000 + 600000 + 180000, onLine: line => lines.push(line) })
+        env, timeoutMs: 4 * 120000 + 600000 + 180000, onLine: line => lines.push(line) })
       clearInterval(guardianTimer); await guardianWork
       await writeFile(join(evidence, 'private-electron.log'), lines.join('\n'))
       await readBudget()
