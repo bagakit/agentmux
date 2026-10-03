@@ -2,7 +2,7 @@ import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSIT
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from './user-profile'
-import { resolveFocusRecentActivityHours } from './focus-preferences'
+import { resolveFocusRecentActivityHours, resolveFocusLinkDestination } from './focus-preferences'
 import { resolveGoalsCommonActions } from './goals-preferences'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
@@ -20,6 +20,7 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
   if (path === 'focus') return value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }
   if (path === 'focus.recentActivityHours') return resolveFocusRecentActivityHours(value)
+  if (path === 'focus.linkDestination') return resolveFocusLinkDestination(value)
   if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
   if (path === 'goalsCommonActions') return resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined)
   if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }

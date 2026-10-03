@@ -92,6 +92,8 @@ export type FileOpenPlacement = {
   reference?: import('./workbench-projection').WorkbenchProjectionSelection
   /** Consume this exact empty Launcher; repeat reads may reuse the same File Region. */
   launcher?: { tabId: string; regionId: string }
+  /** Insert beside this exact Region, or reuse the same resource in this Tab. */
+  split?: { tabId: string; regionId: string; direction: 'left' | 'right' | 'up' | 'down' }
   focus?: boolean
   fileOnly?: boolean
   selection?: import('@agentmux/core').AgentMuxDesktopSpaceSelection
@@ -112,6 +114,20 @@ export function fileOpenLauncherMatches(
   return Boolean(tab && tab.workspaceId === workspaceId && (!tab.space || tab.space.zoneId === placement.space.zoneId) &&
     layout && groupId && groupIds(layout.root).includes(groupId) && layout.groups.some(group => group.id === groupId && group.tabOrder.includes(tab.id)) &&
     (surface?.kind === 'launcher' && surface.workspaceId === workspaceId || surface?.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path))
+}
+
+/** A split is bound to the original resource, Zone and display occurrence. */
+export function fileOpenSplitMatches(
+  state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string,
+  groupId: string | undefined, placement: FileOpenPlacement, confirmedExistingSpace?: ConfirmedExistingFileSpace
+): boolean {
+  if (!placement.split) return true
+  const tab = state.tabs[placement.split.tabId], layout = state.layouts[placement.displayWorkspaceId]
+  const space = tab?.space ?? (confirmedExistingSpace?.tabId === tab?.id ? confirmedExistingSpace?.space : undefined)
+  return Boolean(tab && tab.workspaceId === workspaceId && space?.zoneId === placement.space.zoneId &&
+    space.spaceId === placement.space.spaceId && tab.regions[placement.split.regionId] &&
+    layout && groupId && groupIds(layout.root).includes(groupId) &&
+    layout.groups.some(group => group.id === groupId && group.tabOrder.includes(tab.id)))
 }
 
 /** An existing File Region is an exact address, not an instruction to create another Tab. */
@@ -163,6 +179,17 @@ export function reduceFileSurfaceOpened(
   const displayId = placement?.displayWorkspaceId ?? workspaceId
   const layout = state.layouts[displayId]
   if (!layout) return state
+  if (placement?.split) {
+    if (!fileOpenSplitMatches(state, workspaceId, preferredTabGroupId, placement, confirmedExistingSpace)) throw new Error('The original resource or Region is unavailable. No substitute Tab was created.')
+    const tab = state.tabs[placement.split.tabId]!
+    const existing = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
+    const opened = existing ? focusWorkbenchTabRegion(tab, existing.regionId) : addWorkbenchRegion(tab, placement.split.regionId, placement.split.direction,
+      { kind: 'file', workspaceId, path, regionId: `region:${crypto.randomUUID()}` })
+    const retained = placement.projection || placement.focus === false
+      ? { ...opened, layout: { ...opened.layout, activeRegionId: tab.layout.activeRegionId } } : opened
+    return { ...state, tabs: { ...state.tabs, [tab.id]: retained },
+      layouts: placement.projection || placement.focus === false ? state.layouts : { ...state.layouts, [displayId]: activateTab(layout, preferredTabGroupId!, tab.id) } }
+  }
   if (placement?.launcher) {
     if (!fileOpenLauncherMatches(state, workspaceId, path, preferredTabGroupId, placement)) throw new Error('The original Note pane is unavailable; its file is kept and no substitute was created.')
     const { tabId, regionId } = placement.launcher, tab = state.tabs[tabId]!

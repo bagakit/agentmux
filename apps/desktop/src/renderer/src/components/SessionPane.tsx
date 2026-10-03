@@ -1,3 +1,4 @@
+import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
@@ -8,12 +9,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
-import {
-  dismissOpenDestinationRequest,
-  type OpenDestination,
-  type OpenHttpLinkOrigin
-} from '../lib/open-destination'
-import { terminalLinkModifierOpensSystemBrowser } from '../lib/terminal-link-gesture'
+import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
@@ -35,9 +31,8 @@ import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
 import { replyConversationQuestion } from '../lib/conversation-question'
 import { ActivityView } from './ActivityView'
-import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
+import { OpenDestinationPopover } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
-import { isMacPlatform } from '../lib/host-platform'
 import {
   classifyContinuityFailure,
   continuityRefreshEnabled,
@@ -445,19 +440,16 @@ export function SessionPane({
   const fileContext = useAppStore(selectFileContext)
   const [fileLinkIssue, setFileLinkIssue] = useState<string | null>(null)
   useEffect(() => { setFileLinkIssue(null) }, [fileContext])
-  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }) => {
+  const fileOrigin = useMemo(() => ({ ...linkOrigin, sessionId }), [linkOrigin, sessionId])
+  const linkOpening = useSessionLinkOpening(fileOrigin, setFileLinkIssue)
+  const openProjectFile = useCallback((path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => {
     // Freeze the rendered scope and exact display occurrence. Never resolve again from focus.
     if (selectFileContext(useAppStore.getState()) !== fileContext || fileContext.kind === 'unconfirmed') {
       setFileLinkIssue('The rendered file context changed before this click could be confirmed.')
       return
     }
-    void openFile(path, linkOrigin.tabGroupId, location,
-      fileContext.project?.workspaceId ?? linkOrigin.workspaceId, undefined, fileContext.placement).then((opened) => {
-      if (!opened) setFileLinkIssue('The file resource or original display occurrence could not be confirmed.')
-    }).catch((error: unknown) => {
-      setFileLinkIssue(error instanceof Error ? error.message : String(error))
-    })
-  }, [fileContext, selectFileContext, openFile, linkOrigin.tabGroupId, linkOrigin.workspaceId])
+    linkOpening.activateFile(path, location, event)
+  }, [fileContext, selectFileContext, linkOpening])
   const fileReferenceNotice = fileContext.kind !== 'session' || fileLinkIssue ? <>
     {fileContext.kind === 'goal' ? <div className="activity-feed__read-notice" data-file-reference-scope="current-goal">
       <span>File links use current Goal project: {fileContext.project!.name}.{!fileContext.homeDir ? ' Home paths are unconfirmed for this Host; ~/ references stay as written.' : ''} Earlier messages may have another origin.</span>
@@ -473,55 +465,17 @@ export function SessionPane({
       }
     }} /> : null}
   </> : null
-  // Lands the file in this pane's own Tab Group, exactly as a terminal path click does. A miss
-  // surfaces through reportError — "click opened nothing" is never silent.
-  const openWorkspaceFile = useCallback(
-    (path: string, location?: { line: number; column?: number }) => {
-      void openFile(path, linkOrigin.tabGroupId, location, linkOrigin.workspaceId).catch(reportError)
-    },
-    [openFile, reportError, linkOrigin.tabGroupId, linkOrigin.workspaceId]
-  )
+  const openWorkspaceFile = openProjectFile
   // A pasted image cited in the conversation is read back through main (the only place that can reach a
   // file outside the workspace) as an <img>-ready data URI. Main confines the read to the pasted
   // directory; a null return means "not a readable pasted image", and the renderer falls back to the
   // plain-text reference. Stable identity so the thumbnail's load effect does not re-fire each render.
   const readPastedImage = useCallback((path: string) => api.ui.readPastedImage(path), [])
-  // An http(s) link in agent prose gets the SAME destination menu the Terminal gives, opening into this
-  // pane's own Region — never a jump straight to the system browser. This is the host that owns the menu
-  // because it is the host that holds the Region origin, mirroring TerminalView exactly.
-  const openHttpLink = useAppStore((state) => state.openHttpLink)
-  const [linkRequest, setLinkRequest] = useState<OpenDestinationRequest | null>(null)
-  const nextLinkRequestIdRef = useRef(0)
-  // canSplit reports the TRUTH of this origin: a directional destination needs a precise Tab+Region, and
-  // choosing one without them throws in the Store. Only when both are present are the split items live.
-  const canSplit = Boolean(linkOrigin.tabId && linkOrigin.regionId)
-  const onProseLinkClick = useCallback(
-    (url: string, event: LinkClickModifiers) => {
-      const isMac = isMacPlatform()
-      // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the menu —
-      // the SAME judgement the Terminal uses, so the two surfaces cannot drift on the modifier.
-      if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
-        void openHttpLink(linkOrigin, url, 'system').catch(reportError)
-        return
-      }
-      setLinkRequest({
-        id: ++nextLinkRequestIdRef.current,
-        url,
-        x: event.clientX,
-        y: event.clientY
-      })
-    },
-    [openHttpLink, linkOrigin, reportError]
-  )
-  const onProseLinkSelect = useCallback(
-    (destination: OpenDestination) => {
-      const request = linkRequest
-      if (!request) return
-      setLinkRequest((current) => dismissOpenDestinationRequest(current, request.id))
-      void openHttpLink(linkOrigin, request.url, destination).catch(reportError)
-    },
-    [linkRequest, openHttpLink, linkOrigin, reportError]
-  )
+  // File and HTTP links share the saved Focus destination and explicit modifier gestures.
+  const linkRequest = linkOpening.request
+  const canSplit = linkOpening.canSplit
+  const onProseLinkClick = linkOpening.activateHttp
+  const onProseLinkSelect = linkOpening.choose
   const [refreshing, setRefreshing] = useState(false)
   const [unobservedReadError, setUnobservedReadError] = useState<string | null>(null)
   const observationScope = JSON.stringify([sessionId, linkOrigin.tabId, linkOrigin.regionId, linkOrigin.workspaceId, linkOrigin.tabGroupId])
@@ -1029,9 +983,7 @@ export function SessionPane({
       <OpenDestinationPopover
         request={linkRequest}
         canSplit={canSplit}
-        onDismiss={(requestId) =>
-          setLinkRequest((current) => dismissOpenDestinationRequest(current, requestId))
-        }
+        onDismiss={linkOpening.dismiss}
         onSelect={onProseLinkSelect}
       />
       <ConversationAnnotationNote ref={annotationNoteRef} sessionId={sessionId} regionRef={surfaceRef}

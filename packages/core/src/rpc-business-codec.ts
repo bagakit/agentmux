@@ -152,6 +152,14 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.requestedPath !== request.path) fail()
       const resource = actual.resource as Record<string, unknown> | null
       if (resource && resource.zoneId !== request.zoneId) fail()
+      if (request.tabId) {
+        const placement = (result as Extract<AgentMuxControlResult, { operation: 'open.file' }>).placement
+        if (placement.tabId !== null && placement.tabId !== request.tabId) fail()
+        if ((placement.status === 'created' || placement.status === 'reused') && (placement.tabId !== request.tabId || placement.regionId === null)) fail()
+        if (placement.locations.some(location => location.tabId !== request.tabId || location.regionId !== placement.regionId)) fail()
+        if ((placement.status === 'created' || placement.status === 'reused') && !placement.locations.some(location =>
+          location.displayWorkspaceId === request.displayWorkspaceId && location.groupId === request.groupId)) fail()
+      }
       break
     }
     case 'agent.open': case 'space.mv': case 'space.bind': case 'space.unbind':

@@ -6,9 +6,9 @@ import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
 
-export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; clientX: number; clientY: number }
+export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
-export type OpenWorkspaceFile = (path: string, location?: { line: number; column?: number }) => void
+export type OpenWorkspaceFile = (path: string, location?: { line: number; column?: number }, event?: LinkClickModifiers) => void
 export type RenderWorkspaceImage = (path: string, alt: string, linked?: boolean) => ReactNode
 
 // The Host owns file reads and link destinations; this renderer never opens a URL on its own.
@@ -31,7 +31,7 @@ function FileReference({ text, reference, openWorkspaceFile }: {
   text: string; reference: MarkdownFileReference; openWorkspaceFile: OpenWorkspaceFile
 }) {
   return <button type="button" className="md-link md-link--file" title={reference.path}
-    onClick={() => openWorkspaceFile(reference.path, referenceRevealLocation(reference))}>{text}</button>
+    onClick={event => openWorkspaceFile(reference.path, referenceRevealLocation(reference), event)}>{text}</button>
 }
 
 /** Pasted tokens claim their own narrow syntax before the common Terminal file scanner. */
@@ -81,7 +81,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</Fragment>
       if (context.inLink) return <span key={key}>{node.alt || node.href}</span>
       if (file && context.openWorkspaceFile) return <button key={key} type="button" className="md-image-attachment" title={file.path}
-        onClick={() => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file))}>🖼️ {node.alt || file.path}</button>
+        onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}>🖼️ {node.alt || file.path}</button>
       return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed">🖼️ {node.alt || node.href}</span>
     }
     const labelContext = { ...context, inLink: true }
@@ -96,13 +96,13 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     if (file && context.openWorkspaceFile) {
       const open = context.openWorkspaceFile
       return <button key={key} type="button" className="md-link md-link--file" title={file.path}
-        onClick={() => open(file.path, referenceRevealLocation(file))}><Inline nodes={node.children} context={labelContext} /></button>
+        onClick={event => open(file.path, referenceRevealLocation(file), event)}><Inline nodes={node.children} context={labelContext} /></button>
     }
     const url = parseHttpLinkUrl(node.href)
     if (!url) return <Fragment key={key}><Inline nodes={node.children} context={context} /></Fragment>
     // Buttons route to the Host, so an untrusted href cannot navigate the Renderer.
     return <button key={key} type="button" className="md-link" title={url} onClick={event => context.openHttpLink(url, {
-      metaKey: event.metaKey, ctrlKey: event.ctrlKey, clientX: event.clientX, clientY: event.clientY
+      metaKey: event.metaKey, ctrlKey: event.ctrlKey, altKey: event.altKey, clientX: event.clientX, clientY: event.clientY
     })}><Inline nodes={node.children} context={labelContext} /></button>
   })}</>
 }

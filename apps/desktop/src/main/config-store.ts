@@ -242,7 +242,7 @@ const configSchema = z
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
     browser: browserSchema,
-    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)) }).strict().optional(),
+    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), linkDestination: z.enum(['region', 'tab']).optional() }).strict().optional(),
     profile: z.object({
       displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),
       about: z.string().max(USER_PROFILE_ABOUT_LIMIT),

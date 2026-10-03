@@ -2,6 +2,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt 
 import { AgentMuxError } from './errors.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
+import { isSplitDirection } from './split-direction-ssot.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
   AgentMuxSpaceDestination, AgentMuxSpaceMutationReport, AgentMuxSpaceSelector, AgentMuxSpatialSave, AgentMuxSpaceBindingTarget, AgentMuxSpaceBindingReport, AgentMuxSpaceRegionFact
@@ -109,7 +110,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -127,13 +128,20 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     fields(source, ['schemaVersion', 'requestId', 'operation', 'regionId', 'withRegionId'], code)
     request = { ...base, operation, regionId: spaceControlId(source.regionId, 'Region', code, true), withRegionId: spaceControlId(source.withRegionId, 'Other Region', code, true) }
   } else if (operation === 'open.file') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'focus'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId', 'split', 'focus'], code)
     const path = string(source.path, 'Zone-relative file path', code, MAX_SPATIAL_ID_BYTES)
     if (!path.length || /[\0\r\n]/u.test(path)) fail('File path requires literal Zone-relative data.', code)
     if (Object.hasOwn(source, 'displayWorkspaceId') !== Object.hasOwn(source, 'groupId')) fail('File display placement requires both Workspace and Group IDs.', code)
+    const regionPlacement = ['tabId', 'regionId', 'split'].some(key => Object.hasOwn(source, key))
+    if (regionPlacement && !['tabId', 'regionId', 'split', 'displayWorkspaceId', 'groupId'].every(key => Object.hasOwn(source, key))) {
+      fail('File Region placement requires an exact Tab, anchor Region, split direction, Display Workspace and Group.', code)
+    }
+    const split = source.split
+    if (regionPlacement && (typeof split !== 'string' || !isSplitDirection(split))) fail('File split must be left, right, up or down.', code)
     request = { ...base, operation, path, zoneId: spaceControlId(source.zoneId, 'Zone', code, true), focus: bool(source.focus, 'focus', code),
       ...(Object.hasOwn(source, 'spaceId') ? { spaceId: spaceControlId(source.spaceId, 'Space', code, true) } : {}),
-      ...(Object.hasOwn(source, 'displayWorkspaceId') ? { displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) } : {}) }
+      ...(Object.hasOwn(source, 'displayWorkspaceId') ? { displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) } : {}),
+      ...(regionPlacement ? { tabId: spaceControlId(source.tabId, 'File Tab', code, true), regionId: spaceControlId(source.regionId, 'File anchor Region', code, true), split: split as import('./split-direction-ssot.js').SplitDirection } : {}) }
   } else if (operation === 'agent.rename') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name', 'expectedNameRevision'], code)
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code) }
