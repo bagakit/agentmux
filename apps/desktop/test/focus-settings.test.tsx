@@ -25,15 +25,15 @@ const checked = (hours: number) => dom.container.querySelector<HTMLInputElement>
 
 it('declares a finite numeric public setting and keeps an unchanged effective default unwritten', () => {
   const setting = focusSettings[0]!
-  expect(setting.entry(composerConfig)).toEqual({ key: 'focus.recentActivityHours', kind: 'number', value: 24, default: 24, enum: [12, 24, 72, 168] })
-  expect(setting.apply(composerConfig, '24')).toBe(composerConfig)
-  for (const hours of [12, 24, 72, 168] as const) {
+  expect(setting.entry(composerConfig)).toEqual({ key: 'focus.recentActivityHours', kind: 'number', value: 48, default: 48, enum: [12, 24, 48, 72, 168] })
+  expect(setting.apply(composerConfig, '48')).toBe(composerConfig)
+  for (const hours of [12, 24, 48, 72, 168] as const) {
     const next = setting.apply(composerConfig, String(hours))
     expect(setting.entry(next).value).toBe(hours)
   }
   for (const invalid of ['13', '12.0', '12e0', ' 12', '-12', 'NaN', '']) expect(() => setting.apply(composerConfig, invalid)).toThrow('Invalid value')
-  expect(resolveFocusRecentActivityHours(undefined)).toBe(24)
-  expect(resolveFocusRecentActivityHours('72')).toBe(24)
+  expect(resolveFocusRecentActivityHours(undefined)).toBe(48)
+  expect(resolveFocusRecentActivityHours('72')).toBe(48)
 })
 
 it('saves the real module with its authored baseline while merging an unrelated external change', async () => {
@@ -43,7 +43,7 @@ it('saves the real module with its authored baseline while merging an unrelated 
     return current
   })
   await dom.render(<Pane config={current} onClose={() => {}} onNavigate={() => {}} active />)
-  expect(checked(24)).toBe(true)
+  expect(checked(48)).toBe(true)
   await choose(72)
   current = { ...current, copyPathsAsAbsolute: true }
   useAppStore.setState({ config: current })
@@ -52,7 +52,7 @@ it('saves the real module with its authored baseline while merging an unrelated 
   expect(save).toHaveBeenCalledTimes(1)
   expect(current.focus?.recentActivityHours).toBe(72)
   expect(current.copyPathsAsAbsolute).toBe(true)
-  expect(save.mock.calls[0]![1]?.focus?.recentActivityHours).toBe(24)
+  expect(save.mock.calls[0]![1]?.focus?.recentActivityHours).toBe(48)
   expect(saveButton().disabled).toBe(true)
 })
 
@@ -100,14 +100,14 @@ it('updates the actual GlobalFocusSurface for 12 and 72 hours while retaining pr
     const state = id === 'working' ? 'working' as const : id === 'attention' ? 'waiting' as const : 'done' as const
     const status = { state, source: 'native-hook' as const, observedAt: now }
     return { ...base, workspacePath: workspaces[index]!.path, status,
-      semanticStatus: { ...status, stateEnteredAt: id === 'unknown' ? undefined : now - (id === 'old30' ? 30 : id === 'mid18' ? 18 : id === 'exact12' ? 12 : 2) * hour } }
+      semanticStatus: { ...status, ...(id === 'unknown' ? {} : { stateEnteredAt: now - (id === 'old30' ? 30 : id === 'mid18' ? 18 : id === 'exact12' ? 12 : 2) * hour }) } }
   })
   const config = { ...composerConfig, workspaces }
   useAppStore.setState({ config, mainSurface: 'agents', sessions, timelines: {}, tabs: {}, agentNames: {},
     agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })
   await dom.render(<GlobalFocusSurface />)
   const order = () => [...dom.container.querySelectorAll<HTMLElement>('.focus-project-lanes__row')].map(row => row.dataset.projectId)
-  expect(order()).toEqual(['attention', 'working', 'mid18', 'recent2', 'exact12', 'old30', 'unknown'])
+  expect(order()).toEqual(['attention', 'working', 'old30', 'mid18', 'recent2', 'exact12', 'unknown'])
   await act(async () => useAppStore.setState({ config: { ...config, focus: { recentActivityHours: 12 } } }))
   expect(order()).toEqual(['attention', 'working', 'recent2', 'exact12', 'old30', 'mid18', 'unknown'])
   await act(async () => useAppStore.setState({ config: { ...config, focus: { recentActivityHours: 72 } } }))

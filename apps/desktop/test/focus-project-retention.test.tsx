@@ -205,7 +205,7 @@ it('retains only recorded Agent Host/Project facts without inventing current car
 
 it('isolates project filtering and offline ownership across Hosts with identical project IDs and paths', async () => {
   const sessions = [agent('local-off', _hygiene_fixturePath("same/repo"), 'local', true), agent('other-off', _hygiene_fixturePath("same/repo"), 'other', true)]
-  const entries = [history('past-local', 'same-past-id', 'Same past', NOW - DAY), history('past-other', 'same-past-id', 'Same past', NOW - 2 * DAY, { hostId: 'other' })]
+  const entries = [history('past-local', 'same-past-id', 'Same past', NOW - 3 * DAY), history('past-other', 'same-past-id', 'Same past', NOW - 4 * DAY, { hostId: 'other' })]
   await mount(sessions, [workspace('same-id', 'Same project', _hygiene_fixturePath("same/repo")), workspace('same-id', 'Same project', _hygiene_fixturePath("same/repo"), 'other')], entries)
   expect(boardLanes()).toHaveLength(2); expect(new Set(boardLanes().map(row => row.dataset.laneId)).size).toBe(2)
   expect(boardLanes().map(row => row.dataset.projectKey).sort()).toEqual([key('local', 'same-id'), key('other', 'same-id')].sort())
@@ -228,11 +228,11 @@ it('isolates project filtering and offline ownership across Hosts with identical
 
 it('deduplicates historical projects before filtering and keeps hidden or unrelated-byte updates free of new hierarchy and input reads', async () => {
   const sessions = [agent('live', _hygiene_fixturePath("current"))]
-  const entries = [history('a-new', 'archive-a', 'Archive A', NOW - DAY), history('a-old', 'archive-a', 'Old label A', NOW - 4 * DAY),
-    history('b', 'archive-b', 'Archive B', NOW - 2 * DAY), history('current-before', 'current', 'Current previous name', NOW - 3 * DAY)]
+  const entries = [history('a-new', 'archive-a', 'Archive A', NOW - 3 * DAY), history('a-old', 'archive-a', 'Old label A', NOW - 4 * DAY),
+    history('b', 'archive-b', 'Archive B', NOW - 3 * DAY), history('current-before', 'current', 'Current previous name', NOW - 3 * DAY)]
   await mount(sessions, [workspace('current', 'Current project', _hygiene_fixturePath("current"))], entries)
   expect(retainedRows()).toHaveLength(2); expect(retainedRow('local', 'archive-a').textContent).toContain('Archive A')
-  expect(retainedRow('local', 'archive-a').querySelector('time')?.dateTime).toBe(new Date(NOW - DAY).toISOString())
+  expect(retainedRow('local', 'archive-a').querySelector('time')?.dateTime).toBe(new Date(NOW - 3 * DAY).toISOString())
   const toggle = button('Retained projects'), originalRows = retainedRows(), originalCurrent = container!.querySelector('.focus-context[data-session-id="live"]')!
   expect(originalCurrent).not.toBeNull()
   await click(toggle); const reads = readCounts()
@@ -266,7 +266,7 @@ it('moves the original Timeline viewport from Now through a real retained-date c
   await mount([live], [workspace('current', 'Current project', _hygiene_fixturePath("current"))], entries, live.id)
   const messageId = 'native:generic:retention-native-live:record-live'
   let marker: HTMLButtonElement | null = null
-  await act(async () => vi.waitFor(() => { marker = container!.querySelector<HTMLButtonElement>(`[data-message-id="${messageId}"]`); expect(marker).not.toBeNull() }))
+  await act(async () => vi.waitFor(() => { marker = container!.querySelector<HTMLButtonElement>(`[data-input-message-id="${messageId}"]`); expect(marker).not.toBeNull() }))
   expect(button('Return to current focus window').getAttribute('aria-pressed')).toBe('true')
   await click(button('Retained projects'))
   const date = retainedRow('local', 'past-project'); expect(date.disabled).toBe(false)

@@ -1,8 +1,12 @@
-import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
-import { mkdir, rename, rm } from 'node:fs/promises'
+import { fixturePath as _hygiene_fixturePath, fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
+import { mkdir, mkdtemp, rename, rm } from 'node:fs/promises'
+import { execFile } from 'node:child_process'
+import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import { expect, it, vi } from 'vitest'
 import { configOwnerFixture } from './helpers/config-owner-fixture.js'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
+import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { parseSettingsCommand } from '../../../packages/core/src/settings-cli.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { ConfigStore } from '../src/main/config-store.js'
@@ -29,12 +33,12 @@ async function set(rpc: AgentMuxRpcService, key: string, value: string) {
 it('real CLI and public RPC discover numeric Focus defaults and persist 12/72 through commit then publish', async () => {
   const f = await configOwnerFixture({ profile: { displayName: 'Keep my name', about: 'Keep my background', shareWithAgents: true, avatar: '' } })
   const rpc = publicSettings(f), initial = structuredClone(f.owner.current)
-  const entry = { key: 'focus.recentActivityHours', kind: 'number', value: 24, default: 24, enum: [12, 24, 72, 168] }
-  expect((await inspect(rpc, 'focus')).entries).toEqual([entry])
+  const entry = { key: 'focus.recentActivityHours', kind: 'number', value: 48, default: 48, enum: [12, 24, 48, 72, 168] }
+  expect((await inspect(rpc, 'focus')).entries.find(value => value.key === entry.key)).toEqual(entry)
   expect((await inspect(rpc, 'focus.recentActivityHours')).entries).toEqual([entry])
   expect(f.owner.current.focus).toBeUndefined()
   const before = await f.bytes()
-  await set(rpc, 'focus.recentActivityHours', '24')
+  await set(rpc, 'focus.recentActivityHours', '48')
   expect(await f.bytes()).toBe(before)
   expect(f.save).not.toHaveBeenCalled()
   expect(f.publish).not.toHaveBeenCalled()
@@ -45,7 +49,7 @@ it('real CLI and public RPC discover numeric Focus defaults and persist 12/72 th
     expect((await f.disk()).focus?.recentActivityHours).toBe(hours)
     expect(f.publish).toHaveBeenCalledTimes(index + 1)
     expect(vi.mocked(f.runtime.commit).mock.invocationCallOrder[index]).toBeLessThan(f.publish.mock.invocationCallOrder[index]!)
-    expect((await inspect(rpc, 'focus')).entries).toEqual([{ ...entry, value: hours }])
+    expect((await inspect(rpc, 'focus')).entries.find(value => value.key === entry.key)).toEqual({ ...entry, value: hours })
     expect(f.owner.current.profile).toEqual(initial.profile)
     expect(f.owner.current.hosts).toEqual(initial.hosts)
     expect(f.owner.current.workspaces).toEqual(initial.workspaces)
@@ -54,6 +58,31 @@ it('real CLI and public RPC discover numeric Focus defaults and persist 12/72 th
   const reopened = await new ConfigStore(f.store.filePath).get()
   expect(reopened.focus?.recentActivityHours).toBe(72)
   expect(reopened.profile).toEqual(initial.profile)
+})
+
+it('actual CLI discovers 48, sets it through the private public socket and durable owner, and preserves the saved value on invalid input', async () => {
+  const f = await configOwnerFixture({ focus: { recentActivityHours: 24 } })
+  const socketDirectory = await mkdtemp(_hygiene_fixturePath("tmp/amux-focus-rpc-"))
+  const server = new AgentMuxControlServer({ execute: request => {
+    if (request.operation !== 'settings.get' && request.operation !== 'settings.set') throw new Error('Wrong business owner')
+    return executeSettingsControl(request, f.owner)
+  } }, join(socketDirectory, 'control.sock'))
+  await server.start()
+  const cli = promisify(execFile), args = [resolve('packages/core/bin/agentmux'), '--endpoint', `unix:${server.path}`, 'settings']
+  const options = { timeout: 5000, env: { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined } }
+  try {
+    const found = JSON.parse((await cli(process.execPath, [...args, 'inspect', 'focus.recentActivityHours'], options)).stdout).result
+    expect(found.entries).toEqual([{ key: 'focus.recentActivityHours', kind: 'number', value: 24, default: 48, enum: [12, 24, 48, 72, 168] }])
+    const receipt = JSON.parse((await cli(process.execPath, [...args, 'set', 'focus.recentActivityHours', '48'], options)).stdout).result
+    expect(receipt.entry.value).toBe(48); expect(f.owner.current.focus?.recentActivityHours).toBe(48)
+    expect((await f.disk()).focus?.recentActivityHours).toBe(48)
+    expect(f.publish).toHaveBeenCalledTimes(1)
+    expect(vi.mocked(f.runtime.commit).mock.invocationCallOrder[0]).toBeLessThan(f.publish.mock.invocationCallOrder[0]!)
+    const before = await f.bytes()
+    await expect(cli(process.execPath, [...args, 'set', 'focus.recentActivityHours', '49'], options)).rejects.toMatchObject({ code: 1 })
+    expect(await f.bytes()).toBe(before); expect(f.publish).toHaveBeenCalledTimes(1)
+    const reopened = await new ConfigStore(f.store.filePath).get(); expect(reopened.focus?.recentActivityHours).toBe(48)
+  } finally { await server.stop(); await rm(socketDirectory, { recursive: true, force: true }) }
 })
 
 it('real public nochange and invalid/unknown values perform no writes or Runtime preparation', async () => {
