@@ -60,7 +60,7 @@ import { WorkbenchTabMarks } from './WorkbenchTabMarks'
 import { WorkbenchTabStrip } from './WorkbenchTabStrip'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { resolvePaneColumnEdgeZone } from '../lib/tab-drop-zone'
-import { SplitRatioCommitter } from '../lib/split-ratio-commit'
+import { SplitRatioCommitter, synchronizeSplitLayout } from '../lib/split-ratio-commit'
 import { moveSessionViewMenu, regionSwapMenuEntries, tabIdsForCloseScope, workbenchSplitMenuEntries } from '../lib/workbench-tab-actions'
 import { regionSurfaceLabel } from '../lib/region-display-name'
 import { revealInFileManagerLabel } from '../lib/host-platform'
@@ -980,11 +980,7 @@ function usePersistedSplitLayout(ratio: number, dragging: boolean, visible: bool
     if (dragging) return
     const group = groupRef.current
     if (!group) return
-    const sizes = [ratio * 100, (1 - ratio) * 100]
-    const current = group.getLayout()
-    // The library rounds percentages; ignore only numerical dust in this visible projection.
-    if (current.length === 2 && current.every((size, index) => Math.abs(size - sizes[index]!) < 1e-6)) return
-    group.setLayout(sizes)
+    synchronizeSplitLayout(group, ratio)
   }, [ratio, dragging, visible])
   return groupRef
 }

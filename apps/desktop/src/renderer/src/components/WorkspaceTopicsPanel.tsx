@@ -8,17 +8,13 @@ import {
   Pin,
   Plus
 } from 'lucide-react'
-import { useRef, useState, type ReactNode } from 'react'
+import { useCallback, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type {
   ScratchTopicSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_TOPIC_TITLE_MAX_LENGTH, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicPhysicalPath, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
-import { topicAgentPresentation, topicsWithAgents } from '../lib/surface-tool-dock'
-// 显示名只有一条求值链（《显示名与身份》），这里消费它而**不**在面板里重拼一份。
-import { resolveAgentName } from '../lib/display-name'
-import { firstPromptFromTimeline, tabDisplayName } from '../lib/workbench-tabs'
-import { assertUnreachableSurface } from '../lib/workbench-surface-kinds'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { bumpWorkspaceFileRevision } from '../lib/file-workbench-state'
@@ -39,16 +35,16 @@ import {
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import { orderTopics, partitionPinned, reorderTopics } from '../lib/topic-order'
-import { activeTopicIdFromLayout, openTopicRegionMosaics, openTopicWorkSurfaces } from '../lib/scratch-topic-layout'
-import { sessionRecentActivity } from '../lib/session-recency'
+import { activeTopicIdFromLayout, openTopicWorkSurfaces } from '../lib/scratch-topic-layout'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
 import { TopicActionsMenu, TopicContextMenu } from './TopicContextMenu'
 import { TopicMoveDialog } from './TopicMoveDialog'
+import { TopicRowPresence } from './TopicRowPresence'
+import { useTopicSessionPaths } from '../lib/topic-session-subscriptions'
+import { workbenchDisplayTabs } from '../lib/workbench-resource-display'
 import { useAppStore } from '../store'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
-import { TopicPresence } from './TopicPresence'
-import type { TopicTabDetail } from './TopicPresence'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -62,36 +58,30 @@ import { SpaceIconPicker } from './SpaceIconPicker'
  * 而不是边角：没 pin 过任何东西的全新 userData 一进来就撞上，日常用的 profile 反而因为 key 在而正常。
  */
 const NO_PINNED_TOPICS: readonly string[] = []
+const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
+const NO_SURFACES: readonly import('../lib/scratch-topic-layout').TopicTabSurface[] = []
 
 export function WorkspaceTopicsPanel({
   workspace,
   onRevealDirectory,
-  categorySpaceId
+  categorySpaceId,
+  visible = true
 }: {
   workspace: WorkspaceRecord
   categorySpaceId?: string | undefined
+  visible?: boolean | undefined
   onRevealDirectory(path: string): void
 }) {
   const displayPath = usePathDisplay()
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const category = useAppStore(state => state.topicCategories.find(category => category.spaceId === categorySpaceId))
   const layout = useAppStore((state) => state.layouts[workspace.id])
-  const tabs = useAppStore((state) => state.tabs)
+  const tabs = useAppStore(useShallow(state => workbenchDisplayTabs(state.tabs, workspace.id, layout)))
   const selection = useAppStore(state => state.workbenchSpaceSelection)
   const topicId = selection?.workspaceId === workspace.id ? selection.topicId : layout ? activeTopicIdFromLayout(layout, tabs) : null
-  const sessions = useAppStore((state) => state.sessions)
-  const config = useAppStore((state) => state.config)
-  // 头像簇要显示的是**显示名**，不是 session.label（那是命名链最低一档）。链的两个高档输入就是这
-  // 两份 store 状态：用户手改名与首条 prompt。不读它们，这枚头像就只能拿到兜底名——而同 provider、
-  // 同目录的两个 Agent 兜底名逐字相同，于是 tooltip 与读屏都答不出「这是哪一个」。
-  const agentNames = useAppStore((state) => state.agentNames)
-  const timelines = useAppStore((state) => state.timelines)
   const createScratchTopic = useAppStore((state) => state.createScratchTopic)
   const openScratchTopic = useAppStore((state) => state.openScratchTopic)
   const renameScratchTopic = useAppStore((state) => state.renameScratchTopic)
-  // 头像点击走全局那一个 selectSession——跳转到某个 Agent 全窗口只有这一条路径，
-  // 在这里另写一段"找到它的 Tab 再激活"就是第二条，两条迟早对不上。
-  const selectSession = useAppStore((state) => state.selectSession)
   const openFile = useAppStore((state) => state.openFile)
   const reportError = useAppStore((state) => state.reportError)
   const { topics, error: readError } = useScratchTopics(workspace.id)
@@ -123,104 +113,18 @@ export function WorkspaceTopicsPanel({
   // 文件系统仍是 Topic 存在与否的真相；用户顺序只决定怎么排。
   // 先 orderTopics 定拖拽序，再 partitionPinned 把 pin 的提到前面——是一次**分区**不是排序：
   // pin 段按 pin 的先后、未 pin 段保留拖拽序原样。两者组合而不是取代（见 topic-order.ts）。
-  const userTopics = topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings) && (!categorySpaceId || (() => { const address = originalTopicAddress(workspace, topic, bindings); return address && bindings[address.zoneId]?.relations?.[categorySpaceId] === true })())) ?? null
-  const projected = userTopics
-    ? (() => {
-        const withAgents = topicsWithAgents(userTopics, sessions, workspace)
-        const dragOrder = orderTopics(withAgents.map((topic) => topic.id), topicOrder)
-        const shown = partitionPinned(dragOrder, pinnedTopics)
-        return shown.flatMap((id) => withAgents.filter((topic) => topic.id === id))
-      })()
-    : null
-  const currentTopic = projected?.find((topic) => topic.id === topicId)
-  // 一次派生「哪些 Topic 有 Tab 开着」及其 Region 分屏几何，逐行只读它，不让每行各自扫 tabs
-  // （scratch-topic-layout.ts 的学说：门禁与几何是同一事实的两半，投影一次）。
-  const openMosaics = openTopicRegionMosaics(layout, tabs)
-  const openWorkSurfaces = openTopicWorkSurfaces(layout, tabs)
-  const tabOrder = layout?.groups.flatMap((group) => group.tabOrder) ?? []
-  const sessionTabRank = new Map<string, number>()
-  tabOrder.forEach((tabId, index) => {
-    const tab = tabs[tabId]
-    const agentSurface = tab && Object.values(tab.regions).find((surface) => surface.kind === 'agent')
-    if (agentSurface?.kind === 'agent') sessionTabRank.set(agentSurface.sessionId, index)
-  })
-  const sessionById = new Map(sessions.map((session) => [session.id, session]))
-  const topicTabDetails = new Map<string, readonly TopicTabDetail[]>()
-  for (const [openTopicId, entries] of openWorkSurfaces) {
-    const details = entries.flatMap((entry, tabIndex) => {
-      const tab = tabs[entry.tabId]
-      if (!tab) return []
-      const title = tabDisplayName({
-        tab,
-        fallback: `Tab ${tabIndex + 1}`,
-        agentFactsFor: (sessionId) => {
-          const session = sessionById.get(sessionId)
-          if (!session || session.kind !== 'agent') return null
-          const executor = session.executorId ? config?.executors[session.executorId] : undefined
-          return {
-            userName: agentNames[sessionId],
-            firstPrompt: firstPromptFromTimeline(timelines[sessionId]),
-            fallbackLabel: session.label,
-            providerLabel: executor?.label ?? session.executorId ?? session.providerId
-          }
-        }
-      })
-      return [{
-        tabId: entry.tabId,
-        title,
-        active: entry.active,
-        regions: entry.cells.map((cell) => {
-          const surface = tab.regions[cell.regionId]
-          const session = surface && 'sessionId' in surface ? sessionById.get(surface.sessionId) : undefined
-          // executorLabel and activity below used to be ternary chains that fell through to a
-          // silent `'Launcher'` / `'No recent activity'` — the chain worked by ordering, not by
-          // exhaustive coverage, so a sixth kind added to WorkbenchSurface would silently be
-          // labelled as the fallback. Route through the exhaustive switch + assertUnreachableSurface
-          // (SSOT in workbench-surface-kinds.ts) so a new kind fails to compile here instead.
-          // Guard flagged this file at line 155 after the prior observation nullable-receiver widening
-          // (see memory [[exhaustiveness-guard-blind-to-nullable-receiver]]).
-          const executorLabel: string = surface
-            ? (() => {
-                switch (surface.kind) {
-                  case 'agent':
-                    return session && session.kind === 'agent' && session.executorId
-                      ? config?.executors[session.executorId]?.label ?? session.executorId
-                      : 'Agent'
-                  case 'terminal': return 'Terminal'
-                  case 'browser': return 'Browser'
-                  case 'file': return 'File'
-                  case 'git-diff': return 'Git diff'
-                  case 'launcher': return 'Launcher'
-                  default: return assertUnreachableSurface(surface)
-                }
-              })()
-            : 'Launcher'
-          const activity = session?.kind === 'agent'
-            ? (timelines[session.id]?.items.length || session.pendingInteraction || session.status.detail
-              ? sessionRecentActivity(session, timelines[session.id]?.items ?? [], workspace.path)
-              : 'No recent activity')
-            : surface?.kind === 'terminal' ? 'Terminal session'
-              : 'No recent activity'
-          const agent = surface?.kind === 'agent' && session?.kind === 'agent'
-            ? {
-                providerId: session.providerId,
-                executorId: session.executorId,
-                sessionId: session.id,
-                appearance: session.executorId ? config?.executors[session.executorId]?.avatar : undefined,
-                state: session.status.state,
-                label: resolveAgentName({
-                  userName: agentNames[session.id],
-                  firstPrompt: firstPromptFromTimeline(timelines[session.id]),
-                  fallback: session.label
-                }).name
-              }
-            : undefined
-          return { ...cell, executorLabel, activity, ...(agent ? { agent } : {}) }
-        })
-      } satisfies TopicTabDetail]
-    })
-    topicTabDetails.set(openTopicId, details)
-  }
+  const userTopics = useMemo(() => topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings) &&
+    (!categorySpaceId || (() => { const address = originalTopicAddress(workspace, topic, bindings)
+      return address && bindings[address.zoneId]?.relations?.[categorySpaceId] === true })())) ?? null,
+    [topics, bindings, categorySpaceId, workspace])
+  const projected = useMemo(() => {
+    if (!userTopics) return null
+    const byId = new Map(userTopics.map(topic => [topic.id, topic]))
+    return partitionPinned(orderTopics([...byId.keys()], topicOrder), pinnedTopics).flatMap(id => byId.has(id) ? [byId.get(id)!] : [])
+  }, [userTopics, topicOrder, pinnedTopics])
+  const currentTopic = projected?.find(topic => topic.id === topicId)
+  const paths = useTopicSessionPaths(workspace, topics ?? NO_TOPICS)
+  const openWorkSurfaces = useMemo(() => openTopicWorkSurfaces(layout, tabs), [layout, tabs])
 
   async function createTopic(): Promise<void> {
     if (pending) return
@@ -255,13 +159,13 @@ export function WorkspaceTopicsPanel({
     }
   }
 
-  async function selectTopicTab(nextTopicId: string, tabId: string): Promise<void> {
+  const selectTopicTab = useCallback(async (nextTopicId: string, tabId: string): Promise<void> => {
     try {
       await openScratchTopic(nextTopicId, workspace.id, { tabId })
     } catch (cause) {
       setError(presentError(cause))
     }
-  }
+  }, [openScratchTopic, workspace.id])
 
   function beginRename(topic: ScratchTopicSnapshot): void {
     if (pending) return
@@ -481,36 +385,8 @@ export function WorkspaceTopicsPanel({
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
                       presence={
-                        <TopicPresence
-                          cells={openMosaics.get(topic.id)}
-                          tabs={topicTabDetails.get(topic.id) ?? []}
-                          onSelectTab={(tabId) => { void selectTopicTab(topic.id, tabId) }}
-                          agents={topic.agents
-                            .filter((agent) => agent.live !== null && agent.live.processState === 'running')
-                            .sort((left, right) => (sessionTabRank.get(left.sessionId) ?? Number.MAX_SAFE_INTEGER) - (sessionTabRank.get(right.sessionId) ?? Number.MAX_SAFE_INTEGER))
-                            .map((agent) => {
-                            const shown = topicAgentPresentation(agent)
-                            return {
-                              key: agent.sessionId,
-                              providerId: agent.providerId,
-                              executorId: agent.live?.executorId,
-                              sessionId: agent.live?.id,
-                              appearance: agent.live ? config?.executors[agent.live.executorId]?.avatar : undefined,
-                              // 经命名链求值，不直接用 agent.live.label。那个 label 是 Main 建的
-                              // `executorLabel · workspaceLabel`（链的最低一档），对「同 provider 多个
-                              // Agent 同一目录」这个本条要解的场景逐字相同——两枚头像的 tooltip 与
-                              // aria-label 会一模一样。`fallback` 仍是它：链的最低一档本来就是它，
-                              // 这里不为缺 live 的情形编一个假名字（用 sessionId 兜底是如实的）。
-                              label: resolveAgentName({
-                                userName: agentNames[agent.sessionId],
-                                firstPrompt: firstPromptFromTimeline(timelines[agent.sessionId]),
-                                fallback: agent.live?.label ?? agent.sessionId
-                              }).name,
-                              state: shown.state,
-                              onOpen: () => selectSession(agent.sessionId)
-                            }
-                          })}
-                        />
+                        <TopicRowPresence workspace={workspace} topic={topic} paths={paths.get(topic.id) ?? NO_PINNED_TOPICS}
+                          surfaces={openWorkSurfaces.get(topic.id) ?? NO_SURFACES} active={visible} onSelectTab={selectTopicTab} />
                       }
                     />
                   </div>

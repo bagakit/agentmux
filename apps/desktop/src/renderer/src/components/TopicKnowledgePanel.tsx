@@ -20,8 +20,8 @@ function documentKey(document: TopicKnowledgeDocument): string {
 }
 
 /** Existing exact-Topic or global search; results retain their actual source Topic. */
-export function TopicKnowledgePanel({ workspace, topic, topics = [] }: {
-  workspace: WorkspaceRecord; topic?: ScratchTopicSnapshot | undefined; topics?: readonly ScratchTopicSnapshot[] | undefined
+export function TopicKnowledgePanel({ workspace, topic, topics = [], active = true }: {
+  active?: boolean | undefined; workspace: WorkspaceRecord; topic?: ScratchTopicSnapshot | undefined; topics?: readonly ScratchTopicSnapshot[] | undefined
 }) {
   const categories = useAppStore(state => state.topicCategories)
   const bindings = useAppStore(state => state.spaceZoneBindings)
@@ -37,6 +37,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [] }: {
   const selectedRow = useRef<HTMLButtonElement>(null)
   useEffect(() => { setMoveTarget(null); setHistoryIssue(null) }, [topic?.id])
   useEffect(() => {
+    if (!active) return
     let live = true
     if (!topic && !search) { setEntries([]); setDocuments([]); setSelected(null); setSelectedDocument(null); setError(null); setLoading(false); return }
     setLoading(true)
@@ -50,7 +51,7 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [] }: {
       setSelectedDocument(previous => previous ? knowledge.documents.find(document => documentKey(document) === documentKey(previous)) ?? (knowledge.unavailable.length ? previous : null) : null)
     }).catch(cause => { if (live) setError(presentError(cause)) }).finally(() => { if (live) setLoading(false) })
     return () => { live = false }
-  }, [topic?.id, search, attempt, bindings])
+  }, [active, topic?.id, search, attempt, bindings])
   const current = categories.filter(category => fact?.categorySpaceIds.includes(category.spaceId))
   const sourceTopic = selected ? topics.find(candidate => candidate.id === selected.topicId) ?? (topic?.id === selected.topicId ? topic : undefined) : topic
   const rootPath = sourceTopic ? scratchTopicLogicalPath(workspace, sourceTopic) : null

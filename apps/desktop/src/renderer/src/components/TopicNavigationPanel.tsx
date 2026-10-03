@@ -34,11 +34,11 @@ export function TopicNavigationPanel({ workspace, topic, selectedTopicId, topics
       </button>)}
     </nav>
     <div className="topic-navigation-panel__topics" hidden={view !== 'topics'}>
-      <WorkspaceTopicsPanel workspace={workspace} categorySpaceId={categorySpaceId} onRevealDirectory={onRevealDirectory} />
+      <WorkspaceTopicsPanel workspace={workspace} categorySpaceId={categorySpaceId} visible={visible && view === 'topics'} onRevealDirectory={onRevealDirectory} />
     </div>
     {knowledgeOpened ? <div className="topic-navigation-panel__knowledge" hidden={view !== 'knowledge'}>
       {selectedTopicId && !topic ? <div className="surface-inline-error" role="status">The selected Topic is still restoring. Its workface and Topic directory remain available.</div> :
-        <TopicKnowledgePanel key={topic?.id ?? 'all-topics'} workspace={workspace} topic={topic} topics={topics} />}
+        <TopicKnowledgePanel key={topic?.id ?? 'all-topics'} workspace={workspace} topic={topic} topics={topics} active={visible && view === 'knowledge'} />}
     </div> : null}
   </section>
 }

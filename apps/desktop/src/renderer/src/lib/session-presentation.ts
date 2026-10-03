@@ -8,14 +8,31 @@ import type { SessionViewMode } from './session-state'
 
 let indexedSessions: readonly SessionSnapshot[] | undefined
 let index: ReadonlyMap<string, SessionSnapshot> = new Map()
+let indexedPathSessions: readonly SessionSnapshot[] | undefined
+let paths: ReadonlyMap<string, ReadonlyMap<string, readonly SessionSnapshot[]>> = new Map()
+const NO_SESSIONS: readonly SessionSnapshot[] = []
 
 /** Shared lookup over the immutable Store projection; references remain owned by the Store. */
 export function sessionPresentationById(sessions: readonly SessionSnapshot[]): ReadonlyMap<string, SessionSnapshot> {
   if (sessions !== indexedSessions) {
-    index = new Map(sessions.map((session) => [session.id, session]))
+    index = new Map(sessions.map(session => [session.id, session]))
     indexedSessions = sessions
   }
   return index
+}
+
+/** Directory consumers lazily share one path projection per immutable Session snapshot. */
+export function sessionPresentationsAtPath(sessions: readonly SessionSnapshot[], hostId: string, path: string): readonly SessionSnapshot[] {
+  if (sessions !== indexedPathSessions) {
+    const byHost = new Map<string, Map<string, SessionSnapshot[]>>()
+    for (const session of sessions) {
+      const host = byHost.get(session.hostId) ?? new Map<string, SessionSnapshot[]>()
+      const atPath = host.get(session.workspacePath) ?? []
+      atPath.push(session); host.set(session.workspacePath, atPath); byHost.set(session.hostId, host)
+    }
+    paths = byHost; indexedPathSessions = sessions
+  }
+  return paths.get(hostId)?.get(path) ?? NO_SESSIONS
 }
 
 /** Only a valid own preference is explicit; opaque Session IDs also name Object properties. */

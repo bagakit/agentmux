@@ -24,5 +24,10 @@ export function useWorkbenchTabSessions(tab: WorkbenchTab | undefined) {
 
 /** Keep naming/timeline subscriptions on the same spatial consumers as the Session lookup. */
 export function recordForWorkbenchTab<T>(record: Readonly<Record<string, T>>, tab: WorkbenchTab | undefined): Record<string, T> {
-  return Object.fromEntries(tabSessionIds(tab).flatMap((id) => Object.hasOwn(record, id) ? [[id, record[id]!]] : []))
+  return recordForSessionIds(record, tabSessionIds(tab))
+}
+
+/** Name and timeline records follow the same exact consumers as their Session facts. */
+export function recordForSessionIds<T>(record: Readonly<Record<string, T>>, ids: readonly string[]): Record<string, T> {
+  return Object.fromEntries(ids.flatMap(id => Object.hasOwn(record, id) ? [[id, record[id]!]] : []))
 }
