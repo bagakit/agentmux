@@ -2,7 +2,6 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
 import {
-  Crosshair,
   LoaderCircle,
   NotebookText,
   Pin,
@@ -43,7 +42,8 @@ import { activeTopicIdFromLayout, openTopicRegionMosaics, openTopicWorkSurfaces 
 import { sessionRecentActivity } from '../lib/session-recency'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { handleTopicRenameKeyDown } from '../lib/topic-rename'
-import { TopicContextMenu } from './TopicContextMenu'
+import { TopicActionsMenu, TopicContextMenu } from './TopicContextMenu'
+import { TopicMoveDialog } from './TopicMoveDialog'
 import { useAppStore } from '../store'
 import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 import { TopicPresence } from './TopicPresence'
@@ -98,6 +98,7 @@ export function WorkspaceTopicsPanel({
   const [editTitle, setEditTitle] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
+  const [moveTarget, setMoveTarget] = useState<{ topicId: string; title: string } | null>(null)
   const manualIcons = useAppStore(state => state.spaceObjectIcons)
   const panel = useRef<HTMLElement>(null)
   const iconReturnKey = useRef<string | null>(null)
@@ -220,6 +221,10 @@ export function WorkspaceTopicsPanel({
 
   async function createTopic(): Promise<void> {
     if (pending) return
+    if (categorySpaceId && (!category || category.readError)) {
+      setError('The selected Category description is not confirmed. Reopen this Category after refreshing Topics; its existing discussions remain available.')
+      return
+    }
     setPending('create')
     setError(null)
     try {
@@ -336,7 +341,7 @@ export function WorkspaceTopicsPanel({
     <section ref={panel} className="surface-tool-summary workspace-topics-panel workspace-topics-panel--index">
       <SelectorListHeader
         className="workspace-topic-index-header"
-        title={category?.title ?? 'Topics'}
+        title="Topics"
         count={userTopics?.length ?? null}
         actions={
           <button
@@ -353,6 +358,7 @@ export function WorkspaceTopicsPanel({
           </button>
         }
       />
+      {categorySpaceId && (!category || category.readError) ? <div className="surface-inline-error" role="status">{category?.readError ?? 'The selected Category description is still restoring.'} Existing Topics and discussions remain available.</div> : null}
       {topics === null ? (
         <div className="workspace-topic-state" role="status">
           <LoaderCircle className="spin" size={16} aria-hidden="true" />
@@ -397,25 +403,29 @@ export function WorkspaceTopicsPanel({
               }
               action(logicalPath)
             }
+            const menuActions = {
+              pinned,
+              onCopyPath: () => withLogicalPath(path => {
+                const absolute = scratchWorkspaceFilePath(workspace, topics, path)
+                if (absolute === null) { reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry copying its path.')); return }
+                void copyTextToClipboard(displayPath(absolute, workspace.hostId), reportError)
+              }),
+              onRename: () => beginRename(topic),
+              onReveal: () => withLogicalPath(onRevealDirectory),
+              onTogglePin: () => togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id),
+              onEditWiki: () => withLogicalPath(path => void openFile(`${path}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)),
+              onToggleWiki: topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined,
+              onResetWiki: topic.wiki ? () => void resetTopicWiki(topic) : undefined,
+              onChangeIcon: () => { iconReturnKey.current = target.key; setIconTarget(target) },
+              onMove: () => setMoveTarget({ topicId: topic.id, title: topic.title }),
+              wikiEnabled: topic.wiki?.enabled
+            }
             return (
               <SortableTopicItem
                 topicId={topic.id}
                 isCurrent={isCurrent}
-                pinned={pinned}
                 key={topic.id}
-                onCopyPath={() => withLogicalPath(path => {
-                  const absolute = scratchWorkspaceFilePath(workspace, topics, path)
-                  if (absolute === null) { reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry copying its path.')); return }
-                  void copyTextToClipboard(displayPath(absolute, workspace.hostId), reportError)
-                })}
-                onRename={() => beginRename(topic)}
-                onReveal={() => withLogicalPath(onRevealDirectory)}
-                onTogglePin={() => togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id)}
-                onEditWiki={() => withLogicalPath(path => void openFile(`${path}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError))}
-                onToggleWiki={topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined}
-                onResetWiki={topic.wiki ? () => void resetTopicWiki(topic) : undefined}
-                onChangeIcon={() => { iconReturnKey.current = target.key; setIconTarget(target) }}
-                wikiEnabled={topic.wiki?.enabled}
+                {...menuActions}
               >
                 {editing ? (
                   <form
@@ -445,6 +455,7 @@ export function WorkspaceTopicsPanel({
                     data-space-icon-target={target.key}
                     {...(isCurrent ? { 'data-current': 'true' } : {})}
                     role="button"
+                    aria-current={isCurrent ? 'page' : undefined}
                     tabIndex={pending !== null ? -1 : 0}
                     aria-disabled={pending !== null}
                     onClick={() => { if (pending === null) void openTopic(topic.id) }}
@@ -496,21 +507,9 @@ export function WorkspaceTopicsPanel({
                     />
                   </div>
                 )}
-                {/* 行上只留最高频的那个动作。改名收进右键菜单——它一天用不了一次，
-                    占一个常驻图标位是在跟标题抢宽度。
-                    文案与 TopicContextMenu 那项必须同一句（见那里的注释）：这是在自家文件面板里
-                    定位，不是打开系统文件管理器，所以不走 lib/host-platform 的三态文案。 */}
+                {/* One visible menu shares all actions with the keyboard/context menu. */}
                 <span className="workspace-topic-actions">
-                  <button
-                    className="icon-button workspace-topic-reveal"
-                    type="button"
-                    aria-label={`Reveal ${topic.title} in Files`}
-                    title="Reveal in Files"
-                    disabled={pending !== null}
-                    onClick={(event) => { event.stopPropagation(); withLogicalPath(onRevealDirectory) }}
-                  >
-                    <Crosshair size={13} />
-                  </button>
+                  <TopicActionsMenu title={topic.title} {...menuActions} />
                 </span>
                 {topic.readError ? <div className="surface-inline-error" role="alert">{topic.title}: {topic.readError}. Its work surface is retained.</div> : null}
               </SortableTopicItem>
@@ -522,6 +521,7 @@ export function WorkspaceTopicsPanel({
       ) : null}
       {readError ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {readError}. Existing work surfaces remain available.</div> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
+      <TopicMoveDialog target={moveTarget} onClose={() => setMoveTarget(null)} />
       <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() =>
         [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
           .find(node => node.dataset.spaceIconTarget === iconReturnKey.current) ?? null} />
@@ -548,6 +548,7 @@ function SortableTopicItem({
   onToggleWiki,
   onResetWiki,
   onChangeIcon,
+  onMove,
   wikiEnabled
 }: {
   topicId: string
@@ -562,6 +563,7 @@ function SortableTopicItem({
   onToggleWiki?: (() => void) | undefined
   onResetWiki?: (() => void) | undefined
   onChangeIcon(): void
+  onMove(): void
   wikiEnabled?: boolean | undefined
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -578,6 +580,7 @@ function SortableTopicItem({
       onToggleWiki={onToggleWiki}
       onResetWiki={onResetWiki}
       onChangeIcon={onChangeIcon}
+      onMove={onMove}
       {...(wikiEnabled === undefined ? {} : { wikiEnabled })}
     >
       <div

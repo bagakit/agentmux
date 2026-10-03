@@ -17,6 +17,8 @@ import { TopicKnowledgePanel } from '../src/renderer/src/components/TopicKnowled
 import { TopicKnowledgeCapture, TopicKnowledgeEditor } from '../src/renderer/src/components/TopicKnowledgeEditor'
 import { TopicCategoryDialog } from '../src/renderer/src/components/TopicCategoryDialog'
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
+import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
+import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { selectedKnowledgeSources, moveKnowledgeTopic, openKnowledgeSource } from '../src/renderer/src/lib/topic-knowledge-actions'
 import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
@@ -87,7 +89,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     await click(button('Save category')); await settle(() => close.mock.calls.length === 3)
     expect((await f.owner.call('topic.category.ls', {})).categories.find(item => item.categoryId === category.categoryId)).toMatchObject({ title: 'Research', spaceId: category.spaceId, directoryPath: category.directoryPath })
   })
-  it('shows Category→Topic from Core membership and Topic move keeps original Chat, Thread, pin and draft', async () => {
+  it('shows Categories in Space and their Topics on the page while move keeps original Chat, Thread, pin and draft', async () => {
     const f = await fixture(), before = useAppStore.getState(), current = (await f.owner.call('topic.inspect', { topicId: f.first.topicId })).topic!
     await moveKnowledgeTopic(current, CATEGORY)
     expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.category.spaceId, zoneId: f.first.zoneId, tabId: f.tabs[0]!.id, regionId: f.tabs[0]!.layout.activeRegionId })
@@ -95,11 +97,47 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     expect(useAppStore.getState().pinnedItems).toBe(before.pinnedItems); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
     expect((await f.state.read())!.graph.regions).toHaveLength(2); expect(api.sessions.stop).not.toHaveBeenCalled()
     await mount(createElement(SpaceTopicsTree, { workspace: f.workspace, icons: {}, onChangeIcon: () => {} }))
-    const row = document.querySelector(`[data-space-nav="topic:${f.first.topicId}"]`)!
-    expect(row.getAttribute('data-space-parent')).toBe('topic-category:' + CATEGORY)
-    expect((row as HTMLElement).style.getPropertyValue('--rail-depth')).toBe('2')
+    expect(document.querySelector(`[data-space-nav="topic:${f.first.topicId}"]`)).toBeNull()
+    const row = document.querySelector(`[data-space-nav="topic-category:${CATEGORY}"]`)!
+    expect(row.getAttribute('data-space-parent')).toBe('space:topics')
+    expect(row.closest('.space-category-heading')!.querySelector('[data-space-disclosure]')).toBeNull()
     await click(document.querySelector(`[data-space-nav="topic-category:${CATEGORY}"]`)!)
     expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.category.spaceId, zoneId: null, topicId: null })
+    await act(async () => root!.render(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.category.spaceId, onRevealDirectory: () => {} })))
+    await settle(() => !!host.querySelector('[data-topic-id]'))
+    expect([...host.querySelectorAll('[data-topic-id]')].map(row => row.getAttribute('data-topic-id'))).toEqual([f.first.topicId])
+    expect(host.querySelector('.workspace-topic-index-header')!.textContent).toBe('Topics1')
+    expect(host.querySelector('[aria-label="Actions for 工作方法"]')).not.toBeNull()
+  })
+  it('creates a durable Category from the only Topics creation icon without creating a Topic', async () => {
+    const f = await fixture(), original = (await f.owner.call('topic.ls', {})).topics.map(topic => topic.topicId)
+    await mount(createElement(SpaceTopicsTree, { workspace: f.workspace, icons: {}, onChangeIcon: () => {} }))
+    expect(host.querySelector('.space-category-create')).toBeNull()
+    await click(button('Create Category'))
+    await settle(() => !!document.querySelector('[role="dialog"] input'))
+    await input(document.querySelector<HTMLInputElement>('[role="dialog"] input')!, 'Ideas from discussions')
+    await click(button('Save category')); await settle(() => !document.querySelector('[role="dialog"]'))
+    const category = (await f.owner.call('topic.category.ls', {})).categories.find(category => category.title === 'Ideas from discussions')!
+    expect(category).toBeDefined()
+    expect(await readFile(join(category.directoryPath, 'category.md'), 'utf8')).toBe('# Ideas from discussions\n')
+    expect((await f.owner.call('topic.ls', {})).topics.map(topic => topic.topicId)).toEqual(original)
+    expect(host.querySelector(`[data-space-nav="topic-category:${category.categoryId}"]`)).not.toBeNull()
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
+  it('retains the requested Category through a missing description without leaking the library or creating in a default Category', async () => {
+    const f = await fixture(), fact = (await f.owner.call('topic.inspect', { topicId: f.first.topicId })).topic!
+    await moveKnowledgeTopic(fact, CATEGORY)
+    useAppStore.setState({ topicCategories: [], workbenchSpaceSelection: { workspaceId: f.workspace.id, spaceId: f.category.spaceId, zoneId: null, topicId: null, tabId: null, groupId: null, regionId: null } })
+    const create = vi.spyOn(useAppStore.getState(), 'createScratchTopic')
+    await mount(createElement(WorkspaceWorkbench, { workspaceId: f.workspace.id }))
+    await settle(() => !!host.querySelector('[data-topic-id]'))
+    expect([...host.querySelectorAll('[data-topic-id]')].map(row => row.getAttribute('data-topic-id'))).toEqual([f.first.topicId])
+    expect(host.textContent).toContain('Category description is still restoring')
+    await click(button('Create new Topic'))
+    expect(create).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('selected Category description is not confirmed')
+    expect(useAppStore.getState().workbenchSpaceSelection?.spaceId).toBe(f.category.spaceId)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
   })
   it('lists and searches only this Topic, rejects a stale real save and keeps the editing draft', async () => {
     const f = await fixture(), original = await entry(f.owner, f.first.topicId, 'Hiring principles')

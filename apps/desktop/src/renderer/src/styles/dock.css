@@ -112,13 +112,12 @@
 .workspace-topic-state small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .workspace-topic-state__icon { width: 24px; height: 24px; display: inline-grid; place-items: center; border-radius: var(--radius-sm); color: var(--green-2); background: var(--green-bg); }
 .workspace-topic-state .small-button { flex: 0 0 auto; margin-left: auto; }
-.workspace-topic-list { width: 100%; margin-top: var(--sp-2); overflow: visible; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-0); }
-.workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-bottom: 1px solid var(--line-soft); }
-.workspace-topic-item:last-child { border-bottom: 0; }
+.workspace-topic-list { width: 100%; margin-top: var(--sp-2); display: flex; flex-direction: column; gap: var(--sp-1); overflow: visible; }
+.workspace-topic-item { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; border-radius: var(--radius-sm); }
 /* 选中＝一块干净的 Surface 填充，没有贴边竖条。它必须比 hover 更实，否则选中看起来比
    悬停还弱——此前它是 --surface-1，比 hover 的 --surface-3 更暗，全靠那根绿竖条撑住存在感。 */
 .workspace-topic-item.current { background: var(--green-bg); }
-.workspace-topic-item.current .selector-row__identity strong { color: var(--text); }
+.workspace-topic-item.current .selector-row__identity strong { color: var(--text); font-weight: 650; }
 /* 行首没有常驻图标槽——一列全同的图标不携带信息。打开中的 spinner 是唯一会出现在这里的
    东西，它出现时才占位，不出现时标题从最左缘开始。行内三段的排布（含"头像簇右缘对齐行、
    与摘要多长无关"）归共享层 `.selector-row`（selector.css）；这里只管本面板的内外边距、
@@ -142,7 +141,7 @@
 .workspace-topic-item.dragging { position: relative; z-index: 1; background: var(--surface-3); box-shadow: var(--hl-strong); }
 .workspace-topic-actions { display: inline-flex; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2) 0 0; opacity: .55; transition: opacity var(--dur-fast) ease; }
 .workspace-topic-item:hover .workspace-topic-actions, .workspace-topic-item:focus-within .workspace-topic-actions, .workspace-topic-item.current .workspace-topic-actions { opacity: 1; }
-.workspace-topic-reveal.icon-button { width: 24px; height: 24px; color: var(--text-3); }
+.workspace-topic-actions > .icon-button { width: 24px; height: 24px; color: var(--text-3); }
 .workspace-topic-wiki { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 var(--sp-1); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--green-2); cursor: pointer; }
 .workspace-topic-wiki:hover { background: var(--surface-2); color: var(--text); }
 .workspace-topic-wiki--text { min-width: 28px; font-size: var(--fs-micro); }

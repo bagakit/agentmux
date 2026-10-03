@@ -1,109 +1,74 @@
 import * as ContextMenu from '@radix-ui/react-context-menu'
-import { Copy, Crosshair, NotebookText, Pencil, Pin, PinOff, RotateCcw, Shapes, ToggleLeft, ToggleRight } from 'lucide-react'
-import type { ReactNode } from 'react'
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu'
+import { ArrowRightLeft, Copy, Crosshair, MoreHorizontal, NotebookText, Pencil, Pin, PinOff, RotateCcw, Shapes, ToggleLeft, ToggleRight } from 'lucide-react'
+import { useRef, type ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useSpaceObjectMenu } from './SpaceObjectContextMenu'
 
-/**
- * Topic 行的右键菜单。
- *
- * 行上只留得下一个动作，所以留给最高频的那个（定位到目录）；改名一天用不了一次，占一个常驻
- * 图标位是在跟标题抢宽度。用户的说法是："改名不用给个专门图标, 可以放进 topic 右键菜单"。
- *
- * pin/unpin 走同一条理由收进这里：行上再多一个常驻图标按钮会跟标题抢宽度，也会撞
- * surface-tool-dock 那条「行上只留一个常驻动作」的断言。已 pin 的**状态**在行内以一枚静息态
- * 小 Pin 标记表达（见 WorkspaceTopicsPanel 的 workspace-topic-entry__pin），这里提供切换它的**动作**。
- * 键盘可达：共用对象菜单的 Trigger 支持 Shift+F10 / 菜单键。
- *
- * 复用 `tab-context-menu` 那套基座——密度合同要求全部 Context Menu 共用一套，新开一套只会让
- * 两处的行高与内缩慢慢走偏。
- */
-export function TopicContextMenu({
-  children,
-  pinned,
-  onCopyPath,
-  onRename,
-  onReveal,
-  onTogglePin,
-  onEditWiki,
-  onToggleWiki,
-  onResetWiki,
-  onChangeIcon,
-  wikiEnabled
-}: {
-  children: ReactNode
+type TopicMenuActions = {
   pinned: boolean
   onCopyPath(): void
   onRename(): void
   onReveal(): void
   onTogglePin(): void
   onEditWiki(): void
+  onMove?: (() => void) | undefined
   onToggleWiki?: (() => void) | undefined
   onResetWiki?: (() => void) | undefined
   onChangeIcon?: (() => void) | undefined
   wikiEnabled?: boolean | undefined
-}) {
-  const menu = useSpaceObjectMenu()
-  return (
-    <ContextMenu.Root onOpenChange={menu.onOpenChange}>
-      <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
-      <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
-        <ContextMenu.Content
-          className="tab-context-menu topic-context-menu"
-          collisionPadding={8}
-          onCloseAutoFocus={menu.onCloseAutoFocus}
-        >
-          {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(onChangeIcon)}>
-            <Shapes size={14} /><span>Change icon…</span>
-          </ContextMenu.Item> : null}
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onTogglePin}>
-            {pinned ? <PinOff size={14} /> : <Pin size={14} />}
-            <span>{pinned ? 'Unpin Topic' : 'Pin Topic'}</span>
-          </ContextMenu.Item>
-          <ContextMenu.Separator className="tab-context-menu__separator" />
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onRename}>
-            <Pencil size={14} />
-            <span>Rename Topic</span>
-          </ContextMenu.Item>
-          <ContextMenu.Separator className="tab-context-menu__separator" />
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onReveal}>
-            <Crosshair size={14} />
-            {/*
-              「在 AgentMux 自己的文件面板里定位」——不是系统文件管理器。`onReveal` 只写
-              `explorerRevealRequest` 状态让那棵树展开滚动到位，全程不碰 `api.files.reveal`。
-              所以这句**不许**走 `lib/host-platform` 的 reveal 文案：那一族是三个操作系统的
-              Finder / File Explorer / File Manager，与这里是两件事。
+}
 
-              原文案是 "Reveal in Explorer"，两个毛病：产品里没有任何界面把那个面板叫
-              "Explorer"（它的名字是 "Files + Branches"，见 SurfaceToolDock 的 TOOL 表），
-              而 "Explorer" 又恰好是 Windows 系统文件管理器的名字——于是一个内部导航动作看起来
-              像在承诺打开操作系统的窗口。改成点名那个面板自己的名字。
-            */}
-            <span>Reveal in Files</span>
-          </ContextMenu.Item>
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onCopyPath}>
-            <Copy size={14} />
-            <span>Copy Topic Path</span>
-          </ContextMenu.Item>
-          <ContextMenu.Separator className="tab-context-menu__separator" />
-          <ContextMenu.Item className="tab-context-menu__item" onSelect={onEditWiki}>
-            <NotebookText size={14} />
-            <span>Edit Topic Wiki</span>
-          </ContextMenu.Item>
-          {onToggleWiki ? (
-            <ContextMenu.Item className="tab-context-menu__item" onSelect={onToggleWiki}>
-              {wikiEnabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}
-              <span>{wikiEnabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}</span>
-            </ContextMenu.Item>
-          ) : null}
-          {onResetWiki ? (
-            <ContextMenu.Item className="tab-context-menu__item" onSelect={onResetWiki}>
-              <RotateCcw size={14} />
-              <span>Restore default Topic Wiki</span>
-            </ContextMenu.Item>
-          ) : null}
-        </ContextMenu.Content>
-      </ContextMenu.Portal>
-    </ContextMenu.Root>
-  )
+/** The visible action menu and right-click menu offer the same original Topic actions. */
+function topicMenuItems(Item: typeof ContextMenu.Item, Separator: typeof ContextMenu.Separator, actions: TopicMenuActions, openDialog: (callback: () => void) => void) {
+  return <>
+    {actions.onMove ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onMove!)}><ArrowRightLeft size={14} /><span>Move to category…</span></Item> : null}
+    {actions.onChangeIcon ? <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onChangeIcon!)}><Shapes size={14} /><span>Change icon…</span></Item> : null}
+    <Item className="tab-context-menu__item" onSelect={actions.onTogglePin}>
+      {actions.pinned ? <PinOff size={14} /> : <Pin size={14} />}<span>{actions.pinned ? 'Unpin Topic' : 'Pin Topic'}</span>
+    </Item>
+    <Separator className="tab-context-menu__separator" />
+    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onRename)}><Pencil size={14} /><span>Rename Topic</span></Item>
+    <Separator className="tab-context-menu__separator" />
+    <Item className="tab-context-menu__item" onSelect={actions.onReveal}><Crosshair size={14} /><span>Reveal in Files</span></Item>
+    <Item className="tab-context-menu__item" onSelect={actions.onCopyPath}><Copy size={14} /><span>Copy Topic Path</span></Item>
+    <Separator className="tab-context-menu__separator" />
+    <Item className="tab-context-menu__item" onSelect={() => openDialog(actions.onEditWiki)}><NotebookText size={14} /><span>Edit Topic Wiki</span></Item>
+    {actions.onToggleWiki ? <Item className="tab-context-menu__item" onSelect={actions.onToggleWiki}>
+      {actions.wikiEnabled ? <ToggleLeft size={14} /> : <ToggleRight size={14} />}<span>{actions.wikiEnabled ? 'Disable Topic Wiki' : 'Enable Topic Wiki'}</span>
+    </Item> : null}
+    {actions.onResetWiki ? <Item className="tab-context-menu__item" onSelect={actions.onResetWiki}><RotateCcw size={14} /><span>Restore default Topic Wiki</span></Item> : null}
+  </>
+}
+
+/** Shift+F10 and the menu key use the existing object-menu keyboard and focus owner. */
+export function TopicContextMenu({ children, ...actions }: TopicMenuActions & { children: ReactNode }) {
+  const menu = useSpaceObjectMenu()
+  return <ContextMenu.Root onOpenChange={menu.onOpenChange}>
+    <ContextMenu.Trigger asChild {...menu.triggerProps}>{children}</ContextMenu.Trigger>
+    <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <ContextMenu.Content className="tab-context-menu topic-context-menu" collisionPadding={8} onCloseAutoFocus={menu.onCloseAutoFocus}>
+        {topicMenuItems(ContextMenu.Item, ContextMenu.Separator, actions, menu.changeIcon)}
+      </ContextMenu.Content>
+    </ContextMenu.Portal>
+  </ContextMenu.Root>
+}
+
+/** Dialog actions wait until Radix releases the menu focus scope and restore its invoker. */
+export function TopicActionsMenu({ title, ...actions }: TopicMenuActions & { title: string }) {
+  const trigger = useRef<HTMLButtonElement>(null), pendingDialog = useRef<(() => void) | null>(null)
+  return <DropdownMenu.Root onOpenChange={open => { if (open) pendingDialog.current = null }}>
+    <DropdownMenu.Trigger asChild><button ref={trigger} type="button" className="icon-button workspace-topic-entry__actions" aria-label={`Actions for ${title}`} title={`Actions for ${title}`}
+      onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
+      onKeyDown={event => { if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10')) event.stopPropagation() }}><MoreHorizontal size={15} /></button></DropdownMenu.Trigger>
+    <DropdownMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}>
+      <DropdownMenu.Content className="tab-context-menu topic-context-menu" align="end" collisionPadding={8}
+        onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()} onKeyDown={event => event.stopPropagation()} onCloseAutoFocus={event => {
+          const callback = pendingDialog.current; pendingDialog.current = null
+          if (callback) { event.preventDefault(); trigger.current?.focus(); callback() }
+        }}>
+        {topicMenuItems(DropdownMenu.Item, DropdownMenu.Separator, actions, callback => { pendingDialog.current = callback })}
+      </DropdownMenu.Content>
+    </DropdownMenu.Portal>
+  </DropdownMenu.Root>
 }
