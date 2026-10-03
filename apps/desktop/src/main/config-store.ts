@@ -236,6 +236,7 @@ const configSchema = z
     browser: browserSchema,
     toolkit: z.object({
       performance: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),
+      mobileConnection: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),
       tools: z.array(toolkitToolSchema).max(TOOLKIT_MAX_USER_TOOLS).superRefine((tools, context) => {
         if (new Set(tools.map(tool => tool.id)).size !== tools.length) context.addIssue({ code: 'custom', message: 'Tool identities must be unique.' })
       }).optional()

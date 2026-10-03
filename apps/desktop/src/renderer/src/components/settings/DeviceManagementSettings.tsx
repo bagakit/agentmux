@@ -7,8 +7,15 @@ import { api } from '../../lib/api'
 type DeviceList = AgentMuxRpcResult<'device.ls'>
 type DeviceInvitation = AgentMuxRpcResult<'device.link'>
 
+const operationLabels: Readonly<Record<string, string>> = {
+  submitAgentPrompt: '发送消息', writeAgent: '终端输入', pasteAgent: '粘贴输入',
+  respondAgentPermission: '回应权限请求', answerAgentRequest: '回答请求',
+  resizeAgent: '调整终端尺寸', signalAgent: '发送进程信号', stopAgent: '停止 Agent',
+  resumeAgent: '恢复 Agent', createAgent: '创建 Agent', removeAgent: '移除 Agent'
+}
+
 /** Person-only controls for the original Host Authority; a click is never a confirmation fact. */
-export function DeviceManagementSettings({ active }: { active: boolean }) {
+export function DeviceManagementSettings({ active, compact = false }: { active: boolean; compact?: boolean }) {
   const [list, setList] = useState<DeviceList | null>(null)
   const [invitation, setInvitation] = useState<DeviceInvitation | null>(null)
   const [notice, setNotice] = useState('')
@@ -88,10 +95,10 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
   }
   if (!active) return null
   const disabled = busy || needsRead || !list
-  return <section className="settings-group">
-    <header><span>手机与设备授权</span><small>{list ? `${list.devices.filter(device => device.online).length} 当前在线 · ${list.devices.filter(device => device.revokedAt === undefined).length} 已授权` : '状态尚未核实'}</small></header>
+  return <section className="settings-group" data-device-view={compact ? "compact" : "settings"}>
+    <header>{!compact && <span>手机与设备授权</span>}<small>{list ? `${list.devices.filter(device => device.online).length} 当前在线 · ${list.devices.filter(device => device.revokedAt === undefined).length} 已授权` : '状态尚未核实'}</small></header>
     <p className="settings-group-note">生成并复制连接链接，在手机打开即可继续操作本 Mac 的 Agent。链接 5 分钟内有效，仅能连接一台新设备。</p>
-    {list && <p className="field-hint">Mac 身份：<code>{list.hostId}</code></p>}
+    {list && !compact && <p className="field-hint">Mac 身份：<code>{list.hostId}</code></p>}
     <div className="settings-pane-toolbar">
       <button className="small-button" disabled={busy} onClick={() => void read()}><RefreshCw size={13} />刷新设备状态</button>
       <button className="small-button" disabled={disabled} onClick={() => void invite()}>{busy ? <LoaderCircle size={13} className="spin" /> : <ShieldCheck size={13} />}生成并复制连接链接</button>
@@ -102,7 +109,8 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
       <p className="field-hint host-edit-grid__wide">连接的 Mac：<code>{invitation.hostId}</code>。关闭设置后不在页面保留连接码。</p>
       <button className="small-button" disabled={busy} onClick={() => void copyInvitation()}><Copy size={13} />复制链接</button>
     </div>}
-    {list && <PrivateAccessDetails access={list.privateAccess} unconfirmed={accessReadUnconfirmed} onCopy={copyAccess} />}
+    {list && !compact && <PrivateAccessDetails access={list.privateAccess} unconfirmed={accessReadUnconfirmed} onCopy={copyAccess} />}
+    {list && compact && (list.privateAccess.state !== "listening" || list.privateAccess.assetIssue) && <p className="settings-group-note" role="status">{list.privateAccess.state === "listening" ? list.privateAccess.assetIssue : list.privateAccess.message} 请在设置中查看连接详情。</p>}
     <div className="host-settings-list">
       {list?.requests.map(request => <section className="host-settings-card" key={request.device.deviceId}>
         <header><span className="host-card__icon"><Smartphone size={16} /></span>
@@ -113,7 +121,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
             'Mac 已确认批准。请在手机继续领取授权；原会话保持。')}>批准 <bdi>{request.device.name}</bdi></button>
           <button className="small-button" disabled={disabled} onClick={() => void mutate(
             () => api.deviceManagement.reject({ deviceId: request.device.deviceId }), 'Mac 已确认拒绝此请求；已有授权与原会话保持。')}>拒绝 <bdi>{request.device.name}</bdi></button>
-        </header><p className="field-hint">完整设备身份：<code>{request.device.deviceId}</code></p>
+        </header>{!compact && <p className="field-hint">完整设备身份：<code>{request.device.deviceId}</code></p>}
       </section>)}
       {list?.devices.map(device => <section className="host-settings-card" key={device.deviceId}>
         <header><span className="host-card__icon"><Smartphone size={16} /></span>
@@ -121,9 +129,9 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
           <span className="check-pill">{device.revokedAt === undefined ? '可操作本 Mac' : '授权已撤销'}</span>
           {device.revokedAt === undefined && <button className="small-button" disabled={disabled} onClick={() => void mutate(
             () => api.deviceManagement.revoke({ deviceId: device.deviceId }), 'Mac 已确认撤销此设备，结束它的读者；其他设备和原 Agent 会话保持。')}>撤销 <bdi>{device.name}</bdi></button>}
-        </header><p className="field-hint">完整设备身份：<code>{device.deviceId}</code></p>
+        </header>{!compact && <p className="field-hint">完整设备身份：<code>{device.deviceId}</code></p>}
       {device.operationIssue && <p role="status" className="field-hint">{device.operationIssue}</p>}
-      {device.operations?.length ? <details><summary>最近操作 · {device.operations.length} 条</summary><ol>{[...device.operations].reverse().map(operation => <li key={operation.id}><time>{new Date(operation.at).toLocaleString()}</time> · {operation.method} · <code>{operation.target}</code> · {operation.result === 'confirmed' ? '已提交' : operation.result === 'failed' ? '失败' : '结果未确认'}</li>)}</ol></details> : null}
+      {device.operations?.length ? <details><summary>最近操作 · {device.operations.length} 条</summary><ol>{[...device.operations].reverse().map(operation => <li key={operation.id}><time>{new Date(operation.at).toLocaleString()}</time> · {operationLabels[operation.method] ?? operation.method} · <code>{operation.target}</code> · {operation.result === 'confirmed' ? '已提交' : operation.result === 'failed' ? '失败' : '结果未确认'}</li>)}</ol></details> : null}
       </section>)}
     </div>
     {list && !list.requests.length && !list.devices.length && <p className="settings-group-note">暂无已授权设备。生成并复制连接链接，在手机打开即可连接。</p>}
