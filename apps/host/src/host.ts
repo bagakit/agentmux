@@ -42,7 +42,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   })
   const mobileAccessState = (): AgentMuxRpcMobileAccessState => {
     try { return { ...mobileState, ...(offerUrl ? { origin: new URL(offerUrl()).origin } : {}) } }
-    catch { return { ...mobileState, message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
+    catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),

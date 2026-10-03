@@ -1,7 +1,7 @@
 import type { ToolkitToolDefinition } from '@agentmux/core/control'
 
 export const PERFORMANCE_STATUS_BAR_IDS = ['icon', 'label'] as const
-export const TOOLKIT_ICON_IDS = ['terminal', 'zap', 'refresh-cw', 'gauge', 'key-round', 'credit-card', 'bot', 'sparkles'] as const
+export const TOOLKIT_ICON_IDS = ['terminal', 'zap', 'refresh-cw', 'gauge', 'key-round', 'credit-card', 'bot', 'sparkles', 'smartphone'] as const
 export type PerformanceStatusBar = typeof PERFORMANCE_STATUS_BAR_IDS[number]
 export type PerformancePreferences = { enabled: boolean; statusBar: PerformanceStatusBar }
 export const MOBILE_CONNECTION_TOOL_ID = 'builtin:mobile-connection'

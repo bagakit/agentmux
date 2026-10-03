@@ -28,9 +28,10 @@ export class CustomToolkitOwner {
   private readonly tools = new Map<string, Tool>()
   private closed = false
   constructor(private readonly args: { config: ConfigOwner; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>
-    openRunPort(): Promise<ToolkitRunPort>; runner: string; env: Record<string, string>; now?: () => number }) {}
+    openRunPort(): Promise<ToolkitRunPort>; runner: string; env: Record<string, string>; bundled?: () => ToolkitToolDefinition[]; now?: () => number }) {}
   private now() { return (this.args.now ?? Date.now)() }
-  private definition(id: string) { return findToolkitTool(this.args.config.current, id) }
+  private definitions() { return [...(this.args.bundled?.() ?? []), ...toolkitTools(this.args.config.current)] }
+  private definition(id: string) { return this.definitions().find(tool => tool.id === id) ?? findToolkitTool(this.args.config.current, id) }
   private current(tool: Tool): ToolkitScriptSnapshot {
     const definition = this.definition(tool.id)
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition,
@@ -45,7 +46,7 @@ export class CustomToolkitOwner {
     for (const lease of [...tool.leases]) try { lease.snapshot(value) } catch { lease.release() }
   }
   configurationChanged() {
-    const ids = new Set(toolkitTools(this.args.config.current).map(tool => tool.id))
+    const ids = new Set(this.definitions().map(tool => tool.id))
     for (const [id, tool] of this.tools) {
       if (ids.has(id)) { if (tool.leases.size) this.publish(tool); continue }
       if (tool.admission) continue
@@ -144,7 +145,7 @@ export class CustomToolkitOwner {
     await this.args.config.inspect(current => {
       if (signal.aborted) throw new AgentMuxError('Tool admission cancelled.', 'CONTROL_CANCELLED')
       if (this.closed) throw new AgentMuxError('Toolkit owner is closed.', 'CONTROL_UNAVAILABLE')
-      const definition = findToolkitTool(current, id)
+      const definition = this.args.bundled?.().find(tool => tool.id === id) ?? findToolkitTool(current, id)
       if (definition.revision !== input.expectedRevision) throw new AgentMuxError('Tool configuration changed; inspect it before running.', 'CONFIG_CONFLICT')
       if (this.repeat(tool, input, action)) return
       if (action && (!tool.latest || tool.latest.definition.revision !== definition.revision ||

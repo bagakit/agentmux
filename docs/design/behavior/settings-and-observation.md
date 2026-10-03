@@ -90,7 +90,7 @@ Toolkit 设置以用户自己的 Custom 工具为主线：普通入口优先呈�
 
 手动执行与定时启用让用户能审阅内容、身份、范围和权限，未知权限不自动批准。应用关闭后的定时执行、Agent 完成与结果协议、在途工作修改 / 删除 / 停止、凭据与日志隐私在相应能力交付前明确边界，不预设新后台调度平台。查询余量、刷新鉴权、切换账号仅是用户工具示例，不成为厂商专用核心分支。Idea、使用旅程与尚未确认选择见 Toolkit idea（本机过程资料：`docs/ideas/toolkit.md`）；视觉语言见密度 SSOT[《Toolkit 的入口、结果与配置》](../presentation/settings-and-observation.md#toolkit-的入口结果与配置)。
 
-手机连接是 Performance 之后的第二个官方 Toolkit，在同一 Built-in 库中管理，默认显示在右下角工具区，并可保存启用及 icon／label 呈现配置。查看、hover、打开设置和显示开关不生成链接或改变授权；浮窗与设置共用原 Host 的连接、设备状态与操作记录，显式生成复制沿[《手机版 Relay 连接》](public-control.md#手机版-relay-连接)，手机打开链接即可使用。关闭入口只结束当前观察，不撤销设备或停止健康 Run。手机 Toolkit 不持有第二份授权、活动账本或 Runtime，未配置和观察失败就地保留事实并提供设置入口。
+手机连接是 Performance 之后的第二个官方 Toolkit，在同一 Built-in 库中管理，默认显示在右下角工具区，并可保存启用及 icon／label 呈现配置。查看、hover、打开设置和显示开关不生成链接或改变授权；手机工具以随应用交付的 manifest、入口脚本和具名动作注册为只读官方扩展，经公开 Toolkit 发现、脚本查询、原 Run 执行与通用结果显示消费原 Host device.ls/link。浮窗只显示快速连接和最近查询的设备状态，不嵌入设置管理表单；设置独立承担完整设备、撤销与活动管理。显式生成复制沿[《手机版 Relay 连接》](public-control.md#手机版-relay-连接)，手机打开链接即可使用。关闭入口只结束当前观察，不撤销设备或停止健康 Run。手机 Toolkit 不持有第二份授权、活动账本或 Runtime，未配置和观察失败就地保留事实并提供设置入口。
 
 ## 资源与 Activity 观测
 Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Provider 与当前 Agent 状态；空闲时显示可理解的 idle 时长。资源数值与 Agent 语义状态分开，缺失数据保持未知。Activity 展开行只补充能帮助定位的上下文，不重复左侧 Agents 入口。

@@ -4,6 +4,7 @@ import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolk
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
+import { bundledToolkitTools, bundledToolkitScript } from './toolkit-bundled.js'
 import { CustomToolkitOwner } from './toolkit-custom-owner.js'
 import { executeToolkitConfig, prepareToolkitConfig, toolkitTools } from './toolkit-config.js'
 import type { ConfigOwner } from './config-owner.js'
@@ -302,11 +303,11 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   private readonly custom: CustomToolkitOwner
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
     enabled(): boolean; config: ConfigOwner; receiptPath: string; mainPid?: number; now?: () => number }) {
-    const receipts = new ToolkitReceiptStore(args.receiptPath, () => ['performance', ...toolkitTools(args.config.current).map(tool => tool.id)])
+    const receipts = new ToolkitReceiptStore(args.receiptPath, () => ['performance', ...bundledToolkitTools(args.launch(), args.config.current).map(tool => tool.id), ...toolkitTools(args.config.current).map(tool => tool.id)])
     this.performance = new PerformanceToolkitOwner({ ...args, receipts })
     const launch = args.launch()
     this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
-      runner: launch.runner, env: launch.env, ...(args.now ? { now: args.now } : {}),
+      runner: launch.runner, env: launch.env, bundled: () => bundledToolkitTools(args.launch(), args.config.current), ...(args.now ? { now: args.now } : {}),
       receipts })
   }
   prepareConfig(current: AppConfig, next: AppConfig): Promise<AppConfig> {
@@ -316,6 +317,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [
       { kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
+      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true as const, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar })),
       ...toolkitTools(this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id,
         name: tool.name, readonly: false as const, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }))
     ] }
@@ -324,7 +326,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     }
     if (request.toolId === 'performance') return await this.performance.execute(request, signal)
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }
-    if (request.operation === 'toolkit.script') return { operation: request.operation, script: this.custom.script(request.toolId) }
+    if (request.operation === 'toolkit.script') return { operation: request.operation, script: bundledToolkitScript(this.args.launch(), request.toolId) ?? this.custom.script(request.toolId) }
     if (request.operation === 'toolkit.run') return { operation: request.operation, snapshot: await this.custom.run(request.toolId, request.input, signal) }
     if (request.operation === 'toolkit.action') return { operation: request.operation, snapshot: await this.custom.action(request.toolId, request.actionId, request.input, signal) }
     if (request.operation === 'toolkit.stop') {
