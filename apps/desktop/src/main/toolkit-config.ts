@@ -4,6 +4,7 @@ import { ZodError } from 'zod'
 import { parseToolkitToolFields, type ToolkitRequest, type ToolkitResult,
   type ToolkitToolDefinition, type ToolkitToolFields } from '@agentmux/core/control'
 import type { AppConfig } from '../shared/contracts.js'
+import { MOBILE_CONNECTION_TOOL_ID } from '../shared/toolkit-preferences.js'
 import { ConfigConflict, configValuesEqual } from '../shared/config-edit.js'
 import { toolkitToolSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
@@ -34,7 +35,7 @@ export async function prepareToolkitConfig(current: AppConfig, next: AppConfig,
 
 export async function executeToolkitConfig(request: Extract<ToolkitRequest,
   { operation: 'toolkit.add' | 'toolkit.update' | 'toolkit.remove' }>, owner: ConfigOwner): Promise<ToolkitResult> {
-  if (request.toolId === 'performance') fail('SETTING_IDENTITY_IMMUTABLE', 'Performance is an official read-only tool.')
+  if (request.toolId === 'performance' || request.toolId === MOBILE_CONNECTION_TOOL_ID) fail('SETTING_IDENTITY_IMMUTABLE', 'Official tools cannot be edited as user scripts.')
   let changed = false
   const saved = await owner.update(current => {
     const tools = toolkitTools(current), old = tools.find(tool => tool.id === request.toolId)

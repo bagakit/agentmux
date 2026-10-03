@@ -1,9 +1,10 @@
-import { Activity, ArrowLeft, Check, Gauge, LockKeyhole, Plus, Search, Wrench, X } from 'lucide-react'
+import { Activity, ArrowLeft, Check, Gauge, LockKeyhole, Plus, Search, Smartphone, Wrench, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { ToolkitToolDefinition, ToolkitToolFields } from '@agentmux/core/control'
-import type { PerformancePreferences } from '../../../../shared/toolkit-preferences'
+import { DEFAULT_MOBILE_CONNECTION_PREFERENCES, MOBILE_CONNECTION_TOOL_ID, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon } from '../toolkit/ToolkitIcon'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
+import { BuiltinMobileConnectionSettings } from './BuiltinMobileConnectionSettings'
 import { BuiltinPerformanceSettings } from './BuiltinPerformanceSettings'
 import { ToolkitToolEditor } from './ToolkitToolEditor'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
@@ -15,7 +16,9 @@ function shortDirectory(path: string) {
   return { parent: segments.length > 1 ? `${segments.length > 2 ? '…/' : '/'}${segments.at(-2)}/` : '', name: segments.at(-1) ?? path }
 }
 
-export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequest, active, writer, onSave, onRemoveTool, onRunTool }: {
+export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MOBILE_CONNECTION_PREFERENCES, tools, toolId, navigationRequest, active, writer, onSave, onSaveMobileConnection, onRemoveTool, onRunTool }: {
+  mobileConnection?: MobileConnectionPreferences
+  onSaveMobileConnection?(value: MobileConnectionPreferences, expected: MobileConnectionPreferences): Promise<void>
   performance: PerformancePreferences; tools: readonly ToolkitToolDefinition[]; toolId?: string | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
   active: boolean; writer: ToolkitDraftWriter
@@ -39,6 +42,7 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
   const selected = selectedId !== null && Object.hasOwn(resource.entries, selectedId) ? resource.entries[selectedId] : undefined
   const normalized = query.trim().toLowerCase()
   const visible = entries.filter(([,entry]) => `${entry.value.name} ${entry.value.workspacePath}`.toLowerCase().includes(normalized))
+  const showMobileConnection = !normalized || '手机连接 phone mobile connection device official built-in 手机 设备 在线 授权'.includes(normalized)
   const showPerformance = !normalized || 'performance official built-in resource use'.includes(normalized)
   useLayoutEffect(() => {
     const node = host.current
@@ -51,7 +55,7 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
   useEffect(() => { if (toolId) { setTemplateOpen(false); setSelectedId(toolId); setView('editor'); setQuery('') } }, [toolId, navigationRequest])
   useEffect(() => {
     if (toolId === selectedId) return
-    if (selectedId !== null && selectedId !== 'performance' && !Object.hasOwn(resource.entries, selectedId)) setSelectedId(null)
+    if (selectedId !== null && selectedId !== 'performance' && selectedId !== MOBILE_CONNECTION_TOOL_ID && !Object.hasOwn(resource.entries, selectedId)) setSelectedId(null)
   }, [resource.entries, selectedId, toolId])
   useLayoutEffect(() => {
     if (!focusNewName.current || !nameInput.current) return
@@ -93,11 +97,14 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
             <ToolkitIcon icon={entry.value.icon} size={17} /><span><strong>{entry.value.name.trim() || 'Untitled tool'}</strong><small>Custom · {entry.saving ? 'Saving…' : toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'}{entry.value.enabled ? '' : ' · Hidden'}</small><code title={entry.value.workspacePath}>{entry.value.workspacePath ? <><span className="toolkit-library__parent">{directory.parent}</span><span className="toolkit-library__directory">{directory.name}</span></> : 'Choose a fixed directory'}</code></span>{!templateOpen && selectedId === id ? <Check className="toolkit-library__selected" size={12} aria-label="Selected tool" /> : null}
           </button>})}
           {!visible.length ? <p className="settings-resource-empty">{entries.length ? 'No matching custom tools. Your drafts are kept.' : 'Create a tool with your own script and actions.'}</p> : null}
-          {showPerformance ? <><p className="toolkit-library__group">Built-in</p><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={!templateOpen && selectedId === 'performance'} onClick={() => open('performance')}><Activity size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><LockKeyhole className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
+          {showPerformance || showMobileConnection ? <p className="toolkit-library__group">Built-in</p> : null}
+          {showPerformance ? <><button type="button" className="toolkit-library__item" data-tool-id="performance" aria-pressed={!templateOpen && selectedId === 'performance'} onClick={() => open('performance')}><Activity size={17} /><span><strong>Performance</strong><small>Official · read-only script</small></span><LockKeyhole className="toolkit-library__official" size={12} aria-label="Official tool" /></button></> : null}
+          {showMobileConnection ? <button type="button" className="toolkit-library__item" data-tool-id={MOBILE_CONNECTION_TOOL_ID} aria-pressed={!templateOpen && selectedId === MOBILE_CONNECTION_TOOL_ID} onClick={() => open(MOBILE_CONNECTION_TOOL_ID)}><Smartphone size={17} /><span><strong>手机连接</strong><small>Official · 连接与设备状态</small></span><LockKeyhole className="toolkit-library__official" size={12} aria-label="Official tool" /></button> : null}
         </div>
       </section>
       <div className="toolkit-workbench__detail">
         <div hidden={templateOpen || selectedId !== 'performance'} inert={templateOpen || selectedId !== 'performance'}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ArrowLeft size={13} /> Back to tools</button><BuiltinPerformanceSettings performance={performance} active={active && !templateOpen && selectedId === 'performance' && (!narrow || view === 'editor')} onSave={onSave} /></div>
+        <div hidden={templateOpen || selectedId !== MOBILE_CONNECTION_TOOL_ID} inert={templateOpen || selectedId !== MOBILE_CONNECTION_TOOL_ID}><button type="button" className="small-button toolkit-editor__back" onClick={back}><ArrowLeft size={13} /> Back to tools</button><BuiltinMobileConnectionSettings preferences={mobileConnection} active={active && !templateOpen && selectedId === MOBILE_CONNECTION_TOOL_ID && (!narrow || view === 'editor')} onSave={async (value, expected) => { if (!onSaveMobileConnection) throw new Error('手机连接显示配置尚未加载，草稿保留。'); await onSaveMobileConnection(value, expected) }} /></div>
         {templateOpen ? <section className="toolkit-editor toolkit-template" aria-label="Account usage template">
           <header className="toolkit-editor__heading"><button type="button" className="small-button toolkit-editor__back" onClick={back}><ArrowLeft size={13} /> Back to tools</button><span className="toolkit-editor__metadata">Starting point for a custom tool</span></header>
           <div className="toolkit-template__identity"><Gauge size={28} /><div><h3>Account usage</h3><p>Remaining limits, natural resets and reset cards — together in one snapshot.</p></div></div>
@@ -106,7 +113,7 @@ export function ToolkitSettingsPane({ performance, tools, toolId, navigationRequ
           <p className="settings-hint">Starts hidden and disabled. Creating and saving do not query accounts; enable it and run when you are ready.</p>
           <details className="toolkit-editor__scope"><summary>Review template source</summary><pre className="toolkit-template__source">{accountUsageScript}</pre></details>
           <div><button type="button" className="primary-button toolkit-template__adopt" disabled={entries.length >= 128} onClick={() => add(createAccountUsageTool())}><Plus size={13} /> Use this starting point</button></div>
-        </section> : selectedId === 'performance' ? null : selected && selectedId !== null ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={onRunTool} onBack={back} /> : <section className="toolkit-workbench__empty"><Wrench size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Make a tool your own.'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Start with any script. Give it a name and icon, then add buttons to its results.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> Create your first tool</button> : null}</section>}
+        </section> : selectedId === 'performance' || selectedId === MOBILE_CONNECTION_TOOL_ID ? null : selected && selectedId !== null ? <ToolkitToolEditor key={selectedId} id={selectedId} entry={selected} active={active && (!narrow || view === 'editor')} nameInput={nameInput} save={resource.saveFor(selectedId)} onEdit={patch => resource.edit(selectedId, patch)} onSave={() => void resource.save(selectedId, writer)} onRemove={remove} onRun={onRunTool} onBack={back} /> : <section className="toolkit-workbench__empty"><Wrench size={28} /><h3>{toolId && toolId === selectedId ? 'This saved tool is unavailable.' : 'Make a tool your own.'}</h3><p>{toolId && toolId === selectedId ? 'The requested tool is not in the current configuration. No other tool has been substituted.' : 'Start with any script. Give it a name and icon, then add buttons to its results.'}</p>{!toolId || toolId !== selectedId ? <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> Create your first tool</button> : null}</section>}
       </div>
     </div>
   </div>

@@ -1,11 +1,12 @@
-import { Activity, ArrowLeft, MoreHorizontal, X } from 'lucide-react'
+import { Activity, ArrowLeft, MoreHorizontal, Smartphone, X } from 'lucide-react'
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ToolkitToolDefinition } from '@agentmux/core/control'
-import { resolvePerformancePreferences } from '../../../../shared/toolkit-preferences'
+import { resolvePerformancePreferences, resolveMobileConnectionPreferences } from '../../../../shared/toolkit-preferences'
 import { useAppStore } from '../../store'
 import { PerformancePanel } from '../performance/PerformancePanel'
 import { ToolkitPopover, type ToolkitPopoverSelection } from '../performance/PerformancePopover'
 import { ToolkitIcon } from './ToolkitIcon'
+import { MobileConnectionToolkit } from './MobileConnectionToolkit'
 import { UserToolkitResult } from './UserToolkitResult'
 
 const OVERFLOW_SELECTION = Symbol('toolkit-overflow')
@@ -35,6 +36,7 @@ export const ToolkitStatusBar = memo(function ToolkitStatusBar() {
   const tools = preferences?.tools ?? NO_TOOLS
   const enabled = useMemo(() => tools.filter(tool => tool.enabled), [tools])
   const performance = resolvePerformancePreferences(preferences ? { toolkit: preferences } : {})
+  const mobileConnection = resolveMobileConnectionPreferences(preferences ? { toolkit: preferences } : {})
   const [selectedToolId, setSelectedToolId] = useState<string | symbol | null>(null)
   const select = useCallback((next: string | symbol | null, closing?: string | symbol) => setSelectedToolId(current => closing && current !== closing ? current : next), [])
   const selection = useMemo(() => ({ selectedToolId, onSelectTool: select }), [selectedToolId, select])
@@ -60,9 +62,11 @@ export const ToolkitStatusBar = memo(function ToolkitStatusBar() {
       }
       const widths = Array.from(metrics.querySelectorAll<HTMLElement>('[data-measure-tool]')).map(item => item.getBoundingClientRect().width)
       const perfWidth = performance.enabled ? widths.shift() ?? 22 : 0
-      const all = perfWidth + widths.reduce((sum, width) => sum + width + 2, 0)
+      const mobileWidth = mobileConnection.enabled ? widths.shift() ?? 22 : 0
+      const builtinWidth = perfWidth + mobileWidth + (performance.enabled && mobileConnection.enabled ? 2 : 0)
+      const all = builtinWidth + widths.reduce((sum, width) => sum + width + 2, 0)
       if (all <= available) { setVisibleCount(enabled.length); return }
-      let used = perfWidth + 24, count = 0
+      let used = builtinWidth + 24, count = 0
       for (const width of widths) { if (used + width + 2 > available) break; used += width + 2; ++count }
       setVisibleCount(count)
     }
@@ -74,13 +78,15 @@ export const ToolkitStatusBar = memo(function ToolkitStatusBar() {
     if (left) observer.observe(left)
     if (notices) observer.observe(notices)
     return () => observer.disconnect()
-  }, [enabled, performance.enabled, performance.statusBar])
+  }, [enabled, performance.enabled, performance.statusBar, mobileConnection.enabled, mobileConnection.statusBar])
   return <div ref={host} className="toolkit-statusbar">
     <PerformancePanel {...selection} />
+    <MobileConnectionToolkit {...selection} />
     {enabled.slice(0,visibleCount).map(tool => <UserTool key={tool.id} definition={tool} selection={selection} />)}
     {visibleCount < enabled.length ? <Overflow tools={overflow} selection={selection} /> : null}
     <div ref={measure} className="toolkit-statusbar__measure" aria-hidden="true" inert>
       {performance.enabled ? <span className="performance-trigger" data-measure-tool><Activity size={14} />{performance.statusBar === 'label' ? <span>Performance</span> : null}</span> : null}
+      {mobileConnection.enabled ? <span className="performance-trigger" data-measure-tool><Smartphone size={14} />{mobileConnection.statusBar === 'label' ? <span>手机连接</span> : null}</span> : null}
       {enabled.map(tool => <span className="performance-trigger" data-measure-tool key={tool.id}><ToolkitIcon icon={tool.icon} size={14} />{tool.statusBar === 'label' ? <span>{tool.name}</span> : null}</span>)}
     </div>
   </div>

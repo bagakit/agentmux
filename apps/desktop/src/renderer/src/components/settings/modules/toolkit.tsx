@@ -2,7 +2,7 @@ import { Wrench } from 'lucide-react'
 import type { ToolkitToolDefinition } from '@agentmux/core/control'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
-import { resolvePerformancePreferences, type PerformancePreferences } from '../../../../../shared/toolkit-preferences'
+import { resolvePerformancePreferences, resolveMobileConnectionPreferences, type MobileConnectionPreferences, type PerformancePreferences } from '../../../../../shared/toolkit-preferences'
 import { ToolkitSettingsPane } from '../ToolkitSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
@@ -15,17 +15,27 @@ async function savePerformance(performance: PerformancePreferences, expected: Pe
   )
 }
 
+async function saveMobileConnection(mobileConnection: MobileConnectionPreferences, expected: MobileConnectionPreferences): Promise<void> {
+  const current = useAppStore.getState().config
+  if (!current) throw new Error('Settings are not loaded. Your draft is kept.')
+  await api.config.save(
+    { ...current, toolkit: { ...current.toolkit, mobileConnection } },
+    { ...current, toolkit: { ...current.toolkit, mobileConnection: expected } }
+  )
+}
+
 export const toolkitSettingsModule = {
   id: 'toolkit', group: 'preferences', title: 'Toolkit', icon: Wrench,
   description: 'Local tools and results, right where you work.',
-  keywords: 'performance cpu memory rss process resource toolkit tool built in script javascript directory arguments status bar icon label',
+  keywords: 'performance cpu memory rss process resource toolkit tool built in script javascript directory arguments status bar icon label phone mobile connection device 手机 连接 设备 状态',
   savedSummary(config) {
     const preferences = resolvePerformancePreferences(config)
+    const mobile = resolveMobileConnectionPreferences(config)
     const count = config.toolkit?.tools?.length ?? 0
-    return `${count} ${count === 1 ? 'user tool' : 'user tools'} · ${preferences.enabled ? 'Performance available' : 'Performance hidden'}`
+    return `${count} ${count === 1 ? 'user tool' : 'user tools'} · ${preferences.enabled ? 'Performance available' : 'Performance hidden'} · ${mobile.enabled ? '手机连接可用' : '手机连接隐藏'}`
   },
   Pane({ config, active, toolId, navigationRequest }) {
-    return <ToolkitSettingsPane performance={resolvePerformancePreferences(config)} tools={config.toolkit?.tools ?? []} toolId={toolId} navigationRequest={navigationRequest} active={active} onSave={savePerformance}
+    return <ToolkitSettingsPane mobileConnection={resolveMobileConnectionPreferences(config)} onSaveMobileConnection={saveMobileConnection} performance={resolvePerformancePreferences(config)} tools={config.toolkit?.tools ?? []} toolId={toolId} navigationRequest={navigationRequest} active={active} onSave={savePerformance}
       writer={{ add: async (id, value) => (await api.toolkit.add(id, value)).definition, update: async (id, changes, expected) => (await api.toolkit.update(id, changes, expected)).definition }}
       onRemoveTool={async (id, expected) => { await api.toolkit.remove(id, expected) }} onRunTool={runSavedTool} />
   }
