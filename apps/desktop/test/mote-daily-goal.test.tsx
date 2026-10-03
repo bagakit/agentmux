@@ -193,6 +193,108 @@ afterEach(async () => {
 
 const request = (operationId = 'original-start') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.start' as const, demandId: 'goal', sessionId: session.agentSessionId, continuation: { intervalMs: 60_000, alignmentRevision: 1 } })
 async function start() { return useAppStore.getState().executeControl(request()) }
+function refuseImmediatePreparation() {
+  return vi.spyOn((client as any).promptSubmission, 'qualifyInputTransport')
+    .mockRejectedValue(new Error('Native immediate preparation is unavailable'))
+}
+it('finite Goal typed public start freezes ordinary execution before preparation and reaches real Core input', async () => {
+  const preparation = refuseImmediatePreparation()
+  const refresh = api.sessions.refresh
+  const pending: any[] = []
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async (...args) => {
+    pending.push(structuredClone(useAppStore.getState().agentSteerQueues[session.agentSessionId]))
+    return refresh(...args)
+  })
+  const service = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], execute: request => useAppStore.getState().executeControl(request) })
+  const attempt = service.call('goal.start', { goalId: 'goal', sessionId: session.agentSessionId, operationId: 'finite-original' })
+  await expect(attempt).resolves.toMatchObject({ receipt: { goalId: 'goal', sessionId: session.agentSessionId } })
+  const result = await attempt
+  expect(pending.length).toBeGreaterThan(0)
+  expect(pending[0]).toEqual([expect.objectContaining({ operationId: 'finite-original', execution: 'default', promptCondition: null })])
+  expect(result).toMatchObject({ receipt: { goalId: 'goal', sessionId: session.agentSessionId } })
+  expect(preparation).not.toHaveBeenCalled()
+  expect(writes.length).toBeGreaterThan(0)
+  expect(writes.join('')).toContain('Complete the original useful result.')
+  expect(writes.join('')).not.toContain('\u0003')
+  expect(manager.list()).toEqual([])
+  expect(useAppStore.getState().agentSteerQueues[session.agentSessionId] ?? []).toEqual([])
+})
+it('finite Goal actual Source CLI uses the same ordinary public owner', async () => {
+  const preparation = refuseImmediatePreparation()
+  const server = new PublicServer({ socketPath: join(directory, 'finite.sock'), coreClients: () => [{ hostId: 'local', client }], execute: request => useAppStore.getState().executeControl(request) })
+  await server.start()
+  try {
+    const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
+    const response = JSON.parse((await promisify(execFile)(process.execPath, [sourceCli, '--endpoint', 'unix:' + server.path, 'goal', 'start', '--goal', 'goal', '--session', session.agentSessionId, '--operation-id', 'finite-cli'], { env: environment, timeout: 15000 })).stdout)
+    expect(response.ok).toBe(true)
+    expect(response.result.receipt).toMatchObject({ goalId: 'goal', sessionId: session.agentSessionId })
+    expect(preparation).not.toHaveBeenCalled()
+    expect(writes.length).toBeGreaterThan(0)
+    expect(manager.list()).toEqual([])
+  } finally { await server.stop() }
+})
+it.each(['immediate', undefined] as const)('finite Goal refuses to rewrite an old operation with execution %s', async execution => {
+  const preparation = refuseImmediatePreparation()
+  const entry = { operationId: 'finite-old', runId: session.run.runId, text: 'Complete the original useful result.', promptCondition: null, status: 'deferred' as const, ...(execution ? { execution } : {}) }
+  useAppStore.setState({ agentSteerQueues: { [session.agentSessionId]: [entry] } })
+  useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'Later human draft stays.')
+  const input = container.querySelector('[contenteditable="true"]')
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.start', requestId: 'finite-old', demandId: 'goal', sessionId: session.agentSessionId })).rejects.toThrow()
+  expect(useAppStore.getState().agentSteerQueues[session.agentSessionId]).toEqual([entry])
+  expect(submit).not.toHaveBeenCalled()
+  expect(preparation).not.toHaveBeenCalled()
+  expect(writes).toEqual([])
+  expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('Later human draft stays.')
+  expect(container.querySelector('[contenteditable="true"]')).toBe(input)
+})
+it('finite Goal unknown submission keeps ordinary mode and waits for explicit same-operation retry', async () => {
+  const preparation = refuseImmediatePreparation()
+  const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(new Error('Finite original submission outcome unknown'))
+  const finite = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.start' as const, requestId: 'finite-lost', demandId: 'goal', sessionId: session.agentSessionId }
+  await expect(useAppStore.getState().executeControl(finite)).rejects.toThrow('outcome unknown')
+  const retained = useAppStore.getState().agentSteerQueues[session.agentSessionId]![0]!
+  expect(retained).toMatchObject({ operationId: 'finite-lost', execution: 'default', promptCondition: { expectedRun: session.run } })
+  const before = [...writes]; expect(before).toEqual([])
+  await useAppStore.getState().flushAgentSteerQueue(session.agentSessionId)
+  expect(writes).toEqual(before)
+  expect(submit).toHaveBeenCalledTimes(1)
+  expect(await useAppStore.getState().executeControl(finite)).toMatchObject({ receipt: { sessionId: session.agentSessionId } })
+  expect(writes.length).toBeGreaterThan(0)
+  expect(submit).toHaveBeenCalledTimes(2)
+  expect(submit.mock.calls.every(call => call[2] === 'finite-lost' && call[4]?.execution !== 'immediate')).toBe(true)
+  expect(preparation).not.toHaveBeenCalled()
+})
+it.each(['permission', 'changed Run'] as const)('finite Goal keeps its original ordinary intent when %s blocks this submission', async failure => {
+  const preparation = refuseImmediatePreparation()
+  const refresh = api.sessions.refresh
+  vi.spyOn(api.sessions, 'refresh').mockImplementation(async (...args) => {
+    if (failure === 'permission') await (client as any).registry.update(session.agentSessionId, session.run, (current: AgentMuxStoredAgentSession) => ({ ...current, pendingInteraction: { request: { kind: 'permission', id: 'finite-permission', agentSessionId: session.agentSessionId, title: 'Pending human choice', options: [{ id: 'deny', label: 'Deny', kind: 'reject-once' }], evidence: { source: 'native-hook', observedAt: 200, run: session.run } } } }))
+    const result = await refresh(...args)
+    if (result.kind !== 'agent') throw new Error('The original fixture Agent is required')
+    return failure === 'changed Run' ? { ...result, control: { ...result.control, run: { runId: 'later-run' } } } : result
+  })
+  useAppStore.getState().setAgentComposerDraft(session.agentSessionId, 'Later draft stays.')
+  const input = container.querySelector('[contenteditable="true"]')
+  const submit = vi.spyOn(api.sessions, 'submitPrompt')
+  await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.start', requestId: 'finite-blocked', demandId: 'goal', sessionId: session.agentSessionId })).rejects.toThrow()
+  expect(useAppStore.getState().agentSteerQueues[session.agentSessionId]).toEqual([expect.objectContaining({ operationId: 'finite-blocked', execution: 'default', runId: session.run.runId, text: 'Complete the original useful result.' })])
+  expect(writes).toEqual([])
+  expect(submit).not.toHaveBeenCalled()
+  expect(preparation).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts[session.agentSessionId]).toBe('Later draft stays.')
+  expect(container.querySelector('[contenteditable="true"]')).toBe(input)
+})
+it('finite Goal retains ordinary healthy input and the original notice when presentation saving fails', async () => {
+  const preparation = refuseImmediatePreparation()
+  const save = vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(new Error('Original presentation save is unavailable'))
+  try {
+    await expect(useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, operation: 'demand.start', requestId: 'finite-save-warning', demandId: 'goal', sessionId: session.agentSessionId })).resolves.toMatchObject({ receipt: { sessionId: session.agentSessionId } })
+    await vi.waitFor(() => expect(useAppStore.getState().workbenchSaveWarning).toContain('Original presentation save is unavailable'))
+    expect(writes.length).toBeGreaterThan(0)
+    expect(preparation).not.toHaveBeenCalled()
+  } finally { save.mockRestore() }
+})
 it('actual original Goal Store, preload, IPC, Manager and Core queue freeze one operation before any input', async () => {
   const originalInput = (client as any).kernel.input
   const beforeInput: any[] = []

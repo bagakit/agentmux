@@ -405,7 +405,7 @@ const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean
 
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
-export type AgentSteerOptions = { reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
+export type AgentSteerOptions = { execution?: AgentPromptExecution; reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
 
 export type AgentSteerQueueEntry = {
   operationId: string
@@ -2699,8 +2699,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   if (!session || session.kind !== 'agent') return false
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation)) return operationId
-    ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation) && (options?.execution === undefined || existing.execution === options.execution)) return operationId
+    ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content or an earlier execution choice. Your original message and draft are kept.'))
     return false
   }
   if ((useAppStore.getState().agentSteerQueues[sessionId]?.filter(entry => !entry.archived).length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
@@ -2717,6 +2717,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   const entry: AgentSteerQueueEntry = {
     operationId,
     promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
+    ...(options?.execution === undefined ? {} : { execution: options.execution }),
     ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
     enqueuedAt: Date.now(),
     ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
@@ -4246,7 +4247,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (!session || session.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${attachedSessionId}`)
         const original = savedContinuation?.initialDelivery
         let operationId: string | false = original?.state === 'confirmed' ? original.operationId : admitAgentSteer(session.id, original?.prompt ?? (current.description.trim() || current.title), undefined, businessOperationId, undefined, undefined,
-          original && savedContinuation ? { goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : undefined)
+          original && savedContinuation ? { goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : { execution: 'default' })
         if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
         if (original?.state !== 'confirmed') await get().flushAgentSteerQueue(session.id, operationId)
         const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
