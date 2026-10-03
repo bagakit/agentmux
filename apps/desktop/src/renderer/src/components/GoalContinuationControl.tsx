@@ -1,15 +1,22 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
-import type { SessionSnapshot } from '../../../shared/contracts'
 import type { DemandRecord } from '../lib/global-demand-board'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 
 /** A thin original Goal caller, shared by Goal details and the Mote current-work surface. */
 export function GoalContinuationControl({ demand, initialSessionId, onRefresh }: {
   demand: DemandRecord; initialSessionId?: string; onRefresh?: () => void
 }) {
-  const sessions = useAppStore(state => state.sessions)
+  const linked = useAppStore(useShallow(state => {
+    const byId = sessionPresentationById(state.sessions)
+    return Object.fromEntries(demand.sessionIds.flatMap(id => {
+      const session = byId.get(id)
+      return session?.kind === 'agent' && session.control.agentSessionId === id ? [[id, session.label]] : []
+    }))
+  }))
   const execute = useAppStore(state => state.executeControl)
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
   const [selected, setSelected] = useState(initialSessionId ?? '')
@@ -22,7 +29,6 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh }:
   const flight = useRef<object | undefined>(undefined)
   const mutation = useRef<{ goalId: string; loopId: string; action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number; operationId: string } | undefined>(undefined)
   const attempt = useRef<{ goalId: string; sessionId: string; intervalMs: number; alignmentRevision: number; operationId: string } | undefined>(undefined)
-  const linked = sessions.filter((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && demand.sessionIds.includes(session.id) && session.id === session.control.agentSessionId)
   async function inspect(goalId = demand.id, owner = scope.current) {
     const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(), operation: 'demand.show', demandId: goalId })
     if (scope.current !== owner || result.operation !== 'demand.show') return
@@ -48,7 +54,7 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh }:
     if (flight.current || mutation.current) return
     const alignment = demand.alignment
     if (!retry) {
-      if (alignment?.confirmedAt == null || !linked.some(session => session.id === selected)) return
+      if (alignment?.confirmedAt == null || !Object.hasOwn(linked, selected)) return
       attempt.current = { goalId: demand.id, sessionId: selected, intervalMs: Number(minutes) * 60_000, alignmentRevision: alignment.revision, operationId: crypto.randomUUID() }
     }
     const saved = attempt.current
@@ -89,9 +95,9 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh }:
       <div className="goals-continuation__actions">{(['pause', 'resume', 'check', 'stop'] as const).filter(action => action === 'stop' ? loop.status !== 'stopped' : action === 'resume' ? loop.status === 'paused' && loop.initialDelivery?.state === 'confirmed' : loop.status === 'active').map(action => <button type="button" className="goals-button" key={action} disabled={busy || Boolean(mutation.current) || !Number.isSafeInteger(loop.revision) || !loop.revision} onClick={() => mutate(loop, action)}>{action === 'check' ? 'Check now' : action.charAt(0).toUpperCase() + action.slice(1)}</button>)}</div>
     </div>)}
     {!currentLoops.some(loop => loop.status !== 'stopped') && observedGoal === demand.id ? <form onSubmit={event => { event.preventDefault(); start() }}>
-      <label>Executing Agent<select aria-label="Goal continuation Agent" value={selected} onChange={event => { setSelected(event.target.value); attempt.current = undefined }}><option value="">Choose an associated Agent…</option>{linked.map(session => <option key={session.id} value={session.id}>{session.label}</option>)}</select></label>
+      <label>Executing Agent<select aria-label="Goal continuation Agent" value={selected} onChange={event => { setSelected(event.target.value); attempt.current = undefined }}><option value="">Choose an associated Agent…</option>{Object.entries(linked).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></label>
       <label>Check every<input aria-label="Goal continuation minutes" type="number" min="1" value={minutes} onChange={event => { setMinutes(event.target.value); attempt.current = undefined }} /> minutes</label>
-      <button type="submit" className="goals-button" disabled={busy || Boolean(mutation.current) || demand.alignment?.confirmedAt == null || !linked.some(session => session.id === selected) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
+      <button type="submit" className="goals-button" disabled={busy || Boolean(mutation.current) || demand.alignment?.confirmedAt == null || !Object.hasOwn(linked, selected) || !Number.isFinite(Number(minutes)) || Number(minutes) < 1}>Start and continue</button>
       {demand.alignment?.confirmedAt == null ? <p className="goals-service">Confirm this Goal’s scope before enabling automatic work.</p> : null}
     </form> : null}
     {error && mutation.current?.goalId === demand.id ? <button type="button" className="goals-button" disabled={busy} onClick={() => { const saved = mutation.current, loop = currentLoops.find(item => item.loopId === saved?.loopId); if (saved && loop) mutate(loop, saved.action, true) }}>Inspect and retry original {mutation.current.action}</button> : null}
