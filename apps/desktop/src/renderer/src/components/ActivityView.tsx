@@ -79,12 +79,14 @@ type RawEntry =
   | { type: 'user-message'; message: AgentSessionUserMessage; time?: number }
 
 function buildActivityEntries(
-  items: AgentTimelineItem[],
+  sourceItems: AgentTimelineItem[],
   userMessages?: readonly AgentSessionUserMessage[]
 ): {
   unifiedItems: ConversationAxisItem[]
   segments: Segment[]
 } {
+  // Host diagnostics remain queryable in the original timeline, outside conversation content.
+  const items = sourceItems.filter(item => !(item.kind === 'system_message' && item.source === 'agentmux' && item.id.startsWith('device-operation:')))
   const segments: Segment[] = []
   let run: AgentTimelineItem[] = []
   const flush = (): void => {
@@ -658,7 +660,7 @@ export function ActivityView({
 
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
-  const hasItems = items.length > 0
+  const hasItems = unifiedItems.length > 0
   const readNotice = <UserMessageReadNotice read={userMessageRead} />
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
@@ -672,7 +674,7 @@ export function ActivityView({
       </div>
     )
   }
-  if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, items)) {
+  if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, hasItems ? items : [])) {
     return (
       <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
         {readNotice}

@@ -158,8 +158,6 @@ export class AgentMuxHostedRuntimeService {
       throw new AgentMuxError('Device origin is supplied by the authenticated Host.', 'INVALID_CONTROL_REQUEST')
     const modifying = /^(submit|reply|respond|write|paste|resize|signal|stop|remove|create|resume|reopen|respawn|setAgent|saveAgent|answer|cancel)/.test(invocation.method)
     const first = invocation.args[0] as unknown
-    const sessionId = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
-      : typeof first === 'string' && invocation.method.endsWith('Agent') ? first : undefined
     if (source && (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     if (source && invocation.method === 'saveAgentFuturePromptIntent') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
@@ -194,9 +192,6 @@ export class AgentMuxHostedRuntimeService {
     }
     } catch (error) { await recordActivity('unknown'); throw error }
     await recordActivity('confirmed')
-    // Terminal geometry is already recorded by Runtime and Host activity, not conversational input.
-    if (source && modifying && sessionId && invocation.method !== 'submitAgentPrompt' && invocation.method !== 'resizeAgent' && invocation.method !== 'replySessionQuestion')
-      await this.client.recordDeviceOperation(sessionId, operationId, invocation.method, source, 'confirmed')
     return { value: encodeHostedValue(value) }
   }
   private async acquire(target: AgentMuxHostedAttachmentTarget, afterByte: number, view: 'raw' | 'terminal',

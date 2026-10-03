@@ -5017,15 +5017,6 @@ export class AgentMuxClient {
         ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}) })
   }
 
-  /** Transport owner records an operation on its exact Session without duplicating Runtime state. */
-  async recordDeviceOperation(agentSessionId: string, operationId: string, method: string,
-    sourceDevice: import('./types.js').AgentOperationDevice, result: 'confirmed' | 'failed' | 'unknown'): Promise<void> {
-    const session = this.requireAgentSession(agentSessionId)
-    await this.recordMessageAfterSideEffect(session, `device-operation:${operationId}`, '设备操作',
-      `${method} · ${result === 'confirmed' ? '已提交' : result === 'failed' ? '失败' : '结果未确认'}`,
-      Date.now(), 'agentmux', { sourceDevice, ...(result === 'failed' ? { status: 'failed' as const } : {}) })
-  }
-
   private async recordMessageAfterSideEffect(
     session: AgentMuxAgentSession,
     itemId: string,
