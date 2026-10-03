@@ -309,7 +309,7 @@ export class ExternalBrowserBridge {
     const row = this.require(id)
     const connection = [...this.connections].find(item => item.id === row.connection?.id)
     if (connection) this.send(connection, { type: 'stop-sharing', tabId: row.tabId, grantId: row.grantId })
-    this.revoke(row, 'revoked', 'The person stopped sharing this original tab. Grant control explicitly before another action.')
+    this.revoke(row, 'revoked', 'Sharing of this original tab ended. Grant control explicitly before another action.')
   }
   get warning(): string | undefined { return this.persistenceWarning }
   list(): AgentMuxBrowserTarget[] {
