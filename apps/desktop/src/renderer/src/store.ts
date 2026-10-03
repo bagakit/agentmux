@@ -12,7 +12,7 @@ import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
 import { useLauncherState } from './lib/launcher-state'
 import { noteBlockSelectionKey, restoreNoteBlockSelections, type NoteBlockPresentation } from './lib/note-block-selection'
 import { noteKnowledge, parseNoteFile } from './lib/note-knowledge'
-import { warmLauncherId } from './lib/warm-terminal-preview'
+import { warmLauncherId, type WarmTerminalCreation } from './lib/warm-terminal-preview'
 import { NOTE_FILE_EXTENSION, newNoteDocument, readNoteDocument } from '../../shared/note-document'
 import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceMatches, noteFilePlacement, type NoteCreationReceipt } from './lib/note-creation'
 import type { NoteBlockTarget } from '../../shared/note-document'
@@ -93,6 +93,7 @@ import type {
   SessionControl,
   SessionRecoveryResult,
   SessionSnapshot,
+  TerminalLaunchInput,
   WorkspaceSelectionResult,
   RunFanOutInput,
   RunFanOutResult,
@@ -118,6 +119,7 @@ import {
 import { isScratchWorkspaceId } from '../../shared/contracts'
 import { bookmarkFileNameFromTitle, bookmarkKindForPath, emitWebloc } from '../../shared/bookmark-file'
 import { api } from './lib/api'
+import { sessionLaunchFailure } from '../../shared/session-launch-result'
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import type { ServiceNoticeKind } from './lib/service-window-notice'
@@ -935,6 +937,7 @@ type AppState = {
   // 每个 group 的空占位），归属必须由槽记着、不能由各个 launcher 各自推断，否则它们会同时挂
   // TerminalView 到同一个 PTY 上并对着它轮流 resize。同 key 再请求会把归属**转移**过来（不重开 PTY）。
   prewarmTerminal(workspaceId: string, ownerLauncherId: string): void
+  retryWarmTerminal(workspaceId: string, ownerLauncherId: string, hostRestored?: boolean): Promise<SessionSnapshot | null>
   // Claims the exact warm shell or uses the ordinary Terminal launch path if none exists.
   promoteWarmTerminal(
     tabGroupId: string,
@@ -1883,7 +1886,7 @@ function startSessionMembershipResync(
             const decision = agentStartupRecoveryDecision({
               runState: 'missing',
               ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-              canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+              canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
               now: Date.now()
             })
             projected = { ...projected, sessions: [...projected.sessions, recoveryCandidateSession(candidate, {
@@ -1955,7 +1958,7 @@ function startSessionMembershipResync(
           const decision = agentStartupRecoveryDecision({
             runState: current.processState,
             ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-            canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+            canonical: !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
             now: Date.now()
           })
           if (decision.kind !== 'resume') continue
@@ -2020,6 +2023,10 @@ type WarmTerminal = {
   ownerLauncherId: string
   ready: Promise<SessionSnapshot | null>
   session: SessionSnapshot | null
+  /** Retained until its original creation is confirmed; absent on an already known Run. */
+  creation?: WarmTerminalCreation
+  /** One explicit opening owns the retained slot until its original receipt settles. */
+  claimingLauncherId?: string
 }
 
 export function warmTerminalKey(hostId: string, workspacePath: string): string {
@@ -3118,7 +3125,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const decision = agentStartupRecoveryDecision({
           runState: projected?.processState ?? 'missing',
           ...(candidate.semanticStatus ? { semanticStatus: candidate.semanticStatus } : {}),
-          canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId) && !(snapshot.runtimeOwnershipWarnings ?? []).includes(candidate.hostId),
+          canonical: snapshotVerified && !runtimeSnapshotHostUnavailable(snapshot, candidate.hostId),
           now: Date.now()
         })
         if (decision.kind !== 'resume') {
@@ -7140,44 +7147,66 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       return
     }
-    if (existing) {
-      // A different host/cwd cannot reuse this shell. Keep its durable id recorded
-      // until Core confirms the stop.
-      void stopWarmTerminal(existing).then((sessionId) => {
-        if (!sessionId) return
-        set((state) => ({
-          unclaimedTerminalSessionIds: forgetUnclaimedTerminalSession(
-            state.unclaimedTerminalSessionIds,
-            sessionId
-          )
-        }))
-      })
+    // Changing the visible project is not permission to stop another healthy shell.
+    if (existing) return
+    const request: TerminalLaunchInput = {
+      hostId: workspace.hostId,
+      workspacePath: workspace.path,
+      createOperationId: crypto.randomUUID()
     }
-    const ready = api.sessions
-      .launchTerminal({
-        hostId: workspace.hostId,
-        workspacePath: workspace.path,
-        createOperationId: crypto.randomUUID()
-      })
-      .catch(() => null)
+    const creation: WarmTerminalCreation = { request, inFlight: true }
+    const ready = api.sessions.launchTerminal(request).catch((error) => {
+      creation.inFlight = false
+      creation.issue = sessionLaunchFailure(error)
+      if (get().warmTerminal?.ready === ready) set((state) => ({
+        warmTerminal: state.warmTerminal ? { ...state.warmTerminal } : null
+      }))
+      return null
+    })
     void ready.then((session) => {
-      if (!session) {
-        if (get().warmTerminal?.ready === ready) set({ warmTerminal: null })
-        return
-      }
+      if (!session) return
+      creation.inFlight = false
+      delete creation.issue
       set((state) => ({
-        // Track every successful prewarm even if another workspace replaced the slot
-        // while Core was launching it. The matching stop path removes the id later.
         warmTerminal: state.warmTerminal?.ready === ready
           ? { ...state.warmTerminal, session }
           : state.warmTerminal,
-        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(
-          state.unclaimedTerminalSessionIds,
-          session.id
-        )
+        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(state.unclaimedTerminalSessionIds, session.id)
       }))
     })
-    set({ warmTerminal: { key, ownerLauncherId, ready, session: null } })
+    set({ warmTerminal: { key, ownerLauncherId, ready, session: null, creation } })
+  },
+  async retryWarmTerminal(workspaceId, ownerLauncherId, hostRestored = false) {
+    const workspace = get().config?.workspaces.find((item) => item.id === workspaceId)
+    const held = get().warmTerminal
+    if (!workspace || !held || held.key !== warmTerminalKey(workspace.hostId, workspace.path)) return null
+    const creation = held.creation
+    if (held.claimingLauncherId || held.session || !creation?.issue || creation.inFlight) return await held.ready
+    if (hostRestored && creation.hostRecoveryAttempted) return null
+    // This operation may already have created a Run. Confirm its original exact request;
+    // replacing the UUID or reconstructing its parameters would be another creation.
+    const request = creation.request
+    creation.inFlight = true
+    creation.hostRecoveryAttempted ||= hostRestored
+    const ready = api.sessions.launchTerminal(request).catch((error) => {
+      creation.inFlight = false
+      creation.issue = sessionLaunchFailure(error)
+      if (get().warmTerminal?.ready === ready) set((state) => ({
+        warmTerminal: state.warmTerminal ? { ...state.warmTerminal } : null
+      }))
+      return null
+    })
+    set({ warmTerminal: { ...held, ownerLauncherId, ready } })
+    const session = await ready
+    if (session) {
+      creation.inFlight = false
+      delete creation.issue
+      set((state) => ({
+        warmTerminal: state.warmTerminal?.ready === ready ? { ...state.warmTerminal, session } : state.warmTerminal,
+        unclaimedTerminalSessionIds: trackUnclaimedTerminalSession(state.unclaimedTerminalSessionIds, session.id)
+      }))
+    }
+    return session
   },
   async promoteWarmTerminal(tabGroupId, launcher) {
     const state = get()
@@ -7203,18 +7232,40 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await get().launchTerminal(tabGroupId, launcher)
       return
     }
-    const held = state.warmTerminal
-    // Reserve an explicit launcher Region while the warm Run is in flight. Otherwise its
-    // still-mounted create page sees an empty warm slot and starts another shell before this
-    // one attaches. Claim the existing healthy Run; do not stop it to repair our projection.
+    let held = state.warmTerminal
+    if (held.claimingLauncherId) throw new Error('This reusable shell is already opening in another Region. Its original request is retained; check it again after that opening settles.')
+    if (held.creation?.issue) {
+      const ownerLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
+      const confirmed = await get().retryWarmTerminal(workspace.id, ownerLauncherId)
+      if (!confirmed) {
+        const issue = get().warmTerminal?.creation?.issue ?? held.creation.issue
+        throw Object.assign(new Error(issue.message), issue)
+      }
+      const live = get().warmTerminal
+      if (!live || live.key !== key || live.session?.id !== confirmed.id) return
+      if (live.claimingLauncherId) throw new Error('This reusable shell is already opening. Check its original request after that opening settles.')
+      held = live
+      // A late confirmation belongs to the original Launcher, never a replacement View.
+      if (launcher && (get().tabs[launcher.tabId]?.regions[launcher.regionId] !== launcherSurface ||
+        !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launcher.tabId))) return
+    }
+    // Reserve the exact Launcher and retain the warm slot until its original receipt settles.
+    // Another preview cannot erase that request, and only one opening may claim the same Run.
     const pendingSurface: TerminalWorkbenchSurface | undefined = launcherTab && launcher ? {
       regionId: launcher.regionId, kind: 'terminal', phase: 'launching', workspaceId: workspace.id,
       sessionId: held.session?.id ?? crypto.randomUUID()
     } : undefined
-    set((current) => ({ warmTerminal: null, ...(pendingSurface && launcherTab ? {
+    const claimingLauncherId = warmLauncherId({ tabGroupId, regionId: launcher?.regionId })
+    set((current) => ({ warmTerminal: { ...held, claimingLauncherId }, ...(pendingSurface && launcherTab ? {
       tabs: { ...current.tabs, [launcherTab.id]: replaceWorkbenchRegion(launcherTab, pendingSurface.regionId, pendingSurface) }
     } : {}) }))
     const session = await held.ready
+    set((current) => {
+      const available = current.warmTerminal
+      if (!available || available.ready !== held.ready || available.claimingLauncherId !== claimingLauncherId) return current
+      const { claimingLauncherId: _claim, ...retained } = available
+      return { warmTerminal: session ? null : retained }
+    })
     if (!session) {
       if (pendingSurface && launcherTab && launcherSurface) {
         let restored = false
@@ -7226,8 +7277,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         })
         if (!restored) return
       }
-      await get().launchTerminal(tabGroupId, launcher)
-      return
+      // The original request may have been accepted before its reply failed. Keep
+      // this exact creation available for Check again, including its typed failure.
+      set((current) => ({ warmTerminal: current.warmTerminal ?? held }))
+      const issue = held.creation?.issue ?? sessionLaunchFailure(new Error('The original shell creation is unconfirmed. Check this same request again.'))
+      throw Object.assign(new Error(issue.message), issue)
     }
     if (!launcherTab && !get().layouts[workspace.id]) {
       if (await stopTerminalSession(session)) {
@@ -8278,6 +8332,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { runtimeEndpointWarnings, sessions: projectRuntimeEndpointSessions(state.sessions, runtimeEndpointWarnings) }
     })
     if (core.type === 'connection-state' && core.state === 'restored') {
+      const warm = get().warmTerminal
+      const request = warm?.creation?.request
+      if (warm?.creation?.issue && request?.hostId === event.hostId) {
+        const workspace = get().config?.workspaces.find(item => item.hostId === request.hostId && item.path === request.workspacePath)
+        if (workspace) void get().retryWarmTerminal(workspace.id, warm.ownerLauncherId, true)
+      }
       startSessionMembershipResync(event, { recoverSavedAgents: true, restoredHostId: event.hostId })
       return
     }

@@ -1,3 +1,4 @@
+import type { AgentMuxRunStorageObservation } from './run-storage-observation.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { constants as fsConstants } from 'node:fs'
 import { access, stat } from 'node:fs/promises'
@@ -2059,6 +2060,14 @@ export class AgentMuxClient {
   async runtimeResourceSnapshot(): Promise<AgentMuxRuntimeResourceSnapshot> {
     this.requireConnected()
     return await this.kernel.resourceSnapshot()
+  }
+
+  /** Read bounded storage facts for the original Run through its public Native owner. */
+  async observeRunStorage(run: AgentMuxRunRef): Promise<AgentMuxRunStorageObservation> {
+    this.requireConnected()
+    const runtime = this.runtimeIdentity(), originalRun = { ...run }
+    const observation = await this.kernel.observeStorage(originalRun.runId)
+    return { ...observation, run: originalRun, runtime, observedAt: Date.now() }
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {

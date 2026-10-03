@@ -174,6 +174,7 @@ type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMux
   'message.dispatch.report': { sourceMessageId: string; replyMessageId: string; kind: import('./agent-handoff.js').DispatchEventKind }
   'app.snapshot': AgentMuxRpcSnapshotParams
   'goal.activity': AgentMuxRpcGoalFilters
+  'system.storage': { hostId: string; runId: string }
   'system.doctor': { workspacePath?: string }
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
@@ -208,6 +209,7 @@ type NativeResult = TopicResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHosted
   'message.dispatch.report': Awaited<ReturnType<AgentMuxClient['recordDispatchEvent']>>
   'app.snapshot': AgentMuxRpcSnapshot
   'goal.activity': { activity: Array<{ goalId: string; message: string; updatedAt: number }> }
+  'system.storage': import('./run-storage-observation.js').AgentMuxRunStorageObservation
   'system.doctor': AgentMuxDoctorReport
   'system.endpoint': { protocol: 'jsonrpc-2.0'; framing: 'json-lines'; endpoint: AgentMuxRpcEndpoint }
   'system.subscription.cancel': { disposed: boolean }
@@ -239,7 +241,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
-  'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long',
+  'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 

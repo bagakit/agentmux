@@ -24,3 +24,16 @@
 .service-disclosure__actions .small-button { min-height: 26px; padding: 0 var(--sp-2); border: 0; color: var(--text-2); background: transparent; box-shadow: none; font-weight: 400; }
 .service-disclosure__actions .small-button:hover { color: var(--text); background: var(--surface-3); }
 .composer-notice .service-window { margin: 0; padding: 0; background: transparent; }
+
+.terminal-storage-details { min-width: 0; margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.terminal-storage-details > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.terminal-storage-details > header > strong { display: inline-flex; align-items: center; gap: var(--sp-2); font-weight: 550; }
+.terminal-storage-details p { margin: var(--sp-3) 0; line-height: 1.5; overflow-wrap: anywhere; }
+.terminal-storage-details__sample { color: var(--text-3); }
+.terminal-storage-details dl { display: grid; gap: var(--sp-3); margin: var(--sp-4) 0; }
+.terminal-storage-details dl > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: var(--sp-4); align-items: baseline; }
+.terminal-storage-details dt { color: var(--text-3); }
+.terminal-storage-details dd { margin: 0; overflow-wrap: anywhere; font-variant-numeric: tabular-nums; }
+.terminal-storage-details__identity dd { font-family: var(--font-mono); font-size: var(--fs-micro); }
+.terminal-storage-details__failure { padding: var(--sp-3) var(--sp-4); border-left: 2px solid var(--amber); background: var(--amber-wash); }
+.terminal-storage-details h4 { margin: var(--sp-5) 0 var(--sp-3); font-size: inherit; font-weight: 550; }

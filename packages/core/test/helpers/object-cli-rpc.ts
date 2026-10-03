@@ -123,7 +123,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'settings.inspect': [], 'settings.set': ['client.label', '--help'], 'settings.executors.refresh': ['E', '--host', '--help'],
     'settings.hosts.ls': [], 'settings.hosts.test': ['--help'], 'settings.workspaces.register': ['--input', input],
     'settings.browser-links.ls': [], 'settings.browser-links.forget': ['--help'],
-    'system.doctor': [], 'system.endpoint': [], 'system.crash-log.inspect': [], 'system.crash-log.reveal': [],
+    'system.doctor': [], 'system.endpoint': [], 'system.storage': ['--host', 'local', '--run', 'RUN'], 'system.crash-log.inspect': [], 'system.crash-log.reveal': [],
     'system.metrics.get': [], 'system.metrics.watch': []
   }
   const found = fixed[method]

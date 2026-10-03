@@ -2,6 +2,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
+import { Socket } from 'node:net'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
@@ -11,6 +12,7 @@ import {
   CtxmuxClient,
   CtxmuxCommandError,
   CtxmuxProtocolError,
+  CtxmuxUnsupportedCapabilityError,
   PROTOCOL_VERSION,
   RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_INPUT,
   RUNTIME_CAPABILITY_NATIVE_RECOVERABLE_STOP,
@@ -31,6 +33,7 @@ import {
 } from '@ctxmux/sdk'
 import { AgentMuxError } from './errors.js'
 import { withCtxmuxStartupDiagnostic } from './ctxmux-startup-diagnostic.js'
+import { projectRunStorageFacts, type AgentMuxRunStorageFacts } from './run-storage-observation.js'
 import { classifyReplayGap } from './ctxmux-replay-gap.js'
 import { classifyStreamEnd } from './ctxmux-stream-end.js'
 import { probeSocketLiveness } from './socket-liveness.js'
@@ -39,6 +42,7 @@ import type { AgentMuxRuntimeCompatibilityInput, AgentMuxRunInputData, AgentMuxR
 import {
   CTXMUX_MANIFEST_SHA256,
   supportedCtxmuxArtifactPlatform,
+  ctxmuxArtifactSource,
   defaultAgentMuxRuntimeDirectory,
   defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory
@@ -50,8 +54,8 @@ import {
 // by CTXMUX_MANIFEST_SHA256). Bundled artifact diagnostics and terminalEnvironment import these
 // instead of retyping them. The serving listener's identity comes from public RuntimeIdentity;
 // its source commit is not exposed by that protocol and must not be inferred from this bundle.
-export const CTXMUX_COMMIT = ctxmuxArtifacts.source.commit
-const CTXMUX_TREE = ctxmuxArtifacts.source.tree
+export const CTXMUX_COMMIT = ctxmuxArtifactSource().commit
+const CTXMUX_TREE = ctxmuxArtifactSource().tree
 export const CTXMUX_VERSION = ctxmuxArtifacts.version
 const CTXMUX_RUNTIME_BUILD_ID = `ctxmuxd/${CTXMUX_VERSION}`
 const REQUIRED_RUNTIME_CAPABILITIES = {
@@ -858,22 +862,32 @@ export class CtxmuxRunAdapter {
         '3'
       ], {
         detached: true,
-        // Keep stderr bounded and scoped to this child. Readiness is the ownership handshake;
-        // stderr is only a diagnostic side channel for failures before that handshake (for
-        // example SQLite SQLITE_FULL), never a second Runtime protocol.
+        // Readiness proves ownership. Keep draining this child's diagnostic channel afterward;
+        // closing it here gives the durable daemon EPIPE while its Runs are still serving.
+        // Authoritative service/storage state remains on the public Runtime protocol.
         stdio: ['ignore', 'ignore', 'pipe', 'pipe'],
         env: localProcessEnvironment()
       })
       child.unref()
       let daemonStderr = ''
       const stderrStream = child.stderr as Readable | null
+      if (stderrStream instanceof Socket) stderrStream.unref()
       stderrStream?.setEncoding('utf8')
       stderrStream?.on('data', (chunk: string) => {
-        if (Buffer.byteLength(daemonStderr) >= DAEMON_DIAGNOSTIC_MAX_BYTES) return
-        daemonStderr += chunk
-        if (Buffer.byteLength(daemonStderr) > DAEMON_DIAGNOSTIC_MAX_BYTES) {
-          daemonStderr = daemonStderr.slice(0, DAEMON_DIAGNOSTIC_MAX_BYTES)
+        const remaining = DAEMON_DIAGNOSTIC_MAX_BYTES - Buffer.byteLength(daemonStderr)
+        if (remaining <= 0) return
+        // Slice bytes before retaining them: a large or multibyte diagnostic must not exceed
+        // the startup buffer budget. Continue draining once that bounded prefix is full.
+        daemonStderr += Buffer.from(chunk).subarray(0, remaining).toString('utf8')
+        while (Buffer.byteLength(daemonStderr) > DAEMON_DIAGNOSTIC_MAX_BYTES) {
+          daemonStderr = daemonStderr.slice(0, -1)
         }
+      })
+      stderrStream?.on('error', (error) => {
+        this.errorListener?.(new AgentMuxError(
+          `CtxMux diagnostic channel failed: ${error.message}. Runtime and Run availability are observed separately.`,
+          'CTXMUX_DIAGNOSTIC_CHANNEL_UNAVAILABLE'
+        ))
       })
       try {
         const readinessStream = child.stdio[3] as Readable | null
@@ -931,9 +945,8 @@ export class CtxmuxRunAdapter {
             'CTXMUX_OWNER_IDENTITY_UNPROVEN'
           )
         }
-        throw startupError
-      } finally {
         stderrStream?.destroy()
+        throw startupError
       }
     }
     if (runtime === null) {
@@ -946,6 +959,27 @@ export class CtxmuxRunAdapter {
     })
     this.runtime = runtime
     this.client = client
+  }
+
+  /** One exact Run, optional observation capability; never a connection or input prerequisite. */
+  async observeStorage(runId: string): Promise<{ status: 'observed'; storage: AgentMuxRunStorageFacts } |
+    { status: 'unsupported'; message: string }> {
+    const client = this.requireClient()
+    if (typeof client.observeStorage !== 'function') {
+      return { status: 'unsupported', message: 'This client bundle does not expose Runtime storage diagnostics. Its existing Runs and input remain available; capacity and persistence details are unknown.' }
+    }
+    try {
+      const result = await client.observeStorage(runId)
+      if (result.observation.run_id !== runId) {
+        throw new AgentMuxError('Storage observation belongs to another Run.', 'CONTROL_PROTOCOL_ERROR')
+      }
+      return { status: 'observed', storage: projectRunStorageFacts(result.observation) }
+    } catch (error) {
+      if (error instanceof CtxmuxUnsupportedCapabilityError && error.capability === 'services.storage_observation') {
+        return { status: 'unsupported', message: 'This Runtime does not expose storage diagnostics. Its Runs and input remain available; capacity and persistence failure details are unknown.' }
+      }
+      throw error
+    }
   }
 
   /** A failed wire/setup keeps exact-Run continuation; it never persists output state. */

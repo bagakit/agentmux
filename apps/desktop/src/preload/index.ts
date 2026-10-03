@@ -5,6 +5,7 @@ import type { ContinuousProgressLoop, ContinuousProgressTarget, ContinuousProgre
 import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
+import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
 import { unwrapSessionInputWriteResult } from '../shared/session-input-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
@@ -297,7 +298,7 @@ const api: AgentMuxPreloadApi = {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
     launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
-    launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
+    launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input).then(unwrapSessionLaunchResult),
     historySources: () => ipcRenderer.invoke('sessions:historySources'),
     timeline: (session: import('../shared/contracts.js').SessionHistoryReference) => ipcRenderer.invoke('sessions:timeline', session),
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
@@ -356,6 +357,7 @@ const api: AgentMuxPreloadApi = {
     interrupt: (session: SessionControl) => ipcRenderer.invoke('sessions:interrupt', session),
     resize: (attachmentId: string, cols: number, rows: number) =>
       ipcRenderer.invoke('sessions:resize', attachmentId, cols, rows),
+    observeStorage: (session: SessionControl) => ipcRenderer.invoke('sessions:observeStorage', session),
     refresh: (session: SessionControl) => ipcRenderer.invoke('sessions:refresh', session),
     recover: (session: SessionControl, workspacePath?: string, operationId?: string) =>
       ipcRenderer.invoke('sessions:recover', session, workspacePath, operationId),

@@ -4,6 +4,7 @@ import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebo
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
+import { sessionLaunchResult } from '../shared/session-launch-result.js'
 import { sessionInputWriteResult } from '../shared/session-input-result.js'
 import { CONTINUOUS_PROGRESS_CHANGED, NATIVE_BROWSER_INPUT_CHANNEL, NATIVE_OVERLAY_WARNING_CHANNEL } from '../shared/contracts.js'
 import type { ContinuousProgressTarget, ContinuousProgressTaskSource } from '@agentmux/core'
@@ -838,7 +839,7 @@ export async function registerIpc(args: {
     }
     throw primary
   })
-  handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => await args.runtime.launchTerminal(input, config))
+  handle('sessions:launchTerminal', async (input: TerminalLaunchInput) => sessionLaunchResult(() => args.runtime.launchTerminal(input, config)))
   handle('sessions:timeline', async (session: import('../shared/contracts.js').SessionHistoryReference) => await args.runtime.sessionTimeline(session))
   handle('sessions:creation', async (hostId: string, agentSessionId: string) => await args.runtime.agentCreation(hostId, agentSessionId))
   handle('sessions:historySources', async () => args.runtime.sessionHistorySources())
@@ -959,6 +960,7 @@ export async function registerIpc(args: {
   handleWithEvent('sessions:resize', async (event, attachmentId: string, cols: number, rows: number) => (
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
+  handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
   handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string) => await args.runtime.recoverSession(session, config, workspacePath, operationId))
   handle('sessions:stop', async (session: SessionControl) => { pauseUserProgress(session, 'Paused because you stopped the Agent.'); await args.runtime.stopSession(session) })

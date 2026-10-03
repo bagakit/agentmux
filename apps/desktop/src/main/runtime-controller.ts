@@ -1524,6 +1524,23 @@ export class RuntimeController {
     else await client.signalTerminal(control.run, 'SIGINT')
   }
 
+  async observeStorage(control: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation> {
+    if (control.kind === 'terminal' && control.runId !== control.run.runId) {
+      throw Object.assign(new Error('Terminal storage target has conflicting Run identities.'), { code: 'INVALID_CONTROL_REQUEST' })
+    }
+    const client = await this.connectedClient(control.hostId)
+    if (control.kind === 'agent') {
+      // Confirm original Session/Run binding without changing lifecycle or opening an attachment.
+      const original = client.agentSession(control.agentSessionId)
+      if (original.run.runId !== control.run.runId) {
+        throw Object.assign(new Error('Session changed before storage observation. Refresh the original Session.'), { code: 'STALE_AGENT_SESSION_BINDING' })
+      }
+    }
+    const run = control.kind === 'agent' ? control.run : { runId: control.runId }
+    const result = await client.observeRunStorage(run)
+    return { ...result, runtime: { ...result.runtime, hostId: control.hostId } }
+  }
+
   async refresh(control: SessionControl, config: AppConfig): Promise<SessionSnapshot> {
     const client = await this.connectedClient(control.hostId)
     if (control.kind === 'agent') await client.refreshAgentSession(control.agentSessionId, control.run)

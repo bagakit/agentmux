@@ -116,7 +116,7 @@ export function NewTabSurface({
   // A visible Tab can contain an unselected Launcher created by Control. Only its
   // selected Region may acquire input; the original empty-group Launcher has no Region.
   const inputRegionActive = useAppStore(state => tabId && regionId
-    ? state.tabs[tabId]?.layout.activeRegionId === regionId
+    ? state.tabs[tabId]?.regions[regionId]?.kind === 'launcher' && state.tabs[tabId]?.layout.activeRegionId === regionId
     : tabId === undefined && regionId === undefined)
   const warmTerminal = useAppStore((state) => state.warmTerminal)
   const terminalThemeId = useAppStore((state) => state.config?.appearance.terminalTheme)
@@ -147,11 +147,12 @@ export function NewTabSurface({
   const launcherRef = tabId && regionId ? { tabId, regionId } : undefined
   // 「这个槽在我眼里是什么样」只判一次，落点在 warmTerminalPreview。要显示哪个 session、要不要显示
   // 「正在预热」、槽在不在，分开算必然漂移，症状是转圈提示归 A 而终端画面归 B 这种自相矛盾的画面。
-  const { session: warmSession, pending: warmPending, slotHeld: warmSlotHeld } = warmTerminalPreview({
+  const warmPreview = warmTerminalPreview({
     warmTerminal,
     warmKey,
     launcherId
   })
+  const { slotHeld: warmSlotHeld } = warmPreview
   const executors = useMemo(
     () => configuredExecutors(config).map((executor) => ({
       ...executor,
@@ -232,12 +233,12 @@ export function NewTabSurface({
     if (warmSlotHeld && warmTerminal?.session) automaticWarmAttempt.current = null
     // A target choice must not stop another project's healthy reusable shell.
     // The ordinary explicit Terminal action remains available for this exact target.
-    if (workspace && (!warmTerminal || warmTerminal.key === warmKey) && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
+    if (workspace && (!warmTerminal || warmSlotHeld) && visible && presentationActive && inputRegionActive && !controlNavigation && sections.terminal === 'expanded' &&
       (warmSlotHeld || automaticWarmAttempt.current !== warmKey)) {
       if (!warmSlotHeld) automaticWarmAttempt.current = warmKey
       prewarmTerminal(workspace.id, launcherId)
     }
-  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, warmTerminal?.key, warmKey, sections.terminal])
+  }, [prewarmTerminal, visible, presentationActive, inputRegionActive, controlNavigation, workspace?.id, launcherId, warmSlotHeld, warmTerminal?.session?.id, Boolean(warmTerminal), warmKey, sections.terminal])
 
   useEffect(() => {
     if (!workspace || executors.every((executor) => executor.detection)) return
@@ -422,7 +423,7 @@ export function NewTabSurface({
       {regionId ? <AgentLifecycleFeedback owner={{ regionId }} visible={visible} busy={busy !== null} retry={launchFromLauncher} /> : null}
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <LauncherSecondarySurfaces workspace={workspace} tabGroupId={tabGroupId} launcherRef={launcherRef} launcherId={launcherId}
-        sections={sections} onSectionChange={setSection} warmSession={warmSession} warmPending={warmPending}
+        sections={sections} onSectionChange={setSection} warmPreview={warmPreview}
         terminalThemeId={terminalThemeId} terminalFontSize={terminalFontSize} visible={visible} busy={busy}
         onRun={run} />
       {sections.agents === 'hidden' ? <div className="launcher-restores"><button type="button" className="launcher-restore" aria-label="Restore Agents" onClick={() => setSection('agents', 'expanded')}><AgentAvatar executorId={executorId} label={selectedExecutor?.label ?? executorId} providerId={selectedProviderId} size={15} />Agents · {selectedExecutor?.label ?? executorId}<ChevronDown size={12} /></button></div> : null}
