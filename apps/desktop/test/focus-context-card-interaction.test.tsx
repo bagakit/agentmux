@@ -1,5 +1,11 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { acknowledgedNameProjection } from '../src/renderer/src/lib/name-authority'
+import { initializeSpatialControlFixture } from './helpers/spatial-control-owner-fixture'
 import { act, createElement, useMemo } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -13,6 +19,7 @@ import { FocusContextRow } from '../src/renderer/src/components/FocusContextRow'
 
 const initial = useAppStore.getState(), first = 'card-first', second = 'card-second'
 let root: Root, container: HTMLDivElement, destination: HTMLInputElement, select: ReturnType<typeof vi.fn>
+let privateSpatialRoot: string
 const response = '完整回复：核对 src/scroll-anchor.ts，保留原草稿与选区。'
 function Rows() {
   const project = useMemo(createFocusProjectionSelector, [])
@@ -56,6 +63,21 @@ beforeEach(async () => {
       { id: id + '-prompt', agentSessionId: id, kind: 'user_message', title: 'Prompt', status: 'complete', source: 'native-hook', content: 'Derived task for ' + id, createdAt: 1, updatedAt: 1 },
       { id: id + '-reply', agentSessionId: id, kind: 'assistant_message', title: 'Reply', status: 'complete', source: 'native-hook', content: response, createdAt: 2, updatedAt: 2 }
     ] }])), agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { [second]: 'Original unsent draft' } }, true)
+  // The original rename cases must reach the real durable label owner and ACK.
+  privateSpatialRoot = await mkdtemp(join(tmpdir(), 'focus-card-labels-'))
+  const owner = new AgentMuxSpatialStateStore(join(privateSpatialRoot, 'spatial.json'))
+  await owner.commit({ expectedRevision: 0, graph: { spaces: [], zones: [], bindings: [], layouts: {}, tabs: [], regions: [], tabLayouts: {}, resources: {} } })
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
+  vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => owner.mutateDisplayLabel(input, {
+    actor: { kind: 'device', id: 'private-card-test', verified: true }, source: 'desktop-ui',
+    entryPoint: 'spatial:renameLabel', transport: 'electron-ipc', location: { windowId: 'private-card-test' }
+  }))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
+  vi.spyOn(api.spatial, 'confirmNameCommit').mockImplementation(operationId => owner.confirmNameCommit(operationId))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
+  await initializeSpatialControlFixture()
+  useAppStore.setState(acknowledgedNameProjection((await owner.readForLayout())!, 0)!)
   container = document.createElement('div'); destination = document.createElement('input'); document.body.append(container, destination)
   select = vi.fn(() => destination.focus()); root = createRoot(container)
   await act(async () => root.render(createElement(Rows)))
@@ -63,13 +85,16 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   await act(async () => root.unmount()); await advance(1); vi.useRealTimers()
+  await useAppStore.getState().retryWorkbenchSave()
   container.remove(); destination.remove(); document.getElementById('agentmux-window-overlay-host')?.remove()
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  await rm(privateSpatialRoot, { recursive: true })
 })
 
-it('reveals complete held facts after intent, allows reading transfer and inner scrolling, and never moves the input or reads history', async () => {
+it('reveals held facts and scoped inputs after intent, allows reading transfer and inner scrolling without moving input', async () => {
   const reads = [vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline'), vi.spyOn(api.workspaces, 'appearance')]
   destination.focus(); await pointer(card(), 'pointerover'); await advance(179); expect(preview()).toBeNull()
+  expect(reads.every(read => read.mock.calls.length === 0)).toBe(true)
   await advance(1); expect(preview()?.textContent).toContain(response); expect(preview()?.textContent).toContain('Last assistant message')
   expect(preview()?.textContent).toContain(_hygiene_fixturePath("private/card-interaction")); expect(preview()?.textContent).toContain(second)
   expect(document.activeElement).toBe(destination)
@@ -78,13 +103,14 @@ it('reveals complete held facts after intent, allows reading transfer and inner 
   const text = panel.querySelector('p')!.firstChild!, range = document.createRange(); range.selectNodeContents(text)
   window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range); expect(window.getSelection()!.toString()).toContain(response)
   await pointer(panel, 'pointerout', destination); await advance(160); expect(preview()).toBeNull()
-  expect(reads.every(read => read.mock.calls.length === 0)).toBe(true); expect(select).not.toHaveBeenCalled()
+  expect(reads[0]).toHaveBeenCalledTimes(1); expect(reads[0]!.mock.calls[0]![0]).toBe(useAppStore.getState().sessions.find(session => session.id === second)!.control)
+  expect(reads.slice(1).every(read => read.mock.calls.length === 0)).toBe(true); expect(select).not.toHaveBeenCalled()
 })
 it('Escape, external scroll, source changes and unmount cancel stale intents without claiming focus', async () => {
   destination.focus(); await pointer(card(), 'pointerover')
   await act(async () => destination.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
   await advance(200); expect(preview()).toBeNull(); expect(document.activeElement).toBe(destination)
-  await pointer(card(), 'pointerover'); await act(async () => useAppStore.getState().renameAgent(second, 'New current task'))
+  await pointer(card(), 'pointerover'); await act(async () => { const changed = await useAppStore.getState().renameAgent(second, 'New current task'); expect(changed, JSON.stringify(useAppStore.getState().nameEditFailure)).toBe(true) })
   await advance(200); expect(preview()).toBeNull()
   await pointer(card(), 'pointerover'); await advance(180); expect(preview()).toBeTruthy()
   await act(async () => container.dispatchEvent(new Event('scroll'))); expect(preview()).toBeNull()
@@ -142,10 +168,12 @@ it('renames only the exact Agent, cancels safely, and clearing restores the exis
   expect(useAppStore.getState().agentNames).toBe(before.agentNames); expect(document.activeElement).toBe(card())
   await menu(); await choose('Rename Agent'); const next = await value('Current renamed Agent')
   await act(async () => next.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })))
+  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().agentNames[second]).toBe('Current renamed Agent')) })
   expect(useAppStore.getState().agentNames[second]).toBe('Current renamed Agent'); expect(useAppStore.getState().agentNames[first]).toBe(before.agentNames[first])
   expect(document.activeElement).toBe(card()); expect(select).not.toHaveBeenCalled()
   await menu(); await choose('Rename Agent'); const clear = await value('   ')
   await act(async () => clear.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })))
+  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().agentNames[second]).toBeUndefined()) })
   expect(useAppStore.getState().agentNames[second]).toBeUndefined(); expect(card().querySelector('strong')!.textContent).toBe('Derived task for ' + second)
   expect(useAppStore.getState().agentFocus).toBe(before.agentFocus); expect(useAppStore.getState().sessions).toBe(before.sessions)
 })
@@ -154,5 +182,6 @@ it('preserves IME editing and commits blur without taking later input focus', as
   for (const key of ['Enter', 'Escape']) await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key, isComposing: true })))
   expect(container.querySelector('.focus-context__rename')).toBe(input); expect(useAppStore.getState().agentNames[second]).toBe('Same visible Agent')
   await act(async () => destination.focus()); await advance(1)
+  await act(async () => { await vi.waitFor(() => expect(useAppStore.getState().agentNames[second]).toBe('中文名称')) })
   expect(useAppStore.getState().agentNames[second]).toBe('中文名称'); expect(document.activeElement).toBe(destination)
 })
