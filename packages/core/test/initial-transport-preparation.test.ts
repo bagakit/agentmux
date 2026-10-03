@@ -16,6 +16,17 @@ import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { hostedTestOwner, hostedTestFence, logicalHostedEvents } from './helpers/hosted-runtime-port.js'
 
+/** A protocol query must not wait behind the observation it is required to finish. */
+async function inputAckWithin<T>(pending: Promise<T>): Promise<T> {
+  let timer!: ReturnType<typeof setTimeout>
+  const timeout = Symbol('input ACK blocked behind its input observation')
+  try {
+    const result = await Promise.race([pending, new Promise<typeof timeout>(done => { timer = setTimeout(() => done(timeout), 1_000) })])
+    expect(result, 'input ACK must release the original observation lane').not.toBe(timeout)
+    return result as T
+  } finally { clearTimeout(timer) }
+}
+
 /** Public Client and real coordinator/store; Runtime bytes are explicitly synthetic here. */
 async function fixture(storePath?: string) {
   const store = storePath ? new AgentMuxFileAgentSessionStore(storePath) : new AgentMuxMemoryAgentSessionStore()
@@ -27,6 +38,7 @@ async function fixture(storePath?: string) {
   const template = new AgentProviderRegistry().get('codex')
   let source = 'source-1', pid = 123, cursor = 0, recheck = true, lostAck = false
   let verifyCount = 0, statusesAfterVerify = 0, finalStatusFault: string | undefined
+  let finalVerify: ((count: number, context: AgentProviderPromptExecutionContext) => Promise<void>) | undefined
   let rawDuringFinalStatus: Promise<unknown> | undefined
   const screen = new AgentTerminalScreen(80, 24)
   const draw = async (text = '') => {
@@ -40,7 +52,7 @@ async function fixture(storePath?: string) {
   const preparation = vi.fn(async (context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport> => {
     started(); await ready
     context.signal.throwIfAborted()
-    return { nativeSourceId: 'source-1', verifyCurrentTransport: async () => { verifyCount++; statusesAfterVerify = 0; return recheck } }
+    return { nativeSourceId: 'source-1', verifyCurrentTransport: async context => { verifyCount++; statusesAfterVerify = 0; await finalVerify?.(verifyCount, context); return recheck } }
   })
   const provider = defineAgentProvider({ catalog: { ...template.catalog, id: 'fixture', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: { frameStart: '\x1b[?2026h', frameEnd: '\x1b[?2026l', activeComposer: '>' },
@@ -66,6 +78,8 @@ async function fixture(storePath?: string) {
       if (finalStatusFault === 'pid') pid++
       if (finalStatusFault === 'raw-cancel') rawDuringFinalStatus = client.writeAgent({ agentSessionId: 'prepare',
         expectedRun: { runId: 'prepare-run' }, data: 'RAW_AT_FINAL_BOUNDARY', source: 'user' })
+      if (finalStatusFault === 'protocol') rawDuringFinalStatus = client.writeAgent({ agentSessionId: 'prepare',
+        expectedRun: { runId: 'prepare-run' }, data: '\x1b[1;1R', source: 'terminal-protocol' })
     }
     return run(id)
   }
@@ -91,6 +105,7 @@ async function fixture(storePath?: string) {
   const submit = (signal?: AbortSignal, operationId = 'original-send') => client.submitAgentPrompt({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
     afterSubmissionId: null, operationId, prompt: 'ORIGINAL_BODY', execution: 'immediate', ...(signal ? { signal } : {}) })
   return { client, owner, store, provider, preparation, entered, release, writes, submit,
+    finalVerify: (hook: typeof finalVerify) => { finalVerify = hook },
     finalStatusFault: (kind: string) => { finalStatusFault = kind }, rawDuringFinalStatus: () => rawDuringFinalStatus,
     change: (kind: string) => { if (kind === 'source') source = 'source-other'; if (kind === 'pid') pid++; if (kind === 'cursor') cursor++;
       if (kind === 'final') recheck = false; if (kind === 'lost-ack') lostAck = true },
@@ -98,6 +113,216 @@ async function fixture(storePath?: string) {
 }
 
 describe('original immediate transport preparation', () => {
+  it.each(['\x1b[?1;2c', '\x1b[1;1R'])('acknowledges preclaim protocol %j before the final verifier and original body complete', async reply => {
+    const f = await fixture()
+    let entered!: () => void, acknowledged!: () => void
+    const verifying = new Promise<void>(resolve => { entered = resolve })
+    const ack = new Promise<void>(resolve => { acknowledged = resolve })
+    let originalVerifierCompleted = false
+    f.finalVerify(async count => {
+      if (count !== 1) return
+      entered(); await ack; originalVerifierCompleted = true
+    })
+    const originalInput = f.owner.kernel.input as (id: string, op: { operationId: string; expectedByte: number; data: string }) => Promise<unknown>
+    f.owner.kernel.input = async (id: string, op: { operationId: string; expectedByte: number; data: string }) => {
+      const result = await originalInput(id, op)
+      if (op.data === reply) acknowledged()
+      return result
+    }
+    try {
+      const sent = f.submit().then(() => undefined, error => error)
+      await f.entered; f.release(); await verifying
+      const boundary = (await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'prepare')
+      expect(boundary?.promptCompletionAdmission).toBeUndefined()
+      await inputAckWithin(f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: reply, source: 'terminal-protocol' }))
+      expect(await sent).toBeUndefined()
+      expect(originalVerifierCompleted).toBe(true)
+      expect(f.writes.map(write => write.data)).toEqual([reply, '\x1b[I', 'ORIGINAL_BODY', '\r'])
+      const completed = (await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'prepare')
+      expect(completed?.promptCompletionAdmission?.submissionId).toBe('original-send')
+      expect(completed?.promptCompletionAdmission?.acknowledged).toBe(true)
+      expect(completed?.promptCompletionAdmission?.intent?.prompt).toBe('ORIGINAL_BODY')
+    } finally { await f.close() }
+  })
+
+  it('retains original protocol ACK authority across qualification completion and first lane queueing', async () => {
+    const f = await fixture()
+    const owner = f.client as any
+    const observe = owner.observeAgentInputPreparation.bind(owner)
+    let observed = false
+    owner.observeAgentInputPreparation = async (...args: unknown[]) => {
+      const result = await observe(...args)
+      if (!observed) {
+        observed = true
+        await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[1;1R', source: 'terminal-protocol' })
+      }
+      return result
+    }
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release()
+      expect(await sent).toBeNull()
+      expect(observed).toBe(true)
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[1;1R', '\x1b[I', 'ORIGINAL_BODY', '\r'])
+    } finally { await f.close() }
+  })
+
+  it('retains human cancellation across qualification handoff even when the raw input is not applied', async () => {
+    const f = await fixture()
+    f.finalVerify(async () => { await new Promise<void>(() => {}) })
+    const owner = f.client as any
+    const observe = owner.observeAgentInputPreparation.bind(owner)
+    const originalInput = f.owner.kernel.input as (id: string, op: { data: string }) => Promise<unknown>
+    let humanAttempts = 0
+    f.owner.kernel.input = async (id: string, op: { data: string }) => {
+      if (op.data === 'HUMAN_HANDOFF') {
+        humanAttempts++
+        throw new AgentMuxError('raw input was not applied', 'CTXMUX_input_cursor_mismatch', 'not_applied',
+          { disposition: 'not_applied', confirmedInputBytes: 0 })
+      }
+      return await originalInput(id, op)
+    }
+    owner.observeAgentInputPreparation = async (...args: unknown[]) => {
+      const result = await observe(...args)
+      await expect(f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+        data: 'HUMAN_HANDOFF', source: 'user' })).rejects.toMatchObject({ code: 'CTXMUX_input_cursor_mismatch' })
+      return result
+    }
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release()
+      expect(await inputAckWithin(sent)).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED',
+        controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(humanAttempts).toBe(1)
+      expect(f.writes).toEqual([])
+      expect((await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'prepare')?.promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('retains human cancellation while checking the owner after a preclaim protocol yield', async () => {
+    const f = await fixture()
+    const owner = f.client as any
+    const refresh = owner.registry.refresh.bind(owner.registry)
+    const originalInput = f.owner.kernel.input as (id: string, op: { data: string }) => Promise<unknown>
+    let entered!: () => void, acknowledged!: () => void
+    const verifying = new Promise<void>(done => { entered = done })
+    const ack = new Promise<void>(done => { acknowledged = done })
+    let protocolStarted = false, humanAttempts = 0, ownerCheck = false
+    f.finalVerify(async count => { if (count === 1) { entered(); await ack } })
+    f.owner.kernel.input = async (id: string, op: { data: string }) => {
+      if (op.data === 'HUMAN_AFTER_YIELD') {
+        humanAttempts++
+        throw new AgentMuxError('raw input was not applied', 'CTXMUX_input_cursor_mismatch', 'not_applied',
+          { disposition: 'not_applied', confirmedInputBytes: 0 })
+      }
+      const result = await originalInput(id, op)
+      if (op.data === '\x1b[1;1R') acknowledged()
+      return result
+    }
+    owner.registry.refresh = async (...args: unknown[]) => {
+      const current = await refresh(...args)
+      if (protocolStarted && !ownerCheck) {
+        ownerCheck = true
+        expect(current.promptCompletionAdmission).toBeUndefined()
+        await expect(f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+          data: 'HUMAN_AFTER_YIELD', source: 'user' })).rejects.toMatchObject({ code: 'CTXMUX_input_cursor_mismatch' })
+      }
+      return current
+    }
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release(); await verifying; protocolStarted = true
+      await inputAckWithin(f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+        data: '\x1b[1;1R', source: 'terminal-protocol' }))
+      expect(await sent).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED',
+        controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(ownerCheck).toBe(true); expect(humanAttempts).toBe(1)
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[1;1R'])
+      expect((await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'prepare')?.promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it.each(['human', 'source', 'pid', 'cursor', 'final', 'partial', 'unacknowledged'])('keeps the original body absent after preclaim protocol ACK with %s change', async fault => {
+    const f = await fixture()
+    let entered!: () => void, acknowledge!: () => void
+    const verifying = new Promise<void>(done => { entered = done })
+    const ack = new Promise<void>(done => { acknowledge = done })
+    f.finalVerify(async count => { if (count === 1) { entered(); await ack } })
+    const input = f.owner.kernel.input as (id: string, op: { operationId: string; expectedByte: number; data: string }) => Promise<any>
+    f.owner.kernel.input = async (id: string, op: { operationId: string; expectedByte: number; data: string }) => {
+      const result = await input(id, op)
+      if (op.data === '\x1b[?1;2c') {
+        if (['source', 'pid', 'cursor', 'final'].includes(fault)) f.change(fault)
+        acknowledge()
+        if (fault === 'partial') return { ...result, appliedByteRange: { ...result.appliedByteRange, endByte: result.appliedByteRange.endByte - 1 } }
+        if (fault === 'unacknowledged') throw new AgentMuxError('protocol ACK unknown', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown')
+      }
+      return result
+    }
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release(); await verifying
+      const protocol = f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' }).catch(() => {})
+      // This human input is queued while the original protocol input is still pending.
+      const human = fault === 'human' ? f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: 'HUMAN_BEFORE_CLAIM', source: 'user' }) : undefined
+      await protocol; await human
+      expect(await sent).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(f.writes.some(write => ['ORIGINAL_BODY', '\x1b[I', '\r'].includes(write.data))).toBe(false)
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('human input cancels an uncooperative final preclaim verifier and obtains its ACK immediately', async () => {
+    const f = await fixture()
+    let enter!: () => void
+    const entered = new Promise<void>(done => { enter = done })
+    f.finalVerify(async () => { enter(); await new Promise<void>(() => {}) })
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release(); await entered
+      await inputAckWithin(f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: 'HUMAN_FINAL_READ', source: 'user' }))
+      expect(await sent).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(f.writes.map(write => write.data)).toEqual(['HUMAN_FINAL_READ'])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+    } finally { await f.close() }
+  })
+
+  it('rechecks the original ACK fence when protocol arrives at the last status await before firstclaim', async () => {
+    const f = await fixture()
+    f.finalStatusFault('protocol')
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release()
+      expect(await sent).toBeNull()
+      await f.rawDuringFinalStatus()
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[1;1R', '\x1b[I', 'ORIGINAL_BODY', '\r'])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission?.frameRefresh?.inputByteRange).toEqual({ startByte: 6, endByte: 9 })
+    } finally { await f.close() }
+  })
+
+  it('keeps a claim already entering CAS frozen when protocol arrives before its persistence returns', async () => {
+    const f = await fixture()
+    const cas = f.store.compareAndSwap.bind(f.store)
+    let protocol: Promise<unknown> | undefined, frozen: unknown
+    f.store.compareAndSwap = async (expected, next) => {
+      if (!protocol && next?.agentSessionId === 'prepare' && next.promptCompletionAdmission?.frameRefresh) {
+        frozen = structuredClone(next.promptCompletionAdmission)
+        protocol = f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: '\x1b[?1;2c', source: 'terminal-protocol' })
+      }
+      return await cas(expected, next)
+    }
+    try {
+      const sent = f.submit().then(() => null, error => error)
+      await f.entered; f.release()
+      expect(await sent).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED' })
+      await protocol
+      expect(frozen).toBeDefined()
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toEqual(frozen)
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[?1;2c'])
+      expect(f.preparation).toHaveBeenCalledTimes(1)
+    } finally { await f.close() }
+  })
+
   it('releases a post-claim complete-frame observer for a protocol ACK without changing its frozen claim', async () => {
     const f = await fixture()
     let waiting!: () => void
@@ -119,8 +344,8 @@ describe('original immediate transport preparation', () => {
       const frozen = structuredClone(f.client.agentSession('prepare').promptCompletionAdmission)
       expect(frozen?.frameRefresh?.acknowledged).toBe(true)
       expect(frozen?.frameRefresh?.inputByteRange).toEqual({ startByte: 0, endByte: 3 })
-      const ack = await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
-        data: '\x1b[?1;2c', source: 'terminal-protocol' })
+      const ack = await inputAckWithin(f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
+        data: '\x1b[?1;2c', source: 'terminal-protocol' }))
       expect(ack.appliedByteRange).toEqual({ startByte: 3, endByte: 10 })
       const error = await submitted
       expect(error).toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })

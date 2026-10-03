@@ -3972,8 +3972,8 @@ export class AgentMuxClient {
     }
     const provider = this.providers.get(session.providerId)
     const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
-    const renderObservation = new AbortController()
     const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
+    let releasePreparationObservation: ((next?: AbortController) => void) | undefined
     let preparationStarted = false
     let transportQualification: AgentPromptTransportQualification | undefined
     try {
@@ -3982,35 +3982,60 @@ export class AgentMuxClient {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
           () => { preparationStarted = true }, protocolInput)
-      }, input.signal, protocolInput) : undefined
+      }, input.signal, protocolInput, release => { releasePreparationObservation = release }) : undefined
     } catch (error) {
+      releasePreparationObservation?.()
       if (preparationStarted) throw promptPreparationFailure(error)
       throw error
     }
-    const delivered = await this.serializeAgentInput(session, async (current, run) => {
-      let plan = ordinaryPlan
-      if (questionReply) {
-        let terminalScreen: AgentTerminalScreenSnapshot | undefined
-        await this.screenEvidence.wait(current, run.latestOutputBytes, false, screen => {
-          terminalScreen = screen.snapshot(); return true
-        }, { timeoutMs: SESSION_HISTORY_TIMEOUT_MS, timeoutMessage: 'Question input surface is unconfirmed; ordinary terminal input remains available.',
-          terminalMessage: 'The original question Run ended.', requireCompleteFrame: true,
-          ...(input.signal ? { signal: input.signal } : {}) })
-        plan = provider.planPromptInput(outbound, { intent: 'question-reply', ...(terminalScreen ? { terminalScreen } : {}) })
+    try {
+      if (transportQualification) protocolInput.preclaim = { interruption: new Error('Read-only input preparation yielded for its terminal protocol ACK.'), claimStarted: false }
+      let delivered: AgentPromptMessageContent | undefined
+      for (;;) {
+        const renderObservation = new AbortController()
+        try {
+          delivered = await this.serializeAgentInput(session, async (current, run) => {
+            let plan = ordinaryPlan
+            if (questionReply) {
+              let terminalScreen: AgentTerminalScreenSnapshot | undefined
+              await this.screenEvidence.wait(current, run.latestOutputBytes, false, screen => {
+                terminalScreen = screen.snapshot(); return true
+              }, { timeoutMs: SESSION_HISTORY_TIMEOUT_MS, timeoutMessage: 'Question input surface is unconfirmed; ordinary terminal input remains available.',
+                terminalMessage: 'The original question Run ended.', requireCompleteFrame: true,
+                ...(input.signal ? { signal: input.signal } : {}) })
+              plan = provider.planPromptInput(outbound, { intent: 'question-reply', ...(terminalScreen ? { terminalScreen } : {}) })
+            }
+            const savedMessage = input.expectedFutureIntent ? current.futurePromptIntents?.[input.expectedFutureIntent.intentId]?.message : undefined
+            // Timer transport is not the producer. Inherit only the original saved
+            // authenticated source; retain this request's exact content for admission.
+            const admittedMessage = input.expectedFutureIntent ? {
+              ...(message.userContent ? { userContent: message.userContent } : {}), ...(message.systemContext ? { systemContext: message.systemContext } : {}),
+              ...(savedMessage?.authorAgentSessionId ? { authorAgentSessionId: savedMessage.authorAgentSessionId } : {}),
+              ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
+            } : message
+            return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
+              input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification)
+          }, renderObservation, transportQualification ? protocolInput : undefined, releasePreparationObservation,
+            release => { releasePreparationObservation = release })
+          break
+        } catch (error) {
+          const preclaim = protocolInput.preclaim
+          if (!transportQualification || !preclaim || preclaim.claimStarted || error !== preclaim.interruption ||
+              renderObservation.signal.reason !== preclaim.interruption) throw error
+          if (input.signal?.aborted || Date.now() >= transportQualification.deadline) throw promptPreparationFailure(input.signal?.reason ?? error)
+          const current = await this.registry.refresh(session.agentSessionId, session.run)
+          if (!sameRun(current.run, session.run) || current.promptCompletionAdmission?.submissionId === operationId ||
+              current.terminalPromptSubmission?.submissionId === operationId ||
+              (current.promptCompletionAdmission === undefined ? null : current.promptCompletionAdmission.submissionId) !== condition.afterSubmissionId) {
+            throw promptPreparationFailure(new AgentMuxError('The original request changed while its protocol ACK was pending.', 'AGENT_PROMPT_INPUT_UNCONFIRMED'))
+          }
+          // Queue behind that protocol operation, retaining this invocation's original
+          // ACK boundary and deadline. No qualification or message is recreated.
+        }
       }
-      const savedMessage = input.expectedFutureIntent ? current.futurePromptIntents?.[input.expectedFutureIntent.intentId]?.message : undefined
-      // Timer transport is not the producer. Inherit only the original saved
-      // authenticated source; retain this request's exact content for admission.
-      const admittedMessage = input.expectedFutureIntent ? {
-        ...(message.userContent ? { userContent: message.userContent } : {}), ...(message.systemContext ? { systemContext: message.systemContext } : {}),
-        ...(savedMessage?.authorAgentSessionId ? { authorAgentSessionId: savedMessage.authorAgentSessionId } : {}),
-        ...(savedMessage?.sourceDevice ? { sourceDevice: savedMessage.sourceDevice } : {})
-      } : message
-      return await this.promptSubmission.submitInputPlan(current, run, operationId, outbound, plan, condition,
-        input.expectedCompletionId, input.signal, input.allowUncertainTurn, renderObservation.signal, input.expectedInputByte, admittedMessage, input.execution, input.expectedFutureIntent, assertSession, transportQualification)
-    }, renderObservation)
-    if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
-    await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
+      if (delivered === undefined) throw new AgentMuxError('Original message source facts are unconfirmed; the Agent and original Input are kept.', 'AGENT_PROMPT_INPUT_UNCONFIRMED')
+      await this.recordPromptMessageAfterSideEffect(session, operationId, 'Prompt', delivered)
+    } finally { releasePreparationObservation?.() }
   }
 
   /** Persist the original creation transport, without turning missing receipts into another Input. */
@@ -5709,10 +5734,20 @@ export class AgentMuxClient {
   private cancelPromptRenderObservation(session: AgentMuxAgentSession, preserveProtocolPreparation = false): void {
     const lane = this.agentInputTails.get(session.agentSessionId)
     for (const observation of lane?.renderObservations ?? []) {
-      // Only fresh read-only qualification can account for this reply's ACK. Serialized
-      // render observers must release the byte lane so the terminal can answer its query.
-      if (sameRun(observation.run, session.run) &&
-          !(preserveProtocolPreparation && observation.protocolInput)) observation.controller.abort()
+      if (!sameRun(observation.run, session.run)) continue
+      if (!preserveProtocolPreparation && observation.protocolInput) {
+        observation.protocolInput.cancelled ??= new DOMException('Human input cancelled the original preparation.', 'AbortError')
+      }
+      if (preserveProtocolPreparation && observation.protocolInput) {
+        const preclaim = observation.protocolInput.preclaim
+        if (!preclaim) continue // Initial qualification is outside the byte lane.
+        if (!preclaim.claimStarted) {
+          observation.controller.abort(preclaim.interruption)
+          continue
+        }
+      }
+      // Claimed render waits must release the lane for native query replies.
+      observation.controller.abort()
     }
   }
 
@@ -5728,7 +5763,8 @@ export class AgentMuxClient {
   /** Read-only qualification shares cancellation with input observers, but never occupies the byte lane. */
   private async observeAgentInputPreparation<T>(session: AgentMuxAgentSession, timeoutMs: number,
     read: (signal: AbortSignal) => Promise<T>, requestedSignal?: AbortSignal,
-    protocolInput?: AgentPromptProtocolInputBoundary): Promise<T> {
+    protocolInput?: AgentPromptProtocolInputBoundary,
+    retainUntilQueued?: (release: (next?: AbortController) => void) => void): Promise<T> {
     const lane = this.agentInputTails.get(session.agentSessionId) ?? {
       tail: Promise.resolve(), renderObservations: new Set<AgentInputObservation>() }
     const controller = new AbortController()
@@ -5745,11 +5781,8 @@ export class AgentMuxClient {
       controller.signal.addEventListener('abort', abort, { once: true })
       if (controller.signal.aborted) abort()
     })
-    try { return await Promise.race([read(controller.signal), cancelled]) }
-    finally {
-      clearTimeout(timeout)
-      controller.signal.removeEventListener('abort', abort)
-      requestedSignal?.removeEventListener('abort', cancelRequested)
+    const release = (next?: AbortController) => {
+      if (next && controller.signal.aborted) next.abort(controller.signal.reason)
       lane.renderObservations.delete(observation)
       if (this.agentInputTails.get(session.agentSessionId) === lane && lane.renderObservations.size === 0) {
         const tail = lane.tail
@@ -5758,12 +5791,26 @@ export class AgentMuxClient {
         })
       }
     }
+    let retained = false
+    try {
+      const value = await Promise.race([read(controller.signal), cancelled])
+      if (retainUntilQueued) { retainUntilQueued(release); retained = true }
+      return value
+    } finally {
+      clearTimeout(timeout)
+      controller.signal.removeEventListener('abort', abort)
+      requestedSignal?.removeEventListener('abort', cancelRequested)
+      if (!retained) release()
+    }
   }
 
   private async serializeAgentInput<T>(
     requestedSession: AgentMuxAgentSession,
     operation: (session: AgentMuxAgentSession, run: CtxmuxAdapterRun) => Promise<T>,
-    renderObservation?: AbortController
+    renderObservation?: AbortController,
+    protocolInput?: AgentPromptProtocolInputBoundary,
+    onQueued?: (next?: AbortController) => void,
+    retainPreclaimYield?: (release: (next?: AbortController) => void) => void
   ): Promise<T> {
     const agentSessionId = requestedSession.agentSessionId
     const lane = this.agentInputTails.get(agentSessionId) ?? {
@@ -5771,10 +5818,13 @@ export class AgentMuxClient {
       renderObservations: new Set<AgentInputObservation>()
     }
     const observation = renderObservation ? {
-      run: { ...requestedSession.run }, controller: renderObservation
+      run: { ...requestedSession.run }, controller: renderObservation,
+      ...(protocolInput ? { protocolInput } : {})
     } : undefined
     // Register before queueing: raw input can arrive while this prompt awaits its predecessor.
     if (observation) lane.renderObservations.add(observation)
+    // Transfer the original ACK observation synchronously, without an unobserved gap.
+    onQueued?.(renderObservation)
     const previous = lane.tail
     let result!: T
     const queued = previous.catch(() => {}).then(async () => {
@@ -5801,7 +5851,21 @@ export class AgentMuxClient {
       this.agentInputCursors.delete(agentSessionId)
       throw error
     } finally {
-      if (observation) lane.renderObservations.delete(observation)
+      const preclaim = protocolInput?.preclaim
+      const retained = observation && retainPreclaimYield && preclaim && !preclaim.claimStarted &&
+        renderObservation?.signal.reason === preclaim.interruption
+      if (retained) {
+        retainPreclaimYield(next => {
+          if (next && protocolInput?.cancelled) next.abort(protocolInput.cancelled)
+          lane.renderObservations.delete(observation)
+          if (this.agentInputTails.get(agentSessionId) === lane && lane.renderObservations.size === 0) {
+            const currentTail = lane.tail
+            void currentTail.finally(() => {
+              if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === currentTail && lane.renderObservations.size === 0) this.agentInputTails.delete(agentSessionId)
+            })
+          }
+        })
+      } else if (observation) lane.renderObservations.delete(observation)
       if (this.agentInputTails.get(agentSessionId) === lane && lane.tail === tail && lane.renderObservations.size === 0) {
         this.agentInputTails.delete(agentSessionId)
       }
