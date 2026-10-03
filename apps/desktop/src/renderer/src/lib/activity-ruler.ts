@@ -68,6 +68,23 @@ export type RulerBand = {
   endOrdinal: number
 }
 
+export type RulerRangeReadout =
+  | { axis: 'temporal'; from: string; to: string; elapsed: string | null; count: number }
+  | { axis: 'ordinal'; from: number; to: number; total: number; count: number }
+
+/** Endpoints and loaded records in the interval, not a physical visibility count. */
+export function describeRulerRange(scale: RulerScale, band: RulerBand): RulerRangeReadout {
+  const from = scale.readoutOf(band.startOrdinal - 1)
+  const to = scale.readoutOf(band.endOrdinal - 1)
+  const count = band.endOrdinal - band.startOrdinal + 1
+  if (from.axis === 'temporal' && to.axis === 'temporal') {
+    const text = describeActivityRecordTime(from.at, to.at, scale.origin)
+    return { axis: 'temporal', from: text.from, to: text.to,
+      elapsed: to.at > from.at ? formatDuration(to.at - from.at) : null, count }
+  }
+  return { axis: 'ordinal', from: band.startOrdinal, to: band.endOrdinal, total: scale.count, count }
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value))
 }
