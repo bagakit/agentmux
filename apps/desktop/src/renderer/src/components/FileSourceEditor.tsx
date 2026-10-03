@@ -39,6 +39,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     regionCaretFocusTargets(state.regionCaretFocus, surface.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore(state => state.clearRegionCaretFocus)
   const wordWrap = useAppStore(state => state.editorWordWrap)
+  const minimap = useAppStore(state => state.editorMinimap)
   const monacoTheme = useMonacoTheme()
   const typography = useEditorTypography()
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
@@ -247,7 +248,7 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     }}
     theme={monacoTheme}
     options={{
-      minimap: { enabled: false },
+      minimap: { enabled: minimap },
       fontFamily: '"SFMono-Regular", "Cascadia Code", monospace',
       fontSize: typography.fontSize,
       lineHeight: typography.lineHeight,

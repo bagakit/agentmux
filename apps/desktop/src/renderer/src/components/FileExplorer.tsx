@@ -20,12 +20,17 @@ import {
 import {
   ChevronDown,
   ChevronRight,
+  Check,
+  ChevronsDownUp,
+  Eye,
   FilePlus2,
   Folder,
   FolderOpen,
   FolderPlus,
   GripVertical,
+  GitBranch,
   LoaderCircle,
+  MoreHorizontal,
   RefreshCw,
   Search,
   TriangleAlert,
@@ -42,6 +47,8 @@ import { documentKey } from '../lib/workbench-tabs'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { ConfirmationDialog } from './ConfirmationDialog'
+import * as DropdownMenu from './HoverDropdownMenu'
+import { projectFileExplorerRows } from './file-tree/file-explorer-visibility'
 import {
   isNavigationKey,
   resolveFileExplorerNavigationTarget
@@ -446,6 +453,10 @@ export function FileExplorer({
     workspaceId ? state.fileExplorerStates[workspaceId] : undefined
   )) ?? EMPTY_EXPLORER_STATE
   const updateExplorerState = useAppStore((state) => state.updateFileExplorerState)
+  const showHidden = useAppStore(state => state.explorerShowHidden)
+  const showIgnored = useAppStore(state => state.explorerShowIgnored)
+  const toggleShowHidden = useAppStore(state => state.toggleExplorerShowHidden)
+  const toggleShowIgnored = useAppStore(state => state.toggleExplorerShowIgnored)
   const [query, setQuery] = useState('')
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null)
   const editIntent = useRef(0)
@@ -461,6 +472,7 @@ export function FileExplorer({
   const [deleting, setDeleting] = useState(false)
   const [relinking, setRelinking] = useState(false)
   const [activeDrag, setActiveDrag] = useState<FileExplorerDragData | null>(null)
+  const dragVisibilityRef = useRef<{ showHidden: boolean; showIgnored: boolean; query: string } | null>(null)
   const activeDragScopeRef = useRef<{ workspaceId: string | null; rootPath: string } | null>(null)
   const [scrollTarget, setScrollTarget] = useState<{
     path: string
@@ -520,6 +532,7 @@ export function FileExplorer({
   useEffect(() => {
     clearHoverExpand()
     setActiveDrag(null)
+    dragVisibilityRef.current = null
     activeDragScopeRef.current = null
     setDeleteRequest(null)
     lastRevealedPathRef.current = null
@@ -596,19 +609,18 @@ export function FileExplorer({
     () => flattenFileTree(tree.rootCache?.children ?? [], tree.dirCache, expanded),
     [expanded, tree.dirCache, tree.rootCache?.children]
   )
-  const visibleRows = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
-    return normalized
-      ? rows.filter((node) => node.name.toLowerCase().includes(normalized) || node.path.toLowerCase().includes(normalized))
-      : rows
-  }, [query, rows])
+  const editPath = inlineEdit?.kind === 'rename' ? inlineEdit.node.path : inlineEdit?.parentPath
+  const retainedPaths = useMemo(() => [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path],
+    [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path])
+  // Visibility changes in another consumer wait for the original pointer move to settle.
+  const dragVisibility = activeDrag ? dragVisibilityRef.current : null
+  const visibleRows = useMemo(() => projectFileExplorerRows(rows, dragVisibility?.showHidden ?? showHidden,
+    dragVisibility?.showIgnored ?? showIgnored, dragVisibility?.query ?? query, retainedPaths),
+  [dragVisibility, query, retainedPaths, rows, showHidden, showIgnored])
   const rowProjection = useMemo(
     () => createFileExplorerRowProjection(visibleRows),
     [visibleRows]
   )
-  const editPath = inlineEdit?.kind === 'rename' ? inlineEdit.node.path : inlineEdit?.parentPath
-  const retainedPaths = useMemo(() => [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path],
-    [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path])
   const viewport = useFileTreeViewport(rowProjection, treeRootRef, retainedPaths,
     `${workspaceId}\0${workspacePath}\0${rootPath}`)
   useEffect(() => {
@@ -674,6 +686,7 @@ export function FileExplorer({
     const data = event.active.data.current as FileExplorerDragData | undefined
     if (data?.kind === 'file-explorer-path' && fileExplorerContains(rootPath, data.path)) {
       activeDragScopeRef.current = { workspaceId, rootPath }
+      dragVisibilityRef.current = { showHidden, showIgnored, query }
       setSelection(createSingleFileExplorerSelection(data.path))
       setActiveDrag(data)
     }
@@ -712,6 +725,7 @@ export function FileExplorer({
     activeDragScopeRef.current = null
     clearHoverExpand()
     setActiveDrag(null)
+    dragVisibilityRef.current = null
     if (drag?.kind !== 'file-explorer-path' || drop?.kind !== 'file-explorer-directory' || scope?.workspaceId !== workspaceId || scope.rootPath !== rootPath) return
     try {
       await movePathToDirectory(drag.path, drop.directoryPath)
@@ -729,6 +743,26 @@ export function FileExplorer({
       else next.add(node.path)
       return next
     })
+  }
+
+  function collapseAll(): void {
+    fileRevealRef.current?.abort()
+    clearHoverExpand()
+    lastRevealedPathRef.current = activePath ?? null
+    setScrollTarget(null)
+    const retained = new Set<string>()
+    // An active edit/menu/move must keep its original row and parent available.
+    for (const path of [editPath, menuPath, activeDrag?.path]) {
+      if (path === null || path === undefined) continue
+      for (const ancestor of getRevealAncestorPaths(path)) retained.add(ancestor)
+      if (path === editPath && inlineEdit?.kind !== 'rename') retained.add(path)
+    }
+    if (activeDrag) for (const path of expanded) retained.add(path)
+    if (focusedPath && getRevealAncestorPaths(focusedPath).some(path => expanded.has(path) && !retained.has(path))) {
+      treeRootRef.current?.focus({ preventScroll: true })
+      setFocusedPath(null)
+    }
+    setExpanded(current => new Set([...current].filter(path => retained.has(path))))
   }
 
   function beginCreate(kind: 'create-file' | 'create-directory', targetParent = createParent): void {
@@ -1003,6 +1037,13 @@ export function FileExplorer({
     <button onClick={() => void refreshExplorer()} title="Refresh explorer">
       {tree.rootCache?.loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
     </button>
+    <button onClick={collapseAll} title="Collapse all folders" aria-label="Collapse all folders"><ChevronsDownUp size={13} /></button>
+    <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" aria-label="Explorer options" title="Explorer options"><MoreHorizontal size={13} /></button></DropdownMenu.Trigger>
+      <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showHidden} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowHidden()}><Eye size={13} /><span>Show hidden files</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showIgnored} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowIgnored()}><GitBranch size={13} /><span>Show Git ignored files</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+      </DropdownMenu.Content></DropdownMenu.Portal>
+    </DropdownMenu.Root>
   </div>
   return (
     <section className={`file-explorer ${toolbarTarget !== undefined ? 'file-explorer--shared-header' : ''}`} data-file-workspace={workspaceId} data-file-root={rootPath}>
@@ -1020,7 +1061,7 @@ export function FileExplorer({
         autoScroll
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
-        onDragCancel={() => { clearHoverExpand(); setActiveDrag(null) }}
+        onDragCancel={() => { clearHoverExpand(); setActiveDrag(null); dragVisibilityRef.current = null }}
         onDragEnd={(event) => void handleDragEnd(event)}
       >
         {new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
@@ -1151,7 +1192,7 @@ export function FileExplorer({
               </div>
             </div>
           ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
-            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
+            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rows.length ? 'No visible files' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : rows.length ? 'Change file visibility in Explorer options.' : 'Create a file or folder to begin.'}</span></div>
           ) : null}
         </div>
         <DragOverlay dropAnimation={null}>
