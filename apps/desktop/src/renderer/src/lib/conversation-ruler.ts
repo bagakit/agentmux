@@ -52,7 +52,8 @@ export function conversationRulerWindow(records: readonly RulerRecord[], window:
     .sort((a, b) => a.recordedAt! - b.recordedAt!)
   const scale = createRulerScale(items.map(r => r.recordedAt), 1)
   return { items, untimed: known.length ? untimed : [], scale,
-    recentFraction: scale.axis === 'temporal' ? Math.max(0, Math.min(1, (latest - RULER_WINDOWS['1h'] - scale.origin) / scale.span)) : 0 }
+    recentFraction: scale.axis === 'temporal' ? (latest - RULER_WINDOWS['1h'] - scale.origin) / scale.span
+      : known.length === 0 ? null : items[0]!.recordedAt! < latest - RULER_WINDOWS['1h'] ? Infinity : 0 }
 }
 
 /** At most 48 displayed bins; count is recorded density, never execution time. */
