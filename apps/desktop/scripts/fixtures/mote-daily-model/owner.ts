@@ -26,7 +26,7 @@ const privateScope = 'This is a bounded private verification: use only this Mote
 
 /** Private driver only: all business and Agent operations use the original Main/App owners. */
 export async function runModelOwner(input: { html: string; preload: string; root: string; evidence: string;
-  command: string; codexArgs: string[]; cli: string; hook: string; decisionFile: string }): Promise<boolean> {
+  command: string; codexArgs: string[]; nativeReadArgs: string[]; cli: string; hook: string; decisionFile: string }): Promise<boolean> {
   assert.equal(process.env.AGENTMUX_RUNTIME_DIRECTORY, join(input.root, 'runtime'), 'Only the original explicit private Runtime may be observed or stopped')
   assert.ok(process.env.CODEX_HOME?.startsWith(input.root + '/'), 'Only an authorized private auth scope may enter Main')
   const result: any = { schema: 'agentmux.mote.real-model-owner.v1', taskId: 'T-006', passed: false,
@@ -166,7 +166,7 @@ export async function runModelOwner(input: { html: string; preload: string; root
     do {
       const page = await host!.client.sessionHistoryPage(id, { limit: 100, ...(cursor ? { cursor } : {}),
         ...(!cursor ? { refreshNativeSource: true, requireCurrentSource: true } : {}),
-        commandOverride: input.command, args: input.codexArgs, ...(signal ? { signal } : {}) })
+        commandOverride: input.command, args: input.nativeReadArgs, ...(signal ? { signal } : {}) })
       if (pages.length) assert.deepEqual(page.source, pages[0]!.source, 'Original history source changed between pages')
       assert.equal(page.agentSessionId, id); pages.push(page); cursor = page.nextCursor
       assert.ok(pages.length <= 10, 'Bounded synthetic native history must not walk unrelated history')
