@@ -1,6 +1,6 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act, createElement } from 'react'
+import { act, createElement, useContext } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { webcrypto } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -15,7 +15,8 @@ import { directoryIdentity, homeZoneId, topicSpatialAddress, workspaceZoneId } f
 import { scratchTopicsScope, scratchTopicKind, scratchMoteTopics } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { workbenchObjectLayout, workbenchSelectionCatalog, restoreWorkbenchSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { useWorkbenchObjectLayout } from '../src/renderer/src/hooks/useWorkbenchObjectLayout'
-import { useMoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
+import { MoteWorkfaceContext, useMoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
+import { MoteWorkface } from '../src/renderer/src/components/MoteWorkface'
 import { dispatchWorkbenchCommand } from '../src/renderer/src/lib/workbench-shortcuts'
 
 const initial = useAppStore.getState()
@@ -100,7 +101,65 @@ async function mount(workspaceId = SCRATCH_WORKSPACE_ID) {
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
   await act(async () => root!.render(createElement(Probe, { workspaceId })))
 }
+function LocalTabOutlet() {
+  const context = useContext(MoteWorkfaceContext)
+  return createElement('button', { onClick: () => context!.selectTab('project-tab', 'project-group') }, 'Select original Tab')
+}
+async function mountMoteOutlet(onTabSelect?: (tabId: string, groupId?: string) => void) {
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+  await act(async () => root!.render(createElement(MoteWorkface, { workspaceId: 'project',
+    ...(onTabSelect ? { floating: true, onTabSelect } : {}), children: createElement(LocalTabOutlet) })))
+}
+async function selectForeignMote() {
+  await useAppStore.getState().openScratchTopic(mote.id)
+  useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings, [projectZone]: {
+    workspaceId: 'project', spaceId: folderSpace, relations: { [moteAddress.spaceId]: true } } } }))
+  useAppStore.getState().activateTab('project', 'project-group', 'project-tab')
+}
 describe('actual Topic/Mote navigation and Renderer membership owners', () => {
+  it('the mounted Mote Tab outlet keeps its object when the original foreign binding becomes unavailable', async () => {
+    await selectForeignMote()
+    await mountMoteOutlet()
+    const before = useAppStore.getState()
+    await act(async () => useAppStore.setState(state => ({ spaceZoneBindings: { ...state.spaceZoneBindings,
+      [projectZone]: { workspaceId: 'project', spaceId: folderSpace, relations: { [moteAddress.spaceId]: false } } } })))
+    await act(async () => host!.querySelector('button')!.click())
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().sessions).toBe(before.sessions)
+    expect(useAppStore.getState().error).toMatch(/not confirmed/)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+    // Explicit navigation to the still-valid original Folder remains available.
+    useAppStore.getState().activateTab('project', 'project-group', 'project-tab')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: folderSpace, zoneId: projectZone, topicId: null })
+  })
+  it('a local Tab request cannot replace a later selection with its original object', async () => {
+    await selectForeignMote()
+    await useAppStore.getState().openScratchTopic(first.id)
+    const before = useAppStore.getState()
+    useAppStore.getState().activateTab('project', 'project-group', 'project-tab', 'local')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(useAppStore.getState().error).toMatch(/not confirmed/)
+  })
+  it('valid local Tab requests use their exact Group and keep the original Mote', async () => {
+    await useAppStore.getState().openScratchTopic(mote.id)
+    useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'scratch-group', 'mote-chat', 'local')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ ...moteAddress, topicId: mote.id,
+      workspaceId: SCRATCH_WORKSPACE_ID, groupId: 'scratch-group', tabId: 'mote-chat', regionId: 'region:mote-chat' })
+    expect(displayed().sort()).toEqual(['mote-agent', 'mote-chat'])
+  })
+  it('the mounted floating Tab outlet delegates to its original projection callback without navigating Space', async () => {
+    await selectForeignMote()
+    const before = useAppStore.getState(), onTabSelect = vi.fn()
+    await mountMoteOutlet(onTabSelect)
+    await act(async () => host!.querySelector('button')!.click())
+    expect(onTabSelect).toHaveBeenCalledExactlyOnceWith('project-tab', 'project-group')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+  })
   it('tree entry establishes the exact Mote and local Group/Region/Tab/shortcut clicks retain it without free or foreign content', async () => {
     const before = useAppStore.getState()
     await before.openScratchTopic(mote.id)
