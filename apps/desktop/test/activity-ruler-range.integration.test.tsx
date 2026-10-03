@@ -165,3 +165,40 @@ it('adds no participant host without an actual presentation capability', async (
   expect(container.querySelector('.activity-ruler__participants')).toBeNull()
   expect(track().getAttribute('role')).toBe('slider')
 })
+
+// Native disclosure itself is exercised in the compiled browser; happy-dom has no popover shim.
+it('gives the guide a real invoker and closes the original passive readout without changing records', async () => {
+  await view(); await move(100)
+  expect(popup()?.dataset.body).toBe('range')
+  const button = container.querySelector<HTMLButtonElement>('button[aria-label="Timeline guide"]')!
+  expect(button).toBeInstanceOf(HTMLButtonElement); expect(button.tabIndex).toBe(0)
+  const target = button.getAttribute('popovertarget')!
+  const guide = document.getElementById(target)!
+  expect(guide).not.toBeNull(); expect(guide.getAttribute('popover')).toBe('auto')
+  expect(guide.getAttribute('role')).toBe('dialog')
+  expect(document.getElementById(guide.getAttribute('aria-labelledby')!)?.textContent).toBe('Timeline guide')
+  expect(guide.textContent).toContain('Unmarked time is unknown')
+  expect(guide.querySelector('[data-key="range"]')?.getAttribute('data-axis')).toBe(scale().axis)
+  const body = container.querySelector('#original-body'), draft = container.querySelector('textarea')!
+  await act(async () => button.click())
+  expect(popup()).toBeNull(); expect(container.querySelector('#original-body')).toBe(body)
+  expect(container.querySelector('textarea')).toBe(draft); expect(draft.value).toBe('Original draft')
+  expect(select).not.toHaveBeenCalled()
+})
+it('keeps distinct native targets and anchors when two actual rulers are mounted', async () => {
+  const current = scale()
+  await render(<><Ruler items={records()} scale={current} band={null} selectedIndex={null} onSelect={select} />
+    <Ruler items={records()} scale={current} band={null} selectedIndex={null} onSelect={select} /></>)
+  const buttons = [...container.querySelectorAll<HTMLButtonElement>('button[aria-label="Timeline guide"]')]
+  expect(buttons).toHaveLength(2)
+  const targets = buttons.map(button => button.getAttribute('popovertarget'))
+  expect(new Set(targets).size).toBe(2)
+  const anchors = buttons.map(button => button.style.getPropertyValue('anchor-name'))
+  expect(new Set(anchors).size).toBe(2)
+  buttons.forEach((button, index) => {
+    const guide = document.getElementById(targets[index]!)!
+    expect(guide).not.toBeNull()
+    expect(guide.style.getPropertyValue('position-anchor')).toBe(anchors[index])
+    expect(anchors[index]).toMatch(/^--[a-zA-Z0-9_-]+$/)
+  })
+})
