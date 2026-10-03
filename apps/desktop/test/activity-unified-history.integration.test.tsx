@@ -157,6 +157,21 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(recent!.messages.find(message => message.rawId === 'record-352')?.content).toContain('Input 352')
   await click('Current'); expect(container.textContent).toContain('Input 352'); expect(container.textContent).toContain('Independent Message Tool input')
  })
+ it('keeps the displayed original page and its actual cursor when legal public pages exceed the local reading memory budget together', async () => {
+  await writeFile(transcript, Array.from({ length: 90 }, (_, n) => JSON.stringify({ ...record(n), type: 'assistant',
+   message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Original process '.repeat(4400) }] } })).join('\n') + '\n')
+  const current = await client.sessionHistoryPage(sid, { limit: 30 })
+  expect(current.items).toHaveLength(30); expect(current.nextCursor).not.toBeNull()
+  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+   userMessageRead={{ loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} }}
+   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
+  const before = ids(), head = container.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
+  await click('Earlier')
+  expect(ids()).toEqual(before); expect(head.isConnected).toBe(true)
+  expect(container.querySelector('.activity-feed__read-notice')?.textContent).toContain('byte budget')
+  expect(requests).toHaveLength(2); expect(requests[0]!.cursor).toBe(current.nextCursor)
+  expect(requests.every(read => read.limit === 30)).toBe(true)
+ })
  it('keeps every original adjacent raw record when a real shared observation projection has clipped older process facts', async () => {
   await render(compose())
   for (let batch = 0; batch < 6; batch++) {
@@ -180,6 +195,34 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(ordinals[0]).toBeLessThan(rawIds[0]!)
   expect(recent!.nativeHistoryPage).toBe(original)
   await click('Current'); expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
+ })
+ it('enters an original earlier window from an unselected context-only anchor, while selected context and real raw anchors keep their protection', async () => {
+  await render(compose())
+  for (let batch = 0; batch < 6; batch++) {
+   const n = 360 + batch * 30
+   await appendFile(transcript, Array.from({ length: 30 }, (_, offset) => JSON.stringify({ ...record(n + offset), type: 'assistant',
+    message: { role: 'assistant', content: [{ type: 'thinking', thinking: `Observed process ${n + offset}` }] } })).join('\n') + '\n')
+   const reads = requests.length
+   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' }))
+   await vi.waitFor(async () => {
+    await act(async () => { await Promise.allSettled([...promises]) })
+    expect(requests.length).toBeGreaterThan(reads); expect(recent!.loading).toBe(false)
+    expect(recent!.nativeHistoryPage!.items.at(-1)!.id).toBe(`record-${n + 29}`)
+   }, { interval: 10, timeout: 2000 })
+  }
+  const original = recent!.nativeHistoryPage!, viewport = container.querySelector<HTMLElement>('.activity-feed')!
+  const old = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"]')!
+  expect(original.items[0]!.id).toBe('record-450'); expect(old).not.toBeNull(); expect(original.items.some(item => item.id === 'record-353')).toBe(false)
+  viewport.getBoundingClientRect = () => rect(0, 200); old.getBoundingClientRect = () => rect(10)
+  const text = [...old.querySelectorAll('p')].find(p => p.textContent === 'Reply 353')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
+  const before = ids(), count = requests.length; await click('Earlier')
+  expect(ids()).toEqual(before); expect(old.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
+  expect(recent!.nativeHistoryPage).toBe(original)
+  window.getSelection()!.removeAllRanges(); await click('Earlier')
+  expect(ids()).toEqual(Array.from({ length: 90 }, (_, n) => `record-${420 + n}`))
+  expect(requests.slice(count).every(read => read.cursor === original.nextCursor)).toBe(true)
+  expect(recent!.nativeHistoryPage).toBe(original); expect(recent!.nativeContextItems.some(item => item.id === 'record-353')).toBe(true)
  })
  it('preserves observed native input when no page exists or the actual public page has a different source', async () => {
   const originalPage = await client.sessionHistoryPage(sid)
