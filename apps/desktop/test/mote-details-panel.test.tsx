@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { FileReadParams, FileReadResult } from '@agentmux/core'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -17,6 +18,10 @@ vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => 
 let app: MoteAppFixture
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), notePath = rootPath + '/try-a-new-angle.md'
 const entry = (path: string) => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false })
+const material = (params: FileReadParams, content: string): FileReadResult => ({
+  resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path: rootPath + '/' + params.path },
+  result: { status: 'read', document: { path: rootPath + '/' + params.path, content, revision: 'sha256:' + 'c'.repeat(64) } }
+})
 beforeEach(() => {
   app = createMoteApp()
   useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
@@ -127,7 +132,7 @@ describe('Mote object content in the original secondary tools frame', () => {
   it('uses finite authoritative times for three stable recent titles and opens the identical Ideas path without reading Profile note bodies', async () => {
     const names = [['a-old.md', 10], ['z-new.md', 50], ['b-equal.md', 20], ['c-equal.md', 20], ['zero.md', 0], ['unknown.md', undefined], ['invalid.md', NaN]] as const
     vi.mocked(api.files.readDirectory).mockResolvedValue(names.map(([name, mtimeMs]) => ({ ...entry(rootPath + '/' + name), ...(mtimeMs === undefined ? {} : { mtimeMs }) })))
-    const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: 'Exact note ' + path, revision: 'original-note' } }))
+    const read = vi.spyOn(api.files, 'readPublic').mockImplementation(async params => material(params, 'Exact note ' + rootPath + '/' + params.path))
     await app.mount()
     const original = useAppStore.getState(), workbench = app.container.querySelector('.workspace-workbench')
     const recent = [...details().querySelectorAll<HTMLButtonElement>('.mote-details__recent .mote-details__note')]
@@ -136,7 +141,7 @@ describe('Mote object content in the original secondary tools frame', () => {
     expect(unknownTime).not.toBeNull(); expect(unknownTime!.textContent).toContain('not confirmed')
     await moteClick(recent[1]!)
     expect(details().querySelector('[role="tab"][aria-selected="true"]')?.textContent).toBe('Ideas')
-    expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, rootPath + '/b-equal.md')
+    expect(read).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: 'b-equal.md', expectedResource: { hostId: 'local', workspaceId: SCRATCH_WORKSPACE_ID, workspacePath: scratchWorkspace.path } }))
     expect(details().querySelector('.mote-details__note[aria-pressed="true"]')?.textContent).toContain('b-equal')
     expect(details().querySelectorAll('.mote-details__note')).toHaveLength(names.length)
     expect(details().querySelector('.mote-details__preview')?.textContent).toContain('Exact note ' + rootPath + '/b-equal.md')
@@ -193,13 +198,14 @@ describe('Mote object content in the original secondary tools frame', () => {
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('reads an original idea with its filename, then creates a note through the shared FileExplorer owner', async () => {
-    const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: '# An original thought\nCompare both approaches before deciding.', revision: 'original-note' } }))
+    const read = vi.spyOn(api.files, 'readPublic').mockImplementation(async params => material(params, '# An original thought\nCompare both approaches before deciding.'))
+    vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: '', revision: 'sha256:' + 'e'.repeat(64) } }))
     const create = vi.spyOn(api.files, 'create').mockResolvedValue(undefined)
     await app.mount(); await section('Ideas')
     const note = details().querySelector<HTMLButtonElement>('.mote-details__note')!
     expect(note.textContent).toContain('try-a-new-angle')
     await moteClick(note)
-    expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, notePath)
+    expect(read).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ path: 'try-a-new-angle.md', expectedResource: { hostId: 'local', workspaceId: SCRATCH_WORKSPACE_ID, workspacePath: scratchWorkspace.path } }))
     expect(details().textContent).toContain('Compare both approaches')
     expect(details().textContent).toContain('try-a-new-angle.md')
     await moteClick([...details().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.includes('New note'))!)
@@ -212,12 +218,12 @@ describe('Mote object content in the original secondary tools frame', () => {
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('rejects a late idea read after switching to another Mote, and makes failed reads retryable', async () => {
-    let finish!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
-    const read = vi.spyOn(api.files, 'read').mockImplementationOnce(() => new Promise(resolve => { finish = resolve })).mockRejectedValue(new Error('Original note unavailable'))
+    let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    const read = vi.spyOn(api.files, 'readPublic').mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) }).mockRejectedValue(new Error('Original note unavailable'))
     await app.mount(); await section('Ideas'); await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!)
     await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id })); await settleMoteApp()
     expect(details().dataset.moteDetails).toBe(customMoteId)
-    await act(async () => finish({ status: 'read', document: { path: notePath, content: 'OLD MOTE SECRET', revision: 'late' } })); await settleMoteApp()
+    await act(async () => finish(material(captured, 'OLD MOTE SECRET'))); await settleMoteApp()
     expect(details().textContent).not.toContain('OLD MOTE SECRET')
     await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id })); await settleMoteApp()
     await section('Ideas'); await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!)
@@ -269,15 +275,15 @@ describe('Mote object content in the original secondary tools frame', () => {
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('drops a note preview from the old Host when the same logical Mote is rebound', async () => {
-    let finish!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
-    vi.spyOn(api.files, 'read').mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.spyOn(api.files, 'readPublic').mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
     await app.mount(); await section('Ideas'); await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!)
     const state = useAppStore.getState(), workspace = state.config!.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)!
     const { scratchTopicsScope } = await import('../src/renderer/src/lib/scratch-topic-snapshots')
     await act(async () => useAppStore.setState({ config: { ...state.config!, workspaces: state.config!.workspaces.map(item => item.id === workspace.id ? { ...item, hostId: 'new-host' } : item) }, scratchTopicSnapshots: {
       ...state.scratchTopicSnapshots, [workspace.id]: { ...state.scratchTopicSnapshots[workspace.id]!, scope: scratchTopicsScope({ ...workspace, hostId: 'new-host' }) }
     } })); await settleMoteApp()
-    await act(async () => finish({ status: 'read', document: { path: notePath, content: 'OLD HOST SECRET', revision: 'late' } })); await settleMoteApp()
+    await act(async () => finish(material(captured, 'OLD HOST SECRET'))); await settleMoteApp()
     expect(details().textContent).not.toContain('OLD HOST SECRET')
     expect(details().querySelector('.mote-details__preview')).toBeNull()
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')

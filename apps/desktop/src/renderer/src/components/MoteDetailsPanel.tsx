@@ -3,17 +3,19 @@ import { FileText, Pencil, Plus } from 'lucide-react'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
-import { api } from '../lib/api'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { sessionPresentationById } from '../lib/session-presentation'
+import { openMoteDiscussionDraft } from '../lib/mote-materials-actions'
+import { readMoteMaterial, stageMoteCooperationPreferences, type MoteCooperationPreferences } from '../lib/mote-cooperation'
 import { useAppStore } from '../store'
 import { useWorkspaceFileTree } from './file-tree/useWorkspaceFileTree'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { MoteRenameDialog } from './MoteRenameDialog'
 import { StatusDot } from './StatusDot'
+import { MoteIdeaControls } from './MoteIdeaControls'
 
 const NO_EXPANDED_PATHS: ReadonlySet<string> = new Set()
 type MoteSection = 'profile' | 'ideas'
@@ -69,14 +71,14 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
       aria-selected={section === id} tabIndex={section === id ? 0 : -1} className={section === id ? 'selected' : ''}
       onClick={() => setSection(id)}>{id === 'profile' ? 'Profile' : 'Ideas'}</button>)}</div>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
-      scope={scope} section={section} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
+      scope={scope} reference={reference} section={section} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
     <MoteRenameDialog target={rename} onClose={() => setRename(null)} returnFocus={() => returnFocus(renameInvoker.current)} />
     <SpaceIconPicker target={avatar} onClose={() => setAvatar(null)} returnFocus={() => returnFocus(avatarInvoker.current)} />
   </section>
 }
 
-function MoteContent({ scope, section, profile, onShowIdeas, onOpenPath, onCreateNote }: {
-  scope: MoteWorkfaceScope; section: MoteSection; profile: ReactNode; onShowIdeas(): void
+function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPath, onCreateNote }: {
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: MoteSection; profile: ReactNode; onShowIdeas(): void
   onOpenPath(path: string): Promise<unknown>; onCreateNote(): void
 }) {
   const tree = useWorkspaceFileTree(scope.workspace.id, NO_EXPANDED_PATHS, scope.rootPath)
@@ -85,15 +87,22 @@ function MoteContent({ scope, section, profile, onShowIdeas, onOpenPath, onCreat
   const observedRevision = useRef(revision)
   useEffect(() => { if (observedRevision.current !== revision) { observedRevision.current = revision; void refresh.current() } }, [revision])
   const [selected, setSelected] = useState<string | null>(null)
-  const [note, setNote] = useState<{ path: string; content: string } | null>(null)
+  const [note, setNote] = useState<{ path: string; content: string; revision: string } | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(false), [attempt, setAttempt] = useState(0)
+  const [preferences, setPreferences] = useState<MoteCooperationPreferences>({ responses: 'concise', decisions: 'ask', custom: '' })
+  const [cooperationIssue, setCooperationIssue] = useState<string | null>(null), [question, setQuestion] = useState('')
+  const [guideOpen, setGuideOpen] = useState(false), [staging, setStaging] = useState(false)
   useEffect(() => {
     if (!selected || section !== 'ideas') return
     let current = true; setLoading(true); setIssue(null)
-    void api.files.read(scope.workspace.id, selected).then(result => {
+    void readMoteMaterial(scope, selected).then(observation => {
       if (!current) return
-      if (result.status === 'read') setNote({ path: selected, content: result.document.content })
-      else setIssue('The original note is not readable as text. Open its file to inspect it.')
+      const result = observation.result
+      if (result.status === 'read') setNote({ path: selected, content: result.document.content, revision: result.document.revision })
+      else setIssue(result.status === 'unknown' || result.status === 'error' ? result.message : result.status === 'deleted'
+        ? 'The original file is no longer present. Any last confirmed content is kept below; inspect its folder.'
+        : result.status === 'directory' ? 'This is a directory. Inspect it in the original file tree.'
+        : 'The original file contains binary data. Open its file to inspect it.')
     }).catch(error => { if (current) setIssue(presentError(error)) }).finally(() => { if (current) setLoading(false) })
     return () => { current = false }
   }, [scope.workspace.id, section, selected, attempt, revision])
@@ -108,18 +117,38 @@ function MoteContent({ scope, section, profile, onShowIdeas, onOpenPath, onCreat
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
       <div className="mote-details__self">
-        <div className="mote-details__section-actions"><span>Self setting</span><button type="button" className="icon-button" aria-label="Edit self setting" title="Edit self setting" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}><Pencil size={12} /></button></div>
-        {scope.topic.soul ? <AgentMarkdown content={scope.topic.soul.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
-          workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : <p role="status" className="mote-details__hint">Self setting is not confirmed yet. Open the original file to inspect it.</p>}
+        <div className="mote-details__section-actions"><span>How we work</span><button type="button" className="icon-button" aria-label="Edit self setting" title="Edit original SOUL file" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}><Pencil size={12} /></button></div>
+        {scope.topic.soul ? <details className="mote-details__soul"><summary>Read original SOUL</summary><AgentMarkdown content={scope.topic.soul.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
+          workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /></details> : <p role="status" className="mote-details__hint">Self setting is not confirmed yet. Open the original file to inspect it.</p>}
+        <p className="mote-details__hint">Saved SOUL changes apply to new Sessions. Existing discussions keep their context; your current directions take priority.</p>
+        <button type="button" className="small-button" aria-expanded={guideOpen} onClick={() => setGuideOpen(value => !value)}>Adjust cooperation</button>
+        {guideOpen ? <div className="mote-details__cooperation">
+          <label>Replies<select aria-label="Cooperation replies" value={preferences.responses} onChange={event => setPreferences(value => ({ ...value, responses: event.target.value as MoteCooperationPreferences['responses'] }))}><option value="concise">Concise, with detail on request</option><option value="detailed">Explain reasoning and details</option></select></label>
+          <label>Choices<select aria-label="Cooperation choices" value={preferences.decisions} onChange={event => setPreferences(value => ({ ...value, decisions: event.target.value as MoteCooperationPreferences['decisions'] }))}><option value="ask">Ask when my judgment is needed</option><option value="propose">Propose a concrete next step</option></select></label>
+          <label>Anything else<textarea aria-label="Custom cooperation preferences" value={preferences.custom} onChange={event => setPreferences(value => ({ ...value, custom: event.target.value }))} placeholder="What helps us work together?" rows={2} /></label>
+          <div className="mote-details__section-actions"><button type="button" className="small-button" onClick={() => {
+            if (staging) return
+            setCooperationIssue(null); setStaging(true)
+            void stageMoteCooperationPreferences(scope, preferences, onOpenPath).catch(error => setCooperationIssue(presentError(error))).finally(() => setStaging(false))
+          }}>{staging ? 'Opening original editor…' : 'Review in editor'}</button><button type="button" className="small-button" onClick={() => setGuideOpen(false)}>Skip for now</button></div>
+          <p className="mote-details__hint">Your original SOUL text stays intact. Review the added preferences and use Save in the editor.</p>
+        </div> : null}
+        <div className="mote-details__cooperation">
+          <label>Try your own question<textarea aria-label="Try a cooperation question" value={question} onChange={event => setQuestion(event.target.value)} placeholder="Bring a real question to a new discussion" rows={2} /></label>
+          <button type="button" className="small-button" onClick={() => { setCooperationIssue(null); openMoteDiscussionDraft(scope, question, { reference }) }}>Prepare new discussion</button>
+          <p className="mote-details__hint">Choose the Agent and model in the new Launcher, edit your question, then Start. This keeps your current discussion running.</p>
+        </div>
+        {cooperationIssue ? <p role="status" className="mote-details__issue">{cooperationIssue}</p> : null}
       </div>
       <div className="mote-details__recent">
-        <div className="mote-details__section-actions"><span>Recent ideas</span></div>
+        <div className="mote-details__section-actions"><span>Recent ideas</span><button type="button" className="small-button" onClick={onShowIdeas}>Inspect saved materials</button></div>
         {notesIssue}
         {!tree.rootCache?.loading && recent.length > 0 && notes.some(entry => typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs)) ? <p role="status" className="mote-details__hint">Some recent updates are not confirmed. All notes remain in Ideas.</p> : null}
         <div className="mote-details__notes">{recent.map(entry => <button type="button" key={entry.path} className="mote-details__note" onClick={() => { setSelected(entry.path); onShowIdeas() }}><FileText size={13} /><span>{entry.name.replace(/\.(md|txt)$/i, '')}</span></button>)}</div>
         {!tree.rootCache?.loading && !recent.length && !tree.rootError ? <p className="mote-details__hint">{notes.length ? 'Recent updates are not confirmed. All notes remain in Ideas.' : 'No ideas here yet.'}</p> : null}
       </div>
     </> : <>
+      <MoteIdeaControls scope={scope} reference={reference} material={note?.path === selected && !issue && !loading ? note : null} onOpenPath={onOpenPath} />
       <div className="mote-details__section-actions"><span>Notes in this folder</span><button type="button" className="small-button" onClick={onCreateNote}><Plus size={12} /> New note</button></div>
       {notesIssue}
       {!tree.rootCache?.loading && !notes.length && !tree.rootError ? <p className="mote-details__hint">No notes here yet. Capture a thought in a file, then continue the discussion.</p> : null}
@@ -127,10 +156,14 @@ function MoteContent({ scope, section, profile, onShowIdeas, onOpenPath, onCreat
         className="mote-details__note" onClick={() => setSelected(entry.path)}><FileText size={13} /><span>{entry.name.replace(/\.(md|txt)$/i, '')}<small>{entry.path.slice(scope.rootPath.length + 1)}</small></span></button>)}</div>
       {selected ? <div className="mote-details__preview">
         <div className="mote-details__section-actions"><span>{selected.slice(scope.rootPath.length + 1)}</span><button type="button" className="small-button" onClick={() => void onOpenPath(selected)}>Open file</button></div>
+        <p className="mote-details__hint mote-details__source" title={scope.workspace.path + '/' + selected}>{scope.topic.title} · {selected}</p>
+        <p className="mote-details__hint">Source and scope are available when recorded in this file. Agent use is not confirmed.</p>
         {loading ? <p role="status">Reading note…</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry</button></div> : null}
-        {note?.path === selected ? <AgentMarkdown content={note.content} className="mote-details__prose" workspaceRoot={scope.workspace.path}
-          sourcePath={selected} openWorkspaceFile={path => { void onOpenPath(path) }} /> : null}
+        {note?.path === selected ? <><p className="mote-details__hint" title={note.revision}>{issue || loading ? 'Last confirmed saved content' : 'Read from the saved file'}</p><AgentMarkdown content={note.content} className="mote-details__prose" workspaceRoot={scope.workspace.path}
+          sourcePath={selected} openWorkspaceFile={path => { void onOpenPath(path) }} /></> : null}
+        <button type="button" className="small-button" onClick={() => void onOpenPath(selected)}>Correct or remove a detail in editor</button>
+        <p className="mote-details__hint">Edit only what should change, then Save. File changes keep the original conversations and existing Session context.</p>
       </div> : null}
       <p className="mote-details__hint">Notes stay in your files. Use the file tree for other folders and formats.</p>
     </>}

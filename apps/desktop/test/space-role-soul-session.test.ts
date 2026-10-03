@@ -1,4 +1,3 @@
-import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
 import { mkdtemp, readFile, realpath, rename, rm, unlink, mkdir, lstat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -19,11 +18,6 @@ import { DEFAULT_MOTE_SOUL, DEFAULT_PMO_TEAMS_TOPIC_WIKI, MOTE_COORDINATION_ROLE
 
 // Keep the real Desktop controller, Core lifecycle, provider planning, outbound envelope,
 // Session store and filesystem. Only transport/host selection is isolated from user Runs.
-const host = vi.hoisted(() => ({ client: null as unknown }))
-vi.mock('@agentmux/core', async (original) => ({
-  ...await original<typeof import('@agentmux/core')>(),
-  connectLocalAgentMux: async () => host.client
-}))
 vi.mock('../src/main/host-factory.js', () => ({
   createExecutionHost: () => ({ kind: 'local', dispose: async () => {} })
 }))
@@ -85,7 +79,7 @@ async function fixture() {
     starts.push(input)
     const run: CtxmuxAdapterRun = { runId: `soul-run-${starts.length}`, lifecycleOperationId: input.operationKey,
       program: input.program, args: input.args, workspacePath: input.cwd, pid: 10_000 + starts.length,
-      state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0 }
+      state: { type: 'running' }, cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: 0, nativeService: null }
     runs.set(run.runId, run)
     return run
   }
@@ -98,7 +92,6 @@ async function fixture() {
   inner.kernel.prepareStop = async runId => ({ daemonInstance: 'isolated-soul-adapter', operationKey: `stop-${runId}`, runId })
   inner.kernel.stop = async operation => { runs.delete(operation.runId) }
   const stop = vi.spyOn(core, 'stopAgent')
-  host.client = core
   const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Isolated fixture' }],
     executors: Object.fromEntries(providers.map(provider => [provider.id, { label: provider.label, providerId: provider.id,
       command: provider.executable, args: [], env: {}, injectAgentMuxGuide: false }])),
@@ -106,7 +99,10 @@ async function fixture() {
       { id: 'project-b', name: 'Project B', hostId: 'local', path: join(root, 'project-b'), kind: 'folder' }],
     appearance: { terminalTheme: 'graphite' },
     browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-  const controller = new RuntimeController(store, localRuntimeConnector, topics)
+  const controller = new RuntimeController(store, async config => {
+    if (config.kind !== 'local') throw new Error('This isolated SOUL fixture only owns its local Core.')
+    return core
+  }, topics)
   controller.commit(await controller.prepare(config))
   disposals.push(() => controller.dispose())
   const launch = (topicId: string, sessionId: string, prompt: string, executorId = providers[0]!.id) => controller.launchAgent({

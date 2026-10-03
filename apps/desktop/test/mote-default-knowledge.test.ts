@@ -34,6 +34,7 @@ it('delivers new primary defaults and exactly one app-owned role through the act
   expect(prepared.prompt).toContain('no particular memory filename or taxonomy is required.')
   expect(prepared.prompt).toContain('do not claim to have inherited unseen conversation, running tools or another Agent\'s context.')
   expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
+  expect(prepared.prompt).toContain('offer a few worthwhile ideas grounded in the user\'s current direction')
   expect(prepared.absolutePath).toBe(primary.physicalDirectoryPath!)
   expect(await readFile(join(primary.physicalDirectoryPath!, MOTE_SOUL_PATH), 'utf8')).toBe(DEFAULT_MOTE_SOUL)
 })
@@ -84,6 +85,7 @@ it('preserves both edited homes and intentionally repeated user Wiki byte-for-by
     const prepared = await reopened.prepareAgent(h.workspace, old.id, { providerId: 'codex', sessionId: 'retained-' + old.id.split(':')[1] })
     expect(prepared.prompt).toContain(old.soul)
     expect(prepared.prompt).toContain(old.wiki)
+    expect(prepared.prompt).toContain('Use explicit feedback and saved cooperation preferences for later suggestions')
     // User-authored repeats are preserved rather than silently cleaned.
     expect(prepared.prompt.split(MOTE_COORDINATION_ROLE)).toHaveLength(3)
   }
