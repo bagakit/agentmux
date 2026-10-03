@@ -13,9 +13,9 @@ export type FileDocumentReadResult =
   | { status: 'error'; code: string; message: string }
 /** Public observation failure; this is not a new state invented for WorkspaceFiles. */
 export type FileReadUnknown = { status: 'unknown'; code: string; message: string }
-export type FileReadParams = { zoneId: string; spaceId?: string; path: string; expectedResource: FileResource }
+export type FileReadParams = { zoneId: string; spaceId?: string; path: string; expectedResource: FileResource; maxBytes?: number }
 export type FileReadResult = { resource: FileReadResource | null; result: FileDocumentReadResult | FileReadUnknown }
-export type FileListParams = FileReadParams & { limit?: number }
+export type FileListParams = Omit<FileReadParams, 'maxBytes'> & { limit?: number }
 /** Names only. A bounded observation does not claim to be a complete filesystem index. */
 export type FileNameListing = { status: 'listed'; files: string[]; complete: boolean; omitted: 'git-ignored' | 'none'; partialReason: 'limit' | 'budget' | 'unreadable' | null }
 export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileReadUnknown }
@@ -39,12 +39,13 @@ function resource(value: unknown, code: string, read = false): FileResource | Fi
   return p as FileResource | FileReadResource
 }
 export function parseFileReadParams(value: unknown): FileReadParams {
-  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource'], code)
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'maxBytes'], code)
   string(p.zoneId, code); string(p.path, code)
   if (p.spaceId !== undefined) string(p.spaceId, code)
   if ((p.path as string).startsWith('/') || /^[A-Za-z]:/u.test(p.path as string) || (p.path as string).includes('\\') ||
       (p.path as string).split('/').some(segment => segment === '..')) invalid('Choose a relative file path inside the original Zone.', code)
   resource(p.expectedResource, code)
+  if (p.maxBytes !== undefined && (!Number.isSafeInteger(p.maxBytes) || (p.maxBytes as number) < 1 || (p.maxBytes as number) > 16 * 1024 * 1024)) invalid('A file read byte cap must be from 1 to 16 MiB.', code)
   return p as FileReadParams
 }
 export function parseFileListParams(value: unknown): FileListParams {
@@ -106,10 +107,12 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
     const d = rpcRecord(r.document, ['path', 'content', 'revision'], code)
     string(d.path, code); revision(d.revision, code)
     if (typeof d.content !== 'string') invalid('File content must be text.', code)
+    if (params.maxBytes !== undefined && new TextEncoder().encode(d.content).byteLength > params.maxBytes) invalid('The original File read exceeded its requested byte cap.', code)
     if ((p.resource as FileReadResource | null)?.path !== d.path) invalid('Another File document was returned.', code)
   } else if (r.status === 'binary') {
     string(r.path, code); revision(r.revision, code)
     if (!Number.isSafeInteger(r.byteLength) || (r.byteLength as number) < 0 || (p.resource as FileReadResource | null)?.path !== r.path) invalid('The original binary File evidence is invalid.', code)
+    if (params.maxBytes !== undefined && (r.byteLength as number) > params.maxBytes) invalid('The original binary File read exceeded its byte cap.', code)
   } else if (r.status === 'error' || r.status === 'unknown') { string(r.code, code); string(r.message, code) }
   return p as FileReadResult
 }

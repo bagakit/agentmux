@@ -1,6 +1,7 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
+import { parseFileReadParams, type FileReadParams } from './public-rpc-files.js'
 
 /** Host content identities; category membership and conversations remain Core spatial facts. */
 export type TopicCategory = {
@@ -35,6 +36,11 @@ export type TopicKnowledge = {
   sources: TopicKnowledgeSource[]; scope?: string; revision: string; updatedAt: number
 }
 export type TopicKnowledgeItem = TopicKnowledge | { topicId: string; entryId: string; readError: string }
+/** An original document locator, never a generated or classified knowledge entry. */
+export type TopicKnowledgeDocument = {
+  topicId: string; target: FileReadParams; title: string;
+  snippet: string | null; revision: string | null; readScope: 'name' | 'full'
+}
 export type TopicKnowledgeWrite = Omit<TopicKnowledge, 'revision' | 'updatedAt'> & { expectedRevision: string | null }
 export type TopicParameterMap = {
   'topic.category.ls': Record<string, never>
@@ -61,8 +67,8 @@ export type TopicResultMap = {
   'topic.move': { topic: KnowledgeTopic; previousCategorySpaceIds: string[]; spatialRevision: number; diskDurability: 'confirmed' }
   'topic.migrate.preview': TopicMigrationPreview
   'topic.migrate.apply': TopicMigrationReceipt
-  'topic.knowledge.ls': { entries: TopicKnowledgeItem[]; unavailable: TopicUnavailable[] }
-  'topic.knowledge.search': { entries: TopicKnowledgeItem[]; unavailable: TopicUnavailable[] }
+  'topic.knowledge.ls': { entries: TopicKnowledgeItem[]; documents: TopicKnowledgeDocument[]; unavailable: TopicUnavailable[] }
+  'topic.knowledge.search': { entries: TopicKnowledgeItem[]; documents: TopicKnowledgeDocument[]; unavailable: TopicUnavailable[] }
   'topic.knowledge.read': { entry: TopicKnowledge | null }
   'topic.knowledge.write': { entry: TopicKnowledge; diskDurability: 'confirmed' }
 }
@@ -196,7 +202,7 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
     : method === 'topic.create' ? ['topic','diskDurability']
     : method === 'topic.move' ? ['topic','previousCategorySpaceIds','spatialRevision','diskDurability']
     : method === 'topic.migrate.preview' ? ['spatialRevision','topics','category','required','unavailable']
-    : method === 'topic.knowledge.ls' || method === 'topic.knowledge.search' ? ['entries','unavailable']
+    : method === 'topic.knowledge.ls' || method === 'topic.knowledge.search' ? ['entries','documents','unavailable']
     : method === 'topic.knowledge.read' ? ['entry'] : method === 'topic.knowledge.write' ? ['entry','diskDurability']
     : ['spatialRevision','backupPath','migratedTopicIds','diskDurability']
   const p = rpcRecord(value, fields, code)
@@ -224,8 +230,27 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
       topicId(t.topicId, code); for (const key of ['sourceSpaceId','zoneId','categorySpaceId']) string(t[key], code)
     }
   } else if (method === 'topic.knowledge.ls' || method === 'topic.knowledge.search') {
-    if (!Array.isArray(p.entries) || p.entries.length > (input.limit as number ?? 32)) invalid('Knowledge list is invalid or exceeds its requested scope.', code)
+    if (!Array.isArray(p.entries) || !Array.isArray(p.documents) || p.entries.length + p.documents.length > (input.limit as number ?? 32)) invalid('Knowledge list is invalid or exceeds its requested scope.', code)
     for (const value of p.entries) { const entry = knowledgeItem(value); if (input.topicId !== undefined && entry.topicId !== input.topicId) invalid('Another Topic knowledge scope was returned.', code) }
+    const locations = new Set<string>()
+    for (const value of p.documents) {
+      const d = rpcRecord(value, ['topicId','target','title','snippet','revision','readScope'], code)
+      topicId(d.topicId, code); string(d.title, code)
+      if (input.topicId !== undefined && d.topicId !== input.topicId) invalid('Another Topic document scope was returned.', code)
+      let target: FileReadParams
+      try { target = parseFileReadParams(d.target) } catch { invalid('The original document File locator is invalid.', code) }
+      if (target.maxBytes === undefined) invalid('Original document readers require their byte cap.', code)
+      if (target.path.split('/').some(part => !part || part === '.')) invalid('Choose the canonical original document path.', code)
+      const key = target.zoneId + '\0' + target.path
+      if (locations.has(key)) invalid('Original document locators cannot repeat.', code)
+      locations.add(key)
+      if (d.readScope === 'name') {
+        if (method !== 'topic.knowledge.ls' || d.snippet !== null || d.revision !== null) invalid('A name-only observation cannot claim a body or revision.', code)
+      } else if (d.readScope === 'full') {
+        if (typeof d.snippet !== 'string' || d.snippet.length > 1024 || method !== 'topic.knowledge.search') invalid('A document match requires bounded original text.', code)
+        revision(d.revision, code)
+      } else invalid('The original document read scope is invalid.', code)
+    }
   } else if (method === 'topic.knowledge.read' || method === 'topic.knowledge.write') {
     if (p.entry !== null || method === 'topic.knowledge.write') { const entry = parseTopicKnowledge(p.entry); if (entry.topicId !== input.topicId || entry.entryId !== input.entryId) invalid('Another knowledge entry was returned.', code) }
   } else {

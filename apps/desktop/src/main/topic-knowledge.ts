@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 import { AgentMuxError, type AgentMuxRpcCallContext, type TopicCategory, type KnowledgeTopic,
   type TopicMethod, type TopicParams, type TopicResult, type AgentMuxRpcTopicsOwner,
-  type TopicMigrationPreview, type TopicMigrationReceipt, type TopicKnowledge, type TopicKnowledgeItem, type TopicKnowledgeWrite, type TopicUnavailable } from '@agentmux/core'
+  parseFileListResult, parseFileReadResult, type FileReadParams,
+  type TopicMigrationPreview, type TopicMigrationReceipt, type TopicKnowledge, type TopicKnowledgeItem, type TopicKnowledgeDocument, type TopicKnowledgeWrite, type TopicUnavailable } from '@agentmux/core'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { UNCLASSIFIED_TOPIC_CATEGORY_ID } from '../shared/topic-categories.js'
@@ -13,6 +14,20 @@ import { isTopicMethod, parseTopicParams, parseTopicResult, parseTopicKnowledge 
 import { ensureScratchStorageRoot } from './scratch-topic-directories.js'
 import type { ScratchTopics } from './scratch-topics.js'
 import type { WorkspaceFiles } from './workspace-files.js'
+import type { FileReadOwner } from './file-read-owner.js'
+
+const DOCUMENT_MAX_BYTES = 128 * 1024
+const SEARCH_MAX_BYTES = 4 * 1024 * 1024
+const SEARCH_MAX_CANDIDATES = 512
+const DOCUMENT_FORMATS = new Set(['md', 'markdown', 'txt', 'rst', 'adoc', 'org', 'json', 'csv', 'yaml', 'yml', 'html'])
+const DOCUMENT_ARTIFACTS = new Set(['node_modules', 'dist', 'build', 'coverage', 'target'])
+type KnowledgeReadBudget = { bytes: number; candidates: number; stopped: boolean; signal: AbortSignal }
+function isOriginalDocument(path: string): boolean {
+  if (path === SCRATCH_TOPIC_WIKI_PATH) return true
+  if (path.split('/').some(part => part.startsWith('.') || DOCUMENT_ARTIFACTS.has(part))) return false
+  if (/^knowledge\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u.test(path)) return false
+  return DOCUMENT_FORMATS.has(path.split('.').at(-1)!.toLowerCase())
+}
 
 export type TopicSpatialInspection = {
   zoneId: string; categorySpaceIds: string[]; chatIds: string[]; spatialRevision: number;
@@ -41,13 +56,27 @@ async function regularDirectory(path: string, create = false): Promise<string> {
   if (!info.isDirectory() || info.isSymbolicLink()) throw new AgentMuxError('Topic content requires its original regular directory.', 'TOPIC_DIRECTORY_UNCONFIRMED')
   return await realpath(path)
 }
-async function boundedFile(path: string, maxBytes = 1024 * 1024): Promise<string> {
+async function boundedFile(path: string, maxBytes = 1024 * 1024, onReadCost?: (bytes: number) => void, signal?: AbortSignal): Promise<string> {
+  signal?.throwIfAborted()
   const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  let scannedBytes = 0
   try {
     const info = await handle.stat()
     if (!info.isFile() || info.size > maxBytes) throw new AgentMuxError('Topic content is not a bounded regular file.', 'TOPIC_CONTENT_INVALID')
-    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(await handle.readFile())
-  } finally { await handle.close() }
+    let bytes: Buffer
+    if (onReadCost) {
+      bytes = Buffer.alloc(info.size)
+      while (scannedBytes < info.size) {
+        signal?.throwIfAborted()
+        const read = await handle.read(bytes, scannedBytes, Math.min(64 * 1024, info.size - scannedBytes), scannedBytes)
+        if (!read.bytesRead) throw new AgentMuxError('The original entry changed during its bounded read.', 'TOPIC_CONTENT_UNAVAILABLE')
+        scannedBytes += read.bytesRead
+      }
+      const after = await handle.stat()
+      if (after.size !== info.size || after.mtimeMs !== info.mtimeMs || after.ctimeMs !== info.ctimeMs) throw new AgentMuxError('The original entry changed during its bounded read.', 'TOPIC_CONTENT_UNAVAILABLE')
+    } else bytes = await handle.readFile()
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+  } finally { onReadCost?.(scannedBytes); await handle.close() }
 }
 async function syncDirectory(path: string): Promise<void> {
   const handle = await open(path, 'r')
@@ -56,9 +85,11 @@ async function syncDirectory(path: string): Promise<void> {
 /** The same filesystem and revision-aware save owners are consumed by GUI and public CUI. */
 export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   private spatial?: TopicSpatialPort
+  private originalFiles?: Pick<FileReadOwner, 'list' | 'read'>
   constructor(private readonly scratch: Pick<ScratchTopics, 'list' | 'read' | 'ensure'>,
     private readonly files: Pick<WorkspaceFiles, 'write'>, private readonly workspace: () => WorkspaceRecord) {}
   setSpatialPort(port: TopicSpatialPort): void { this.spatial = port }
+  setFileReadPort(port: Pick<FileReadOwner, 'list' | 'read'>): void { this.originalFiles = port }
   private scope(): WorkspaceRecord {
     const workspace = this.workspace()
     if (workspace.id !== SCRATCH_WORKSPACE_ID || workspace.hostId !== 'local') throw new AgentMuxError('Use the original local Topics content workspace.', 'TOPIC_WORKSPACE_UNAVAILABLE')
@@ -139,10 +170,11 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     return topic
   }
   /** Missing personality metadata cannot override an original Core Mote identity. */
-  private async confirmKnowledgeTopic(topic: ScratchTopicSnapshot): Promise<void> {
+  private async confirmKnowledgeTopic(topic: ScratchTopicSnapshot): Promise<TopicSpatialInspection> {
     if (topic.readError) throw new AgentMuxError('This content scope is unconfirmed. Repair the original metadata before reading its knowledge; the original files and work remain available.', 'TOPIC_SCOPE_UNCONFIRMED')
     const original = await this.spatialPort().inspect(topic)
     if (original.contentKind !== 'topic') throw new AgentMuxError('The original Topic kind is not confirmed. Refresh its original spatial identity before this knowledge operation; content, workfaces and healthy Agents remain available.', 'TOPIC_IDENTITY_UNCONFIRMED')
+    return original
   }
   private async requireKnowledgeTopic(topicId: string): Promise<ScratchTopicSnapshot | null> {
     const topic = await this.requireTopic(topicId)
@@ -160,33 +192,85 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     const knowledge = join(directory, 'knowledge')
     return await regularDirectory(knowledge, create)
   }
-  private async readKnowledge(topic: ScratchTopicSnapshot, entryId: string): Promise<TopicKnowledge | null> {
+  private async readKnowledge(topic: ScratchTopicSnapshot, entryId: string, maxBytes?: number, onReadCost?: (bytes: number) => void, signal?: AbortSignal): Promise<TopicKnowledge | null> {
     try {
-      const directory = await this.knowledgeDirectory(topic), content = await boundedFile(join(directory, entryId + '.json'))
+      const directory = await this.knowledgeDirectory(topic), content = await boundedFile(join(directory, entryId + '.json'), maxBytes, onReadCost, signal)
       const entry = parseTopicKnowledge({ ...JSON.parse(content), revision: hash(content) })
       if (entry.topicId !== topic.id || entry.entryId !== entryId) throw new AgentMuxError('Knowledge bytes belong to another original entry. Keep both identities and inspect the original file.', 'TOPIC_KNOWLEDGE_IDENTITY_CONFLICT')
       return entry
     } catch (error) { if (missing(error)) return null; throw error }
   }
+  private canContinue(topic: ScratchTopicSnapshot, budget: KnowledgeReadBudget, count: number, limit: number, unavailable: TopicUnavailable[]): boolean {
+    if (budget.stopped) return false
+    if (count >= limit || budget.bytes >= SEARCH_MAX_BYTES || budget.candidates >= SEARCH_MAX_CANDIDATES || budget.signal.aborted) {
+      unavailable.push(issue(new AgentMuxError('Knowledge discovery reached its result, candidate, byte or time budget. Narrow the Topic/query or open the original file to continue; this is a partial observation.', 'TOPIC_KNOWLEDGE_PARTIAL'), topic.id))
+      budget.stopped = true
+      return false
+    }
+    return true
+  }
   private async knowledgeEntries(topic: ScratchTopicSnapshot, query: string | null, limit: number,
-    entries: TopicKnowledgeItem[], unavailable: TopicUnavailable[], budget: { bytes: number }): Promise<void> {
+    entries: TopicKnowledgeItem[], unavailable: TopicUnavailable[], budget: KnowledgeReadBudget): Promise<void> {
     let directory: string
     try { directory = await this.knowledgeDirectory(topic) } catch (error) { if (missing(error)) return; throw error }
     const names = (await readdir(directory)).filter(name => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u.test(name)).sort()
     for (const name of names) {
-      if (entries.length >= limit) { unavailable.push(issue(new AgentMuxError('Knowledge results reached the requested limit. Read exact entries or narrow this query to continue.', 'TOPIC_KNOWLEDGE_PARTIAL'), topic.id)); return }
+      if (!this.canContinue(topic, budget, entries.length, limit, unavailable)) return
+      budget.candidates++
       const entryId = name.slice(0, -5)
+      const reservation = Math.min(1024 * 1024, SEARCH_MAX_BYTES - budget.bytes)
+      budget.bytes += reservation
       try {
-        const entry = await this.readKnowledge(topic, entryId)
+        const entry = await this.readKnowledge(topic, entryId, reservation, bytes => { budget.bytes += bytes - reservation }, budget.signal)
         if (!entry) { unavailable.push(issue(new Error('The original knowledge entry changed during discovery.'), entryId)); continue }
         if (query !== null && ![entry.title, entry.content, entry.scope ?? '', JSON.stringify(entry.sources)].join('\n').toLocaleLowerCase().includes(query)) continue
-        const bytes = Buffer.byteLength(JSON.stringify(entry))
-        if (budget.bytes + bytes > 1024 * 1024) { unavailable.push(issue(new AgentMuxError('Knowledge results reached the read budget. Read exact entries or narrow this query to continue.', 'TOPIC_KNOWLEDGE_PARTIAL'), topic.id)); return }
-        budget.bytes += bytes; entries.push(entry)
+        entries.push(entry)
       } catch (error) {
         entries.push({ topicId: topic.id, entryId, readError: issue(error).message })
         unavailable.push(issue(error, entryId))
       }
+    }
+  }
+  private async documentEntries(topic: ScratchTopicSnapshot, original: TopicSpatialInspection, query: string | null, limit: number,
+    entries: TopicKnowledgeItem[], documents: TopicKnowledgeDocument[], unavailable: TopicUnavailable[], budget: KnowledgeReadBudget): Promise<void> {
+    if (!this.canContinue(topic, budget, entries.length + documents.length, limit, unavailable)) return
+    if (!this.originalFiles) throw new AgentMuxError('The original Files owner is unavailable. Saved entries and original file workfaces remain available.', 'CONTROL_UNAVAILABLE')
+    const workspace = this.scope(), expectedResource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path }
+    const request = { zoneId: original.zoneId, path: '.', expectedResource, limit: SEARCH_MAX_CANDIDATES - budget.candidates }
+    const listing = parseFileListResult(await this.originalFiles.list(request, { signal: budget.signal }), request)
+    if (listing.result.status !== 'listed') throw new AgentMuxError(listing.result.message, listing.result.code)
+    if (!listing.result.complete || listing.result.omitted !== 'none') unavailable.push(issue(new AgentMuxError(
+      `Original document discovery is bounded or omits Git-ignored files (${listing.result.partialReason ?? listing.result.omitted}). Open the exact original file or narrow discovery to continue.`, 'TOPIC_KNOWLEDGE_PARTIAL'), topic.id))
+    const paths = [...listing.result.files]
+    // The original metadata owner confirms a saved Wiki; Git omission must not hide this explicit source.
+    if (topic.wiki?.updatedAt != null && paths.length < request.limit && !paths.includes(SCRATCH_TOPIC_WIKI_PATH)) paths.push(SCRATCH_TOPIC_WIKI_PATH)
+    for (const path of paths.sort()) {
+      if (!this.canContinue(topic, budget, entries.length + documents.length, limit, unavailable)) return
+      budget.candidates++
+      if (!isOriginalDocument(path)) continue
+      const target: FileReadParams = { zoneId: original.zoneId, path, expectedResource, maxBytes: DOCUMENT_MAX_BYTES }
+      const document: TopicKnowledgeDocument = { topicId: topic.id, target, title: path.split('/').at(-1)!, snippet: null, revision: null, readScope: 'name' }
+      if (query === null) { documents.push(document); continue }
+      const reservation = Math.min(DOCUMENT_MAX_BYTES, SEARCH_MAX_BYTES - budget.bytes)
+      budget.bytes += reservation
+      let charged = false
+      try {
+        const read = parseFileReadResult(await this.originalFiles.read(target, { maxFileBytes: reservation, signal: budget.signal,
+          onReadCost: cost => { if (!charged) { budget.bytes += cost.payloadBytes - reservation; charged = true } }
+        }), target)
+        if (reservation < DOCUMENT_MAX_BYTES && read.result.status === 'error' && read.result.code === 'WORKSPACE_FILE_BYTE_LIMIT') {
+          unavailable.push(issue(new AgentMuxError('The remaining shared byte budget cannot cover this original document. Narrow the Topic/query or read its exact file; the unobserved tail is partial.', 'TOPIC_KNOWLEDGE_PARTIAL'), topic.id + ':' + path))
+          budget.stopped = true
+          return
+        }
+        if (read.result.status !== 'read') throw new AgentMuxError(
+          read.result.status === 'error' || read.result.status === 'unknown' ? read.result.message : `The original document is ${read.result.status}; its bytes and file workface are kept.`,
+          read.result.status === 'error' || read.result.status === 'unknown' ? read.result.code : 'TOPIC_DOCUMENT_UNAVAILABLE')
+        const text = read.result.document.content, position = text.toLocaleLowerCase().indexOf(query)
+        if (position < 0 && !path.toLocaleLowerCase().includes(query)) continue
+        documents.push({ ...document, readScope: 'full', revision: read.result.document.revision,
+          snippet: text.slice(Math.max(0, position - 60), Math.max(0, position - 60) + 240) })
+      } catch (error) { unavailable.push(issue(error, topic.id + ':' + path)) }
     }
   }
   async call<M extends TopicMethod>(method: M, params: TopicParams<M>, context?: AgentMuxRpcCallContext): Promise<TopicResult<M>> {
@@ -271,21 +355,32 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
         result = { entry, diskDurability: 'confirmed' }; break
       }
       case 'topic.knowledge.ls': case 'topic.knowledge.search': {
-        const entries: TopicKnowledgeItem[] = [], unavailable: TopicUnavailable[] = [], limit = p.limit as number ?? 32
+        const entries: TopicKnowledgeItem[] = [], documents: TopicKnowledgeDocument[] = [], unavailable: TopicUnavailable[] = [], limit = p.limit as number ?? 32
+        const deadline = AbortSignal.timeout(10000)
+        const budget: KnowledgeReadBudget = { bytes: 0, candidates: 0, stopped: false,
+          signal: context?.signal ? AbortSignal.any([context.signal, deadline]) : deadline }
         const query = method === 'topic.knowledge.search' ? (p.query as string).toLocaleLowerCase() : null
         const discovery = p.topicId ? null : await this.listTopicSnapshots()
         for (const message of discovery?.issues ?? []) unavailable.push(issue(new AgentMuxError(message, 'TOPIC_SCOPE_UNCONFIRMED')))
-        const topics = p.topicId ? [await this.requireKnowledgeTopic(p.topicId as string)].filter((topic): topic is ScratchTopicSnapshot => topic !== null)
+        const exact = p.topicId ? await this.requireTopic(p.topicId as string) : null
+        const exactOriginal = exact ? await this.confirmKnowledgeTopic(exact) : null
+        const topics = p.topicId ? [exact].filter((topic): topic is ScratchTopicSnapshot => topic !== null)
           : discovery!.filter(topic => !this.isMote(topic))
-        const budget = { bytes: 0 }
         for (const topic of topics) {
+          context?.signal?.throwIfAborted()
+          if (!this.canContinue(topic, budget, entries.length + documents.length, limit, unavailable)) break
           try {
-            if (!p.topicId) await this.confirmKnowledgeTopic(topic)
-            await this.knowledgeEntries(topic, query, limit, entries, unavailable, budget)
+            const original = exactOriginal ?? await this.confirmKnowledgeTopic(topic)
+            await this.knowledgeEntries(topic, query, limit - documents.length, entries, unavailable, budget)
+            await this.documentEntries(topic, original, query, limit, entries, documents, unavailable, budget)
           }
-          catch (error) { unavailable.push(issue(error, topic.id)) }
+          catch (error) {
+            context?.signal?.throwIfAborted()
+            unavailable.push(issue(error, topic.id))
+          }
         }
-        result = { entries, unavailable }; break
+        context?.signal?.throwIfAborted()
+        result = { entries, documents, unavailable }; break
       }
       case 'topic.migrate.preview': result = await this.spatialPort().migratePreview(); break
       case 'topic.migrate.apply': result = await this.spatialPort().migrateApply(p.expectedRevision as number); break
