@@ -175,6 +175,12 @@ export function BrowserPane({
   const addressDraftEdited = useRef(false)
   const addressBrowser = useRef(tab.browserId)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
+  const [savedBookmark, setSavedBookmark] = useState<{
+    browserId: string
+    navigationId: BrowserSnapshot['navigationId']
+    workspaceId: string
+    path: string
+  } | null>(null)
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -743,7 +749,18 @@ export function BrowserPane({
   const selectElement = () => selectionBusy ? cancelElementSelection() : void beginElementSelection()
   const openDevTools = () => void runCommand(async () => await api.browser.openDevTools(tab.browserId))
   const saveBookmark = () => void runCommand(async () => {
-    await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
+    const identity = browserIdentity.current
+    setSavedBookmark(null)
+    const path = await saveBrowserBookmark(tab.workspaceId, tab.url, tab.title)
+    if (browserIdentity.current.id !== identity.id || browserIdentity.current.navigationId !== identity.navigationId) return
+    setSavedBookmark({ browserId: identity.id, navigationId: identity.navigationId, workspaceId: tab.workspaceId, path })
+  })
+  const currentBookmark = savedBookmark?.browserId === tab.browserId && savedBookmark.navigationId === tab.navigationId &&
+    savedBookmark.workspaceId === tab.workspaceId ? savedBookmark : null
+  const openSavedBookmark = () => void runCommand(async () => {
+    if (!currentBookmark || browserIdentity.current.id !== currentBookmark.browserId ||
+      browserIdentity.current.navigationId !== currentBookmark.navigationId) return
+    await openFile(currentBookmark.path, undefined, undefined, currentBookmark.workspaceId)
   })
   const viewBookmarkSource = () => void runCommand(async () => {
     const origin = tab.bookmarkOrigin
@@ -1052,6 +1069,11 @@ export function BrowserPane({
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
       </form>
+      {currentBookmark ? <p className="browser-bookmark-result" role="status">
+        <Check size={12} aria-hidden="true" /><span>Saved</span>
+        <code title={currentBookmark.path}>{currentBookmark.path}</code>
+        <button type="button" className="small-button" disabled={busy} onClick={openSavedBookmark}>Open bookmark</button>
+      </p> : null}
       {addressError ? <p className="browser-address-error" role="alert">{addressError}{research.current ? <button type="button" className="small-button" disabled={busy} onClick={() => void startResearch()}>Retry same research</button> : null}</p> : null}
       {inputHistoryNotice ? <p className="browser-address-error" role="status">{inputHistoryNotice}</p> : null}
       <BrowserOperationWarning activity={browserActivity} />
