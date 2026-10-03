@@ -971,8 +971,8 @@ export function BrowserPane({
               </button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
-                <DropdownMenu.Label>Viewport</DropdownMenu.Label>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+                <DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>
                 {viewportOptions}
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
@@ -1011,8 +1011,8 @@ export function BrowserPane({
               <button type="button" className={toolbar?.more ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
-              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5}>
-                <DropdownMenu.Label>Page</DropdownMenu.Label>
+              <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+                <DropdownMenu.Label className="browser-menu__label">Page</DropdownMenu.Label>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Back" disabled={!tab.canGoBack || busy} onSelect={() => void run(() => api.browser.back(tab.browserId))}>
                   <ArrowLeft size={12} /><span>Back</span>
                 </DropdownMenu.Item>
@@ -1040,7 +1040,8 @@ export function BrowserPane({
                 {tab.bookmarkOrigin ? <DropdownMenu.Item className="browser-menu__item" aria-label="View bookmark source" title={tab.bookmarkOrigin.binary ? "This bookmark is a binary file — its source can't be shown as text" : "View this bookmark's source"} disabled={tab.bookmarkOrigin.binary || busy} onSelect={viewBookmarkSource}>
                   <FileCode2 size={12} /><span>View bookmark source</span>
                 </DropdownMenu.Item> : null}
-                {toolbar?.viewport ? <><DropdownMenu.Label>Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
+                {toolbar?.viewport ? <><DropdownMenu.Separator className="browser-menu__separator" /><DropdownMenu.Label className="browser-menu__label">Viewport</DropdownMenu.Label>{viewportOptions}</> : null}
+                <DropdownMenu.Separator className="browser-menu__separator" />
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Browser tools" onSelect={() => { setManagementVisited(true); setManagementOpen(true) }}>
                   <SlidersHorizontal size={12} /><span>Browser tools…</span>
                 </DropdownMenu.Item>
