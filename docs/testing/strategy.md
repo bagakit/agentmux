@@ -76,7 +76,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
 
 - ready receipt 确认 `packaged: true`；caller Agent Session 由 `.app` 内随包 Core/ctxmux artifact
   创建，packaged Desktop 从同一 Store 建立其唯一 Tab/Region 投影；
-- 受管 caller 执行 `agentmux inspect --tab self`，读取确切 Region ID，再用
+- 受管 caller 执行 `agentmux space inspect --tab self`，读取确切 Region ID，再用
   `agentmux agent open --executor <executor-id> --region <region-id> --split right`；
   receipt 的 `result.agent` 返回新 Agent Session/Run，`result.to` 返回实际空间地址，
   新 Run 的 public status 为 `running`；
@@ -84,7 +84,7 @@ Security/Fuzz 的 Input 证据由 public recoverable Input、option-like prompt�
   从 checkout 搬到 packaged App 后可以继续使用原 daemon，receipt 中的启动路径只作诊断，不参与身份判断；
 - 将随包 source/manifest 身份、正在服务的 Runtime identity/capability 与 cleanup 归属分别核对；
   兼容服务可以继续承载健康 Run，旧启动路径或缺失 owner receipt 不能代替不兼容判据；
-- smoke 后通过公开 `stop --session` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
+- smoke 后通过公开 `agentmux agent stop --session <test-session-id>` 停止两个测试 Run，退出 test Desktop，确认没有隔离 runtime
   进程残留，再删除系统临时目录中的 test-only 子目录。
 
 空间方向的非视觉合同由 Desktop Control/Layout 测试对真实 Layout Store/reducer
