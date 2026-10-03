@@ -1,3 +1,4 @@
+import type { ContinuousProgressLoop } from './continuous-progress-scheduler.js'
 import type { PendingMessageControlRequest, PendingMessageControlResult } from './pending-message-control.js'
 export type { AgentMuxPendingMessage } from './pending-message-control.js'
 import type { DemandAlignment, DemandAlignmentProposal, DemandGrounding, DemandGroundingProposal } from '@agentmux/demand/goals'
@@ -412,6 +413,12 @@ export type AgentMuxControlDemandStartRequest = RequestBase & {
   operation: 'demand.start'
   demandId: string
   sessionId?: string
+  continuation?: { intervalMs: number; alignmentRevision: number }
+  caller?: AgentMuxControlCaller
+}
+export type AgentMuxControlDemandContinuationActionRequest = RequestBase & {
+  operation: 'demand.continuation-action'; demandId: string; loopId: string
+  action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number; caller?: AgentMuxControlCaller
 }
 export type AgentMuxControlDemandHandoffRequest = RequestBase & {
   operation: 'demand.handoff'
@@ -591,6 +598,7 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandUpdateRequest
   | AgentMuxControlDemandAssignRequest
   | AgentMuxControlDemandStartRequest
+  | AgentMuxControlDemandContinuationActionRequest
   | AgentMuxControlDemandHandoffRequest
   | AgentMuxControlDemandDeleteRequest
   | AgentMuxControlDemandLinkSessionRequest
@@ -688,11 +696,12 @@ export type AgentMuxControlResult =
   | { operation: 'resume'; agentSessionId: string; runId: string }
   | { operation: 'stop'; agentSessionId: string }
   | { operation: 'demand.list'; demands: AgentMuxDemand[] }
-  | { operation: 'demand.show'; demand: AgentMuxDemand | null }
+  | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
   | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }
-  | { operation: 'demand.start'; demand: AgentMuxDemand; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
+  | { operation: 'demand.start'; demand: AgentMuxDemand; continuation?: ContinuousProgressLoop; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
+  | { operation: 'demand.continuation-action'; demandId: string; continuation: ContinuousProgressLoop; diskDurability: 'confirmed' }
   | { operation: 'demand.handoff'; demand: AgentMuxDemand; receipt: { demandId: string; handedOffAt: number; sessionId: string | null } }
   | { operation: 'demand.delete'; demand: AgentMuxDemand; receipt: { demandId: string; deletedAt: number } }
   | { operation: 'demand.link-session'; demand: AgentMuxDemand; receipt: { demandId: string; sessionId: string } }
@@ -980,6 +989,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.update': 'short'
   , 'demand.assign': 'short'
   , 'demand.start': 'long'
+  , 'demand.continuation-action': 'long'
   , 'demand.handoff': 'short'
   , 'demand.delete': 'short'
   , 'demand.link-session': 'short'

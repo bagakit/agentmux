@@ -79,7 +79,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   }
   if (operation.startsWith('browser.') && operationId !== undefined) body.operationId = operationId
   const usesCaller = ['inspect.region', 'inspect.tab', 'open.terminal', 'open.browser', 'send',
-    'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'browser.run', 'browser.replay',
+    'arrange', 'promote.region', 'interrupt', 'resume', 'stop', 'demand.start', 'demand.continuation-action', 'browser.run', 'browser.replay',
     'browser.stop', 'agent.open'].includes(operation)
   const input = { ...body, schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation,
     ...(caller && usesCaller ? { caller } : {}) }
@@ -194,11 +194,19 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       if (actual.resource !== request.resource || (actual.item as Record<string, unknown>).id !== request.id) fail()
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break
-    case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
+    case 'demand.continuation-action': case 'demand.show': case 'demand.update': case 'demand.assign': case 'demand.start': case 'demand.handoff':
     case 'demand.delete': case 'demand.link-session': case 'demand.link-project': case 'demand.decision-log':
       if (actual.demand && (actual.demand as Record<string, unknown>).id !== request.demandId ||
         actual.demandId !== undefined && actual.demandId !== request.demandId ||
         actual.receipt && (actual.receipt as Record<string, unknown>).demandId !== request.demandId) fail()
+      if (actual.goalContinuations && (actual.goalContinuations as import('./continuous-progress-scheduler.js').ContinuousProgressLoop[]).some(loop => loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId)) fail()
+      if (request.operation === 'demand.start' && Boolean(request.continuation) !== Boolean(actual.continuation)) fail()
+      if (actual.continuation) {
+        const loop = actual.continuation as import('./continuous-progress-scheduler.js').ContinuousProgressLoop
+        if (loop.taskSource?.kind !== 'goal' || loop.taskSource.goalId !== request.demandId) fail()
+        if (request.operation === 'demand.continuation-action' && (loop.loopId !== request.loopId || loop.lastMutation?.operationId !== request.requestId || loop.lastMutation?.action !== request.action || loop.lastMutation?.expectedRevision !== request.expectedRevision || loop.revision !== request.expectedRevision + 1)) fail()
+        if (request.operation === 'demand.start' && request.continuation && (loop.agentSessionId !== request.sessionId || loop.creationOperationId !== request.requestId || loop.taskSource?.kind !== 'goal' || loop.taskSource.alignmentRevision !== request.continuation.alignmentRevision || loop.intervalMs !== request.continuation.intervalMs)) fail()
+      }
       break
     case 'browser.operation': case 'browser.stop':
       if (actual.runOperation && (actual.runOperation as Record<string, unknown>).id !== request.operationId) fail()

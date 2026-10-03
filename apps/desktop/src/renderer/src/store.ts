@@ -404,7 +404,7 @@ const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean
 
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
-export type AgentSteerOptions = { reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel }
+export type AgentSteerOptions = { reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel; goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition } }
 
 export type AgentSteerQueueEntry = {
   operationId: string
@@ -419,6 +419,7 @@ export type AgentSteerQueueEntry = {
   /** Original reply reference, frozen in the existing durable intent, never inferred from text. */
   reaction?: AgentSteerReaction
   sourceChannel?: import('@agentmux/core').AgentMessageChannel
+  goalContinuation?: { goalId: string; loopId: string; condition: AgentPromptCondition }
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
@@ -2698,7 +2699,7 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   if (!session || session.kind !== 'agent') return false
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel) return operationId
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel && JSON.stringify(existing.goalContinuation) === JSON.stringify(options?.goalContinuation)) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
     return false
   }
@@ -2715,7 +2716,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
   }
   const entry: AgentSteerQueueEntry = {
     operationId,
-    promptCondition: null,
+    promptCondition: options?.goalContinuation ? validateAgentPromptCondition(options.goalContinuation.condition) : null,
+    ...(options?.goalContinuation ? { goalContinuation: structuredClone(options.goalContinuation) } : {}),
     enqueuedAt: Date.now(),
     ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
       ? { runId: session.control.run.runId } : {}),
@@ -4152,9 +4154,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return { operation: request.operation, demands: projected.map(({ sessions: _sessions, workspacePath: _workspacePath, ...demand }) => demand) }
       }
       const demand = projected.find((candidate) => candidate.id === request.demandId)
-      if (!demand) return { operation: request.operation, demand: null }
+      if (!demand) return { operation: request.operation, demand: null, goalContinuations: await api.continuousProgress.goals(request.demandId) }
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
-      return { operation: request.operation, demand: record }
+      return { operation: request.operation, demand: record, goalContinuations: await api.continuousProgress.goals(request.demandId) }
+    }
+    if (request.operation === 'demand.continuation-action') {
+      const continuation = await api.continuousProgress.goalAction(request.demandId, request.loopId, request.action, request.expectedRevision, request.requestId, request.caller)
+      return { operation: request.operation, demandId: request.demandId, continuation, diskDurability: 'confirmed' }
     }
     if (request.operation === 'demand.create') {
       const project = request.projectId ? controlProject(request.projectId) : undefined
@@ -4192,15 +4198,35 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const current = demandRecord(demandId)
       await get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
     }
-    const startDemand = async (demandId: string, sessionId?: string) => {
+    const startDemand = async (demandId: string, sessionId?: string, continuation?: { intervalMs: number; alignmentRevision: number }, businessOperationId?: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
+      if (continuation) {
+        const facts = await api.demands.list()
+        const fresh = facts.find(goal => goal.id === demandId)
+        if (!fresh || !sessionId || !fresh.sessionIds.includes(sessionId)) throw controlFailure('INVALID_CONTROL_REQUEST', 'Choose an exact associated Session for this original Goal.')
+        set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(fresh, state.demands[demandId]) } }))
+      }
       const current = demandRecord(demandId)
+      let savedContinuation: import('@agentmux/core').ContinuousProgressLoop | undefined
+      if (continuation) {
+        if (!sessionId || !businessOperationId) throw controlFailure('INVALID_CONTROL_REQUEST', 'Continuation needs an exact Session and stable business operation.')
+        const selected = get().sessions.find(candidate => candidate.kind === 'agent' && candidate.control.agentSessionId === sessionId)
+        if (!selected || selected.kind !== 'agent' || selected.id !== sessionId || selected.hostId !== selected.control.hostId || selected.processState !== 'running') throw controlFailure('STALE_AGENT_SESSION', 'The original Goal Session mapping or running target is unconfirmed.')
+        const originalStarts = (await api.continuousProgress.goals(demandId)).filter(loop => loop.creationOperationId === businessOperationId)
+        if (originalStarts.length > 1) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original start has ambiguous durable loop facts. Your Agent and input are retained.')
+        const originalStart = originalStarts[0]
+        savedContinuation = await api.continuousProgress.prepareGoal({ goalId: demandId, agentSessionId: selected.control.agentSessionId, hostId: selected.control.hostId, providerId: selected.providerId, workspacePath: selected.workspacePath, alignmentRevision: continuation.alignmentRevision, intervalMs: continuation.intervalMs, operationId: businessOperationId, prompt: originalStart?.initialDelivery?.prompt ?? (current.description.trim() || current.title) }, caller)
+        const live = get().sessions.find(candidate => candidate.id === sessionId)
+        if (!live || live.kind !== 'agent' || live.control.agentSessionId !== savedContinuation.agentSessionId || live.control.hostId !== savedContinuation.hostId || live.control.run.runId !== savedContinuation.initialDelivery?.condition.expectedRun.runId) throw controlFailure('STALE_AGENT_SESSION', 'The original Session changed after its start was saved. Its loop and healthy Agent are retained.')
+      }
       let attachedSessionId = sessionId ?? current.sessionIds.at(-1) ?? null
       if (attachedSessionId) {
         const session = get().sessions.find((candidate) => candidate.id === attachedSessionId)
         if (!session || session.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', `Agent Session is not available: ${attachedSessionId}`)
-        const operationId = admitAgentSteer(session.id, current.description.trim() || current.title)
+        const original = savedContinuation?.initialDelivery
+        let operationId: string | false = original?.state === 'confirmed' ? original.operationId : admitAgentSteer(session.id, original?.prompt ?? (current.description.trim() || current.title), undefined, businessOperationId, undefined, undefined,
+          original && savedContinuation ? { goalContinuation: { goalId: demandId, loopId: savedContinuation.loopId, condition: original.condition } } : undefined)
         if (!operationId) throw controlFailure('CONTROL_FAILED', 'The message could not be queued. Its content is kept.')
-        await get().flushAgentSteerQueue(session.id, operationId)
+        if (original?.state !== 'confirmed') await get().flushAgentSteerQueue(session.id, operationId)
         const retained = get().agentSteerQueues[session.id]?.find(entry => entry.operationId === operationId)
         if (retained) throw controlFailure('CONTROL_FAILED', retained.error ?? 'The execution message is queued; delivery is not yet confirmed.')
       } else {
@@ -4214,7 +4240,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       await get().updateDemand(demandId, { status: 'in_progress' })
       await appendDemandActivity(demandId, attachedSessionId ? `Execution started with Session ${attachedSessionId}.` : 'Execution start requested.')
-      return { sessionId: attachedSessionId, demand: demandRecord(demandId) }
+      if (savedContinuation && attachedSessionId) savedContinuation = await api.continuousProgress.initialGoalInput(savedContinuation, savedContinuation.loopId, businessOperationId!, 'confirm')
+      return { sessionId: attachedSessionId, demand: demandRecord(demandId), ...(savedContinuation ? { continuation: savedContinuation } : {}) }
     }
     if (request.operation === 'demand.assign') {
       const current = demandRecord(request.demandId)
@@ -4230,8 +4257,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: false } }
     }
     if (request.operation === 'demand.start') {
-      const started = await startDemand(request.demandId, request.sessionId)
-      return { operation: request.operation, demand: started.demand, receipt: { demandId: request.demandId, startedAt: Date.now(), sessionId: started.sessionId } }
+      const started = await startDemand(request.demandId, request.sessionId, request.continuation, request.requestId, request.caller)
+      return { operation: request.operation, demand: started.demand, ...(started.continuation ? { continuation: started.continuation } : {}), receipt: { demandId: request.demandId, startedAt: started.continuation?.initialDelivery?.startedAt ?? Date.now(), sessionId: started.sessionId } }
     }
     if (request.operation === 'demand.handoff') {
       const current = demandRecord(request.demandId)
@@ -8124,7 +8151,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
             !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
             item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
-            item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) &&
+            item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) && JSON.stringify(item.goalContinuation) === JSON.stringify(entry.goalContinuation) &&
             (!dispatchStarted || item.execution === attemptExecution) &&
             (item.promptCondition === null) === (attemptCondition === null) &&
             item.promptCondition?.expectedRun.runId === attemptCondition?.expectedRun.runId &&
@@ -8221,7 +8248,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               explicitAttempt ? { allowUncertainTurn: true,
                 ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
                 : pending.execution === 'immediate' ? { execution: 'immediate' } : undefined,
-              pending.origin === 'manual', pending.agentMuxNote, pending.sourceChannel)
+              pending.origin === 'manual', pending.agentMuxNote, pending.sourceChannel, pending.goalContinuation ? { goalId: pending.goalContinuation.goalId, loopId: pending.goalContinuation.loopId } : undefined)
+            if (pending.goalContinuation) await api.continuousProgress.initialGoalInput({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, pending.goalContinuation.loopId, pending.operationId, 'confirm')
             drain.submitted.add(entry.operationId)
             set((current) => {
               const target = current.sessions.find(item => item.id === sessionId)

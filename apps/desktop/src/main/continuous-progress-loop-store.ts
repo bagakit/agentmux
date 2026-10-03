@@ -4,7 +4,7 @@ import { durableWriteFile } from '@agentmux/core'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 
 import { validateContinuousProgressTaskSource } from './continuous-progress-task-source.js'
-import { parseScheduleRecord } from '@agentmux/core'
+import { parseGoalContinuationLoop, parseScheduleRecord } from '@agentmux/core'
 
 const FILE = 'continuous-progress-loops.json'
 
@@ -25,6 +25,7 @@ export class ContinuousProgressLoopStore {
             !['active', 'paused', 'stopped'].includes(item.status)) throw new Error('Continuous progress configuration is unconfirmed. Its stored records are kept; review the loop configuration.')
         if (item.taskSource !== undefined) validateContinuousProgressTaskSource(item.taskSource)
         if (item.calendar !== undefined) parseScheduleRecord(item)
+        if (item.taskSource?.kind === 'goal') parseGoalContinuationLoop(item)
       }
       return raw as ContinuousProgressLoop[]
     } catch (error) {

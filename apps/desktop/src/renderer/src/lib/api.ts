@@ -801,6 +801,10 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   continuousProgress: {
+    goals: async () => { throw new Error('Goal continuation facts require the original Desktop host.') },
+    prepareGoal: async () => { throw new Error('Goal continuation requires the original Desktop host.') },
+    initialGoalInput: async () => { throw new Error('Original Goal input inspection requires the Desktop host.') },
+    goalAction: async () => { throw new Error('Goal continuation actions require the original Desktop host.') },
     list: async () => [],
     create: async () => { throw new Error('Continuous progress requires the Desktop host.') },
     action: async () => { throw new Error('Continuous progress requires the Desktop host.') },
