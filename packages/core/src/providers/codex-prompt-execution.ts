@@ -21,7 +21,18 @@ export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot)
   while (footerRow < rows && !lines[footerRow]?.text.trim()) footerRow++
   const footer = lines[footerRow]?.text.trim() ?? ''
   if (!footer || !/^(?:\? for shortcuts|\S+ (?:none|minimal|low|medium|high|xhigh|default)(?: ·|$)|\d+% context left)/u.test(footer)) return 'unavailable'
-  if (lines.slice(footerRow + 1).some(line => line.text.trim())) return 'unavailable'
+  // A custom status line leaves the native shortcut hint on the next row.
+  // Recognize only that adjacent, dim native label; arbitrary footer content,
+  // duplicate hints and popups must not authorize interruption.
+  const hintLine = lines[footerRow + 1]
+  const hint = hintLine?.text.trim() ?? ''
+  if (hint) {
+    if (footer.startsWith('?') || hintLine?.wrapped ||
+        !/^(?:tab to queue(?: message)?|\? for shortcuts)$/u.test(hint)) return 'unavailable'
+    const labelColumn = hintLine!.text.search(/\S/u) + (hint.startsWith('tab') ? 3 : 1)
+    if (hintLine!.cells.slice(labelColumn).some(cell => cell.chars.trim() && !cell.dim)) return 'unavailable'
+  }
+  if (lines.slice(footerRow + 2).some(line => line.text.trim())) return 'unavailable'
   let statusRow = cursor.row - 1
   while (statusRow >= 0 && !lines[statusRow]?.text.trim()) statusRow--
   const status = lines[statusRow]?.text.trim() ?? ''
