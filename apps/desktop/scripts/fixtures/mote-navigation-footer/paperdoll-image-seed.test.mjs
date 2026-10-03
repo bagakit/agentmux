@@ -19,11 +19,11 @@ const compiledModule = file => {
   return compiled
 }
 const dataModule = text => 'data:text/javascript;base64,' + Buffer.from(text).toString('base64')
-const shared = dataModule(compiledModule('apps/desktop/src/shared/mote-avatars.ts'))
-let guard = compiledModule('apps/desktop/src/main/mote-avatar-image.ts')
-assert.match(guard, /(['"])\.\.\/shared\/mote-avatars\.js\1/)
-guard = guard.replace(/(['"])\.\.\/shared\/mote-avatars\.js\1/, JSON.stringify(shared))
-const { decodeMoteAvatar, moteAvatarPng } = await import(dataModule(guard))
+const shared = dataModule(compiledModule('apps/desktop/src/shared/object-avatars.ts'))
+let guard = compiledModule('apps/desktop/src/main/object-avatar-image.ts')
+assert.match(guard, /(['"])\.\.\/shared\/object-avatars\.js\1/)
+guard = guard.replace(/(['"])\.\.\/shared\/object-avatars\.js\1/, JSON.stringify(shared))
+const { decodeObjectAvatar, objectAvatarPng } = await import(dataModule(guard))
 const { controlledNativeImage, imagePng } = await import(dataModule(compiledModule('apps/desktop/test/fixtures/mote-identity-image.ts')))
 const originalFile = path.join(repository, 'apps/desktop/src/renderer/src/assets/pmo-teams-topic-avatar.png')
 const originalBytes = fs.readFileSync(originalFile), originalSha256 = hash(originalBytes)
@@ -46,8 +46,8 @@ function acceptance(text) {
   const prepared = prepare(text)
   assert.ok(prepared.png.length > 0)
   assert.equal(prepared.png.readUInt32BE(16), 256); assert.equal(prepared.png.readUInt32BE(20), 256)
-  const decoded = decodeMoteAvatar({ mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + prepared.png.toString('base64') }, controlledNativeImage)
-  assert.deepEqual(moteAvatarPng(decoded), prepared.png)
+  const decoded = decodeObjectAvatar({ mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + prepared.png.toString('base64') }, controlledNativeImage)
+  assert.deepEqual(objectAvatarPng(decoded), prepared.png)
   assert.equal(hash(fs.readFileSync(originalFile)), originalSha256, 'Original nonempty user file remains unchanged')
   return prepared
 }
@@ -55,8 +55,8 @@ test('the original seed prepares a nonempty 256 PNG accepted by the unchanged re
   const prepared = acceptance(source)
   assert.equal(prepared.preparation.originalSha256, originalSha256)
   assert.equal(prepared.preparation.originalSize.width, 1024); assert.equal(prepared.preparation.originalSize.height, 1024)
-  assert.throws(() => moteAvatarPng(controlledNativeImage(originalBytes)), /256 pixel avatar crop/)
-  assert.throws(() => moteAvatarPng(controlledNativeImage(imagePng(128, 128))), /256 pixel avatar crop/)
+  assert.throws(() => objectAvatarPng(controlledNativeImage(originalBytes)), /256 pixel avatar crop/)
+  assert.throws(() => objectAvatarPng(controlledNativeImage(imagePng(128, 128))), /256 pixel avatar crop/)
   receipt.cases.push('nonempty real 1024 source unchanged; prepared 256 PNG accepted', 'original 1024 and malformed 128 crop rejected by original product guard')
 })
 test('bad seed resize and direct original-file save regressions make actual preparation acceptance red', () => {

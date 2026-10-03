@@ -3106,6 +3106,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       : request.operation === 'metrics.renderer'
         ? { operation: 'metrics.renderer', window: request.window, observedAt: Date.now(), counts: readRendererResourceOwnerCounts() }
         : get().executeControl(request, signal))
+    const disposeSpatialLinkIssues = api.ui.onSpatialLinkIssue(message => get().reportError(new Error(message)))
     const disposeFileInvalidations = api.files.onInvalidated((event) => {
       const key = documentKey(event.workspaceId, event.path)
       fileInvalidationSequences.set(key, (fileInvalidationSequences.get(key) ?? 0) + 1)
@@ -3120,6 +3121,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       disposeSessions()
       disposeBrowsers()
       disposeControl()
+      disposeSpatialLinkIssues()
       disposeFileInvalidations()
       void stopWarmTerminal(get().warmTerminal).then((sessionId) => {
         if (!sessionId) return
@@ -3559,6 +3561,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // canonical membership read after the shell is visible so stale Terminal Regions get a real
       // cleanup boundary even when Runtime emits no event for a PTY that disappeared with the app.
       // Agent recovery candidates remain protected by the same reducer used for event-driven resync.
+      void api.ui.spatialLinksReady().catch(error => get().reportError(new Error('Spatial link startup is unconfirmed. Your workface is kept; retry its exact link. ' + presentError(error))))
       return () => {
         disposeRuntimeSubscriptions()
       }
@@ -4293,17 +4296,26 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demandId: request.demandId, decisions: demand.decisionLog ?? [] }
     }
     if (request.operation === 'focus') {
+      const originalNavigation = fileNavigationSelection(get())
+      let navigationChanged = false
+      const stopObservingNavigation = useAppStore.subscribe(state => {
+        if (fileNavigationSelection(state) !== originalNavigation) navigationChanged = true
+      })
+      signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
       let topics: ScratchTopicSnapshot[] = []
       try { if (get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
       catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
         recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
+      finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
       const catalog = spatialCatalog(get(), topics)
       const before = captureDesktopInput(get().tabs)
       const beforeSelection = desktopSelection(get(), catalog)
       let navigationState: AgentMuxDesktopFocusResult['navigation']['state'] = 'applied'
       try {
         requireActive()
+        if (navigationChanged || fileNavigationSelection(get()) !== originalNavigation) throw new DesktopFocusFailure({ step: 'navigation', code: 'NAVIGATION_CHANGED',
+          message: 'A newer navigation happened while the original target was being observed.', recovery: 'The later workface is kept. Inspect the client before explicitly retrying this target.' })
         if (request.target.kind === 'goal') {
           if (!Object.hasOwn(get().demands, request.target.goalId)) throw new DesktopFocusFailure({ step: 'target', code: 'GOAL_UNKNOWN',
             message: 'The exact Goal is not currently in the complete Demand projection.', recovery: 'List Goals and choose an existing Demand ID.' })

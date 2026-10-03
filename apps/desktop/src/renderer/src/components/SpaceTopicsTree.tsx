@@ -1,5 +1,5 @@
 import { usePathDisplay } from '../hooks/usePathDisplay'
-import { ArchiveRestore, NotebookText, Pin, NotebookPen, FolderPlus, Pencil } from 'lucide-react'
+import { ArchiveRestore, NotebookText, Pin, NotebookPen, FolderPlus } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
@@ -11,6 +11,9 @@ import { useScratchTopics } from '../hooks/useScratchTopics'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import type { TopicCategory } from '@agentmux/core/control'
+import { formatSpaceAddress, formatAmuxSpatialLink } from '@agentmux/core/sharing'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { TopicCategoryContextMenu, TopicCategoryActionsMenu } from './TopicCategoryMenu'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { originalTopicAddress, directoryIdentity } from '../../../shared/space-addresses'
 import { TopicCategoryDialog } from './TopicCategoryDialog'
@@ -19,7 +22,7 @@ import { rowAttention, rowAttentionLabel } from '../lib/row-attention'
 import type { ActivityContextInput } from '../lib/activity-groups'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { matchesSpaceQuery } from '../lib/space-tree-navigation'
-import { topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
+import { categorySpaceIconTarget, topicSpaceIconTarget, type SpaceIconOverrides, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
@@ -50,6 +53,11 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   const categories = useAppStore(state => state.topicCategories)
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const [categoryTarget, setCategoryTarget] = useState<TopicCategory | 'create' | null>(null)
+  const categoryInvoker = useRef<HTMLElement | null>(null)
+  function editCategory(target: TopicCategory | 'create'): void {
+    categoryInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setCategoryTarget(target)
+  }
   const current = selection?.workspaceId === workspace.id ? selection.topicId : layout ? activeTopicIdFromLayout(layout, tabs) : undefined
   const filtering = Boolean(query.trim())
   // One pass through Sessions, using the same host/path owner predicate as the Board.
@@ -169,7 +177,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               aria-current={selected ? 'page' : undefined}
               title={[name, topic.readError ?? topic.summary, displayPath(scratchTopicPhysicalPath(workspace, topic), workspace.hostId)].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
-              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={target ? icons[target.key] ?? null : null} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />
+              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={target ? icons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
@@ -206,25 +214,34 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
     <div className="space-section space-topics-section"><SpaceSectionHeader label="Topics" count={categories.length} icon={<NotebookText size={14} />}
       expanded={filtering || collapsedGroups['space:topics'] !== true} filtering={filtering} onToggle={() => toggleGroup('space:topics')}
       onOpen={() => void openOverview()} createLabel="Create Category" createIcon={<FolderPlus size={13} />}
-      onCreate={async () => setCategoryTarget('create')} />
+      onCreate={async () => editCategory('create')} />
       {filtering || collapsedGroups['space:topics'] !== true ? <>
-        {matchingCategories.map(category => <nav className="space-topic-category" aria-label={category.title} key={category.categoryId}>
-          <div className="space-category-heading"><SpaceSectionHeader label={category.title} count={categoryTopics.get(category.spaceId)!.length}
-            icon={<NotebookText size={14} />} expanded={false} filtering={filtering} collapsible={false} onToggle={() => {}}
-            navigationId={'topic-category:' + category.categoryId} parentNavigationId="space:topics"
-            selected={activeWorkspaceId === workspace.id && selection?.spaceId === category.spaceId}
-            onOpen={() => useAppStore.setState({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', workspaceTool: 'files-branches', toolsOpen: true,
-              workbenchSpaceSelection: { spaceId: category.spaceId, zoneId: null, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null },
-              retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })} />
-            <button type="button" className="icon-button space-row-action" aria-label={'Rename category ' + category.title} title="Rename category" onClick={() => setCategoryTarget(category)}><Pencil size={11} /></button>
-          </div>
-          {category.readError ? <div className="surface-inline-error" role="status">{category.readError}</div> : null}
-        </nav>)}
+        {matchingCategories.map(category => {
+          const target = categorySpaceIconTarget(category)
+          const actions = { target, onChangeIcon, onRename: () => editCategory(category),
+            onCopyCard: () => void copyTextToClipboard(formatSpaceAddress({ spaceId: category.spaceId, label: category.title }), reportError),
+            onCopyLink: () => void copyTextToClipboard(formatAmuxSpatialLink({ kind: 'space', spaceId: category.spaceId }), reportError) }
+          return <nav className="space-topic-category" aria-label={category.title} key={category.categoryId}>
+            <TopicCategoryContextMenu {...actions}>
+              <div className="space-category-heading"><SpaceSectionHeader label={category.title} count={categoryTopics.get(category.spaceId)!.length}
+                icon={<SpaceObjectIcon kind="category" name={category.title} manualIcon={icons[target.key] ?? null} imageTarget={target.imageTarget} />} iconTargetKey={target.key}
+                expanded={false} filtering={filtering} collapsible={false} onToggle={() => {}}
+                navigationId={'topic-category:' + category.categoryId} parentNavigationId="space:topics"
+                selected={activeWorkspaceId === workspace.id && selection?.spaceId === category.spaceId}
+                onOpen={() => useAppStore.setState({ activeWorkspaceId: workspace.id, mainSurface: 'workbench', workspaceTool: 'files-branches', toolsOpen: true,
+                  workbenchSpaceSelection: { spaceId: category.spaceId, zoneId: null, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null },
+                  retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })} />
+                <TopicCategoryActionsMenu {...actions} />
+              </div>
+            </TopicCategoryContextMenu>
+            {category.readError ? <div className="surface-inline-error" role="status">{category.readError}</div> : null}
+          </nav>
+        })}
         {filtering && matchingCategories.length === 0 ? <p className="space-tree-empty" role="status">No matching Topics</p> : null}
         {uncategorized.length ? <p className="space-tree-empty" role="status">Category not confirmed for {uncategorized.length} Topic{uncategorized.length === 1 ? '' : 's'}. Open Topics overview to access them.</p> : null}
       </> : null}
     </div>
-    <TopicCategoryDialog target={categoryTarget} onClose={() => setCategoryTarget(null)} />
+    <TopicCategoryDialog target={categoryTarget} onClose={() => setCategoryTarget(null)} returnFocus={() => categoryInvoker.current?.isConnected ? categoryInvoker.current : null} />
     {error ? <div className="surface-inline-error" role="alert">Topics could not be refreshed: {error}. Existing work surfaces remain available.</div> : null}
     <MoteArchiveNotice workspaceId={workspace.id} issue={archive.issue} failure={archive.failure} />
     <MoteRenameDialog target={renameTarget ? { topic: renameTarget, workspace } : null} onClose={() => setRenameTarget(null)}

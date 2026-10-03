@@ -149,6 +149,7 @@ export async function brandApplication(appPath) {
   await plistReplace(plist, 'CFBundleDisplayName', 'string', PRODUCT_NAME)
   await plistReplace(plist, 'CFBundleName', 'string', PRODUCT_NAME)
   await plistReplace(plist, 'CFBundleIdentifier', 'string', BUNDLE_ID)
+  await plistReplace(plist, 'CFBundleURLTypes', 'json', JSON.stringify([{ CFBundleURLName: BUNDLE_ID, CFBundleURLSchemes: ['amux'], CFBundleTypeRole: 'Viewer' }]))
   await plistReplace(plist, 'CFBundleExecutable', 'string', PRODUCT_NAME)
   await plistReplace(plist, 'CFBundleIconFile', 'string', 'agentmux.icns')
   await plistReplace(plist, 'CFBundleShortVersionString', 'string', manifest.version)
@@ -370,6 +371,7 @@ async function verifyIdentity(appPath) {
   assert(await plistValue(plist, 'CFBundleDisplayName') === PRODUCT_NAME, 'Packaged display name is wrong.')
   assert(await plistValue(plist, 'CFBundleExecutable') === PRODUCT_NAME, 'Packaged executable name is wrong.')
   assert(await plistValue(plist, 'CFBundleIdentifier') === BUNDLE_ID, 'Packaged bundle id is wrong.')
+  assert(await plistValue(plist, 'CFBundleURLTypes.0.CFBundleURLSchemes.0') === 'amux', 'Packaged spatial link scheme is wrong.')
   assert(await plistValue(plist, 'CFBundleIconFile') === 'agentmux.icns', 'Packaged icon is wrong.')
   assert(!await pathExists(join(contents, 'Resources', 'default_app.asar')), 'Electron default app entered the package.')
   for (const suffix of ['', ' (Renderer)', ' (GPU)', ' (Plugin)']) {

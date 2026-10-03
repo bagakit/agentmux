@@ -186,6 +186,12 @@ const api: AgentMuxPreloadApi = {
   topics: {
     call: (method, params) => ipcRenderer.invoke('topics:call', method, params)
   },
+  spaceObjects: {
+    appearance: (target: SpaceObjectImageTarget) => ipcRenderer.invoke('spaceObjects:appearance', target),
+    previewAvatar: (target: SpaceObjectImageTarget, input: ObjectAvatarInput) => ipcRenderer.invoke('spaceObjects:previewAvatar', target, input),
+    saveAvatar: (target: SpaceObjectImageTarget, input: ObjectAvatarInput) => ipcRenderer.invoke('spaceObjects:saveAvatar', target, input),
+    readAvatar: (target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => ipcRenderer.invoke('spaceObjects:readAvatar', target, ref)
+  },
   scratch: {
     setMoteArchived: (workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string) =>
       ipcRenderer.invoke('scratch:setMoteArchived', workspaceId, topicId, archived, objectKey, expectedVersion),
@@ -232,6 +238,12 @@ const api: AgentMuxPreloadApi = {
     },
     requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
+    spatialLinksReady: () => ipcRenderer.invoke('ui:spatialLinksReady'),
+    onSpatialLinkIssue(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, message: string): void => { if (typeof message === 'string') listener(message) }
+      ipcRenderer.on('ui:spatialLinkIssue', wrapped)
+      return () => ipcRenderer.off('ui:spatialLinkIssue', wrapped)
+    },
     captureScreenshot: () => ipcRenderer.invoke('ui:captureScreenshot'),
     listAgentSkills: (sessionId: string) => ipcRenderer.invoke('ui:listAgentSkills', sessionId),
     listWorkspaceSkills: (workspaceId: string, providerId: string) => ipcRenderer.invoke('ui:listWorkspaceSkills', workspaceId, providerId),
@@ -511,3 +523,5 @@ const api: AgentMuxPreloadApi = {
 
 contextBridge.exposeInMainWorld('agentmux', api)
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
+
+import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'

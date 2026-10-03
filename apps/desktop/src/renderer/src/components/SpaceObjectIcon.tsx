@@ -1,3 +1,5 @@
+import type { SpaceObjectImageTarget } from '../../../shared/object-avatars'
+import { SpaceDirectoryImage } from './SpaceDirectoryImage'
 import { memo, useEffect, useState } from 'react'
 import { NotebookText } from 'lucide-react'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconTarget } from '../lib/space-object-appearance'
@@ -58,6 +60,7 @@ function MoteAvatar({ kind, workspaceId, topicId, choice, objectKey }: { kind: S
 type SpaceObjectIconProps = {
   kind: SpaceIconTarget['kind']; name: string; manualIcon: SpaceIconChoice | null; workspaceId?: string
   folderIdentityKey?: string | undefined
+  imageTarget?: SpaceObjectImageTarget | undefined
   avatarWorkspaceId?: string | undefined; avatarTopicId?: string | undefined; avatarObjectKey?: string | undefined
   lastActivityAt?: number | null | undefined; visible?: boolean | undefined; topicGlyph?: boolean
 } & MoteIdentityMotionProps
@@ -67,12 +70,20 @@ export const SpaceObjectIcon = memo(function SpaceObjectIcon(props: SpaceObjectI
     className={!isMoteFace(props.manualIcon) && !props.moteSessionId && (!props.moteAvailability || props.moteAvailability === 'static') ? 'project-rail-row__icon' : undefined}>
     {expression => <SpaceObjectIconContents {...props} expression={expression} />}
   </MoteIdentityMotion> : <SpaceObjectIconContents {...props} />
+}, (previous, next) => {
+  const { imageTarget: a, ...aProps } = previous, { imageTarget: b, ...bProps } = next
+  const sameTarget = a === b || Boolean(a && b && a.kind === b.kind && a.objectKey === b.objectKey &&
+    (a.kind === 'category' && b.kind === 'category' ? a.categoryId === b.categoryId
+      : a.kind === 'topic' && b.kind === 'topic' && a.workspaceId === b.workspaceId && a.topicId === b.topicId))
+  return sameTarget && Object.keys(aProps).length === Object.keys(bProps).length &&
+    (Object.keys(aProps) as Array<keyof typeof aProps>).every(key => Object.is(aProps[key], bProps[key]))
 })
-function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderIdentityKey, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
+function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderIdentityKey, lastActivityAt, visible, topicGlyph = false, avatarWorkspaceId, avatarTopicId, avatarObjectKey, imageTarget, expression }: SpaceObjectIconProps & { expression?: MoteExpression }) {
   if (isMoteFace(manualIcon)) return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="face" aria-hidden="true">
     {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <NotebookText size={14} />}
   </span>
   if (manualIcon && typeof manualIcon === 'object') {
+    if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={manualIcon} fallback={<NotebookText size={14} />} />
     if (!avatarWorkspaceId || !avatarTopicId || !avatarObjectKey) return <span className="space-object-icon" data-space-icon-kind={kind} data-space-icon-source="image" title="Saved avatar target is unavailable" aria-hidden="true"><MoteIcon size={14} /></span>
     return <MoteAvatar kind={kind} workspaceId={avatarWorkspaceId} topicId={avatarTopicId} choice={manualIcon} objectKey={avatarObjectKey} />
   }
@@ -85,9 +96,10 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
     if (!workspaceId) throw new Error('Automatic Folder icons require their registered Workspace.')
     return <ProjectIcon workspaceId={workspaceId} name={name} folderIdentityKey={folderIdentityKey} lastActivityAt={lastActivityAt} visible={visible} />
   }
+  if (imageTarget) return <SpaceDirectoryImage target={imageTarget} choice={null} fallback={kind === 'topic' && !topicGlyph && projectMonogram(name) ? <span>{projectMonogram(name)}</span> : <NotebookText size={14} />} />
   const monogram = kind === 'topic' && !topicGlyph ? projectMonogram(name) : ''
   return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="automatic"
-    {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : 'Topic'} aria-hidden="true">
+    {...(monogram ? { 'data-monogram': '' } : {})} title={kind === 'mote' ? 'Mote' : kind === 'category' ? 'Category' : 'Topic'} aria-hidden="true">
     {kind === 'mote' ? avatarTopicId === PMO_TEAMS_TOPIC_ID ? <span className="mote-image-follow"><img className="space-object-icon__avatar" src={defaultMoteAvatar} alt="" draggable={false} /></span> : <MoteIcon size={14} /> : monogram ? <span>{monogram}</span> : <NotebookText size={14} />}
   </span>
 }

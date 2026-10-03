@@ -7,8 +7,9 @@ import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, reta
 import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { durableWriteFile, type AgentProviderId } from '@agentmux/core'
 import { nativeImage, type NativeImage } from 'electron'
-import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
-import { decodeMoteAvatar, previewMoteAvatar, moteAvatarPng } from './mote-avatar-image.js'
+import { MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
+import { decodeObjectAvatar, previewObjectAvatar, objectAvatarPng } from './object-avatar-image.js'
+import { readObjectAvatarFile, saveObjectAvatarFile } from './object-avatar-files.js'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { NameChangeAudit } from './name-change-audit.js'
 import {
@@ -266,7 +267,7 @@ export class ScratchTopics {
   }
 
   private decodeAvatar(input: MoteAvatarInput): NativeImage {
-    return decodeMoteAvatar(input, this.createAvatarImage)
+    return decodeObjectAvatar(input, this.createAvatarImage)
   }
 
   private async avatarMoteDirectory(workspace: WorkspaceRecord, topicId: string): Promise<string> {
@@ -280,26 +281,31 @@ export class ScratchTopics {
     return resolved
   }
 
-  private async avatarDirectory(workspace: WorkspaceRecord, topicId: string, create = false): Promise<string> {
-    const directory = await this.avatarMoteDirectory(workspace, topicId)
-    const metadata = join(directory, '.agentmux'), assets = join(metadata, 'avatars')
-    if (create) { await ensureDirectory(metadata); await ensureDirectory(assets) }
-    else for (const path of [metadata, assets]) {
-      const info = await lstat(path)
-      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('The Mote avatar directory is not a regular directory.')
-    }
-    if (!(await realpath(assets)).startsWith(directory + sep)) throw new Error('The Mote avatar directory escapes its original object.')
-    return assets
-  }
-
   private async requireAvatarObject(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<void> {
     requireScratchWorkspace(workspace)
     const directory = await resolveScratchTopicDirectory(workspace.path, topicId)
     const identity = directory ? await this.identityFact(workspace, topicId, directory) : {}
     if (identity.readError && !identity.identityDirectoryPath) throw new Error(identity.readError)
     if (!directory || !identity.identityDirectoryPath || directoryIdentity(workspace.hostId, identity.identityDirectoryPath) !== objectKey) {
-      throw new Error('This Mote directory changed while editing. Reopen its avatar editor to use the current object.')
+      throw new Error('This original object directory changed while editing. Reopen its avatar editor to use the current object.')
     }
+  }
+
+  /** Exact appearance reads need neither the Wiki nor a full library/collaborator snapshot. */
+  async topicAppearanceIdentity(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<
+    Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath'> & { physicalDirectoryPath: string }> {
+    await this.requireAvatarObject(workspace, topicId, objectKey)
+    const directory = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!directory || topicId === PMO_TEAMS_TOPIC_ID) throw new Error('Choose an existing ordinary Topic for its image.')
+    const context = await scratchIdentityContext(workspace.path, topicId)
+    if (context.roots.motes.includes(dirname(directory))) throw new Error('This target is a Mote. Its original avatar remains available.')
+    try {
+      await lstat(join(directory, MOTE_SOUL_PATH))
+      throw new Error('This target is a Mote. Its original avatar remains available.')
+    } catch (error) { if (errorCode(error) !== 'ENOENT') throw error }
+    const identity = await this.identityFact(workspace, topicId, directory)
+    if (!identity.identityDirectoryPath) throw new Error(identity.readError ?? 'The original Topic identity is unconfirmed.')
+    return { id: topicId, directoryPath: scratchTopicDirectoryName(topicId), identityDirectoryPath: identity.identityDirectoryPath, physicalDirectoryPath: directory }
   }
 
   private async readMoteArchive(directory: string, topicId: string): Promise<MoteArchiveState> {
@@ -351,43 +357,22 @@ export class ScratchTopics {
   async previewAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage> {
     await this.requireAvatarObject(workspace, topicId, objectKey)
     await this.avatarMoteDirectory(workspace, topicId)
-    return previewMoteAvatar(this.decodeAvatar(input))
+    return previewObjectAvatar(this.decodeAvatar(input))
   }
 
   async saveAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef> {
     await this.requireAvatarObject(workspace, topicId, objectKey)
     if (input?.mimeType !== 'image/png' || input.dataUrl.length > Math.ceil(MOTE_AVATAR_OUTPUT_MAX_BYTES / 3) * 4 + 22) throw new Error('Save a bounded PNG avatar crop.')
-    const png = moteAvatarPng(await this.decodeAvatar(input))
-    const ref: MoteAvatarRef = { kind: 'image', fileName: createHash('sha256').update(png).digest('hex') + '.png' }
-    const directory = await this.avatarDirectory(workspace, topicId, true), path = join(directory, ref.fileName)
-    let handle
-    try { handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) }
-    catch (error) {
-      if (errorCode(error) !== 'EEXIST') throw error
-      await this.readAvatar(workspace, topicId, ref, objectKey)
-      return ref
-    }
-    try { await handle.writeFile(png); await handle.sync() }
-    catch (error) { await unlink(path).catch(() => {}); throw error }
-    finally { await handle.close() }
-    return ref
+    const png = objectAvatarPng(await this.decodeAvatar(input))
+    return await saveObjectAvatarFile(await this.avatarMoteDirectory(workspace, topicId), png)
   }
 
   async readAvatar(workspace: WorkspaceRecord, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage> {
     await this.requireAvatarObject(workspace, topicId, objectKey)
-    if (!isMoteAvatarRef(ref)) throw new Error('The Mote avatar reference is invalid.')
-    const path = join(await this.avatarDirectory(workspace, topicId), ref.fileName)
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    let png: Buffer
-    try {
-      const info = await handle.stat()
-      if (!info.isFile() || info.size > MOTE_AVATAR_OUTPUT_MAX_BYTES) throw new Error('The Mote avatar is not a bounded regular file.')
-      png = await handle.readFile()
-    } finally { await handle.close() }
-    if (createHash('sha256').update(png).digest('hex') + '.png' !== ref.fileName) throw new Error('The Mote avatar bytes do not match their reference.')
+    const png = await readObjectAvatarFile(await this.avatarMoteDirectory(workspace, topicId), ref)
     const input: MoteAvatarInput = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + png.toString('base64') }
-    const image = await this.decodeAvatar(input)
-    moteAvatarPng(image)
+    const image = this.decodeAvatar(input)
+    objectAvatarPng(image)
     return { dataUrl: input.dataUrl, ...image.getSize() }
   }
   /** Current cwd only: no library scan, guessed hash ID, or saved Session change. */

@@ -1,6 +1,8 @@
 import { useEffect, useState, type CSSProperties } from 'react'
 import { Folder, GitBranch } from 'lucide-react'
 import { api } from '../lib/api'
+import { useAppStore } from '../store'
+import { presentError } from '@agentmux/client-ui/error-presentation'
 import { projectMonogram } from '../lib/project-monogram'
 import { folderIconRecency } from '../lib/space-folder-icon-recency'
 import { speakerColorHue } from '../lib/conversation-avatar-color'
@@ -22,7 +24,9 @@ export function ProjectIcon({ workspaceId, name, folderIdentityKey, lastActivity
   useEffect(() => {
     let active = true
     setAppearance(null)
-    void api.workspaces.appearance(workspaceId).then((value) => { if (active) setAppearance(value) }).catch(() => {})
+    void api.workspaces.appearance(workspaceId).then((value) => { if (active) setAppearance(value) }).catch(cause => {
+      if (active) useAppStore.getState().reportError(new Error('This local project image could not be read. The original files and workface are retained; save a manual icon in Change icon, then Restore automatic to retry local image recognition. ' + presentError(cause)))
+    })
     return () => { active = false }
   }, [workspaceId])
   useEffect(() => {

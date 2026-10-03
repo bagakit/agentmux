@@ -1,5 +1,7 @@
+import type { SpaceObjectImageTarget } from '../../../shared/object-avatars'
 import { isMoteAvatarRef, isMoteFace, type MoteAvatarRef, type MoteAvatarTarget, type MoteFace } from '../../../shared/mote-avatars'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
+import type { TopicCategory } from '@agentmux/core/control'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from '../../../shared/scratch-topics'
 import type { WorkspaceProject } from './workspace-projects'
 import { directoryIdentity, originalTopicAddress, type SpaceZoneBindings } from '../../../shared/space-addresses'
@@ -9,7 +11,7 @@ import { SPACE_ICON_CATALOG, type SpaceIconId } from '@agentmux/client-ui/space-
 export { SPACE_ICON_CATALOG, type SpaceIconId } from '@agentmux/client-ui/space-icon-catalog'
 export type SpaceIconChoice = SpaceIconId | MoteAvatarRef | MoteFace
 export type SpaceIconOverrides = Record<string, SpaceIconChoice>
-export type SpaceIconTarget = { key: string; name: string; kind: 'folder' | 'topic' | 'mote'; avatarTarget?: MoteAvatarTarget }
+export type SpaceIconTarget = { key: string; name: string; kind: 'folder' | 'category' | 'topic' | 'mote'; avatarTarget?: MoteAvatarTarget; imageTarget?: SpaceObjectImageTarget }
 
 export function isSpaceIconId(candidate: unknown): candidate is SpaceIconId {
   return typeof candidate === 'string' && Object.hasOwn(SPACE_ICON_CATALOG, candidate)
@@ -38,6 +40,11 @@ export function folderSpaceIconTarget(project: Pick<WorkspaceProject, 'hostId' |
   return { key: spaceObjectIdentityKey(project.hostId, project.repoPath), name: project.name, kind: 'folder' }
 }
 
+/** The classification owns its appearance; its members' content keys stay independent. */
+export function categorySpaceIconTarget(category: Pick<TopicCategory, 'categoryId' | 'spaceId' | 'title'>): SpaceIconTarget {
+  return { key: category.spaceId, name: category.title, kind: 'category', imageTarget: { kind: 'category', categoryId: category.categoryId, objectKey: category.spaceId } }
+}
+
 export function topicSpaceIconTarget(
   workspace: Pick<WorkspaceRecord, 'hostId' | 'path'> & { id?: string },
   topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'title' | 'soul' | 'identityDirectoryPath' | 'readError'>,
@@ -50,7 +57,9 @@ export function topicSpaceIconTarget(
     key,
     name: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title,
     kind: topic.id === PMO_TEAMS_TOPIC_ID || topic.soul ? 'mote' : 'topic',
-    ...(workspace.id && (topic.id === PMO_TEAMS_TOPIC_ID || topic.soul) ? { avatarTarget: { workspaceId: workspace.id, topicId: topic.id, objectKey: key } } : {})
+    ...(workspace.id ? topic.id === PMO_TEAMS_TOPIC_ID || topic.soul
+      ? { avatarTarget: { workspaceId: workspace.id, topicId: topic.id, objectKey: key } }
+      : { imageTarget: { kind: 'topic' as const, workspaceId: workspace.id, topicId: topic.id, objectKey: key } } : {})
   }
 }
 
