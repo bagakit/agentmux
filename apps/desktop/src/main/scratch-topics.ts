@@ -9,6 +9,7 @@ import { nativeImage, type NativeImage } from 'electron'
 import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
 import { decodeMoteAvatar, previewMoteAvatar, moteAvatarPng } from './mote-avatar-image.js'
 import type { WorkspaceRecord } from '../shared/contracts.js'
+import type { NameChangeAudit } from './name-change-audit.js'
 import {
   SCRATCH_WORKSPACE_ID,
   MOTE_SOUL_PATH,
@@ -212,6 +213,9 @@ export type PreparedScratchAgentTopic = {
 
 export class ScratchTopics {
   private readonly moteStateWrites = new Map<string, Promise<unknown>>()
+  private readonly titleWrites = new Map<string, Promise<unknown>>()
+  private nameAudit: NameChangeAudit | undefined
+  setNameAudit(audit: NameChangeAudit): void { this.nameAudit = audit }
   constructor(private readonly createAvatarImage: (bytes: Buffer) => NativeImage = bytes => nativeImage.createFromBuffer(bytes)) {}
 
   /** Advisory maintenance is a write operation; read/list and public discovery remain read-only. */
@@ -502,12 +506,26 @@ export class ScratchTopics {
     topicId: string,
     title: string
   ): Promise<ScratchTopicSnapshot> {
-    const snapshot = await this.read(workspace, topicId)
-    if (!snapshot) throw new Error('Scratch Topic no longer exists')
-    const topicPath = join(snapshot.physicalDirectoryPath!, 'topic.md')
-    const content = await readRegularFile(topicPath)
-    await writeRegularFile(topicPath, renamedTopicContent(content, title))
-    return (await this.read(workspace, topicId))!
+    const key = `${workspace.id}\0${topicId}`
+    const job = Promise.resolve(this.titleWrites.get(key)).catch(() => {}).then(async () => {
+      const snapshot = await this.read(workspace, topicId)
+      if (!snapshot) throw new Error('Scratch Topic no longer exists')
+      const topicPath = join(snapshot.physicalDirectoryPath!, 'topic.md')
+      const content = await readRegularFile(topicPath)
+      const replacement = renamedTopicContent(content, title)
+      const change = { target: { kind: 'topic', id: JSON.stringify([workspace.id, topicId]) },
+        location: { workspaceId: workspace.id, hostId: workspace.hostId, cwd: workspace.path, topicPath }, before: topicCopy(content).title,
+        requested: topicCopy(replacement).title, ownerRevision: wikiVersion(content) }
+      const apply = async (): Promise<ScratchTopicSnapshot> => {
+        await writeRegularFile(topicPath, replacement)
+        return (await this.read(workspace, topicId))!
+      }
+      return this.nameAudit ? await this.nameAudit.run([change], apply,
+        result => ({ actual: result.title, ownerRevision: wikiVersion(replacement) })) : await apply()
+    })
+    this.titleWrites.set(key, job)
+    try { return await job }
+    finally { if (this.titleWrites.get(key) === job) this.titleWrites.delete(key) }
   }
 
   async setWikiEnabled(workspace: WorkspaceRecord, topicId: string, enabled: boolean): Promise<ScratchTopicSnapshot> {

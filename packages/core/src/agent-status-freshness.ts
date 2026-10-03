@@ -297,3 +297,15 @@ export function observeAgent(
     stale: agentEvidenceStale(input.status, now)
   }
 }
+
+/** Project current activity without rewriting the retained main completion identity. */
+export function currentAgentSemanticStatus(status: AgentStatus | undefined): AgentStatus | undefined {
+  if (!status) return undefined
+  if (status.aggregateActivityAt !== undefined && status.aggregateActivityAt >= status.observedAt) {
+    return { ...status, state: 'working', observedAt: status.aggregateActivityAt }
+  }
+  if (status.state === 'done' && status.idleEvidenceConsumed) {
+    return { ...status, state: 'running', detail: 'Prior completion consumed; waiting for a new native activity observation.' }
+  }
+  return status
+}

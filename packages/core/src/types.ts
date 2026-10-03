@@ -623,7 +623,22 @@ export type AgentNativeSessionHandle =
       sessionId: string
     }
 
+export type AgentHookSubject = {
+  kind: 'main' | 'child' | 'foreign' | 'unknown'
+  basis: 'provider-protocol' | 'process-native-record'
+  nativeSessionId?: string
+  reason: string
+}
+
+export type AgentNativeBinding = {
+  source: 'native-hook' | 'process-witness' | 'semantic-resume-target'
+  run: AgentMuxRunRef
+  observedAt: number
+}
+
 export type AgentHookReceipt = {
+  subject?: AgentHookSubject
+  decision?: { activityApplied: boolean; lifecycleApplied: boolean; reason: string }
   id: string
   providerId: AgentProviderId
   agentSessionId: string
@@ -716,7 +731,7 @@ export type AgentSessionHistoryCollaboration =
 
 /** The durable locator for reading; deliberately carries no Run or input authority. */
 export type AgentSessionHistoryMetadata = Pick<AgentMuxStoredAgentSession,
-  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'createdAt'>
+  'providerId' | 'executorId' | 'workspacePath' | 'nativeHandle' | 'observedNativeHandle' | 'createdAt'>
 
 export type AgentSessionHistoryDescriptor = {
   agentSessionId: string
@@ -801,6 +816,8 @@ export type AgentProviderNativeSessionDiscoveryContext = {
 }
 
 export type AgentProviderNativeSessionDiscovery = {
+  /** Provider-confirmed descendants of the same process-native main Session. */
+  childSessionIds?: readonly string[]
   handle: Extract<AgentNativeSessionHandle, { kind: 'provider' }>
   /** Recheck the observed native record before accepting a late result. */
   assertCurrent(): Promise<void>
@@ -945,6 +962,9 @@ export type AgentMuxAgentSession = {
   semanticStatus?: AgentStatus
   pendingInteraction?: AgentMuxPendingInteraction
   nativeHandle?: AgentNativeSessionHandle
+  nativeBinding?: AgentNativeBinding
+  /** A confirmed process source that cannot silently replace a retained resume target. */
+  observedNativeHandle?: AgentNativeSessionHandle
   nativePromptPredecessor?: AgentNativePromptPredecessor
   hookReceipt?: AgentHookReceipt
   /**
@@ -1429,6 +1449,12 @@ export type AgentMuxClientEvent = (
 ) & { observationOrigin?: AgentMuxObservationOrigin }
 
 export type AgentStatus = {
+  /** Core-owned order of current activity changes within this Run, not a native activity clock. */
+  currentActivityRevision?: number
+  /** Current idle evidence was consumed; the historical completion remains intact. */
+  idleEvidenceConsumed?: true
+  /** Proven child activity clock, independent of the main turn/completion clock. */
+  aggregateActivityAt?: number
   state: AgentDisplayState
   source: AgentMuxEvidenceSource
   observedAt: number
@@ -1624,6 +1650,8 @@ export type NormalizedHookEvent = {
   mainSubject: boolean
   nativeTurnId?: string
   toolInvocation?: AgentHookToolInvocation
+  subject?: AgentHookSubject
+  childActivity?: boolean
   /**
    * 这条事件归一化后的 Core canonical 生命周期事件，**认不出时缺席**。
    *

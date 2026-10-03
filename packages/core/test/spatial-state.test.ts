@@ -1,6 +1,6 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
-import { mkdtemp, readFile, rm, writeFile, symlink } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile, symlink, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
@@ -33,6 +33,7 @@ afterEach(async () => { for (const server of servers.splice(0)) await server.sto
 let cli: string, worker: string
 beforeAll(async () => {
   const output = resolve('.tmp/durable-spatial-index')
+  await mkdir(output, { recursive: true })
   await symlink('../../packages/core/node_modules',join(output,'node_modules'),'dir').catch(error => { if(error.code !== 'EEXIST') throw error })
   cli = join(output,'cli.mjs'); worker = join(output,'worker.mjs')
   const compiled = await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',metafile:true,logLevel:'silent'})
@@ -55,7 +56,7 @@ describe('Core durable spatial owner without an App',() => {
   })
   it('admits only one of two concurrent writers at the exact original revision',async () => {
     const {store}=await fixture();await store.commit({expectedRevision:0,graph:graph()})
-    const a=graph(),b=graph();a.tabs[0]!.name='A';b.tabs[0]!.name='B'
+    const a=graph(),b=graph();a.resources.tab={draft:'A'};b.resources.tab={draft:'B'}
     const results=await Promise.all([run(worker,[store.path,'write',JSON.stringify({expectedRevision:1,graph:a})]),run(worker,[store.path,'write',JSON.stringify({expectedRevision:1,graph:b})])])
     expect(results.map(r=>r.code).sort()).toEqual([0,2]);expect(results.find(r=>r.code===2)!.result.code).toBe('SPATIAL_STATE_CONFLICT')
     expect((await store.read())!.revision).toBe(2)
@@ -83,7 +84,7 @@ describe('Core durable spatial owner without an App',() => {
   it('finds original Zone members even when there is no display location',() => {
     const g=graph();g.layouts={}
     const catalog=spatialCatalog(g,{zoneId:'zone'})
-    expect(catalog.tabs).toEqual(g.tabs);expect(catalog.regions).toEqual(g.regions);expect(catalog.locations).toEqual([])
+    expect(catalog.tabs).toEqual(g.tabs.map(tab => ({ ...tab, nameRevision: 0 })));expect(catalog.regions).toEqual(g.regions);expect(catalog.locations).toEqual([])
   })
   it('preserves the same Tab in two Groups and returns every occurrence without arbitration',async () => {
     const {store}=await fixture();const g=graph();g.layouts.resource={root:{type:'split',direction:'horizontal',ratio:0.5,first:{type:'leaf',groupId:'g'},second:{type:'leaf',groupId:'second'}},groups:[...g.layouts.resource!.groups,{id:'second',tabOrder:['tab'],recentTabIds:[],activeTabId:'tab'}],activeGroupId:'g'}
@@ -117,7 +118,7 @@ describe('Core durable spatial owner without an App',() => {
     const unbound=await run(cli,['space','unbind','--zone','zone','--space','a'],env)
     expect(unbound.code,unbound.stderr).toBe(0);expect((await store.read())!.graph.bindings).toEqual([{zoneId:'zone',spaceId:'b'}])
     const listed=await run(cli,['space','ls','--zone','zone'],env)
-    expect(listed.code,listed.stderr).toBe(0);expect(listed.result.result.catalog.tabs).toEqual(graph().tabs)
+    expect(listed.code,listed.stderr).toBe(0);expect(listed.result.result.catalog.tabs).toEqual(graph().tabs.map(tab => ({ ...tab, nameRevision: 0 })))
     expect((await store.read())!.graph.regions[0]).toEqual(graph().regions[0])
   })
 })

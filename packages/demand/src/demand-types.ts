@@ -18,12 +18,46 @@ export type DemandStatus = (typeof DEMAND_STATUSES)[number]
 export const DEMAND_PRIORITIES = ['low', 'normal', 'high', 'urgent'] as const
 export type DemandPriority = (typeof DEMAND_PRIORITIES)[number]
 
+/** Established by the calling host, never by a Demand business payload. */
+export type DemandNameContext = {
+  actor: { kind: 'agent' | 'user' | 'device' | 'unknown'; id: string | null; verified: boolean }
+  source: string
+  entryPoint: string
+  transport: string | null
+  location: Record<string, string | null>
+}
+
+export type DemandNameChangeRecord = {
+  id: string
+  operationId: string
+  target: { kind: 'demand'; id: string }
+  before: string
+  requested: string | null
+  actual: string
+  context: DemandNameContext
+  ownerRevision: number | null
+  status: 'applied' | 'failed' | 'unknown'
+  startedAt: number
+  settledAt: number
+  reason: string | null
+}
+
+export type DemandTitleMutationOptions = {
+  context?: DemandNameContext
+  operationId?: string
+  /** CAS against this owner snapshot; callers may omit it for an unconditional update. */
+  expectedRevision?: number
+}
+
 export type DemandActivity = {
   id: string
   kind: string
   message: string
   createdAt: number
   actorId: string | null
+  nameChangeId?: string
+  /** Read projection of the snapshot's history owner; never a second persisted record. */
+  nameChange?: DemandNameChangeRecord
 }
 
 export type DemandDecision = {
@@ -63,6 +97,8 @@ export type DemandStoreSnapshot = {
   revision: number
   updatedAt: number
   demands: Demand[]
+  /** Survives deletion of the named object; title and history share this snapshot commit. */
+  nameHistory: DemandNameChangeRecord[]
 }
 
 export type CreateDemandInput = {
@@ -93,6 +129,15 @@ export type DemandReceipt = {
   operationId: string
   revision: number
   demand: Demand
+  nameChange?: DemandNameChangeRecord
+  /** The existing operation was observed again; no update was reapplied. */
+  replayed?: true
+}
+
+export type DemandNameChangePage = {
+  revision: number
+  records: DemandNameChangeRecord[]
+  nextOffset: number | null
 }
 
 export type DemandStoreListener = (snapshot: DemandStoreSnapshot) => void

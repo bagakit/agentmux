@@ -10,12 +10,14 @@ export interface DurableWriteOptions {
   readonly requireDirectorySync?: boolean
 }
 
-/** The replacement is readable, but its directory entry has no durable acknowledgement. */
-export class DurableWriteConfirmationError extends Error {
-  readonly replacementApplied = true
-  constructor(readonly path: string, cause: unknown) {
-    super('The file was replaced, but its parent directory flush is unconfirmed.', { cause })
-    this.name = 'DurableWriteConfirmationError'
+/** Replacement is a producer fact; a failed directory ACK cannot undo it. */
+export class DurableWriteError extends Error {
+  readonly code?: string
+  constructor(readonly path: string, readonly phase: 'before-replace' | 'after-replace', cause: unknown) {
+    super(cause instanceof Error ? cause.message : String(cause), { cause })
+    this.name = 'DurableWriteError'
+    const code = cause && typeof cause === 'object' && 'code' in cause ? cause.code : undefined
+    if (typeof code === 'string') this.code = code
   }
 }
 
@@ -54,11 +56,9 @@ export async function durableWriteFile(
     signal?.throwIfAborted()
     await rename(temporaryPath, path)
     committed = true
-    try {
-      await syncDirectory(dirname(path), options.requireDirectorySync === true)
-    } catch (error) {
-      throw new DurableWriteConfirmationError(path, error)
-    }
+    await syncDirectory(dirname(path), options.requireDirectorySync === true)
+  } catch (error) {
+    throw new DurableWriteError(path, committed ? 'after-replace' : 'before-replace', error)
   } finally {
     if (!committed) {
       await unlink(temporaryPath).catch((error: NodeJS.ErrnoException) => {

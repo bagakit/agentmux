@@ -76,6 +76,11 @@ export type AgentProviderHookNormalizationContext = Readonly<{
   nativeHandle?: Readonly<AgentNativeSessionHandle>
   /** Only the existing durable receipt of this exact Core Run. */
   previousHookReceipt?: Readonly<AgentHookReceipt>
+  /** This Run was started for an exact semantic resume target; Hook observations cannot redirect it. */
+  protectedNativeTarget?: boolean
+  processNativeHandle?: Readonly<AgentNativeSessionHandle>
+  processNativeChildSessionIds?: readonly string[]
+  nativeIdentityReason?: string
 }>
 
 export type AgentProviderPromptExecutionContext = {

@@ -36,7 +36,7 @@ import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } 
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
-import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
+import { isAgentActivityStatusSource, currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 import type { WebContents } from 'electron'
 import type {
   ExecutorDetection,
@@ -252,7 +252,8 @@ function projectSession(
     // 写入方恰好就是那两个活动来源。新增第三个活动来源时，在场判定会自动接纳，而那边的白名单会把它
     // 覆盖成裸 running：同一个 Agent 在场看 running、reload 看 waiting，且两侧都不会红（实测把这里
     // 收窄成只认 native-hook，93 条全绿）。两侧现在同判一次，新增来源只需在 Core 那张表里表态一次。
-    const semantic = subject.agentSession.semanticStatus
+    const semanticFacts = subject.agentSession.semanticStatus
+    const semantic = currentAgentSemanticStatus(semanticFacts)
     const pending = subject.agentSession.pendingInteraction
     const unavailableReason = pending ? agentInteractionResponseUnavailableReason(pending) : undefined
     const status = run.state === 'running' && semantic && isAgentActivityStatusSource(semantic.source)
@@ -267,7 +268,7 @@ function projectSession(
         ? { nativeSessionId: subject.agentSession.nativeHandle.sessionId }
         : {}),
       capabilities: capabilitiesFor(subject.providerId),
-      ...(semantic ? { semanticStatus: structuredClone(semantic) } : {}),
+      ...(semanticFacts ? { semanticStatus: structuredClone(semanticFacts) } : {}),
       hostId: subject.hostId,
       workspacePath: subject.workspacePath,
       label: agentFallbackLabel(config, subject),

@@ -3,7 +3,9 @@ import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { displayLabel } from '@agentmux/core/spatial-graph'
-import { desktopNameContext } from './name-change-audit.js'
+import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
+import { desktopNameHistory } from './name-history.js'
+import type { AgentMuxNameContext } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
@@ -190,6 +192,9 @@ export async function registerIpc(args: {
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
+  const spatialState = new AgentMuxSpatialStateStore()
+  const nameAudit = new NameChangeAudit(spatialState)
+  args.scratchTopics.setNameAudit(nameAudit)
   let config = await args.configStore.get()
   const initialPalette = terminalPalette(config.appearance.terminalTheme)
   args.runtime.setTerminalViewColors({
@@ -211,6 +216,7 @@ export async function registerIpc(args: {
   let releaseExecutorConfigEdit: (() => void) | undefined
   let toolkit: ToolkitOwner
   const configOwner = new ConfigOwner({
+    nameAudit,
     read: () => config,
     prepare: (current, next) => toolkit.prepareConfig(current, next),
     save: async (next) => {
@@ -291,7 +297,7 @@ export async function registerIpc(args: {
     // 箭头包一层而不是 `shell.openExternal`：摘下来的方法会丢掉原生 receiver（本仓吃过这个亏）。
     openExternal: (target) => shell.openExternal(target)
   }, browserOperationJournal, browserEvidence, browserResults, browserDemonstrations,
-  new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE))),
+  new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(app.getPath('userData'), BROWSER_TASK_ASSETS_FILE)), { nameAudit }),
   new BrowserDownloads(join(app.getPath('userData'), 'browser-downloads'), files, id => workspace(config, id)),
   browserUploads)
   const warnNativeChrome = (warning: string): void => {
@@ -362,7 +368,7 @@ export async function registerIpc(args: {
     if (!response || typeof response.requestId !== 'string') return
     controlBridge.accept(response)
   }
-  const executeControl = async (
+  const executeControlOwner = async (
     request: AgentMuxControlRequest
   ): Promise<AgentMuxControlResult> => {
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
@@ -402,13 +408,18 @@ export async function registerIpc(args: {
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
     return projectBrowserControlResult(await controlBridge.execute(request))
   }
+  const executeControl = (request: AgentMuxControlRequest, context?: AgentMuxNameContext): Promise<AgentMuxControlResult> =>
+    nameChangeRequests.run({ context: context ?? unknownNameContext(request.operation), operationId: request.requestId },
+      () => executeControlOwner(request))
   ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,
     listener: (...values: TArgs) => Promise<TResult> | TResult
   ): void => {
     channels.push(channel)
-    ipcMain.handle(channel, (_event, ...values: TArgs) => listener(...values))
+    ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
+      context: desktopNameContext(channel, event.sender, args.window.webContents, args.window.id), operationId: randomUUID()
+    }, () => listener(...values)))
   }
   /**
    * 同上，但把 `event` 透传给 listener——需要校验发送者、或需要 `sender.id` 的那些频道用它。
@@ -426,7 +437,9 @@ export async function registerIpc(args: {
     listener: (event: IpcMainInvokeEvent, ...values: TArgs) => Promise<TResult> | TResult
   ): void => {
     channels.push(channel)
-    ipcMain.handle(channel, (event, ...values: TArgs) => listener(event, ...values))
+    ipcMain.handle(channel, (event, ...values: TArgs) => nameChangeRequests.run({
+      context: desktopNameContext(channel, event.sender, args.window.webContents, args.window.id), operationId: randomUUID()
+    }, () => listener(event, ...values)))
   }
   /**
    * 特权频道的发送者卫兵——不可信就抛。判据（身份比对 + 拒绝措辞）在纯的 `senderTrust` 里，处置（抛）
@@ -663,11 +676,16 @@ export async function registerIpc(args: {
   handle('files:create', async (workspaceId: string, input: CreateWorkspacePathInput) => {
     await files.create(workspace(config, workspaceId), input)
   })
-  handle('files:move', async (input: MoveWorkspacePathInput) => await files.move(
-    workspace(config, input.source.workspaceId),
-    workspace(config, input.destination.workspaceId),
-    input
-  ))
+  handle('files:move', async (input: MoveWorkspacePathInput) => await nameAudit.run([{
+    target: { kind: 'workspace-path', id: JSON.stringify([input.source.workspaceId, input.source.path]) },
+    location: { workspaceId: input.source.workspaceId, cwd: workspace(config, input.source.workspaceId).path,
+      hostId: workspace(config, input.source.workspaceId).hostId, destinationWorkspaceId: input.destination.workspaceId },
+    before: input.source.path, requested: input.destination.path
+  }], () => files.move(workspace(config, input.source.workspaceId), workspace(config, input.destination.workspaceId), input),
+  result => result.status === 'moved' ? { actual: input.destination.path } : {
+    actual: result.finalLocation === 'source' ? input.source.path : null,
+    status: result.finalLocation === 'source' ? 'failed' : 'unknown', reason: result.message
+  }))
   handle('files:delete', async (workspaceId: string, path: string) => {
     await files.delete(workspace(config, workspaceId), path)
   })
@@ -710,7 +728,11 @@ export async function registerIpc(args: {
   )
   handle('demands:list', async () => await demands.list())
   handle('demands:create', async (input: import('@agentmux/demand').CreateDemandInput) => await demands.create(input))
-  handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput) => await demands.update(id, patch))
+  handle('demands:update', async (id: string, patch: import('@agentmux/demand').UpdateDemandInput, controlRequestId?: string) => {
+    const request = controlRequestId === undefined ? nameChangeRequests.getStore()! : controlBridge.nameRequest(controlRequestId,
+      request => request.operation === 'demand.update' && request.demandId === id && request.patch.title === patch.title)
+    return await demands.update(id, patch, { context: request.context, operationId: request.operationId })
+  })
   handle('demands:confirmAlignment', async (id: string, expectedRevision: number) => await demands.confirmAlignment(id, expectedRevision))
   handle('demands:acceptGrounding', async (id: string, expectedAlignmentRevision: number, expectedSubmissionId: string, acceptGaps?: boolean) => await demands.acceptGrounding(id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps))
   handle('demands:delete', async (id: string) => await demands.delete(id))
@@ -729,7 +751,6 @@ export async function registerIpc(args: {
     requireTrustedSender('notebook:apply', event)
     return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
   })
-  const spatialState = new AgentMuxSpatialStateStore()
   const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
     workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),
@@ -1363,6 +1384,7 @@ export async function registerIpc(args: {
   const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
     execute: executeControl,
+    nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,
     topics: topicKnowledge,
     files: publicFiles,
@@ -1372,7 +1394,10 @@ export async function registerIpc(args: {
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
     ...(rpcHttp ? { http: rpcHttp } : {}),
     metrics,
-    toolkit,
+    toolkit: { subscribe: (toolId, onSnapshot, onEnd, signal) => toolkit.subscribe(toolId, onSnapshot, onEnd, signal),
+      execute: (request, signal, context) => nameChangeRequests.run({
+      context: context ?? unknownNameContext(request.operation), operationId: request.requestId
+    }, () => toolkit.execute(request, signal)) },
     /**
      * 进度订阅直接接到 journal 上，**不经过 Renderer**。
      *

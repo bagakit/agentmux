@@ -210,7 +210,7 @@ const api: AgentMuxPreloadApi = {
   demands: {
     list: () => ipcRenderer.invoke('demands:list'),
     create: (input) => ipcRenderer.invoke('demands:create', input),
-    update: (id, patch) => ipcRenderer.invoke('demands:update', id, patch),
+    update: (id, patch, controlRequestId) => ipcRenderer.invoke('demands:update', id, patch, controlRequestId),
     confirmAlignment: (id, expectedRevision) => ipcRenderer.invoke('demands:confirmAlignment', id, expectedRevision),
     acceptGrounding: (id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps) => ipcRenderer.invoke('demands:acceptGrounding', id, expectedAlignmentRevision, expectedSubmissionId, acceptGaps),
     delete: (id) => ipcRenderer.invoke('demands:delete', id),

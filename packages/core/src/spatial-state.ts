@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { durableWriteFile, DurableWriteConfirmationError } from './durable-write.js';
+import { durableWriteFile, DurableWriteError } from './durable-write.js';
 import { AgentMuxError } from './errors.js';
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
@@ -252,7 +252,7 @@ export class AgentMuxSpatialStateStore {
       try { state = await this.writeLocked(current, graph, { operationId: record.id, target: record.target,
         applied: !rejected, diskDurability: 'confirmed', issue: null }); }
       catch (error) {
-        if (!(error instanceof DurableWriteConfirmationError) || error.path !== this.path) throw error;
+        if (!(error instanceof DurableWriteError) || error.path !== this.path || error.phase !== 'after-replace') throw error;
         // This exact replacement succeeded under our lock. Its content is applied,
         // while a power-loss durability ACK is unknown; do not replay or roll back.
         diskDurability = 'unconfirmed';

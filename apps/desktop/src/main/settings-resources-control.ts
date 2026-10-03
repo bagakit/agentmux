@@ -129,7 +129,10 @@ export async function executeSettingsResourcesControl(request: Request, owner: C
     if (resource === 'executors' && value.providerId !== existing.value.providerId) fail('SETTING_IDENTITY_IMMUTABLE', `Executor “${request.id}” has a fixed Provider. Create a new identity.`)
     changed = !configValuesEqual(value, existing.value)
     return changed ? replace(current, resource, request.id, value) : current
-  }).catch((cause: unknown) => {
+  }, request.operation === 'settings.resource.update' && Object.hasOwn(request.changes, 'label') ? [{
+    target: { kind: resource === 'executors' ? 'executor' : 'prompt', id: request.id },
+    requested: typeof request.changes.label === 'string' ? request.changes.label : null
+  }] : []).catch((cause: unknown) => {
     // Full persistence validation owns cross-record constraints such as Provider membership.
     if (cause instanceof ZodError) invalidValue(resource, cause)
     throw cause

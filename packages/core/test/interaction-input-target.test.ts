@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxClient } from '../src/client.js'
+import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 import { AgentMuxMemoryAgentSessionStore, AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import type { AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
 import type { AgentProviderPreparedInteractionResponse } from '../src/agent-provider.js'
@@ -21,7 +22,12 @@ async function fixture() {
     workspacePath: upstreamFixturePath("tmp/target-agent"), run: { runId: 'target-run' }, retiredRuns: [],
     hookBindingId: 'target-binding', hookToken: 'target-token', createdAt: 1, updatedAt: 1
   } as AgentMuxStoredAgentSession)
-  const client = new AgentMuxClient({ store })
+  const client = new AgentMuxClient({ store, providers: BUILT_IN_AGENT_PROVIDERS.map(provider => provider.id !== 'codex' ? provider : {
+    ...provider,
+    // Synthetic Runtime PID has no OS identity. Admit only this fixture's exact native source;
+    // session-status-authority independently qualifies real process-native discovery.
+    discoverNativeSession: async () => ({ handle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'native-exact', transcriptPath: upstreamFixturePath("tmp/native-exact.jsonl") }, assertCurrent: async () => {} })
+  }) })
   const owner = client as unknown as {
     connected: boolean; registry: { load(host: string): Promise<void> }; kernel: Record<string, unknown>
     acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void>
@@ -55,7 +61,7 @@ async function fixture() {
   let serial = 0
   const hook = async (event: 'PermissionRequest' | 'PostToolUse', call: string) => owner.acceptHookEvent({
     receiptId: `target-receipt-${++serial}`, agentSessionId: 'target-agent', providerId: 'codex', runId: 'target-run',
-    payload: { hook_event_name: event, tool_name: 'exec_command', tool_call_id: call, tool_input: { cmd: `printf ${call}` } }
+    payload: { session_id: 'native-exact', hook_event_name: event, tool_name: 'exec_command', tool_call_id: call, tool_input: { cmd: `printf ${call}` } }
   }, new AbortController().signal)
   const reply = () => client.respondAgentInteraction({ agentSessionId: 'target-agent', expectedRun: { runId: 'target-run' },
     response: { kind: 'permission', requestId: client.agentSession('target-agent').pendingInteraction!.request.id,
@@ -437,7 +443,7 @@ describe('authenticated adjacent Hook tool identity', () => {
         // The store itself must reject a foreign Run receipt; the direct Provider boundary also rejects it.
         const provider = h.client.providers.get('codex'), previous = h.client.agentSession('target-agent').hookReceipt!
         const normalized = provider.normalizeHook({ receiptId: 'direct-permission', agentSessionId: 'target-agent', providerId: 'codex', runId: 'target-run', payload: pre('PermissionRequest') },
-          { nativeHandle: h.client.agentSession('target-agent').nativeHandle!, previousHookReceipt: { ...previous, run: { runId: 'other-run' } } })
+          { nativeHandle: h.client.agentSession('target-agent').nativeHandle!, processNativeHandle: h.client.agentSession('target-agent').nativeHandle!, previousHookReceipt: { ...previous, run: { runId: 'other-run' } } })
         expect(normalized.interaction?.nativeToolCallId).toBeUndefined()
         await ingress(h, 'intervening', { hook_event_name: 'UserPromptSubmit', session_id: 'native-exact', turn_id: 'native-turn' })
       }
@@ -450,8 +456,14 @@ describe('authenticated adjacent Hook tool identity', () => {
       if (fault === 'other-tool') payload.tool_name = 'OtherTool'
       await ingress(h, 'actual-permission', payload)
       expect(h.pending()?.request.nativeToolCallId).toBeUndefined()
-      await expect(h.reply()).rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
-      expect(h.writes).toEqual([]); expect(h.pending()).not.toHaveProperty('response')
+      if (fault === 'other-source') {
+        expect(h.pending()).toBeUndefined()
+        expect(h.client.agentSession('target-agent').hookReceipt?.subject).toMatchObject({ kind: 'foreign' })
+      } else {
+        await expect(h.reply()).rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
+        expect(h.pending()).not.toHaveProperty('response')
+      }
+      expect(h.writes).toEqual([])
       await h.client.writeAgent({ agentSessionId: 'target-agent', expectedRun: { runId: 'target-run' }, source: 'user', data: 'ordinary' })
       expect(h.writes).toEqual(['ordinary'])
     } finally { await h.client.dispose() }
@@ -483,7 +495,7 @@ describe('authenticated adjacent Hook tool identity', () => {
           // Store CAS. Do not recursively acquire this Core's per-Session lane.
           const normalized = h.client.providers.get('codex').normalizeHook({ receiptId: 'racing-hook', agentSessionId: 'target-agent', providerId: 'codex', runId: 'target-run',
             payload: { hook_event_name: 'UserPromptSubmit', session_id: 'native-exact', turn_id: 'native-turn' } },
-          { nativeHandle: expected!.nativeHandle!, previousHookReceipt: expected!.hookReceipt! })
+          { nativeHandle: expected!.nativeHandle!, processNativeHandle: expected!.nativeHandle!, previousHookReceipt: expected!.hookReceipt! })
           await compare(expected, { ...expected!, hookReceipt: { ...expected!.hookReceipt!, id: 'racing-hook', eventName: normalized.eventName,
             ...(normalized.lifecycleEvent === undefined ? {} : { lifecycleEvent: normalized.lifecycleEvent }), observedAt: normalized.status.observedAt } })
         }
@@ -505,7 +517,7 @@ describe('authenticated adjacent Hook tool identity', () => {
         if (!changed && next?.hookReceipt?.id === 'stale-hook') {
           changed = true
           const normalized = h.client.providers.get('codex').normalizeHook({ receiptId: 'racing-pre', agentSessionId: 'target-agent', providerId: 'codex', runId: 'target-run',
-            payload: pre('PreToolUse', 'actual-call-2') }, { nativeHandle: expected!.nativeHandle!, previousHookReceipt: expected!.hookReceipt! })
+            payload: pre('PreToolUse', 'actual-call-2') }, { nativeHandle: expected!.nativeHandle!, processNativeHandle: expected!.nativeHandle!, previousHookReceipt: expected!.hookReceipt! })
           await compare(expected, { ...expected!, hookReceipt: { ...expected!.hookReceipt!, id: 'racing-pre', eventName: normalized.eventName,
             toolInvocation: normalized.toolInvocation!, observedAt: normalized.status.observedAt } })
         }

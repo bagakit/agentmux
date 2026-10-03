@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
-import { openDemandStore } from './demand-store.js'
-import { DEMAND_CLI_SCHEMA, DEMAND_PRIORITIES, DEMAND_STATUSES, type CreateDemandInput, type DemandPriority, type DemandStatus, type UpdateDemandInput } from './demand-types.js'
+import { DemandNameChangeError, openDemandStore } from './demand-store.js'
+import { DEMAND_CLI_SCHEMA, DEMAND_PRIORITIES, DEMAND_STATUSES, type CreateDemandInput, type DemandNameContext, type DemandPriority, type DemandStatus, type UpdateDemandInput } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
 import { parseAlignmentProposal, parseGroundingProposal } from './goals.js'
 
@@ -33,12 +33,18 @@ export async function runDemandCli(argv: readonly string[], io: DemandCliIO = {}
     if (!root) throw new DemandStoreError('INVALID_INPUT', 'validate', '', 'Demand CLI requires --root or AGENTMUX_DEMAND_ROOT')
     const lockTimeoutMs = numberOption(parsed.options, 'lock-timeout-ms')
     const store = openDemandStore(lockTimeoutMs === undefined ? { root } : { root, lockTimeoutMs })
-    const result = await execute(parsed.command, parsed.options, store)
+    const uid = process.getuid?.()
+    const nameContext: DemandNameContext = {
+      actor: uid === undefined ? { kind: 'unknown', id: null, verified: false } : { kind: 'device', id: `uid:${uid}`, verified: true },
+      source: 'local-cli', entryPoint: `agentmux-demand.${parsed.command}`, transport: 'local-process',
+      location: { demandRoot: store.root, cwd: process.cwd(), processId: String(process.pid) }
+    }
+    const result = await execute(parsed.command, parsed.options, store, nameContext, requestId)
     stdout(JSON.stringify({ schemaVersion: DEMAND_CLI_SCHEMA, requestId, operation: parsed.command, ...result }))
     return 0
   } catch (error) {
     const serialized = error instanceof DemandStoreError
-      ? { code: error.code, phase: error.phase, path: error.path, message: error.message }
+      ? { code: error.code, phase: error.phase, path: error.path, message: error.message, ...(error instanceof DemandNameChangeError ? { nameChange: error.nameChange, commitStatus: error.commitStatus } : {}) }
       : { code: 'CLI_ERROR', phase: 'validate', path: '', message: error instanceof Error ? error.message : String(error) }
     const output = JSON.stringify({ schemaVersion: DEMAND_CLI_SCHEMA, requestId, ok: false, error: serialized })
     stderr(output)
@@ -46,7 +52,7 @@ export async function runDemandCli(argv: readonly string[], io: DemandCliIO = {}
   }
 }
 
-async function execute(command: string, options: Map<string, string[]>, store: ReturnType<typeof openDemandStore>): Promise<Record<string, unknown>> {
+async function execute(command: string, options: Map<string, string[]>, store: ReturnType<typeof openDemandStore>, context: DemandNameContext, requestId: string): Promise<Record<string, unknown>> {
   if (command === 'list') {
     const snapshot = await store.snapshot()
     return { revision: snapshot.revision, demands: snapshot.demands }
@@ -55,6 +61,11 @@ async function execute(command: string, options: Map<string, string[]>, store: R
     const demand = await store.get(required(options, 'id'))
     if (!demand) throw new DemandStoreError('NOT_FOUND', 'validate', store.storePath, `Demand ${required(options, 'id')} was not found`)
     return { revision: (await store.snapshot()).revision, demand }
+  }
+  if (command === 'name-history') {
+    const offset = numberOption(options, 'offset')
+    const limit = numberOption(options, 'limit')
+    return await store.listNameChanges(required(options, 'id'), { ...(offset === undefined ? {} : { offset }), ...(limit === undefined ? {} : { limit }) })
   }
   if (command === 'create') {
     const input: CreateDemandInput = { title: required(options, 'title'), sessionIds: options.get('session-id') ?? [] }
@@ -79,7 +90,8 @@ async function execute(command: string, options: Map<string, string[]>, store: R
     const executorId = option(options, 'executor-id'); if (executorId !== undefined) patch.executorId = executorId
     const alignment = option(options, 'alignment'); if (alignment !== undefined) patch.alignment = parseAlignmentProposal(JSON.parse(alignment))
     const grounding = option(options, 'grounding'); if (grounding !== undefined) patch.grounding = parseGroundingProposal(JSON.parse(grounding))
-    const receipt = await store.update(required(options, 'id'), patch)
+    const expectedRevision = numberOption(options, 'expected-revision')
+    const receipt = await store.update(required(options, 'id'), patch, { context, operationId: option(options, 'operation-id') ?? requestId, ...(expectedRevision === undefined ? {} : { expectedRevision }) })
     return { receipt, demand: receipt.demand, revision: receipt.revision }
   }
   if (command === 'propose-alignment' || command === 'propose-grounding') {
@@ -224,5 +236,5 @@ function priorityOption(options: Map<string, string[]>, key: string): DemandPrio
 }
 
 function helpText(): string {
-  return `agentmux-demand — filesystem Demand store\n\nUsage:\n  agentmux-demand --root <directory> list\n  agentmux-demand --root <directory> create --title <title> [options]\n  agentmux-demand --root <directory> show --id <id>\n  agentmux-demand --root <directory> update --id <id> [options]\n  agentmux-demand --root <directory> propose-alignment --id <id> --proposal <json>\n  agentmux-demand --root <directory> propose-grounding --id <id> --proposal <json>\n  agentmux-demand --root <directory> delete --id <id> --confirm delete\n  agentmux-demand --root <directory> link-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> unlink-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> link-project --id <id> --project-id <id>\n  agentmux-demand --root <directory> unlink-project --id <id>\n  agentmux-demand --root <directory> decision-log --id <id> --question <text> --decision <text> [--rationale <text>]\n  agentmux-demand --root <directory> activity --id <id> --kind <kind> --message <text>\n  agentmux-demand --root <directory> assign --id <id> [--project-id <id>] [--executor-id <id>] [--no-start]\n  agentmux-demand --root <directory> start --id <id> [--session-id <id>] [--project-id <id>] [--executor-id <id>]\n  agentmux-demand --root <directory> handoff --id <id> --to-executor <id> [--to-session <id>]\n\nUpdate also accepts --alignment <json> and --grounding <json>. Proposals never confirm goals or accept results.\nThe root must be explicit with --root or AGENTMUX_DEMAND_ROOT.`
+  return `agentmux-demand — filesystem Demand store\n\nUsage:\n  agentmux-demand --root <directory> list\n  agentmux-demand --root <directory> create --title <title> [options]\n  agentmux-demand --root <directory> show --id <id>\n  agentmux-demand --root <directory> update --id <id> [options]\n  agentmux-demand --root <directory> propose-alignment --id <id> --proposal <json>\n  agentmux-demand --root <directory> propose-grounding --id <id> --proposal <json>\n  agentmux-demand --root <directory> delete --id <id> --confirm delete\n  agentmux-demand --root <directory> link-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> unlink-session --id <id> --session-id <id>\n  agentmux-demand --root <directory> link-project --id <id> --project-id <id>\n  agentmux-demand --root <directory> unlink-project --id <id>\n  agentmux-demand --root <directory> decision-log --id <id> --question <text> --decision <text> [--rationale <text>]\n  agentmux-demand --root <directory> activity --id <id> --kind <kind> --message <text>\n  agentmux-demand --root <directory> assign --id <id> [--project-id <id>] [--executor-id <id>] [--no-start]\n  agentmux-demand --root <directory> start --id <id> [--session-id <id>] [--project-id <id>] [--executor-id <id>]\n  agentmux-demand --root <directory> handoff --id <id> --to-executor <id> [--to-session <id>]\n\nTitle update accepts --operation-id <id> and --expected-revision <revision>.\nRead structured title history with name-history --id <id> [--offset <n>] [--limit <1..100>].\nUpdate also accepts --alignment <json> and --grounding <json>. Proposals never confirm goals or accept results.\nThe root must be explicit with --root or AGENTMUX_DEMAND_ROOT.`
 }

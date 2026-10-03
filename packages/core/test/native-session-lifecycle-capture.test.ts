@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, AgentMuxSessionDurabilityError, loadAgentSessions } from '../src/agent-session-store.js'
-import { DurableWriteConfirmationError } from '../src/durable-write.js'
+import { DurableWriteError } from '../src/durable-write.js'
 import type { CtxmuxRunAdapter, CtxmuxAdapterRun } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 
@@ -152,7 +152,7 @@ it.each(['create', 'native-save'] as const)('keeps post-rename %s usable until a
   const f = await fixture()
   const commit = f.store.commitLifecycle.bind(f.store), cas = f.store.compareAndSwap.bind(f.store)
   let fail = true
-  const uncertainty = () => new AgentMuxSessionDurabilityError(new DurableWriteConfirmationError(f.store.path, new Error('controlled directory sync EIO')))
+  const uncertainty = () => new AgentMuxSessionDurabilityError(new DurableWriteError(f.store.path, 'after-replace', new Error('controlled directory sync EIO')))
   vi.spyOn(f.store, 'commitLifecycle').mockImplementation(async (reservation, session) => {
     await commit(reservation, session)
     if (session && fail && phase === 'create') throw uncertainty()
@@ -182,7 +182,7 @@ it('public native resume keeps its healthy new Run and original native identity 
   const f = await fixture({ resume: true })
   const commit = f.store.commitLifecycle.bind(f.store)
   let fail = true
-  const uncertainty = () => new AgentMuxSessionDurabilityError(new DurableWriteConfirmationError(f.store.path, new Error('controlled directory sync EIO')))
+  const uncertainty = () => new AgentMuxSessionDurabilityError(new DurableWriteError(f.store.path, 'after-replace', new Error('controlled directory sync EIO')))
   vi.spyOn(f.store, 'commitLifecycle').mockImplementation(async (reservation, next) => {
     await commit(reservation, next)
     if (next && fail) throw uncertainty()

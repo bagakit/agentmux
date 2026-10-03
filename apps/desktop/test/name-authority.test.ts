@@ -10,7 +10,7 @@ import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-st
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabel, displayLabelDocument, type AgentMuxNameContext,
   type AgentMuxSpatialGraph } from '../../../packages/core/src/spatial-graph'
 import { acknowledgedNameProjection } from '../src/renderer/src/lib/name-authority'
-import { reconcileSpatialGraphs } from '../src/renderer/src/lib/desktop-spatial-state'
+import { DesktopSpatialPersistence, reconcileSpatialGraphs } from '../src/renderer/src/lib/desktop-spatial-state'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { api } from '../src/renderer/src/lib/api'
@@ -20,6 +20,8 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { agentCreationFixture } from './helpers/agent-creation-fixture'
+// The registered vertical gate consumes the existing named-owner suite as well.
+import './name-change-owners.test'
 // The already-installed build tool belongs to Core; Desktop does not acquire a
 // product dependency merely for this isolated source-counterfactual proof.
 const { build } = createRequire(resolve(import.meta.dirname, '../../../packages/core/package.json'))('esbuild') as typeof import('../../../packages/core/node_modules/esbuild')
@@ -235,6 +237,27 @@ describe('name authority at its durable boundary and real projection consumers',
     await owner.commit({ expectedRevision: namedAgent.state.revision, graph: merged })
     expect((await owner.queryNameChanges()).records).toHaveLength(2)
   })
+  it('renames registered targets despite unrelated layout failure and keeps new targets behind registration', async () => {
+    const { owner } = await appFixture()
+    const regions = useAppStore.getState().tabs['private-tab']!.regions
+    const warning = 'Unrelated layout unavailable'
+    vi.spyOn(DesktopSpatialPersistence.prototype, 'flush').mockRejectedValue(new Error(warning))
+    useAppStore.setState({ workbenchSaveWarning: warning })
+    expect(await useAppStore.getState().renameTab('private-tab', 'Chosen tab', 0)).toBe(true)
+    expect(await useAppStore.getState().renameAgent('legacy-session', 'Chosen Agent', 1)).toBe(true)
+    expect(displayLabel((await owner.read())!.graph, { kind: 'tab', id: 'private-tab' })?.value).toBe('Chosen tab')
+    expect(displayLabel((await owner.read())!.graph, { kind: 'agent-session', id: 'legacy-session' })?.value).toBe('Chosen Agent')
+    expect(useAppStore.getState().tabs['private-tab']!.regions).toBe(regions)
+    expect(useAppStore.getState().workbenchSaveWarning).toBe(warning)
+    const newTab = createWorkbenchTab('unregistered-tab', { regionId: initialWorkbenchRegionId('unregistered-tab'),
+      kind: 'launcher', workspaceId: 'private-workspace' })
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [newTab.id]: newTab } }))
+    const writes = vi.mocked(api.spatial.renameLabel).mock.calls.length
+    expect(await useAppStore.getState().renameTab(newTab.id, 'Unregistered choice', 0)).toBe(false)
+    expect(vi.mocked(api.spatial.renameLabel).mock.calls).toHaveLength(writes)
+    expect((await owner.read())!.graph.tabs.some(tab => tab.tabId === newTab.id)).toBe(false)
+    expect(useAppStore.getState().nameEditFailure?.message).toContain(warning)
+  })
   it('uses the actual Desktop Store for durable manual clear, stale hydration, failed save and a deliberate retry', async () => {
     const { owner } = await appFixture()
     expect(useAppStore.getState().agentNames['legacy-session']).toBe('Preserved original alias')
@@ -372,7 +395,7 @@ describe('name authority at its durable boundary and real projection consumers',
       { id: 'renderer-name-rebase', path: 'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts',
         old: "if (field === 'tabs' && current.has(id)) {", next: 'if (false) {' },
       { id: 'post-replace-unknown-ack', path: 'packages/core/src/spatial-state.ts',
-        old: "if (!(error instanceof DurableWriteConfirmationError) || error.path !== this.path) throw error;", next: 'throw error;' },
+        old: "if (!(error instanceof DurableWriteError) || error.path !== this.path || error.phase !== 'after-replace') throw error;", next: 'throw error;' },
       { id: 'public-name-revision-envelope', path: 'packages/core/src/space-control-parser.ts',
         old: "'tabId', 'name', 'expectedNameRevision', 'fromLocation'", next: "'tabId', 'name', 'fromLocation'" }
     ]
@@ -408,7 +431,7 @@ finally{await rpc.dispose();await server.stop();}
       const file = join(output, id + '.mjs')
       const bundle = await build({ stdin: { contents: harness, resolveDir: root, sourcefile: 'name-authority-loaded-caller.mjs' },
         outfile: file, bundle: true, platform: 'node', format: 'esm', metafile: true, logLevel: 'silent',
-        banner: { js: "import { createRequire as __nameProofCreateRequire } from 'node:module';const require=__nameProofCreateRequire(import.meta.url);" },
+        banner: { js: "import { createRequire as createNameProofRequire } from 'node:module'; const require = createNameProofRequire(import.meta.url);" },
         define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, plugins: [{ name: 'one-loaded-name-counterfactual', setup(plugin) {
           plugin.onLoad({ filter: /\.(?:ts|tsx)$/ }, async args => {
             if (args.path === resolve(root, 'packages/core/src/durable-write.ts')) {
@@ -460,6 +483,6 @@ finally{await rpc.dispose();await server.stop();}
     expect(rows).toHaveLength(5); expect(callers.length).toBeGreaterThan(0)
     await writeFile(join(output, 'label-proof.json'), JSON.stringify({ passed: true, sourceHashes: hashes, mutations: rows, callers,
       userRuntimeTouched: false, cleanup: { exactSourceUntouched: true, privateFixturesRemoved: true },
-      scope: 'Loaded isolated source bundles exercise the actual Spatial owner, Renderer rebase and public RPC. This bounded suite does not claim GUI or process restart evidence.' }, null, 2))
+      scope: 'Loaded isolated source bundles exercise actual Spatial owner and Renderer rebase; compiled public/UI callers and process restart are independently covered by GUI receipt.' }, null, 2))
   }, 60000)
 })

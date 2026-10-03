@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath } from './helpers/history-fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import assert from 'node:assert/strict'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import fsp from 'node:fs/promises'
@@ -20,7 +20,11 @@ import {
   type AgentMuxStoredAgentSession
 } from '../dist/index.js'
 
-const isolation = await vi.hoisted(async () => { const { fixturePath: upstreamFixturePath } = await import("./helpers/history-fixture-values.js"); return ({ homedir: upstreamFixturePath("synthetic/unset-home") }) })
+const isolation = await vi.hoisted(async () => {
+  const { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os')
+  const { join } = await import('node:path')
+  return { homedir: join(tmpdir(), 'agentmux-fixtures', "synthetic/unset-home") }
+})
 vi.mock('node:os', async (importOriginal) => ({
   ...(await importOriginal<typeof import('node:os')>()),
   homedir: () => isolation.homedir
@@ -111,7 +115,8 @@ async function harness(mode: Mode) {
         expectedProcess: 'fixture',
         hookStrategy: { kind: 'native', installation: 'unmanaged' }
       },
-      hook: template.hook,
+      // Synthetic admission protocol copies event rules, not Codex's OS-native membership.
+      hook: { ...template.hook, processNativeIdentity: false, resolveSubject: undefined },
       buildArgs: (_, args) => [...args],
       ...(mode === 'render-then-submit'
         ? {
