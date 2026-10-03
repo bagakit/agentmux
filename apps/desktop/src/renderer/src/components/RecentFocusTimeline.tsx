@@ -1,3 +1,4 @@
+import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, History, LocateFixed, MessageSquare, Minus, Plus, SquareTerminal, X } from 'lucide-react'
@@ -289,8 +290,8 @@ function useFocusInputWindow(control: SessionHistoryReference | undefined, scope
   return { ...(window.partitions.get(scope) ?? EMPTY_NATIVE_WINDOW), window, observeWork, continueReading: () => void readBatch(), refresh: () => void readBatch(true) }
 }
 
-const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence }: {
-  track: FocusTimelineTrack; selected: boolean; window: FocusTimeWindow; now: number
+const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMessages, recordedMessageTracks, retainedWork, observeWork, observing, window, now, scaleWidth, lane, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork, onPresence }: {
+  track: FocusTimelineTrack; selected: boolean; window: FocusTimeWindow; now: number; scaleWidth: number
   nativeMessages?: readonly ConversationRecord[] | undefined
   recordedMessageTracks?: ReadonlyMap<string, string> | undefined
   retainedWork?: FocusWorkFacts | undefined
@@ -317,11 +318,7 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const captured = useMemo(() => context && timeline ? projectConversationRecords({ agentSessionId: sessionId, executionHostId: context?.hostId, timeline }).filter(record => record.kind !== 'activity') : EMPTY_LATEST_INPUTS.messages, [sessionId, !!context, context?.hostId, timeline])
   // Record facts are checked when observed; the slowly refreshed playhead is not their arrival fence.
   const messages = useMemo(() => { const observedNow = Date.now(), seen = new Set<string>(); return [...(nativeMessages ?? []), ...captured].filter(item => { if (seen.has(item.id) || recordedMessageTracks?.has(item.id) && recordedMessageTracks.get(item.id) !== track.key) return false; seen.add(item.id); return true }).filter(item => item.recordedAt !== undefined && Number.isFinite(item.recordedAt) && item.recordedAt >= window.start && item.recordedAt <= window.end && item.recordedAt <= observedNow) }, [captured, nativeMessages, recordedMessageTracks, track.key, window, now])
-  const messageGroups = useMemo(() => {
-    const groups = new Map<number, ConversationRecord[]>()
-    for (const message of messages) { const at = message.recordedAt!, group = groups.get(at) ?? []; group.push(message); groups.set(at, group) }
-    return [...groups.values()]
-  }, [messages])
+  const messageGroups = useMemo(() => focusMessageMarkers(messages, window, scaleWidth), [messages, window, scaleWidth])
   const describeMessageSpeaker = useFocusSpeakerResolver(messages)
   const position = focusTimePosition(now, window)
   const liveNow = context?.processState === 'running' && position >= 0 && position <= 100
@@ -413,16 +410,17 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
         aria-label={`${context ? 'Return to' : 'Inspect focus in'} ${context ? name : item.identity?.name ?? name}, focused at ${dateClock(item.focusedAt)}${item.end === undefined ? ', next focus not recorded' : ''}`}
         title={`${item.identity?.name ?? 'Historical name not recorded'} · ${item.identity?.project?.name ?? 'Project not recorded'} · Focused ${dateClock(item.focusedAt)}${item.end === undefined ? ' · Next focus not recorded' : ''}`}
         onClick={event => context ? onSelect(sessionId) : onInspect(item, event.currentTarget)}><span>{clock(item.focusedAt)}</span></button>)}
-      {messageGroups.map(records => {
+      {messageGroups.map(({ records, startAt, endAt }) => {
         const message = records[0]!, multiple = records.length > 1
         const inputs = records.filter(record => record.kind === 'user-message').length, replies = records.filter(record => record.kind === 'assistant-message').length
         const recordKind = inputs && replies ? 'mixed' : message.kind
+        const recordedRange = startAt === endAt ? `at ${time.detailed(startAt)}` : `from ${time.detailed(startAt)} through ${time.detailed(endAt)}`
         const speaker = message.speaker!
         const described = describeMessageSpeaker(speaker)
         const authorLabel = speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} · Sender ${speaker.id}` : speaker.role === 'human' ? 'Human message · You' : 'Prompt · Sender not recorded'
-        return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={message.recordedAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
-          style={{ left: `${focusTimePosition(message.recordedAt!, window)}%` }} aria-label={multiple ? `${records.length} conversation records in ${name} at ${clock(message.recordedAt!)}, including ${inputs} inputs and ${replies} replies. Open recorded messages.` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
-          title={multiple ? `${records.length} records · ${inputs} inputs · ${replies} replies · ${name} · Record time ${dateClock(message.recordedAt!)} · Click to read each original record` : `${name} · Record time ${dateClock(message.recordedAt!)} · ${authorLabel}\n${message.content.slice(0, 160)}`}
+        return <button key={message.id} type="button" className={`recent-focus__message${multiple ? ' recent-focus__message--group' : ''}`} data-message-id={message.id} data-message-ids={JSON.stringify(records.map(record => record.id))} data-message-raw-ids={JSON.stringify(records.map(record => record.rawId))} data-record-count={records.length} data-message-raw-id={message.rawId} data-message-source={message.source.kind} data-message-at={startAt} data-message-through={endAt} data-message-author={multiple ? undefined : speaker.role} data-record-kind={recordKind} data-input-message-id={message.input?.id}
+          style={{ left: `${focusTimePosition(startAt, window)}%` }} aria-label={multiple ? `${records.length} conversation records in ${name} ${recordedRange}, including ${inputs} inputs and ${replies} replies. Open recorded messages.` : speaker.role === 'agent' ? `${message.kind === 'assistant-message' ? 'Agent reply' : 'Agent input'} in ${name} at ${clock(message.recordedAt!)}, sender ${speaker.id}` : speaker.role === 'human' ? `Your message in ${name} at ${clock(message.recordedAt!)}` : `Prompt in ${name} at ${clock(message.recordedAt!)}, sender not recorded`}
+          title={multiple ? `${records.length} records · ${inputs} inputs · ${replies} replies · ${name} · Record times ${recordedRange} · Click to read each original record` : `${name} · Record time ${dateClock(message.recordedAt!)} · ${authorLabel}\n${message.content.slice(0, 160)}`}
           onMouseEnter={event => { if (!multiple) onPreview(message, event.currentTarget, false) }} onMouseLeave={() => onDismiss(message.id)}
           onFocus={event => { if (!multiple && !(event.relatedTarget instanceof Element && event.relatedTarget.closest('.recent-focus__message-preview'))) onPreview(message, event.currentTarget, false, true) }} onBlur={() => onDismiss(message.id)}
           onClick={event => onPreview(message, event.currentTarget, true, false, multiple ? records : undefined)}>{multiple ? records.length > 99 ? '99+' : records.length : <ConversationSpeakerAvatar speaker={speaker} name={described.name} mote={described.mote} {...(described.providerId ? { providerId: described.providerId } : {})} size={10} />}</button>
@@ -431,14 +429,14 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   </div>
 })
 
-const FocusTimeProject = memo(function FocusTimeProject({ project, registered, currentSessionId, messagesByTrack, messagesByReference, recordedMessageTracks, workByReference, observeWork, observing, window, now, lanesByContext, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork }: {
+const FocusTimeProject = memo(function FocusTimeProject({ project, registered, currentSessionId, messagesByTrack, messagesByReference, recordedMessageTracks, workByReference, observeWork, observing, window, now, scaleWidth, lanesByContext, time, onSelect, onPreview, onDismiss, onInspect, onInspectWork }: {
   project: FocusTimelineProject; registered: boolean; currentSessionId: string | null
   messagesByTrack: ReadonlyMap<string, readonly ConversationRecord[]>; messagesByReference: ReadonlyMap<string, readonly ConversationRecord[]>
   recordedMessageTracks: ReadonlyMap<string, ReadonlyMap<string, string>>
   workByReference: ReadonlyMap<string, FocusWorkFacts>
   observing: boolean
   observeWork(reference: SessionHistoryReference, items: readonly AgentTimelineItem[], identity: AgentFocusHistoryIdentity | undefined): void
-  window: FocusTimeWindow; now: number
+  window: FocusTimeWindow; now: number; scaleWidth: number
   lanesByContext: ReadonlyMap<string, FocusProjectLane>
   time: FocusTimeFormatters
   onSelect(id: string): void; onPreview(message: ConversationRecord, target: HTMLElement, interactive: boolean, immediate?: boolean, records?: readonly ConversationRecord[]): void
@@ -460,7 +458,7 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
       <span className="recent-focus__project-summary" aria-hidden="true" />
     </button>
     <div className="recent-focus__project-tracks" data-collapsed={collapsed} inert={collapsed} aria-hidden={collapsed || undefined}>
-      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentSessionId} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
+      {project.tracks.map(track => <FocusTimeTrack key={track.key} track={track} selected={!!track.current && track.sessionId === currentSessionId} recordedMessageTracks={recordedMessageTracks.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} retainedWork={workByReference.get(JSON.stringify([track.current?.hostId ?? track.inputReference?.hostId ?? track.identity?.hostId, track.sessionId]))} observeWork={observeWork} observing={observing} nativeMessages={track.current ? messagesByReference.get(JSON.stringify([track.current.hostId, track.sessionId])) : messagesByTrack.get(track.key)} window={window} now={now} scaleWidth={scaleWidth} lane={track.current ? lanesByContext.get(track.sessionId) : undefined} time={time} onSelect={onSelect} onPreview={onPreview} onDismiss={onDismiss} onInspect={onInspect} onInspectWork={onInspectWork} onPresence={observePresence} />)}
     </div>
   </section>
 })
@@ -912,6 +910,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     path: ticks.filter(tick => tick.tier === tier).map(tick => `M${focusTimePosition(tick.instant, range)} 0V1`).join(' ')
   })), [ticks, range])
   const position = focusTimePosition(now, range)
+  const previewRecordStart = preview?.records ? Math.min(...preview.records.map(record => record.recordedAt!)) : undefined
+  const previewRecordEnd = preview?.records ? Math.max(...preview.records.map(record => record.recordedAt!)) : undefined
   const previewContext = preview?.message ? contexts.find(context => context.id === preview.message!.agentSessionId && context.hostId === preview.message!.executionHostId) : inputContext
   const previewSource = preview?.message ? inputSources.find(source => source.id === preview.message!.agentSessionId && source.reference.hostId === preview.message!.executionHostId) : inputSource
   const previewSpeaker = preview?.message ? preview.message.speaker : undefined
@@ -989,7 +989,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
           return <span key={tick.instant} className="recent-focus__tick" data-tier={tick.tier} data-tick-at={tick.instant} title={time.detailed(tick.instant)} style={{ left: `${position}%`, '--focus-tick-x': `${position * scaleWidth / 100}px`, '--focus-time-scale-width': `${scaleWidth}px` } as CSSProperties}>{tickLabels.has(tick.instant) ? <time dateTime={new Date(tick.instant).toISOString()}>{time.ruler(tick.instant)}{tick.repeated ? <small>{focusUtcOffset(tick.offset)}</small> : null}</time> : null}</span>
         })}{position >= 0 && position <= 100 ? <span className="recent-focus__playhead recent-focus__playhead--ruler" data-now={now} style={{ left: `${position}%` }} aria-label={`Current time ${clock(now)}`} /> : null}</div></div>
         <div className="recent-focus__tracks">
-          {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentSessionId={currentSessionId} messagesByTrack={messagesByTrack} messagesByReference={messagesByReference} recordedMessageTracks={recordedMessageTracks} workByReference={workByReference} observeWork={nativeWindow.observeWork} observing={documentVisible} window={range} now={now} lanesByContext={lanesByContext} time={time} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} onInspectWork={inspectWorkObservation} />)}
+          {projects.map(project => <FocusTimeProject key={project.key} project={project} registered={registeredProjects.has(project.key)} currentSessionId={currentSessionId} messagesByTrack={messagesByTrack} messagesByReference={messagesByReference} recordedMessageTracks={recordedMessageTracks} workByReference={workByReference} observeWork={nativeWindow.observeWork} observing={documentVisible} window={range} now={now} scaleWidth={scaleWidth} lanesByContext={lanesByContext} time={time} onSelect={onSelect} onPreview={inspectMessage} onDismiss={dismissMessage} onInspect={inspectObservation} onInspectWork={inspectWorkObservation} />)}
         </div>
         <p className="recent-focus__empty">No visible records in this window. Use meaning and coverage to see what has been read.</p>
       </div>
@@ -999,7 +999,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
     {preview ? <FocusMessagePreview describeSpeaker={describePreviewSpeaker} timeFormatters={time} message={preview.message} recipient={previewContext} recipientName={previewSource?.name} workspaceRoot={previewSource?.workspacePath} sender={sender} lane={senderLane} hierarchy={hierarchy} interactive={preview.interactive} anchor={preview.anchor} onSelect={onSelect} onClose={closePreview} onMouseEnter={cancelPreviewIntent} onMouseLeave={() => { if (preview.message) dismissMessage(preview.message.id) }}
       {...(preview.records ? { reader: {
         selectionOnly: true, messages: preview.records, loading: false,
-        coverage: `${preview.records.length} records at ${dateClock(preview.records[0]!.recordedAt!)}. Original source order; select a record to read it.`, error: null,
+        coverage: `${preview.records.length} records ${previewRecordStart === previewRecordEnd ? `at ${time.detailed(previewRecordStart!)}` : `from ${time.detailed(previewRecordStart!)} through ${time.detailed(previewRecordEnd!)}`}. Original source order; select a record to read it.`, error: null,
         onMessage: (message: ConversationRecord) => setPreview(current => current ? { ...current, message } : current)
       } } : readerOpen ? { reader: {
         contexts: inputSources.slice(0, sourceLimit), contextId: inputReference?.agentSessionId ?? null, messages: inputMessages,

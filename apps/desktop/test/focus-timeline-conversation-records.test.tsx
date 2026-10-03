@@ -13,6 +13,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
 import * as conversationRecords from '@agentmux/client-ui/conversation-records'
+import * as messageGeometry from '../src/renderer/src/lib/focus-message-markers'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { localDateTime } from '../src/renderer/src/lib/focus-time-window'
 // The actual Global/Store/Timeline/shared Hook and public Core/FileStore/Claude
@@ -53,6 +54,23 @@ async function seedCaptured(items: AgentTimelineItem[]) {
   const timeline = await fixture.client.sessionTimeline(ID)
   await act(async () => useAppStore.setState({ timelines: { [ID]: timeline } }))
 }
+// The original ruler observes this actual mounted scale element; this fixture
+// supplies layout in HappyDOM, where border boxes otherwise report zero.
+function measuredTimeline(initialWidth: number) {
+  let width = initialWidth
+  const observers = new Set<{ callback: ResizeObserverCallback; value: ResizeObserver }>()
+  const originalBounds = HTMLElement.prototype.getBoundingClientRect
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('recent-focus__time-scale') ? new DOMRect(0, 0, width, 18) : originalBounds.call(this)
+  })
+  vi.stubGlobal('ResizeObserver', class {
+    private entry: { callback: ResizeObserverCallback; value: ResizeObserver }
+    constructor(callback: ResizeObserverCallback) { this.entry = { callback, value: this as unknown as ResizeObserver }; observers.add(this.entry) }
+    observe() {} disconnect() { observers.delete(this.entry) }
+  })
+  return async (next: number) => { width = next; await act(async () => { for (const observer of [...observers]) observer.callback([], observer.value) }) }
+}
+
 function healthy() { expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT); expect(useAppStore.getState().sessions[0]!.control).toEqual({ kind: 'agent', hostId: 'local', agentSessionId: ID, run: { runId: 'unchanged-private-run' } }) }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -76,6 +94,84 @@ afterEach(async () => {
   await act(async () => root.unmount()); host.remove()
   expect(fixture.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
   await fixture.close(); for (const extra of extraFixtures.splice(0)) { expect(extra.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); await extra.close() } useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); document.getElementById('agentmux-window-overlay-host')?.remove()
+})
+
+it('neighboring inputs and replies use the actual ruler width, keep original order and read each record with truthful seconds', async () => {
+  const resize = measuredTimeline(864)
+  await writeFile(fixture.path, '')
+  await seedCaptured([
+    captured('near-reply', 'assistant_message', { createdAt: NOW - 10_000, content: 'Repeated original speech' }),
+    captured('near-input', 'user_message', { createdAt: NOW - 20_000, authorAgentSessionId: 'other-agent', content: 'Repeated original speech' }),
+    captured('far-input', 'user_message', { createdAt: NOW - HOUR, authorHuman: true })
+  ])
+  await render(); await wait(() => expect(recordCount()).toBe(3))
+  expect(markers()).toHaveLength(2)
+  const group = markers().find(node => node.dataset.recordCount === '2')!
+  expect(group).toBeDefined(); expect(group.dataset.recordKind).toBe('mixed')
+  expect(JSON.parse(group.dataset.messageRawIds!)).toEqual(['near-reply', 'near-input'])
+  expect(Number(group.dataset.messageAt)).toBe(NOW - 20_000); expect(Number(group.dataset.messageThrough)).toBe(NOW - 10_000)
+  expect(group.title).toContain('from'); expect(group.title).toContain('through')
+  expect(group.title).toContain(':40'); expect(group.title).toContain(':50')
+  await act(async () => group.click())
+  const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
+  expect(list.map(node => node.dataset.recordRawId)).toEqual(['near-reply', 'near-input'])
+  expect(overlay().textContent).toContain('from'); expect(overlay().textContent).toContain('through')
+  for (const item of list) { await act(async () => item.click()); expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Repeated original speech') }
+  const body = overlay().querySelector<HTMLElement>('.recent-focus__message-body')!, text = body.querySelector('p')!.firstChild!, range = document.createRange()
+  range.setStart(text, 0); range.setEnd(text, 8); const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range); body.scrollTop = 7
+  const before = reads.mock.calls.length
+  await resize(30_000); expect(markers()).toHaveLength(3)
+  await resize(120); expect(markers()).toHaveLength(2)
+  const zoom = host.querySelector<HTMLSelectElement>('[aria-label="Focus window size"]')!
+  await act(async () => { zoom.value = '0.5'; zoom.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(recordCount()).toBe(2); expect(markers()).toHaveLength(1)
+  await resize(3000); expect(markers()).toHaveLength(2)
+  await resize(0); expect(markers()).toHaveLength(2)
+  await click('[aria-label="Previous focus window"]'); expect(markers()).toHaveLength(0)
+  expect(overlay().querySelector('.recent-focus__message-body')).toBe(body); expect(selection.toString()).toBe('Repeated'); expect(body.scrollTop).toBe(7)
+  expect(reads.mock.calls.length).toBe(before); healthy(); selection.removeAllRanges()
+})
+
+it('the final 22px count width also merges the left neighbor and repeated native/captured raw IDs stay original', async () => {
+  measuredTimeline(864)
+  await writeFile(fixture.path, jsonl([native('duplicate', 'user', 'Repeated original speech', NOW - 483_333), native('native-other', 'assistant', 'Repeated original speech', NOW - 200_000)]))
+  await seedCaptured([
+    captured('duplicate', 'user_message', { createdAt: NOW - 183_333, authorAgentSessionId: 'other-agent' }),
+    captured('reply', 'assistant_message', { createdAt: NOW - 183_333 })
+  ])
+  await render(); await wait(() => expect(recordCount()).toBe(4))
+  expect(markers()).toHaveLength(1)
+  const group = markers()[0]!
+  expect(group.dataset.recordCount).toBe('4')
+  expect(JSON.parse(group.dataset.messageRawIds!)).toEqual(['duplicate', 'native-other', 'duplicate', 'reply'])
+  const identities = JSON.parse(group.dataset.messageIds!) as string[]
+  expect(new Set(identities).size).toBe(4)
+  await act(async () => group.click())
+  const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
+  expect(list.map(node => node.dataset.recordSource)).toEqual(['native', 'native', 'captured', 'captured'])
+  expect(list.map(node => node.dataset.recordRawId)).toEqual(['duplicate', 'native-other', 'duplicate', 'reply'])
+  for (const item of list) { await act(async () => item.click()); expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Repeated original speech') }
+  healthy()
+})
+
+it('zero width keeps exact-time records reachable and unrelated output does not rerun pixel grouping or read sources', async () => {
+  const resize = measuredTimeline(0), geometry = vi.spyOn(messageGeometry, 'focusMessageMarkers')
+  await writeFile(fixture.path, '')
+  await seedCaptured([captured('zero-input', 'user_message', { createdAt: NOW - 20_000, authorAgentSessionId: 'other-agent' }), captured('zero-reply', 'assistant_message', { createdAt: NOW - 10_000 })])
+  await render(); await wait(() => expect(recordCount()).toBe(2))
+  expect(markers()).toHaveLength(2); expect(geometry.mock.calls.length).toBeGreaterThan(0)
+  await records(); expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => node.dataset.recordRawId)).toEqual(['zero-input', 'zero-reply'])
+  const before = { groups: geometry.mock.calls.length, reads: reads.mock.calls.length }
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [captured('unrelated', 'assistant_message', { agentSessionId: 'unrelated' })] } } })))
+  expect(geometry.mock.calls.length).toBe(before.groups); expect(reads.mock.calls.length).toBe(before.reads)
+  await resize(864); expect(markers()).toHaveLength(1)
+  const at = Number(markers()[0]!.dataset.messageAt), through = Number(markers()[0]!.dataset.messageThrough)
+  await act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' }); document.dispatchEvent(new Event('visibilitychange')) })
+  const hidden = reads.mock.calls.length
+  await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, unrelated: 'Unrelated hidden update' } })))
+  expect(reads.mock.calls.length).toBe(hidden); expect(Number(markers()[0]!.dataset.messageAt)).toBe(at); expect(Number(markers()[0]!.dataset.messageThrough)).toBe(through)
+  if (process.env.AGENTMUX_COLLISION_PREFLIGHT_FACTS) await appendFile(process.env.AGENTMUX_COLLISION_PREFLIGHT_FACTS, JSON.stringify({ groupingCalls: before.groups, unrelatedGroupingDelta: 0, unrelatedReadDelta: 0, hiddenReadDelta: 0, groupStart: at, groupEnd: through }) + '\n')
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' }); healthy()
 })
 
 it('newly observed other-Agent input is visible before the slow UI now clock ticks', async () => {
