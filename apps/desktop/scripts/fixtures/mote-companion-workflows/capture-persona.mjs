@@ -8,10 +8,11 @@ const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../.
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const directory = path.join(root, (".tmp/mote-companion/persona-renderer-" + (globalThis.crypto.randomUUID()) + "")), compiled = path.join(directory, 'compiled')
+const behaviorOnly = process.argv.includes('--behavior-only')
 const ideasOnly = process.argv.includes('--ideas-only')
 const feedbackOnly = process.argv.includes('--feedback-only')
 await fs.mkdir(compiled, { recursive: true }); await fs.mkdir(path.join(directory, 'userData'))
-const receipt = { passed: false, captureOnly: true, captureSubset: feedbackOnly ? 'feedback-only' : ideasOnly ? 'ideas-only' : 'full', aestheticReview: 'not-performed', source: {}, images: {},
+const receipt = { passed: false, captureOnly: true, captureSubset: behaviorOnly ? 'behavior-only' : feedbackOnly ? 'feedback-only' : ideasOnly ? 'ideas-only' : 'full', aestheticReview: 'not-performed', source: {}, images: {},
   boundary: 'Original Profile/Editor/NewTabSurface/Store and Desktop styles in an isolated Electron Renderer. Controlled filesystem/history/Goal API replies, synthetic exact Session reference and no configured Executor; no live user App/Run, Core native lifecycle, model, package or install claim.' }
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
@@ -46,12 +47,20 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="persona-entry.css"></head><body><div id="root"></div><script type="module" src="persona-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'persona-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(feedbackOnly ? ['--feedback-only'] : ideasOnly ? ['--ideas-only'] : [])],
-    { temporaryRoot: directory, cwd: root, env, timeoutMs: 60000, onLine: line => logs.push(line) })
+  receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'persona-main.cjs'), path.join(compiled, 'index.html'), directory, directory, ...(behaviorOnly ? ['--behavior-only'] : feedbackOnly ? ['--feedback-only'] : ideasOnly ? ['--ideas-only'] : [])],
+    { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   assert.equal(receipt.process.exitCode, 0); assert.equal(receipt.renderer.passed, true)
   for (const file of receipt.renderer.images) receipt.images[path.relative(root, path.join(directory, file))] = sha(await fs.readFile(path.join(directory, file)))
+  if (behaviorOnly) {
+    const frame = name => receipt.renderer.operations.find(item => item.name === name)
+    for (const surface of ['profile', 'studio']) for (const width of ['wide', 'narrow']) {
+      const dark = `${surface}-${width}-dark`, light = `${surface}-${width}-light`
+      assert.notEqual(frame(dark).background, frame(light).background, 'Actual dark/light theme backgrounds must differ')
+      assert.notEqual(receipt.images[path.relative(root, path.join(directory, dark + '.png'))], receipt.images[path.relative(root, path.join(directory, light + '.png'))], 'Actual dark/light PNG bytes must differ')
+    }
+  }
   receipt.passed = true
 } catch (error) { receipt.error = { message: error.message, stack: error.stack } }
 receipt.compiled = Object.fromEntries(await Promise.all((await fs.readdir(compiled)).map(async file => [file, sha(await fs.readFile(path.join(compiled, file)))])))

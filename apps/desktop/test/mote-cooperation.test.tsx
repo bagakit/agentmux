@@ -1,30 +1,43 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
+import type { FileReadParams, FileReadResult } from '@agentmux/core'
+import { parseMoteBehaviorBlock, replaceMoteBehaviorBlock } from '../src/renderer/src/lib/mote-behavior'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { defaultAgent, defaultTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
+import { defaultAgent, defaultTab, customMoteId, customTab, scratchWorkspace, moteTopics } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { openMoteDiscussionDraft } from '../src/renderer/src/lib/mote-materials-actions'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { warmLauncherId } from '../src/renderer/src/lib/warm-terminal-preview'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
-let app: MoteAppFixture
+let app: MoteAppFixture, disk: string, diskRevision: string
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = rootPath + '/SOUL.md', revision = 'sha256:' + 'a'.repeat(64)
 beforeEach(() => {
+  disk = '# Original SOUL\nKeep my existing words.\n'; diskRevision = revision
   app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
   useLauncherState.setState({ drafts: {} })
+  vi.spyOn(api.files, 'readPublic').mockImplementation(async params => publicRead(params))
+  vi.spyOn(api.files, 'read').mockImplementation(async () => ({ status: 'read', document: { path, content: disk, revision: diskRevision } }))
+  vi.spyOn(api.files, 'write').mockImplementation(async (_workspace, input) => { disk = input.content; diskRevision = 'sha256:' + 'b'.repeat(64); return { status: 'written', revision: diskRevision } })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([]); vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
 })
 afterEach(async () => { await app.dispose() })
 const details = () => app.container.querySelector<HTMLElement>('[data-mote-details]')!
 async function text(selector: string, value: string) {
-  const input = details().querySelector<HTMLTextAreaElement>(selector)!
+  const input = document.querySelector<HTMLTextAreaElement>(selector)!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) })
 }
-const button = (name: string) => [...details().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === name)!
+const button = (name: string) => [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === name)!
+const action = (name: string) => document.querySelector<HTMLButtonElement>('[aria-label="' + name + '"]')!
+const dialog = () => document.querySelector<HTMLElement>('.mote-behavior-dialog')!
+const publicRead = (params: FileReadParams): FileReadResult => ({ resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path }, result: { status: 'read', document: { path, content: disk, revision: diskRevision } } })
+async function studio() { await moteClick(action('Edit behavior settings')) }
+async function trial() { await studio(); await moteClick(action('Try a cooperation question')) }
+async function choices() { for (const value of ['I', 'N', 'F', 'J']) await moteClick(dialog().querySelector<HTMLInputElement>('input[value="' + value + '"]')!) }
 const scope = () => ({ workspace: scratchWorkspace, topic: moteTopics.find(topic => topic.id === PMO_TEAMS_TOPIC_ID)!, rootPath })
 
 describe('original Mote cooperation Editor and explicit new Launcher', () => {
@@ -33,7 +46,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     const groupDraft = { prompt: 'Retained Group unsent', browser: 'https://example.test/original', note: 'An original unmaterialized note.', names: { agentName: 'Original Group Agent', tabName: 'Original Group Tab' }, optionsByProvider: {} }
     useLauncherState.setState({ drafts: { [groupId]: groupDraft } })
     await app.mount(); const before = useAppStore.getState()
-    await text('[aria-label="Try a cooperation question"]', 'Help me compare two designs.'); await moteClick(button('Prepare new discussion'))
+    await trial(); await text('[aria-label="Cooperation trial question"]', 'Help me compare two designs.'); await moteClick(button('Prepare new discussion'))
     expect(useLauncherState.getState().drafts[groupId]).toEqual(groupDraft)
     const after = useAppStore.getState(), created = Object.values(after.tabs).filter(tab => !before.tabs[tab.id])
     expect(created).toHaveLength(1); const tab = created[0]!, region = tab.regions[tab.layout.activeRegionId]!
@@ -46,7 +59,7 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
   })
   it('keeps the exact new Launcher and question when no executor is configured', async () => {
     useAppStore.setState({ config: { ...useAppStore.getState().config!, executors: {} } }); await app.mount()
-    await text('[aria-label="Try a cooperation question"]', 'My question with no executor'); await moteClick(button('Prepare new discussion'))
+    await trial(); await text('[aria-label="Cooperation trial question"]', 'My question with no executor'); await moteClick(button('Prepare new discussion'))
     const state = useAppStore.getState(), selected = state.workbenchSpaceSelection!, tab = state.tabs[selected.tabId!]!
     expect(tab.regions[selected.regionId!]?.kind).toBe('launcher'); expect(state.agentComposerDrafts[selected.regionId!]).toBe('My question with no executor')
     expect(state.agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.launch).not.toHaveBeenCalled()
@@ -67,18 +80,20 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     await act(async () => { expect(openMoteDiscussionDraft(scope(), 'Must not reach old Session')).toBeNull() }); expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
   })
   it('stages selected preferences after the untouched original SOUL and saves through the actual Editor revision protocol', async () => {
-    const original = '# My original SOUL\nKeep all custom content exactly.\n'
-    vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: original, revision } })
-    const write = vi.spyOn(api.files, 'write').mockResolvedValue({ status: 'written', revision: 'sha256:' + 'b'.repeat(64) })
-    await app.mount(); expect(details().textContent).toContain('new Sessions'); expect(details().textContent).toContain('current directions take priority')
-    await moteClick(button('Adjust cooperation')); await text('[aria-label="Custom cooperation preferences"]', 'Use concrete examples.'); await moteClick(button('Review in editor'))
+    const original = '# My original SOUL\nKeep all custom content exactly.\n\n## Cooperation preferences\nOld preference remains.\n\n## Idea feedback\nOriginal note and revision remain.\n'; disk = original
+
+    const write = vi.mocked(api.files.write)
+    await app.mount(); expect(details().querySelector('select, textarea')).toBeNull(); expect(details().textContent).toContain('Not set yet.')
+    await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Use concrete examples.'); await moteClick(button('Review changes'))
     const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path), doc = state.documents[key]!
     expect(doc.content.startsWith(original)).toBe(true); expect(doc.content).toContain('Use concrete examples.'); expect(doc.revision).toBe(revision)
-    expect(state.dirtyDocuments[key]).toBe(true); expect(write).not.toHaveBeenCalled()
+    expect(state.dirtyDocuments[key]).toBe(true); expect(write).not.toHaveBeenCalled(); expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull(); expect(parseMoteBehaviorBlock(doc.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
     const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
     await act(async () => state.saveDocument(tab.id, tab.layout.activeRegionId)); await settleMoteApp()
     expect(write).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, { path, content: doc.content, expectedRevision: revision })
-    expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+    expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true); expect(details().textContent).toContain('MBTI style · INFJ')
+    expect(details().textContent).not.toContain('Save there to apply it')
+    await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="N"]')!.checked).toBe(true); expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('refuses a new Launcher whose execution resource changes during publication without replacing its later target', async () => {
     await app.mount(); const before = useAppStore.getState()
@@ -98,9 +113,153 @@ describe('original Mote cooperation Editor and explicit new Launcher', () => {
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.launch).not.toHaveBeenCalled()
   })
   it('can skip preferences without writing or opening anything', async () => {
-    const read = vi.spyOn(api.files, 'read'), write = vi.spyOn(api.files, 'write'); await app.mount(); const before = useAppStore.getState()
-    await moteClick(button('Adjust cooperation')); await text('[aria-label="Custom cooperation preferences"]', 'Uncommitted choice'); await moteClick(button('Skip for now'))
-    expect(details().querySelector('[aria-label="Custom cooperation preferences"]')).toBeNull(); expect(useAppStore.getState().tabs).toBe(before.tabs)
+    const read = vi.mocked(api.files.read), write = vi.mocked(api.files.write); await app.mount(); const before = useAppStore.getState()
+    expect(details().querySelector('select, textarea')).toBeNull()
+    const ideasAction = details().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')
+    expect(ideasAction).not.toBeNull(); await moteClick(ideasAction!)
+    expect(details().querySelector('[aria-label="Mote ideas"]')).not.toBeNull()
+    await moteClick(button('Profile'))
+    await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Uncommitted choice'); await moteClick(button('Cancel'))
+    expect(document.querySelector('[aria-label="Custom cooperation preferences"]')).toBeNull(); expect(useAppStore.getState().tabs).toBe(before.tabs)
     expect(read).not.toHaveBeenCalled(); expect(write).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+  })
+  it('stages behavior for a confirmed empty Mote in its exact existing Group without creating a discussion', async () => {
+    const state = useAppStore.getState(), tabs = Object.fromEntries(Object.entries(state.tabs).filter(([, tab]) => tab.topicId !== PMO_TEAMS_TOPIC_ID))
+    const spaceId = directoryIdentity(scratchWorkspace.hostId, scratchWorkspace.path + '/' + rootPath)
+    useAppStore.setState({ tabs, layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: { ...state.layouts[SCRATCH_WORKSPACE_ID]!,
+      groups: state.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => !!tabs[id]), activeTabId: null })) } },
+      workbenchSpaceSelection: { workspaceId: SCRATCH_WORKSPACE_ID, spaceId, zoneId: homeZoneId(spaceId), groupId: 'mote-group', topicId: PMO_TEAMS_TOPIC_ID, tabId: null, regionId: null } })
+    await app.mount(); await studio(); await choices(); await moteClick(button('Review changes'))
+    const current = useAppStore.getState(), selected = current.workbenchSpaceSelection!
+    expect(current.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeDefined(); expect(selected.tabId).not.toBeNull()
+    const file = current.tabs[selected.tabId!]!
+    expect(selected.groupId).toBe('mote-group'); expect(file.topicId).toBe(PMO_TEAMS_TOPIC_ID)
+    expect(file.regions[selected.regionId!]).toMatchObject({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path })
+    expect(Object.keys(current.tabs)).toHaveLength(Object.keys(tabs).length + 1)
+    expect(parseMoteBehaviorBlock(current.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]!.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
+    expect(vi.mocked(api.files.write)).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+  })
+  it('keeps a saved unknown target distinct from an empty Mote and does not stage through another Group', async () => {
+    const original = useAppStore.getState(), selected = original.workbenchSpaceSelection!
+    const tabs = Object.fromEntries(Object.entries(original.tabs).filter(([, tab]) => tab.topicId !== PMO_TEAMS_TOPIC_ID))
+    useAppStore.setState({ tabs, layouts: { ...original.layouts, [SCRATCH_WORKSPACE_ID]: { ...original.layouts[SCRATCH_WORKSPACE_ID]!,
+      groups: original.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => ({ ...group, tabOrder: group.tabOrder.filter(id => !!tabs[id]), activeTabId: null })) } },
+      workbenchSpaceSelection: { ...selected, tabId: 'saved-unknown-target', regionId: 'saved-unknown-region' } })
+    await app.mount(); const state = useAppStore.getState()
+    await studio(); await choices(); await moteClick(button('Review changes'))
+    expect(Object.keys(useAppStore.getState().documents)).toHaveLength(0); expect(useAppStore.getState().tabs).toBe(state.tabs)
+    expect(document.querySelector('.mote-behavior-dialog')).not.toBeNull(); expect(vi.mocked(api.files.write)).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled()
+  })
+  it('retains later explicit choices and extra text while the initial saved read is pending', async () => {
+    await app.mount()
+    disk = replaceMoteBehaviorBlock(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'Old saved extra.' })
+    let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'Later unsent preference.')
+    await act(async () => finish(publicRead(captured))); await settleMoteApp()
+    expect(dialog().textContent).toContain('MBTI style · INFJ')
+    expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Later unsent preference.')
+    expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined(); expect(api.files.write).not.toHaveBeenCalled()
+  })
+  it('keeps unknown Save unconfirmed until the original Check saved file verifies the same attempt', async () => {
+    await app.mount(); await studio(); await choices(); await moteClick(button('Review changes'))
+    const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
+    const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
+    vi.mocked(api.files.write).mockImplementation(async (_workspace, input) => { disk = input.content; diskRevision = 'sha256:' + 'e'.repeat(64); return { status: 'unknown', code: 'RECEIPT_LOST', message: 'The write receipt is unconfirmed.' } })
+    await act(async () => state.saveDocument(tab.id, tab.layout.activeRegionId)); await settleMoteApp()
+    expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-unknown')
+    expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull(); expect(details().textContent).toContain('Saved behavior is unconfirmed')
+    expect(details().textContent).not.toContain('Save there to apply it')
+    await act(async () => state.saveDocument(tab.id, tab.layout.activeRegionId)); expect(api.files.write).toHaveBeenCalledTimes(1)
+    await act(async () => state.reloadDocument(tab.id, tab.layout.activeRegionId)); await settleMoteApp()
+    expect(useAppStore.getState().documentIssues[key]).toBeUndefined(); expect(useAppStore.getState().dirtyDocuments[key]).toBe(false)
+    expect(api.files.write).toHaveBeenCalledTimes(1); expect(details().textContent).toContain('MBTI style · INFJ')
+    expect(details().textContent).not.toContain('Save there to apply it')
+    await studio(); expect(dialog().querySelector<HTMLInputElement>('input[value="I"]')!.checked).toBe(true)
+    expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent'); expect(app.stop).not.toHaveBeenCalled()
+  })
+  it('preserves an existing unsaved original Editor paragraph when reviewing a behavior block', async () => {
+    await app.mount(); await studio(); await moteClick(action('Open original SOUL file'))
+    const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
+    const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
+    const originalDraft = disk + '\nAn original unsaved paragraph.\n'
+    await act(async () => state.updateDocument(tab.id, originalDraft, tab.layout.activeRegionId))
+    await studio(); await choices(); await moteClick(button('Review changes'))
+    expect(useAppStore.getState().documents[key]!.content.startsWith(originalDraft)).toBe(true)
+    expect(parseMoteBehaviorBlock(useAppStore.getState().documents[key]!.content)).toMatchObject({ status: 'valid', code: 'INFJ' })
+    expect(disk).not.toContain('agentmux:mote-behavior:'); expect(api.files.write).not.toHaveBeenCalled()
+  })
+  it('refuses later original document edits during the review read and keeps both the form and draft', async () => {
+    await app.mount(); await studio(); await moteClick(action('Open original SOUL file')); await studio(); await choices()
+    const state = useAppStore.getState(), key = documentKey(SCRATCH_WORKSPACE_ID, path)
+    const tab = Object.values(state.tabs).find(tab => Object.values(tab.regions).some(region => region.kind === 'file' && region.path === path))!
+    let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await moteClick(button('Review changes'))
+    const later = disk + '\nLater original Editor input.\n'; await act(async () => state.updateDocument(tab.id, later, tab.layout.activeRegionId))
+    await act(async () => finish(publicRead(captured))); await settleMoteApp()
+    expect(useAppStore.getState().documents[key]!.content).toBe(later); expect(dialog().textContent).toContain('MBTI style · INFJ')
+    expect(dialog().textContent).toContain('original draft are kept'); expect(api.files.write).not.toHaveBeenCalled()
+  })
+  it('rejects a late same-Mote read lifetime after rereading without replacing the newer saved choices', async () => {
+    await app.mount(); let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await studio(); await moteClick(action('Extra preferences'))
+    disk = replaceMoteBehaviorBlock(disk, { engagement: 'I', information: 'N', decisions: 'F', approach: 'J', custom: 'Current saved preference.' })
+    // The still-reading request can be explicitly replaced through the same original read owner.
+    await moteClick(button('Review changes')); await moteClick(button('Reread SOUL'))
+    const current = disk; disk = replaceMoteBehaviorBlock(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'STALE FIRST REQUEST' })
+    const stale = publicRead(captured); disk = current
+    await act(async () => finish(stale)); await settleMoteApp()
+    expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Current saved preference.')
+    expect(dialog().textContent).not.toContain('STALE FIRST REQUEST'); expect(api.files.write).not.toHaveBeenCalled()
+  })
+  it('rejects the first Mote A lifetime after A to B to A while preserving new A choices and both original inputs', async () => {
+    await app.mount(); let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await studio(); await choices()
+    await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id })); await settleMoteApp()
+    await act(async () => useAppStore.getState().openScratchTopic(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { tabId: defaultTab.id })); await settleMoteApp()
+    await studio(); await choices(); await moteClick(action('Extra preferences')); await text('[aria-label="Custom cooperation preferences"]', 'New A lifetime input.')
+    const current = disk; disk = replaceMoteBehaviorBlock(disk, { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'OLD A SECRET' })
+    const stale = publicRead(captured); disk = current
+    await act(async () => finish(stale)); await settleMoteApp()
+    expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('New A lifetime input.')
+    expect(dialog().textContent).not.toContain('OLD A SECRET'); expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
+    expect(useAppStore.getState().agentComposerDrafts['custom-agent']).toBe('Analyst unsent'); expect(api.files.write).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+  })
+  it('retains later form input during the review read instead of staging the submitted older preferences', async () => {
+    await app.mount(); await studio(); await choices(); await moteClick(action('Extra preferences'))
+    await text('[aria-label="Custom cooperation preferences"]', 'Earlier submitted preference.')
+    let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await moteClick(button('Review changes')); await text('[aria-label="Custom cooperation preferences"]', 'Later form input stays here.')
+    await act(async () => finish(publicRead(captured))); await settleMoteApp()
+    expect(dialog()).not.toBeNull()
+    expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('Later form input stays here.')
+    expect(dialog().textContent).toContain('later input changed'); expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined()
+    expect(api.files.write).not.toHaveBeenCalled()
+    await moteClick(button('Cancel')); await studio(); await choices()
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await moteClick(button('Review changes')); await moteClick(action('Try a cooperation question'))
+    await text('[aria-label="Cooperation trial question"]', 'A later trial question stays here.')
+    await act(async () => finish(publicRead(captured))); await settleMoteApp()
+    expect(dialog()).not.toBeNull(); expect(dialog().querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('A later trial question stays here.')
+    expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined(); expect(api.files.write).not.toHaveBeenCalled()
+  })
+  it('latches A to B to A within one Renderer publication interval before opening the Editor', async () => {
+    await app.mount(); await studio(); await choices()
+    let finish!: (value: FileReadResult) => void, captured!: FileReadParams
+    vi.mocked(api.files.readPublic).mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    await moteClick(button('Review changes'))
+    await act(async () => {
+      useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', customTab.id)
+      useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id)
+    })
+    await act(async () => finish(publicRead(captured))); await settleMoteApp()
+    expect(dialog()).not.toBeNull()
+    expect(dialog().textContent).toContain('MBTI style · INFJ'); expect(dialog().textContent).toContain('selection or later input changed')
+    expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toBeUndefined(); expect(api.files.write).not.toHaveBeenCalled()
+    expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
   })
 })

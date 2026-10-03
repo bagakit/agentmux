@@ -16,17 +16,24 @@ const button = (name: string) => [...details().querySelectorAll<HTMLButtonElemen
 const readResult = (params: FileReadParams, content = '# Saved material\nSource: my own observation.'): FileReadResult => ({
   resource: { ...params.expectedResource, zoneId: params.zoneId, zonePath: scratchWorkspace.path + '/' + rootPath, path },
   result: { status: 'read', document: { path, content, revision } } })
+// Profile confirms only SOUL; material assertions count only the explicitly selected material.
+function mockMaterials() {
+  const read = vi.fn<(params: FileReadParams) => Promise<FileReadResult>>()
+  vi.spyOn(api.files, 'readPublic').mockImplementation(params => params.path === 'SOUL.md'
+    ? Promise.resolve({ resource: null, result: { status: 'unknown', code: 'BEHAVIOR_FIXTURE_UNSET', message: 'No saved behavior fixture.' } }) : read(params))
+  return read
+}
 beforeEach(() => {
   app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ path, name: 'my-original-material.md', isDirectory: false, isSymlink: false, ignored: false }])
   vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
 })
 afterEach(async () => { await app.dispose() })
-async function inspect() { await moteClick(button('Inspect saved materials')); await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!) }
+async function inspect() { await moteClick(details().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')!); await moteClick(details().querySelector<HTMLButtonElement>('.mote-details__note')!) }
 
 describe('Profile inspection consumes the original public File domain', () => {
   it('reads only a selected file through the typed seam, keeps its revision and opens correction through original Editor', async () => {
-    const read = vi.spyOn(api.files, 'readPublic').mockImplementation(async params => readResult(params))
+    const read = mockMaterials().mockImplementation(async params => readResult(params))
     const privateRead = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: '# Original editor content', revision } })
     const write = vi.spyOn(api.files, 'write'); await app.mount(); expect(read).not.toHaveBeenCalled()
     await inspect(); expect(read).toHaveBeenCalledTimes(1)
@@ -39,7 +46,7 @@ describe('Profile inspection consumes the original public File domain', () => {
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })
   it('keeps last confirmed content and its original reference when rereading becomes unknown; retry is a read', async () => {
-    const read = vi.spyOn(api.files, 'readPublic').mockImplementationOnce(async params => readResult(params))
+    const read = mockMaterials().mockImplementationOnce(async params => readResult(params))
       .mockResolvedValue({ resource: null, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: 'Original resource observation is unavailable' } })
     const write = vi.spyOn(api.files, 'write'); await app.mount(); await inspect()
     await act(async () => useAppStore.setState({ workspaceFileRevisions: { [SCRATCH_WORKSPACE_ID]: 1 } })); await settleMoteApp()
@@ -49,7 +56,7 @@ describe('Profile inspection consumes the original public File domain', () => {
   })
   it('rejects a late A read after A to B to A even when the original name and path return', async () => {
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
-    const read = vi.spyOn(api.files, 'readPublic').mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    const read = mockMaterials().mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
       .mockResolvedValue({ resource: null, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: 'Current read unavailable' } })
     await app.mount(); await inspect()
     await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id })); await settleMoteApp()
@@ -62,7 +69,7 @@ describe('Profile inspection consumes the original public File domain', () => {
     const another = rootPath + '/another-original-file.md'
     vi.mocked(api.files.readDirectory).mockResolvedValue([path, another].map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false })))
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
-    const read = vi.spyOn(api.files, 'readPublic').mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    const read = mockMaterials().mockImplementationOnce(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
       .mockResolvedValue({ resource: null, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: 'Current file read unavailable' } })
     await app.mount(); await inspect()
     const notes = [...details().querySelectorAll<HTMLButtonElement>('.mote-details__note')]

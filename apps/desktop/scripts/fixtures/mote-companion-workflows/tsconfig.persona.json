@@ -123,6 +123,12 @@
       ],
       "@agentmux/core/notebook-catalog": [
         "packages/core/src/notebook-catalog.ts"
+      ],
+      "@agentmux/core/prompt-reaction": [
+        "packages/core/src/prompt-reaction.ts"
+      ],
+      "@agentmux/core/schedule": [
+        "packages/core/src/agent-schedule.ts"
       ]
     }
   },
@@ -136,6 +142,7 @@
     "../../../test/mote-cooperation.test.tsx",
     "../../../test/mote-materials-inspection.test.tsx",
     "../../../test/mote-materials-public-read.test.ts",
-    "../../../test/mote-ideas.test.tsx"
+    "../../../test/mote-ideas.test.tsx",
+    "../../../test/mote-behavior.test.ts"
   ]
 }
