@@ -47,7 +47,7 @@ function Conversation({ control, enabled = true }: { control: AgentSessionContro
     nativeHistoryPage={read.nativeHistoryPage} capability="complete-events" displayState="working"
     userMessageRead={{ loading: read.loading, error: read.error, observationError: read.observationError, windowFrozen: read.windowFrozen,
       hasMore: read.hasMore, onRetry: () => void read.refresh(), onReadEarlier: () => setHistory(true) }} /></div>
-    {history ? <SessionHistoryView control={control} label="Original native source" visible={enabled} themeId="graphite" fontSize={13}
+    {history ? <SessionHistoryView control={control} label="Original native source" visible={enabled}
       workspaceRoot={_hygiene_fixturePath("workspace")} openWorkspaceFile={() => {}} openHttpLink={() => {}} returnLabel="Conversation" onClose={() => setHistory(false)} /> : null}</>
 }
 
@@ -179,13 +179,13 @@ it('90 raw without user stays honest and original History reaches the fourth-pag
   await wait(() => {
     expect(history.querySelector('.session-history__notice')?.textContent).toBeUndefined()
     expect(f.pages).toHaveLength(4)
-    expect(history.querySelectorAll('[data-history-item-id]')).toHaveLength(30)
+    expect(history.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(30)
   })
   for (const size of [60, 90, 90]) {
     const before = f.reads.mock.calls.length; await click(button('Load earlier records', history))
-    await wait(() => { expect(f.reads.mock.calls.length).toBe(before + 1); expect(history.querySelectorAll('[data-history-item-id]')).toHaveLength(size); expect(reading().loading).toBe(false) })
+    await wait(() => { expect(f.reads.mock.calls.length).toBe(before + 1); expect(history.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(size); expect(reading().loading).toBe(false) })
   }
-  await wait(() => expect(history.querySelector('[data-history-item-id="protocol-0"]')?.textContent).toContain(BODY))
+  await wait(() => expect(history.querySelector('[data-native-record-id="protocol-0"]')?.textContent).toContain(BODY))
   expect(f.reads.mock.calls.at(-1)?.[1]).toEqual({ cursor: 'snapshot-0|90' })
 })
 

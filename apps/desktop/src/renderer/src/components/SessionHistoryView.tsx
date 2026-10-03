@@ -1,17 +1,15 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, History, LoaderCircle, RefreshCw } from 'lucide-react'
-import type { AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import type { SessionHistoryReference, TerminalThemeId } from '../../../shared/contracts'
+import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
+import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { terminalOptions, terminalTheme } from '../lib/terminal-theme'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
-import { ConversationMessage, parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationRecordSequence, type ConversationRecordRenderer } from '@agentmux/client-ui/components/ConversationRecordSequence'
+import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
+import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
 import { NativeProcessObservation } from './NativeProcessObservation'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
-import { UNKNOWN_SPEAKER_ID, createSpeakerResolver, speakerOfUserMessage, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
+import { createSpeakerResolver, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 
 type ReadingAnchor = { kind: 'record' | 'group'; id: string; offset: number }
 type ReadingState = {
@@ -35,10 +33,10 @@ function sameSource(left: AgentSessionHistorySource, right: AgentSessionHistoryS
 function readingAnchor(viewport: HTMLElement): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
-  for (const row of viewport.querySelectorAll<HTMLElement>('[data-history-item-id]')) {
+  for (const row of viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')) {
     const rect = row.getBoundingClientRect()
     if (rect.bottom > bounds.top && rect.top < bounds.bottom) {
-      return { kind: 'record', id: row.dataset.historyItemId!, offset: rect.top - bounds.top }
+      return { kind: 'record', id: row.dataset.nativeRecordId!, offset: rect.top - bounds.top }
     }
   }
   // Only a truly collapsed group may provide geometry while its real raw rows are hidden.
@@ -82,7 +80,7 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
-  control, readingKey, label, onClose, visible, themeId, fontSize, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, primaryAction, describeSpeaker,
+  control, readingKey, label, onClose, visible, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, primaryAction, describeSpeaker,
   expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation
 }: {
   control: SessionHistoryReference
@@ -92,8 +90,6 @@ export function SessionHistoryView({
   onClose?(): void
   onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   visible: boolean
-  themeId: TerminalThemeId
-  fontSize: number
   returnLabel?: string
   serviceNotice?: ReactNode
   /** An explicit Session action supplied by its owner; reading itself never starts a Run. */
@@ -129,8 +125,8 @@ export function SessionHistoryView({
     const anchor = anchorRef.current
     if (!visibleRef.current || !viewport || !anchor) return
     const row = anchor.kind === 'record'
-      ? Array.from(viewport.querySelectorAll<HTMLElement>('[data-history-item-id]'))
-        .find(candidate => candidate.dataset.historyItemId === anchor.id)
+      ? Array.from(viewport.querySelectorAll<HTMLElement>('[data-native-record-id]'))
+        .find(candidate => candidate.dataset.nativeRecordId === anchor.id)
       : Array.from(viewport.querySelectorAll<HTMLElement>('[data-history-group-anchor]'))
         .find(candidate => candidate.dataset.historyGroupAnchor === anchor.id)
         ?.querySelector<HTMLElement>(':scope > .wf-card--observation > .wf-head[aria-expanded="false"]')
@@ -184,8 +180,8 @@ export function SessionHistoryView({
           : undefined
         const anchorInNewest = currentAnchor?.kind === 'record'
           ? newest.items.some(item => item.id === currentAnchor.id)
-          : anchorGroup && Array.from(anchorGroup.querySelectorAll<HTMLElement>('[data-history-item-id]'))
-            .some(row => newest.items.some(item => item.id === row.dataset.historyItemId))
+          : anchorGroup && Array.from(anchorGroup.querySelectorAll<HTMLElement>('[data-native-record-id]'))
+            .some(row => newest.items.some(item => item.id === row.dataset.nativeRecordId))
         const sel = typeof window !== 'undefined' ? window.getSelection() : null
         const hasActiveSelection = Boolean(
           sel &&
@@ -195,12 +191,12 @@ export function SessionHistoryView({
             (viewportRef.current.contains(sel.anchorNode) || viewportRef.current.contains(sel.focusNode))
         )
         const historyRows = viewportRef.current
-          ? Array.from(viewportRef.current.querySelectorAll<HTMLElement>('[data-history-item-id]'))
+          ? Array.from(viewportRef.current.querySelectorAll<HTMLElement>('[data-native-record-id]'))
           : []
         const selectionInNewest = Boolean(
           hasActiveSelection &&
             newest.items.some((item) => {
-              const el = historyRows.find((row) => row.dataset.historyItemId === item.id)
+              const el = historyRows.find((row) => row.dataset.nativeRecordId === item.id)
               if (!el) return false
               if (nodeIntersectsElement(sel!.anchorNode, el)) return true
               if (nodeIntersectsElement(sel!.focusNode, el)) return true
@@ -276,20 +272,15 @@ export function SessionHistoryView({
     return () => observer.disconnect()
   }, [])
 
-  const items = reading.pages.flatMap((page) => page.items)
-  const userMessagesByRawId = useMemo(() => {
-    const map = new Map<string, AgentSessionUserMessage>()
-    for (const page of reading.pages) {
-      const messages = projectSessionUserMessages({
-        agentSessionId: control.agentSessionId,
-        historyPage: page
-      })
-      for (const msg of messages) {
-        map.set(msg.rawId, msg)
-      }
-    }
-    return map
-  }, [reading.pages, control.agentSessionId])
+  const page = useMemo<AgentSessionHistoryPage | null>(() => reading.source ? {
+    agentSessionId: control.agentSessionId,
+    source: reading.source,
+    items: reading.pages.flatMap((entry) => entry.items),
+    nextCursor: reading.nextCursor
+  } : null, [reading.pages, reading.source, reading.nextCursor, control.agentSessionId])
+  const items = page?.items ?? []
+  const boundaryRecord = items.at(-1)
+  const boundaryTime = boundaryRecord?.completedAt ?? boundaryRecord?.startedAt
 
   const fallbackResolver = useMemo(
     () =>
@@ -303,8 +294,6 @@ export function SessionHistoryView({
     [control.agentSessionId, label, reading.source?.providerId]
   )
   const resolveSpeaker = describeSpeaker ?? fallbackResolver
-  const appearance = terminalOptions(themeId, fontSize)
-  const theme = terminalTheme(themeId)
   const openedTraces = expandedTracesProp ?? localDisclosures
   const handleToggleTrace = (traceId: string, open: boolean) => {
     if (onToggleTraceProp) {
@@ -350,49 +339,7 @@ export function SessionHistoryView({
       }
     }
   }, [items, expandedTracesProp, onToggleTraceProp, localDisclosures, control])
-  const style = {
-    backgroundColor: theme.background, color: theme.foreground,
-    fontFamily: appearance.fontFamily, fontSize: appearance.fontSize,
-    fontWeight: appearance.fontWeight, lineHeight: appearance.lineHeight,
-    '--history-selection-background': theme.selectionBackground,
-    '--history-selection-foreground': theme.selectionForeground
-  } as CSSProperties
-  const renderRecord: ConversationRecordRenderer = (item, wrapBody) => {
-    const userMsg = item.kind === 'user-message' ? userMessagesByRawId.get(item.id) : undefined
-    const speaker: ConversationSpeaker | undefined = item.kind === 'activity'
-      ? undefined
-      : item.kind === 'user-message'
-        ? (userMsg ? speakerOfUserMessage(userMsg) : { role: 'unknown', id: UNKNOWN_SPEAKER_ID })
-        : { role: 'agent', id: control.agentSessionId }
-    const described = speaker ? resolveSpeaker(speaker) : undefined
-    const displayName = described?.name ?? (item.kind === 'activity' ? item.title ?? 'Activity' : 'Input')
-    const message = (
-      <ConversationMessage
-        messageId={item.id}
-        conversationSessionId={control.agentSessionId}
-        {...(userMsg ? { inputSource: userMsg.source } : {})}
-        describeSpeaker={resolveSpeaker}
-        {...(speaker ? { speaker } : {})}
-        name={displayName}
-        {...(described?.providerId ? { providerId: described.providerId } : reading.source ? { providerId: reading.source.providerId } : {})}
-        content={item.contentParts}
-        {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})}
-        {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
-        workspaceRoot={workspaceRoot}
-        openWorkspaceFile={openWorkspaceFile}
-        openHttpLink={openHttpLink}
-        expandedTraces={openedTraces}
-        onToggleTrace={handleToggleTrace}
-        {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-      />
-    )
-    return (
-      <article key={item.id} className="session-history__item" data-history-item-id={item.id} data-history-kind={item.kind}>
-        {wrapBody ? wrapBody(message) : message}
-      </article>
-    )
-  }
-  return <section className={`session-history${onClose ? '' : ' session-history--inline'}`} style={style} hidden={!visible} aria-label={visible ? 'Conversation history' : undefined} onKeyDown={(event) => {
+  return <section className={`session-history${onClose ? '' : ' session-history--inline'}`} hidden={!visible} aria-label={visible ? 'Conversation history' : undefined} onKeyDown={(event) => {
     if (event.key === 'Escape' && onClose) { event.stopPropagation(); onClose() }
   }}>
     <div className="session-history__toolbar">
@@ -404,9 +351,6 @@ export function SessionHistoryView({
       </div>
     </div>
     {serviceNotice ? <div className="session-history__notice" role="status">{serviceNotice}</div> : null}
-    <div className="session-history__source" title={reading.source ? `${reading.source.providerId} · ${reading.source.nativeSessionId}` : undefined}>
-      {reading.source ? 'Persisted native conversation · separate from terminal replay' : 'Reading persisted native conversation'}
-    </div>
     {reading.error ? <div className="session-history__notice" role="status">
       <span>History read failed: {reading.error} Existing history and the Session are kept.</span>
       <button type="button" className="small-button" disabled={reading.loading} onClick={() => void readPage(retryDirectionRef.current)}><RefreshCw size={12} /> Retry</button>
@@ -428,15 +372,26 @@ export function SessionHistoryView({
           {reading.loading ? <><LoaderCircle size={12} className="spin" /> Reading history…</> : reading.source && reading.nextCursor === null ? 'Beginning of the available native history' : null}
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
-        <ConversationRecordSequence items={items}
-          sourceKey={JSON.stringify([control.hostId, control.agentSessionId, reading.source])}
-          renderRecord={renderRecord}
+        {page ? <ConversationNativeThread page={page} sessionId={control.agentSessionId}
+          describeSpeaker={resolveSpeaker} showSource={false} messageIdForRecord={rawMessageId}
+          workspaceRoot={workspaceRoot} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink}
+          expandedTraces={openedTraces} onToggleTrace={handleToggleTrace}
+          {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
           renderProcess={props => <div data-history-group-anchor={props.id}>
             <NativeProcessObservation {...props} />
-          </div>} />
+          </div>} /> : null}
+        {items.length > 0 ? <div className="session-history__divider" role="separator"
+          aria-label={boundaryTime === undefined ? '以上是历史消息 (时间未记录)' : `以上是历史消息 (${new Date(boundaryTime).toLocaleString()})`}>
+          <span>以上是历史消息 (<time {...(boundaryTime === undefined ? {} : { dateTime: new Date(boundaryTime).toISOString() })}>
+            {boundaryTime === undefined ? '时间未记录' : new Date(boundaryTime).toLocaleString()}</time>)</span>
+        </div> : null}
         {!reading.loading && reading.source && items.length === 0 ? <p className="session-history__empty">No records in this page.{reading.nextCursor !== null ? ' Earlier records can still be read.' : ''}</p> : null}
         {reading.newerOutsideWindow ? <div className="session-history__boundary" role="status">Newer records are outside this three-page reading window. <button type="button" className="small-button" disabled={reading.loading && retryDirectionRef.current === 'latest'} onClick={() => void readPage('latest')}>Return to latest</button></div> : null}
       </div>
     </div>
   </section>
+}
+
+function rawMessageId(item: AgentSessionHistoryPage['items'][number]): string {
+  return item.id
 }

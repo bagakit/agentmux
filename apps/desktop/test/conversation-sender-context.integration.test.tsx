@@ -115,10 +115,10 @@ it('uses a real public Claude native page and the one projector, keeping equal b
 
 it('routes the same public native page through actual History and preserves its original raw IDs and unknown author facts', async () => {
   const f = await fixture()
-  await act(async () => root.render(<SessionHistoryView control={f.control} label="Recipient agent" visible themeId="graphite" fontSize={12} workspaceRoot={f.workspacePath} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
-  for (let i = 0; i < 80 && host.querySelectorAll('[data-history-item-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
-  const rows = [...host.querySelectorAll<HTMLElement>('[data-history-item-id]')]
-  expect(rows.map(row => row.dataset.historyItemId)).toEqual([...RAW_IDS])
+  await act(async () => root.render(<SessionHistoryView control={f.control} label="Recipient agent" visible workspaceRoot={f.workspacePath} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
+  for (let i = 0; i < 80 && host.querySelectorAll('.session-history [data-native-record-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+  const rows = [...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')]
+  expect(rows.map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS])
   expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(RAW_IDS.map(() => `Message from Agent ${DECLARED_ID}`))
   expect(f.messages.slice(0, 2).map(message => message.author)).toEqual([{ kind: 'unknown' }, { kind: 'unknown' }])
   expect(useAppStore.getState().agentComposerDrafts[RECIPIENT_ID]).toBe('Keep the original unsent reply draft.')
@@ -203,8 +203,8 @@ it('actual SessionPane History carries the same native source and precise lazy r
   const f = await fixture(), appearance = vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null }), read = vi.spyOn(senderDetails, 'currentConversationSenderDetails')
   await drawPane(f); const body = message(f.messages[0]!.id).querySelector('.log-turn__text')!
   await act(async () => host.querySelector<HTMLButtonElement>('[data-leaf="header"] button')!.click()); await settle()
-  for (let i = 0; i < 80 && host.querySelectorAll('[data-history-item-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
-  expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(row => row.dataset.historyItemId)).toEqual([...RAW_IDS])
+  for (let i = 0; i < 80 && host.querySelectorAll('.session-history [data-native-record-id]').length !== 2; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
+  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS])
   expect(body.isConnected).toBe(true); expect(read).not.toHaveBeenCalled(); expect(appearance.mock.calls).toEqual([['sender-project']])
   const turn = message(RAW_IDS[0]); await toggle(turn)
   expect(value(turn, 'Source')).toBe('Provider native input · claude'); expect(value(turn, 'Record')).toBe(RAW_IDS[0]); expect(value(turn, 'Session')).toBe(DECLARED_ID)

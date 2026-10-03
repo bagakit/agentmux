@@ -68,7 +68,7 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); document.body.replaceChildren(); vi.useRealTimers(); vi.unstubAllGlobals() })
 async function mountReader(nextControl = control) {
-  await act(async () => root.render(<SessionHistoryView control={nextControl} readingKey={nextControl.run.runId} label="Reader" onClose={() => {}} visible themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
+  await act(async () => root.render(<SessionHistoryView control={nextControl} readingKey={nextControl.run.runId} label="Reader" onClose={() => {}} visible workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
 }
 function button(text: string) {
   const found=Array.from(container.querySelectorAll<HTMLButtonElement>('button')).find((candidate) => candidate.textContent?.trim()===text.trim())
@@ -385,7 +385,7 @@ it('real upward wheel pages once while pending, keeps ordered resources, and doe
   fixture.historyPage.mockResolvedValueOnce(page('oldest',null))
   await wheelUp()
   expect(fixture.historyPage).toHaveBeenLastCalledWith(control,{cursor:'opaque-2'})
-  expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'),(row) => row.dataset.historyItemId)).toEqual(['oldest','mixed'])
+  expect(Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'),(row) => row.dataset.nativeRecordId)).toEqual(['oldest','mixed'])
   expect(container.textContent).toContain('Beginning of the available native history')
 })
 
@@ -402,13 +402,13 @@ it('uses the shared message owner for ordered native parts, exact copy and host 
     { id: 'native-activity', kind: 'activity', title: 'Tool observation', contentParts: [{ kind: 'text', text: 'native tool facts' }] }
   ] }))
   const openWorkspaceFile = vi.fn(), openHttpLink = vi.fn()
-  await act(async () => root.render(<SessionHistoryView control={control} label="Reader" visible themeId="graphite" fontSize={17}
+  await act(async () => root.render(<SessionHistoryView control={control} label="Reader" visible
     workspaceRoot={_hygiene_fixturePath("synthetic")} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink} />))
-  const activityStep = container.querySelector<HTMLButtonElement>('[data-history-item-id="native-activity"] .wf-tool-row--observation')!
+  const activityStep = container.querySelector<HTMLButtonElement>('[data-native-record-id="native-activity"] .wf-tool-row--observation')!
   expect(activityStep).not.toBeNull()
   await act(async () => activityStep.click())
-  const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'))
-  expect(rows.map(row => row.dataset.historyItemId)).toEqual(['native-user', 'native-assistant', 'native-activity'])
+  const rows = Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'))
+  expect(rows.map(row => row.dataset.nativeRecordId)).toEqual(['native-user', 'native-assistant', 'native-activity'])
   // The recorded native author remains unknown; the current shared display default is You.
   expect(rows.map(row => row.querySelector('.log-turn')?.getAttribute('data-speaker-role'))).toEqual(['human', 'agent', null])
   expect(rows.map(row => row.querySelector('.log-turn__who')?.textContent)).toEqual(['You', 'Reader', 'Tool observation'])
@@ -451,7 +451,7 @@ it('retains a stable visible item pixel anchor through prepend and later content
   let grew=0
   const bounds=(top:number,bottom:number) => ({top,bottom,left:0,right:500,width:500,height:bottom-top,x:0,y:top,toJSON(){}})
   vi.spyOn(viewport,'getBoundingClientRect').mockImplementation(() => bounds(10,210))
-  const original=container.querySelector<HTMLElement>('[data-history-item-id="latest"]')!
+  const original=container.querySelector<HTMLElement>('[data-native-record-id="latest"]')!
   vi.spyOn(original,'getBoundingClientRect').mockImplementation(() => bounds(oldRowTop+grew-viewport.scrollTop,oldRowTop+grew-viewport.scrollTop+40))
   let resolve!: (value:AgentSessionHistoryPage) => void
   fixture.historyPage.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>((done) => {resolve=done}))
@@ -484,12 +484,12 @@ it('bounds the nearby window to three pages and re-reads canonical latest on its
   await wheelUp()
   fixture.historyPage.mockResolvedValueOnce(page('older-3','cursor-4'))
   await wheelUp()
-  expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'),(row) => row.dataset.historyItemId)).toEqual(['older-3','older-2','older-1'])
+  expect(Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'),(row) => row.dataset.nativeRecordId)).toEqual(['older-3','older-2','older-1'])
   expect(container.textContent).toContain('Newer records are outside this three-page reading window')
   fixture.historyPage.mockResolvedValueOnce(page('fresh-latest','fresh-cursor'))
   await act(async () => button('Return to latest').click())
   expect(fixture.historyPage).toHaveBeenLastCalledWith(control,undefined)
-  expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'),(row) => row.dataset.historyItemId)).toEqual(['fresh-latest'])
+  expect(Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'),(row) => row.dataset.nativeRecordId)).toEqual(['fresh-latest'])
 })
 
 it('preserves the current page on failed reads or changed native source and exposes retry', async () => {
@@ -523,12 +523,12 @@ it('does not duplicate an overlapping canonical item while retaining the complet
     { id: 'latest', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'body latest' }] }
   ] }))
   await wheelUp()
-  expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'), row => row.dataset.historyItemId)).toEqual(['older', 'latest'])
+  expect(Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), row => row.dataset.nativeRecordId)).toEqual(['older', 'latest'])
   expect(container.textContent).toContain('Unrecognized native activity')
-  const earlierStep = container.querySelector<HTMLButtonElement>('[data-history-item-id="older"] .wf-tool-row--observation')!
+  const earlierStep = container.querySelector<HTMLButtonElement>('[data-native-record-id="older"] .wf-tool-row--observation')!
   expect(earlierStep).not.toBeNull()
   await act(async () => earlierStep.click())
-  expect(container.querySelector('[data-history-item-id="older"]')?.textContent).toContain('original activity  \n')
+  expect(container.querySelector('[data-native-record-id="older"]')?.textContent).toContain('original activity  \n')
 })
 
 it('discards a late page for another Session without leaking its content or cursor', async () => {

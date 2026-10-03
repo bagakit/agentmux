@@ -56,7 +56,7 @@ function Scene() {
   return <main className="chat-preview">
     <div className="chat-preview__toolbar"><strong>{history ? 'Conversation history' : 'Conversation'}</strong><span>Private actual Renderer · controlled public records · no Agent Run</span></div>
     <div className="chat-preview__reading" ref={regionRef}>
-      {history ? <SessionHistoryView control={control} visible label="Implementation" themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("private-chat")}
+      {history ? <SessionHistoryView control={control} visible label="Implementation" workspaceRoot={_hygiene_fixturePath("private-chat")}
         describeSpeaker={describeSpeaker} onSelectAnnotation={onSelectAnnotation} openWorkspaceFile={() => {}} openHttpLink={() => {}} onClose={() => {}} /> :
         <ActivityView sessionId={id} capability="complete-events" displayState="done" items={items} userMessages={messages} describeSpeaker={describeSpeaker} onSelectAnnotation={onSelectAnnotation} />}
     </div>

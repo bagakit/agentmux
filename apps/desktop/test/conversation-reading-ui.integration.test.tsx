@@ -217,8 +217,6 @@ describe('Conversation and History shared reading UI presentation', () => {
           control={control}
           label="Codex"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("workspace")}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}
@@ -370,8 +368,6 @@ describe('Conversation and History shared reading UI presentation', () => {
           control={control}
           label="Codex"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("workspace")}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}

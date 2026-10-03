@@ -8,7 +8,7 @@ import { ConversationRecordSequence, type ConversationProcessRenderer, type Conv
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation'>
+  'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
 type Props = ReadingProps & {
   page: AgentSessionHistoryPage
@@ -17,11 +17,14 @@ type Props = ReadingProps & {
   onContinue?: (prompt: string) => void
   locatedMessageKey?: string | null
   renderProcess?: ConversationProcessRenderer
+  /** Hosts may retain an existing annotation/disclosure identity without replacing presentation. */
+  messageIdForRecord?: (item: AgentSessionHistoryItem) => string
+  showSource?: boolean
 }
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationNativeThread = memo(function ConversationNativeThread({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, messageIdForRecord, showSource = true, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
@@ -40,7 +43,7 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
       const speaker = user ? speakerOfUserMessage(user)
         : item.kind === 'assistant-message' ? { role: 'agent' as const, id: sessionId } : undefined
       const described = speaker ? describeSpeaker?.(speaker) : undefined
-      const body = <ConversationMessage messageId={user?.id ?? recordId} conversationSessionId={sessionId}
+      const body = <ConversationMessage messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
           content={item.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
@@ -57,10 +60,10 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
   }
   return <section className="conversation-native-thread" aria-label="Native conversation"
     data-native-provider={page.source.providerId} data-native-source={JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
-    <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
+    {showSource ? <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
       <span>{page.source.providerId} · Native conversation</span>
       <span>{records.length} {records.length === 1 ? 'record' : 'records'} · Current window</span>
-    </div>
+    </div> : null}
     <ConversationRecordSequence items={records}
       sourceKey={JSON.stringify([sessionId, page.source.providerId, page.source.nativeSessionId])}
       renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} />
