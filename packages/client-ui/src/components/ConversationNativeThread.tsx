@@ -6,6 +6,7 @@ import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
 import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
+import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
@@ -44,6 +45,7 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
         : item.kind === 'assistant-message' ? { role: 'agent' as const, id: sessionId } : undefined
       const described = speaker ? describeSpeaker?.(speaker) : undefined
       const body = <ConversationMessage messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
+          {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
           content={item.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
