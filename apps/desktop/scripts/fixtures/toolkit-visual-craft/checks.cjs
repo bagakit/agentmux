@@ -20,18 +20,18 @@ module.exports = ({ read, click, button, text, settle, win, raw, until, hover })
     await hover({ x: 1, y: 1 })
     await new Promise(resolve => setTimeout(resolve, 180)); await settle()
     const toolbar = await facts('.toolkit-workbench__toolbar > .toolkit-workbench__create')
-    const starting = await facts('.toolkit-workbench__starting')
+    const starting = await facts('.toolkit-workbench__toolbar > .small-button')
     record(kind + ':toolbar', toolbar); record(kind + ':starting', starting)
     specific('hierarchy', () => {
-      assert.equal(starting.image, 'none', 'Starting points stays ghost without a competing fill')
-      assert.ok(transparent(starting.background), 'Starting points has no competing surface')
+      assert.equal(starting.image, 'none', 'Install package stays ghost without a competing fill')
+      assert.ok(transparent(starting.background), 'Install package has no competing surface')
       assert.equal(starting.boxShadow, 'none', 'Ghost does not keep a raised button shadow')
-      if (kind === 'wide-empty' || kind === 'wide-starting') {
-        assert.equal(toolbar.image, 'none', 'Wide empty or starting-point toolbar New is quiet')
+      if (kind === 'wide-empty') {
+        assert.equal(toolbar.image, 'none', 'Wide empty toolbar New is quiet')
         assert.ok(transparent(toolbar.background), 'Wide toolbar New cannot compete with the central primary')
         assert.equal(toolbar.boxShadow, 'none', 'Quiet toolbar New has no raised shadow')
         const leading = raw.styles.at(-3)
-        assert.ok(leading.image.includes('gradient'), 'The one leading create/adopt control has an actual filled surface')
+        assert.ok(leading.image.includes('gradient'), 'The one leading create control has an actual filled surface')
         assert.notEqual(leading.boxShadow, 'none', 'The leading filled action has an actual primary shadow')
         assert.ok(Number(leading.weight) > Number(toolbar.weight), 'Primary has stronger weight than quiet New')
       } else {
@@ -93,8 +93,7 @@ module.exports = ({ read, click, button, text, settle, win, raw, until, hover })
     if (target === 'all' || target === 'hierarchy') {
       await leading('.toolkit-workbench__empty > .toolkit-workbench__create', 'wide-empty:leading'); await hierarchy('wide-empty')
       win.setContentSize(640, 980); await settle(); await hierarchy('narrow-empty')
-      win.setContentSize(1480, 980); await settle(); await button('Starting points')
-      await leading('.toolkit-template__adopt', 'wide-starting:leading'); await hierarchy('wide-starting')
+      win.setContentSize(1480, 980); await settle()
     }
     await button('New custom tool'); await until('window.identityScene.models().then(models=>models.length===1)')
     for (const theme of ['light', 'dark']) {

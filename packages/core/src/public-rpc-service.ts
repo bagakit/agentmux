@@ -417,14 +417,19 @@ export class AgentMuxRpcService {
         const baseline = rpcControlRequest('toolkit.inspect', { toolId: baselineParams.toolId,
           ...(baselineParams.operationId === undefined ? {} : { operationId: baselineParams.operationId }) })
         const current = await this.toolkit(baseline, context.signal)
-        if (current.operation !== 'toolkit.get' || current.snapshot.kind !== 'script' || current.snapshot.toolId !== baselineParams.toolId) {
+        if (current.operation !== 'toolkit.get' ||
+          (current.snapshot.kind !== 'script' && current.snapshot.kind !== 'package-unavailable') || current.snapshot.toolId !== baselineParams.toolId) {
           throw new AgentMuxError('Toolkit baseline belongs to another tool.', 'CONTROL_PROTOCOL_ERROR')
         }
-        const snapshot = current.snapshot
-        body = { ...body, operationId: baseline.requestId, input: method === 'toolkit.run'
-          ? { invocationId: baseline.requestId, expectedRevision: snapshot.definition.revision,
-            expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null }
-          : { executionId: snapshot.admission?.executionId ?? null } }
+        if (method === 'toolkit.run' && current.snapshot.kind === 'package-unavailable') {
+          throw new AgentMuxError(current.snapshot.reason, 'TOOLKIT_PACKAGE_UNAVAILABLE')
+        }
+        // Source observation cannot take away the exact retained stop identity.
+        const snapshot = current.snapshot.kind === 'package-unavailable' ? current.snapshot.retained : current.snapshot
+        body = { ...body, operationId: baseline.requestId, input: method === 'toolkit.run' && current.snapshot.kind === 'script'
+          ? { invocationId: baseline.requestId, expectedRevision: current.snapshot.definition.revision,
+            expectedLatestExecutionId: current.snapshot.admission?.executionId ?? current.snapshot.latestConfirmed?.executionId ?? null }
+          : { executionId: snapshot?.admission?.executionId ?? null } }
       }
       const internalCaller: AgentMuxControlCaller | undefined = caller
         ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined

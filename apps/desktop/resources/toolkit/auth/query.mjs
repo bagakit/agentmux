@@ -1,13 +1,11 @@
-// Editable account-usage example. Argument 1: query executable. Argument 2:
-// exact account_key. Remaining arguments replace the example query arguments.
-// Choose a fixed working directory and fill both arguments before enabling.
-// This queries an external snapshot once; it never renews credentials, switches
-// accounts, consumes reset cards or starts background work.
+// User-owned Auth tool. Argument 1: query executable; argument 2: @active or
+// an exact account_key. Edit any part for your own CLI and output. Only an
+// explicit Run queries; this never logs in, renews, switches accounts or uses cards.
 import { spawnSync } from 'node:child_process'
 
-const [executable, accountKey, ...customArguments] = process.argv.slice(1)
+const [executable, accountKey, ...customArguments] = process.argv.slice(2)
 if (!executable?.trim() || !accountKey?.trim()) {
-  console.error('Choose a query executable and an exact account_key in Arguments before running.')
+  console.error('Choose a query executable and an account selector (@active or exact account_key) in Arguments before running.')
   process.exit(1)
 }
 
@@ -31,7 +29,12 @@ try { snapshot = decodeQueryOutput(query.stdout) }
 catch { console.error('Account query did not return the expected JSON. Edit decodeQueryOutput for its actual format.'); process.exit(1) }
 const accounts = readAccounts(snapshot)
 if (!Array.isArray(accounts)) { console.error('Account rows are not reported. Edit readAccounts for the actual response.'); process.exit(1) }
-const matches = accounts.filter(account => account?.account_key === accountKey)
+const selectedKey = accountKey === '@active' ? snapshot.active_account_key : accountKey
+if (typeof selectedKey !== 'string' || !selectedKey.trim()) {
+  console.error('Current global account is unknown: active_account_key was not reported. No account was selected.')
+  process.exit(1)
+}
+const matches = accounts.filter(account => account?.account_key === selectedKey)
 if (matches.length !== 1) { console.error(`Expected one exact account_key; found ${matches.length}. No other account was selected.`); process.exit(1) }
 const account = matches[0], usage = account.usage ?? {}, observedAt = Date.now()
 const lines = [], unknown = 'Not reported'

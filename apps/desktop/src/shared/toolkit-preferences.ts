@@ -1,4 +1,4 @@
-import type { ToolkitToolDefinition } from '@agentmux/core/control'
+import type { ToolkitToolConfiguration } from '@agentmux/core/control'
 
 export const PERFORMANCE_STATUS_BAR_IDS = ['icon', 'label'] as const
 export const TOOLKIT_ICON_IDS = ['terminal', 'zap', 'refresh-cw', 'gauge', 'key-round', 'credit-card', 'bot', 'sparkles', 'smartphone'] as const
@@ -7,7 +7,7 @@ export type PerformancePreferences = { enabled: boolean; statusBar: PerformanceS
 export const MOBILE_CONNECTION_TOOL_ID = 'builtin:mobile-connection'
 export const MOBILE_CONNECTION_STATUS_BAR_IDS = PERFORMANCE_STATUS_BAR_IDS
 export type MobileConnectionPreferences = { enabled: boolean; statusBar: PerformanceStatusBar }
-export type ToolkitPreferences = { performance?: Partial<PerformancePreferences>; mobileConnection?: Partial<MobileConnectionPreferences>; tools?: ToolkitToolDefinition[] }
+export type ToolkitPreferences = { performance?: Partial<PerformancePreferences>; mobileConnection?: Partial<MobileConnectionPreferences>; tools?: ToolkitToolConfiguration[] }
 
 export const DEFAULT_PERFORMANCE_PREFERENCES: PerformancePreferences = Object.freeze({ enabled: true, statusBar: 'icon' })
 

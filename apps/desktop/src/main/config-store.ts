@@ -3,7 +3,7 @@ import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
-import { parseToolkitToolDefinition, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
+import { parseToolkitToolConfiguration, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
 import { PROMPT_REACTION_ICONS, isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import { COMPOSER_PROMPT_STATES } from '../shared/composer-shortcut-library.js'
@@ -25,11 +25,15 @@ import {
 } from '../shared/contracts.js'
 import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/notification-presentation.js'
 import { PERFORMANCE_STATUS_BAR_IDS, TOOLKIT_ICON_IDS } from '../shared/toolkit-preferences.js'
+import { INITIAL_TOOLKIT_PACKAGES } from '../../resources/toolkit/initial-packages.js'
+import { bootstrapToolkitPackages } from './toolkit-package-bootstrap.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
-    const definition = parseToolkitToolDefinition(value)
-    if (!TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number]) || !definition.workspacePath.startsWith('/')) {
+    const definition = parseToolkitToolConfiguration(value)
+    if (!definition.workspacePath.startsWith('/') || ('kind' in definition
+      ? !definition.packagePath.startsWith('/')
+      : !TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number]))) {
       context.addIssue({ code: 'custom', message: 'Tool needs an available icon and an absolute local working directory.' })
       return z.NEVER
     }
@@ -1002,6 +1006,12 @@ export class ConfigStore {
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         loaded = structuredClone(DEFAULT_CONFIG)
+        loaded.toolkit = { tools: await bootstrapToolkitPackages({
+          resourceRoot: join(app.getAppPath(), 'resources', 'toolkit'),
+          packageRoot: join(app.getPath('userData'), 'toolkit', 'packages'), workspacePath: app.getPath('home'),
+          packages: INITIAL_TOOLKIT_PACKAGES,
+          reportIssue: issue => console.warn(`Toolkit package ${issue.toolId}: ${issue.reason} Source: ${issue.path}`)
+        }) }
         persist = true
       } else {
         // Every non-ENOENT path lands here with `rawText` already read: a JSON syntax error, a schema

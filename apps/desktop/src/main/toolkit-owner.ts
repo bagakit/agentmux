@@ -1,15 +1,17 @@
+import { dirname, join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunRef } from '@agentmux/core'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, parseToolkitSnapshot, type AgentMuxToolkitPort,
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot } from '@agentmux/core/control'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
-import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { bundledToolkitTools, bundledToolkitScript } from './toolkit-bundled.js'
+import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { CustomToolkitOwner } from './toolkit-custom-owner.js'
 import { executeToolkitConfig, prepareToolkitConfig, toolkitTools } from './toolkit-config.js'
 import type { ConfigOwner } from './config-owner.js'
 import type { AppConfig } from '../shared/contracts.js'
 import { ToolkitReceiptStore } from './toolkit-receipt-store.js'
+import { readToolkitPackageMetadata } from './toolkit-package.js'
 
 type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort | null; ended: boolean
@@ -307,7 +309,7 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
     this.performance = new PerformanceToolkitOwner({ ...args, receipts })
     const launch = args.launch()
     this.custom = new CustomToolkitOwner({ config: args.config, openRunPort: args.openRunPort,
-      runner: launch.runner, env: launch.env, bundled: () => bundledToolkitTools(args.launch(), args.config.current), ...(args.now ? { now: args.now } : {}),
+      runner: launch.runner, env: launch.env, snapshotRoot: join(dirname(args.receiptPath), 'toolkit-snapshots'), bundled: () => bundledToolkitTools(args.launch(), args.config.current), ...(args.now ? { now: args.now } : {}),
       receipts })
   }
   prepareConfig(current: AppConfig, next: AppConfig): Promise<AppConfig> {
@@ -317,16 +319,27 @@ export class ToolkitOwner implements AgentMuxToolkitPort {
   async execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult> {
     if (request.operation === 'toolkit.list') return { operation: request.operation, tools: [
       { kind: 'metrics', toolId: 'performance', name: 'Performance', readonly: true },
-      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true as const, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar })),
-      ...toolkitTools(this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id,
-        name: tool.name, readonly: false as const, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }))
+      ...bundledToolkitTools(this.args.launch(), this.args.config.current).map(tool => ({ kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: true, revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar })),
+      ...await Promise.all(toolkitTools(this.args.config.current).map(async tool => {
+        if (!('kind' in tool)) return { kind: 'script' as const, toolId: tool.id, name: tool.name, readonly: false as const,
+          revision: tool.revision, icon: tool.icon, enabled: tool.enabled, statusBar: tool.statusBar }
+        const base = { kind: 'package' as const, toolId: tool.id, readonly: false as const, configRevision: tool.revision,
+          path: tool.packagePath, enabled: tool.enabled, statusBar: tool.statusBar }
+        try {
+          const metadata = await readToolkitPackageMetadata(tool)
+          return { ...base, availability: 'available' as const, name: metadata.manifest.name, icon: metadata.icon, reason: metadata.warning }
+        } catch (error) {
+          return { ...base, availability: 'unavailable' as const, name: null, icon: null,
+            reason: String(error instanceof Error ? error.message : error).slice(0, 512) || 'Package metadata is unavailable.' }
+        }
+      }))
     ] }
     if (request.operation === 'toolkit.add' || request.operation === 'toolkit.update' || request.operation === 'toolkit.remove') {
       return await executeToolkitConfig(request, this.args.config)
     }
     if (request.toolId === 'performance') return await this.performance.execute(request, signal)
     if (request.operation === 'toolkit.get') return { operation: request.operation, snapshot: await this.custom.get(request.toolId) }
-    if (request.operation === 'toolkit.script') return { operation: request.operation, script: bundledToolkitScript(this.args.launch(), request.toolId) ?? this.custom.script(request.toolId) }
+    if (request.operation === 'toolkit.script') return { operation: request.operation, script: bundledToolkitScript(this.args.launch(), request.toolId) ?? await this.custom.script(request.toolId) }
     if (request.operation === 'toolkit.run') return { operation: request.operation, snapshot: await this.custom.run(request.toolId, request.input, signal) }
     if (request.operation === 'toolkit.action') return { operation: request.operation, snapshot: await this.custom.action(request.toolId, request.actionId, request.input, signal) }
     if (request.operation === 'toolkit.stop') {

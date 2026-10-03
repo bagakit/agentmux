@@ -17,7 +17,7 @@ if (mode === 'unknown') selected.usage = { source: '', updated_at: null, primary
   credits: null, reset_credits: null, reset_credit_details: null, refresh: { status: '' } }
 if (mode === 'zero') selected.usage = { source: 'reported fixture', updated_at: null, primary: null, secondary: null,
   credits: { balance: 0 }, reset_credits: 0, reset_credit_details: null, refresh: { status: 'local' } }
-const data = { scope: 'fixture pool', active_account_key: 'account:other', accounts: [
+const data = { scope: 'fixture pool', active_account_key: mode === 'active-missing' ? null : mode === 'active-inconsistent' ? 'account:absent' : 'account:target', accounts: [
   { account_key: 'account:other', usage: { reset_credits: 99 } }, selected,
   ...(mode === 'duplicate' ? [selected] : [])
 ] }

@@ -1,17 +1,20 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { join } from 'node:path'
 import { AgentMuxError, type AgentMuxClientEvent, type AgentMuxRunAttachment } from '@agentmux/core'
 import { parseToolkitSnapshot, parseToolkitRunInput, parseToolkitActionInput, TOOLKIT_TEXT_MAX_BYTES, TOOLKIT_TEXT_MAX_JSON_BYTES,
   type ToolkitAdmission, type ToolkitConfirmedResult, type ToolkitRunInput,
-  type ToolkitExecution, type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '@agentmux/core/control'
+  type ToolkitExecution, type ToolkitScriptSnapshot, type ToolkitToolDefinition, type ToolkitToolConfiguration, type ToolkitSnapshot } from '@agentmux/core/control'
+import type { AppConfig } from '../shared/contracts.js'
 import type { ConfigOwner } from './config-owner.js'
 import { findToolkitTool, toolkitTools } from './toolkit-config.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 import type { ToolkitReceiptStore } from './toolkit-receipt-store.js'
+import { captureToolkitPackage, writeToolkitPackageSnapshot, removeToolkitPackageSnapshot, type CapturedToolkitPackage } from './toolkit-package.js'
 
-type Lease = { snapshot(value: ToolkitScriptSnapshot): void; end(error?: Error): void; release(): void }
+type Lease = { snapshot(value: ToolkitSnapshot): void; end(error?: Error): void; release(): void }
 type Tool = { id: string; loading: Promise<void> | null; latest: ToolkitConfirmedResult | null; admission: ToolkitAdmission | null
-  error: string | null; sequence: number; leases: Set<Lease>; live: Execution | null }
-type Execution = { tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
+  error: string | null; sourceError: string | null; definition: ToolkitToolDefinition | null; sequence: number; leases: Set<Lease>; live: Execution | null }
+type Execution = { capture: CapturedToolkitPackage | null; tool: Tool; admission: ToolkitAdmission; port: ToolkitRunPort | null; cursor: number; rawBytes: number
   decoder: TextDecoder; replayText: string | null; failure: string | null; creating: boolean; attaching: boolean; ended: boolean; stopRequested: boolean
   terminalHint: boolean; uncertain: boolean; done: Promise<void>; complete(): void
   finishing: Promise<void> | null; starting: Promise<void> | null; stopSubmission: Promise<void> | null }
@@ -28,16 +31,42 @@ export class CustomToolkitOwner {
   private readonly tools = new Map<string, Tool>()
   private closed = false
   constructor(private readonly args: { config: ConfigOwner; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>
-    openRunPort(): Promise<ToolkitRunPort>; runner: string; env: Record<string, string>; bundled?: () => ToolkitToolDefinition[]; now?: () => number }) {}
+    openRunPort(): Promise<ToolkitRunPort>; runner: string; env: Record<string, string>; snapshotRoot?: string; bundled?: () => ToolkitToolDefinition[]; now?: () => number }) {}
   private now() { return (this.args.now ?? Date.now)() }
-  private definitions() { return [...(this.args.bundled?.() ?? []), ...toolkitTools(this.args.config.current)] }
-  private definition(id: string) { return this.definitions().find(tool => tool.id === id) ?? findToolkitTool(this.args.config.current, id) }
-  private current(tool: Tool): ToolkitScriptSnapshot {
-    const definition = this.definition(tool.id)
+  private configurations() { return [...(this.args.bundled?.() ?? []), ...toolkitTools(this.args.config.current)] }
+  private configuration(id: string) { return this.configurationFrom(this.args.config.current, id) }
+  private configurationFrom(current: AppConfig, id: string) {
+    return this.args.bundled?.().find(tool => tool.id === id) ?? findToolkitTool(current, id)
+  }
+  private scriptSnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitScriptSnapshot {
     return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'script', toolId: tool.id, definition,
       state: tool.error ? 'unknown' : tool.admission?.state ?? (!definition.enabled ? 'disabled' : tool.latest?.state ?? 'idle'),
       reason: tool.error ?? tool.admission?.reason ?? tool.latest?.reason ?? null, admission: tool.admission,
       latestConfirmed: tool.latest, consumerCount: tool.leases.size, sequence: tool.sequence })
+  }
+  /** Output publication consumes captured facts, never the live filesystem. */
+  private current(tool: Tool): ToolkitSnapshot {
+    const record = this.configuration(tool.id)
+    if (!('kind' in record)) return this.scriptSnapshot(tool, record)
+    if (!tool.sourceError && tool.definition?.package?.configRevision === record.revision) return this.scriptSnapshot(tool, tool.definition)
+    const retained = tool.admission?.definition ?? tool.latest?.definition
+    return structuredClone({ schema: 'agentmux.toolkit.v1', kind: 'package-unavailable', toolId: tool.id,
+      configuration: record, reason: tool.sourceError ?? 'Package source has not been inspected.',
+      retained: retained ? this.scriptSnapshot(tool, retained) : null })
+  }
+  private async resolve(tool: Tool): Promise<{ record: ToolkitToolConfiguration | ToolkitToolDefinition; definition: ToolkitToolDefinition; capture: CapturedToolkitPackage | null }> {
+    const record = this.configuration(tool.id)
+    if (!('kind' in record)) return { record, definition: record, capture: null }
+    try {
+      const capture = await captureToolkitPackage(record)
+      if (this.configuration(tool.id).revision !== record.revision) throw new AgentMuxError('Tool configuration changed while reading its package.', 'CONFIG_CONFLICT')
+      tool.definition = capture.definition; tool.sourceError = null
+      return { record, definition: capture.definition, capture }
+    } catch (error) {
+      tool.sourceError = message(error)
+      if (error instanceof AgentMuxError && ['CONFIG_CONFLICT', 'SETTING_RESOURCE_NOT_FOUND'].includes(error.code)) throw error
+      throw new AgentMuxError('Package source is unavailable: ' + tool.sourceError, 'TOOLKIT_PACKAGE_UNAVAILABLE')
+    }
   }
   private publish(tool: Tool) {
     tool.sequence++
@@ -46,7 +75,7 @@ export class CustomToolkitOwner {
     for (const lease of [...tool.leases]) try { lease.snapshot(value) } catch { lease.release() }
   }
   configurationChanged() {
-    const ids = new Set(this.definitions().map(tool => tool.id))
+    const ids = new Set(this.configurations().map(tool => tool.id))
     for (const [id, tool] of this.tools) {
       if (ids.has(id)) { if (tool.leases.size) this.publish(tool); continue }
       if (tool.admission) continue
@@ -58,10 +87,10 @@ export class CustomToolkitOwner {
     }
   }
   private async load(id: string): Promise<Tool> {
-    this.definition(id)
+    this.configuration(id)
     let tool = this.tools.get(id)
     if (!tool) {
-      tool = { id, loading: null, latest: null, admission: null, error: null, sequence: 0, leases: new Set(), live: null }
+      tool = { id, loading: null, latest: null, admission: null, error: null, sourceError: null, definition: null, sequence: 0, leases: new Set(), live: null }
       this.tools.set(id, tool)
     }
     const value = tool
@@ -73,7 +102,10 @@ export class CustomToolkitOwner {
           throw new AgentMuxError('Tool receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
         }
         const saved = receipt as Receipt
-        const parsed = parseToolkitSnapshot({ ...this.current(value), admission: saved.admission,
+        const record = this.configuration(id)
+        const definition = saved.admission?.definition ?? saved.latestConfirmed?.definition ?? (!('kind' in record) ? record : null)
+        if (!definition) throw new AgentMuxError('Tool receipt has no captured definition.', 'CONTROL_PROTOCOL_ERROR')
+        const parsed = parseToolkitSnapshot({ ...this.scriptSnapshot(value, definition), admission: saved.admission,
           latestConfirmed: saved.latestConfirmed, state: saved.admission?.state ?? saved.latestConfirmed?.state ?? 'idle' })
         if (parsed.kind !== 'script') throw new AgentMuxError('Tool receipt has another kind.', 'CONTROL_PROTOCOL_ERROR')
         value.latest = parsed.latestConfirmed; value.admission = parsed.admission
@@ -81,26 +113,28 @@ export class CustomToolkitOwner {
       } catch (error) { value.error = 'Tool receipt is unconfirmed: ' + message(error) }
     })()
     await value.loading
-    this.definition(id)
+    this.configuration(id)
     return value
   }
   async guardDelete(id: string): Promise<void> {
     const tool = await this.load(id)
     if (tool.error || tool.admission) throw new AgentMuxError(`Tool “${id}” has an in-use or unconfirmed execution.`, 'SETTING_RESOURCE_IN_USE')
   }
-  async get(id: string): Promise<ToolkitScriptSnapshot> {
+  async get(id: string): Promise<ToolkitSnapshot> {
     const tool = await this.load(id)
     if (!tool.error && tool.admission?.run && !tool.live && !this.closed) await this.recover(tool)
+    await this.resolve(tool).catch(() => {})
     return this.current(tool)
   }
-  script(id: string) {
-    const definition = this.definition(id)
-    return { toolId: id, path: null, sha256: createHash('sha256').update(definition.script).digest('hex'), text: definition.script }
+  async script(id: string) {
+    const tool = await this.load(id)
+    const { definition } = await this.resolve(tool)
+    return { toolId: id, path: definition.package ? join(definition.package.path, definition.package.entry) : null, sha256: createHash('sha256').update(definition.script).digest('hex'), text: definition.script }
   }
   private execution(tool: Tool, admission: ToolkitAdmission): Execution {
     let complete!: () => void
     const done = new Promise<void>(resolve => { complete = resolve })
-    return { tool, admission, port: null, cursor: 0, rawBytes: 0, decoder: new TextDecoder('utf-8', { fatal: true }), replayText: null,
+    return { capture: null, tool, admission, port: null, cursor: 0, rawBytes: 0, decoder: new TextDecoder('utf-8', { fatal: true }), replayText: null,
       failure: null, creating: false, attaching: false, ended: false, stopRequested: false, terminalHint: false, uncertain: false,
       done, complete, finishing: null, starting: null, stopSubmission: null }
   }
@@ -130,22 +164,34 @@ export class CustomToolkitOwner {
     }
     return true
   }
-  async run(id: string, rawInput: unknown, signal: AbortSignal): Promise<ToolkitScriptSnapshot> {
+  async run(id: string, rawInput: unknown, signal: AbortSignal): Promise<ToolkitSnapshot> {
     return await this.admit(id, parseToolkitRunInput(rawInput), null, signal)
   }
-  async action(id: string, actionId: string, rawInput: unknown, signal: AbortSignal): Promise<ToolkitScriptSnapshot> {
+  async action(id: string, actionId: string, rawInput: unknown, signal: AbortSignal): Promise<ToolkitSnapshot> {
     const input = parseToolkitActionInput(rawInput)
     return await this.admit(id, { invocationId: input.invocationId, expectedRevision: input.expectedRevision,
       expectedLatestExecutionId: input.sourceExecutionId }, { id: actionId, sourceExecutionId: input.sourceExecutionId,
       expectedAdmissionExecutionId: input.expectedAdmissionExecutionId }, signal)
   }
-  private async admit(id: string, input: ToolkitRunInput, action: NonNullable<ToolkitExecution['action']> | null, signal: AbortSignal): Promise<ToolkitScriptSnapshot> {
+  private async admit(id: string, input: ToolkitRunInput, action: NonNullable<ToolkitExecution['action']> | null, signal: AbortSignal): Promise<ToolkitSnapshot> {
     const tool = await this.load(id)
+    const repeated = await this.args.config.inspect(current => {
+      const record = this.configurationFrom(current, id)
+      const fact = tool.admission?.invocationId === input.invocationId ? tool.admission : tool.latest?.invocationId === input.invocationId ? tool.latest : null
+      if (fact && ('kind' in record ? fact.definition.package?.configRevision : fact.definition.revision) !== record.revision) {
+        throw new AgentMuxError('Invocation belongs to a previous tool configuration.', 'CONFIG_CONFLICT')
+      }
+      return this.repeat(tool, input, action)
+    })
+    if (repeated) return this.current(tool)
+    // Filesystem work is outside the configuration commit queue.
+    const resolved = await this.resolve(tool)
     let execution: Execution | null = null
     await this.args.config.inspect(current => {
       if (signal.aborted) throw new AgentMuxError('Tool admission cancelled.', 'CONTROL_CANCELLED')
       if (this.closed) throw new AgentMuxError('Toolkit owner is closed.', 'CONTROL_UNAVAILABLE')
-      const definition = this.args.bundled?.().find(tool => tool.id === id) ?? findToolkitTool(current, id)
+      const record = this.configurationFrom(current, id), definition = resolved.definition
+      if (record.revision !== resolved.record.revision) throw new AgentMuxError('Tool configuration changed during package capture.', 'CONFIG_CONFLICT')
       if (definition.revision !== input.expectedRevision) throw new AgentMuxError('Tool configuration changed; inspect it before running.', 'CONFIG_CONFLICT')
       if (this.repeat(tool, input, action)) return
       if (action && (!tool.latest || tool.latest.definition.revision !== definition.revision ||
@@ -162,7 +208,7 @@ export class CustomToolkitOwner {
         definition: structuredClone(definition), expectedLatestExecutionId: input.expectedLatestExecutionId, action,
         target: { workspacePath: definition.workspacePath }, run: null, startedAt: this.now(), text: '', state: 'pending', reason: null }
       tool.admission = admission
-      execution = this.execution(tool, admission); tool.live = execution
+      execution = this.execution(tool, admission); execution.capture = resolved.capture; tool.live = execution
       const admitted = execution
       // Register the entire admitted work before any durable wait, so disposal cannot return ahead of a late create.
       admitted.starting = Promise.resolve().then(async () => {
@@ -183,12 +229,24 @@ export class CustomToolkitOwner {
     try {
       execution.port = await this.args.openRunPort()
       if (this.closed) { await this.confirm(execution, 'stopped', 'Owner closed before the script started.', null); return }
-      execution.creating = true
       const definition = execution.admission.definition
       const program = execution.admission.action ? this.savedAction(definition, execution.admission.action.id) : definition
+      let args = ['--input-type=module', '--eval', program.script, '--', ...program.args]
+      if (definition.package) {
+        if (!execution.capture || !this.args.snapshotRoot) throw new AgentMuxError('Package snapshot owner is unavailable.', 'TOOLKIT_PACKAGE_UNAVAILABLE')
+        const directory = await writeToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, execution.capture)
+        const entry = execution.admission.action
+          ? definition.package.actionEntries.find(entry => entry.id === execution.admission.action!.id)!.entry
+          : definition.package.entry
+        args = [join(directory, entry), ...program.args]
+        execution.capture = null
+      }
+      if (this.closed) { await this.confirm(execution, "stopped", "Owner closed before the script started.", null); return }
+      // A failed create may still have admitted a Run; only confirmed outcomes permit cleanup.
+      execution.creating = true
       const run = await execution.port.create({ createOperationId: execution.admission.executionId,
         workspacePath: definition.workspacePath, command: this.args.runner,
-        args: ['--input-type=module', '--eval', program.script, '--', ...program.args], env: this.args.env, cols: 80, rows: 24 },
+        args, env: this.args.env, cols: 80, rows: 24 },
         event => this.accept(execution, event))
       execution.admission.run = { hostId: 'local', runId: run.runId }; execution.creating = false
       await this.save(execution.tool)
@@ -349,10 +407,16 @@ export class CustomToolkitOwner {
         await execution.port.remove(ref(execution))
       }
       await this.args.receipts.save(tool.id, { latestConfirmed: confirmed, admission: null })
-      tool.admission = null; tool.live = null; execution.complete(); this.publish(tool)
+      tool.admission = null; tool.live = null; execution.capture = null; execution.complete(); this.publish(tool)
+      // Cleanup failure retains only an owned cache; it cannot turn a confirmed result into an unknown Run.
+      if (execution.admission.definition.package && this.args.snapshotRoot) {
+        await removeToolkitPackageSnapshot(this.args.snapshotRoot, execution.admission.executionId, execution.admission.definition.package.contentSHA256).catch(error => {
+          console.warn("Confirmed Toolkit execution cache cleanup failed:", message(error))
+        })
+      }
     } catch (error) { execution.ended = false; this.unknown(execution, 'Tool result or cleanup is unconfirmed: ' + message(error)) }
   }
-  async stop(id: string, executionId: string | null): Promise<ToolkitScriptSnapshot> {
+  async stop(id: string, executionId: string | null): Promise<ToolkitSnapshot> {
     const tool = await this.load(id)
     if (tool.admission?.executionId !== executionId && !(tool.admission === null && executionId === null)) {
       throw new AgentMuxError('Tool execution changed; stop targets one captured execution.', 'CONFIG_CONFLICT')
@@ -382,7 +446,8 @@ export class CustomToolkitOwner {
         await this.finish(execution)
         if (tool.live !== execution || execution.ended) return this.current(tool)
         const observed = this.current(tool)
-        const outcome = observed.state === 'unknown' ? observed.reason : null
+        const observedScript = observed.kind === 'package-unavailable' ? observed.retained : observed.kind === 'script' ? observed : null
+        const outcome = observedScript?.state === 'unknown' ? observedScript.reason : null
         this.unknown(execution, 'Stop unconfirmed: ' + message(error) + (outcome ? '; ' + outcome : ''))
         throw error
       } finally { if (execution.stopSubmission === submission) execution.stopSubmission = null }
@@ -400,6 +465,7 @@ export class CustomToolkitOwner {
     if (signal.aborted || this.closed) throw new AgentMuxError('Tool reader cancelled or closed.', 'CONTROL_CANCELLED')
     const tool = await this.load(id)
     if (!tool.error && tool.admission?.run && !tool.live && !this.closed) await this.recover(tool)
+    await this.resolve(tool).catch(() => {})
     if (signal.aborted || this.closed) throw new AgentMuxError('Tool reader cancelled or closed during establishment.', 'CONTROL_CANCELLED')
     let released = false
     const lease: Lease = { snapshot, end, release: () => {
