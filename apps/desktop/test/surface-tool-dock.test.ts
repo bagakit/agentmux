@@ -398,11 +398,9 @@ describe('shared surface tool dock resize', () => {
   })
 
   it('把 Topic 目录定位到自家文件面板，而不是打开系统文件管理器', () => {
-    expect(topicsPanelSource).toContain('onRevealDirectory(topic.directoryPath)')
-    // 图标要表达「聚焦定位」而不是「打开文件夹」——它把自家那棵树滚到这个目录，
-    // 不是在系统文件管理器里开一个窗口。
-    expect(topicsPanelSource).toContain('title="Reveal in Files"')
-    expect(topicsPanelSource).toContain('<Crosshair size={13} />')
+    expect(topicsPanelSource).toContain('onReveal: () => withLogicalPath(onRevealDirectory)')
+    expect(topicContextMenuSource).toContain('<Crosshair size={14} />')
+    expect(topicContextMenuSource).toContain('<span>Reveal in Files</span>')
     expect(topicsPanelSource).not.toContain('api.files.reveal(workspace.id, topic.directoryPath)')
     expect(fileExplorerSource).toContain('next.add(revealRequest.path)')
     expect(fileExplorerSource).toContain('setSelection(createSingleFileExplorerSelection(revealRequest.path))')
@@ -432,25 +430,8 @@ describe('shared surface tool dock resize', () => {
     expect(OS_FILE_MANAGER_NAMES, '"File" 被单独禁了，会误伤 "File changed on disk" 这类正当文案')
       .not.toContain('File')
 
-    // SurfaceToolDock 上的图标按钮：className 里含 workspace-topic-reveal。
-    const dockButton = findJsxElementByClassName(
-      parseTsx('WorkspaceTopicsPanel.tsx', topicsPanelSource),
-      'workspace-topic-reveal'
-    )
-    expect(dockButton, 'SurfaceToolDock 里找不到 reveal 图标按钮——判据落空，下面几条会恒真').not.toBeUndefined()
-    const dockTitle = staticJsxAttributeString(dockButton!, 'title')
-    const dockAria = staticJsxAttributeString(dockButton!, 'aria-label')
-    // 正面钉住两处取值：`title` 原本就有正断言，`aria-label` 从前是个没人钉的空槽——下一个泄漏正是
-    // 往那种空槽里去。两处都要**恰好点名**那个内部面板（"Files"），且都不带任何操作系统的名字。
-    expect(dockTitle, 'reveal 按钮的 title 不再指向自家 Files 面板').toContain('Files')
-    expect(dockAria, 'reveal 按钮的 aria-label 不再指向自家 Files 面板（这个槽从前没人钉，是泄漏最爱去的地方）')
-      .toContain('Files')
-    expect(osNamesInText(dockTitle ?? '', OS_FILE_MANAGER_NAMES), `reveal 按钮 title 借用了系统文件管理器的说法`).toEqual([])
-    expect(osNamesInText(dockAria ?? '', OS_FILE_MANAGER_NAMES), `reveal 按钮 aria-label 借用了系统文件管理器的说法`).toEqual([])
-    // 反向的错法：改走 lib 的三态文案（`revealInFileManagerLabel()`）会说 "Reveal in Finder"，
-    // 而这个按钮根本不开 Finder。它是个函数调用不是字符串字面量，上面的整词比对看不见它，单独守。
-    expect(jsxSubtreeUsesIdentifier(dockButton!, 'revealInFileManagerLabel'),
-      'reveal 按钮借用了 lib/host-platform 的三态文案，但它不开系统文件管理器').toBe(false)
+    // 行尾按钮打开共享菜单；内部定位的文案由实际 onReveal 菜单项持有。
+    expect(topicsPanelSource).toContain('<TopicActionsMenu title={topic.title} {...menuActions} />')
 
     // TopicContextMenu 上的同一个动作：onSelect 走 onReveal 的那个 ContextMenu.Item。
     const menuSource = readFileSync(
@@ -491,8 +472,8 @@ describe('shared surface tool dock resize', () => {
       topicsPanelSource.indexOf('<SortableTopicItem'),
       topicsPanelSource.indexOf('</SortableTopicItem>')
     )
-    expect(topicRow.match(/className="icon-button workspace-topic-/g)).toHaveLength(1)
-    expect(topicRow).toContain('workspace-topic-reveal')
+    expect(topicRow.match(/<TopicActionsMenu\b/g)).toHaveLength(1)
+    expect(topicRow).toContain('workspace-topic-actions')
     expect(topicRow).not.toContain('workspace-topic-rename"')
   })
 
