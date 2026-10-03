@@ -1,4 +1,4 @@
-import { readCodexPromptExecutionEvidence, verifyCodexPromptExecutionTransport } from './codex-prompt-execution-evidence.js'
+import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { inspectCodexPromptExecution } from './codex-prompt-execution.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
@@ -106,7 +106,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     terminalHandshake: { query: '\u001b[?u', response: '\u001b[?0u' },
     terminalPromptRender: { frameStart: '\u001b[?2026h', activeComposer: '›', frameEnd: '\u001b[?2026l' },
     inspectPromptExecution: inspectCodexPromptExecution,
-    verifyPromptExecutionTransport: verifyCodexPromptExecutionTransport,
+    verifyPromptExecutionTransport: createCodexPromptExecutionTransportVerifier(),
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
     planPromptInput: (prompt, context) => ({
       kind: 'render-then-submit',
