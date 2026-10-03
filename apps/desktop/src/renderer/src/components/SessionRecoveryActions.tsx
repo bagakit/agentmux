@@ -12,7 +12,7 @@ import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, insp
 
 /** Explicit choices share the existing spatial/queue correlation across dialog and Renderer mounts. */
 export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
-  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; workingLabel?: string; onRestore: () => void; onTakeOver?: () => void
+  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; workingLabel?: string; onRestore: () => void; onTakeOver?: (() => void) | undefined
 }) {
   const [mode, setMode] = useState<RecoveryMode | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
   const config = useAppStore(state => mode ? state.config : null)
