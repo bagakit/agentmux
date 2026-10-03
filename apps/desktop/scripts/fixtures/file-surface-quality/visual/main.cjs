@@ -10,10 +10,10 @@ const evaluate = code => win.webContents.executeJavaScript(code, true)
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 async function wait(code) { const until = Date.now() + 12000; while (Date.now() < until) { if (await evaluate(code)) return; await sleep(50) } assert.fail('Missing actual Renderer fact: ' + code) }
 async function paint() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); await sleep(70) }
-async function click(code) {
+async function click(code, button = 'left') {
   await evaluate(`${code}.scrollIntoView({block:'nearest'})`); await paint()
   const point = await evaluate(`(()=>{const e=${code};if(!e)throw Error('Control missing');const r=e.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-  for (const type of ['mousePressed','mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 })
+  for (const type of ['mousePressed','mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button, clickCount: 1 })
   await paint()
 }
 async function frame(name, filePath) {
@@ -25,7 +25,7 @@ async function frame(name, filePath) {
   const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); report.frames.push({ name, file, headerControls:headers, geometry: filePath ? await evaluate(`filePreviewProbe.geometry(${JSON.stringify(filePath)})`) : null })
 }
 const imageReady = path => `(()=>{const t=filePreviewProbe.geometry(${JSON.stringify(path)});return t.image?.naturalWidth>0})()`
-const active = selector => `filePreviewProbe.activeRegion().querySelector(${JSON.stringify(selector)})`
+const active = selector => `filePreviewProbe.activeRegion()?.querySelector(${JSON.stringify(selector)})`
 const select = selector => `document.querySelector(${JSON.stringify(selector)})`
 async function open(file) { await evaluate(`filePreviewProbe.open(${JSON.stringify(file)})`); await wait(`Boolean(${active('.editor-header')})`); await paint() }
 async function preview(file, selector) {
@@ -102,6 +102,62 @@ async function capture() {
   await fs.writeFile(path.join(evidence,'expected-durable.json'),JSON.stringify(report.expected,null,2))
 }
 const filePreviewKey = path => config.workspaces[0].id+'\0'+path
+async function activation() {
+  await wait(`Boolean(${select('[data-tree-path="code.ts"] .tree-row__label')})`)
+  assert.equal((await evaluate('filePreviewProbe.facts()')).mainSurface, 'agents')
+  await click(select('[data-tree-path="code.ts"] .tree-row__label'))
+  await wait(`${active('.monaco-editor')}?.contains(document.activeElement)`)
+  assert.equal((await evaluate('filePreviewProbe.facts()')).mainSurface, 'workbench')
+  await win.webContents.debugger.sendCommand('Input.insertText', { text: '// Typed after clicking the file name\n' })
+  await wait(`filePreviewProbe.facts().documents[filePreviewProbe.key('code.ts')]?.content.includes('Typed after clicking the file name')`)
+  await frame('filename-opens-and-focuses-source', 'code.ts')
+  await evaluate(`filePreviewProbe.split('code.ts',.5,'light')`)
+  await click(select('[data-workbench-region-id="preview-neighbor:code.ts"] .editor-header'))
+  await click(select('[data-tree-path="code.ts"] .tree-row__label'))
+  await wait(`${active('.monaco-editor')}?.contains(document.activeElement)`)
+  const selected = await evaluate('filePreviewProbe.facts()')
+  assert.equal(selected.selection.regionId, await evaluate(`filePreviewProbe.geometry('code.ts').regionId`))
+  assert.ok(selected.documents[filePreviewKey('code.ts')].content.includes('Typed after clicking the file name'))
+  await frame('existing-file-region-reselected', 'code.ts')
+  await click(select('[data-tree-path="assets"] .tree-row__label'))
+  await wait(`Boolean(${select('[data-tree-path="assets/inside.ts"]')})`)
+  report.directoryNameExpanded = true
+  await click(select('[data-tree-path="drawing.svg"] .tree-row__label'))
+  await wait(`${active('.image-preview__viewport img')}?.naturalWidth>0`)
+  assert.equal((await evaluate('filePreviewProbe.facts()')).mainSurface, 'workbench')
+  win.setContentSize(780, 520); await paint(); await frame('filename-opens-preview-narrow', 'drawing.svg')
+  await click(select('[data-tree-path="code.ts"] .tree-row__label'))
+  await wait(`${active('.monaco-editor')}?.contains(document.activeElement)`)
+  await evaluate('filePreviewProbe.flush()')
+  const facts = await evaluate('filePreviewProbe.facts()')
+  report.expected = { tabs: facts.tabs, layouts: facts.layouts, activeWorkspaceId: facts.activeWorkspaceId,
+    documents: { [filePreviewKey('code.ts')]: facts.documents[filePreviewKey('code.ts')] }, dirtyDocuments: { [filePreviewKey('code.ts')]: true } }
+  await fs.writeFile(path.join(evidence, 'activation-expected.json'), JSON.stringify(report.expected, null, 2))
+  assert.ok(reads.some(read => read.path === 'code.ts' && read.status === 'read'))
+  assert.equal(writes.length, 0)
+  await click(select('[data-tree-path="code.ts"] .tree-row__label'), 'right')
+  await wait(`Boolean(${select('.file-context-menu__danger')})`)
+  await click(select('.file-context-menu__danger'))
+  await wait(`Boolean(${select('[role="dialog"]')})`)
+  await click(`Array.from(document.querySelectorAll('[role="dialog"] button')).find(button=>button.textContent==='Cancel')`)
+  await wait(`!document.querySelector('[role="dialog"]')`)
+  report.menuDeleteCancelled = true
+}
+
+async function activationRestart() {
+  const expected = JSON.parse(await fs.readFile(path.join(evidence,'activation-expected.json'),'utf8'))
+  const actual = await evaluate('filePreviewProbe.beforeFixture')
+  assert.deepEqual(actual.tabs,expected.tabs); assert.deepEqual(actual.layouts,expected.layouts)
+  assert.equal(actual.activeWorkspaceId,expected.activeWorkspaceId)
+  assert.deepEqual(actual.documents[filePreviewKey('code.ts')], expected.documents[filePreviewKey('code.ts')])
+  assert.equal(actual.dirtyDocuments[filePreviewKey('code.ts')],true)
+  // The restored graph is read before this explicit user-like activation.
+  await wait(`Boolean(${select('[data-tree-path="code.ts"] .tree-row__label')})`)
+  await click(select('[data-tree-path="code.ts"] .tree-row__label'))
+  await wait(`${active('.monaco-editor')}?.contains(document.activeElement)`)
+  await frame('original-file-workface-after-restart','code.ts')
+  report.durable={passed:true,expected,actual,boundary:'Second ordinary process restores original Tab/Region/Group/layout/focus and dirty source before explicit name activation; native workspace files unchanged.'}
+}
 async function restart() {
   const expected = JSON.parse(await fs.readFile(path.join(evidence,'expected-durable.json'),'utf8')), actual = await evaluate('filePreviewProbe.beforeFixture')
   assert.deepEqual(actual.tabs,expected.tabs); assert.deepEqual(actual.layouts,expected.layouts); assert.equal(actual.activeWorkspaceId,expected.activeWorkspaceId)
@@ -124,6 +180,6 @@ app.whenReady().then(async()=>{try{
   ipcMain.handle('files:reveal',()=>{throw Error('Capture does not open system UI')});ipcMain.handle('files:openSystem',()=>{throw Error('Capture does not open system applications')})
   win=new BrowserWindow({show:false,width:1180,height:850,webPreferences:{sandbox:true,nodeIntegration:false,contextIsolation:true,backgroundThrottling:false,preload:path.join(__dirname,'preload.cjs')}})
   win.webContents.on('console-message',(_event,_level,message)=>{report.consoleMessages.push(message);console.log('RENDERER '+message)});await win.loadFile(html,{query:{phase}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await wait('Boolean(window.filePreviewProbe)')
-  if(phase==='restart')await restart();else await capture();assert.equal(report.consoleMessages.some(message=>message.includes('Content Security Policy')),false,'No blocked production media/frame request');report.passed=true
-}catch(error){report.failure={name:error.name,message:error.message,stack:error.stack}; if(win){await fs.writeFile(path.join(evidence,'failure.png'),(await win.webContents.capturePage()).toPNG());report.failureState=await evaluate('({text:document.body.innerText,active:filePreviewProbe.activeRegion()?.outerHTML})').catch(()=>null)}}
+  if(phase==='activation')await activation();else if(phase==='activation-restart')await activationRestart();else if(phase==='restart')await restart();else await capture();assert.equal(report.consoleMessages.some(message=>message.includes('Content Security Policy')),false,'No blocked production media/frame request');report.passed=true
+}catch(error){report.failure={name:error.name,message:error.message,stack:error.stack}; if(win){await fs.writeFile(path.join(evidence,'failure.png'),(await win.webContents.capturePage()).toPNG());report.failureState=await evaluate('({text:document.body.innerText,active:filePreviewProbe.activeRegion()?.outerHTML,focus:document.activeElement?.outerHTML,pointerEvents:getComputedStyle(document.body).pointerEvents,facts:filePreviewProbe.facts()})').catch(()=>null)}}
 finally{disposeSpatial?.();for(const dispose of observed.values())await dispose();await files?.dispose();await fs.writeFile(path.join(evidence,phase+'-render.json'),JSON.stringify(report,null,2));app.exit(report.passed?0:1)}})

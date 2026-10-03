@@ -6,6 +6,7 @@ import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
 import { useWorkspaceFileTree } from '../src/renderer/src/components/file-tree/useWorkspaceFileTree'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { installFileTreeGeometry } from './helpers/file-tree-geometry'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -15,10 +16,11 @@ const entry = (path: string, directory = false) => ({ path, name: path.split('/'
 const bridge = Object.getOwnPropertyDescriptor(window, 'agentmux')
 let read: MockInstance<typeof api.files.readDirectory>, open: ReturnType<typeof vi.fn>, terminal: ReturnType<typeof vi.fn>
 beforeEach(() => {
+  installFileTreeGeometry()
   open = vi.fn(async () => true); terminal = vi.fn(async () => {})
   useAppStore.setState({ config: { ...composerConfig, workspaces: [a, b] }, activeWorkspaceId: b.id,
     sessions: [], tabs: {}, layouts: {}, fileExplorerStates: {}, workspaceFileRevisions: {}, lastActiveFileByWorkspace: {},
-    dirtyDocuments: {}, pinnedItems: {}, scratchTopicSnapshots: {}, openFile: open, launchTerminal: terminal })
+    dirtyDocuments: {}, pinnedItems: {}, scratchTopicSnapshots: {}, openFile: open, openFileAndReveal: open, launchTerminal: terminal })
   Object.defineProperty(window, 'agentmux', { configurable: true, value: { git: { status: async (id: string) =>
     ({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: id === a.id ? a.path : b.path }) } } })
   read = vi.spyOn(api.files, 'readDirectory').mockImplementation(async (id, path) =>
@@ -43,13 +45,13 @@ it('explicit resource and subtree keep two Workspaces separate and reject out-of
   expect(dom.container.querySelector('.file-explorer')?.getAttribute('data-file-root')).toBe('mote-a')
   expect(dom.container.querySelector('.file-tree-root-target')?.textContent).toContain('Mote A materials')
   expect(useAppStore.getState().activeWorkspaceId).toBe(b.id)
-  await view('mote-a/notes.md'); expect(open).toHaveBeenCalledExactlyOnceWith('mote-a/notes.md', undefined, undefined, a.id)
+  await view('mote-a/notes.md'); expect(open).toHaveBeenCalledExactlyOnceWith('mote-a/notes.md', undefined, undefined, a.id, expect.any(AbortSignal))
 })
 it('default Explorer keeps current Workspace navigation and the original file action', async () => {
   await dom.render(<FileExplorer />); await waitPaths(['scope-b.md']); expect(read).toHaveBeenCalledWith(b.id, '')
   await act(async () => useAppStore.setState({ activeWorkspaceId: a.id }))
   await waitPaths(['scope-a.md']); expect(read).toHaveBeenLastCalledWith(a.id, '')
-  await view('scope-a.md'); expect(open).toHaveBeenCalledExactlyOnceWith('scope-a.md', undefined, undefined, a.id)
+  await view('scope-a.md'); expect(open).toHaveBeenCalledExactlyOnceWith('scope-a.md', undefined, undefined, a.id, expect.any(AbortSignal))
 })
 it('a same-Workspace root switch rejects the exact older root completion', async () => {
   let complete!: (entries: ReturnType<typeof entry>[]) => void

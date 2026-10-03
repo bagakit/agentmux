@@ -3,6 +3,7 @@ import { vi } from 'vitest'
 /** A scroll viewport for happy-dom, which has no layout engine; the production virtualizer stays real. */
 export function installFileTreeGeometry(height = 240) {
   const originalHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!.get!
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
   const originalWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!.get!
   const rowHeight = (element: HTMLElement): number => element.classList.contains('tree-create-row')
     ? element.querySelector('.inline-rename-field__error') ? 45 : 25
@@ -31,6 +32,7 @@ export function installFileTreeGeometry(height = 240) {
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     const wrapper = this.closest<HTMLElement>('.file-tree__virtual-row')
     const tree = this.closest<HTMLElement>('.file-tree')
+    if (!tree) return originalRect.call(this)
     const offset = Number(wrapper?.style.transform.match(/translateY\(([-\d.]+)px\)/)?.[1] ?? 0)
     const top = wrapper ? offset + 24 - (tree?.scrollTop ?? 0) : 0
     return new DOMRect(0, top, 280, heightOf(this))

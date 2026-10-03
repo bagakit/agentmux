@@ -197,6 +197,7 @@ import {
   fileOpenLauncherMatches,
   reduceFileRename,
   findFileRenameProjectionCollision,
+  findFileWorkbenchSurface,
   reconcileWorkbenchFileProjection,
   type FileDocumentIssue
 } from './lib/file-workbench-state'
@@ -826,6 +827,8 @@ type AppState = {
    * 而不是让调用方各自推导 regionId（推错就切错 Region 的模式）。
    */
   openFileDiff(path: string, workspaceId?: string): Promise<void>
+  /** Explicit file navigation from an external control, through the original document owner. */
+  openFileAndReveal(path: string, tabGroupId?: string, location?: { line: number; column?: number }, workspaceId?: string, navigationSignal?: AbortSignal): Promise<boolean>
   openBranchDiff(workspaceId: string, comparison: GitBranchDiffDescriptor): void
   loadBranchDiff(regionId: string): Promise<void>
   setMainSurface(surface: MainSurface): void
@@ -4963,7 +4966,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...state.layouts,
         [workspaceId]: activateLayoutTab(layout!, tabGroupId, tabId)
       },
-      // 只有键盘导航这一路才把 DOM caret 也搬过去（regionFocusClaimsCaret）。判据是这次落焦的**因**，不是
+      // 键盘导航与外部显式打开目标才搬 DOM caret（regionFocusClaimsCaret）。判据是这次落焦的**因**，不是
       // 「谁成了焦点」——指针点击那一路原生 mousedown 已把焦点放对，再夺一次会打断选择/原生行为。同一个
       // regionId 驱动绿环、原生视图让位、与这条 caret 意图，三者读同一次判定（region-focus.ts 顶部的纪律）。
       // nonce 递增让「连按方向键停在同一格」也能各触发一次，且 selector 不因对象相等忽略它。
@@ -5199,6 +5202,38 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   async reloadRegionDiff(regionId, workspaceId, path) {
     await loadRegionDiff(regionId, (bridge) => bridge.diff(workspaceId, path))
   },
+  async openFileAndReveal(path, tabGroupId, location, requestedWorkspaceId, navigationSignal) {
+    const navigation = get()
+    const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
+    const resource = navigation.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    if (!workspaceId || !resource) return false
+    if (!navigation.layouts[workspaceId]) set(state => ({ layouts: {
+      ...state.layouts, [workspaceId]: createWorkspaceLayout(newTabGroupId())
+    } }))
+    const opening = navigationSignal
+      ? get().openFile(path, tabGroupId, location, workspaceId, undefined, undefined, navigationSignal)
+      : get().openFile(path, tabGroupId, location, workspaceId)
+    const intentVersion = fileOpenIntentVersion
+    const mayReveal = await opening
+    const state = get(), currentResource = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    // Preparation may finish after a newer navigation or a Workspace resource rebind.
+    if (!mayReveal || navigationSignal?.aborted || intentVersion !== fileOpenIntentVersion ||
+      state.mainSurface !== navigation.mainSurface || state.activeWorkspaceId !== navigation.activeWorkspaceId ||
+      state.agentFocus.execution.sessionId !== navigation.agentFocus.execution.sessionId ||
+      state.agentFocus.pmo.sessionId !== navigation.agentFocus.pmo.sessionId ||
+      currentResource?.hostId !== resource.hostId || currentResource.path !== resource.path) return false
+    const original = findFileWorkbenchSurface(state, workspaceId, path), layout = state.layouts[workspaceId]
+    const tab = original?.tab, surface = original?.surface
+    const groupId = tab && tabGroupForTab(layout, tab.id)
+    if (!tab || !surface || !groupId) return false
+    get().focusRegion(workspaceId, tab.id, surface.regionId, 'navigation', groupId)
+    const selected = get().workbenchSpaceSelection
+    if (selected?.workspaceId !== workspaceId || selected.tabId !== tab.id || selected.regionId !== surface.regionId || selected.groupId !== groupId) return false
+    set({ activeWorkspaceId: workspaceId, mainSurface: 'workbench' })
+    const request = get().regionCaretFocus
+    if (request && navigationSignal) navigationSignal.addEventListener('abort', () => get().clearRegionCaretFocus(request.nonce), { once: true })
+    return true
+  },
   async openFileDiff(path, requestedWorkspaceId) {
     const navigation = get()
     const workspaceId = requestedWorkspaceId ?? navigation.activeWorkspaceId
@@ -5209,14 +5244,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const opening = get().openFile(path, undefined, undefined, workspaceId)
     const intentVersion = fileOpenIntentVersion
     const mayReveal = await opening
-    const tabId = fileTabId(workspaceId, path)
-    const regionId = initialWorkbenchRegionId(tabId)
-    const state = get(), tab = state.tabs[tabId], layout = state.layouts[workspaceId]
-    const surface = tab?.regions[regionId]
-    const groupId = tabGroupForTab(layout, tabId)
+    const state = get(), original = findFileWorkbenchSurface(state, workspaceId, path), layout = state.layouts[workspaceId]
+    const tab = original?.tab, surface = original?.surface
+    const tabId = tab?.id, regionId = surface?.regionId
+    const groupId = tabId ? tabGroupForTab(layout, tabId) : undefined
     // A failed file read has no destination. Reveal the exact successful placement without
     // setMainSurface's Session navigation replacing it with the original Agent Tab.
-    if (!tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
+    if (!tabId || !regionId || !tab || !layout || !groupId || surface?.kind !== 'file' || surface.path !== path) return
     // A later navigation owns the screen while the file producer is pending.
     if (
       mayReveal && intentVersion === fileOpenIntentVersion &&
@@ -5707,14 +5741,27 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const surface = tab?.regions[exactRegionId]
       if (!expectedSurface && surface?.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path) expectedSurface = surface
     }
+    let releaseResource = () => {}
     try {
     const layout = displayId ? navigation.layouts[displayId] : undefined
     if (!workspaceId || !layout || placement && (!tabGroupId || !groupIds(layout.root).includes(tabGroupId) || !layout.groups.some(group => group.id === tabGroupId))) return false
+    const originalResource = navigation.config?.workspaces.find(workspace => workspace.id === workspaceId)
+    let resourceRebound = false, observedConfig = navigation.config
+    if (originalResource) releaseResource = useAppStore.subscribe(state => {
+      if (state.config === observedConfig) return
+      observedConfig = state.config
+      const current = state.config?.workspaces.find(workspace => workspace.id === workspaceId)
+      if (current?.hostId !== originalResource.hostId || current.path !== originalResource.path) {
+        resourceRebound = true
+        releaseResource()
+      }
+    })
     const resourceCurrent = () => {
       const workspace = get().config?.workspaces.find(item => item.id === workspaceId)
       const currentLayout = displayId ? get().layouts[displayId] : undefined
       const currentTab = canonicalTabId ? get().tabs[destinationTabId!] : undefined
-      return (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
+      return !resourceRebound && (!originalResource || workspace?.hostId === originalResource.hostId && workspace.path === originalResource.path) &&
+        (!placement || workspace?.hostId === placement.resource.hostId && workspace.path === placement.resource.path &&
         currentLayout && tabGroupId && groupIds(currentLayout.root).includes(tabGroupId) && currentLayout.groups.some(group => group.id === tabGroupId) &&
         fileOpenReferenceMatches(get(), workspaceId, path, tabGroupId, placement) &&
         fileOpenLauncherMatches(get(), workspaceId, path, tabGroupId, placement)) &&
@@ -5930,6 +5977,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               get().reportError(error)
               return false
             } finally {
+              if (resourceRebound && documentLifetime(key) === openedLifetime) await api.files.unobserve(workspaceId, path)
               if (fileOpenRequests.get(key) === request) fileOpenRequests.delete(key)
             }
           })
@@ -5993,6 +6041,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (location && !get().documents[key]) get().clearDocumentRevealTarget(key)
     }
     } finally {
+      releaseResource()
       if (placement?.onResult) {
         const tabId = destinationTabId
         const tab = tabId && Object.hasOwn(get().tabs, tabId) ? get().tabs[tabId] : undefined

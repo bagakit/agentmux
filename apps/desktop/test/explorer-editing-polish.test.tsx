@@ -7,6 +7,7 @@ import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
 import { WorkflowComponentGallery } from '../src/renderer/src/components/WorkflowComponentGallery'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { installFileTreeGeometry } from './helpers/file-tree-geometry'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -21,6 +22,7 @@ let move: ReturnType<typeof vi.spyOn<typeof api.files, 'move'>>
 let create: ReturnType<typeof vi.spyOn<typeof api.files, 'create'>>
 let open: ReturnType<typeof vi.fn>, report: ReturnType<typeof vi.fn>
 beforeEach(() => {
+  installFileTreeGeometry()
   paths = { [first.id]: ['a.test.ts', '.env', 'folder'], [second.id]: ['a.test.ts', '.env', 'folder'] }
   read = vi.spyOn(api.files, 'readDirectory').mockImplementation(async (id, parent) => {
     expect(paths[id], 'Directory API called with an original Workspace identity').toBeDefined()
@@ -41,7 +43,7 @@ beforeEach(() => {
   useAppStore.setState({ config: { ...composerConfig, workspaces: [first, second], copyPathsAsAbsolute: false }, localHome: _hygiene_fixturePath("Users/reader"),
     activeWorkspaceId: first.id, sessions: [], tabs: {}, layouts: {}, documents: {}, dirtyDocuments: {}, pinnedItems: {},
     fileExplorerStates: {}, workspaceFileRevisions: {}, lastActiveFileByWorkspace: {}, scratchTopicSnapshots: {},
-    agentComposerDrafts: { preserved: 'Original unsent draft' }, error: null, reportError: report, openFile: open, ...originalActions })
+    agentComposerDrafts: { preserved: 'Original unsent draft' }, error: null, reportError: report, openFile: open, openFileAndReveal: open, ...originalActions })
 })
 afterEach(() => {
   if (originalBridge) Object.defineProperty(window, 'agentmux', originalBridge)
@@ -84,7 +86,7 @@ describe('Explorer editing through the actual tree hook and file transaction own
   it('uses the same reusable field for double-click, F2 and create, selecting the established file stem', async () => {
     await mount()
     await act(async () => element('[data-tree-path="a.test.ts"] .tree-row__label').click())
-    expect(open).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledExactlyOnceWith('a.test.ts', undefined, undefined, first.id, expect.any(AbortSignal))
     expect(useAppStore.getState().fileExplorerStates[first.id]!.selection.activePath).toBe('a.test.ts')
     await begin()
     expect([input().selectionStart, input().selectionEnd]).toEqual([0, 6])
@@ -98,13 +100,14 @@ describe('Explorer editing through the actual tree hook and file transaction own
     }
     // The toolbar creates in the selected directory; select a root file to request a root sibling.
     await act(async () => element('[data-tree-path="a.test.ts"] .tree-row__label').click())
+    open.mockClear()
     await act(async () => element('[title="New file"]').click())
     const created = element<HTMLInputElement>('input[aria-label="New file name"]')
     expect(created.closest('.inline-rename-field')).not.toBeNull()
     await value('created.ts', created)
     await key(created, 'Enter')
     expect(create).toHaveBeenCalledExactlyOnceWith(first.id, { kind: 'file', path: 'created.ts' })
-    expect(open).toHaveBeenCalledExactlyOnceWith('created.ts', undefined, undefined, first.id)
+    expect(open).toHaveBeenCalledExactlyOnceWith('created.ts', undefined, undefined, first.id, expect.any(AbortSignal))
     expect(element('[data-tree-path="created.ts"]')).not.toBeNull()
     expect(move).not.toHaveBeenCalled()
     expect(dom.container.querySelectorAll('.tree-row__actions')).toHaveLength(0)
@@ -209,6 +212,7 @@ describe('Explorer editing through the actual tree hook and file transaction own
 
   it('gives a replacement create intent fresh focus and ignores the previous composing field', async () => {
     await mount()
+    open.mockClear()
     await act(async () => element('[title="New file"]').click())
     const previous = input()
     await act(async () => previous.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true })))

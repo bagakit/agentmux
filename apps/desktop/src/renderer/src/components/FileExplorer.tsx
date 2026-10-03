@@ -39,7 +39,7 @@ import { api } from '../lib/api'
 import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'
 import { documentKey } from '../lib/workbench-tabs'
-import { useAppStore } from '../store'
+import { fileNavigationSelection, useAppStore } from '../store'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import {
   isNavigationKey,
@@ -333,7 +333,12 @@ function FileTreeRow({
             className="tree-row__label"
             tabIndex={-1}
             title={canRename ? `${pathTitle}\nDouble-click to rename (F2)` : pathTitle}
-            onClick={(event) => { event.stopPropagation(); onSelect(event) }}
+            onClick={(event) => {
+              event.stopPropagation()
+              // The first click activates; the second belongs to inline Rename.
+              if (event.detail < 2) onClick(event)
+              else onSelect(event)
+            }}
             onDoubleClick={(event) => {
               event.stopPropagation()
               if (canRename && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) onRename()
@@ -401,9 +406,15 @@ export function FileExplorer({
   const activePath = useAppStore((state) =>
     workspaceId && fileExplorerContains(rootPath, state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
   )
-  const originalOpenFile = useAppStore((state) => state.openFile)
-  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) =>
-    onOpenPath ? onOpenPath(path) : originalOpenFile(path, groupId, location, resourceId ?? undefined)
+  const originalOpenFile = useAppStore((state) => state.openFileAndReveal)
+  const fileRevealRef = useRef<AbortController | null>(null)
+  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) => {
+    if (onOpenPath) return onOpenPath(path)
+    fileRevealRef.current?.abort()
+    const intent = new AbortController()
+    fileRevealRef.current = intent
+    return originalOpenFile(path, groupId, location, resourceId ?? undefined, intent.signal)
+  }
   const createPath = useAppStore((state) => state.createPath)
   const renamePath = useAppStore((state) => state.renamePath)
   const deletePath = useAppStore((state) => state.deletePath)
@@ -444,6 +455,7 @@ export function FileExplorer({
   const [editPending, setEditPending] = useState(false)
   const editSubmissionRef = useRef<InlineEdit | null>(null)
   const workspacePath = workspace?.path ?? ''
+  useEffect(() => () => { fileRevealRef.current?.abort() }, [workspaceId, workspace?.hostId, workspacePath, rootPath])
   const editContextRef = useRef({ workspaceId, workspacePath, rootPath })
   editContextRef.current = { workspaceId, workspacePath, rootPath }
   const [deleteRequest, setDeleteRequest] = useState<{ node: TreeNode; workspaceId: string; rootPath: string } | null>(null)
@@ -497,7 +509,8 @@ export function FileExplorer({
     }))
   }
 
-  function setSelection(update: SetStateAction<FileExplorerSelectionState>): void {
+  function setSelection(update: SetStateAction<FileExplorerSelectionState>, cancelPendingReveal = true): void {
+    if (cancelPendingReveal) fileRevealRef.current?.abort()
     if (!workspaceId) return
     updateExplorerState(workspaceId, (current) => ({
       ...current,
@@ -710,6 +723,7 @@ export function FileExplorer({
 
   function toggle(node: TreeNode): void {
     if (!node.isDirectory) return
+    fileRevealRef.current?.abort()
     setExpanded((current) => {
       const next = new Set(current)
       if (next.has(node.path)) next.delete(node.path)
@@ -719,7 +733,9 @@ export function FileExplorer({
   }
 
   function beginCreate(kind: 'create-file' | 'create-directory', targetParent = createParent): void {
+    fileRevealRef.current?.abort()
     if (!workspaceId || editSubmissionRef.current) return
+    fileRevealRef.current = new AbortController()
     setExpanded((current) => new Set(current).add(targetParent))
     setInlineEdit({ id: ++editIntent.current, kind, parentPath: targetParent, workspaceId, workspacePath, rootPath })
     setEditValue('')
@@ -828,6 +844,7 @@ export function FileExplorer({
   }
 
   function beginRename(node: TreeNode): void {
+    fileRevealRef.current?.abort()
     if (!workspaceId || editSubmissionRef.current || !canRenameFileExplorerNode(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
     setInlineEdit({ id: ++editIntent.current, kind: 'rename', node, workspaceId, workspacePath, rootPath })
@@ -841,6 +858,12 @@ export function FileExplorer({
     if (!edit || editSubmissionRef.current || edit.workspaceId !== workspaceId || edit.workspacePath !== workspacePath || edit.rootPath !== rootPath) return
     if (!validName(name)) { setEditError('Enter a name without / or \\; . and .. are not file names.'); return }
     editSubmissionRef.current = edit
+    const navigation = fileNavigationSelection(useAppStore.getState())
+    const navigationIntent = fileRevealRef.current
+    const navigationSignal = navigationIntent?.signal
+    const releaseNavigation = edit.kind === 'create-file' ? useAppStore.subscribe(state => {
+      if (fileNavigationSelection(state) !== navigation) navigationIntent?.abort()
+    }) : () => {}
     setEditPending(true)
     setEditError(null)
     try {
@@ -858,15 +881,16 @@ export function FileExplorer({
         }, edit.workspaceId)
         await tree.refreshDir(edit.parentPath)
         if (editSubmissionRef.current === edit && editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath) {
-          setSelection(createSingleFileExplorerSelection(path))
+          setSelection(createSingleFileExplorerSelection(path), false)
+          if (edit.kind === 'create-file' && !navigationSignal?.aborted && fileNavigationSelection(useAppStore.getState()) === navigation) await openFile(path, undefined, undefined, createdIn)
         }
-        if (edit.kind === 'create-file' && (!onOpenPath || (editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath))) await openFile(path, undefined, undefined, createdIn)
       }
       setInlineEdit(current => current === edit ? null : current)
     } catch (error) {
       // The file owner reports transaction failure. Keep only this scope's draft retryable.
       if (editSubmissionRef.current === edit && editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath) setEditError(presentError(error))
     } finally {
+      releaseNavigation()
       if (editSubmissionRef.current === edit) {
         editSubmissionRef.current = null
         setEditPending(false)
@@ -1051,6 +1075,7 @@ export function FileExplorer({
             onCommitEdit={commitEdit}
             onCancelEdit={() => { setInlineEdit(null); setEditError(null) }}
             onContextMenuChange={open => {
+              if (open) fileRevealRef.current?.abort()
               setMenuPath(current => open ? node.path : current === node.path ? null : current)
               if (open && !selection.selectedPaths.has(node.path)) {
                 setSelection(createSingleFileExplorerSelection(node.path))

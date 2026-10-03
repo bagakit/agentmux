@@ -2,6 +2,7 @@ import type { FileDocument, WorkspaceFileReadResult } from '../../../shared/cont
 import { activateTab, addTab, addTabOccurrence, groupIds, removeTab, type WorkspaceLayout } from '@agentmux/layout'
 import {
   createWorkbenchTab,
+  addWorkbenchRegion,
   documentKey,
   fileTabId,
   initialWorkbenchRegionId,
@@ -134,6 +135,20 @@ export function fileOpenReferenceMatches(
 }
 
 
+/** Reuse the original visible File, including one promoted out of its initial Tab. */
+export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string) {
+  const layout = state.layouts[workspaceId]
+  if (!layout) return undefined
+  const ids = [...new Set([fileTabId(workspaceId, path), ...layout.groups.flatMap(group => group.tabOrder)])]
+  for (const id of ids) {
+    const tab = state.tabs[id]
+    if (!tab || !tabGroupForTab(layout, id)) continue
+    const surface = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
+    if (surface) return { tab, surface }
+  }
+  return undefined
+}
+
 /** Place every format through the same durable File surface; content is a separate fact. */
 export function reduceFileSurfaceOpened(
   state: FileWorkbenchState,
@@ -163,14 +178,20 @@ export function reduceFileSurfaceOpened(
       lastActiveFileByWorkspace: { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
       layouts: { ...state.layouts, [displayId]: activateTab(layout, reference.groupId, reference.tabId) } }
   }
-  const tabId = fileTabId(workspaceId, path)
+  const original = placement ? undefined : findFileWorkbenchSurface(state, workspaceId, path)
+  const tabId = original?.tab.id ?? fileTabId(workspaceId, path)
   const existingTabGroupId = tabGroupForTab(layout, tabId)
   const targetTabGroupId = placement ? preferredTabGroupId : existingTabGroupId ?? preferredTabGroupId ?? layout.activeGroupId
   if (!targetTabGroupId) return state
   const existingTab = state.tabs[tabId]
+  const existingFile = existingTab && workbenchSurfaces(existingTab).some(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
   const existingSpace = existingTab?.space ?? (confirmedExistingSpace?.tabId === existingTab?.id ? confirmedExistingSpace?.space : undefined)
   if (placement && existingTab && (existingSpace?.zoneId !== placement.space.zoneId || existingSpace.spaceId !== placement.space.spaceId)) throw new Error('The existing file Tab has another Zone context; its original placement is retained.')
-  const tab = existingTab ?? (() => {
+  const placedTab = original ? { ...original.tab, layout: { ...original.tab.layout, activeRegionId: original.surface.regionId } }
+    : existingFile ? existingTab! : existingTab ? addWorkbenchRegion(existingTab, existingTab.layout.activeRegionId, 'right', {
+      kind: 'file', workspaceId, path,
+      regionId: existingTab.regions[initialWorkbenchRegionId(tabId)] ? `region:${crypto.randomUUID()}` : initialWorkbenchRegionId(tabId)
+    }) : (() => {
     const surface: FileWorkbenchSurface = {
       regionId: initialWorkbenchRegionId(tabId),
       kind: 'file',
@@ -180,6 +201,8 @@ export function reduceFileSurfaceOpened(
     const createdTab = createWorkbenchTab(tabId, surface)
     return { ...createdTab, ...(topicId ? { topicId } : {}), ...(placement ? { space: placement.space } : {}) }
   })()
+  const tab = existingTab && placedTab.layout.activeRegionId !== existingTab.layout.activeRegionId && (placement?.projection || placement?.focus === false)
+    ? { ...placedTab, layout: { ...placedTab.layout, activeRegionId: existingTab.layout.activeRegionId } } : placedTab
   return {
     ...state,
     tabs: { ...state.tabs, [tab.id]: tab },
