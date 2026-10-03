@@ -72,7 +72,12 @@
 .focus-context__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .focus-context__identity { display: flex; align-items: baseline; min-width: 0; gap: var(--sp-2); }
 .focus-context__identity strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
-.focus-context__state { flex: none; }
+.focus-context__state { flex: none; display: inline-flex; align-items: center; }
+.focus-state-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 5px; color: var(--text-3); background: color-mix(in srgb, currentColor 9%, transparent); }
+.focus-state-mark[data-focus-state-icon='working'] { color: var(--green); }
+.focus-state-mark[data-focus-state-icon='results'] { color: var(--status-ink); }
+.focus-state-mark[data-focus-state-icon='attention'] { color: var(--amber); }
+.focus-state-mark[data-focus-state-icon='error'] { color: var(--red); }
 .focus-context[data-bucket='idle'] .focus-context__state { color: var(--text-3); }
 .focus-context[data-bucket='results'] .focus-context__state { color: var(--status-ink); }
 .focus-context__state small { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -110,7 +115,9 @@
 .focus-context-hover { position: fixed; z-index: var(--layer-popover); width: min(360px, calc(100vw - 20px)); max-height: min(520px, calc(100vh - 20px)); overflow: auto; overscroll-behavior: contain; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-3), var(--hl-strong); color: var(--text-2); pointer-events: auto; user-select: text; font-size: var(--fs-body); line-height: 1.45; animation: focus-context-hover-enter 120ms ease-out; }
 .focus-context-hover header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .focus-context-hover header strong { flex: 1; min-width: 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
-.focus-context-hover header > span { flex: none; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__state { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__state-label { display: inline-flex; align-items: center; gap: 4px; }
+.focus-context-hover__state-time { font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
 .focus-context-hover p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .focus-context-hover__activity { color: var(--text-3); font-size: var(--fs-meta); }
 .focus-context-hover__recap { margin-top: 6px; }
