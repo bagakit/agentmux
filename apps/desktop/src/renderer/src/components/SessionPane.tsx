@@ -2,7 +2,7 @@ import { useConversationReactions } from '../lib/conversation-reactions'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { AlertTriangle, ArrowRight, CircleStop, LoaderCircle, RefreshCw, RotateCcw, ServerOff } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ComponentProps } from 'react'
+import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type ReactElement, type ComponentProps } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
@@ -46,7 +46,6 @@ import {
 import { sessionRegionProjectionPolicy } from '../lib/session-region-projection'
 import { SessionResultReview } from './SessionResultReview'
 import { SessionResultReviewContent } from './SessionResultReviewContent'
-import { SessionHistoryView } from './SessionHistoryView'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
@@ -164,7 +163,7 @@ export function SessionPane({
   const viewMode = useAppStore(state => effectiveSessionViewMode(state, sessionId))
   const activitySourceKey = session?.kind === 'agent' ? JSON.stringify([session.control.hostId, session.id, session.control.run.runId]) : sessionId
   const activityLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
-  const activityContent = useRef<ReactNode>(null)
+  const activityContent = useRef<ReactElement<ComponentProps<typeof ActivityView>> | null>(null)
   const currentSourceKey = useRef(activitySourceKey)
   currentSourceKey.current = activitySourceKey
   const currentPresentations = useRef(presentations)
@@ -193,14 +192,9 @@ export function SessionPane({
   historyOpenRef.current = historyOpen
   const visibleRef = useRef(visible)
   visibleRef.current = visible
-  const historyEverOpenedRef = useRef(false)
-  if (historyOpen) historyEverOpenedRef.current = true
-  const [historyDisclosures, setHistoryDisclosures] = useState<Set<string>>(() => new Set())
   useEffect(() => {
     setHistoryOpen(false)
     historyReturnFocusRef.current = null
-    historyEverOpenedRef.current = false
-    setHistoryDisclosures(new Set())
   }, [sessionId])
   useEffect(() => {
     setHistoryOpen(false)
@@ -213,8 +207,9 @@ export function SessionPane({
     setHistoryOpen(true)
   }
   const closeHistory = (): void => {
-    const reader = surfaceRef.current?.querySelector('.session-history')
+    const reader = surfaceRef.current?.querySelector('.activity-feed')
     const target = historyReturnFocusRef.current
+    const closingFocus = document.activeElement
     setHistoryOpen(false)
     if (linkOrigin.tabId && linkOrigin.regionId) {
       useAppStore.getState().focusRegion(linkOrigin.workspaceId, linkOrigin.tabId, linkOrigin.regionId, 'pointer')
@@ -222,7 +217,7 @@ export function SessionPane({
     requestAnimationFrame(() => {
       if (!visibleRef.current || historyOpenRef.current || !surfaceRef.current?.isConnected || !target?.isConnected || target.disabled) return
       const active = document.activeElement
-      if (active && active !== document.body && !reader?.contains(active)) return
+      if (active && active !== document.body && (active !== closingFocus || !reader?.contains(active))) return
       target.focus()
     })
   }
@@ -238,11 +233,12 @@ export function SessionPane({
   const inlineHistory = pendingAgentRestore && startupDecision?.kind === 'pending' &&
     startupDecision.reason === 'idle-over-day'
   // One fact/observation owner, with demand from every actually visible reading stage.
-  const activityDemand = viewMode !== 'terminal' && !pendingAgentRestore &&
-    (visible && !historyOpen || presentations.some(target => target.visible !== false))
+  const activityDemand = !pendingAgentRestore &&
+    (visible && (viewMode !== 'terminal' || historyOpen) || viewMode !== 'terminal' && presentations.some(target => target.visible !== false))
   const {
     messages: userMessages,
     nativeHistoryPage,
+    nativeContextItems,
     loading: userMessagesLoading,
     error: userMessagesError,
     observationError: userMessagesObservationError,
@@ -777,28 +773,17 @@ export function SessionPane({
     return <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
       {preSnapshotHeader(label, executorLabel ?? providerLabel ?? 'Executor unknown')}
       {takeoverSurface}
-      <div className="agent-body"><div className="agent-terminal-stage">
-        {historyOpen ? <SessionHistoryView
-          key={JSON.stringify([reference.hostId, reference.agentSessionId])}
-          control={reference} label={label} onClose={closeHistory} visible={visible && !parked}
-          returnLabel="Session"
-          primaryAction={resumeAction} serviceNotice={reopenNotice}
-          workspaceRoot={metadata?.workspacePath ?? ''} openWorkspaceFile={openWorkspaceFile}
-          openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker}
-        /> : <FullPageLoadingSurface scope="region" phase="parked" eyebrow="Retained conversation"
-          title="Session closed"
-          detail={metadata ? `${identityLabel}. Read the original conversation or continue it with the current Executor configuration.`
-            : 'Core confirmed this Session was closed. Its saved identity is retained.'}
-          actions={<>{resumeAction}<button type="button" className="small-button" onClick={event => openHistory(event.currentTarget)}>
-            Read conversation history
-          </button></>}
-          details={{ summary: label, content: <dl>
-            <dt>Session ID</dt><dd>{reference.agentSessionId}</dd>
-            {metadata ? <><dt>Provider</dt><dd>{agentProviderLabel(metadata.providerId)}</dd>
-              <dt>Executor</dt><dd>{connectingExecutor?.label ?? metadata.executorId}</dd>
-              <dt>Native Session</dt><dd>{metadata.nativeHandle?.sessionId ?? 'Not recorded'}</dd></> : null}
-          </dl> }} />}
-        {!historyOpen ? reopenNotice : null}
+      <div className="agent-body" data-observation-surface="workflow"><div className="agent-terminal-stage">
+        <ActivityView sessionId={sessionId} executionHostId={reference.hostId} items={timeline} capability="complete-events"
+          conversationReading={{ reference, identity: JSON.stringify([reference.hostId, reference.agentSessionId]),
+            enabled: visible && !parked, opened: true, readCaptured: true }}
+          readingAction={resumeAction} readingNotice={reopenNotice ?? <div className="activity-feed__read-notice" role="status">
+            {metadata ? `${identityLabel}. This Session is closed; its original conversation remains readable.`
+              : 'Core confirmed this Session was closed. Its saved identity is retained.'}</div>}
+          workspaceRoot={metadata?.workspacePath ?? ''} homeDir={fileContext.homeDir}
+          readPastedImage={readPastedImage} openWorkspaceFile={openWorkspaceFile}
+          openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} />
+
       </div></div>
     </section>
   }
@@ -875,9 +860,17 @@ export function SessionPane({
     ? session.status.detail
     : agentStartupRecoveryDetail(startupDecision)) : undefined
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
+  const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
+  if (activityShown) activityLifetime.current.opened = true
+  const conversationReading = session.kind === 'agent' ? {
+    reference: session.control, identity: activitySourceKey, enabled: visible && !parked && activityShown,
+    opened: historyOpen || inlineHistory,
+    ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
+  } : undefined
   const activityProps: ComponentProps<typeof ActivityView> = {
-    sessionId: session.id, items: timeline, userMessages, nativeHistoryPage,
-    ...(session.kind === 'agent' ? { executionHostId: session.control.hostId } : {}),
+    sessionId: session.id, items: timeline, userMessages, nativeHistoryPage, nativeContextItems,
+    ...(session.kind === 'agent' ? { executionHostId: session.control.hostId, ...(conversationReading ? { conversationReading } : {}) } : {}),
+    ...(pendingAgentRestore ? { readingNotice: <div className="activity-feed__read-notice" role="status">{pendingRestoreDetail}</div>, readingAction: agentRecoveryAction } : {}),
     userMessageRead: { loading: userMessagesLoading, error: userMessagesError,
       observationError: userMessagesObservationError, windowFrozen: userMessagesWindowFrozen,
       windowIncomplete: userMessagesWindowIncomplete,
@@ -892,9 +885,11 @@ export function SessionPane({
     ...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input) } : {})
   }
   // Covering/hiding a location freezes that location's already-presented elements.
-  if (session.kind === 'agent' && visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore) {
+  if (session.kind === 'agent' && visible && activityShown) {
     activityContent.current = <ActivityView {...activityProps} revealRequest={revealRequest?.displayId === null ? revealRequest : null} />
   }
+  const presentedActivity = activityContent.current && conversationReading
+    ? cloneElement(activityContent.current, { conversationReading }) : activityContent.current
   const resultReview = session.kind === 'agent'
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
@@ -935,10 +930,10 @@ export function SessionPane({
       {session.kind === 'agent' ? <AgentLifecycleFeedback owner={{ subject: session.control }} visible={visible}
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
-      <div className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && viewMode !== 'terminal' ? 'workflow' : undefined}>
+      <div className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || pendingAgentRestore || terminalLifetime.current.opened ? (
-            <div hidden={session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore}
+            <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore)}
               ref={element => { if (element && !pendingAgentRestore && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
               inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore} style={{ height: '100%' }}>
             {pendingAgentRestore ? (inlineHistory ? null :
@@ -973,34 +968,6 @@ export function SessionPane({
             )
             }</div>
           ) : null}
-          {(historyOpen || inlineHistory || historyEverOpenedRef.current) && session.kind === 'agent' ? <SessionHistoryView
-            key={JSON.stringify([session.control.hostId, session.id, session.control.run.runId])}
-            control={session.control}
-            readingKey={session.control.run.runId}
-            label={agentInputIdentity ?? session.label}
-            {...(!inlineHistory ? { onClose: closeHistory } : {})}
-            visible={visible && (historyOpen || inlineHistory)}
-            returnLabel={pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity'}
-            primaryAction={pendingAgentRestore ? agentRecoveryAction : undefined}
-            workspaceRoot={activeWorkspaceRoot}
-            openWorkspaceFile={openWorkspaceFile}
-            openHttpLink={onProseLinkClick}
-            describeSpeaker={describeSpeaker}
-            {...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input) } : {})}
-            expandedTraces={historyDisclosures}
-            {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
-            onToggleTrace={(traceId, open) => {
-              setHistoryDisclosures((prev) => {
-                const next = new Set(prev)
-                if (open) next.add(traceId)
-                else next.delete(traceId)
-                return next
-              })
-            }}
-            {...(pendingAgentRestore ? {
-              serviceNotice: <span><strong>Ready to restore.</strong> {pendingRestoreDetail}</span>
-            } : {})}
-          /> : null}
           {(disconnected || missing || exited) && !pendingAgentRestore ? (
             <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected, exited, failed: session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
@@ -1033,8 +1000,8 @@ export function SessionPane({
             </div>
           ) : null}
           {session.kind === 'agent' && activityLifetime.current.opened ? (
-            <div hidden={viewMode === 'terminal' || pendingAgentRestore} inert={historyOpen || viewMode === 'terminal' || pendingAgentRestore} style={{ height: '100%' }}>
-              {activityContent.current}
+            <div hidden={!activityShown} inert={!activityShown} style={{ height: '100%' }}>
+              {presentedActivity}
             </div>
           ) : null}
         </div>

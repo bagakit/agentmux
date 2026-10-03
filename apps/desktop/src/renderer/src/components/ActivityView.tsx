@@ -1,6 +1,6 @@
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
-import { ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+import { ArrowLeft, ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -43,6 +43,7 @@ import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'
 import { NativeProcessObservation } from './NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
+import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'
 
 /**
@@ -346,8 +347,8 @@ function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefine
           ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
           : read.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.'
           : read.observationError ? `Automatic native updates are unavailable: ${read.observationError.message}. The current reading window is kept; Refresh retries the source.`
-          : read.windowIncomplete ? 'This window keeps recent conversation and process records. History reads the original sequence.'
-          : 'Earlier conversation records are available in History.'}
+          : read.windowIncomplete ? 'This window keeps recent conversation and process records. Read earlier to browse the original sequence.'
+          : 'Earlier conversation records are available.'}
       </span>
       {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
       {!read.error && (read.windowFrozen || read.observationError) ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>{read.windowFrozen ? 'Read latest records' : 'Refresh'}</button> : null}
@@ -359,9 +360,13 @@ function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefine
 export function ActivityView({
   sessionId,
   executionHostId,
-  items,
+  items: observedItems,
   userMessages,
-  nativeHistoryPage,
+  nativeHistoryPage: recentNativePage,
+  nativeContextItems,
+  conversationReading,
+  readingNotice,
+  readingAction,
   userMessageRead,
   revealRequest,
   capability,
@@ -384,6 +389,10 @@ export function ActivityView({
   items: AgentTimelineItem[]
   userMessages?: readonly AgentSessionUserMessage[]
   nativeHistoryPage?: AgentSessionHistoryPage | null
+  nativeContextItems?: AgentSessionHistoryPage['items']
+  conversationReading?: ConversationReading
+  readingNotice?: ReactNode
+  readingAction?: ReactNode
   userMessageRead?: UserMessageReadState
   revealRequest?: ConversationRevealRequest | null
   capability: 'unavailable' | 'complete-events' | 'streaming'
@@ -411,16 +420,51 @@ export function ActivityView({
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   onReplyQuestion?: ConversationQuestionReply
 }) {
+  const logRef = useRef<HTMLDivElement>(null)
+  const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
+  const anchorRef = useRef<ReturnType<typeof conversationReadingAnchor>>(null)
+  const returnRef = useRef<HTMLButtonElement>(null)
+  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent) => {
+    if (protectsConversationWindow(feedEl, page, intent === 'earlier')) return false
+    anchorRef.current = intent === 'earlier' && feedEl ? conversationReadingAnchor(feedEl) : null
+    if (intent === 'current') followRef.current = { ...followRef.current, following: true }
+    return true
+  }, nativeContextItems)
+  const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Escape' && !event.defaultPrevented && conversationReading?.opened && conversationReading.onClose) {
+      event.stopPropagation(); conversationReading.onClose()
+    }
+  }
+  const nativeHistoryPage = readingWindow.page
+  const items = readingWindow.captured ?? observedItems
+  useLayoutEffect(() => {
+    if (conversationReading?.enabled && feedEl && anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
+    else if (conversationReading?.enabled && feedEl && followRef.current.following) feedEl.scrollTop = feedEl.scrollHeight
+  }, [nativeHistoryPage, feedEl, conversationReading?.enabled])
+  useLayoutEffect(() => {
+    if (!conversationReading?.enabled || !readingWindow.historical || !feedEl) return
+    const content = feedEl.querySelector('.conversation-native-thread')
+    if (!content) return
+    const observer = new ResizeObserver(() => {
+      if (anchorRef.current) restoreConversationAnchor(feedEl, anchorRef.current)
+    })
+    observer.observe(content)
+    return () => observer.disconnect()
+  }, [feedEl, conversationReading?.enabled, readingWindow.historical])
+  useEffect(() => {
+    if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
+    returnRef.current?.focus({ preventScroll: true })
+  }, [conversationReading?.opened, conversationReading?.identity])
   const { unifiedItems, segments } = useMemo(() => {
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
     const nativeIds = new Set(page?.items.filter((item) => item.kind === 'user-message').map((item) => item.id))
-    // Only move an input into the source thread when that exact record is present there.
-    // A missing page prop cannot erase already observed native input facts.
+    // A historical native window contains only its own source records. Recent facts stay
+    // in the shared current window; a missing/different source never erases observed input.
     const observedMessages = userMessages?.filter((message) => message.source.kind !== 'native' || !page ||
       message.source.providerId !== page.source.providerId || message.source.nativeSessionId !== page.source.nativeSessionId ||
-      !nativeIds.has(message.rawId))
+      !readingWindow.historical && !nativeIds.has(message.rawId))
     return buildActivityEntries(items, observedMessages)
-  }, [items, userMessages, nativeHistoryPage, sessionId])
+  }, [items, userMessages, nativeHistoryPage, sessionId, readingWindow.historical])
   const placed = useMemo(() => placeSegments(segments), [segments])
   const origin = useMemo(() => {
     for (const it of unifiedItems) {
@@ -445,8 +489,6 @@ export function ActivityView({
     return rulerBand(scale, indices.length ? { from: Math.min(...indices), to: Math.max(...indices) } : null)
   }, [ruler.items, scale, visible])
 
-  const logRef = useRef<HTMLDivElement>(null)
-  const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
   const [locatedMessageKey, setLocatedMessageKey] = useState<string | null>(null)
   useEffect(() => {
     if (!locatedMessageKey) return
@@ -497,18 +539,19 @@ export function ActivityView({
     const handle = (): void => {
       const geometry = feedGeometry()
       if (!geometry) return
+      if (readingWindow.historical && geometry.scrollTop !== followRef.current.lastScrollTop) anchorRef.current = conversationReadingAnchor(el)
       followRef.current = onScroll(followRef.current, geometry)
       setShowJump(shouldShowJumpToLatest(followRef.current))
     }
     el.addEventListener('scroll', handle, { passive: true })
     return () => el.removeEventListener('scroll', handle)
-  }, [feedEl])
+  }, [feedEl, readingWindow.historical])
 
   // 新内容到达时贴底。追加与原地变长都算"新内容"——流式回答最常见的形态正是后者（尾项没换，
   // 只是变长了）。只有仍在跟随时才贴，否则会把已经滚上去的读者拽回来。
   useEffect(() => {
     const geometry = feedGeometry()
-    if (!geometry) return
+    if (!geometry || readingWindow.historical) return
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
     const nativeTail = page?.items.at(-1)
     const observedTail = unifiedItems.at(-1)
@@ -523,7 +566,7 @@ export function ActivityView({
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
-  }, [unifiedItems, nativeHistoryPage, sessionId, feedEl])
+  }, [unifiedItems, nativeHistoryPage, sessionId, feedEl, readingWindow.historical])
 
   useEffect(() => {
     if (!revealRequest || !feedEl) return
@@ -664,11 +707,32 @@ export function ActivityView({
   const hasUserMessages = Boolean(userMessages && userMessages.length > 0)
   const hasNativeRecords = nativeHistoryPage?.agentSessionId === sessionId && nativeHistoryPage.items.length > 0
   const hasItems = unifiedItems.length > 0
-  const readNotice = <UserMessageReadNotice read={userMessageRead} />
+  const readNotice = <>
+    {conversationReading ? <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}
+>
+      {conversationReading.opened && conversationReading.onClose ? <button ref={returnRef} type="button" className="small-button"
+        aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`} onClick={conversationReading.onClose}>
+        <ArrowLeft size={12} /> Return</button> : null}
+      <span>{readingWindow.historical ? 'Earlier records' : 'Conversation'}</span>
+      {readingWindow.loading ? <LoaderCircle className="spin" size={12} aria-label="Reading records" /> : null}
+      {readingWindow.historical ? <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.showCurrent}>Current</button> : null}
+      {(readingWindow.historical ? readingWindow.hasMore : Boolean(userMessageRead?.hasMore || userMessageRead?.windowIncomplete || conversationReading.opened)) ?
+        <button type="button" className="small-button" disabled={readingWindow.loading || !conversationReading.enabled} onClick={readingWindow.readEarlier}>Earlier</button> : null}
+      {readingAction}
+    </div> : null}
+    {readingNotice}
+    {readingWindow.capturedError ? <div role="status" className="activity-feed__read-notice">Submitted-message read unavailable: {readingWindow.capturedError}. Existing records are kept.</div> : null}
+    {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
+      <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
+    {readingWindow.newerOutside ? <div role="status" className="activity-feed__read-notice">More recent records remain available via Current.</div> : null}
+    {!readingWindow.historical ? <UserMessageReadNotice read={userMessageRead ? { ...userMessageRead,
+      onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
+  </>
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
-      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+      <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.historical && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
         {readNotice}
         {fileReferenceNotice}
         <div className="activity-feed__empty">
@@ -679,7 +743,8 @@ export function ActivityView({
   }
   if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, hasItems ? items : [])) {
     return (
-      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+      <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.historical && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
         {readNotice}
         {fileReferenceNotice}
         {!userMessageRead?.loading && !userMessageRead?.error ? <div className="activity-feed__empty">
@@ -692,7 +757,8 @@ export function ActivityView({
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
   if (!hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
-      <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+      <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.historical && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
         {readNotice}
         {fileReferenceNotice}
         <WorkingIndicator />
@@ -710,7 +776,8 @@ export function ActivityView({
   }
 
   return (
-    <div className="activity-feed" data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}>
+    <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+        onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.historical && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
       {readNotice}
         {fileReferenceNotice}
       {capability === 'unavailable' ? (
@@ -834,8 +901,12 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       /> : null}
-      {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
-      {showJump ? (
+      {readingWindow.historical && nativeHistoryPage ? <div className="activity-feed__history-divider" role="separator">
+        以上是历史消息（{(() => { const last = nativeHistoryPage.items.at(-1); const time = last?.completedAt ?? last?.startedAt;
+          return time === undefined ? '时间未记录' : new Date(time).toLocaleString() })()}）
+      </div> : null}
+      {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
+      {showJump && !readingWindow.historical ? (
         <button
           type="button"
           className="activity-feed__jump"
