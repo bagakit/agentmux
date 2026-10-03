@@ -1,3 +1,4 @@
+import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import React from 'react'
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
 import { flushSync } from 'react-dom'
@@ -12,7 +13,15 @@ import '../../../src/renderer/src/styles/index.css'
 
 // Only the existing public preview API boundary is synthetic. Production views, effects, xterm and CSS are actual.
 await useAppStore.getState().initialize()
+// Explicit private resources satisfy the production durable Space identity contract.
+const config = useAppStore.getState().config!
+const workspaces = config.workspaces.map(workspace => ({ ...workspace,
+  path: workspace.path.startsWith('/') ? workspace.path : (_hygiene_fixturePath("private/quality-fixture/") + (workspace.id) + ""),
+  ...(workspace.repoPath ? { repoPath: workspace.repoPath.startsWith('/') ? workspace.repoPath : (_hygiene_fixturePath("private/quality-fixture/") + (workspace.id) + "") } : {}) }))
+const directories = new Map(config.workspaces.map((workspace, index) => [workspace.path, workspaces[index]!.path]))
+useAppStore.setState({ config: { ...config, workspaces } })
 const originals = (await api.sessions.snapshot()).sessions.filter(s => s.kind === 'agent').slice(0, 2)
+  .map(session => ({ ...session, workspacePath: directories.get(session.workspacePath) ?? session.workspacePath }))
 if (originals.length !== 2) throw new Error('Two actual preview Session consumers are required')
 const workspaceId = useAppStore.getState().config!.workspaces[0]!.id
 const root = createRoot(document.getElementById('root')!)
@@ -41,10 +50,11 @@ api.continuousProgress.action = async (...args) => { actions.push(args); if (mod
 api.continuousProgress.onChanged = () => () => {}
 api.sessions.attach = async (...args) => {
   const attached = await originalAttach(...args), runId = attached.session.control.run.runId
-  const session = { ...attached.session, latestOutputBytes: bytes.byteLength }
+  const session = { ...attached.session, workspacePath: directories.get(attached.session.workspacePath) ?? attached.session.workspacePath, latestOutputBytes: bytes.byteLength }
   const healthy = ['normal', 'list-rejected', 'progress-unknown', 'progress-action', 'progress-busy', 'lifecycle', 'unknown', 'readonly', 'observation'].includes(mode)
   return { ...attached, session, currentSize: mode === 'concurrent' ? null : { cols: 80, rows: 24 }, resizeRevision: 0,
-    terminal: healthy ? { type: 'basic-vt' as const, checkpoint: { runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }
+    terminal: healthy ? { type: 'basic-vt' as const, checkpoint: { runId, throughByte: 0, resizeRevision: 0, size: { cols: 80, rows: 24 },
+      restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\x1b[0m'), resizes: [] }
       : { type: 'unknown' as const, reason: 'origin_unknown' as const },
     replay: [{ type: 'data' as const, runId, startByte: 0, endByte: bytes.byteLength, data: output, dataBytes: bytes }], gap: null }
 }
@@ -66,7 +76,8 @@ api.sessions.refreshAttachment = async (...args) => {
   // Exercise the original preview lease validation while keeping this fixture's known basic-vt boundary.
   return { ...attached, currentSize: { cols: 80, rows: 24 }, resizeRevision: 0,
     terminal: { type: 'basic-vt' as const, checkpoint: { runId: attached.session.control.run.runId, throughByte: args[2],
-      resizeRevision: 0, size: { cols: 80, rows: 24 } }, restoreBytes: new Uint8Array(), resizes: [] }, replay: [], gap: null }
+      resizeRevision: 0, size: { cols: 80, rows: 24 }, restoreSize: { cols: 80, rows: 24 }, restoreScrollbackRows: null,
+      resizeAfterRestoreBytes: 0 }, restoreBytes: new TextEncoder().encode('\x1b[0m'), resizes: [] }, replay: [], gap: null }
 }
 api.sessions.recover = async (...args) => {
   recoveries.push(args)
@@ -127,8 +138,12 @@ const probe = {
   },
   header(next: string) {
     probe.mode(next === 'readonly' ? 'readonly' : next === 'notice' ? 'unknown' : 'normal', next !== 'readonly')
-    const name = next === 'long' || next === 'full' ? 'Original Agent — preserve the complete investigation name and precise Session while reading this wide Terminal' : 'Agent'
-    flushSync(() => useAppStore.setState(state => ({ agentNames: { [originals[0]!.id]: name, [originals[1]!.id]: name },
+    const name = next === 'long' || next === 'full' || next === 'remote-long' ? 'Original Agent — preserve the complete investigation name and precise Session while reading this wide Terminal' : 'Agent'
+    const remoteLabel = next === 'remote-long' ? 'Build machine with a very long original name to retain in disclosure' : 'Build machine'
+    flushSync(() => useAppStore.setState(state => ({ config: { ...state.config!, hosts: state.config!.hosts.map(host => host.id === originals[0]!.control.hostId
+      ? next.startsWith('remote') ? { id: host.id, kind: 'ssh' as const, label: remoteLabel, hostname: 'private.invalid' }
+        : { id: host.id, kind: 'local' as const, label: 'This Mac' } : host) },
+      agentNames: { [originals[0]!.id]: name, [originals[1]!.id]: name },
       sessions: state.sessions.map(session => session.id === originals[1]!.id ? { ...session, providerId: originals[0]!.providerId, executorId: originals[0]!.executorId } : session) })))
     return name
   },

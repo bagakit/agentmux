@@ -28,7 +28,7 @@ const mutations=recovery?[
     change:source=>replaceOne(source,'background: radial-gradient(ellipse at 30% 36%, color-mix(in srgb, var(--recovery-accent) 12%, transparent), transparent 62%), radial-gradient(ellipse at 76% 68%, var(--surface-2), transparent 60%);','background: none;')}
 ]:[
   {label:'hover-band-expands',file:'styles/agent-region-header.css',expected:/Hover paint remains inside the quiet glyph band/,
-    change:source=>replaceOne(source,'width: 100%; height: 13px;','width: 100%; height: 22px;')},
+    change:source=>replaceOne(source,'width: 100%; height: 16px;','width: 100%; height: 22px;')},
   {label:'notice-enters-flow',file:'styles/terminal.css',expected:/original Terminal viewport|outside vertical flow/,
     change:source=>replaceOne(source,'position: absolute; isolation: isolate; z-index: 42;','position: static; isolation: isolate; z-index: 42;')},
   {label:'buffer-boundary-unplugged',file:'components/TerminalContextMenu.tsx',expected:/actual buffer boundary|Actual Renderer fact absent/,

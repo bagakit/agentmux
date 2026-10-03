@@ -4,7 +4,7 @@ import type { RegionExecutionHost } from '../lib/region-execution-host'
 type HostIdentity = Pick<RegionExecutionHost, 'id' | 'label' | 'kind' | 'configured'>
 
 /** A quiet identity, not a connection or Agent-health indicator. */
-export function HostBadge({ host, showLocal = true, compact = false, className = '', context = 'Execution Host' }: {
+export function HostBadge({ host, showLocal = false, compact = false, className = '', context = 'Execution Host' }: {
   host: HostIdentity; showLocal?: boolean; compact?: boolean; className?: string; context?: 'Host' | 'Execution Host'
 }) {
   if (!showLocal && host.kind === 'local') return null

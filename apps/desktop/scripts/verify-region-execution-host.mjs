@@ -74,6 +74,9 @@ async function causal() {
     { name: 'original-execution-host-restored-green', target: product.helper, before: selector, after: selector },
     { name: 'remove-visible-host-assertion-red', target: product.header, before: badge, after: '{/* private readonly withdrawal of the original Host projection */}', required: [controlCase], withdrawnModule: product.badge },
     { name: 'original-visible-host-restored-green', target: product.header, before: badge, after: badge },
+    { name: 'show-confirmed-local-marker-assertion-red', target: product.badge, before: "if (host.kind === 'local') return null", after: 'if (false) return null',
+      required: ['a confirmed local Host stays quiet while More retains its complete execution identity, and missing configuration becomes explicit'] },
+    { name: 'original-quiet-local-restored-green', target: product.badge, before: "if (host.kind === 'local') return null", after: "if (host.kind === 'local') return null" },
     { name: 'borrow-core-local-identity-assertion-red', target: product.pane, before: submittedHost,
       after: 'pendingLaunch ? executionHostProjection(pendingLaunch.created?.hostId ?? pendingLaunch.request?.hostId, pendingLaunch.request?.workspacePath, configuredExecutionHost)',
       required: ['an accepted remote creation uses the frozen submitted endpoint rather than Core server-local identity',
@@ -168,8 +171,8 @@ async function artifacts() {
   const causalPath = path.join(evidence, 'latest-causal.json'), old = await json(causalPath)
   assert.equal(old.schema, receipt.schema); assert.equal(old.mode, 'readonly-product-causal'); assert.equal(old.passed, true)
   assert.deepEqual(old.inputsBefore, receipt.inputsBefore); assert.deepEqual(old.inputsAfter, receipt.inputsBefore)
-  assert.equal(old.checks.filter(item => item.qualifiedAssertionRed).length, 4)
-  assert.equal(old.checks.filter(item => item.qualifiedOriginalGreen).length, 5)
+  assert.equal(old.checks.filter(item => item.qualifiedAssertionRed).length, 5)
+  assert.equal(old.checks.filter(item => item.qualifiedOriginalGreen).length, 6)
   assert.ok(old.productionCallers.length > 0)
   for (const check of old.checks) {
     assert.ok(check.total > 0); assert.equal(hash(await read(check.resultFile)), check.resultSHA256)
