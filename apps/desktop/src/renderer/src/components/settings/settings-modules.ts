@@ -11,6 +11,8 @@ import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
 import { devicesSettingsModule } from './modules/devices'
 import { toolkitSettingsModule } from './modules/toolkit'
+import { spaceSettingsModule } from './modules/space'
+import { goalsSettingsModule } from './modules/goals'
 
 /** The only Renderer composition point. Order is the product's navigation order. */
 export const settingsModules = [
@@ -18,9 +20,11 @@ export const settingsModules = [
   appearanceSettingsModule,
   notificationsSettingsModule,
   browserSettingsModule,
-  focusSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,
+  spaceSettingsModule,
+  focusSettingsModule,
+  goalsSettingsModule,
   toolkitSettingsModule,
   agentsSettingsModule,
   promptsSettingsModule,

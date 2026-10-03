@@ -76,7 +76,7 @@ const overviewRow = () => connected('[data-settings-overview] [data-settings-sec
 it('a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(registration.originalIds).toEqual([
-    'profile', 'appearance', 'notifications', 'browser', 'focus', 'general', 'keyboard-shortcuts', 'toolkit', 'agents', 'prompts', 'hosts', 'devices'
+    'profile', 'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'space', 'focus', 'goals', 'toolkit', 'agents', 'prompts', 'hosts', 'devices'
   ])
   const catalog = visibleSettingsSections('')
   expect(catalog.map(module => module.id)).toEqual([...registration.originalIds, 'fixture-module'])
@@ -222,7 +222,7 @@ it('presents Mods beside Preferences through the actual shell and preserves the 
   const row = connected('[data-settings-target="toolkit"]', nav)
   expect(row.previousElementSibling!.textContent).toBe('Mods')
   const groups = settingsNavGroups('')
-  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Mods', 'Resources', 'Connections'])
+  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Workflows', 'Mods', 'Resources', 'Connections'])
   expect(groups.find(group => group.title === 'Mods')!.items.map(item => item.id)).toEqual(['toolkit'])
   expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
   await section('Toolkit Library')

@@ -1,8 +1,9 @@
-import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, type AppConfig } from './contracts'
+import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from './user-profile'
 import { resolveFocusRecentActivityHours } from './focus-preferences'
+import { resolveGoalsCommonActions } from './goals-preferences'
 
 export function configValuesEqual(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true
@@ -19,6 +20,8 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'profile') return resolveUserProfile(value as Partial<UserProfile> | undefined)
   if (path === 'focus') return value ?? { recentActivityHours: resolveFocusRecentActivityHours(undefined) }
   if (path === 'focus.recentActivityHours') return resolveFocusRecentActivityHours(value)
+  if (path === 'projectRailDensity') return value ?? PROJECT_RAIL_DENSITY_DEFAULT
+  if (path === 'goalsCommonActions') return resolveGoalsCommonActions(value as GoalsCommonActionsConfig | undefined)
   if (path === 'toolkit') return value ?? { performance: DEFAULT_PERFORMANCE_PREFERENCES, mobileConnection: DEFAULT_MOBILE_CONNECTION_PREFERENCES }
   if (path === 'toolkit.performance') return value ?? DEFAULT_PERFORMANCE_PREFERENCES
   if (path === 'toolkit.performance.enabled') return value ?? DEFAULT_PERFORMANCE_PREFERENCES.enabled
@@ -47,8 +50,8 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
   function merge(actual: unknown, expected: unknown, requested: unknown, path: string): unknown {
     if (configValuesEqual(effective(path, expected), effective(path, requested))) return actual
     if (configValuesEqual(effective(path, actual), effective(path, requested))) return actual
-    // Optional Toolkit domains still merge authored fields/identities after a concurrent first tool is added.
-    if (path === 'profile' || path === 'focus' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
+    // Optional domains still merge authored fields/identities after a concurrent first edit.
+    if (path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
     }
     // Environment is one literal launch value, never a merge of independently authored keys.

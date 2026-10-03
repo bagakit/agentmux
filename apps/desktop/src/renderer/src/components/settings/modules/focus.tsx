@@ -14,11 +14,11 @@ async function saveRecentActivityHours(recentActivityHours: FocusRecentActivityH
 
 export const focusSettingsModule = {
   id: 'focus',
-  group: 'preferences',
+  group: 'workflows',
   title: 'Focus',
   description: 'How long task activity keeps a project near the front.',
   icon: Clock3,
-  keywords: 'recent activity hours window project lanes timeline time ruler time zone',
+  keywords: 'workflows work recent activity hours window project lanes timeline time ruler time zone',
   savedSummary: config => `${resolveFocusRecentActivityHours(config.focus?.recentActivityHours)} hours of recent activity`,
   Pane({ config }) {
     return <FocusSettingsPane recentActivityHours={config.focus?.recentActivityHours} onSave={saveRecentActivityHours} />
