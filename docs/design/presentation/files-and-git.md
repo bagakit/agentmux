@@ -20,7 +20,6 @@
 - minimap 是源码边缘的辅助导航，沿 Editor 的原设置／More 语言表达开关，正常态不增加永久标题带。开启后明暗主题和窄 Region 中正文、滚动条、关闭与保存仍可达，不能让小地图成为正文的主视觉；范围与位置保全要求只在[同主题交互](../behavior/files-and-git.md#本地文件预览与按格式编辑)定义。
 
 - Agent 的文件打开、Session 展示偏好、File Region 模式与 Region 交换沿已有紧凑控件语言；作用范围、默认保输入、真实格式及失败／恢复边界只在交互文档[《Agent 通过 CLI 打开文件与控制原工作面》](../behavior/public-control.md#agent-通过-cli-打开文件与控制原工作面)定义，不增加一条永久 chrome 或第二套模式按钮。
-- 网页、图片与文本的展示应符合各自内容类型，沿用工作台已有控件语言；行为和范围见 [Desktop interaction](../agentmux-desktop-interaction.md)“本地文件预览与按格式编辑”。具体工具栏与编辑能力在成熟产品调研后评审。
 - Terminal 本机临时产物沿现 Browser chrome 呈现真实文件内容及可辨本地目标，不增加假项目卡、第二预览窗或常驻说明；目标边界、点击校验、失效与恢复唯一见交互 SSOT[《Terminal 本机临时产物预览》](../behavior/files-and-git.md#terminal-本机临时产物预览)。
 - 用户要求本地 PNG 链接能直接预览并补齐相关缺失。图片用内容优先的安静查看面，紧凑工具行提供 Fit、1:1、缩放与必要尺寸信息；真实图片是主层，透明背景可辨，浅 / 深色与窄 / 矮 Region 保持完整可达的阅读和操作，不用大空卡、重复路径或满屏说明替代内容。
 - 文件查看 / 源码工具栏须给同 Region 的关闭按钮留出位置；窄 / 矮分屏中，关闭、重读、系统打开、Reveal、模式切换与保存互不遮挡，所有可用按钮都能实际点击。沿用既有 Region chrome，不增加一条永久标题带。
@@ -30,7 +29,7 @@
 
 ## Branch Pin 的层级与操作位
 
-固定分支的标题左缘在所属 Project 之下增加一层真实缩进，统一遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)；不靠空折叠槽或空图标槽凑层级，也不退到父级左边。Pin 按钮缩小内边距，未悬停或聚焦时不占操作位，悬停或键盘聚焦后才为按钮留空间；已固定状态保留安静的视觉提示，不用常驻大按钮挤压名称。行为约束见 desktop-interaction 的同名小节。
+固定分支的标题左缘在所属 Project 之下增加一层真实缩进，统一遵守[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)；不靠空折叠槽或空图标槽凑层级，也不退到父级左边。Pin 按钮缩小内边距，未悬停或聚焦时不占操作位，悬停或键盘聚焦后才为按钮留空间；已固定状态保留安静的视觉提示，不用常驻大按钮挤压名称。行为约束见交互合同[《Branch Pin 的层级与操作位》](../behavior/files-and-git.md#branch-pin-的层级与操作位)。
 
 ## Worktree 移除确认与 Git 卫生提示
 
