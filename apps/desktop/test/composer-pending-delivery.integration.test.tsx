@@ -10,7 +10,7 @@ const queued = (operationId: string, runId = 'run-agent-1') => ({operationId, ru
 const strip = () => document.querySelector<HTMLElement>('.composer-pending:not([hidden])')
 const selectedCard = () => [...strip()!.querySelectorAll<HTMLElement>('.composer-pending__card')].find(card => card.dataset.operationId === strip()!.dataset.operationId)!
 async function pendingClick(selector: string) {
-  const owner = selector === '[aria-label="在 Outbox 查看待发消息和操作"]' ? strip()!.querySelector('.composer-pending__heading')! : selectedCard()
+  const owner = selectedCard()
   await act(async () => owner.querySelector<HTMLButtonElement>(selector)!.click())
 }
 const editor = () => dom.container.querySelector('[role="textbox"]')!
@@ -102,10 +102,13 @@ it('the per-call preparation explanation retains overall unknown and the separat
   await mount()
   expect(strip()!.textContent).toContain('本次准备未完成')
   await act(async()=>strip()!.querySelector<HTMLElement>('.composer-pending__card')!.dispatchEvent(new PointerEvent('pointermove',{bubbles:true})))
-  expect(strip()!.textContent).toContain(original.error)
-  expect(strip()!.textContent).toContain('此前是否已提交仍待核实')
-  expect(strip()!.textContent).toContain('重启后等待你明确发送')
   expect(strip()!.querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')!.disabled).toBe(true)
+  await pendingClick('[aria-label="在 Outbox 查看待发消息和操作"]')
+  const panel = dom.container.querySelector('.composer-mailbox')!
+  await dom.click('[aria-label="Message details"]')
+  expect(panel.textContent).toContain(original.error)
+  expect(panel.textContent).toContain('此前是否已提交仍待核实')
+  expect(panel.textContent).toContain('重启后等待你明确发送')
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([original])
   expect(editor().getAttribute('contenteditable')).toBe('true')
 })
@@ -122,7 +125,8 @@ it('100 distinct cards are discoverable and middle/tail hover, copy, send and Mo
   for (const index of [0, 49, 99]) {
     await act(async () => cards[index]!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
     expect(strip()!.dataset.operationId).toBe(entries[index]!.operationId)
-    expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe(entries[index]!.text)
+    expect(cards[index]!.querySelector('.composer-pending__preview')!.textContent).toBe(entries[index]!.text.replace(/\s+/g, ' '))
+    expect(cards[index]!.querySelector('.composer-pending__more')!.textContent).toBe((index + 1) + '/100')
     await pendingClick('[aria-label="复制这条待发消息"]')
     expect(clipboard).toHaveBeenLastCalledWith(entries[index]!.text)
   }
@@ -145,7 +149,7 @@ it('keyboard reaches a long queue tail without submitting, and dismissed cards r
   expect(document.activeElement).toBe(selectedCard()); expect(send).not.toHaveBeenCalled()
   await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="收起待发卡片"]')!.click())
   expect(strip()!.querySelector('.composer-pending__cards')).toBeNull()
-  expect(strip()!.textContent).toContain('待发 25')
+  expect(strip()!.querySelector('.composer-pending__restore')!.getAttribute('aria-label')).toBe('展开 25 条待发消息')
   await act(async () => strip()!.querySelector<HTMLButtonElement>('.composer-pending__restore')!.click())
   expect(strip()!.querySelectorAll('.composer-pending__card')).toHaveLength(25)
   expect(send).not.toHaveBeenCalled(); expect(dom.draft()).toBe('Keep my draft')
@@ -170,7 +174,7 @@ it('editing a nonhead never-admitted card saves through the original queue owner
   await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
   expect(save).toHaveBeenLastCalledWith('agent-1', 'edit-tail', entries[1]!.text, 'Edited tail\nFull second line')
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([entries[0], { ...entries[1], text: 'Edited tail\nFull second line' }])
-  expect(strip()!.querySelector('textarea')).toBeNull();expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe('Edited tail\nFull second line')
+  expect(strip()!.querySelector('textarea')).toBeNull();expect(selectedCard().querySelector('.composer-pending__preview')!.textContent).toBe('Edited tail Full second line')
   expect(send).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();expect(dom.draft()).toBe('Keep my draft')
 })
 it('a rejected compare-and-swap keeps the local edit draft and original delivery record; IME Escape does not dismiss', async () => {
@@ -201,20 +205,20 @@ it('opening and closing the original Mailbox retains the floating edit draft whi
   expect(strip()!.querySelector('textarea')).toBe(textarea);expect(textarea.value).toBe('Unsaved local edit survives Mailbox');expect(dom.draft()).toBe('Keep my draft')
 })
 
-it('compact rows have three original actions, no native full-text tooltip, and one reader and live announcement', async () => {
+it('compact rows keep exact per-card actions and numbering without a heading, full-body tooltip or duplicate reader', async () => {
   useAppStore.setState({agentSteerQueues:{'agent-1':[queued('head'),queued('tail')]}})
   await mount()
-  for (const card of strip()!.querySelectorAll('.composer-pending__card')) {
-    expect(card.querySelectorAll('.composer-pending__actions button')).toHaveLength(3)
+  for (const [index, card] of [...strip()!.querySelectorAll('.composer-pending__card')].entries()) {
+    expect(card.querySelector('.composer-pending__more')!.textContent).toBe((index + 1) + '/2')
     expect(card.querySelector('.composer-pending__preview')!.hasAttribute('title')).toBe(false)
     expect(card.querySelector('.composer-pending__state')!.getAttribute('aria-label')).toBe('排队中')
     expect(card.querySelector('[role="status"]')).toBeNull()
   }
   await act(async () => strip()!.querySelector('[data-queue-index="1"]')!.dispatchEvent(new PointerEvent('pointermove',{bubbles:true})))
-  expect(strip()!.querySelectorAll('.composer-pending__body')).toHaveLength(1)
-  expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe('Original tail')
+  expect(selectedCard().querySelector('.composer-pending__preview')!.textContent).toBe('Original tail')
+  expect(strip()!.querySelector('.composer-pending__heading')).toBeNull()
+  expect(strip()!.querySelector('.composer-pending__reading')).toBeNull()
   expect(strip()!.querySelectorAll('[role="status"]')).toHaveLength(1)
-  expect(strip()!.querySelector('.composer-pending__reading-state')!.textContent).toContain('排队中')
 })
 
 it('copy shows a visible check only after the real clipboard owner accepts the original full body', async () => {

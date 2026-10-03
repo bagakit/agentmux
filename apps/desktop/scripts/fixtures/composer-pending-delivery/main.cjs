@@ -5,6 +5,9 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const [html, privateRoot, evidence, capture] = process.argv.slice(2);
 const anchorOnly = capture === "anchor-capture";
+const compactContract = process.env.AGENTMUX_PENDING_COMPACT_CONTRACT === '1';
+const compactCheckpoint = process.env.AGENTMUX_PENDING_COMPACT_CHECKPOINT ?? null;
+assert.ok(compactCheckpoint === null || ['hover', 'distance', 'coarse', 'min-gap', 'overlap', 'more', 'send'].includes(compactCheckpoint), 'Only the seven bounded compact checkpoints are allowed');
 app.setPath('userData', path.join(privateRoot, 'user-data'));
 let win;
 const result = { schema: 'agentmux.composer-pending-delivery-native.v1', passed: false,
@@ -15,8 +18,6 @@ const editor = `${surface}.querySelector('.composer [role="textbox"]')`;
 const strip = `document.querySelector('.composer-pending:not([hidden])')`;
 const selectedCard = `${strip}.querySelector('.composer-pending__card[data-selected="true"]')`;
 const panel = `${surface}.querySelector('.composer-mailbox')`;
-const send = `${selectedCard}.querySelector('.composer-pending__send')`;
-const more = `${strip}.querySelector('.composer-pending__count[aria-label="在 Outbox 查看待发消息和操作"]')`;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function evaluate(expression) {
   const value = await win.webContents.executeJavaScript(`(async()=>{try{return await eval(${JSON.stringify(expression)})}catch(error){return{__probeError:true,name:error.name,message:error.message,stack:error.stack}}})()`);
@@ -31,12 +32,15 @@ async function painted() {
   await evaluate('new Promise(done=>requestAnimationFrame(()=>requestAnimationFrame(done)))');
   await delay(35);
 }
-async function click(expression) {
-  const point = await evaluate(`(()=>{const node=(${expression});if(!node)throw Error('Actual control is absent');const rect=node.getBoundingClientRect();if(!rect.width||!rect.height)throw Error('Actual control is not visible');return{x:rect.x+rect.width/2,y:rect.y+rect.height/2}})()`);
+async function click(expression, proofName = null) {
+  const before = await evaluate(proofName ? `(()=>{const node=(${expression});if(!node)throw Error('Actual control is absent');const r=node.getBoundingClientRect();if(!r.width||!r.height)throw Error('Actual control is not visible');const point={x:r.x+r.width/2,y:r.y+r.height/2},card=node.closest('.composer-pending__card'),hit=document.elementFromPoint(point.x,point.y),rect=n=>{if(!n)return null;const v=n.getBoundingClientRect();return{x:v.x,y:v.y,width:v.width,height:v.height,right:v.right,bottom:v.bottom}};return{point,target:{tag:node.tagName,label:node.getAttribute('aria-label'),rect:rect(node)},card:card?{operationId:card.dataset.operationId,selected:card.dataset.selected,rect:rect(card),transform:getComputedStyle(card).transform}:null,hit:{tag:hit?.tagName,label:hit?.closest('button')?.getAttribute('aria-label')??null,operationId:hit?.closest('.composer-pending__card')?.dataset.operationId??null},eventStart:pendingNative.buttonEvents.length}})()` : `(()=>{const node=(${expression});if(!node)throw Error('Actual control is absent');const rect=node.getBoundingClientRect();if(!rect.width||!rect.height)throw Error('Actual control is not visible');return{point:{x:rect.x+rect.width/2,y:rect.y+rect.height/2}}})()`);
+  const point = before.point, proof = proofName ? { name: proofName, before } : null;
+  if (proof) (result.singleClicks ??= []).push(proof);
   for (const type of ['mousePressed', 'mouseReleased']) {
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...point, button: 'left', clickCount: 1 });
   }
   await painted();
+  if (proof) proof.after = await evaluate(`(()=>{const point=${JSON.stringify(point)},id=${JSON.stringify(before.card?.operationId ?? null)},node=document.elementFromPoint(point.x,point.y),card=id?document.querySelector('.composer-pending__card[data-operation-id="'+id+'"]'):null,button=card?.querySelector('.composer-pending__more'),rect=n=>{if(!n)return null;const r=n.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};return{point,hit:{tag:node?.tagName,label:node?.closest('button')?.getAttribute('aria-label')??null,operationId:node?.closest('.composer-pending__card')?.dataset.operationId??null},card:card?{operationId:card.dataset.operationId,selected:card.dataset.selected,rect:rect(card),transform:getComputedStyle(card).transform}:null,originalMoreRect:rect(button),popover:${panel}.matches(':popover-open'),events:pendingNative.buttonEvents.slice(${before.eventStart})}})()`);
 }
 async function key(key, code, virtual, text, modifiers = 0) {
   for (const type of ['keyDown', 'keyUp']) {
@@ -61,7 +65,7 @@ async function geometry() {
     const editorSlot=e.closest('.composer__editor'),controls=mailbox.closest('.composer__toolbar > div');
     const range=node=>{if(!node)return[];const r=document.createRange();r.selectNodeContents(node);return[...r.getClientRects()].map(r=>({x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}))};
     const buffer=other?.terminal.buffer.active;
-    return{terminal,buffer:{type:activeBuffer.type,stable:activeBuffer===window.pendingNative.buffer,repeatedReadStable:activeBuffer===owner.terminal.buffer.active},screen,cellHeight,
+    return{terminal,nativeLinePrefix:window.pendingNative.nativeLinePrefix,buffer:{type:activeBuffer.type,stable:activeBuffer===window.pendingNative.buffer,repeatedReadStable:activeBuffer===owner.terminal.buffer.active},screen,cellHeight,
       helperTextarea:{rect:rect(helper),height:helperStyle.height,lineHeight:helperStyle.lineHeight,fontSize:helperStyle.fontSize,inlineStyle:helper.getAttribute('style')},
       cursorCell:{x:screen.x+terminal.cursorX*screen.width/terminal.cols,y:screen.y+cursorRow*cellHeight,width:screen.width/terminal.cols,height:cellHeight,right:screen.x+(terminal.cursorX+1)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorText:{x:screen.x,y:screen.y+cursorRow*cellHeight,right:screen.x+Math.min(terminal.cols,terminal.cursorLine.length)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorVisible:cursorRow>=0&&cursorRow<terminal.rows,
       cursorBottom:screen.y+(cursorRow+1)*cellHeight,ownerRect:rect(s),terminalRect:rect(original),
@@ -79,13 +83,16 @@ async function geometry() {
         controls:{rect:rect(controls),gridColumn:getComputedStyle(controls).gridColumn,gridRow:getComputedStyle(controls).gridRow}},
       strip:b?{rect:rect(b),operationId:b.dataset.operationId,busy:selected?.dataset.busy,outsideInput:!composer.contains(b),
         count:b.querySelector('.composer-pending__count')?.textContent,position:getComputedStyle(b).position,background:getComputedStyle(b).backgroundColor,
+        maskImage:getComputedStyle(b).maskImage,pointerX:b.style.getPropertyValue('--queue-pointer-x'),pointerY:b.style.getPropertyValue('--queue-pointer-y'),
+        headerCount:b.querySelectorAll('.composer-pending__heading, .composer-pending__count').length,inlineEditorCount:b.querySelectorAll('.composer-pending__card .composer-queued-editor').length,
         hover:b.matches(':hover'),focused:b.matches(':focus-within'),focusedLabel:b.contains(document.activeElement)?document.activeElement.getAttribute('aria-label'):null,
         previewClipped:preview?preview.scrollWidth>preview.clientWidth:false,
         heading:rect(b.querySelector('.composer-pending__heading')),announcers:[...b.querySelectorAll('[role="status"]')].map(node=>node.textContent),
         cards:[...b.querySelectorAll('.composer-pending__card')].map(node=>({id:node.dataset.operationId,index:Number(node.dataset.queueIndex),selected:node.dataset.selected,
-          rect:rect(node),transform:getComputedStyle(node).transform,animation:getComputedStyle(node).animationName,timeline:getComputedStyle(node).animationTimeline,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
-          layoutHeight:node.offsetHeight,layoutLeft:node.offsetLeft,layoutTop:node.offsetTop,transformOrigin:getComputedStyle(node).transformOrigin,offsetParentIsList:node.offsetParent===node.parentElement,preview:node.querySelector('.composer-pending__preview').textContent,
-          previewTitle:node.querySelector('.composer-pending__preview').getAttribute('title'),previewLines:range(node.querySelector('.composer-pending__preview')),
+          rect:rect(node),hover:node.matches(':hover'),transform:getComputedStyle(node).transform,animation:getComputedStyle(node).animationName,timeline:getComputedStyle(node).animationTimeline,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
+          layoutHeight:node.offsetHeight,layoutLeft:node.offsetLeft,layoutTop:node.offsetTop,transformOrigin:getComputedStyle(node).transformOrigin,offsetParentIsList:node.offsetParent===node.parentElement,preview:node.querySelector('.composer-pending__preview')?.textContent ?? null,
+          editing:node.dataset.editing,ordinal:node.querySelector('.composer-pending__more')?.textContent,background:getComputedStyle(node).backgroundColor,backdropFilter:getComputedStyle(node).backdropFilter,
+          previewTitle:node.querySelector('.composer-pending__preview')?.getAttribute('title') ?? null,previewLines:range(node.querySelector('.composer-pending__preview')),
           state:{label:node.querySelector('.composer-pending__state').getAttribute('aria-label'),icon:node.querySelector('.composer-pending__state svg')?.getAttribute('class'),rect:rect(node.querySelector('.composer-pending__state')),hiddenLabel:node.querySelector('.composer-pending__sr-only')?.textContent},
           actions:[...node.querySelectorAll('button')].map(button=>({rect:rect(button),label:button.getAttribute('aria-label'),background:getComputedStyle(button).backgroundColor,
             copyState:button.dataset.copyState,icon:button.querySelector('svg')?.getAttribute('class'),animation:button.querySelector('svg')?getComputedStyle(button.querySelector('svg')).animationName:null}))})),
@@ -94,8 +101,8 @@ async function geometry() {
           editing:b.querySelectorAll('.composer-pending__reading textarea').length,rect:rect(b.querySelector('.composer-pending__reading'))},
         list:{rect:rect(b.querySelector('.composer-pending__cards')),layoutWidth:b.querySelector('.composer-pending__cards')?.offsetWidth,layoutHeight:b.querySelector('.composer-pending__cards')?.offsetHeight,scrollTop:b.querySelector('.composer-pending__cards')?.scrollTop,scrollHeight:b.querySelector('.composer-pending__cards')?.scrollHeight},
         label:state?.getAttribute('aria-label'),stateRect:rect(state?.querySelector('svg')),preview:preview?.textContent,
-        previewRect:rect(preview),sendDisabled:selected?.querySelector('.composer-pending__send').disabled}:null,
-      popover:s.querySelector('.composer-mailbox').matches(':popover-open'),facts:pendingDelivery.facts(),trustedActions:window.pendingNative.actions,trustedHoverActions:window.pendingNative.hoverActions,
+        previewRect:rect(preview),sendDisabled:selected?.querySelector('.composer-pending__send')?.disabled}:null,
+      popover:s.querySelector('.composer-mailbox').matches(':popover-open'),facts:pendingDelivery.facts(),trustedActions:window.pendingNative.actions,trustedHoverActions:window.pendingNative.hoverActions,buttonEvents:window.pendingNative.buttonEvents,
       terminalEvents:window.pendingNative.terminalEvents}
   })()`);
 }
@@ -162,27 +169,9 @@ function retained(before, after, attentionTransition = false, priorPermissionTra
   for (const name of ['sessions', 'tab', 'layout', 'drafts', 'writes', 'pastes']) assert.deepEqual(after.facts[name], before.facts[name], 'Pending UI preserves original ' + name);
   return noticeBoundary;
 }
-function pendingGeometry(before, after, label, busy, disabled, attentionTransition = false) {
-  const noticeBoundary = retained(before, after, attentionTransition);
-  assert.ok(after.strip, 'Nonempty real queue has a visible pending summary');
-  assert.equal(after.strip.outsideInput, true); assert.equal(after.strip.label, label);
-  assert.equal(after.strip.busy, String(busy)); assert.equal(after.strip.sendDisabled, disabled);
-  const state = after.strip.cards.find(card => card.selected === 'true').state;
-  assert.equal(state.hiddenLabel,label);
-  assert.match(state.icon,busy?/lucide-loader-circle/:label==='发送结果待核实'?/lucide-circle-help/:/lucide-clock/,'The inline state has a distinct non-color semantic glyph');
-  const r = after.strip.rect;
-  assert.ok(r.width > 0 && r.height > 0 && after.strip.previewRect.width > 0);
-  assert.ok(r.bottom <= after.composer.y + 1, 'Pending summary sits outside and above the input');
-  assert.ok(r.x >= after.ownerRect.x - 1 && r.right <= after.ownerRect.right + 1, 'Pending controls fit the original owner width');
-  const glyph = after.strip.stateRect;
-  assert.ok(glyph?.width > 0 && glyph.height > 0, 'Actual inline state has a painted glyph and an exact accessible label');
-  assert.ok(glyph.x >= r.x - 1 && glyph.right <= r.right + 1, 'Status glyph remains inside the visible pending surface');
-  assert.ok(after.terminal.rows > 0);
-  return noticeBoundary;
-}
 function visibleCursor(facts) {
   assert.equal(facts.cursorVisible, true, 'The actual original terminal cursor remains in its viewport');
-  assert.match(facts.terminal.cursorLine, /agent > half typed prompt/);
+  assert.ok(facts.terminal.cursorLine.startsWith(facts.nativeLinePrefix), 'The actual private unfinished terminal text retains its original prefix');
   assert.ok(facts.cursorBottom <= facts.terminalRect.bottom + 1, 'The cursor line remains inside the real terminal');
   if (facts.strip) {
     const intersects=(a,b)=>a.x<b.right&&a.right>b.x&&a.y<b.bottom&&a.bottom>b.y;
@@ -193,72 +182,18 @@ function visibleCursor(facts) {
   }
 }
 async function frame(scene, name) {
-  if (capture !== 'capture' && !anchorOnly) return;
   const paints = await evaluate(`(()=>{const entries=(globalThis.resultReadyTerminals??[]).filter(r=>!r.disposed&&r.terminal.element?.isConnected&&!r.terminal.element.closest('[hidden]'));if(!entries.length)throw Error('No actual visible terminal to paint');return Promise.all(entries.map(r=>new Promise((resolve,reject)=>{let lease;const timer=setTimeout(()=>{lease?.dispose();reject(Error('Actual terminal render did not arrive'))},2000);lease=r.terminal.onRender(range=>{clearTimeout(timer);lease.dispose();resolve({id:r.id,rows:r.terminal.rows,...range})});r.terminal.refresh(0,r.terminal.rows-1)})))})()`);
   assert.equal(paints.length, 2, 'Both original owner and neighbor terminals actually paint');
   await painted(); const image = await win.webContents.capturePage(), bytes = image.toPNG();
-  const file = `${scene.viewport}-${scene.appearance}-${name}.png`;
+  const file = `${scene.name ?? scene.viewport}-${scene.appearance}-${name}.png`;
   assert.ok(bytes.length > 0); await fs.writeFile(path.join(evidence, file), bytes);
   result.frames.push({ scene, name, file, size: image.getSize(), sha256: crypto.createHash('sha256').update(bytes).digest('hex'), terminalPaint: paints });
 }
 async function pointAt(expression) {
-  const point = await evaluate(`(()=>{const r=(${expression}).getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
-  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+  const before = await evaluate(`(()=>{const node=(${expression}),r=node.getBoundingClientRect(),card=node.closest('.composer-pending__card'),b=${strip};const rect=n=>{const v=n.getBoundingClientRect();return{x:v.x,y:v.y,width:v.width,height:v.height,right:v.right,bottom:v.bottom}};return{point:{x:r.x+r.width/2,y:r.y+r.height/2},previewRect:rect(node),cardRect:rect(card),stripRect:rect(b),operationId:card.dataset.operationId,selected:card.dataset.selected,transform:getComputedStyle(card).transform,animation:getComputedStyle(card).animationName,shadow:getComputedStyle(card).boxShadow}})()`);
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...before.point });
   await delay(160); await painted();
-}
-function cardGeometry(facts, count, selectedVisible = true) {
-  const card=facts.strip;assert.ok(card);assert.equal(card.count,`待发 ${count}`);
-  assert.equal(card.background,'rgba(0, 0, 0, 0)','The float has no full-strip background');
-  assert.equal(card.cards.length,count,'Every queued operation has its own real card inside the floating surface');
-  assert.equal(new Set(card.cards.map(c=>c.id)).size,count,'Every real card has a distinct operation identity');
-  if (count > 1) sharedPivot(facts);
-  assert.ok(card.rect.width<=360.1&&card.rect.height<=320.1,'Floating queue has bounded width and height');
-  assert.ok(Math.abs(card.rect.right-facts.composer.right)<=1,'Pending stack aligns with its actual tool top-right');
-  // The live unfinished native input row is content, not an empty visual gap.
-  // Keep the original cursor/text footprint checks strict and measure compact
-  // distance from the protected last screen row rather than from its bottom.
-  const dock=facts.cursorCell.y,list=card.list.rect;
-  const visible=card.cards.filter(c=>c.rect.y<list.bottom&&c.rect.bottom>list.y);
-  const paintedBottom=Math.max(...visible.map(c=>Math.min(c.rect.bottom,list.bottom))),gap=dock-paintedBottom;
-  assert.ok(gap>=5.9&&gap<=16.1,'Actual card lower edge stays close to the protected Message Tool with a short visible gap');
-  assert.equal(card.announcers.length,1,'Only one scoped live Copy feedback region exists, not a status announcer for every card');
-  for(const item of card.cards){
-    assert.equal(item.layoutHeight,28,'Every actual card has fixed single-line 28px layout height');
-    assert.equal(item.previewTitle,null,'The full body has no native title tooltip duplicating the unique reader');
-    assert.equal(item.actions.length,3,'Only three compact per-card Send/Copy/Edit actions remain');
-    assert.equal(item.state.hiddenLabel,item.state.label,'The hidden state label preserves exact accessible meaning');
-  }
-  const selected=card.cards.find(c=>c.selected==='true');
-  assert.equal(new Set(selected.previewLines.map(r=>Math.round(r.y*100)/100)).size,1,'Actual selected preview occupies only one text line');
-  const mid=r=>r.y+r.height/2;
-  assert.ok(Math.abs(mid(selected.state.rect)-mid(selected.actions[0].rect))<=1,'State and actions share the same actual card row');
-  for(const action of selected.actions){
-    assert.ok(action.rect.width>=23.9&&action.rect.height>=23.9,'Compact action retains a full actual 24px hit and focus area');
-    assert.ok(action.rect.x>=selected.rect.x-1&&action.rect.right<=selected.rect.right+1,'Every selected action fits inside its real card');
-    if(selectedVisible) assert.ok(action.rect.y>=list.y-1&&action.rect.bottom<=list.bottom+1,'Every selected action has a complete visible hit area inside the bounded card list');
-  }
-  assert.equal(selected.actions[0].background,'rgba(0, 0, 0, 0)','Send remains a quiet action without a heavy button background');
-  if(card.reading.readerCount){
-    assert.equal(card.reading.readerCount,1,'Hover exposes only one custom reader');
-    assert.equal(card.reading.bodyCount,card.reading.editing?0:1,'Textarea replaces the full reader body while editing');
-  }
-  if(count>1){
-    assert.ok(card.cards.filter(c=>c.selected==='false').every(c=>c.transform.startsWith('matrix3d(')),'Real queued cards preserve depth while idle');
-    const [first,second]=visible.filter(item=>item.rect.y>=list.y-1&&item.rect.bottom<=list.bottom+1);
-    assert.ok(first&&second,'Distinct complete original cards remain visible in the actual scroll viewport');
-    assert.ok(second.rect.y>first.rect.y+10&&second.rect.y<first.rect.bottom,'Real queued cards have visible vertical stacking height and overlap');
-    const nearby=card.cards.find(c=>Math.abs(c.index-selected.index)===1);
-    assert.ok(nearby);
-    assert.notEqual(selected.transform,nearby.transform,'Actual selected and nearby queued cards occupy distinct depth planes');
-  }
-  visibleCursor(facts);
-}
-function uniqueReader(facts, id, text, label) {
-  assert.equal(facts.strip.reading.id,id);
-  assert.equal(facts.strip.reading.text,text,'Hover reads the one complete original body of this card');
-  assert.equal(facts.strip.reading.readerCount,1);
-  assert.equal(facts.strip.reading.bodyCount,1);
-  assert.ok(facts.strip.reading.state.includes(label)&&facts.strip.reading.state.length>label.length,'The same reader explains its exact state and full reason');
+  return before;
 }
 function copyFeedback(facts, id, state, reduced) {
   const card=facts.strip.cards.find(card=>card.id===id),button=card.actions.find(action=>action.label==='复制这条待发消息');
@@ -273,189 +208,6 @@ function copyFeedback(facts, id, state, reduced) {
     assert.ok(!facts.strip.announcers.includes('已复制待发消息'),'Failure or stale body cannot announce copy success');
   }
 }
-async function copyOutcomeScenes(scene, baseline) {
-  await evaluate("pendingDelivery.queue('原复制消息 · 第二行完整保留\\n复制反馈不改变草稿或操作')");
-  await pointAt(`${selectedCard}.querySelector('.composer-pending__preview')`);
-  const before=await settled(),sid=await evaluate('resultReady.sessionId'),entry=before.facts.queues[sid][0];
-  cardGeometry(before,1);uniqueReader(before,entry.operationId,entry.text,'排队中');
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
-  await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
-  const motion=await settled();retained(before,motion);copyFeedback(motion,entry.operationId,'copied',false);cardGeometry(motion,1);
-  assert.equal(motion.facts.copies.at(-1),entry.text);await frame(scene,'card-copy-success-motion');
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
-  await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
-  const reduced=await settled();retained(before,reduced);copyFeedback(reduced,entry.operationId,'copied',true);await frame(scene,'card-copy-success-reduced');
-  await waitFor(`${selectedCard}.querySelector('.composer-pending__copy').dataset.copyState==='idle'`);
-  const idle=await settled();retained(before,idle);copyFeedback(idle,entry.operationId,'idle',true);
-  await evaluate("pendingDelivery.nextCopy('reject')");await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
-  const failed=await settled();retained(before,failed,true);cardGeometry(failed,1);copyFeedback(failed,entry.operationId,'failed',true);
-  assert.match(failed.strip.cards[0].actions[1].icon,/lucide-triangle-alert/);
-  assert.equal(failed.facts.copyRequests.at(-1).state,'failed');assert.equal(failed.facts.copyRequests.at(-1).text,entry.text);
-  assert.deepEqual(failed.facts.queues[sid],before.facts.queues[sid]);assert.deepEqual(failed.facts.attempts,before.facts.attempts);
-  await frame(scene,'card-copy-failed');
-  await evaluate("pendingDelivery.nextCopy('hold')");await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
-  const held=await settled();retained(failed,held,true);assert.equal(held.facts.copyPending,true);copyFeedback(held,entry.operationId,'idle',true);
-  const revised='保存的另一份正文 · 相同原ID\n晚到复制不能认证此新正文';
-  await evaluate(`pendingDelivery.revise(${JSON.stringify(entry.operationId)},${JSON.stringify(revised)})`);
-  const changed=await settled();retained(held,changed);assert.deepEqual(changed.facts.queues[sid],[{...entry,text:revised}]);
-  await evaluate('pendingDelivery.completeCopy()');await waitFor("pendingDelivery.facts().copyRequests.at(-1).state==='copied'");
-  const late=await settled();retained(changed,late);copyFeedback(late,entry.operationId,'idle',true);cardGeometry(late,1);
-  assert.equal(late.facts.copies.at(-1),entry.text,'The delayed original clipboard write contains only the captured original full body');
-  uniqueReader(late,entry.operationId,revised,'排队中');assert.deepEqual(late.facts.attempts,before.facts.attempts);
-  await frame(scene,'card-copy-late');
-  await evaluate('pendingDelivery.clear()');await click(editor);const end=await settled();retained(baseline,end);
-  result.checkpoints.push({scene,name:'original-copy-outcomes',before,motion,reduced,idle,failed,held,changed,late,end});
-}
-async function spatialScrollScenes(scene, baseline) {
-  assert.equal(await evaluate("CSS.supports('animation-timeline','view(block)')"),true,'Actual Native supports per-card view timelines');
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
-  await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards');window.pendingScrollNodes=[...list.children];window.pendingScrollWheels=[];list.addEventListener('wheel',event=>pendingScrollWheels.push({trusted:event.isTrusted,defaultPrevented:event.defaultPrevented,deltaY:event.deltaY}),{passive:true})})()`);
-  const samples=[];
-  for(const [index,name]of [[4,'head'],[50,'middle'],[96,'tail']]){
-    const expr=`${strip}.querySelector('[data-queue-index="${index}"]')`;
-    await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards'),node=${expr};list.scrollTop=node.offsetTop-96})()`);
-    const point=await evaluate(`(()=>{const r=${strip}.querySelector('.composer-pending__cards').getBoundingClientRect();return{x:r.right-2,y:r.y+r.height/2}})()`);
-    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await painted();
-    const before=await settled(),cardBefore=before.strip.cards[index];retained(baseline,before);
-    assert.equal(cardBefore.selected,'false','Wheel traverses the same original unselected card');
-    assert.equal(cardBefore.animation,'composer-pending-depth');assert.equal(cardBefore.timeline,'view()');
-    await frame(scene,'card-scroll-'+name+'-before');
-    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:46});
-    await waitFor(`${strip}.querySelector('.composer-pending__cards').scrollTop>${before.strip.list.scrollTop}+20`);
-    const after=await settled(),cardAfter=after.strip.cards[index];retained(before,after);
-    result.checkpoints.push({scene,name:'spatial-wheel-observation-'+name,index,before,after});
-    cardGeometry(after,100,false); // Passive scrolling can move the original selected card offscreen; hover action probes still require full hit visibility.
-    const inside=card=>card.rect.y>=after.strip.list.rect.y-1&&card.rect.bottom<=after.strip.list.rect.bottom+1;
-    assert.ok(inside(cardBefore)&&inside(cardAfter),'Both measured positions keep the same complete card in the viewport');
-    assert.equal(cardAfter.id,cardBefore.id);assert.equal(after.strip.operationId,before.strip.operationId,'Wheel does not change the selected original operation');
-    assert.notEqual(cardAfter.transform,cardBefore.transform,'The same original card changes depth and tilt with trusted native scroll');
-    const matrix=value=>value.slice(9,-1).split(',').map(Number),a=matrix(cardBefore.transform),b=matrix(cardAfter.transform);
-    assert.equal(a.length,16);assert.equal(b.length,16);
-    assert.ok(Math.abs(a[14]-b[14])>2&&Math.abs(a[6]-b[6])>.02,'Trusted wheel changes actual depth and X tilt, beyond planar Y displacement');
-    assert.deepEqual(after.facts.queues,before.facts.queues);assert.deepEqual(after.facts.attempts,before.facts.attempts);
-    assert.equal(await evaluate(`window.pendingScrollNodes.every((node,index)=>node===${strip}.querySelector('.composer-pending__cards').children[index])`),true,'Native wheel retains every original card node');
-    assert.ok(await evaluate('pendingScrollWheels.some(event=>event.trusted&&!event.defaultPrevented&&event.deltaY>0)'),'Trusted wheel remains native and is not intercepted');
-    await frame(scene,'card-scroll-'+name+'-after');samples.push({index,name,before,after});
-  }
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
-  const reduced=await settled();retained(baseline,reduced);
-  assert.ok(reduced.strip.cards.filter(card=>card.selected==='false').every(card=>card.animation==='none'&&card.transform.startsWith('matrix3d(')),'Reduced motion preserves original static depth on every actual card');
-  const before=reduced.strip.cards[96].transform,listBefore=reduced.strip.list.scrollTop;
-  const point=await evaluate(`(()=>{const r=${strip}.querySelector('.composer-pending__cards').getBoundingClientRect();return{x:r.right-2,y:r.y+r.height/2}})()`);
-  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:-46});
-  await waitFor(`${strip}.querySelector('.composer-pending__cards').scrollTop<${listBefore}-20`);
-  const end=await settled();retained(reduced,end);assert.equal(end.strip.cards[96].transform,before,'Reduced motion scrolls without depth animation');
-  await frame(scene,'card-scroll-reduced');result.checkpoints.push({scene,name:'spatial-native-scroll',samples,reduced,end});
-}
-async function cardScenes(scene, baseline) {
-  await pointAt(surface);await evaluate("pendingDelivery.queue('稍后复查')");
-  const short=await settled();pendingGeometry(baseline,short,'排队中',false,false);cardGeometry(short,1);
-  assert.ok(short.strip.rect.width<300,'Short pending card sizes to its content');await frame(scene,'card-short');
-  await evaluate("pendingDelivery.queue('第二条真实卡片')");const two=await settled();cardGeometry(two,2);retained(short,two);await frame(scene,'card-two');
-  await evaluate("pendingDelivery.distinctQueue(98)");const stack=await settled();cardGeometry(stack,100);retained(two,stack);
-  assert.ok(stack.strip.list.scrollHeight>stack.strip.list.rect.height,'Long queues traverse inside the same bounded floating surface');await frame(scene,'card-stack');
-  await spatialScrollScenes(scene,baseline);
-  const sid=await evaluate('resultReady.sessionId'),entries=stack.facts.queues[sid],visited=[];
-  for(const index of [0,49,99]){
-    const expr=`${strip}.querySelector('[data-queue-index="${index}"]')`;
-    await evaluate(`${expr}.scrollIntoView({block:'nearest'})`);await painted();
-    await pointAt(`${expr}.querySelector('.composer-pending__preview')`);
-    const focused=await settled();retained(baseline,focused);
-    assert.equal(focused.strip.operationId,entries[index].operationId,'Trusted hover targets the original head, middle or tail card');
-    uniqueReader(focused,entries[index].operationId,entries[index].text,'排队中');cardGeometry(focused,100);
-    await delay(700);assert.equal((await geometry()).strip.cards[index].previewTitle,null,'A prolonged trusted hover has no native full-body tooltip');
-    assert.ok(focused.trustedHoverActions.some(a=>a.trusted&&a.operationId===entries[index].operationId),'Actual pointer reaches this individual original card');
-    await click(`${expr}.querySelector('[aria-label="复制这条待发消息"]')`);
-    const copied=await settled();assert.equal(copied.facts.copies.at(-1),entries[index].text,'Each card copies its own complete original text');
-    assert.equal(copied.strip.operationId,entries[index].operationId,'Pointer path from card to actions keeps the same operation');
-    assert.deepEqual(copied.facts.attempts,stack.facts.attempts,'Hover and Copy send no prompt');
-    copyFeedback(copied,entries[index].operationId,'copied',true);cardGeometry(copied,100);
-    visited.push({index,id:entries[index].operationId,facts:copied});await frame(scene,'card-hover-'+index);
-    await pointAt(more);assert.equal((await geometry()).strip.operationId,entries[index].operationId,'Moving to the header preserves the latest real selected original ID');
-    await click(more);await waitFor(`${panel}.matches(':popover-open')&&Boolean(${panel}.querySelector('[data-record-key="queue:${entries[index].operationId}"]'))`);
-    assert.equal(await evaluate(`${panel}.querySelector('.log-turn__body').textContent`),entries[index].text,'Header More opens that exact head, middle or tail original record');
-    assert.equal(await evaluate('pendingDelivery.facts().attempts.length'),stack.facts.attempts.length);
-    if(index===49)await frame(scene,'card-header-49');
-    await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);await waitFor(`!${panel}.matches(':popover-open')`);
-  }
-  // Trusted keyboard traversal remains in the same floating surface; IME is covered by mounted tests.
-  await click(`${strip}.querySelector('[data-queue-index="99"]')`);await key('Home','Home',36);
-  const focus=await settled();assert.equal(focus.strip.operationId,entries[0].operationId);retained(baseline,focus);
-  assert.ok(focus.strip.cards.every(c=>c.transition==='0s'),'Reduced motion retains static depth without movement');await frame(scene,'card-keyboard-focus');
-  await key('Tab','Tab',9,undefined,8);await key('Tab','Tab',9,undefined,8);
-  assert.equal(await evaluate(`document.activeElement===${more}`),true,'Trusted Shift+Tab reaches the original header Outbox button');
-  await key('Enter','Enter',13,'\r');await waitFor(`${panel}.matches(':popover-open')&&Boolean(${panel}.querySelector('[data-record-key="queue:${entries[0].operationId}"]'))`);
-  assert.equal(await evaluate('pendingDelivery.facts().attempts.length'),stack.facts.attempts.length,'Keyboard header access does not submit');
-  await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);await waitFor(`!${panel}.matches(':popover-open')`);
-  await click(`${strip}.querySelector('[data-queue-index="0"]')`);
-  await key('End','End',35);await click(send);await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`);
-  await evaluate('pendingDelivery.prepared()');await waitFor('pendingDelivery.facts().attempts.length===2');
-  const attempt=await evaluate('pendingDelivery.facts().attempts.at(-1)');
-  assert.equal(attempt[2],entries[99].operationId,'Nonhead Send submits only that original card');assert.equal(attempt[1],entries[99].text);
-  await evaluate('pendingDelivery.submitted()');await waitFor(`!pendingDelivery.facts().inFlight[${JSON.stringify(sid)}]`);
-  const afterSend=await settled();assert.deepEqual(afterSend.facts.queues[sid],entries.slice(0,99),'Nonhead Send preserves every other original queue entry');retained(baseline,afterSend);
-  await evaluate('pendingDelivery.clear()');await click(editor);const cleared=await settled();assert.equal(cleared.strip,null);retained(baseline,cleared);
-  await evaluate(`pendingDelivery.queue(${JSON.stringify('这是一条保留原文的较长待发消息，全文在同一浮层阅读，操作始终绑定原消息。'.repeat(6))})`);
-  const long=await settled();cardGeometry(long,1);pendingGeometry(cleared,long,'排队中',false,false);
-  assert.ok(long.strip.rect.width>short.strip.rect.width,'Long content uses more width than the short card');assert.equal(long.strip.previewClipped,true);await frame(scene,'card-long');
-  const originalLong=long.facts.queues[sid][0],editText='保存后的原消息 · 同身份\n完整新正文';
-  const textarea=`${strip}.querySelector('textarea')`;
-  await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);await waitFor(`Boolean(${textarea})`);
-  await evaluate(`${textarea}.select()`);await win.webContents.debugger.sendCommand('Input.insertText',{text:editText});await painted();
-  await evaluate(`${textarea}.setSelectionRange(2,6)`);
-  const caret=[];
-  for(const [name,code,virtual]of [['ArrowUp','ArrowUp',38],['ArrowDown','ArrowDown',40],['Home','Home',36],['End','End',35]]){
-    await key(name,code,virtual);
-    const actual=await evaluate(`(()=>{const node=${textarea};return{focused:document.activeElement===node,text:node.value,start:node.selectionStart,end:node.selectionEnd,operationId:${strip}.dataset.operationId}})()`);
-    assert.equal(actual.focused,true,'Editing native navigation retains the original textarea focus');assert.equal(actual.text,editText);assert.equal(actual.operationId,originalLong.operationId);caret.push({key:name,...actual});
-  }
-  // The editor itself stops bubbling. This surface guard also protects real card actions while the same edit is open.
-  const editingCopy=`${selectedCard}.querySelector('.composer-pending__copy')`;
-  await click(editingCopy);
-  const copyKeys=[];
-  for(const [name,code,virtual]of [['ArrowUp','ArrowUp',38],['ArrowDown','ArrowDown',40],['Home','Home',36],['End','End',35]]){
-    await key(name,code,virtual);
-    const actual=await evaluate(`(()=>{const node=${textarea};return{focused:document.activeElement===${editingCopy},text:node.value,operationId:${strip}.dataset.operationId}})()`);
-    assert.equal(actual.focused,true,'Editing native card-action navigation retains the original Copy focus');assert.equal(actual.text,editText);assert.equal(actual.operationId,originalLong.operationId);copyKeys.push({key:name,...actual});
-  }
-  result.checkpoints.push({scene,name:'original-edit-native-caret',caret,copyKeys});
-  const editing=await settled();retained(long,editing);cardGeometry(editing,1);assert.equal(await evaluate(`${more}.disabled`),true,'Editing locks header queue navigation without discarding the local draft');assert.equal(editing.facts.queues[sid][0].text,originalLong.text,'Typing an edit has no queue write');await frame(scene,'card-editing');
-  await evaluate(`(window.pendingNativeEditNode=${textarea},true)`);
-  await pointAt(`${surface}.querySelector('.composer__mailbox')`);await waitFor(`${panel}.matches(':popover-open')`);
-  assert.equal(await evaluate(`Boolean(${strip})`),false,'Open Mailbox suppresses the floating projection');
-  assert.equal(await evaluate(`document.querySelector('.composer-pending[hidden] textarea')===pendingNativeEditNode`),true,'Mailbox preview retains the same local editing node');
-  assert.equal(await evaluate('pendingNativeEditNode.value'),editText);await frame(scene,'card-edit-mailbox');
-  await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);await waitFor(`!${panel}.matches(':popover-open')&&Boolean(${textarea})`);
-  assert.equal(await evaluate(`${textarea}===pendingNativeEditNode`),true);assert.equal(await evaluate(`${textarea}.value`),editText);
-  await click(`${strip}.querySelector('[aria-label="保存待发消息"]')`);await waitFor(`!${textarea}`);
-  const saved=await settled();retained(long,saved);
-  assert.deepEqual(saved.facts.queues[sid],[{...originalLong,text:editText}],'Save preserves original operation, Run, time and order');
-  assert.equal(saved.facts.attempts.length,2,'Save grants no submission');assert.equal(saved.strip.reading.text,editText);await frame(scene,'card-edit-saved');
-  await click(`${selectedCard}.querySelector('[aria-label="复制这条待发消息"]')`);assert.equal(await evaluate('pendingDelivery.facts().copies.at(-1)'),editText);
-  await click(send);await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`);await evaluate('pendingDelivery.prepared()');
-  await waitFor('pendingDelivery.facts().attempts.length===3');const editedAttempt=await evaluate('pendingDelivery.facts().attempts.at(-1)');
-  assert.equal(editedAttempt[1],editText,'Explicit Send after Save submits the updated original text');assert.equal(editedAttempt[2],originalLong.operationId);
-  await evaluate('pendingDelivery.submitted()');await waitFor(`!pendingDelivery.facts().inFlight[${JSON.stringify(sid)}]`);
-  await evaluate("pendingDelivery.queue('原 CAS 消息')");await painted();
-  const casEntry=(await settled()).facts.queues[sid][0];await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);
-  await evaluate(`${textarea}.select()`);await win.webContents.debugger.sendCommand('Input.insertText',{text:'未保存的本地稿'});await painted();
-  await evaluate(`pendingDelivery.revise(${JSON.stringify(casEntry.operationId)},'另一个调用者保存的原消息')`);const beforeConflict=await settled();
-  await click(`${strip}.querySelector('[aria-label="保存待发消息"]')`);await waitFor(`Boolean(${strip}.querySelector('[role="alert"]'))`);
-  const rejected=await settled();noticeGeometry(beforeConflict,rejected);
-  assert.equal(await evaluate(`${textarea}.value`),'未保存的本地稿','CAS rejection keeps the local editing text');
-  assert.equal(rejected.facts.queues[sid][0].text,'另一个调用者保存的原消息');assert.equal(rejected.facts.attempts.length,3);
-  assert.deepEqual(rejected.terminalRect,beforeConflict.terminalRect);assert.equal(rejected.terminal.rows,beforeConflict.terminal.rows);assert.equal(rejected.facts.resizes.length,beforeConflict.facts.resizes.length);
-  await frame(scene,'card-edit-rejected');await evaluate('pendingDelivery.unknown()');const locked=await settled();
-  assert.equal(await evaluate(`${strip}.querySelector('[aria-label="保存待发消息"]').disabled`),true,'Admitted unknown input cannot be edited into a new retry');
-  assert.equal(await evaluate(`${textarea}.value`),'未保存的本地稿');assert.equal(locked.facts.queues[sid][0].text,'另一个调用者保存的原消息');
-  assert.ok(locked.facts.queues[sid][0].promptCondition);assert.equal(locked.facts.attempts.length,3);await frame(scene,'card-edit-unknown-lock');
-  await key('Escape','Escape',27);await waitFor(`!${textarea}`);await click(`${selectedCard}.querySelector('[aria-label="复制这条待发消息"]')`);
-  await evaluate('pendingDelivery.clear()');await click(editor);await pointAt(surface);await copyOutcomeScenes(scene,baseline);await evaluate("pendingDelivery.queue('收起后仍可发现的原消息')");await painted();
-  await click(`${strip}.querySelector('[aria-label="收起待发卡片"]')`);const collapsed=await settled();retained(baseline,collapsed);
-  assert.ok(await evaluate(`Boolean(${strip}.querySelector('.composer-pending__restore'))`));await frame(scene,'card-collapsed');
-  await click(`${strip}.querySelector('.composer-pending__restore')`);await evaluate('pendingDelivery.clear()');const end=await settled();retained(baseline,end);
-  result.checkpoints.push({scene,name:'real-floating-card-traversal',short,two,stack,visited,focus,afterSend,long,editing,saved,rejected,locked,collapsed,end,editedAttempt});
-}
 function sharedPivot(facts) {
   const list=facts.strip.list,visible=facts.strip.cards.filter(card=>card.rect.y<list.rect.bottom&&card.rect.bottom>list.rect.y);
   assert.ok(visible.length>1,'Shared pivot is measured on distinct visible original cards');
@@ -467,196 +219,355 @@ function sharedPivot(facts) {
     assert.ok(Math.abs(card.layoutTop+y-list.scrollTop-list.layoutHeight)<1,'Every original card shares the list bottom edge as world pivot');
   }
 }
-function toolAnchor(facts) {
-  sharedPivot(facts);
-  const clearance=Number.parseFloat(facts.helperTextarea.lineHeight)*2;
-  assert.ok(Math.abs(facts.strip.rect.right-facts.composer.right)<1,'The visible stack follows the actual tool right edge');
-  assert.ok(Math.abs(facts.strip.rect.bottom-(facts.composer.y-8-clearance))<1,'Only the nearby native row safety gap separates the tool reference and shared stack pivot');
-}
-async function anchorScene(scene) {
-  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
-  const baseline=await initializeScene(scene),sid=await evaluate('resultReady.sessionId');
-  await frame(scene,'anchor-empty');
-  await evaluate("pendingDelivery.queue('原消息 · 保留共同右下旋转中心\\n第二行全文仍可读',5)");
-  const queued=await settled();retained(baseline,queued);visibleCursor(queued);cardGeometry(queued,5);toolAnchor(queued);
-  await frame(scene,'anchor-stack');
-  await pointAt(`${strip}.querySelector('[data-queue-index="3"] .composer-pending__preview')`);
-  const reader=await settled(),entry=reader.facts.queues[sid][3];uniqueReader(reader,entry.operationId,entry.text,'排队中');toolAnchor(reader);
-  await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
-  const copied=await settled();assert.equal(copied.facts.copies.at(-1),entry.text);copyFeedback(copied,entry.operationId,'copied',false);
-  assert.deepEqual(copied.facts.attempts,[]);toolAnchor(copied);visibleCursor(copied);await frame(scene,'anchor-reader-copy');
-
-  // This private countercase changes only an inner screen's retained DOM height.
-  // It is not a claim about the cause of the user's screenshot or Runtime state.
-  await pointAt(editor);
-  const screenStyle=await evaluate(`(()=>{const node=pendingNative.terminal.querySelector('.xterm-screen'),old=node.style.height;node.style.height='96px';return old})()`);
-  await pointAt(`${strip}.querySelector('[data-queue-index="3"] .composer-pending__preview')`);
-  const stale=await settled();assert.deepEqual(stale.terminal,reader.terminal);assert.deepEqual(stale.composer,reader.composer);toolAnchor(stale);
-  assert.deepEqual(stale.facts.queues,reader.facts.queues);await frame(scene,'anchor-stale-screen-control');
-  await evaluate(`pendingNative.terminal.querySelector('.xterm-screen').style.height=${JSON.stringify(screenStyle)}`);
-
-  await pointAt(editor);
-  await evaluate(`(()=>{const cache=pendingNative.terminal.cloneNode(false);cache.hidden=true;cache.dataset.anchorPrivateCache='true';const helper=document.createElement('textarea');helper.className='xterm-helper-textarea';helper.style.lineHeight='999px';cache.append(helper);pendingNative.terminal.parentElement.prepend(cache)})()`);
-  await pointAt(`${strip}.querySelector('[data-queue-index="3"] .composer-pending__preview')`);
-  const cached=await settled();toolAnchor(cached);visibleCursor(cached);assert.deepEqual(cached.facts.queues,reader.facts.queues);
-  await frame(scene,'anchor-cached-terminal-control');await evaluate("document.querySelector('[data-anchor-private-cache]').remove()");
-
-  await evaluate(`${surface}.querySelector('.composer').style.transform='translateY(-32px)'`);
-  await painted();const moved=await settled();assert.ok(reader.composer.y-moved.composer.y>30);toolAnchor(moved);
-  assert.deepEqual(moved.terminal,cached.terminal);assert.deepEqual(moved.facts.queues,cached.facts.queues);await frame(scene,'anchor-tool-position-moved');
-  await evaluate(`${surface}.querySelector('.composer').style.transform=''`);
-  await painted();const restored=await settled();toolAnchor(restored);retained(baseline,restored);visibleCursor(restored);await frame(scene,'anchor-restored');
-
-  win.setContentSize(scene.viewport,690);
-  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:scene.viewport,height:690,deviceScaleFactor:1,mobile:false});
-  await painted();const resized=await settled();assert.ok(restored.composer.y-resized.composer.y>40);toolAnchor(resized);visibleCursor(resized);
-  assert.deepEqual(resized.facts.queues,restored.facts.queues);assert.equal(resized.draft,restored.draft);assert.deepEqual(resized.retainedNodes,{editor:true,terminal:true,neighbor:true});await frame(scene,'anchor-window-resized');
-  await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);
-  const editing=await settled();assert.equal(editing.strip.reading.editing,1);toolAnchor(editing);visibleCursor(editing);await frame(scene,'anchor-editor');
-  await key('Escape','Escape',27);await evaluate('pendingDelivery.clear()');await click(editor);
-  const scrollBaseline=await settled();await evaluate('pendingDelivery.distinctQueue(100)');await painted();
-  await spatialScrollScenes(scene,scrollBaseline);
-  const end=await settled();sharedPivot(end);assert.deepEqual(end.facts.attempts,[]);
-  await evaluate('pendingDelivery.clear()');const cleared=await settled();retained(scrollBaseline,cleared);
-  result.scenes.push({scene,baseline,queued,reader,copied,stale,cached,moved,restored,resized,editing,end,cleared});
-}
-async function initializeScene(scene) {
+async function initializeScene(scene, shortPrompt = false) {
   result.stage = scene;
   win.setContentSize(scene.viewport, 750);
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: scene.viewport, height: 750, deviceScaleFactor: 1, mobile: false });
   await evaluate(`pendingDelivery.seed(${JSON.stringify(scene.appearance)})`);
   await waitFor(`Boolean(${surface}.querySelector('.xterm-helper-textarea'))&&!${surface}.querySelector('.terminal-view__xterm--hydrating')&&pendingDelivery.terminal().cursorLine.includes('half typed prompt')`);
-  await evaluate(`(()=>{window.pendingNative={editor:${editor},terminal:${surface}.querySelector('.xterm'),neighbor:${neighbor},actions:[],hoverActions:[],terminalEvents:[],phase:'seed'};const log=window.pendingNative,record=resultReadyTerminals.find(r=>r.terminal.element===log.terminal&&!r.disposed);log.buffer=record.terminal.buffer.active;const observe=(kind,value)=>{const b=record.terminal.buffer.active;log.terminalEvents.push({kind,value,phase:log.phase,bufferType:b.type,bufferStable:b===log.buffer,repeatedReadStable:b===record.terminal.buffer.active,rows:record.terminal.rows,baseY:b.baseY,viewportY:b.viewportY,cursorY:b.cursorY,stack:kind==='scroll'?new Error('Private terminal scroll observation').stack:undefined})};record.terminal.onResize(value=>observe('resize',value));record.terminal.onScroll(value=>observe('scroll',value));if(!window.pendingNativeRecorder){window.pendingNativeRecorder=true;document.addEventListener('pointermove',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending__card'):null;if(target&&window.pendingNative)window.pendingNative.hoverActions.push({trusted:event.isTrusted,operationId:target.dataset.operationId})},true);document.addEventListener('click',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending button'):null;if(target&&window.pendingNative)window.pendingNative.actions.push({trusted:event.isTrusted,label:target.getAttribute('aria-label'),operationId:target.closest('.composer-pending__card')?.dataset.operationId??target.closest('.composer-pending')?.dataset.operationId})},true)}})()`);
+  await evaluate(`(()=>{window.pendingNative={editor:${editor},terminal:${surface}.querySelector('.xterm'),neighbor:${neighbor},actions:[],hoverActions:[],buttonEvents:[],terminalEvents:[],phase:'seed',nativeLinePrefix:${JSON.stringify(shortPrompt ? 'agent > a' : 'agent > half typed prompt')}};const log=window.pendingNative,record=resultReadyTerminals.find(r=>r.terminal.element===log.terminal&&!r.disposed);log.buffer=record.terminal.buffer.active;const observe=(kind,value)=>{const b=record.terminal.buffer.active;log.terminalEvents.push({kind,value,phase:log.phase,bufferType:b.type,bufferStable:b===log.buffer,repeatedReadStable:b===record.terminal.buffer.active,rows:record.terminal.rows,baseY:b.baseY,viewportY:b.viewportY,cursorY:b.cursorY,stack:kind==='scroll'?new Error('Private terminal scroll observation').stack:undefined})};record.terminal.onResize(value=>observe('resize',value));record.terminal.onScroll(value=>observe('scroll',value));if(!window.pendingNativeRecorder){window.pendingNativeRecorder=true;for(const kind of ['pointerdown','mousedown','focusin','pointerup','mouseup','click'])document.addEventListener(kind,event=>{const target=event.target instanceof Element?event.target:null,card=target?.closest('.composer-pending__card'),log=window.pendingNative;if(!card||!log||log.buttonEvents.length>=128)return;const r=target.getBoundingClientRect(),button=target.closest('button'),x=typeof event.clientX==='number'?event.clientX:null,y=typeof event.clientY==='number'?event.clientY:null,hit=x!==null&&y!==null?document.elementFromPoint(x,y):null;log.buttonEvents.push({kind,trusted:event.isTrusted,at:event.timeStamp,x,y,tag:target.tagName,label:button?.getAttribute('aria-label')??null,operationId:card.dataset.operationId,selected:card.dataset.selected,targetRect:{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom},hitLabel:hit?.closest('button')?.getAttribute('aria-label')??null,hitOperationId:hit?.closest('.composer-pending__card')?.dataset.operationId??null})},true);document.addEventListener('pointermove',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending__card'):null;if(target&&window.pendingNative)window.pendingNative.hoverActions.push({trusted:event.isTrusted,operationId:target.dataset.operationId})},true);document.addEventListener('click',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending button'):null;if(target&&window.pendingNative)window.pendingNative.actions.push({trusted:event.isTrusted,label:target.getAttribute('aria-label'),operationId:target.closest('.composer-pending__card')?.dataset.operationId??target.closest('.composer-pending')?.dataset.operationId})},true)}})()`);
   // CDP typing exercises the maintained original editor, without an Enter or Runtime submit.
   await click(editor); await key('End', 'End', 35); await key('x', 'KeyX', 88, 'x');
   await waitFor(`pendingDelivery.facts().drafts[resultReady.sessionId].includes('x')`);
-  await evaluate(`new Promise(done=>{const r=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);r.terminal.write('x'.repeat(Math.max(0,r.terminal.cols-r.terminal.buffer.active.cursorX-2)),done)})`);
+  if (shortPrompt) await evaluate(`new Promise(done=>{const r=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);r.terminal.write(${JSON.stringify('\r\x1b[2Kagent > a')},done)})`);
+  if (!shortPrompt) await evaluate(`new Promise(done=>{const r=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);r.terminal.write('x'.repeat(Math.max(0,r.terminal.cols-r.terminal.buffer.active.cursorX-2)),done)})`);
   const baseline = await settled();
   assert.equal(baseline.strip, null, 'An empty queue has no pending slot'); visibleCursor(baseline);
   assert.ok(baseline.facts.inputs.some(input => input.trusted && input.composer && input.key === 'x'));
   assert.ok(Math.abs(baseline.ownerRect.width - scene.ownerWidth) <= 8, 'The actual owner uses the bounded scene width');
   return baseline;
 }
-async function scene(scene) {
-  const baseline = await initializeScene(scene);
-  await frame(scene, 'empty');
 
-  // Appearance at latest must preserve the cursor, independently of historical reading.
-  assert.equal(baseline.editorFocused, true, 'The original input owns focus before bottom appearance');
-  await evaluate("pendingNative.phase='bottom-pending-appearance';pendingDelivery.queue()");
-  const bottomAppearance = await settled();
-  result.checkpoints.push({ scene, name: 'bottom-pending-appearance', facts: bottomAppearance });
-  pendingGeometry(baseline, bottomAppearance, '排队中', false, false); visibleCursor(bottomAppearance);
-  assert.equal(bottomAppearance.editorFocused, true, 'Bottom pending appearance preserves original input focus');
-  assert.equal(bottomAppearance.facts.attempts.length, 0, 'Bottom queue appearance has no submit');
-  assert.deepEqual(bottomAppearance.facts.inFlight, {}); assert.deepEqual(bottomAppearance.facts.phase, {});
-  await evaluate("pendingNative.phase='bottom-pending-cleared';pendingDelivery.clear()");
-  const bottomCleared = await settled();
-  result.checkpoints.push({ scene, name: 'bottom-pending-cleared', facts: bottomCleared });
-  assert.equal(bottomCleared.strip, null); retained(baseline, bottomCleared);
-  assert.deepEqual(bottomCleared.terminal, baseline.terminal, 'Clearing bottom pending restores the complete original terminal');
-  assert.equal(bottomCleared.editorFocused, true); visibleCursor(bottomCleared);
-
-  // A real scrolled xterm anchor must survive the new pending row, independently of bottom reading.
-  await evaluate(`(()=>{const record=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);record.terminal.scrollLines(-4)})()`);
-  const reading = await settled(); assert.ok(reading.terminal.viewportY < reading.terminal.baseY);
-  const anchor = reading.terminal.visibleLines[0]; assert.ok(anchor.length > 0);
-  await evaluate('pendingDelivery.queue()');
-  const queued = await settled(); pendingGeometry(reading, queued, '排队中', false, false);
-  assert.equal(queued.terminal.viewportY, reading.terminal.viewportY, 'Pending appearance retains the actual scrolled viewport anchor');
-  assert.equal(queued.terminal.visibleLines[0], anchor, 'The same original history line remains at the reading anchor');
-  assert.equal(queued.editorFocused, true, 'Queue appearance does not take draft focus');
-  const sid = await evaluate('resultReady.sessionId'), entry = queued.facts.queues[sid][0];
-  assert.equal(queued.facts.queues[sid].length, 1); assert.equal(queued.strip.operationId, entry.operationId);
-  assert.equal(entry.promptCondition, null); assert.equal(queued.facts.attempts.length, 0);
-  await frame(scene, 'queued-reading');
-  await evaluate(`(()=>{const record=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);record.terminal.scrollToBottom()})()`);
-  const bottom = await settled(); visibleCursor(bottom);
-
-  await click(send); await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`);
-  const preparing = await settled(); pendingGeometry(bottom, preparing, '准备发送', true, true); visibleCursor(preparing);
-  assert.equal(preparing.facts.inFlight[sid], entry.operationId); assert.equal(preparing.facts.attempts.length, 0);
-  assert.ok(preparing.trustedActions.some(action => action.trusted && action.label === '发送这条待发消息' && action.operationId === entry.operationId));
-  // The real tail proves that this direct icon grants only the selected operation.
-  await evaluate('pendingDelivery.queue()');await pointAt(`${strip}.querySelector('[data-queue-index="0"] .composer-pending__preview')`);
-  const withTail = await settled(); assert.equal(withTail.facts.queues[sid].length, 2);
-  const tail = withTail.facts.queues[sid][1]; assert.notEqual(tail.operationId, entry.operationId);
-  pendingGeometry(preparing, withTail, '准备发送', true, true); visibleCursor(withTail);
-  await frame(scene, 'preparing');
-  await evaluate('pendingDelivery.prepared()');
-  await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='submitting'&&pendingDelivery.facts().attempts.length===1`);
-  const sending = await settled(); pendingGeometry(withTail, sending, '发送中', true, true); visibleCursor(sending);
-  const attempt = sending.facts.attempts[0];
-  assert.equal(attempt[0].agentSessionId, sid); assert.equal(attempt[0].run.runId, entry.runId);
-  assert.equal(attempt[1], entry.text); assert.equal(attempt[2], entry.operationId);
-  assert.equal(attempt[3].expectedRun.runId, entry.runId); assert.equal(attempt[4].allowUncertainTurn, true);
-  assert.equal(sending.facts.inFlight[sid], entry.operationId); await frame(scene, 'sending');
-  await evaluate('pendingDelivery.submitted()');
-  await waitFor(`!pendingDelivery.facts().inFlight[${JSON.stringify(sid)}]`);
-  const completed = await settled(); retained(sending, completed);
-  assert.deepEqual(completed.facts.queues[sid].map(item => item.operationId), [tail.operationId]);
-  assert.equal(completed.facts.phase[sid], undefined); assert.equal(completed.facts.attempts.length, 1, 'The real nonempty tail has no dispatch');
-  await evaluate('pendingDelivery.clear()'); const clearedTail = await settled();
-  assert.equal(clearedTail.strip, null); assert.deepEqual(clearedTail.terminal, baseline.terminal, 'Clearing the private idle tail restores the original terminal grid and cursor');
-  retained(baseline, clearedTail); visibleCursor(clearedTail);
-  result.checkpoints.push({ scene, name: 'cleared-tail-latest', facts: clearedTail });
-
-  await evaluate("pendingNative.phase='interaction-only';pendingDelivery.interaction(true)"); const interaction = await settled();
-  result.checkpoints.push({ scene, name: 'interaction-only', facts: interaction });
-  await evaluate("pendingNative.phase='interaction-with-pending';pendingDelivery.queue()"); const waiting = await settled();
-  result.checkpoints.push({ scene, name: 'interaction-with-pending', facts: waiting });
-  pendingGeometry(interaction, waiting, '等待回答', false, true); visibleCursor(waiting);
-  const pending = waiting.facts.queues[sid][0];
-  assert.equal(waiting.facts.attempts.length, 1); assert.equal(waiting.facts.inFlight[sid], undefined);
-  await frame(scene, 'waiting');
-  await evaluate("pendingNative.phase='permission-cleared';pendingDelivery.interaction(false);pendingDelivery.unknown()");
-  const unknown = await settled();
-  result.noticeTransitions.push({ scene, name: 'unknown-notice-appears', ...pendingGeometry(clearedTail, unknown, '发送结果待核实', false, false, true) });
-  visibleCursor(unknown);
-  assert.equal(unknown.facts.queues[sid][0].operationId, pending.operationId); assert.equal(unknown.facts.attempts.length, 1);
-  await frame(scene, 'unknown');
-  await click(more); await waitFor(`${panel}.matches(':popover-open')&&${panel}.querySelector('[id$="-outbox-tab"]').getAttribute('aria-selected')==='true'`);
-  await waitFor(`Boolean(${panel}.querySelector('.composer-outbox.composer-mailbox__detail'))`);
-  assert.equal(await evaluate(`${panel}.querySelector('.log-turn__body').textContent`), pending.text, 'Original Outbox retains the exact full queued text');
-  assert.equal(await evaluate(`${panel}.querySelector('.log-turn__actions .composer-mailbox__reveal').disabled`), true);
-  assert.equal(await evaluate(`${panel}.textContent.includes('尚未发送，暂无对话位置')`),false,'Unknown delivery is not falsely called not sent');
-  assert.ok(await evaluate(`${panel}.textContent.includes('发送结果待核实')&&${panel}.textContent.includes('对话位置')`),'Unknown delivery and missing position are explained independently');
-  await click(`${panel}.querySelector('[aria-label="Copy message"]')`);
-  await waitFor(`pendingDelivery.facts().copies.length===1`);
-  assert.equal(await evaluate('pendingDelivery.facts().copies[0]'), pending.text, 'Real Copy sends the full original text to the private clipboard sink');
-  assert.equal(await evaluate('pendingDelivery.facts().attempts.length'), 1, 'More, detail and Copy issue no delivery');
-  const copied = await evaluate(`(()=>{const button=${panel}.querySelector('[aria-label="Message copied"]'),text=button?.querySelector('span');if(!button||!text)throw Error('Actual shared Copy feedback absent');const range=document.createRange();range.selectNodeContents(text);const r=button.getBoundingClientRect(),p=${panel}.getBoundingClientRect();return{label:text.textContent,button:{x:r.x,right:r.right,y:r.y,bottom:r.bottom},panel:{x:p.x,right:p.right,y:p.y,bottom:p.bottom},lines:[...range.getClientRects()].map(rect=>({x:rect.x,right:rect.right,y:rect.y,bottom:rect.bottom}))}})()`);
-  assert.equal(copied.label, 'Copied'); assert.equal(copied.lines.length, 1, 'Copied feedback remains on one visible line');
-  assert.ok(copied.lines[0].x >= copied.button.x && copied.lines[0].right <= copied.button.right);
-  assert.ok(copied.button.x >= copied.panel.x && copied.button.right <= copied.panel.right, 'The original Copy action remains inside the visible Outbox');
-  result.checkpoints.push({ scene, name: 'shared-copy-feedback', copied });
-  await frame(scene, 'outbox-detail');
-  await click(`${panel}.querySelector('[aria-label="Message details"]')`);
-  await waitFor(`Boolean(${panel}.querySelector('.conversation-input-details__body'))`);
-  const info = await evaluate(`${panel}.querySelector('.conversation-input-details__body').textContent`);
-  assert.match(info, /Pending message · not a delivery receipt/); assert.match(info, /Delivery result unknown/);
-  assert.equal(await evaluate(`Boolean(${panel}.querySelector('[data-mailbox-location="target"]'))`), false);
-  await frame(scene, 'outbox-info');
-  await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);
-  await waitFor(`!${panel}.matches(':popover-open')`); await evaluate('pendingDelivery.clear()');
-  await click(editor); const cleared = await settled();
-  assert.equal(cleared.strip, null); assert.equal(cleared.editorFocused, true);
-  retained(baseline, cleared, false, true); assert.equal(cleared.facts.resizes.length,unknown.facts.resizes.length,'Clearing pending after the independent permission transition causes zero resize'); assert.deepEqual(cleared.terminal, baseline.terminal); visibleCursor(cleared);
-  result.noticeTransitions.push({ scene, name: 'unknown-notice-clears', ...noticeGeometry(unknown, cleared) });
-  assert.equal(cleared.facts.attempts.length, 1); assert.deepEqual(cleared.facts.inFlight, {}); assert.deepEqual(cleared.facts.phase, {});
-  // Trusted terminal input is echoed only by the private preview adapter on the same actual xterm.
-  await click(`${surface}.querySelector('.terminal-view__xterm')`);
-  const writes = cleared.facts.writes.length; await key('q', 'KeyQ', 81, 'q');
-  await waitFor(`pendingDelivery.facts().writes.length===${writes + 1}`); const trusted = await settled();
-  assert.equal(trusted.facts.writes.at(-1).data, 'q'); assert.equal(trusted.facts.writes.at(-1).control.run.runId, entry.runId);
-  assert.equal(trusted.terminal.id, baseline.terminal.id); assert.equal(trusted.terminal.rows, baseline.terminal.rows);
-  assert.equal(trusted.terminal.cursorX, baseline.terminal.cursorX + 1); assert.equal(trusted.terminal.cursorLine, baseline.terminal.cursorLine + 'q');
-  assert.equal(trusted.draft, baseline.draft); assert.deepEqual(trusted.neighbor, baseline.neighbor);
-  assert.ok(trusted.facts.inputs.some(input => input.trusted && input.terminal && input.key === 'q'));
-  await cardScenes(scene, trusted);
-  result.scenes.push({ scene, baseline, reading, anchor, queued, bottom, preparing, withTail, sending, completed, clearedTail, interaction, waiting, unknown, info, cleared, trusted,
-    delivery: { operationId: entry.operationId, runId: entry.runId, tailOperationId: tail.operationId, submitCount: trusted.facts.attempts.length } });
+function compactGeometry(facts, count) {
+  const floating = facts.strip;
+  assert.ok(floating); assert.equal(floating.headerCount, 0, 'No separate pending/position header remains');
+  assert.equal(floating.reading.readerCount, 0, 'Hover creates no extra large body or reason panel');
+  assert.equal(floating.cards.length, count); assert.equal(new Set(floating.cards.map(card => card.id)).size, count);
+  assert.ok(floating.rect.width <= 360.1 && floating.rect.height <= 320.1);
+  assert.ok(Math.abs(floating.rect.right - facts.composer.right) < 1, 'The actual tool right edge is the only horizontal anchor');
+  assert.equal(floating.outsideInput, true); assert.equal(floating.background, 'rgba(0, 0, 0, 0)');
+  for (const card of floating.cards) {
+    assert.equal(card.ordinal, `${card.index + 1}/${count}`, 'Each original operation has its own accurate ordinal');
+    assert.equal(card.previewTitle, null); assert.equal(card.state.hiddenLabel, card.state.label);
+    if (card.editing !== 'true') assert.equal(card.layoutHeight, 28);
+  }
+  const selected = floating.cards.find(card => card.selected === 'true');
+  const list = floating.list.rect;
+  if (selected.rect.y >= list.y && selected.rect.bottom <= list.bottom + 1) {
+    for (const label of ['复制这条待发消息', '在 Outbox 查看待发消息和操作']) {
+      const button = selected.actions.find(action => action.label === label);
+      assert.ok(button && button.rect.width >= 23.9 && button.rect.height >= 23.9, 'Actual original actions retain 24px touch/focus targets');
+    }
+  }
+  if (count > 1) sharedPivot(facts);
 }
+function compactGap(facts, expected) {
+  const gap = facts.composer.y - facts.strip.rect.bottom;
+  const natural = { x: facts.strip.rect.x, right: facts.strip.rect.right, y: facts.composer.y - 8 - facts.strip.rect.height, bottom: facts.composer.y - 8 };
+  const text = facts.cursorText, intersects = natural.x < text.right && natural.right > text.x && natural.y < text.bottom && natural.bottom > text.y;
+  const minimum = intersects ? Math.max(8, facts.composer.y - facts.helperTextarea.rect.y + 2) : 8;
+  if (expected !== undefined) assert.equal(intersects, false, 'The left-short control actually does not overlap the natural stack');
+  assert.ok(Math.abs(gap - (expected ?? minimum)) < 1, 'Only the actual visible current line overlap gives a minimal gap; no unconditional native-row clearance');
+  return { gap, natural, text, intersects, minimum };
+}
+async function compactActivate(scene, expression, proofName = null) {
+  if (scene.pointer !== 'coarse') return click(expression, proofName);
+  const point = await evaluate(`(()=>{const r=(${expression}).getBoundingClientRect();if(!r.width||!r.height)throw Error('Actual touch target missing');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+  await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ ...point, radiusX: 1, radiusY: 1, force: 1, id: 1 }] });
+  await win.webContents.debugger.sendCommand('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await painted();
+}
+async function compactDistance(scene, baseline) {
+  const selected = baseline.strip.cards.find(card => card.selected === 'true');
+  const r = selected.rect, roi = { x: Math.ceil(r.x + 2), y: Math.ceil(r.y + 2), width: Math.floor(r.width - 4), height: Math.floor(r.height - 4) };
+  assert.ok(roi.width > 20 && roi.height > 8);
+  const samples = [], bitmaps = [];
+  for (const [name, distance] of [['far', 280], ['mid', 130], ['near', 6]]) {
+    const point = { x: baseline.strip.rect.right + distance, y: r.y + r.height / 2 };
+    assert.ok(point.x < scene.viewport, 'The distance sample uses a real in-window point outside the cards');
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
+    await painted();
+    const actual = await settled();
+    retained(baseline, actual); assert.equal(actual.strip.operationId, baseline.strip.operationId);
+    assert.equal(actual.strip.hover, false, 'Distance does not select another card or use a hover panel');
+    assert.deepEqual(actual.strip.rect, baseline.strip.rect);
+    const coordinates = [Number.parseFloat(actual.strip.pointerX), Number.parseFloat(actual.strip.pointerY)];
+
+    const image = await win.webContents.capturePage(roi), bytes = image.toPNG(), bitmap = image.toBitmap();
+    const file = `${scene.name}-${name}-card-roi.png`; await fs.writeFile(path.join(evidence, file), bytes);
+    bitmaps.push(bitmap); samples.push({ name, point, roi, coordinates, maskImage: actual.strip.maskImage, file, bitmapBytes: bitmap.length, sha256: crypto.createHash('sha256').update(bytes).digest('hex') });
+    await frame(scene, 'compact-single-' + name);
+  }
+  const differences = bitmaps.slice(1).map((bitmap, index) => {
+    assert.equal(bitmap.length, bitmaps[index].length);
+    let changedChannels = 0, absoluteDelta = 0;
+    for (let channel = 0; channel < bitmap.length; channel++) {
+      const delta = Math.abs(bitmap[channel] - bitmaps[index][channel]); if (delta) changedChannels++; absoluteDelta += delta;
+    }
+    return { from: samples[index].name, to: samples[index + 1].name, changedChannels, absoluteDelta };
+  });
+  result.checkpoints.push({ scene, name: 'actual-card-distance-pixels', samples, differences });
+  assert.ok(differences.every(row => row.changedChannels > 20 && row.absoluteDelta > 100), 'Both distance steps change the actual same-card bitmap, beyond CSS property presence');
+  for (const sample of samples) {
+    assert.match(sample.maskImage, /radial-gradient/);
+    assert.ok(Math.abs(sample.coordinates[0] - (sample.point.x - baseline.strip.rect.x)) < 1 && Math.abs(sample.coordinates[1] - (sample.point.y - baseline.strip.rect.y)) < 1);
+  }
+}
+async function compactMultiDistance(scene, baseline) {
+  // One pointer acts on distinct actual original cards. No hover or focus selects them.
+  await click(editor);
+  const ids = [baseline.strip.cards[0].id, baseline.strip.cards[2].id], samples = [], pixels = new Map();
+  for (const [step, target] of [[0, baseline.strip.cards[0]], [1, baseline.strip.cards[2]]]) {
+    const point = { x: baseline.strip.rect.right + 6, y: target.rect.y + target.rect.height / 2 };
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }); await painted();
+    const actual = await settled(); assert.equal(actual.strip.maskImage.includes('radial-gradient'), true);
+    assert.equal(actual.strip.hover, false); assert.equal(actual.strip.focused, false);
+    assert.equal(actual.strip.operationId, baseline.strip.operationId); assert.deepEqual(actual.facts.queues, baseline.facts.queues);
+    const cards = [];
+    for (const id of ids) {
+      const card = actual.strip.cards.find(row => row.id === id), original = baseline.strip.cards.find(row => row.id === id);
+      assert.deepEqual(card.rect, original.rect); assert.equal(card.transform, original.transform, 'Distance changes no card plane or queue selection');
+      const roi = { x: Math.ceil(card.rect.x + 2), y: Math.ceil(card.rect.y + card.rect.height / 2 - 4), width: Math.floor(card.rect.width - 4), height: 8 };
+      const image = await win.webContents.capturePage(roi), bitmap = image.toBitmap(), bytes = image.toPNG();
+      const file = `${scene.name}-multi-distance-${step}-${card.index}-roi.png`; await fs.writeFile(path.join(evidence, file), bytes);
+      const center = { x: card.rect.x + card.rect.width / 2, y: card.rect.y + card.rect.height / 2 };
+      const distance = Math.hypot(point.x - center.x, point.y - center.y), old = pixels.get(id);
+      let changedChannels = 0, absoluteDelta = 0;
+      if (old) { assert.equal(old.length, bitmap.length); for (let i = 0; i < bitmap.length; i++) { const delta = Math.abs(bitmap[i] - old[i]); if (delta) changedChannels++; absoluteDelta += delta; } }
+      cards.push({ id, index: card.index, rect: card.rect, transform: card.transform, distance, roi, file, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), bitmapBytes: bitmap.length, changedChannels, absoluteDelta });
+      pixels.set(id, bitmap);
+    }
+    assert.notEqual(cards[0].distance, cards[1].distance, 'Distinct card geometry has independently measured distance to the same pointer');
+    samples.push({ point, selectedId: actual.strip.operationId, cards });
+  }
+  result.checkpoints.push({ scene, name: 'actual-multiple-card-distance-pixels', samples });
+  assert.ok(samples[1].cards.every(row => row.changedChannels > 20 && row.absoluteDelta > 100), 'Both original cards respond in their actual bitmap to one pointer move');
+}
+async function compactInlineEdit(scene, baseline) {
+  const sid = await evaluate('resultReady.sessionId'), original = baseline.facts.queues[sid][0];
+  await compactActivate(scene, `${selectedCard}.querySelector('.composer-pending__preview')`);
+  const textarea = `${strip}.querySelector('.composer-pending__card[data-operation-id="${original.operationId}"] textarea')`;
+  await waitFor(`Boolean(${textarea})`);
+  const editing = await settled();
+  assert.equal(editing.strip.inlineEditorCount, 1); assert.equal(editing.strip.reading.readerCount, 0);
+  assert.equal(editing.strip.operationId, original.operationId); assert.equal(editing.strip.maskImage, 'none');
+  assert.equal(await evaluate(`document.activeElement===${textarea}`), true);
+  await key('End', 'End', 35); await key('q', 'KeyQ', 81, 'q');
+  const text = await evaluate(`${textarea}.value`), caret = [];
+  for (const [name, code, virtual] of [['ArrowLeft', 'ArrowLeft', 37], ['ArrowRight', 'ArrowRight', 39], ['Home', 'Home', 36], ['End', 'End', 35]]) {
+    await key(name, code, virtual);
+    const facts = await evaluate(`({focused:document.activeElement===${textarea},value:${textarea}.value,start:${textarea}.selectionStart,end:${textarea}.selectionEnd,id:${strip}.dataset.operationId})`);
+    assert.equal(facts.focused, true); assert.equal(facts.value, text); assert.equal(facts.id, original.operationId); caret.push({ name, ...facts });
+  }
+  assert.equal((await evaluate('pendingDelivery.facts()')).queues[sid][0].text, original.text, 'The original queue body is unchanged before Save');
+  await frame(scene, 'compact-inline-edit');
+  await compactActivate(scene, `${strip}.querySelector('[aria-label="保存待发消息"]')`);
+  await waitFor(`!${strip}.querySelector('textarea')`);
+  const saved = await settled(); retained(baseline, saved);
+  assert.equal(saved.facts.queues[sid][0].operationId, original.operationId); assert.equal(saved.facts.queues[sid][0].text, text);
+  assert.deepEqual(saved.facts.attempts, baseline.facts.attempts, 'Saving this original body never submits it');
+  result.checkpoints.push({ scene, name: 'original-inline-edit-focus-and-save', original, text, caret, editing, saved });
+  return saved;
+}
+async function compactOriginalMore(scene, before) {
+  const sid = await evaluate('resultReady.sessionId'), entry = before.facts.queues[sid][1];
+  const target = `${strip}.querySelector('.composer-pending__card[data-operation-id="${entry.operationId}"] .composer-pending__more')`;
+  await compactActivate(scene, target, 'single-nonfirst-original-more');
+  if (compactCheckpoint === 'more') await frame(scene, 'compact-more-first-after');
+  await waitFor(`${panel}.matches(':popover-open')&&Boolean(${panel}.querySelector('[data-record-key="queue:${entry.operationId}"]'))`);
+  const actual = await evaluate(`({id:${panel}.querySelector('.composer-mailbox__detail').dataset.recordKey,text:${panel}.textContent,facts:pendingDelivery.facts(),hidden:document.querySelector('.composer-pending[data-operation-id="${entry.operationId}"]').hidden})`);
+  assert.equal(actual.id, 'queue:' + entry.operationId); assert.ok(actual.text.includes(entry.text)); assert.equal(actual.hidden, true);
+  assert.deepEqual(actual.facts.queues, before.facts.queues); assert.deepEqual(actual.facts.attempts, before.facts.attempts);
+  if (compactCheckpoint !== 'more') await frame(scene, 'compact-more-original');
+  // Close the real original Mail through the maintained tool control.
+  await compactActivate(scene, `${surface}.querySelector('.composer__mailbox')`);
+  await waitFor(`!${panel}.matches(':popover-open')&&!${strip}.hidden`);
+  result.checkpoints.push({ scene, name: 'nonfirst-ordinal-original-mail', entry, actual });
+}
+async function compactNativeLine(scene) {
+  await evaluate(`new Promise(done=>{const r=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);pendingNative.phase='private-long-native-line';r.terminal.write('x'.repeat(Math.max(0,r.terminal.cols-r.terminal.buffer.active.cursorX-2)),done)})`);
+  const longBaseline = await settled();
+  await evaluate("pendingDelivery.queue('保护当前原生长行 · 光标回左不移除右侧正文',2)");
+  const right = await settled(); retained(longBaseline, right);
+  result.checkpoints.push({ scene, name: 'actual-long-line-caret-right', right }); await frame(scene, 'compact-caret-right'); visibleCursor(right);
+  // The original preview write port already echoes terminal-output bytes.
+  // Use actual trusted xterm ArrowLeft input through that owner; observe only.
+  const count = Math.max(1, right.terminal.cursorX - 4);
+  assert.ok(count <= 512, 'This controlled keyboard probe is bounded by the actual terminal row');
+  await evaluate(`(()=>{const r=resultReadyTerminals.find(r=>r.terminal.element===pendingNative.terminal&&!r.disposed);pendingNative.arrowObserved={count:${count},data:[]};pendingNative.arrowLease=r.terminal.onData(data=>{if(pendingNative.arrowObserved.data.length<512)pendingNative.arrowObserved.data.push(data)})})()`);
+  try {
+    await click(`pendingNative.terminal.querySelector('.xterm-helper-textarea')`);
+    for (let i = 0; i < count; i++) for (const type of ['keyDown', 'keyUp']) {
+      await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: 'ArrowLeft', code: 'ArrowLeft', windowsVirtualKeyCode: 37 });
+    }
+    await painted(); await waitFor(`pendingDelivery.terminal().cursorX===${right.terminal.cursorX - count}`);
+    const left = await settled(), echo = await evaluate('pendingNative.arrowObserved');
+    assert.equal(echo.data.length, count); assert.ok(echo.data.every(data => data === '\x1b[D'));
+    assert.equal(left.facts.writes.length - right.facts.writes.length, count, 'Every trusted ArrowLeft consumes the original preview write port once');
+    assert.equal(left.terminal.cursorX, right.terminal.cursorX - count); assert.equal(left.terminal.cursorLine, right.terminal.cursorLine);
+    assert.deepEqual(left.terminal.visibleLines, right.terminal.visibleLines); assert.equal(left.buffer.stable, true);
+    assert.equal(left.originalId, right.originalId); assert.deepEqual(left.retainedNodes, right.retainedNodes);
+    assert.deepEqual(left.facts.queues, right.facts.queues); assert.equal(left.draft, right.draft);
+    result.checkpoints.push({ scene, name: 'actual-long-line-caret-return-left', right, left, echo });
+    await frame(scene, 'compact-caret-return-left');
+    compactGap(left); visibleCursor(left); // Strictly protects text still extending right, not only the helper rect.
+  } finally { await evaluate('pendingNative.arrowLease?.dispose()').catch(() => {}); }
+  await evaluate('pendingDelivery.clear()');
+}
+async function compactNativeScroll(scene, baseline) {
+  await evaluate('pendingDelivery.distinctQueue(100)');
+  const stack = await settled(); retained(baseline, stack); compactGeometry(stack, 100);
+  await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards');window.pendingCompactNodes=[...list.children];window.pendingCompactWheels=[];list.addEventListener('wheel',event=>pendingCompactWheels.push({trusted:event.isTrusted,prevented:event.defaultPrevented,deltaY:event.deltaY}),{passive:true});list.scrollTop=list.children[96].offsetTop-96})()`);
+  const point = await evaluate(`(()=>{const r=${strip}.querySelector('.composer-pending__cards').getBoundingClientRect();return{x:r.right-2,y:r.y+r.height/2}})()`);
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point }); await painted();
+  const before = await settled(), card = before.strip.cards[96];
+  assert.equal(card.selected, 'false'); assert.equal(card.animation, 'composer-pending-depth');
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: 46 });
+  await waitFor(`${strip}.querySelector('.composer-pending__cards').scrollTop>${before.strip.list.scrollTop}+20`);
+  const after = await settled(); retained(before, after); sharedPivot(after);
+  result.checkpoints.push({ scene, name: 'actual-spatial-scroll-tail', before, after });
+  assert.equal(after.strip.operationId, before.strip.operationId); assert.deepEqual(after.facts.queues, before.facts.queues);
+  assert.notEqual(after.strip.cards[96].transform, card.transform, 'Trusted native wheel changes the same original card depth');
+  const matrix = value => value.slice(9, -1).split(',').map(Number), a = matrix(card.transform), b = matrix(after.strip.cards[96].transform);
+  assert.equal(a.length, 16); assert.equal(b.length, 16);
+  assert.ok(Math.abs(a[14] - b[14]) > 2 && Math.abs(a[6] - b[6]) > .02, 'Depth and tilt change beyond a planar vertical displacement');
+  assert.equal(await evaluate(`pendingCompactNodes.every((node,i)=>node===${strip}.querySelector('.composer-pending__cards').children[i])`), true);
+  assert.ok(await evaluate('pendingCompactWheels.some(row=>row.trusted&&!row.prevented&&row.deltaY>0)'));
+  // All head/middle/tail original cards remain reachable via trusted keyboard.
+  await click(`${strip}.querySelector('.composer-pending__card[data-queue-index="96"] .composer-pending__state')`);
+  const navigationStart = await settled(); assert.equal(navigationStart.strip.inlineEditorCount, 0);
+  assert.equal(navigationStart.strip.operationId, navigationStart.strip.cards[96].id);
+  for (const [name, code, virtual, index] of [['Home', 'Home', 36, 0], ['End', 'End', 35, 99]]) {
+    await key(name, code, virtual);
+    const reached = await settled(), item = reached.strip.cards[index];
+    assert.equal(reached.strip.operationId, item.id); assert.ok(item.rect.y >= reached.strip.list.rect.y - 1 && item.rect.bottom <= reached.strip.list.rect.bottom + 1);
+    assert.equal(reached.strip.maskImage, 'none', 'Actual keyboard focus remains readable at every pointer distance');
+  }
+  await frame(scene, 'compact-scroll-tail'); await evaluate('pendingDelivery.clear()');
+}
+async function compactOriginalHover(scene, multi, sid) {
+  const original = multi.facts.queues[sid][2];
+  const originalPreview = `${strip}.querySelector('[data-operation-id="${original.operationId}"] .composer-pending__preview')`;
+  const pointer = await pointAt(originalPreview);
+  const hovered = await settled();
+  const hit = await evaluate(`(()=>{const point=${JSON.stringify(pointer.point)},card=${strip}.querySelector('[data-operation-id="${original.operationId}"]'),node=document.elementFromPoint(point.x,point.y);return{point,operationId:node?.closest('.composer-pending__card')?.dataset.operationId??null,originalCardContainsHit:Boolean(node&&card.contains(node)),cardHover:card.matches(':hover'),stripHover:${strip}.matches(':hover'),elements:document.elementsFromPoint(point.x,point.y).slice(0,6).map(n=>({tag:n.tagName,className:n.className,operationId:n.closest('.composer-pending__card')?.dataset.operationId??null}))}})()`);
+  result.checkpoints.push({ scene, name: 'first-trusted-card-hover-hit', original, pointer, after: hovered, hit });
+  await frame(scene, 'compact-multi');
+  retained(multi, hovered); compactGeometry(hovered, 3); visibleCursor(hovered);
+  assert.equal(hovered.strip.operationId, original.operationId);
+  assert.equal(hit.operationId, original.operationId, 'The first trusted pointer still hits the same original card after its transform settles');
+  assert.equal(hit.originalCardContainsHit, true);
+  const lifted = hovered.strip.cards.find(card => card.id === original.operationId);
+  assert.equal(pointer.selected, 'false', 'The one trusted hover starts on an unselected original card');
+  assert.equal(lifted.selected, 'true'); assert.equal(lifted.animation, 'none');
+  assert.notEqual(lifted.transform, pointer.transform, 'The same original card actually lifts after the one trusted hover');
+  assert.notEqual(lifted.shadow, pointer.shadow, 'The lifted original card has the actual selected shadow');
+  // Preserve raw :hover facts; hidden-window pseudo state does not own the data-selected lift.
+  assert.deepEqual(hovered.facts.queues, multi.facts.queues); assert.deepEqual(hovered.facts.attempts, multi.facts.attempts);
+  assert.ok(hovered.trustedHoverActions.some(action => action.trusted && action.operationId === original.operationId));
+  result.checkpoints.push({ scene, name: 'trusted-original-card-hover-without-extra-reader', original, hovered });
+}
+async function compactBegin(scene) {
+  result.stage = scene;
+  await win.webContents.debugger.sendCommand('Emulation.setTouchEmulationEnabled', { enabled: scene.pointer === 'coarse', maxTouchPoints: 1 });
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: scene.pointer === 'fine' ? 'no-preference' : 'reduce' }] });
+  const baseline = await initializeScene(scene, true);
+  const media = await evaluate(`({fine:matchMedia('(hover: hover) and (pointer: fine)').matches,coarse:matchMedia('(hover: none), (pointer: coarse)').matches,touchPoints:navigator.maxTouchPoints})`);
+  assert.equal(media.fine, scene.pointer === 'fine'); assert.equal(media.coarse, scene.pointer === 'coarse');
+  if (scene.pointer === 'coarse') assert.ok(media.touchPoints > 0);
+  await evaluate(`for(const r of resultReadyTerminals.filter(r=>!r.disposed))r.terminal.options.cursorBlink=false`);
+  return { baseline, media };
+}
+async function compactScene(scene) {
+  const { baseline, media } = await compactBegin(scene), sid = await evaluate('resultReady.sessionId');
+  await evaluate("pendingDelivery.queue('原消息')");
+  const single = await settled(); retained(baseline, single); compactGeometry(single, 1); compactGap(single, 8); visibleCursor(single);
+  if (scene.pointer === 'fine') await compactDistance(scene, single);
+  else {
+    assert.equal(single.strip.maskImage, 'none'); const material = single.strip.cards[0];
+    assert.match(material.background, /(?:\/\s*0?\.\d+|,\s*0\.\d+\))/); assert.match(material.backdropFilter, /blur\(/);
+    await frame(scene, 'compact-single-touch');
+  }
+  await compactActivate(scene, `${selectedCard}.querySelector('.composer-pending__copy')`);
+  const copied = await settled(); assert.equal(copied.facts.copies.at(-1), copied.facts.queues[sid][0].text); copyFeedback(copied, copied.strip.operationId, 'copied', scene.pointer === 'coarse');
+  await compactInlineEdit(scene, copied);
+  await evaluate("pendingDelivery.queue('原第二条 · 编号更多只打开这一条\\n第二行原文仍在 Mail',1);pendingDelivery.queue('原第三条 · 可达且不借用他人操作',1)");
+  const multi = await settled(); compactGeometry(multi, 3); retained(baseline, multi); visibleCursor(multi); compactGap(multi);
+  if (scene.pointer === 'fine') { await compactMultiDistance(scene, multi); await compactOriginalHover(scene, multi, sid); }
+  if (scene.pointer === 'coarse') await frame(scene, 'compact-multi');
+  await compactOriginalMore(scene, multi);
+  await compactActivate(scene, `${selectedCard}.querySelector('.composer-pending__dismiss')`);
+  await waitFor(`Boolean(${strip}.querySelector('.composer-pending__restore'))`);
+  const collapsed = await settled(); assert.deepEqual(collapsed.facts.queues, multi.facts.queues); assert.equal(collapsed.draft, baseline.draft);
+  await compactActivate(scene, `${strip}.querySelector('.composer-pending__restore')`);
+  await waitFor(`Boolean(${strip}.querySelector('.composer-pending__cards'))`);
+  result.checkpoints.push({ scene, name: 'original-collapse-remains-discoverable', collapsed });
+  // An actual selected Send still follows the existing original queue owner.
+  const target = multi.facts.queues[sid][1];
+  await compactActivate(scene, `${strip}.querySelector('.composer-pending__card[data-operation-id="${target.operationId}"] .composer-pending__send')`, 'single-original-selected-send');
+  await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`); await evaluate('pendingDelivery.prepared()');
+  await waitFor('pendingDelivery.facts().attempts.length===1');
+  const attempt = await evaluate('pendingDelivery.facts().attempts[0]'); assert.equal(attempt[1], target.text); assert.equal(attempt[2], target.operationId);
+  await evaluate('pendingDelivery.submitted()'); await waitFor(`!pendingDelivery.facts().inFlight[${JSON.stringify(sid)}]`); await evaluate('pendingDelivery.clear()');
+  const staleStyle = await evaluate(`(()=>{const node=pendingNative.terminal.querySelector('.xterm-screen'),old=node.style.height;node.style.height='96px';return old})()`);
+  const staleBaseline = await settled();
+  await evaluate("pendingDelivery.queue('原消息')");
+  const stale = await settled(); compactGap(stale, 8); retained(staleBaseline, stale);
+  await evaluate(`pendingNative.terminal.querySelector('.xterm-screen').style.height=${JSON.stringify(staleStyle)};pendingDelivery.clear()`);
+  const restored = await settled(); retained(baseline, restored);
+  if (scene.pointer === 'fine') { await compactNativeLine(scene); const scrollBaseline = await settled(); await compactNativeScroll(scene, scrollBaseline); }
+  const end = await settled(); assert.equal(end.strip, null); assert.equal(end.originalId, baseline.originalId); assert.equal(end.buffer.stable, true);
+  assert.deepEqual(end.retainedNodes, { editor: true, terminal: true, neighbor: true }); assert.equal(end.draft, baseline.draft);
+  result.scenes.push({ scene, media, baseline, single, copied, multi, attempt, stale, end });
+}
+
+async function compactBoundedCheckpoint() {
+  const scene = compactCheckpoint === 'coarse'
+    ? { name: 'coarse-narrow-dark', viewport: 640, ownerWidth: 320, appearance: 'dark', pointer: 'coarse' }
+    : { name: 'fine-wide-dark', viewport: 1280, ownerWidth: 640, appearance: 'dark', pointer: 'fine' };
+  result.scope.checkpoint = compactCheckpoint;
+  result.scope.fullMatrixQualified = false;
+  if (compactCheckpoint === 'send') {
+    await compactScene(scene);
+    assert.equal(result.frames.length, 9, 'Only the original first fine scene is complete for the bounded Send checkpoint');
+    return;
+  }
+  const { baseline, media } = await compactBegin(scene), sid = await evaluate('resultReady.sessionId');
+  if (compactCheckpoint === 'overlap') {
+    await compactNativeLine(scene);
+  } else {
+    await evaluate("pendingDelivery.queue('原消息')");
+    const single = await settled();
+    result.checkpoints.push({ scene, name: 'bounded-' + compactCheckpoint + '-original-geometry', baseline, single });
+    if (compactCheckpoint === 'min-gap') await frame(scene, 'compact-short-min-gap');
+    retained(baseline, single); compactGeometry(single, 1);
+    if (compactCheckpoint === 'distance') {
+      compactGap(single, 8); visibleCursor(single); await compactDistance(scene, single);
+    } else if (compactCheckpoint === 'coarse') {
+      await frame(scene, 'compact-single-touch');
+      assert.equal(single.strip.maskImage, 'none', 'Actual coarse input has stable unmasked crystal');
+      const material = single.strip.cards[0];
+      assert.match(material.background, /(?:\/\s*0?\.\d+|,\s*0\.\d+\))/); assert.match(material.backdropFilter, /blur\(/);
+      compactGap(single, 8); visibleCursor(single);
+    } else if (compactCheckpoint === 'min-gap') {
+      compactGap(single, 8); visibleCursor(single);
+    } else {
+      await evaluate("pendingDelivery.queue('原第二条 · 编号更多只打开这一条',1);pendingDelivery.queue('原第三条 · 可达且不借用他人操作',1)");
+      const multi = await settled(); retained(baseline, multi); compactGeometry(multi, 3); compactGap(multi); visibleCursor(multi);
+      if (compactCheckpoint === 'more') {
+        await frame(scene, 'compact-more-first-before');
+        await compactOriginalMore(scene, multi);
+      } else await compactOriginalHover(scene, multi, sid);
+    }
+    await evaluate('pendingDelivery.clear()');
+  }
+  const end = await settled();
+  assert.equal(end.strip, null); assert.equal(end.originalId, baseline.originalId); assert.equal(end.buffer.stable, true);
+  assert.deepEqual(end.retainedNodes, { editor: true, terminal: true, neighbor: true }); assert.equal(end.draft, baseline.draft);
+  result.scenes.push({ scene, media, baseline, end, checkpoint: compactCheckpoint });
+  assert.equal(result.frames.length, { hover: 1, distance: 3, coarse: 1, 'min-gap': 1, overlap: 2, more: 2 }[compactCheckpoint], 'The bounded checkpoint captures its exact finite frame count');
+}
+
 app.whenReady().then(async () => {
   try {
     await fs.mkdir(evidence, { recursive: true });
@@ -668,10 +579,23 @@ app.whenReady().then(async () => {
     await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] });
     await waitFor('Boolean(window.pendingDelivery)');
     await evaluate(`(()=>{window.pendingNativeErrors=[];window.addEventListener('error',event=>pendingNativeErrors.push({message:event.message,stack:event.error?.stack,filename:event.filename,line:event.lineno,column:event.colno}));window.addEventListener('unhandledrejection',event=>pendingNativeErrors.push({message:String(event.reason),stack:event.reason?.stack}))})()`);
-    for (const sceneConfig of [{ viewport: 1280, ownerWidth: 640, appearance: 'dark' }, { viewport: 1280, ownerWidth: 640, appearance: 'light' },
-      { viewport: 640, ownerWidth: 320, appearance: 'dark' }, { viewport: 640, ownerWidth: 320, appearance: 'light' }]) await (anchorOnly ? anchorScene(sceneConfig) : scene(sceneConfig));
-    assert.equal(result.scenes.length, 4);
-    if (capture === 'capture' || anchorOnly) assert.equal(result.frames.length, anchorOnly ? 64 : 136, 'Every bounded scene captures the original flows and each real-card traversal state');
+    result.scope = { actualElectron: true, actualXterm: true, queueAdapter: 'controlled preview of original Store', terminalProducer: 'original private terminal-output echo adapter; trusted bounded ArrowLeft, observation only', ctxmuxNativeHealthQualified: false, touchRepresentative: 'Electron touch emulation at the actual narrow CSS viewport; not physical phone', compactFlag: compactContract };
+    const scenes = [
+      { name: 'fine-wide-dark', viewport: 1280, ownerWidth: 640, appearance: 'dark', pointer: 'fine' },
+      { name: 'fine-wide-light', viewport: 1280, ownerWidth: 640, appearance: 'light', pointer: 'fine' },
+      { name: 'fine-narrow-dark', viewport: 640, ownerWidth: 320, appearance: 'dark', pointer: 'fine' },
+      { name: 'fine-narrow-light', viewport: 640, ownerWidth: 320, appearance: 'light', pointer: 'fine' },
+      ...anchorOnly ? [] : [
+        { name: 'coarse-narrow-dark', viewport: 640, ownerWidth: 320, appearance: 'dark', pointer: 'coarse' },
+        { name: 'coarse-narrow-light', viewport: 640, ownerWidth: 320, appearance: 'light', pointer: 'coarse' }
+      ]
+    ];
+    if (compactCheckpoint) await compactBoundedCheckpoint();
+    else {
+      for (const config of scenes) await compactScene(config);
+      assert.deepEqual(result.scenes.map(row => row.scene.name), scenes.map(row => row.name));
+      assert.equal(result.frames.length, anchorOnly ? 36 : 44, 'Each nonempty fine nine-frame and coarse four-frame scene is complete');
+    }
     result.rendererErrors = await evaluate('window.pendingNativeErrors');
     assert.deepEqual(result.rendererErrors, [], 'Successful actual Renderer scenes have no error or unhandled rejection');
     result.passed = true;

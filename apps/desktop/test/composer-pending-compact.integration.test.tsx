@@ -16,53 +16,59 @@ const dom = composerDOM()
 const queue = (id: string, text: string) => ({ operationId: id, runId: 'run-agent-1', text, status: 'queued' as const, promptCondition: null, enqueuedAt: 123 })
 const strip = () => document.querySelector<HTMLElement>('.composer-pending:not([hidden])')!
 const card = (id: string) => strip().querySelector<HTMLElement>(`[data-operation-id="${id}"].composer-pending__card`)!
-const reader = () => strip().querySelector<HTMLElement>('.composer-pending__reading')!
+const reader = () => card('tail')
 beforeEach(() => {
   vi.spyOn(api.continuousProgress, 'list').mockResolvedValue([])
   useAppStore.setState({ agentSteerInFlight: {}, agentSteerInFlightPhase: {}, timelines: {}, noticeReadReceipts: {} })
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value() {} })
+  const open = new WeakSet<HTMLElement>(), originalMatches = HTMLElement.prototype.matches
+  vi.spyOn(HTMLElement.prototype, 'matches').mockImplementation(function (this: HTMLElement, selector) { return selector === ':popover-open' ? open.has(this) : originalMatches.call(this, selector) })
+  for (const [method, state] of [['showPopover', 'open'], ['hidePopover', 'closed']] as const) {
+    Object.defineProperty(HTMLElement.prototype, method, { configurable: true, value() {
+      if (state === 'open') open.add(this); else open.delete(this)
+      const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: state }); this.dispatchEvent(event)
+    } })
+  }
 })
 async function mount() {
   useAppStore.setState({ agentSteerQueues: { 'agent-1': [queue('head', 'Head exact body'), queue('tail', 'Tail original\nSecond exact line')] } })
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
 }
-it('hover reveals one original full-body reader and header More while cards keep three glyph actions', async () => {
+it('each original card owns its i/N and More; hover lifts without a heading or duplicate reader', async () => {
   await mount()
   expect(strip().querySelectorAll('.composer-pending__card')).toHaveLength(2)
   const originalDraft = dom.container.querySelector('[role="textbox"]')
   await act(async () => card('tail').dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
   expect(strip().dataset.operationId).toBe('tail')
-  expect(strip().querySelector('.composer-pending__heading [aria-label="在 Outbox 查看待发消息和操作"]')).not.toBeNull()
-  expect(strip().querySelectorAll('.composer-pending__reading')).toHaveLength(1)
-  expect(reader().dataset.readingId).toBe('tail')
-  expect(reader().querySelector('.composer-pending__body')!.textContent).toBe('Tail original\nSecond exact line')
-  expect(reader().querySelector('.composer-pending__reading-state')!.textContent).toContain('排队中')
-  for (const entry of strip().querySelectorAll('.composer-pending__card')) {
-    expect(entry.querySelectorAll('.composer-pending__actions button')).toHaveLength(3)
+  expect(strip().querySelector('.composer-pending__heading')).toBeNull()
+  expect(strip().querySelector('.composer-pending__reading')).toBeNull()
+  for (const [id, ordinal] of [['head', '1/2'], ['tail', '2/2']]) {
+    const entry = card(id!)
+    expect(entry.querySelector('.composer-pending__more')!.textContent).toBe(ordinal)
     expect(entry.querySelector('[aria-label="发送这条待发消息"]')).not.toBeNull()
     expect(entry.querySelector('[aria-label="复制这条待发消息"]')).not.toBeNull()
-    expect(entry.querySelector('[aria-label="编辑这条待发消息"]')).not.toBeNull()
-    expect(entry.querySelector('[aria-label="在 Outbox 查看待发消息和操作"]')).toBeNull()
+    expect(entry.querySelector('button.composer-pending__preview')).not.toBeNull()
     expect(entry.querySelector('.composer-pending__preview')!.hasAttribute('title')).toBe(false)
   }
-  expect(strip().querySelector('svg.lucide-circle-help')).toBeNull()
-  expect(strip().querySelector('svg.lucide-pencil')).not.toBeNull()
+  expect(card('tail').querySelector('.composer-pending__preview')!.textContent).toBe('Tail original Second exact line')
+  expect(strip().querySelector('svg.lucide-pencil')).toBeNull()
   expect(dom.container.querySelector('[role="textbox"]')).toBe(originalDraft)
   expect(dom.draft()).toBe('Keep my draft')
 })
-it('the Edit glyph opens the unique reader editor and saves the exact nonhead operation without submitting', async () => {
+it('the original preview opens its own inline editor and saves the exact nonhead operation without submitting', async () => {
   await mount()
   const original = useAppStore.getState().agentSteerQueues['agent-1']!.map(entry => ({ ...entry }))
   const save = vi.spyOn(useAppStore.getState(), 'editQueuedAgentSteer')
   const send = vi.spyOn(useAppStore.getState(), 'sendQueuedAgentSteer').mockResolvedValue('submitted')
   const edit = card('tail').querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')!
-  expect(card('tail').querySelector('button.composer-pending__preview')).toBeNull()
+  expect(card('tail').querySelector('button.composer-pending__preview')).toBe(edit)
   expect(edit.disabled).toBe(false)
   await act(async () => edit.click())
-  expect(strip().querySelectorAll('.composer-pending__reading')).toHaveLength(1)
+  expect(strip().querySelectorAll('.composer-pending__reading')).toHaveLength(0)
+  expect(card('tail').querySelector('textarea')).not.toBeNull()
   const textarea = reader().querySelector<HTMLTextAreaElement>('textarea')!
   expect(textarea.value).toBe(original[1]!.text)
-  expect(card('tail').querySelector('textarea')).toBeNull()
+  expect(card('tail').querySelector('textarea')).toBe(textarea)
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Edited exact tail\nFull line')
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
@@ -144,3 +150,19 @@ it('the rendered editor and public RPC/compiled CLI consume the same original St
     expect(dom.draft()).toBe('Keep my draft')
   } finally { await client.dispose(); await server.stop(); await rm(root, { recursive: true }) }
 }, 20000)
+
+it('a single card still shows 1/1 and its own original Mail details', async () => {
+  useAppStore.setState({agentSteerQueues: {'agent-1': [queue('single', 'Single exact body')]}})
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  expect(card('single').querySelector('.composer-pending__more')!.textContent).toBe('1/1')
+  await act(async () => card('single').querySelector<HTMLButtonElement>('.composer-pending__more')!.click())
+  expect(dom.container.querySelector('[data-record-key="queue:single"]')).not.toBeNull()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+it('a nonselected card More opens that exact operation, independent of the current front card', async () => {
+  await mount()
+  expect(strip().dataset.operationId).toBe('head')
+  await act(async () => card('tail').querySelector<HTMLButtonElement>('.composer-pending__more')!.click())
+  expect(dom.container.querySelector('[data-record-key="queue:tail"]')).not.toBeNull()
+  expect(dom.draft()).toBe('Keep my draft')
+})

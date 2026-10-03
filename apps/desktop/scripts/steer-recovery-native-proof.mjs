@@ -757,10 +757,10 @@ try {
   await killDesktop(first); first = undefined
   second = await launch('second')
   assert.notEqual(second.child.pid, firstPid)
-  const after = await until('independently restored original queue', async () => { const value = await stored(second.cdp); return value?.agentSteerQueues?.[id]?.some(entry => entry.operationId === bootIntent.operationId && entry.errorCode === 'AGENT_EXECUTION_NOT_REQUESTED') && value })
+  const after = await until('independently restored original queue', async () => { const value = await stored(second.cdp); return value?.agentSteerQueues?.[id]?.some(entry => entry.operationId === bootIntent.operationId && entry.awaitingExplicitSend === true) && value })
   assert.equal(after.viewModes[id], 'conversation')
   assert.equal(after.agentComposerDrafts[id], savedBefore.agentComposerDrafts[id])
-  assert.deepEqual(after.agentSteerQueues[id].map(({ error, errorCode, status, ...entry }) => entry), savedBefore.agentSteerQueues[id].map(({ error, errorCode, status, ...entry }) => entry))
+  assert.deepEqual(after.agentSteerQueues[id].map(({ awaitingExplicitSend, status, ...entry }) => entry), savedBefore.agentSteerQueues[id].map(({ awaitingExplicitSend, status, ...entry }) => entry))
   assert.deepEqual((await new AgentMuxSpatialStateStore().read()).graph, graphBefore.graph)
   assert.equal((await client.statusAgent(id)).run.acceptedInputBytes, nativeRunBefore.acceptedInputBytes)
   assert.equal((await client.statusAgent(id)).run.pid, nativeRunBefore.pid)
@@ -768,7 +768,11 @@ try {
   assert.equal((await canonical()).pendingInteraction.request.id, bootPermission.id)
   assert.equal(requests.filter(request => textOf(request).includes(bootIntent.text)).length, 0)
   report.phases.push({ phase: 'C-independent-Desktop-boot-pauses-original-choice', firstPid, secondPid: second.child.pid, intent: bootIntent, publicChoice: bootChoice, beforeRun: nativeRunBefore,
-    bootSetup, automaticInputBytes: 0, draft: after.agentComposerDrafts[id], graph: graphBefore, restoredIntent: after.agentSteerQueues[id] })
+    bootSetup, automaticInputBytes: 0, draft: after.agentComposerDrafts[id], graph: graphBefore, restoredIntent: after.agentSteerQueues[id],
+    bootAuthorization: 'awaitingExplicitSend', originalStoredCausePreserved: true,
+    storedCauseFieldPresence: after.agentSteerQueues[id].map(entry => ({ operationId: entry.operationId,
+      fields: Object.fromEntries(['error', 'errorCode', 'detail', 'controlFailure'].map(key => [key, Object.hasOwn(entry, key)])) })),
+    causeBoundary: 'All original stored queue fields are compared. Absent fields do not prove durable structured cause facts.' })
   if (restorationFailure) throw restorationFailure
   report.steerRecovery = { passed: true }; report.passed = true
   if (finalQualification) report.steerRecoveryFinal = { passed: true, scope: 'Fresh complete Main GUI A/B/C only; separate T008 protocol qualification is required', actualNativeCompletionObserved: true, originalPendingResumedOnce: true, restartAutomaticInputBytes: 0 }

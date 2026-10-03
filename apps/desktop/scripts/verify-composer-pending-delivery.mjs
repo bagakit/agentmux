@@ -11,16 +11,23 @@ import { runProbeProcess, listProbeProcesses } from './probe-process.mjs'
 import { qualifySharedMainSource } from '../../../packages/core/scripts/qualify-shared-main-source.mjs'
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop'),require=createRequire(import.meta.url),exec=promisify(execFile)
 const mode=process.argv[2],base='4b38c4cf540de04f9de2ea70793a965b2e96c30d'
-assert.ok(['--mutations','--source','--anchor-source','--prompt-preparation-source','--native','--card-mutations','--scroll-mutations','--scroll-edit-restored','--anchor-native','--anchor-mutations','--anchor-depth-mutations'].includes(mode))
+assert.ok(['--mutations','--source','--anchor-source','--prompt-preparation-source','--native','--card-mutations','--scroll-mutations','--scroll-edit-restored','--anchor-native','--anchor-mutations','--anchor-depth-mutations','--compact-contract-source','--compact-contract-mutations','--compact-contract-native'].includes(mode))
+const compactContract=mode.startsWith('--compact-contract')
+const phaseSource=mode==='--prompt-preparation-source'||mode==='--compact-contract-source'
 const anchorProof=mode==='--anchor-native'||mode==='--anchor-mutations'||mode==='--anchor-depth-mutations'
-const sourceBase=mode==='--prompt-preparation-source'?execFileSync('git',['rev-parse','HEAD^'],{cwd:root,encoding:'utf8'}).trim():mode==='--anchor-source'?'fc9c1bddc63bebbf7212d038bb9bef4f9a9f0fbd':base
-const expectedFrames=anchorProof?64:136
+const sourceBase=phaseSource?execFileSync('git',['rev-parse','HEAD^'],{cwd:root,encoding:'utf8'}).trim():mode==='--anchor-source'?'fc9c1bddc63bebbf7212d038bb9bef4f9a9f0fbd':base
+const checkpointFrames={hover:1,distance:3,coarse:1,'min-gap':1,overlap:2,more:2,send:9}
+const compactCheckpoint=process.env.AGENTMUX_PENDING_COMPACT_CHECKPOINT
+assert.ok(!compactCheckpoint || (Object.hasOwn(checkpointFrames,compactCheckpoint)&&['--native','--anchor-native','--compact-contract-native'].includes(mode)),'A bounded checkpoint is an explicit native proof scope')
+const expectedFrames=compactCheckpoint?checkpointFrames[compactCheckpoint]:anchorProof?36:44
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex')
 const typedPaths=['apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx','apps/desktop/src/renderer/src/components/SessionMailbox.tsx','apps/desktop/src/renderer/src/components/ComposerOutbox.tsx','apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx','apps/desktop/src/renderer/src/store.ts','packages/client-ui/src/components/AgentComposer.tsx','apps/desktop/src/renderer/src/components/TerminalView.tsx','apps/desktop/src/renderer/src/components/ComposerQueuedMessageEditor.tsx']
-if(mode==='--prompt-preparation-source')typedPaths.push('apps/desktop/src/main/ipc.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/renderer/src/lib/session-service-notices.ts')
+if(phaseSource)typedPaths.push('apps/desktop/src/main/ipc.ts','apps/desktop/src/preload/index.ts','apps/desktop/src/renderer/src/lib/session-service-notices.ts')
+typedPaths.push('apps/desktop/src/renderer/src/lib/terminal-view-observation.ts','apps/desktop/src/renderer/src/lib/terminal-resource-owners.ts')
 const styles=['packages/client-ui/src/styles/composer.css','packages/client-ui/src/styles/conversation-message.css'],dependencyPaths=['patches/@xterm__xterm@6.1.0-beta.303.patch','pnpm-lock.yaml']
 const qualificationHelper='packages/core/scripts/qualify-shared-main-source.mjs',selectedSource=['apps/desktop/src',...['core','client-ui','demand','layout','relay'].map(p=>'packages/'+p+'/src'),...dependencyPaths,'apps/desktop/scripts/fixtures/composer-pending-delivery','package.json','pnpm-workspace.yaml','tsconfig.base.json','apps/desktop/package.json','apps/desktop/tsconfig.json','packages/client-ui/tsconfig.json',...['core','client-ui','demand','layout','relay'].map(p=>'packages/'+p+'/package.json')]
-const sourceQualification=await qualifySharedMainSource(root,selectedSource)
+const qualifiedSource=(mode==='--compact-contract-source'||mode==='--compact-contract-mutations')?selectedSource.filter(p=>p!=='apps/desktop/scripts/fixtures/composer-pending-delivery').concat('apps/desktop/scripts/fixtures/composer-pending-delivery/vitest.config.mts'):selectedSource
+const sourceQualification=await qualifySharedMainSource(root,qualifiedSource)
 const originals=Object.fromEntries(await Promise.all([...typedPaths,...styles,...dependencyPaths].map(async p=>[p,await readFile(join(root,p),'utf8')])))
 const privateRoot=await realpath(await mkdtemp(join(tmpdir(),'amx-pending-delivery-'))),evidence=join(root,'.tmp/composer-pending-delivery',mode.slice(2)+'-'+globalThis.crypto.randomUUID())
 await mkdir(evidence,{recursive:true})
@@ -61,26 +68,39 @@ async function dependencySource(ts){
  result.dependencySource={owner,current,baseline};await writeFile(join(evidence,'dependency-source.json'),JSON.stringify(result.dependencySource,null,2))
 }
 async function mounted(label,red){
- let code=0,output='';try{const r=await exec(process.execPath,[join(root,'node_modules/vitest/vitest.mjs'),'run','--config','apps/desktop/scripts/fixtures/composer-pending-delivery/vitest.config.mts','--maxWorkers=1'],{cwd:privateRoot,timeout:60000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'')}
+ let code=0,output='';try{const r=await exec(process.execPath,[join(root,'node_modules/vitest/vitest.mjs'),'run','--config','apps/desktop/scripts/fixtures/composer-pending-delivery/vitest.config.mts','--maxWorkers=1'],{cwd:privateRoot,env:{...process.env,AGENTMUX_PENDING_COMPACT_CONTRACT:'1',AGENTMUX_TEST_OBJECT_CLI:join(privateRoot,'packages/core/bin/agentmux')},timeout:60000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'')}
  await writeFile(join(evidence,label+'.log'),output)
  const discovery=JSON.parse(await readFile(join(privateRoot,'.tmp/composer-pending-delivery/mounted/discovery.json'),'utf8'))
- assert.equal(discovery.passed,true);assert.equal(discovery.found.length,3)
+ assert.equal(discovery.passed,true);assert.equal(discovery.found.length,5)
  if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.match(output,/AssertionError:/)}else assert.equal(code,0,label+': all owning tests pass')
  return{code,assertionRed:red,discovery,log:label+'.log'}
 }
-async function nativeMutation(label,red,expectedFailure=/actual original terminal cursor remains in its viewport/){
- const d=await prepareXterm(),bannerSnapshot=join(privateRoot,'fixture-settings-banner.png');await writeFile(bannerSnapshot,execFileSync('git',['show',base+':apps/desktop/resources/settings-banner.png'],{cwd:root,maxBuffer:4*1024*1024}));let code=0,output='';try{const r=await exec(process.execPath,[join(privateRoot,'apps/desktop/scripts/verify-composer-pending-delivery.mjs'),anchorProof?'--anchor-native':'--native'],{cwd:privateRoot,env:{...process.env,AGENTMUX_PENDING_PRISTINE:d.pristine,AGENTMUX_PENDING_BASE_PATCH:d.baselinePatchPath,AGENTMUX_PENDING_BANNER_SNAPSHOT:bannerSnapshot},timeout:120000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'');await writeFile(join(evidence,label+'.execution-error.json'),JSON.stringify({name:e.name,message:e.message,code:e.code??null,signal:e.signal??null,killed:e.killed??false,stdoutBytes:Buffer.byteLength(e.stdout??''),stderrBytes:Buffer.byteLength(e.stderr??'')},null,2))}
+async function nativeMutation(label,red,expectedFailure=/actual original terminal cursor remains in its viewport/,checkpoint){
+ assert.ok(!checkpoint || Object.hasOwn(checkpointFrames,checkpoint));const nativeFrameCount=checkpoint?checkpointFrames[checkpoint]:expectedFrames
+ const d=await prepareXterm(),bannerSnapshot=join(privateRoot,'fixture-settings-banner.png');await writeFile(bannerSnapshot,execFileSync('git',['show',base+':apps/desktop/resources/settings-banner.png'],{cwd:root,maxBuffer:4*1024*1024}));let code=0,output='';try{const r=await exec(process.execPath,[join(privateRoot,'apps/desktop/scripts/verify-composer-pending-delivery.mjs'),anchorProof?'--anchor-native':'--native'],{cwd:privateRoot,env:{...process.env,AGENTMUX_PENDING_PRISTINE:d.pristine,AGENTMUX_PENDING_BASE_PATCH:d.baselinePatchPath,AGENTMUX_PENDING_BANNER_SNAPSHOT:bannerSnapshot,...(checkpoint?{AGENTMUX_PENDING_COMPACT_CHECKPOINT:checkpoint}:{})},timeout:120000,maxBuffer:4*1024*1024});output=r.stdout+r.stderr}catch(e){code=e.code;output=(e.stdout??'')+(e.stderr??'');await writeFile(join(evidence,label+'.execution-error.json'),JSON.stringify({name:e.name,message:e.message,code:e.code??null,signal:e.signal??null,killed:e.killed??false,stdoutBytes:Buffer.byteLength(e.stdout??''),stderrBytes:Buffer.byteLength(e.stderr??'')},null,2))}
  await writeFile(join(evidence,label+'.log'),output)
  const summaries=output.trim().split('\n').filter(line=>line.startsWith('{"mode":"'+(anchorProof?'--anchor-native':'--native')+'"'));assert.equal(summaries.length,1)
  const summary=JSON.parse(summaries[0]),proofDirectory=join(privateRoot,summary.evidence),receipt=JSON.parse(await readFile(join(proofDirectory,'receipt.json'),'utf8'))
  await cp(proofDirectory,join(evidence,label),{recursive:true})
  const rendered=JSON.parse(await readFile(join(proofDirectory,'candidate/render.json'),'utf8'))
  assert.equal(receipt.privateRootRemoved,true);assert.equal(receipt.userRunTouched,false);assert.ok(rendered.frames.length)
- if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,expectedFrames);assert.deepEqual(rendered.rendererErrors,[])}
- return{code,assertionRed:red,frames:rendered.frames.length,evidence:label,receipt}
+ let distancePixels
+ if(checkpoint==='distance'){
+  const rows=rendered.checkpoints.filter(row=>row.name==='actual-card-distance-pixels');assert.equal(rows.length,1)
+  const row=rows[0];assert.equal(row.samples.length,3);assert.equal(row.differences.length,2)
+  const original=rendered.checkpoints.find(row=>row.name==='bounded-distance-original-geometry').single.strip
+  assert.equal(original.cards.length,1);assert.equal(original.operationId,original.cards[0].id)
+  for(const sample of row.samples){assert.deepEqual(sample.roi,row.samples[0].roi);assert.ok(Number.isFinite(sample.bitmapBytes)&&sample.bitmapBytes>0);assert.equal(sample.bitmapBytes,row.samples[0].bitmapBytes)}
+  const means=row.differences.map((difference,index)=>{assert.equal(difference.from,row.samples[index].name);assert.equal(difference.to,row.samples[index+1].name);assert.ok(Number.isFinite(difference.absoluteDelta)&&difference.absoluteDelta>=0);return difference.absoluteDelta/row.samples[index+1].bitmapBytes})
+  if(red){assert.match(rendered.failure?.message??'',/Input:\s*'none'/);assert.ok(row.samples.every(sample=>sample.maskImage==='none'));assert.ok(means.some(mean=>mean<0.5),'The removed mask is flat beyond capture noise')}else assert.ok(means.every(mean=>mean>0.5),'Both restored distance steps visibly exceed capture noise')
+  distancePixels={means,minimumMeanAbsoluteDelta:0.5,originalOperationId:original.operationId,roi:row.samples[0].roi,derivedFromActualNativeCheckpoints:true}
+ }
+ if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,nativeFrameCount);assert.deepEqual(rendered.rendererErrors,[])}
+ if(checkpoint){assert.equal(rendered.scope.checkpoint,checkpoint);assert.equal(rendered.scope.fullMatrixQualified,false);assert.equal(new Set(rendered.frames.map(frame=>frame.scene.name)).size,1)}
+ return{code,assertionRed:red,checkpoint:checkpoint??null,distancePixels,frames:rendered.frames.length,evidence:label,receipt}
 }
 async function cardMutations(){
- await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
+ await qualifySharedMainSource(root,qualifiedSource,sourceQualification?.commit)
  await mkdir(join(privateRoot,'packages/core/scripts'),{recursive:true});await cp(join(root,qualificationHelper),join(privateRoot,qualificationHelper))
  for(const dir of ['apps/desktop/src','apps/desktop/test/helpers','apps/desktop/scripts','apps/desktop/resources','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','packages/relay/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
  for(const p of ['package.json','pnpm-workspace.yaml','pnpm-lock.yaml','tsconfig.base.json','apps/desktop/package.json','apps/desktop/tsconfig.json',...['core','client-ui','demand','layout','relay'].map(p=>'packages/'+p+'/package.json')])await cp(join(root,p),join(privateRoot,p))
@@ -97,9 +117,9 @@ async function cardMutations(){
   {name:'nonhead-send-borrows-head',file:typedPaths[3],from:'onSend?.(entry.id)',to:'onSend?.(queued[0]!.id)',failure:/Nonhead Send submits only that original card/},
   {name:'copy-borrows-head-text',file:typedPaths[3],from:'onCopy?.(entry.text)',to:'onCopy?.(queued[0]!.text)',failure:/Each card copies its own complete original text/},
   {name:'single-line-card-height-regressed',from:'height: 28px; min-height: 28px;',to:'height: 40px; min-height: 40px;',failure:/fixed single-line 28px layout height/},
-  {name:'native-full-body-tooltip-restored',file:typedPaths[3],from:'className="composer-pending__preview">',to:'className="composer-pending__preview" title={entry.text}>',failure:/native title tooltip duplicating/},
-  {name:'large-floating-gap-restored',file:typedPaths[3],from:'[offset(8 + clearance),',to:'[offset(28 + clearance),',failure:/short visible gap/},
-  {name:'header-borrows-head-operation',file:typedPaths[3],from:'onMore(selected.id)',to:'onMore(queued[0]!.id)',failure:/Actual Renderer fact did not arrive/},
+  {name:'native-full-body-tooltip-restored',file:typedPaths[3],from:'className="composer-pending__preview" aria-label=',to:'className="composer-pending__preview" title={entry.text} aria-label=',failure:/native title tooltip duplicating/},
+  {name:'large-floating-gap-restored',file:typedPaths[3],from:'let position = await locate(8)',to:'let position = await locate(28)',failure:/short visible gap/},
+  {name:'more-borrows-head-operation',file:typedPaths[3],from:'onMore(entry.id)',to:'onMore(queued[0]!.id)',failure:/Actual Renderer fact did not arrive/},
   {name:'copy-false-reported-as-success',file:typedPaths[3],from:'accepted = (await onCopy?.(entry.text)) === true',to:'await onCopy?.(entry.text); accepted = true',failure:/Failed or late Copy must not report success/},
   {name:'copy-late-body-certifies-current-text',edits:[{file:typedPaths[3],from:' || !queuedRef.current.some(current => current.id === entry.id && current.text === entry.text)',to:''},{file:typedPaths[3],from:'setCopyResult({ id: entry.id, text: entry.text, state:',to:'setCopyResult({ id: entry.id, text: queuedRef.current.find(current => current.id === entry.id)!.text, state:'}],failure:/Failed or late Copy must not report success/},
   {name:'copy-reduced-motion-specificity-lost',from:".composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; }",to:".composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy > svg { animation: none; }",failure:/Reduced motion retains static visible Check without animation/},
@@ -128,12 +148,51 @@ async function cardMutations(){
  result.restored=await nativeMutation('card-original-restored',false)
  assert.equal(result.mutations.length,activeCases.length)
 }
-async function mutations(){
- await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
+async function prepareMountedSnapshot(){
+ await qualifySharedMainSource(root,qualifiedSource,sourceQualification?.commit)
  await mkdir(join(privateRoot,'packages/core/scripts'),{recursive:true});await cp(join(root,qualificationHelper),join(privateRoot,qualificationHelper))
- for(const dir of ['apps/desktop/src','apps/desktop/test','apps/desktop/scripts','apps/desktop/resources','apps/desktop/browser-extension','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','packages/relay/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
+ for(const dir of ['apps/desktop/src','apps/desktop/test','apps/desktop/scripts','apps/desktop/resources','apps/desktop/browser-extension','packages/core/src','packages/core/test/helpers','packages/core/bin','packages/core/dist','packages/client-ui/src','packages/demand/src','packages/layout/src','packages/relay/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
  for(const p of ['package.json','pnpm-workspace.yaml','pnpm-lock.yaml','tsconfig.base.json','vitest.setup.ts','apps/desktop/package.json','apps/desktop/tsconfig.json',...['core','client-ui','demand','layout','relay'].map(p=>'packages/'+p+'/package.json')])await cp(join(root,p),join(privateRoot,p))
  for(const p of ['node_modules','apps/desktop/node_modules',...['core','client-ui','demand','layout','relay'].map(p=>'packages/'+p+'/node_modules')])await symlink(join(root,p),join(privateRoot,p),'dir')
+ result.compiledCli={path:'packages/core/bin/agentmux',wrapperSha256:hash(await readFile(join(root,'packages/core/bin/agentmux'))),compiledSha256:hash(await readFile(join(root,'packages/core/dist/agentmux.js')))}
+}
+async function compactMutations(){
+ await prepareMountedSnapshot()
+ result.baseline=await mounted('compact-baseline',false)
+ const component=typedPaths[3]
+ const cases=[
+  {name:'top-heading-restored',file:component,from:'<ol ref={listRef} className="composer-pending__cards"',to:'<header className="composer-pending__heading">待发 {queued.length}</header><ol ref={listRef} className="composer-pending__cards"'},
+  {name:'per-card-ordinal-removed',file:component,from:'<span>{index + 1}/{queued.length}</span>',to:'<span>Mail</span>'},
+  {name:'more-borrows-head-operation',file:component,from:'onMore(entry.id)',to:'onMore(queued[0]!.id)'},
+  {name:'inline-editor-moved-outside-original-card',file:component,from:'{editing && onEdit ? <ComposerQueuedMessageEditor',to:'{false && editing && onEdit ? <ComposerQueuedMessageEditor'}
+ ]
+ for(const item of cases){
+  const original=originals[item.file];assert.equal(original.split(item.from).length,2)
+  const changed=original.replace(item.from,item.to)
+  try{await writeFile(join(privateRoot,item.file),changed);const red=await mounted(item.name,true);await writeFile(join(privateRoot,item.file),original);const restored=await mounted(item.name+'-restored',false)
+   assert.equal(hash(await readFile(join(privateRoot,item.file))),hash(original));result.mutations.push({...item,originalSha256:hash(original),mutatedSha256:hash(changed),red,restored,exactRestoration:true})
+  }finally{await writeFile(join(privateRoot,item.file),original)}
+ }
+ const nativeCases=[
+  {name:'distance-mask-removed',file:styles[0],checkpoint:'distance',from:'.composer-pending { mask-image: radial-gradient(circle at var(--queue-pointer-x, -500px) var(--queue-pointer-y, -500px), #000 24px, rgb(0 0 0 / 65%) 130px, rgb(0 0 0 / 38%) 240px); }',to:'.composer-pending { mask-image: none; }',failure:/radial-gradient/},
+  {name:'coarse-crystal-made-opaque',file:styles[0],checkpoint:'coarse',from:'var(--surface-2) 46%, transparent',to:'var(--surface-2) 100%, transparent',failure:/did not match the regular expression/s},
+  {name:'unconditional-gap-restored',file:component,checkpoint:'min-gap',from:'let position = await locate(8)',to:'let position = await locate(28)',failure:/Only the actual visible current line overlap gives a minimal gap/},
+  {name:'current-row-overlap-reader-removed',file:component,checkpoint:'overlap',from:'readTerminalInputOverlapTop(regionId, terminal, new DOMRect(left, position.y, width, height))',to:'undefined',failure:/Only the actual visible current line overlap gives a minimal gap/},
+  {name:'focus-inserts-trailing-collapse',file:styles[0],checkpoint:'more',from:'.composer-pending__actions { display: flex; align-items: center; gap: 0; }',to:'.composer-pending__actions { display: flex; align-items: center; gap: 0; }\n.composer-pending__dismiss { order: 1; }',failure:/Actual Renderer fact did not arrive/}
+ ]
+ for(const item of nativeCases){
+  const original=originals[item.file];assert.equal(original.split(item.from).length,2);const changed=original.replace(item.from,item.to)
+  try{await writeFile(join(privateRoot,item.file),changed);const red=await nativeMutation(item.name,true,item.failure,item.checkpoint)
+   await writeFile(join(privateRoot,item.file),original);assert.equal(hash(await readFile(join(privateRoot,item.file))),hash(original))
+   const restored=await nativeMutation(item.name+'-restored',false,item.failure,item.checkpoint)
+   result.mutations.push({...item,failure:item.failure.source,originalSha256:hash(original),mutatedSha256:hash(changed),red,restored,exactRestoration:true})
+  }finally{await writeFile(join(privateRoot,item.file),original)}
+ }
+ assert.equal(result.mutations.length,9)
+
+}
+async function mutations(){
+ await prepareMountedSnapshot()
  result.baseline=await mounted('baseline',false)
  const cases=[{name:'pending-strip-hidden',file:typedPaths[3],from:'if (!queued.length || !selected) return null',to:'if (true) return null'},
  {name:'preparation-misreported',file:typedPaths[0],from:"preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',",to:'preparing: false,'},
@@ -154,7 +213,7 @@ async function mutations(){
  result.mutations.push({name:'absolute-scroll-old-dimensions',files:dependencyPaths,originalSha256:hash(patchOriginal),mutatedSha256:hash(patchChanged),lockOriginalSha256:hash(lockOriginal),lockMutatedSha256:hash(lockChanged),red:dimensionsRed,restored:dimensionsRestored})
 }
 async function source(){
- await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
+ await qualifySharedMainSource(root,qualifiedSource,sourceQualification?.commit)
  const ts=await import('typescript');await dependencySource(ts);const app=ts.getParsedCommandLineOfConfigFile(join(desktop,'tsconfig.json'),{},ts.sys),shared=ts.getParsedCommandLineOfConfigFile(join(root,'packages/client-ui/tsconfig.json'),{},ts.sys)
  assert.ok(app.fileNames.length&&shared.fileNames.length)
  const paths={'@agentmux/client-ui/components/*':['packages/client-ui/src/components/*.tsx'],'@agentmux/client-ui/terminal/*':['packages/client-ui/src/terminal/*.ts'],'@agentmux/client-ui/platform':['packages/client-ui/src/platform.tsx'],'@agentmux/client-ui':['packages/client-ui/src/index.ts'],'@agentmux/client-ui/*':['packages/client-ui/src/lib/*.ts'],'@agentmux/layout':['packages/layout/src/index.ts'],'@agentmux/relay':['packages/relay/src/index.ts']}
@@ -181,7 +240,7 @@ async function source(){
   const file=candidate.program.getSourceFile(join(root,p)),calls=[];assert.ok(file)
   function visit(n){if((ts.isJsxOpeningElement(n)||ts.isJsxSelfClosingElement(n))&&n.tagName.getText(file)===name&&n.attributes.properties.some(a=>ts.isJsxAttribute(a)&&a.name.getText(file)===prop))calls.push({line:file.getLineAndCharacterOfPosition(n.pos).line+1,text:n.getText(file)});ts.forEachChild(n,visit)}visit(file);assert.ok(calls.length,p+' production JSX '+name+'.'+prop);result.callers.push({p,name,prop,calls})
  }
- for(const [p,name]of [[typedPaths[0],'sendQueuedAgentSteer'],[typedPaths[0],'agentSteerCanEdit'],[typedPaths[0],'agentSteerExecution'],[typedPaths[0],'useAppStore.getState().editQueuedAgentSteer'],[typedPaths[7],'onSave'],[typedPaths[3],'queuedMessageState'],[typedPaths[4],'api.sessions.submitPrompt'],[typedPaths[6],'terminal.scrollToLine'],...(mode==='--prompt-preparation-source'?[[typedPaths[8],'sessionInputWriteResult'],[typedPaths[9],'ipcRenderer.invoke'],[typedPaths[10],'errorIdentity']]:[])]){
+ for(const [p,name]of [[typedPaths[0],'sendQueuedAgentSteer'],[typedPaths[0],'agentSteerCanEdit'],[typedPaths[0],'agentSteerExecution'],[typedPaths[0],'useAppStore.getState().editQueuedAgentSteer'],[typedPaths[7],'onSave'],[typedPaths[3],'queuedMessageState'],[typedPaths[4],'api.sessions.submitPrompt'],[typedPaths[6],'terminal.scrollToLine'],[typedPaths[6],'registerTerminalViewObservation'],[typedPaths[6],'terminalLinkReadoutOverlapsText'],[typedPaths[6],'resourceOwners.acquireListeners'],[typedPaths[3],'readTerminalInputOverlapTop'],[typedPaths[3],'observeTerminalInputGeometry'],...(phaseSource?[[typedPaths[8],'sessionInputWriteResult'],[typedPaths[9],'ipcRenderer.invoke'],[typedPaths[10],'errorIdentity']]:[])]){
   const file=candidate.program.getSourceFile(join(root,p)),calls=[];function visit(n){if(ts.isCallExpression(n)&&n.expression.getText(file)===name)calls.push({line:file.getLineAndCharacterOfPosition(n.pos).line+1,text:n.getText(file)});ts.forEachChild(n,visit)}visit(file);assert.ok(calls.length,p+' production call '+name);result.callers.push({p,name,calls})
  }
  const file=candidate.program.getSourceFile(join(root,typedPaths[0]));let attribute
@@ -191,7 +250,7 @@ async function source(){
  result.mutations.push({name:'actual-invalid-queued-prop',originalSha256:hash(original),mutatedSha256:hash(changed),red,restoredOwnedDiagnostics:owned})
 }
 async function native(){
- await qualifySharedMainSource(root,selectedSource,sourceQualification?.commit)
+ await qualifySharedMainSource(root,qualifiedSource,sourceQualification?.commit)
  const d=await prepareXterm()
  const {build}=await import('vite'),fixture=join(desktop,'scripts/fixtures/composer-pending-delivery'),directory=join(evidence,'candidate'),processRoot=join(privateRoot,'native'),outDir=join(processRoot,'out'),main=join(processRoot,'main.cjs'),wrapper=join(processRoot,'xterm.mjs')
  await mkdir(directory,{recursive:true});await mkdir(processRoot,{recursive:true});const mainBytes=await readFile(join(fixture,'main.cjs'));await writeFile(main,mainBytes)
@@ -204,9 +263,9 @@ async function native(){
  const compiled={};for(const file of await readdir(outDir,{recursive:true,withFileTypes:true}))if(file.isFile()){const p=join(file.parentPath,file.name);compiled[relative(outDir,p)]=hash(await readFile(p))}assert.ok(Object.keys(compiled).length)
  assert.equal(runtimeLoaded,result.dependency.candidateHashes['lib/xterm.js'],'Vite consumes the actual reconstructed runtime bytes')
  await writeFile(join(directory,'compiled.json'),JSON.stringify({loaded,styleInputs,compiled,dependency:result.dependency,runtimeLoaded,mainSha256:hash(mainBytes),wrapperSha256:hash(await readFile(wrapper)),electron:require('electron/package.json').version},null,2))
- const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const lines=[]
+ const env={...process.env,AGENTMUX_PENDING_COMPACT_CONTRACT:'1'};delete env.ELECTRON_RUN_AS_NODE;const lines=[]
  const outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,anchorProof?'anchor-capture':'capture'],{temporaryRoot:processRoot,cwd:root,env,timeoutMs:90000,onLine:l=>lines.push(l)})
  await writeFile(join(directory,'process.log'),lines.join('\n'));const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'));assert.equal(outcome.timedOut,false);assert.equal(outcome.exitCode,0,rendered.failure?.message);assert.equal(rendered.passed,true);assert.ok(rendered.frames.length)
- assert.equal(rendered.frames.length,expectedFrames);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
+ assert.equal(rendered.frames.length,expectedFrames);if(compactCheckpoint){assert.equal(rendered.scope.checkpoint,compactCheckpoint);assert.equal(rendered.scope.fullMatrixQualified,false);assert.equal(new Set(rendered.frames.map(frame=>frame.scene.name)).size,1)}else assert.equal(rendered.scope.checkpoint??null,null);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
 }
-try{if(mode==='--card-mutations'||mode==='--scroll-mutations'||mode==='--scroll-edit-restored'||mode==='--anchor-mutations'||mode==='--anchor-depth-mutations')await cardMutations();else if(mode==='--mutations')await mutations();else if(mode==='--source'||mode==='--anchor-source'||mode==='--prompt-preparation-source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{result.sharedSourceChangesDuringProof=[];for(const [p,b]of Object.entries(originals)){const current=hash(await readFile(join(root,p)));if(current!==hash(b))result.sharedSourceChangesDuringProof.push({path:p,capturedSha256:hash(b),currentSha256:current})}if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}
+try{if(mode==='--card-mutations'||mode==='--scroll-mutations'||mode==='--scroll-edit-restored'||mode==='--anchor-mutations'||mode==='--anchor-depth-mutations')await cardMutations();else if(mode==='--compact-contract-mutations')await compactMutations();else if(mode==='--compact-contract-source'){await source();await prepareMountedSnapshot();result.mounted=await mounted('compact-contract-mounted',false)}else if(mode==='--mutations')await mutations();else if(mode==='--source'||mode==='--anchor-source'||mode==='--prompt-preparation-source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{result.sharedSourceChangesDuringProof=[];for(const [p,b]of Object.entries(originals)){const current=hash(await readFile(join(root,p)));if(current!==hash(b))result.sharedSourceChangesDuringProof.push({path:p,capturedSha256:hash(b),currentSha256:current})}if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}
