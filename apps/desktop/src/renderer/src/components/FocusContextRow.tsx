@@ -9,8 +9,8 @@ import { currentDisplayNameRevision, useAppStore } from '../store'
 export const FocusContextRow = memo(function FocusContextRow({ context, selected, compact = false, variant, onSelect }: { context: FocusContext; selected: boolean; compact?: boolean; variant?: 'directory'; onSelect(id: string): void }) {
   const [menuOpen, setMenuOpen] = useState(false), [draft, setDraft] = useState<string | null>(null)
   const input = useRef<HTMLInputElement>(null), cancelled = useRef(false)
-  const expectedNameRevision = useRef(0), saving = useRef(false), editGeneration = useRef(0)
-  useEffect(() => () => { ++editGeneration.current }, [context.id])
+  const expectedNameRevision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
+  useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [context.id])
   const hover = useFocusContextHover(context, !menuOpen && draft === null)
   useEffect(() => {
     if (draft !== null) { input.current?.focus(); input.current?.select() }
@@ -19,8 +19,13 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
   async function commitRename() {
     if (draft === null || saving.current) return
     saving.current = true
-    const generation = editGeneration.current
-    try { if (await useAppStore.getState().renameAgent(context.id, draft.trim() || null, expectedNameRevision.current) && generation === editGeneration.current) { ++editGeneration.current; setDraft(null) } }
+    const generation = editGeneration.current, baseline = expectedNameRevision.current
+    try {
+      if (await useAppStore.getState().renameAgent(context.id, draft.trim() || null, baseline.revision) && expectedNameRevision.current === baseline) {
+        ++baseline.revision
+        if (generation === editGeneration.current) { ++editGeneration.current; setDraft(null) }
+      }
+    }
     finally { saving.current = false }
   }
   const directory = variant === 'directory'
@@ -52,5 +57,5 @@ export const FocusContextRow = memo(function FocusContextRow({ context, selected
     </span>}</span>
     {directory ? null : <ArrowUpRight className="focus-context__open" size={13} aria-hidden="true" />}
   </button>
-  return <>{context.kind === 'agent' ? <FocusContextMenu context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = currentDisplayNameRevision('agent-session', context.id); setDraft(context.name) }}>{card}</FocusContextMenu> : card}{hover.preview}</>
+  return <>{context.kind === 'agent' ? <FocusContextMenu context={context} onOpenChange={setMenuOpen} onRestoreFocus={hover.suppressRestoredFocus} onRename={() => { hover.close(); ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('agent-session', context.id) }; setDraft(context.name) }}>{card}</FocusContextMenu> : card}{hover.preview}</>
 })

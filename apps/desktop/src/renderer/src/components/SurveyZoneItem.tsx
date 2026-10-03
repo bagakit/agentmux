@@ -15,11 +15,11 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   onSelect(zoneId: string): void
 }) {
   const [draft, setDraft] = useState(title)
-  const revision = useRef(0), saving = useRef(false), editGeneration = useRef(0)
-  useEffect(() => { ++editGeneration.current; if (editing) { setDraft(title); revision.current = currentDisplayNameRevision('zone', zone.zoneId) } return () => { ++editGeneration.current } }, [editing, zone.zoneId])
+  const revision = useRef({ revision: 0 }), saving = useRef(false), editGeneration = useRef(0)
+  useEffect(() => { ++editGeneration.current; if (editing) { setDraft(title); revision.current = { revision: currentDisplayNameRevision('zone', zone.zoneId) } } return () => { ++editGeneration.current; revision.current = { revision: 0 } } }, [editing, zone.zoneId])
   const beginEdit = () => { ++editGeneration.current; setDraft(title); onEdit?.(true) }
   return <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected}>
-    {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current; try { if (await onRename?.(draft, revision.current) && generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } finally { saving.current = false } }}>
+    {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current, baseline = revision.current; try { if (await onRename?.(draft, baseline.revision) && revision.current === baseline) { ++baseline.revision; if (generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } } finally { saving.current = false } }}>
       <input autoFocus aria-label="Exploration name" value={draft} placeholder="Name this exploration" onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onFocus={event => event.target.select()}
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); ++editGeneration.current; onEdit?.(false) } }} />
       <button type="submit" aria-label="Save exploration name">✓</button>

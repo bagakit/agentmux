@@ -266,8 +266,13 @@ function SortableWorkbenchTab({
   }
   // Inline rename reuses the topic-row pattern: a right-click menu entry flips the tab into an input, no
   // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
-  const [rename, setRename] = useState<{ target: 'tab' | 'agent'; id: string; value: string; expectedNameRevision: number } | null>(null)
-  const savingName = useRef(false)
+  const [rename, setRename] = useState<{ target: 'tab' | 'agent'; id: string; value: string; baseline: { revision: number } } | null>(null)
+  const savingName = useRef(false), renameInput = useRef<HTMLInputElement>(null)
+  // Let the closing menu release its focus trap before focusing this editor.
+  useEffect(() => {
+    if (bindingMenuOpen) return
+    renameInput.current?.focus(); renameInput.current?.select()
+  }, [rename === null, bindingMenuOpen])
 
   async function closeTabs(
     tabIds: readonly string[],
@@ -353,7 +358,7 @@ function SortableWorkbenchTab({
     const seed = target === 'tab' ? (tab.name ?? displayName) : displayName
     const id = target === 'tab' ? tab.id : copyableAgentSessionId
     if (!id) return
-    setRename({ target, id, value: seed, expectedNameRevision: projectedNameRevision(useAppStore.getState().nameLabels, target === 'tab' ? 'tab' : 'agent-session', id) })
+    setRename({ target, id, value: seed, baseline: { revision: projectedNameRevision(useAppStore.getState().nameLabels, target === 'tab' ? 'tab' : 'agent-session', id) } })
   }
 
   async function commitRename(): Promise<void> {
@@ -362,9 +367,10 @@ function SortableWorkbenchTab({
     savingName.current = true
     try {
       const applied = rename.target === 'tab'
-        ? await renameTab(rename.id, value.length > 0 ? value : null, rename.expectedNameRevision)
-        : await renameAgent(rename.id, value.length > 0 ? value : null, rename.expectedNameRevision)
-      if (applied) setRename(current => current === rename ? null : current)
+        ? await renameTab(rename.id, value.length > 0 ? value : null, rename.baseline.revision)
+        : await renameAgent(rename.id, value.length > 0 ? value : null, rename.baseline.revision)
+      if (applied) setRename(current => current?.baseline !== rename.baseline ? current
+        : current === rename ? null : { ...current, baseline: { revision: rename.baseline.revision + 1 } })
     } finally { savingName.current = false }
   }
 
@@ -428,11 +434,11 @@ function SortableWorkbenchTab({
           <WorkbenchTabMarks marks={marks} />
           {rename ? (
             <input
-              autoFocus
+              ref={renameInput}
               className="workbench-tab__rename"
               aria-label={rename.target === 'tab' ? 'Rename tab' : 'Rename agent'}
               value={rename.value}
-              onChange={(event) => setRename({ ...rename, value: event.target.value })}
+              onChange={(event) => { const value = event.target.value; setRename(current => current ? { ...current, value } : null) }}
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
               onBlur={commitRename}
