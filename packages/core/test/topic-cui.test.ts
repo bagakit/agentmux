@@ -1,10 +1,10 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
 import { mkdtemp, rm, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import { build } from 'esbuild'
 import { parseTopicParams, parseTopicResult, type TopicKnowledge, type TopicKnowledgeWrite, type TopicResult } from '../src/public-rpc-topics.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
@@ -12,6 +12,10 @@ import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-hel
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
+import { AgentMuxRpcService as SourceRpcService, type AgentMuxRpcCallContext } from '../src/public-rpc-service.js'
+import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
+const RpcService: typeof SourceRpcService = process.env.AGENTMUX_TEST_TOPIC_FORWARD_ENTRY
+  ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_TOPIC_FORWARD_ENTRY).href)).AgentMuxRpcService : SourceRpcService
 const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId: 'local', spaceId: JSON.stringify(['local', upstreamFixturePath('topics/category')]), directoryPath: upstreamFixturePath("topics/category"), title: '工作', revision: 'sha256:' + 'a'.repeat(64) }
 describe('Topic typed public contract', () => {
   it('rejects spoofed envelopes, malformed revisions and inexact content identities before mutation', () => {
@@ -133,4 +137,62 @@ describe('Topic typed public contract', () => {
       } finally { await client.dispose() }
     } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }
   }, 20_000)
+})
+
+
+describe('Topic Host routing retains the original content owner and authority', () => {
+  const input = { topicId: 'view:original-topic', entryId: category.categoryId }
+  const entry: TopicKnowledge = { ...input, title: 'Original knowledge', content: 'Original file remains at its owner.',
+    form: 'derived', certainty: 'fact', sources: [{ kind: 'note', noteId: 'original-note' }], revision: category.revision!, updatedAt: 1 }
+  it('prefers the local content owner and reports unknown when neither original owner port exists', async () => {
+    const local = vi.fn(async () => ({ entry })), forward = vi.fn(async () => { throw new Error('Local Topic must not be forwarded.') })
+    const service = new RpcService({ coreClients: () => [], topics: { call: local as never }, forwardControl: forward })
+    const unavailable = new RpcService({ coreClients: () => [] })
+    try {
+      expect(await service.call('topic.knowledge.read', input)).toEqual({ entry })
+      expect(local).toHaveBeenCalledExactlyOnceWith('topic.knowledge.read', input, {})
+      expect(forward).not.toHaveBeenCalled()
+      await expect(unavailable.call('topic.knowledge.read', input)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+    } finally { await service.dispose(); await unavailable.dispose() }
+  })
+  it('forwards the parsed exact Topic method/input/context and validates the original owner result', async () => {
+    const controller = new AbortController(), afterResponse: Array<() => void> = []
+    const context: AgentMuxRpcCallContext = { signal: controller.signal, principal: { kind: 'user', id: 'original-user' }, afterResponse, transport: 'unix' }
+    let result: unknown = { entry }
+    const forward = vi.fn(async (..._args: unknown[]) => result as never), service = new RpcService({ coreClients: () => [], forwardControl: forward })
+    try {
+      expect(await service.call('topic.knowledge.read', input, context)).toEqual({ entry })
+      expect(forward).toHaveBeenCalledExactlyOnceWith('topic.knowledge.read', input, context)
+      expect(forward.mock.calls[0]?.[2]).toBe(context)
+      result = { entry: { ...entry, topicId: 'view:another-owner' } }
+      await expect(service.call('topic.knowledge.read', input, context)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+      result = { entry: { ...entry, revision: 'unconfirmed' } }
+      await expect(service.call('topic.knowledge.read', input, context)).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+      const count = forward.mock.calls.length
+      await expect(service.call('topic.knowledge.read', { ...input, caller: { id: 'spoof' } } as never, context)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+      expect(forward).toHaveBeenCalledTimes(count)
+      controller.abort()
+      await expect(service.call('topic.knowledge.read', input, context)).rejects.toMatchObject({ name: 'AbortError' })
+      expect(forward).toHaveBeenCalledTimes(count)
+    } finally { await service.dispose() }
+  })
+  it('authenticates the exact managed caller before forwarding and retains original authority errors', async () => {
+    const fixture = await rpcOwnerFixture(['original-source-agent'])
+    const context: AgentMuxRpcCallContext = { caller: fixture.credentials, signal: new AbortController().signal }
+    const forward = vi.fn(async (..._args: unknown[]) => ({ entry } as never)), service = new RpcService({ coreClients: fixture.coreClients, forwardControl: forward })
+    const before = fixture.client.agentSession('original-source-agent')
+    try {
+      expect(await service.call('topic.knowledge.read', input, context)).toEqual({ entry })
+      expect(forward).toHaveBeenCalledExactlyOnceWith('topic.knowledge.read', input, context)
+      for (const caller of [{ ...fixture.credentials, capability: 'invalid-capability' }, { ...fixture.credentials, agentSessionId: 'original-source' }]) {
+        await expect(service.call('topic.knowledge.read', input, { caller })).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+      }
+      expect(forward).toHaveBeenCalledTimes(1)
+      const refusal = Object.assign(new Error('The original content owner refused this write.'), { code: 'TOPIC_CONTENT_CONFLICT', detail: 'original-owner-revision' })
+      forward.mockRejectedValueOnce(refusal)
+      await expect(service.call('topic.knowledge.read', input, context)).rejects.toBe(refusal)
+      expect(fixture.client.agentSession('original-source-agent')).toEqual(before)
+      expect(fixture.inner.kernel.stop).not.toHaveBeenCalled()
+    } finally { await service.dispose(); await fixture.close() }
+  })
 })
