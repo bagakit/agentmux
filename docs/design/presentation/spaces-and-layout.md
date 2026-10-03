@@ -49,15 +49,15 @@ Settings覆盖当前背景绑定时的原生 Browser 局部可见性与实体保
 
 ## Topic 导航反馈
 
-- 分类页或总览中的 Topic 选中行与右侧可见 Tabs 必须一致；布局、焦点和读取失败约束见交互合同[《Topic 点击必须打开可见 Tabs》](../behavior/spaces-and-layout.md#topic-点击必须打开可见-tabs)。使用现有选中态和服务窗，不加重复导航栏或无限全页加载。
+- 分类二级目录或总览中的 Topic 选中行与右侧可见 Tabs 必须一致；布局、焦点和读取失败约束见交互合同[《Topic 点击必须打开可见 Tabs》](../behavior/spaces-and-layout.md#topic-点击必须打开可见-tabs)。使用现有选中态和服务窗，不加重复导航栏或无限全页加载。
 
 ## Topics 知识库的导航与内容层级
 
-产品对象、默认「未分类」、归属转移、知识来源与 CUI 只见交互合同[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。Space 树中 Topics 只显示 Category 行，点击分类在主工作面展示其 Topic 列表；Category 不画用于展开 Topic 子项的箭头或空槽。「未分类」与普通 Category 使用同一行密度，不用告警色或空状态引导遮住旧内容。Topics 分区以一枚创建分类图标替换原 `+` 创建入口，占用原动作槽；不另加 `Create Category`／`New category` 文字行或第二创建按钮。图标保「创建分类」的 tooltip、完整可访问名与键盘焦点，Motes、Folders 的既有创建动作继续按自身范围表达。知识分类与物理目录分别可辨，完整目录信息沿按需详情与原目录入口，不常驻内部路径或技术 ID。
+产品对象、默认「未分类」、归属转移、知识来源与 CUI 只见交互合同[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。Space 树中 Topics 只显示 Category 行，点击分类在中间二级菜单展示其 Topic 列表；Category 不画用于展开 Topic 子项的箭头或空槽。「未分类」与普通 Category 使用同一行密度，不用告警色或空状态引导遮住旧内容。Topics 分区以一枚创建分类图标替换原 `+` 创建入口，占用原动作槽；不另加 `Create Category`／`New category` 文字行或第二创建按钮。图标保「创建分类」的 tooltip、完整可访问名与键盘焦点，Motes、Folders 的既有创建动作继续按自身范围表达。知识分类与物理目录分别可辨，完整目录信息沿按需详情与原目录入口，不常驻内部路径或技术 ID。
 
-分类页只保一处当前分类主标题，外层工作面与面内列表不重复同名标题或再套一层分类卡。Topic 以连续行列表呈现，标题为主，短摘要为次；不在整个列表、每行及行内内容上层层套线框，不用逐行边线表达归属，分组依靠对齐、字重与留白。hover、整行 selected Surface 与键盘焦点各自可辨，选中同时有文字／语义标记，不只靠颜色或细单侧线。pin、真实注意力、头像／拓扑、定位及行尾对象动作沿既有能力保可达；收敛外框不删除对象事实、来源或错误说明。
+分类二级目录只保一处当前分类标题，不在右侧重复同名标题或再套一层分类卡。Topic 以连续行列表呈现，标题为主，短摘要为次；不在整个列表、每行及行内内容上层层套线框，不用逐行边线表达归属，分组依靠对齐、字重与留白。hover、整行 selected Surface 与键盘焦点各自可辨，选中同时有文字／语义标记，不只靠颜色或细单侧线。pin、真实注意力、头像／拓扑、定位及行尾对象动作沿既有能力保可达；收敛外框不删除对象事实、来源或错误说明。
 
-完整 Category Topic 列表只显示一份，不在中间二级栏与右侧正文同时铺同一目录。进入具体 Topic 后沿左树→中间二级菜单→右侧工作面的既有结构：左树保 Category 定位，中间默认显示当前 Topic 的 Chat／Tab 目录，右侧是对应的原 Chat／Thread；Topic 名称、当前 Chat 与选中态各自清楚对应。二级目录使用紧凑连续行和原 Tab 的可读标题、内容身份与准确位置，不以 Session 计数或技术 ID 替代 Chat；跨 Group 成员保持可发现，必要位置摘要按需可读。Knowledge 使用独立、有完整可访问名称的工具入口，明确选择后才显示该 Topic 的知识搜索与列表，不占用默认 Chat 目录。原正文、输入与恢复服务窗继续可见；切换与落焦行为只见[Topic 点击必须打开可见 Tabs](../behavior/spaces-and-layout.md#topic-点击必须打开可见-tabs)。
+完整 Category Topic 列表只显示在中间二级菜单，不在右侧正文同时铺同一目录。左树保 Category 定位；中间顶部以紧凑的 Topics／Knowledge 切换组件表达两个功能，保完整可访问名称、明确当前选项、键盘焦点与原滚动区域。Topics 视图持续显示当前分类的连续 Topic 行，选择 Topic 后仍留在原位，选中行与右侧 Topic Zone 一致。右侧沿原 Tabstrip 表达该 Topic 的 Chat／Tab，正文沿原 Region 表达 Thread，不再在二级菜单另列一份 Chats 或为其增加切换栏。Knowledge 视图保留现有知识搜索、结果和来源 Topic；已选 Topic 的搜索标明准确 Topic，未选 Topic 的全局搜索明确显示 All Topics，查询前不给出伪造的全库列表。分类上下文与实际检索范围分别可辨，不用技术 ID 代替来源。结果较长时摘要收紧，原正文、输入与恢复服务窗仍有阅读空间；切换、成员范围及落焦行为只见[Topic 点击必须打开可见 Tabs](../behavior/spaces-and-layout.md#topic-点击必须打开可见-tabs)。
 
 Chat 使用原 Tab，既有 Group 沿原工作面分组；Thread 使用原 Agent Region 的正文与输入；文件、Browser、Terminal 与 Launcher 保自身内容类型，不伪装成 Agent Thread。知识与讨论入口清楚分工，正文优先；知识列表用可读标题与短摘要，来源、确认范围与修订按需可见并可回原内容，不铺满复制聊天或技术 ID。Note／Notebook 的编辑与页面导航沿原内容控件，不为 Topic 增加另一套块编辑器。准确对象、失败和未知的行为只见交互合同，持续服务说明在当前工作面可读并保原内容。
 
@@ -280,7 +280,7 @@ Note 的“来源”和“轨迹”沿原详情入口按需展开，显示可读
 
 ## Scratch Topic 工作面可见性
 
-Scratch 的 Files + Topics 工具栏在 Topics 总览与 Category 总览中承载对应范围的目录；具体 Topic 显示自身知识与资料，Mote 显示自身名片与点子，不在对象二级重复整库列表。打开具体对象后仍保持原 Tab/Region 工作面可见，身份与作用域只见交互合同[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。
+Scratch 的工具栏按[知识库导航层级](#topics-知识库的导航与内容层级)承载分类 Topic 目录与 Knowledge 搜索。打开 Topic 只切换右侧原 Tab/Region 工作面，中间 Topics 目录继续保当前分类范围；Mote 显示自身名片与点子，明确 Topics 总览保跨分类发现，不凭共享 Scratch 重复整库成员。身份与作用域只见交互合同[《Topics 知识库的层级与沉淀》](../behavior/spaces-and-layout.md#topics-知识库的层级与沉淀)。
 
 ## Topic topology 的摘要与展开密度
 
