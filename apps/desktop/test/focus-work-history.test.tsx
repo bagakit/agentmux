@@ -1,12 +1,15 @@
 import { fixtureData as _hygiene_fixtureData, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act, createElement, useMemo } from 'react'
+import { act, createElement, useLayoutEffect, useMemo } from 'react'
 import relativeFixture_acceptedPublicInputs from './fixtures/focus-work-history-public-inputs.json'
 const acceptedPublicInputs = _hygiene_fixtureData(relativeFixture_acceptedPublicInputs)
 import { expect, it, vi } from 'vitest'
 import * as WorkHistory from '@agentmux/core/timeline'
 import { loadAgentSessions, type AgentTimelineItem } from '@agentmux/core'
 import { fixture, NOW, HOUR, BODY } from './fixtures/focus-history-public'
+import { appendFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
@@ -234,4 +237,232 @@ it('the actual public native reader and typed history keep both original reader 
   expect(h.inputs().map(node => node.dataset.inputMessageId)).toEqual(expect.arrayContaining(['native:claude:native-archived-0:native-kept', 'captured:captured']))
   expect(h.element.querySelectorAll('[data-message-id="native:claude:native-archived-0:native-kept"]')).toHaveLength(1)
   h.noRuntime()
+})
+
+
+it('retained work budget must preserve eight known current Working bands', async () => {
+  const h = await fixture([], 9, { native: false, retire: false })
+  const stored = await loadAgentSessions(h.store)
+  const current = stored.slice(0, 8)
+  const enteredAt = NOW - HOUR / 4
+  const typedById: Record<string, AgentTimelineItem> = {}
+  for (const value of current) {
+    const item = { ...observed(`current-work-${value.agentSessionId}`, enteredAt, 'working', undefined, value.run.runId), agentSessionId: value.agentSessionId }
+    typedById[value.agentSessionId] = item
+    await h.store.applyTimelineMutation({ type: 'append', agentSessionId: value.agentSessionId, item })
+  }
+  const snapshots = current.map(value => ({
+    id: value.agentSessionId, kind: 'agent', providerId: value.providerId, executorId: value.executorId,
+    hostId: value.hostId, workspacePath: value.workspacePath, label: `Current ${value.agentSessionId}`, createdAt: 1, updatedAt: NOW,
+    processState: 'running', latestOutputBytes: 0, status: { state: 'working', source: 'acp', observedAt: NOW },
+    capabilities: { terminal: true, timeline: 'complete-events', permission: 'respond', providerResume: true, replyCorrelation: 'none' },
+    semanticStatus: { state: 'working', source: 'acp', observedAt: NOW, stateEnteredAt: enteredAt },
+    control: { kind: 'agent', hostId: value.hostId, agentSessionId: value.agentSessionId, run: value.run }
+  } as SessionSnapshot))
+  const timelines: Record<string, Awaited<ReturnType<typeof api.sessions.timeline>>> = {}
+  for (const value of current) timelines[value.agentSessionId] = await api.sessions.timeline({ hostId: value.hostId, agentSessionId: value.agentSessionId })
+  useAppStore.setState(state => ({ sessions: snapshots, timelines, config: { ...state.config!, workspaces: [
+    { id: 'observed-alpha', name: 'Observed Alpha', hostId: current[0]!.hostId, path: current[0]!.workspacePath, kind: 'folder' }
+  ] } }))
+  const selector = createFocusProjectionSelector()
+  function Surface() {
+    const contexts = useAppStore(state => selector({ sessions: state.sessions, timelines: state.timelines, agentNames: state.agentNames, config: state.config, scratchTopicSnapshots: state.scratchTopicSnapshots }).contexts)
+    const config = useAppStore(state => state.config)
+    const lanes = useMemo(() => deriveFocusProjectLanes(contexts, config), [contexts, config])
+    return createElement(RecentFocusTimeline, { contexts, lanes, entries: [], currentSessionId: null, onSelect: h.onSelect })
+  }
+  const ids = new Set(current.map(value => value.agentSessionId))
+  const bands = () => [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__working')].filter(node => ids.has(node.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId!))
+  const live = () => [...h.element.querySelectorAll<HTMLButtonElement>('.recent-focus__live')].filter(node => ids.has(node.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId!))
+  const capture = () => ({
+    counts: h.counts(), workRecordCount: Number(h.element.querySelector<HTMLElement>('.recent-focus')!.dataset.workRecordCount),
+    trimmed: h.element.querySelector<HTMLElement>('.recent-focus')!.dataset.readingTrimmed ?? null,
+    currentBands: bands().map(node => ({ id: node.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId, runId: node.dataset.runId, enteredAt: node.dataset.workingEnteredAt, through: node.dataset.workingThrough, end: node.dataset.workEnd })),
+    live: live().map(node => ({ id: node.closest<HTMLElement>('[data-focus-timeline-id]')!.dataset.focusTimelineId, runId: node.dataset.runId, title: node.title })),
+    contexts: selector({ sessions: useAppStore.getState().sessions, timelines: useAppStore.getState().timelines, agentNames: useAppStore.getState().agentNames, config: useAppStore.getState().config, scratchTopicSnapshots: useAppStore.getState().scratchTopicSnapshots }).contexts.map(context => ({ id: context.id, state: context.state, processState: context.processState, workingEnteredAt: context.workingEnteredAt, runId: context.runId })),
+    canonicalWork: current.map(value => ({ id: value.agentSessionId, records: useAppStore.getState().timelines[value.agentSessionId]!.items.filter(item => item.activityState) }))
+  })
+  await act(async () => h.root.render(createElement(Surface)))
+  await h.wait(() => { expect(bands()).toHaveLength(8); expect(live()).toHaveLength(8); expect(capture().workRecordCount).toBe(8) })
+  expect(capture().contexts.filter(context => context.state === 'working')).toHaveLength(8)
+  const before = capture()
+
+  const extra = stored[8]!
+  let previous: string | undefined
+  for (let index = 0; index < 200; index++) {
+    const id = `extra-${index}`
+    const item = { ...observed(id, NOW - 2 * HOUR + index * 1000, index % 2 ? 'done' : 'working', previous, extra.run.runId), agentSessionId: extra.agentSessionId }
+    await h.store.applyTimelineMutation({ type: 'append', agentSessionId: extra.agentSessionId, item })
+    previous = id
+  }
+  await h.selectSource(extra.agentSessionId)
+  await h.wait(() => { expect(capture().workRecordCount).toBe(200); expect(capture().trimmed).toBe('true') })
+  const after = capture()
+  const kernel = (h.client as unknown as { kernel: Record<string, (...args: unknown[]) => unknown> }).kernel
+  const controls = Object.fromEntries(['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => [name, vi.mocked(kernel[name]!).mock.calls.length]))
+  const result = { before, after, controls, connectCalls: vi.mocked(h.client.connect).mock.calls.length, selectCalls: h.onSelect.mock.calls.length,
+    readCalls: { catalogue: h.calls.catalogue.mock.calls, page: h.calls.page.mock.calls, timeline: h.calls.timeline.mock.calls },
+    input: { knownCurrentAgents: 8, trustedSource: 'acp', semanticObservedAt: NOW, stateEnteredAt: enteredAt, extraTypedObservations: 200, actualFileStore: true, actualPublicIpcAndCoreReader: true } }
+  expect(after.counts[0]).toBe(before.counts[0])
+  expect(after.counts[1]).toBe(before.counts[1]! + 1)
+  expect(after.counts[2]).toBe(before.counts[2]! + 1)
+  expect(after.live).toHaveLength(8)
+  expect(after.contexts.filter(context => context.state === 'working')).toHaveLength(8)
+  expect(useAppStore.getState().sessions).toEqual(snapshots)
+  for (const value of current) expect(useAppStore.getState().timelines[value.agentSessionId]!.items.filter(item => item.activityState)).toEqual([typedById[value.agentSessionId]])
+  expect(Object.values(controls)).toEqual([0, 0, 0, 0, 0, 0])
+  expect(result.connectCalls).toBe(0); expect(result.selectCalls).toBe(0)
+  expect(after.currentBands).toHaveLength(8)
+})
+
+it('current work extension preserves exact Run freshness and missing-start boundaries', async () => {
+  const h = await mounted()
+  // This tail is actually persisted/read through the original FileStore bridge.
+  const enteredAt = NOW - HOUR / 3
+  const tail = observed('current-contract-tail', enteredAt, 'working', 'done-two')
+  await h.store.applyTimelineMutation({ type: 'append', agentSessionId: SID, item: tail })
+  const fresh = { ...h.snapshot, updatedAt: NOW,
+    status: { state: 'working', source: 'acp', observedAt: NOW },
+    semanticStatus: { state: 'working', source: 'acp', observedAt: NOW, stateEnteredAt: enteredAt }
+  } as SessionSnapshot
+  const setSnapshot = async (value: SessionSnapshot) => act(async () => useAppStore.setState({ sessions: [value] }))
+  await setSnapshot(fresh)
+  await h.refresh()
+  const point = () => h.bands().find(node => node.dataset.workingEnteredAt === String(enteredAt))!
+  const historical = () => h.bands().filter(node => node.dataset.workingEnteredAt !== String(enteredAt))
+  const recorded = () => ({
+    end: point()?.dataset.workEnd, width: point()?.style.width,
+    through: Number(point()?.dataset.workingThrough), run: point()?.dataset.runId,
+    live: h.element.querySelectorAll('.recent-focus__live').length,
+    canonicalItems: useAppStore.getState().timelines[SID]!.items.filter(item => item.activityState).map(item => item.id),
+    reads: h.counts(), originalClosedBands: historical().map(node => ({ start: node.dataset.workingEnteredAt, through: node.dataset.workingThrough, end: node.dataset.workEnd }))
+  })
+  await h.wait(() => { expect(point()).not.toBeUndefined(); expect(point().dataset.workEnd).toBe('current'); expect(Number(point().dataset.workingThrough)).toBe(NOW); expect(h.element.querySelectorAll('.recent-focus__working')).toHaveLength(3) })
+  const baseline = recorded(), reads = h.counts()
+  expect(baseline.live).toBe(1)
+  expect(baseline.originalClosedBands.map(item => item.end)).toEqual(['state-change', 'state-change'])
+  const phases: Array<{ condition: string; observation: ReturnType<typeof recorded> }> = []
+  const expectUnknownPoint = async (condition: string) => {
+    await h.wait(() => {
+      expect(point()).not.toBeUndefined()
+      expect(point().dataset.workEnd).toBe('unknown')
+      expect(point().style.width).toBe('0%')
+      expect(h.element.querySelectorAll('.recent-focus__working:not([data-work-end])')).toHaveLength(0)
+      expect(Number(point().dataset.workingThrough)).toBe(enteredAt)
+      expect(h.element.querySelectorAll('.recent-focus__live')).toHaveLength(1)
+    })
+    expect(recorded().originalClosedBands).toEqual(baseline.originalClosedBands)
+    expect(recorded().canonicalItems).toEqual(baseline.canonicalItems)
+    expect(h.counts()).toEqual(reads)
+    phases.push({ condition, observation: recorded() })
+  }
+  const expectRestored = async () => {
+    await setSnapshot(fresh)
+    await h.wait(() => { expect(point().dataset.workEnd).toBe('current'); expect(Number(point().dataset.workingThrough)).toBe(NOW); expect(h.element.querySelectorAll('.recent-focus__working')).toHaveLength(3) })
+    expect(h.counts()).toEqual(reads)
+  }
+
+  // Same Session, different exact current Run: old typed tail stays a point.
+  await setSnapshot({ ...fresh, control: { ...fresh.control, run: { runId: 'different-current-run' } } } as SessionSnapshot)
+  await expectUnknownPoint('current Run differs from typed tail')
+  await expectRestored()
+
+  // State entered 20 min ago; last trusted observation 16 min ago: both times
+  // remain chronological, and the public 15-min freshness owner decides stale.
+  await setSnapshot({ ...fresh,
+    status: { state: 'working', source: 'acp', observedAt: NOW - 16 * 60_000 },
+    semanticStatus: { state: 'working', source: 'acp', observedAt: NOW - 16 * 60_000, stateEnteredAt: enteredAt }
+  } as SessionSnapshot)
+  await expectUnknownPoint('current working observation is stale')
+  await expectRestored()
+
+  // Current semantic Working is fresh, but its begin is unrecorded. Do not
+  // borrow the known historical tail's begin as current semantic authority.
+  await setSnapshot({ ...fresh, semanticStatus: { state: 'working', source: 'acp', observedAt: NOW } } as SessionSnapshot)
+  await expectUnknownPoint('current working start is unknown')
+  await expectRestored()
+  const kernel = (h.client as unknown as { kernel: Record<string, (...args: unknown[]) => unknown> }).kernel
+  const controls = Object.fromEntries(['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => [name, vi.mocked(kernel[name]!).mock.calls.length]))
+  const receipt = { executedOriginalMountedFixture: true, baseline, phases, restored: recorded(), controls,
+    connectCalls: vi.mocked(h.client.connect).mock.calls.length, selectCalls: h.onSelect.mock.calls.length,
+    boundary: 'One fixture, three negative current DTO changes, same literal stored tail and two closed rounds. No new read, Run control, history cache or Core algorithm. Does not qualify Native/PTY or replace original 200-record/Range adjacency.' }
+  expect(Object.values(controls)).toEqual([0, 0, 0, 0, 0, 0]); expect(receipt.connectCalls).toBe(0); expect(receipt.selectCalls).toBe(0)
+})
+
+it('actual native file growth reaches shared Hook incomplete window and visible Timeline coverage without losing reading', async () => {
+  const h = await mounted(rounds(), true)
+  const snapshot = h.snapshot
+  const control = (() => {
+    const value = snapshot.control
+    if (value.kind !== 'agent') throw new Error('Actual fixture Agent control required')
+    return value
+  })()
+  const events: import('@agentmux/core').AgentSessionHistoryObservation[] = []
+  const realObserve = h.client.observeSessionHistory.bind(h.client)
+  const observe = vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async (reference, listener, options) => {
+    expect(reference).toEqual(snapshot.control)
+    return realObserve(reference.agentSessionId, event => { events.push(event); listener(event) }, options)
+  })
+  let reading: ReturnType<typeof useSessionUserMessages> | undefined
+  function ReadingFacts() {
+    const value = useSessionUserMessages(control, { enabled: true })
+    useLayoutEffect(() => { reading = value }, [value])
+    return null
+  }
+  const selector = createFocusProjectionSelector()
+  function Surface() {
+    const contexts = useAppStore(state => selector({ sessions: state.sessions, timelines: state.timelines, agentNames: state.agentNames, config: state.config, scratchTopicSnapshots: state.scratchTopicSnapshots }).contexts)
+    const config = useAppStore(state => state.config)
+    const lanes = useMemo(() => deriveFocusProjectLanes(contexts, config), [contexts, config])
+    return createElement('section', null, createElement(ReadingFacts), createElement(RecentFocusTimeline, { contexts, lanes, entries: [], currentSessionId: SID, onSelect: h.onSelect }))
+  }
+  await act(async () => h.root.render(createElement(Surface)))
+  await h.wait(() => {
+    expect(reading?.error).toBeNull()
+    expect(reading?.observationError).toBeNull()
+    expect(reading?.nativeHistoryPage?.items.map(item => item.id)).toEqual(['native-kept'])
+    expect(reading?.windowIncomplete).toBe(false)
+    expect(observe).toHaveBeenCalledTimes(1)
+  })
+  const original = reading!.nativeHistoryPage!.items[0]!
+  await h.selectSource()
+  await h.wait(() => expect(h.inputs().some(node => node.textContent?.includes('Native same Context original'))).toBe(true))
+  await act(async () => h.inputs().find(node => node.textContent?.includes('Native same Context original'))!.click())
+  const body = document.querySelector('.recent-focus__message-body')!
+  expect(body.textContent).toContain('Native same Context original')
+  const text = document.createTreeWalker(body, NodeFilter.SHOW_TEXT).nextNode()!
+  const range = document.createRange(); range.selectNodeContents(text)
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+  const selected = selection.toString(); expect(selected.length).toBeGreaterThan(0)
+  const before = h.counts()
+  // 91 new user records place the prior boundary beyond the public Hook's
+  // existing three pages of 30. Genuine FS observation drives revalidation.
+  const rows = Array.from({ length: 91 }, (_, index) => ({ sessionId: `native-${SID}`, uuid: `incomplete-burst-${index}`, type: 'user',
+    message: { role: 'user', content: `Actual native appended input ${index}` }, timestamp: new Date(NOW - HOUR / 4 + index).toISOString() }))
+  await appendFile(join(h.directory, `${SID}.jsonl`), rows.map(row => JSON.stringify(row)).join('\n') + '\n')
+  await act(async () => vi.waitFor(() => {
+    expect(events.some(event => event.kind === 'invalidated')).toBe(true)
+    expect(reading?.windowIncomplete).toBe(true)
+    expect(reading?.loading).toBe(false)
+  }, { timeout: 3000, interval: 10 }))
+  expect(reading?.windowFrozen).toBe(false)
+  expect(reading?.error).toBeNull(); expect(reading?.observationError).toBeNull()
+  expect(reading!.nativeHistoryPage!.items.find(item => item.id === original.id)).toBe(original)
+  expect(reading!.nativeHistoryPage!.items.some(item => item.id === 'incomplete-burst-90')).toBe(true)
+  expect(h.element.querySelector<HTMLElement>('.recent-focus')!.dataset.readingTrimmed).not.toBe('true')
+  const coverage = h.element.querySelector<HTMLButtonElement>('[aria-label="Timeline meaning and coverage"]')!
+  expect(coverage.textContent).toContain('Partial history')
+  expect(coverage.title).toContain('outside this bounded window')
+  const statuses = [...document.querySelectorAll('.recent-focus__input-reader [role="status"]')].map(node => node.textContent).join(' ')
+  expect(statuses).toContain('Some latest input records are outside this bounded window')
+  expect(document.querySelector('.recent-focus__message-body')).toBe(body)
+  expect(selection.rangeCount).toBe(1); expect(selection.toString()).toBe(selected)
+  expect(h.element.querySelectorAll('[data-message-id="native:claude:native-archived-0:native-kept"]')).toHaveLength(1)
+  expect(h.element.querySelectorAll('.recent-focus__live')).toHaveLength(1)
+  expect(observe).toHaveBeenCalledTimes(1)
+  expect(h.counts()[0]).toBe(before[0]); expect(h.counts()[2]).toBe(before[2])
+  expect(h.counts()[1]! - before[1]!).toBe(3)
+  const kernel = (h.client as unknown as { kernel: Record<string, (...args: unknown[]) => unknown> }).kernel
+  for (const name of ['start', 'input', 'resize', 'stop', 'attach', 'status']) expect(vi.mocked(kernel[name]!).mock.calls).toEqual([])
+  expect(h.client.connect).not.toHaveBeenCalled(); expect(h.onSelect).not.toHaveBeenCalled()
 })

@@ -1,5 +1,6 @@
 import type { AgentFocusHistoryIdentity } from './agent-focus'
 import type { AgentTimelineItem, AgentTimelineSnapshot, AgentWorkHistoryProjection } from '@agentmux/core'
+import { projectAgentWorkHistory } from '@agentmux/core/timeline'
 import { focusTimePosition, type FocusTimeWindow } from './focus-time-window'
 
 export const EMPTY_FOCUS_WORK_ITEMS: readonly AgentTimelineItem[] = []
@@ -41,6 +42,22 @@ export function mergeFocusWorkItems(before: readonly AgentTimelineItem[], incomi
   for (const item of incoming) byId.set(item.id, item)
   const items = [...byId.values()].sort((a, b) => a.createdAt - b.createdAt || a.id.localeCompare(b.id))
   return sameFocusWorkItems(before, items) ? before : items
+}
+/** The bounded reading window owns past coverage, not the current Session's
+ * state. Only Core's validated current tail can supplement that window. */
+export function projectFocusWorkHistory(
+  retained: readonly AgentTimelineItem[],
+  canonical: readonly AgentTimelineItem[],
+  options: Parameters<typeof projectAgentWorkHistory>[1]
+): AgentWorkHistoryProjection {
+  const history = projectAgentWorkHistory(retained, options)
+  if (!options?.current?.available || sameFocusWorkItems(retained, canonical)) return history
+  const current = projectAgentWorkHistory(canonical, options).segments.find(segment => segment.end === 'current')
+  if (!current) return history
+  // Replace the same interval's incomplete retained point, keeping every other
+  // historical interval and its coverage. No extra raw history is retained.
+  return { ...history, segments: [...history.segments.filter(segment =>
+    segment.run.runId !== current.run.runId || segment.startAt !== current.startAt), current] }
 }
 /** Unknown ends are a point at the last known observation, never a band to Now. */
 export function clipFocusWorkInterval(segment: FocusWorkInterval, window: FocusTimeWindow, now: number) {
