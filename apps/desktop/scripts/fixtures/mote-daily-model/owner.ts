@@ -26,12 +26,34 @@ const privateScope = 'This is a bounded private verification: use only this Mote
 
 /** Private driver only: all business and Agent operations use the original Main/App owners. */
 export async function runModelOwner(input: { html: string; preload: string; root: string; evidence: string;
-  command: string; codexArgs: string[]; nativeReadArgs: string[]; cli: string; hook: string; decisionFile: string }): Promise<boolean> {
+  command: string; codexArgs: string[]; nativeReadArgs: string[]; cli: string; hook: string; decisionFile: string;
+  continuation?: { evidence: string; receiptSha256: string; budgetSha256: string; turnHashes: string[] } }): Promise<boolean> {
   assert.equal(process.env.AGENTMUX_RUNTIME_DIRECTORY, join(input.root, 'runtime'), 'Only the original explicit private Runtime may be observed or stopped')
   assert.ok(process.env.CODEX_HOME?.startsWith(input.root + '/'), 'Only an authorized private auth scope may enter Main')
   const result: any = { schema: 'agentmux.mote.real-model-owner.v1', taskId: 'T-008', passed: false,
     pid: process.pid, turns: [], attempts: [], inputRequests: [], rejectedInputs: [], protocolWrites: [], currentReads: [], editorSaves: [],
     userRunTouched: false, modelTurns: 0, attemptedModelRequests: 0, admittedModelRequests: 0, completedModelTurns: 0 }
+  const priorModelInputs = input.continuation ? 2 : 0
+  if (input.continuation) {
+    const previous = input.continuation
+    const bytes = await readFile(join(previous.evidence, 'receipt.json')), budgetBytes = await readFile(join(previous.evidence, 'model-budget.json'))
+    assert.equal(hash(bytes), previous.receiptSha256); assert.equal(hash(budgetBytes), previous.budgetSha256)
+    const raw = JSON.parse(bytes.toString()), budget = JSON.parse(budgetBytes.toString())
+    assert.equal(raw.passed, false); assert.equal(raw.nativeCleanupConfirmation.stopped, true)
+    assert.equal(budget.attemptedModelRequests, 2); assert.equal(budget.completedModelTurns, 2); assert.equal(budget.gateClosed, true)
+    assert.equal(previous.turnHashes.length, 2)
+    for (let number = 1; number <= 2; number++) {
+      const turnBytes = await readFile(join(previous.evidence, 'turn-' + number + '.json'))
+      assert.equal(hash(turnBytes), previous.turnHashes[number - 1])
+      const turn = JSON.parse(turnBytes.toString())
+      assert.equal(turn.number, number); assert.ok(turn.agent.workspacePath.startsWith(input.root + '/'))
+      assert.ok(raw.nativeCleanupConfirmation.runs.some((run: any) => run.runId === turn.agent.control.run.runId && run.state.type !== 'running'))
+      result.turns.push(turn)
+    }
+    result.attempts = budget.attempts; result.inputRequests = budget.inputRequests
+    result.modelTurns = result.attemptedModelRequests = result.admittedModelRequests = result.completedModelTurns = 2
+    result.originalPhase = previous
+  }
   const store = new AgentMuxFileAgentSessionStore(process.env.AGENTMUX_AGENT_SESSION_STORE!)
   const topics = new ScratchTopics(), configStore = new ConfigStore()
   const runtime = new RuntimeController(store, connectDesktopAgentMuxHost, topics)
@@ -52,6 +74,7 @@ export async function runModelOwner(input: { html: string; preload: string; root
   let gateClosed = false, activeTurn: any, budgetWrite = Promise.resolve(), emergencyStop: Promise<void> | undefined
   const persistBudget = () => {
     const bytes = JSON.stringify({ schema: 'agentmux.mote.model-input-budget.v1', taskId: 'T-008', pid: process.pid, gateClosed,
+      priorModelInputs, phaseActualModelRequests: result.attemptedModelRequests - priorModelInputs,
       modelTurns: result.modelTurns, attemptedModelRequests: result.attemptedModelRequests,
       admittedModelRequests: result.admittedModelRequests, completedModelTurns: result.completedModelTurns,
       attempts: result.attempts, inputRequests: result.inputRequests, rejectedInputs: result.rejectedInputs, protocolWrites: result.protocolWrites }, null, 2)
@@ -329,7 +352,32 @@ export async function runModelOwner(input: { html: string; preload: string; root
     disposeIpc = await registerIpc({ window: win, configStore, runtime, progressLoops: manager, demands: goals, scratchTopics: topics })
     await manager.start(); await win.loadFile(input.html)
     await until(() => call('facts'), value => value.ready === true, 20000, 'original App initialization')
-    result.original = await call('createMote')
+    if (input.continuation) {
+      const b = result.turns[1], a = result.turns[0]
+      const originalTab = b.actionReceipt.durable.tabs[b.actionReceipt.selection.tabId]
+      assert.ok(originalTab.topicId)
+      result.original = await call('reopenOriginal', originalTab.topicId, b.actionReceipt.selection, b.actionReceipt.durable,
+        [a, b].map(turn => ({ ...turn.actionReceipt.selection, sessionId: turn.agent.id })))
+      assert.equal(result.original.agent.control.agentSessionId, b.agent.control.agentSessionId)
+      assert.equal(result.original.agent.control.run.runId, b.agent.control.run.runId)
+      assert.equal(result.original.scope.topic.physicalDirectoryPath, b.agent.workspacePath)
+      // Read the original indexed native conversations again. No copied rollout,
+      // injected response or reconstructed UI state substitutes for these identities.
+      result.reopenedNativeSources = []
+      result.reopenedNativeStatuses = []
+      for (const turn of [a, b]) {
+        const original = await host.client.statusAgent(turn.agent.control.agentSessionId)
+        const actual = await native.status(turn.agent.control.run.runId)
+        assert.equal(original.run.runId, turn.agent.control.run.runId)
+        assert.equal(actual.id, turn.agent.control.run.runId); assert.equal(actual.spec.cwd, turn.agent.workspacePath)
+        assert.equal(actual.state.type, 'exited'); assert.equal(actual.state.code, 0)
+        result.reopenedNativeStatuses.push({ core: original, native: actual })
+        const current = await history(turn.agent.control.agentSessionId)
+        assert.equal(current.source.nativeSessionId, turn.nativeSource.nativeSessionId)
+        assert.ok(current.items.length)
+        result.reopenedNativeSources.push(current)
+      }
+    } else result.original = await call('createMote')
     // Trust only the fresh synthetic Mote folders, using the provider's actual canonical cwd.
     const privateMotes = await realpath(join(input.root, 'home/.agentmux/motes'))
     const trustedMotes = []
@@ -341,6 +389,7 @@ export async function runModelOwner(input: { html: string; preload: string; root
       trustedMotes.push(cwd)
     }
     result.privateProviderPreparation = { trustedMotes, userConfigurationModified: false }
+    if (!input.continuation) {
     const questionA = privateScope + 'For this synthetic private exercise, first use the actual exported "$AGENTMUX_CLI" to run whoami and --skill. Print only AGENTMUX_ENV, AGENTMUX_CLI, AGENTMUX_AGENT_SESSION_ID and AGENTMUX_RUN_ID as environment evidence. I prefer three concise bullets. My planning decision is a weekly Tuesday review using local Markdown. Save these facts in cooperation-record.md in this Mote, including the exact line "Meeting day: Tuesday". Read the saved file back and explain the source. Use tools; saying you remembered it is not a save.'
     const a = await modelTurn(1, () => call('discuss', questionA))
     const commandEvidence = JSON.stringify(a.tools)
@@ -348,6 +397,7 @@ export async function runModelOwner(input: { html: string; preload: string; root
     assert.ok(JSON.stringify(a.toolResults).includes(a.agent.control.agentSessionId), 'Actual Agent whoami result must identify this Session')
     await currentRead('cooperation-record.md')
     await modelTurn(2, () => call('discuss', privateScope + 'What would be a useful next planning step for me? Check the original saved materials, explain what facts you used and where they came from.', ['cooperation-record.md']))
+    }
     const correction = await call('correct', 'cooperation-record.md', 'Meeting day: Tuesday', 'Meeting day: Thursday'); result.editorSaves.push(correction)
     result.editorSaves.push(await call('feedback', 'Prefer one concrete small Markdown checklist with its path and one source note. Avoid broad reminders and repeated summaries.'))
     result.feedbackBeforeDiscussionC = await currentRead('SOUL.md')
@@ -444,12 +494,13 @@ export async function runModelOwner(input: { html: string; preload: string; root
       () => win && !win.isDestroyed() ? call('dispose') : undefined, () => disposeIpc?.(), () => runtime.dispose(), () => host?.stop()]) {
       try { await cleanup() } catch (error) { errors.push((error as Error).message) }
     }
-    if (win && !win.isDestroyed()) win.destroy()
     if (inflight.size) errors.push('Private observations remain in flight: ' + inflight.size)
     result.cleanup = { errors, exactPrivateRunsStopped: errors.length === 0 && result.nativeCleanupConfirmation?.stopped === true,
       ownedRuns: [...owned.entries()], nativeConfirmation: result.nativeCleanupConfirmation ?? null }
     if (errors.length) result.passed = false
-    await writeFile(join(input.evidence, 'owner.json'), JSON.stringify(result, null, 2))
+    result.phaseActualModelRequests = result.attemptedModelRequests - priorModelInputs
+    await durableWriteFile(join(input.evidence, 'owner.json'), JSON.stringify(result, null, 2), { requireDirectorySync: true })
+    if (win && !win.isDestroyed()) win.destroy()
   }
   return result.passed
 }

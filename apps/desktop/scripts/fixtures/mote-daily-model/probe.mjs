@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto'
 import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
-import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, statfs, symlink, writeFile } from 'node:fs/promises'
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, statfs, symlink, unlink, writeFile } from 'node:fs/promises'
 import { dirname, join, relative, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -121,7 +121,11 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
       }
       async loadFile() {}
       isDestroyed() { return false }
-      destroy() { calls.push('window.destroy') }
+      destroy() {
+        const saved = JSON.parse(require('node:fs').readFileSync(join(output, 'owner.json'), 'utf8'))
+        assert.equal(saved.phaseActualModelRequests, saved.attemptedModelRequests)
+        calls.push('window.destroy.after-durable-receipt')
+      }
     }
     const modules = {
       electron: { app: { getPath: () => root + '/desktop' }, BrowserWindow: Window }, '@ctxmux/sdk': { CtxmuxClient: Native },
@@ -225,10 +229,20 @@ export async function readModelAuthorization(file, expectedSha256) {
   assert.equal(prepared.sourcePreparation?.passed, true); assert.equal(prepared.passed, false)
   assert.equal(prepared.modelTurns, 0); assert.equal(prepared.authFilesRead, false); assert.equal(prepared.authCopied, false)
   assert.deepEqual(manifest.harnessSource, prepared.harnessSource); assert.deepEqual(manifest.source, prepared.source)
-  assert.equal(grant.providerId, 'codex'); assert.equal(grant.maxModelTurns, 5); assert.equal(grant.turnTimeoutMs, 120000)
-  assert.equal(grant.priorActualModelTurns, 2)
+  assert.equal(grant.providerId, 'codex'); assert.equal(grant.maxModelTurns, grant.continuation ? 3 : 5); assert.equal(grant.turnTimeoutMs, 120000)
+  assert.equal(grant.priorActualModelTurns, grant.continuation ? 4 : 2)
   assert.equal(user.supplementalAuthorization?.maxActualModelTurnsTotal, 7)
   assert.ok(grant.priorActualModelTurns + grant.maxModelTurns <= user.supplementalAuthorization.maxActualModelTurnsTotal)
+  if (grant.continuation) {
+    const previous = await bound(grant.continuation.receipt), budget = await bound(grant.continuation.budget)
+    assert.equal(previous.passed, false); assert.equal(previous.modelTurns, 2); assert.equal(previous.nativeCleanupConfirmation.stopped, true)
+    assert.equal(budget.attemptedModelRequests, 2); assert.equal(budget.completedModelTurns, 2); assert.equal(budget.gateClosed, true)
+    assert.ok(previous.nativeCleanupConfirmation.runs.every(run => run.cwd.startsWith(grant.continuation.root + '/') && run.state.type !== 'running'))
+    assert.ok(grant.continuation.root.startsWith(_hygiene_fixturePath("tmp/amx-real-codex-")))
+    assert.equal(grant.continuation.turnHashes.length, 2)
+    assert.equal(grant.continuation.evidence, dirname(grant.continuation.receipt.path))
+    for (const [file, sha256] of Object.entries(grant.continuation.originalState)) assert.equal(hash(await readFile(join(grant.continuation.root, file))), sha256)
+  }
   assert.deepEqual(grant.credentialFiles, ['auth.json', 'config.toml'])
   assert.equal(grant.copyIsolatedSeed, true)
   assert.ok(typeof grant.seedPath === 'string' && grant.seedPath.startsWith('/'))
@@ -252,7 +266,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
     sourcePinnedMain: mainRef, source: {}, sourceOrigins: {}, harnessSource: {}, compiledImports: {}, compiledOutputs: {}, generatedInputs: {},
     authFilesRead: false, authCopied: false, userRunTouched: false, modelTurns: 0,
     authorization: permission ? { sha256: permission.sha256, userAuthorization: permission.grant.userAuthorization,
-      maxModelTurns: 5, turnTimeoutMs: 120000, credentialFiles: permission.grant.credentialFiles } : null,
+      maxModelTurns: permission.grant.maxModelTurns, turnTimeoutMs: 120000, credentialFiles: permission.grant.credentialFiles } : null,
     limitations: ['Only original synthetic private Mote files and owned Runs are in scope.',
       'Source preparation is not model cooperation, memory, proposal value, Runtime, or Native qualification.',
       'Actual model evidence requires original native history/tools, file readback and independent usefulness approval.',
@@ -265,7 +279,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
     })
     if (budget) {
       assert.equal(budget.schema, 'agentmux.mote.model-input-budget.v1')
-      receipt.modelBudget = budget; receipt.modelTurns = budget.attemptedModelRequests
+      receipt.modelBudget = budget; receipt.modelTurns = budget.phaseActualModelRequests ?? budget.attemptedModelRequests
     } else if (modelOwnerStarted) { receipt.modelTurns = null; receipt.modelRequestsUnknown = true }
     return budget
   }
@@ -422,7 +436,24 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       originalEnvironment = { ...process.env }; process.env.CODEX_HOME = permission.grant.seedPath
       process.env.TMPDIR = _hygiene_fixturePath("tmp")
       const fixture = await import(pathToFileURL(realScope).href)
-      try { scope = await fixture.prepareRealCodexScope(value => { scope = value }) }
+      try {
+        if (permission.grant.continuation) {
+          const original = permission.grant.continuation, retained = ['PATH', 'USER', 'LOGNAME', 'SHELL', 'LANG', 'LC_CTYPE', 'LC_ALL', 'TERM']
+          for (const key of Object.keys(process.env)) if (!retained.includes(key)) delete process.env[key]
+          const root = original.root
+          Object.assign(process.env, { HOME: join(root, 'home'), CODEX_HOME: join(root, 'codex-home'), TMPDIR: join(root, 'tmp'),
+            AGENTMUX_RUNTIME_DIRECTORY: join(root, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(root, 'durable'),
+            AGENTMUX_AGENT_SESSION_STORE: join(root, 'agent-sessions.json'), AGENTMUX_MESSAGE_QUEUE_PATH: join(root, 'global-messages.ndjson') })
+          scope = new fixture.RealCodexScope(root, originalEnvironment)
+          // Original stores, native index and UI storage remain in place. Only
+          // the already-authorized disposable credential files are copied again.
+          for (const name of permission.grant.credentialFiles) {
+            await cp(join(permission.grant.seedPath, name), join(root, 'codex-home', name)); await chmod(join(root, 'codex-home', name), 0o600)
+          }
+          receipt.originalPhase = { receipt: original.receipt, budget: original.budget, sourceManifest: original.sourceManifest,
+            sourceReview: original.sourceReview, priorModelInputs: 2 }
+        } else scope = await fixture.prepareRealCodexScope(value => { scope = value })
+      }
       catch (error) {
         if (scope) {
           receipt.authCopyObservation = await Promise.all(['auth.json', 'config.toml'].map(async name => ({ name,
@@ -464,14 +495,25 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       receipt.artifact.privateCopySha256 = receipt.artifact.sha256
       const sdk = await import(pathToFileURL(join(source, 'packages/core/node_modules/@ctxmux/sdk/dist/index.js')).href)
       nativeObserver = new sdk.CtxmuxClient({ socketPath: join(runtimeRoot, 'runtime/ctxmux.sock') })
+      if (permission.grant.continuation) {
+        // A stale socket is removed only after the original endpoint refuses a
+        // read. A serving daemon or an unknown failure cannot be replaced.
+        await nativeObserver.list().then(() => { throw Error('Original private Native is still serving; do not replace it') }, error => {
+          assert.equal(error.code, 'ECONNREFUSED', 'Original private socket state is unconfirmed')
+        })
+        await unlink(join(runtimeRoot, 'runtime/ctxmux.sock'))
+      }
       await scope.startNative(privateArtifact)
       nativeStarted = true
       const args = [...fixture.privateCodexConfigArgs, '--dangerously-bypass-hook-trust', '--no-alt-screen', '--ask-for-approval', 'never',
         '--sandbox', 'workspace-write', '--config', 'model_reasoning_effort="low"']
       const parameters = { html: join(buildRoot, 'renderer/index.html'), preload, root: runtimeRoot, evidence,
         command: executable, codexArgs: args, nativeReadArgs: [...fixture.privateCodexConfigArgs], cli: join(source, 'packages/core/bin/agentmux'),
-        hook: join(source, 'packages/core/bin/agentmux-hook.js'), decisionFile: permission.grant.decisionFile }
-      const main = ("const{app}=require('electron');const input=" + (JSON.stringify(parameters)) + (";app.setPath('userData',input.root+'/desktop');app.setPath('sessionData',input.root+'/desktop-session');app.setPath('home',input.root+'" + _hygiene_fixturePath("home") + "');app.whenReady().then(async()=>{const{runModelOwner}=await import(") + (JSON.stringify(pathToFileURL(owner).href)) + ");const passed=await runModelOwner(input);app.exit(passed?0:1)}).catch(error=>{console.error(error);app.exit(1)});")
+        hook: join(source, 'packages/core/bin/agentmux-hook.js'), decisionFile: permission.grant.decisionFile,
+        ...(permission.grant.continuation ? { continuation: { evidence: permission.grant.continuation.evidence,
+          receiptSha256: permission.grant.continuation.receipt.sha256, budgetSha256: permission.grant.continuation.budget.sha256,
+          turnHashes: permission.grant.continuation.turnHashes } } : {}) }
+      const main = ("const{app}=require('electron');const input=" + (JSON.stringify(parameters)) + (";app.setPath('userData',input.root+'/desktop');app.setPath('sessionData',input.root+'/desktop-session');app.setPath('home',input.root+'" + _hygiene_fixturePath("home") + "');app.on('window-all-closed',()=>{});app.whenReady().then(async()=>{const{runModelOwner}=await import(") + (JSON.stringify(pathToFileURL(owner).href)) + ");const passed=await runModelOwner(input);app.exit(passed?0:1)}).catch(error=>{console.error(error);app.exit(1)});")
       const mainFile = join(buildRoot, 'main.cjs'); await writeFile(mainFile, main); receipt.compiledOutputs.generatedMain = hash(main)
       processProbe = await import(pathToFileURL(join(source, 'apps/desktop/scripts/probe-process.mjs')).href)
       const lines = [], env = { ...process.env, MOTE_MODEL_PRIVATE_HELPER: helper }; delete env.ELECTRON_RUN_AS_NODE
@@ -509,7 +551,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       receipt.owner = JSON.parse(await readFile(join(evidence, 'owner.json'), 'utf8'))
       assert.equal(receipt.process.timedOut, false); assert.equal(receipt.process.exitCode, 0, receipt.owner.error?.message)
       assert.equal(receipt.guardian, undefined, 'Parent watchdog stopped an unconfirmed/expired private request')
-      assert.equal(receipt.owner.passed, true); assert.equal(receipt.modelTurns, 5)
+      assert.equal(receipt.owner.passed, true); assert.equal(receipt.modelTurns, permission.grant.maxModelTurns)
       receipt.passed = true; receipt.status = 'awaiting-independent-review'
     }
   } catch (error) { receipt.error = { message: error.message, stack: error.stack }; receipt.status = prepared ? 'failed' : 'pending' }

@@ -8,6 +8,7 @@ import { prepareMoteCooperationDraft, readMoteMaterial } from '../../../src/rend
 import { prepareMoteIdeaSchedule, stageMoteIdeaFeedback } from '../../../src/renderer/src/lib/mote-idea-request'
 import { CalendarScheduleControl } from '../../../src/renderer/src/components/CalendarScheduleControl'
 import { documentKey } from '../../../src/renderer/src/lib/workbench-tabs'
+import { confirmedMoteReference, useMoteMaterialsActions } from '../../../src/renderer/src/lib/mote-materials-actions'
 import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../src/shared/scratch-topics'
 import '../../../src/renderer/src/styles/index.css'
 
@@ -21,6 +22,17 @@ useAppStore.setState({ initialize: async () => { const dispose = await initializ
 const root = createClientUiRoot(document.getElementById('root'))
 root.render(createElement(App))
 const calendarRoot = createClientUiRoot(document.getElementById('calendar'))
+const materialsRoot = createClientUiRoot(document.body.appendChild(document.createElement('div')))
+let materialsActions
+function OriginalMaterialsBridge() {
+  const current = useAppStore()
+  const workspace = current.config?.workspaces.find(one => one.id === SCRATCH_WORKSPACE_ID)
+  const topic = current.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]?.topics?.find(one => one.id === moteId)
+  const rootPath = workspace && topic ? scratchTopicLogicalPath(workspace, topic) : null
+  materialsActions = useMoteMaterialsActions(workspace && topic && rootPath && !topic.readError ? { workspace, topic, rootPath } : null)
+  return null
+}
+materialsRoot.render(createElement(OriginalMaterialsBridge))
 function reference() {
   const choice = state().workbenchSpaceSelection
   if (!choice?.groupId || !choice.tabId || !choice.regionId) throw Error('Exact original Mote presentation is unconfirmed')
@@ -46,10 +58,9 @@ async function selectLast() {
   await prepareRendererUpdate()
 }
 async function openOriginal(path) {
-  const owner = scope(), before = reference()
-  const opened = await state().openFile(path, before.groupId, undefined, owner.workspace.id)
-  if (!opened) throw Error('Original Editor did not open this path')
-  const selection = reference(), region = state().tabs[selection.tabId]?.regions[selection.regionId]
+  const owner = scope(), selection = await materialsActions.open(path)
+  if (!selection) throw Error('Original Editor did not confirm this path and placement')
+  const region = state().tabs[selection.tabId]?.regions[selection.regionId]
   if (region?.kind !== 'file' || region.path !== path || region.workspaceId !== owner.workspace.id) throw Error('Original File target changed')
   return selection
 }
@@ -82,6 +93,32 @@ window.modelProof = {
     lastSelection = reference()
     state().setAgentComposerDraft(lastSelection.regionId, 'Original unsent Mote question')
     return { scope: scope(), selection: lastSelection, durable: durable() }
+  },
+  async reopenOriginal(topicId, selected, original, references) {
+    if (moteId) throw Error('This journey already selected its original Mote')
+    await state().refreshScratchTopics(SCRATCH_WORKSPACE_ID, true)
+    moteId = topicId
+    const owner = scope(), region = state().tabs[selected.tabId]?.regions[selected.regionId]
+    const placed = state().layouts[selected.displayWorkspaceId]?.groups.find(group => group.id === selected.groupId)?.tabOrder.includes(selected.tabId)
+    if (!placed || region?.kind !== 'agent') throw Error('The original private discussion was not restored')
+    lastAgent = state().sessions.find(one => one.kind === 'agent' && one.id === region.sessionId)
+    if (!lastAgent) throw Error('The original private Agent identity was not restored')
+    if (references.length !== 2) throw Error('Both original discussion references are required')
+    for (const reference of references) {
+      const placed = state().layouts[reference.displayWorkspaceId]?.groups.find(group => group.id === reference.groupId)?.tabOrder.includes(reference.tabId)
+      const region = state().tabs[reference.tabId]?.regions[reference.regionId]
+      if (!placed || region?.kind !== 'agent' || region.sessionId !== reference.sessionId ||
+        !confirmedMoteReference(state(), owner, { reference })) throw Error('An original discussion occurrence was not restored')
+    }
+    for (const [id, tab] of Object.entries(original.tabs)) {
+      const current = state().tabs[id]
+      if (!current || JSON.stringify(current.regions) !== JSON.stringify(tab.regions) || JSON.stringify(current.layout) !== JSON.stringify(tab.layout))
+        throw Error('An original work surface changed during private reopen')
+    }
+    for (const [id, draft] of Object.entries(original.drafts)) if (state().agentComposerDrafts[id] !== draft) throw Error('An original unsent question was not restored')
+    lastSelection = selected
+    await selectLast(); await prepareRendererUpdate()
+    return { scope: owner, selection: lastSelection, references, agent: lastAgent, durable: durable() }
   },
   async discuss(question, materialNames = []) {
     await selectLast()
@@ -134,5 +171,5 @@ window.modelProof = {
     return { note, soul: await readMoteMaterial(owner, owner.rootPath + '/SOUL.md'), opened }
   },
   async save() { await prepareRendererUpdate(); await api.ui.requestStorageFlush(); return durable() },
-  dispose() { calendarRoot.unmount(); root.unmount() }
+  dispose() { materialsRoot.unmount(); calendarRoot.unmount(); root.unmount() }
 }

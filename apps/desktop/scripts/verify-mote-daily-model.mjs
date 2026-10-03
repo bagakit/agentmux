@@ -25,11 +25,39 @@ export async function verifyRealMoteModel(locatorPath = '.tmp/mote-daily-model/a
   })
   const raw = await bound(locator.raw), review = await bound(locator.review), manifest = await bound(locator.sourceManifest)
   assert.equal(raw.schema, 'agentmux.mote.real-model.v1'); assert.equal(raw.taskId, 'T-008'); assert.equal(raw.passed, true)
-  assert.equal(raw.modelTurns, 5); assert.equal(raw.authFilesRead, true); assert.equal(raw.authCopied, true)
+  assert.equal(raw.modelTurns, raw.originalPhase ? 3 : 5); assert.equal(raw.authFilesRead, true); assert.equal(raw.authCopied, true)
   assert.equal(raw.userRunTouched, false)
   assert.equal(raw.owner?.passed, true); assert.equal(raw.owner?.modelTurns, 5)
   assert.equal(raw.owner.attemptedModelRequests, 5); assert.equal(raw.owner.admittedModelRequests, 5)
   assert.equal(raw.owner.completedModelTurns, 5); assert.equal(raw.owner.inputRequests.length, 5)
+  if (raw.originalPhase) {
+    const prior = await bound(raw.originalPhase.receipt), priorBudget = await bound(raw.originalPhase.budget)
+    const priorManifest = await bound(raw.originalPhase.sourceManifest), priorReview = await bound(raw.originalPhase.sourceReview)
+    assert.equal(prior.passed, false); assert.equal(prior.modelTurns, 2); assert.equal(prior.nativeCleanupConfirmation.stopped, true)
+    assert.equal(priorBudget.attemptedModelRequests, 2); assert.equal(priorBudget.completedModelTurns, 2)
+    assert.equal(priorReview.realModelQualification, false)
+    assert.ok(priorReview.taskIds.includes('T-008'))
+    assert.equal(priorReview.sourceGate.sha256, raw.originalPhase.receipt.sha256)
+    assert.equal(priorReview.sourceManifestSha256, raw.originalPhase.sourceManifest.sha256)
+    assert.deepEqual(priorReview.functionalOutcomes.filter(one => one.qualified).map(one => one.id).sort(), ['neutral-material-reuse', 'tool-save-readback'])
+    assert.equal(raw.owner.phaseActualModelRequests, 3); assert.equal(raw.modelBudget.phaseActualModelRequests, 3)
+    assert.equal(raw.owner.reopenedNativeSources.length, 2)
+    for (const [file, sha256] of Object.entries(prior.source)) if (!(file in prior.harnessSource)) {
+      assert.equal(raw.source[file], sha256, 'Original production Source changed between real phases: ' + file)
+      assert.equal(priorManifest.source[file], sha256)
+    }
+    for (let index = 0; index < 2; index++) {
+      const path = resolve(repository, dirname(raw.originalPhase.receipt.path), 'turn-' + (index + 1) + '.json')
+      const bytes = await readFile(path)
+      assert.equal(hash(bytes), raw.owner.originalPhase.turnHashes[index])
+      assert.deepEqual(JSON.parse(bytes), raw.owner.turns[index])
+      assert.equal(raw.owner.reopenedNativeSources[index].source.nativeSessionId, raw.owner.turns[index].nativeSource.nativeSessionId)
+      assert.ok(raw.owner.reopenedNativeSources[index].items.length)
+      assert.deepEqual(raw.owner.attempts[index], priorBudget.attempts[index])
+      const original = priorBudget.inputRequests[index], current = raw.owner.inputRequests[index]
+      for (const key of ['index', 'number', 'operationId', 'agentSessionId', 'enteredAt', 'promptSha256', 'admission', 'phase']) assert.deepEqual(current[key], original[key])
+    }
+  }
   assert.deepEqual(raw.owner.rejectedInputs, [])
   assert.equal(raw.modelBudget.attemptedModelRequests, 5); assert.equal(raw.modelBudget.gateClosed, true)
   assert.equal(raw.guardian, undefined); assert.equal(raw.modelRequestsUnknown, undefined)
@@ -87,7 +115,8 @@ export async function verifyRealMoteModel(locatorPath = '.tmp/mote-daily-model/a
     assert.equal(turn.pages[0].agentSessionId, turn.agent.control.agentSessionId)
     assert.deepEqual(turn.pages[0].source, turn.nativeSource)
     assert.ok(turn.screenshot?.path && /^[a-f0-9]{64}$/.test(turn.screenshot.sha256))
-    assert.equal(hash(await readFile(resolve(repository, dirname(locator.raw.path), turn.screenshot.path))), turn.screenshot.sha256)
+    const phase = raw.originalPhase && index < 2 ? raw.originalPhase.receipt.path : locator.raw.path
+    assert.equal(hash(await readFile(resolve(repository, dirname(phase), turn.screenshot.path))), turn.screenshot.sha256)
   }
   assert.equal(new Set(turns.slice(0, 3).map(turn => turn.agent.control.agentSessionId)).size, 3, 'A/B/C must be new original discussions')
   assert.equal(raw.owner.feedbackBeforeDiscussionC?.result.status, 'read')
