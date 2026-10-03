@@ -1,7 +1,7 @@
 import type { AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { OpenHttpLinkOrigin } from './open-destination'
-import { useAppStore } from '../store'
+import { currentDisplayNameRevision, useAppStore } from '../store'
 import { spatialCatalog } from './space-agent-control'
 import { firstPromptFromTimeline } from './workbench-tabs'
 import { api } from './api'
@@ -107,6 +107,33 @@ export function takeoverPrompt(source: TakeoverSource): string {
   ].join('\n\n')
 }
 
+/** Display naming follows the confirmed creation; inspection never overwrites a later edit. */
+async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutationReport): Promise<AgentMuxSpaceMutationReport> {
+  if (report.outcome !== 'opened' || !report.agent) return report
+  const { agentSessionId } = report.agent
+  // Core's local Host is relative to that Core; Desktop routes via the exact source Host.
+  const hostId = source.hostId!
+  const state = useAppStore.getState()
+  if (currentDisplayNameRevision('agent-session', agentSessionId) > 0 || state.agentNames[agentSessionId]) return report
+  try {
+    const observed = state.sessions.find(session => session.kind === 'agent' && session.id === agentSessionId && session.control.hostId === hostId)
+    const created = observed ? null : await api.sessions.creation(hostId, agentSessionId)
+    if (created && created.agentSessionId !== agentSessionId) throw new Error('The creation reply belongs to another Agent; its name was not used.')
+    if (currentDisplayNameRevision('agent-session', agentSessionId) > 0) return report
+    const createdAt = observed?.createdAt ?? created!.createdAt
+    const time = new Date(createdAt), pad = (value: number) => String(value).padStart(2, '0')
+    if (!Number.isFinite(time.getTime())) throw new Error('The new Agent creation time is unconfirmed.')
+    const suffix = `${time.getFullYear()}-${pad(time.getMonth() + 1)}-${pad(time.getDate())} ${pad(time.getHours())}:${pad(time.getMinutes())}`
+    const original = source.label.replace(/ - \d{4}-\d{2}-\d{2} \d{2}:\d{2}$/, '')
+    await useAppStore.getState().renameAgent(agentSessionId, `${original} - ${suffix}`, 0)
+  } catch (error) {
+    useAppStore.setState({ nameEditFailure: { operationId: `takeover-name:${report.requestId}`,
+      target: { kind: 'agent-session', id: agentSessionId },
+      message: `The new Agent is available; its inherited name is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Inspect this Agent's name before editing it.` } })
+  }
+  return report
+}
+
 export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxSpaceMutationReport | null> {
   source = await exactTakeoverSource(source)
   const state = useAppStore.getState(), requestId = await takeoverRequestId(source)
@@ -115,7 +142,7 @@ export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxS
     operation: 'space.inspect', target: { requestId } })
   if (result.operation !== 'space.inspect') throw new Error('The original creation inspection returned another operation. Its result is unconfirmed.')
   if (!result.request?.report) throw new Error('The original takeover intent is retained; creation is unconfirmed. Check this same request again.')
-  return result.request.report
+  return nameTakeover(source, result.request.report)
 }
 
 /** Renderer navigation consumes a confirmed result, including later inspection. */
@@ -161,5 +188,5 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
     destination: { zoneId: zone.zoneId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, newTab: true },
     content: { kind: 'new-agent', executorId, prompt: takeoverPrompt(source) } })
   if (result.operation !== 'agent.open') throw new Error('The takeover creation returned another operation. Its original result is unconfirmed; do not repeat creation.')
-  return result
+  return nameTakeover(source, result)
 }
