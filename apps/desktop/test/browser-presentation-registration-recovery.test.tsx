@@ -2,6 +2,7 @@
 import { act, createElement, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { previewFrame, previewMedia } from './helpers/browser-preview-media'
 
 const bridge = vi.hoisted(() => ({
   registerPresentation: vi.fn(), removePresentation: vi.fn(), updatePresentation: vi.fn(),
@@ -63,12 +64,12 @@ beforeEach(() => {
   mediaDescriptor = Object.getOwnPropertyDescriptor(navigator, 'mediaDevices')
   Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: {
     getDisplayMedia: vi.fn(async () => {
-      const stream = new MediaStream()
-      Object.defineProperty(stream, 'getTracks', { value: () => [{ id: 'track-one', stop: stopped }] })
+      const { track, stream } = previewMedia('track-one')
+      track.stop = stopped
       return stream
     })
   } })
-  vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined)
+  vi.spyOn(HTMLMediaElement.prototype, 'play').mockImplementation(function () { previewFrame(this); return Promise.resolve() })
   originalRect = HTMLElement.prototype.getBoundingClientRect
   stageWidth = 640
   HTMLElement.prototype.getBoundingClientRect = function () {
