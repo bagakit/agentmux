@@ -52,6 +52,20 @@ agentmux app inspect
 
 `space bind|unbind` 操作 Zone／Space 关系或 Tab／display Workspace／Group 的准确展示关系。解除最后一处绑定仍保留实体与健康内容；显式 Close 是另一件事。具体参数以各命令 `--help` 为准。
 
+提交已编辑的完整空间图解散项目组时，先用 `space state` 读取原图与准确 revision。将本次确认解散的原 `groupId` 填入 `removed.json`，内容例如：
+
+```json
+["<exact-group-id>"]
+```
+
+以原组的精确 ID 替换占位符，不从名称猜 ID。`removed.json` 是精确组 ID JSON 数组；`--removed-project-groups` 只接受文件路径，不能用 `-`，完整 `graph.json` 仍由 stdin 传入。
+
+```sh
+agentmux space commit --revision N --removed-project-groups removed.json < graph.json
+```
+
+仅在新图中省略组不构成解散授权。按 [Core 项目组删除意图](../design/behavior/spaces-and-layout.md#跨设备关联项目组)与 [`AgentMuxSpatialCommit`](../../packages/core/src/spatial-graph.ts)，仅移除本次组的组织关系，保留其他组及原 Space／Zone／Tab／Region、Session 与 Run；该示例不请求实体删除。
+
 ## 打开文件，切换正文，交换格子
 
 ```sh
@@ -122,9 +136,13 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 | 已支持的偏好、诊断与资源观察 | `settings`、`system crash-log/metrics/doctor` |
 | Session 消息、输出、生命周期 | `agent send/output/interrupt/resume/stop`、`message inbox/dispatch` |
 
-“全部桌面操作”还没有完成。共享投影在各界面的完整输入／可见性闭环仍需补齐，上述入口也不保证全部 UI 控件已可操作；不在 help 中的能力不要猜命令。共享实体／展示关系继续由同一 Store owner 提供，CLI 消费它，不另建一套空间模型。
+表中入口的能力边界与接线见[公共能力来源导航](../specs/public-capabilities.md#cli-与服务的当前来源)及[公共控制合同](../design/behavior/public-control.md#对象优先-cli-与统一公共业务服务)。源码、构建、安装与实际运行分别核对；入口清单不代签具体 UI 控件的可操作性，不在当前执行版本 help 中的能力不要猜命令。
+
+共享实体与展示关系由 Core 的同一持久空间 owner 提供；Desktop Store 消费并投影这些事实，CLI 接入同一公共服务，不另建一套空间模型。
 
 ## RPC 与远程调用
+
+Endpoint、Host 路由与源身份的行为边界见[公共控制合同](../design/behavior/public-control.md#endpointhost-路由与源身份)；下文按直接连接服务与经配置 Host 两种任务入口操作，准确参数以当前 `--help`／`--skill` 为准。
 
 命令只负责参数与回执，业务都通过同一 typed JSON-RPC 2.0 服务。Unix 与 SSH 使用逐行 JSON；HTTP 持续观察使用 SSE。`system endpoint` 给出当前选择的 endpoint 与 `connection: "not-attempted"`，不连接、不创建服务，也不证明机器可达或 Agent 健康。直接 RPC 调用该方法得到 `connection: "responded"`，只证明本次服务响应。
 

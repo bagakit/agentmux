@@ -105,7 +105,7 @@
 - **整块消息交互必须低熵、自收敛、职责清楚**。Renderer 只拥有草稿、队列意图与可见反馈，Core 拥有投递与幂等，ctxmux 拥有字节受据；手动与自动消费共享一个入口。同一 Session 同时只投递一个条目，每次投递前读取当前队列与 Session，删除尚未开始的条目立即生效；已在途时如实显示无法撤回。旧 Run 的条目保留供复制但不阻塞新 Run；快照恢复、连接恢复和 readiness 变化必须能重新推进队列，普通输出和其他 Session 的事件不得制造重试洪水。临时拒绝保持可见且安静，自动路径不弹全局错误；不能以叠加防御、厂商特例或第二份状态机替代 owner 修复。
 - Branch 行与 Topic 行都展示对应工作线的 recap，沿用同一份 Board 行摘要来源，不复制状态管线。
 
-- Agent Session 是 Provider 语义身份；Run 是 ctxmux 进程身份；View/Region 是 Desktop 展示身份。
+- Agent Session 是 Core 持有的 Provider 语义身份；Run 是 ctxmux 进程身份；Tab/Region 是 Core 持有的持久空间身份，View 是 Client 的呈现实例。
 - 一个 Session 可以没有 View，也可以投影到多个 View。关闭 Tab 内的 Region 只改变该 View 的内容布局；关闭承载某个 Session 最后一个 Region 的完整 View 时，Terminal 直接停止 Run，Agent 默认停止并二次确认，同时明确提供保留 Session 的选项。
 - 关闭共享或尚未附着的语义 Session 展示面，没有停止 Run 的义务；同一 Session 合法更换 Run 不得阻断这次局部关闭，另一个健康 View 与当前 Session 保留。最后一个已退出展示面及实际 Run 资源收尾仍不能借迟到结果删除后来替换的 Run/Region。
 - 用户反馈「已报错停止的 Session Tab/Region 点关闭关不掉」「tab进入无法处理撞墙状态，撞墙必须避免」。当前同 Session 的 typed 进程事实已经 exited 时，用户关闭精确展示面不应再依赖停止该 Run；收起投影保留原语义 Session、历史、草稿和未知输入，不冒称退休或取消。关闭收尾未能在有界时间内确认时，保原 View 并说明结果未知，释放本次 UI 租约，让原保留 Session 的局部关闭选项与重试真正可达；迟到结果不能删除后来替换的 Run/Region，也不假称原 Stop 已取消。展示保存未确认不得堵死这个局部出口，仍持续说明本次布局耐久未知；running/unknown 的明确停止确认、文件未保存确认、Browser 资源义务及 App 退出/更新保存约束保持，不从错误文案或缺快照猜 exited。
@@ -114,7 +114,7 @@
 - **告诉用户「再关一次」，那条路就必须真的走得通。** 停止是终局动作，不与 resize/attach/detach 这些改附着状态的操作共用串行队列：那条队列保护的是中间态不被穿插，而停止没有需要被保护的中间态，同一个 Run 停两次对 Runtime 是幂等的。反过来它必须能插队——卡住队首的往往正是上一次没回执的停止，让重试排在它后面，等于把恢复动作也一起卡死。附着在**决定停止的那一刻**作废，不等 Runtime 回话。
 - **“把这个 Agent 挪到另一个 Tab”必须移动，不能偷偷复制一份视图。** 用户反馈“分屏里加载的 Agent 在 Tab 上又加载了一次”：搬动后原分屏不再保留被搬走的 Region，其他 Region、Session/Run 身份和正在执行的工作保持不变。GUI 与 Agent 控制入口必须能明确表达同一搬移动作；打开已有 Session 的额外投影不等于移动，不得把新增投影的回执报告成“已移动”。多 View 投影能力仍按上一条保留。
 - **投影可以被显式移动到另一个 Workspace 的 View**，这只搬动展示身份、不动 Agent 事实。cwd 归 Core（`session.workspacePath`，一个已在运行的进程的工作目录），移动**绝不改变** `session.workspacePath`——没有任何通道能让运行中的进程改换工作目录，所以移动后这条 Session 的 Tab **仍**如实显示它自己的工作目录（cwd），不冒用目标 Workspace 的磁盘路径或名字。移动是用户按 Region 显式发起的（Tab 菜单选目标 Workspace），落点复用既有的 selectSession 导航；新建 worktree **绝不**把任何 Session 的投影**自动移动**过去，创建 worktree 与移动投影是两个独立动作。
-- Desktop 持久化的是**展示身份**，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：布局是 Renderer 的展示事实，Session 身份与 Provider-native resume token 是 Core 的语义事实；任何一侧失败都不能把另一侧静默删掉。
+- Core 持久化**空间身份与布局**，Desktop 消费原事实并负责屏幕呈现，不复制 PTY、Replay、Agent 状态或进程生命周期。**布局恢复与 Session 恢复必须分开看待**：持久布局由 Core 空间 owner 保存，Session 身份与 Provider-native resume token 由 Core 语义 owner 保存；任一恢复失败都不能把另一项静默删掉。
   - **判据是「这一面有没有可在冷启动复活的身份」，不是「它属于哪一类面」**。Agent/Terminal 面持久化 Session/Run 落在哪张 View 的哪个 Region；**文件面同样持久化，含它的路径原样**——一个文件面只有 `{regionId, kind, workspaceId, path}`，没有运行时内容可剥，而它的 Tab id 本就是 `file:<workspaceId>:<path>`，所以「存这一面」与「存这个路径」是同一件事，分不开。把文件面剥掉曾经让一个纯文件 Tab 整个消失、让 agent+文件的分屏塌成单面，这正是用户报的「重启后 tab 和分屏没了」。
   - **Browser 面反过来整面不持久化**。它内嵌活体页面快照（url/title/navigationId 全是必填的运行时事实），浏览历史与文件路径是两类不同的敏感度；更关键的是冷启动**没有**一条能把持久化的 browser 结构复活成可用空白页的生命周期，硬存一个结构标识只会 ship 一个死面板。**以缺席表达，而不是画一个打不开的面**。
   - **持久化了一个面，就必须有人在冷启动把它的内容装上**。文件面能存下来只是一半：若启动恢复不去加载那份文档，Tab 在、编辑器却报「不可用」——这比整个 Tab 消失更难诊断，因为看起来像文件坏了。**凡是新增一类可持久化的面，都要同时指明它冷启动时的加载入口**；没有加载入口的持久化是半成品，不许上线。
@@ -122,7 +122,7 @@
 - **应用重启与机器重启都先恢复布局，再恢复语义 Session**。启动时以持久化布局为索引；健康 Run 自动接回，已结束或丢失的 Run 是否立即续接按《冷启动按需恢复》执行。用户不需要先点 `Resume` 才能看到原工作面和可读记录。恢复成功沿用原 View/Region，Run id 可以变化但 Session id 不变。
 - **resume/重新 attach 的画面必须按 Runtime 确认的几何恢复**。ctxmux 持有 `current_size`；Desktop 必须把 attach 时的尺寸交给终端，并在 retained replay 与启动期间缓冲的 pending 输出全部写完之前保持解析几何稳定，不能让 RAF/ResizeObserver 在中途改变行列数。两段输出交接完成后再按当前可见 Region 同步尺寸；交接失败或 Run 不可控制也必须解除本地几何锁；需要重画时走既有 redraw。未知尺寸必须如实提示并尝试可见视口同步，不能用未知尺寸阻断健康 Agent，也不能把初始尺寸当成确认事实。当前尺寸不保证历史上每段字节的原始几何，回放缺口与历史局限仍如实表达。 首次视口同步失败不能撤销持续同步意图或首次重绘义务；下一次正常视口观察必须还能重试，不添加轮询。失败以服务窗持续可见，Runtime 确认后撤下相应告示，不阻断健康 Agent。
 - **运行期保存也必须经过宿主持久化边界**。布局、焦点、草稿和待发消息在界面里读到最新值，不等于强制退出后下一进程还能读到。真实工作面变更聚合后必须提交给现有宿主存储机制，不能只等正常退出；状态事件、读操作与相同持久化值不增加提交。提交失败要在服务窗说明“当前保存未确认”和下一次真实变更的重试动作，不阻断健康 Agent；平台的 void 提交请求不能表述为 fsync 成功，可靠性结论须绑定无测试额外提交的真实隔离重启输入。
-- **重启恢复必须使用同一个持久化根目录**。Renderer 的 Workbench 布局与 Core 的 Agent Session store 都绑定 Electron `app.getPath('userData')`；开发启动、打包 App、DMG 安装副本不得各自生成一份 store。启动恢复前若发现路径身份不一致，必须保留原布局并在服务窗说明实际路径，不能把空 store 当成“没有 Session”。
+- **重启恢复必须使用同一个持久化根目录**。同一 owner 在开发启动、打包 App、DMG 安装副本间沿用已确认的持久化根目录，不得各自生成一份 store。Core 空间图沿 [Core 状态目录或宿主显式配置的路径](../../../packages/core/src/spatial-state.ts)保存；Desktop 的 Agent Session store 由 [Electron 宿主](../../../apps/desktop/src/main/agent-session-store-path.ts)沿 `app.getPath('userData')` 注入，Core 不依赖 Electron。启动恢复前若发现路径身份不一致，必须保留原布局并在服务窗说明实际路径，不能把空 store 当成“没有 Session”。
 - **Session store 的陈旧锁不能把新 Agent 永久挡在门外**。写入锁带有可验证的 owner；owner 已退出时锁可回收。若锁文件为空、截断或 owner 身份无法验证，也不得把它当成永远存活的 owner：在确认没有对应活进程后应回收并继续写入；仍能确认 owner 存活时必须保留锁。一次锁清理失败只在服务窗/诊断面说明，不能删除 Session、布局或 ctxmux 的私有状态。
 - **Session store 的高频读取不能反过来饿死生命周期写入**。列举/恢复等只读加载不得为了孤立 Timeline 清理而长期占用写锁；清理是可抢救的旁路，遇到短暂争用应让出。新建、恢复和停止等生命周期写入必须在同一份 store 上排队并保留可观测的有限重试；只有重试预算耗尽后才报告 `AGENT_SESSION_STORE_BUSY`，不能把正常的多 Agent 活跃状态误报成永久失败。
 - **启动探测失败不能遮住已保存的工作面**。配置、Session snapshot 或 Provider capability 的单项 Host/runtime 失败时，Renderer 仍必须先提交已恢复的布局与可见 Region，再把失败作为作用域明确的服务窗/状态行呈现；只有布局本身无法读取时才进入无布局错误态。一次暂时不可达的 Host 不得让整个窗口回到空白 loading，也不得覆盖最后一份可恢复布局。若 snapshot 未能确认 Session 身份，原 Region 先保留为“待 Runtime 校验”的投影；下一次权威 snapshot 到达后再按已知缺失或匹配结果收敛，不能用空 snapshot 静默裁剪它。
@@ -333,7 +333,7 @@ ctxmux 持有 PTY、Run、Attachment、ordered bytes、Replay 和 Gap；AgentMux
 用户先要求「彻底理解项目, 实现远程管理能力」，要求研究 `herdr`、`orca` 与 `paseo` 并在准备后讨论；现已授权彻底实现既有联邦 Runtime Feature。通用 Core 与 Desktop 必须能联邦管理本机和远端 Headless AgentMux；首个可用闭环连接已有远端服务，复用统一公共 RPC 与系统 SSH stdio，远端持有 Agent 语义与当地 ctxmux Run，不能让无 UI 客户端依赖 Desktop 才能创建、观察或管理 Agent。参考研究与具体远端测试环境观察仍不能代替真实产品验收。
 
 - AgentMux Runtime 是可被 Desktop 管理的最小远端单元。它可以运行在本机，也可以运行在无 UI 的 Linux 服务中；远端 Runtime 自己权威持有 Provider、AgentSession、Hook、Permission、readiness、semantic resume 以及它所连接的 ctxmux 事实。Desktop 只是客户端和工作面投影，不把这些事实复制成第二份本地真相。
-- Desktop 只持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用、工作面布局和最后一次观察结果。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有原语义 Runtime owner 明确确认目标 Session/Run 的 retired 等终局事实，才允许按既有规则移除对应投影。unknown、unknown-session 与 unavailable 不属于终局，保留原 Tab、Region、Session 引用和服务窗。
+- Desktop 持久化 Runtime endpoint 配置、可信身份、稳定的 Session/Run 引用和带来源的最后一次观察结果。工作面的持久空间身份、布局、选择与全部绑定由 [Core 空间 owner](../../architecture/spatial-state.md) 保存，Desktop 消费原事实并持有客户端呈现偏好。远端暂时不可达、握手失败或能力探测未完成时，原 Tab、Region 和引用继续保留，并以“尚未确认/正在重连”服务窗表达；只有原语义 Runtime owner 明确确认目标 Session/Run 的 retired 等终局事实，才允许按既有规则移除对应投影。unknown、unknown-session 与 unavailable 不属于终局，保留原 Tab、Region、Session 引用和服务窗。
 - `ExecutionHost`（文件、shell、SSH 等执行能力）与 `AgentMux Runtime endpoint` 是两种不同的产品能力。即使它们落在同一台远端机器上，也不能因为能访问工作区就假定 Agent Runtime 可用；两者的身份、能力和恢复状态分别呈现。
 - 远端管理的对象是 AgentMux Runtime，而不是把 Desktop 直接变成 ctxmux 的远程控制器。ctxmux 继续只负责 PTY、进程、Run、ordered bytes、Replay、Gap、Attachment 和权威运行时事实；AgentMux 负责 Agent 语义与 Session 恢复，Desktop 不在两层之间再保留一份实现。
 - 本地服务、SSH 与宿主提供的 HTTP 连接共用唯一类型化 JSON-RPC Runtime 服务与 Hosted SDK。传输只改变连接方式，不另建 Session、权限、历史、Attachment 或事件恢复实现；Headless 与带宿主能力的服务均组合同一个 Core 语义 owner。宿主私网、设备及 Desktop 转发能力仍由各自 owner 注入。

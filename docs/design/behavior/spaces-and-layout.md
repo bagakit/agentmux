@@ -332,7 +332,7 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 
 ## 跨设备关联项目组
 
-出现 Remote 时，Space 中的本机目录分区明确标为本机（例如 `This Mac`），各 Remote 以可读机器名称呈现自己的 Folders 分区，与本机并列；未出现 Remote 时保留 `Folders`。目录按原 Host 身份归属，不能混入其他机器的分区。设备暂不可用仍保留其原目录投影，折叠与过滤不改变资源或 Session。
+出现 Remote 时，Space 中的本机目录分区明确标为本机（例如 `This Mac`），各 Remote 以可读机器名称呈现自己的 Folders 分区，与本机并列；未出现 Remote 时保留 `Folders`。不能把 Remote 埋成混合 Folders 内的路径组。目录按原 Host 身份归属，不能混入其他机器的分区。设备暂不可用仍保留其原目录投影，折叠与过滤不改变资源或 Session。
 
 Space 中通过 Git 仓库来源提示已登记项目的跨设备关联，用户手动选择成员创建独立项目组，并可随时解散。Git 识别只提供建议：优先使用 `origin` 的 fetch 来源；没有 `origin` 时只有唯一 remote 才可确定来源。HTTPS、SSH 与 scp 的等价仓库来源统一比较，不以同名、目录名或相同提交猜项目身份，不把 fork 的共同 upstream 当成同一项目。来源歧义、非 Git、无 remote 和连接未知分别如实表达；识别不 fetch、不改 Git，也不阻断手动编组。
 
@@ -342,9 +342,13 @@ Space 中通过 Git 仓库来源提示已登记项目的跨设备关联，用户
 
 存在项目组时才显示 Space 的 Project Groups 分区；无组时通过通用创建入口创建首组。每个成员保留机器与目录身份，选择成员沿其原 Workspace 展示原工作面。原目录树中的项目项始终保留且可以直接选择，不能因多组归属任意跳到某一个组。同 Git origin 的关联提示始终位于原 Folder 上，无论是否归组；提示可核对相关机器和目录，不要求据此创建组或把所有关联项目加入同一组。Git 提示与已经归组是两种不同事实，不能共用含义不明的标记。过滤、键盘导航和窄栏也能找到组与成员，并核对完整路径与可读机器名称。
 
-组建、改名与解散只改变组织关系，不改成员目录、执行 Host、cwd、Zone、Tab、Region、Session 或 Run。解散只移除当前组的成员关系，其他组的同一 Folder 归属与当前成员工作面保留。保存 ACK 和普通进程重启恢复原组与工作面；不同组的并发编辑可合并，同组冲突保留原内容并提供恢复动作，不能覆盖他人的组织或因观察失败自动拆组。
+组建、改名与解散只改变组织关系，不改成员目录、执行 Host、cwd、Zone、Tab、Region、Session 或 Run。解散只移除当前组的成员关系，其他组的同一 Folder 归属与当前成员工作面保留。解散提交须携带 Core 的精确组删除意图（[`AgentMuxSpatialCommit.removedProjectGroupIds`](../../../packages/core/src/spatial-graph.ts)）；仅在新图中省略组不构成授权，该意图不授予实体删除能力。
+
+保存 ACK 和普通进程重启恢复原组与工作面；不同组的并发编辑可合并，同组冲突保留原内容并提供恢复动作，不能覆盖他人的组织或因观察失败自动拆组。
 
 ## Project 与 Workspace
+
+下文目录树分组由同一 Host 的路径派生，不等同于[持久 Project Group](#跨设备关联项目组)，也不等同于[组织 Tabs 的 Tab Group](#tabtab-group-与-region)。
 
 - 导航围绕 Space 的工作上下文组织；Folder/Project、Mote 与知识分类／Topic 的产品归属见[《Space、Folder 与 Topic》](#spacefolder-与-topic)。当前 Project Rail 负责选择工作上下文、显示紧凑状态和进入 Settings/Hosts。
 - Project Rail 的 `Projects` 只是分组标签，不是页面标题：它必须使用低于项目行标题的元信息层级，弱化字重与字距，不抢项目名称的注意力。

@@ -90,7 +90,7 @@ export type AgentMuxRpcServiceSubscription<M extends AgentMuxRpcStreamMethod = A
 }
 const NATIVE_FIELDS = {
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
-  'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval'],
+  'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval','removedProjectGroupIds'],
   'space.resolve': ['tabId','regionId','direction'],
   'name.history': ['target','afterId','limit'],
   'name.confirm': ['operationId'],
@@ -513,7 +513,8 @@ export class AgentMuxRpcService {
       case 'space.commit': {
         if (p.allowEntityRemoval !== undefined && typeof p.allowEntityRemoval !== 'boolean') throw new AgentMuxError('Explicit entity removal must be boolean.', 'INVALID_CONTROL_REQUEST')
         result = {state:await this.spatial.commit({expectedRevision:rpcCount(p.expectedRevision,-1,Number.MAX_SAFE_INTEGER),graph:p.graph as import('./spatial-state.js').AgentMuxSpatialGraph,
-          ...(p.allowEntityRemoval === undefined ? {} : {allowEntityRemoval:p.allowEntityRemoval as boolean})})}; break
+          ...(p.allowEntityRemoval === undefined ? {} : {allowEntityRemoval:p.allowEntityRemoval as boolean}),
+          ...(p.removedProjectGroupIds === undefined ? {} : {removedProjectGroupIds:p.removedProjectGroupIds as string[]})})}; break
       }
       case 'space.resolve': {
         const tabId = rpcString(p.tabId,'Tab ID'), regionId = rpcString(p.regionId,'Region ID')

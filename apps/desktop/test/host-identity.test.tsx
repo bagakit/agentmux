@@ -16,7 +16,7 @@ import { TopBreadcrumb } from '../src/renderer/src/components/TopRowChrome'
 import { hostIdentityProjection, executionHostProjection, regionExecutionHost } from '../src/renderer/src/lib/region-execution-host'
 import { useAppStore } from '../src/renderer/src/store'
 import type { HostConfig } from '../src/shared/contracts'
-import type { FocusProjectLane } from '../src/renderer/src/lib/focus-project-lanes'
+import { focusProjectKey, type FocusProjectLane } from '../src/renderer/src/lib/focus-project-lanes'
 
 const initial = useAppStore.getState()
 const hosts: HostConfig[] = [{ id: 'local', kind: 'local' as const, label: 'This Mac' }, { id: 'farm', kind: 'ssh' as const, label: 'Build machine', hostname: 'private-farm' }]
@@ -40,22 +40,30 @@ it('retains exact machine identity, explicitly unknown configuration and no conn
   expect(badges()[2]!.getAttribute('aria-label')).toBe('Host: Host unknown')
   expect(container.textContent).not.toMatch(/connected|healthy|offline/i)
 })
-it('omits confirmed local machine hints while compact remote and unknown identities remain accessible', async () => {
-  await mount(<><HostBadge context="Host" host={hostIdentityProjection('local', hosts[0])} /><HostBadge context="Host" compact host={hostIdentityProjection('farm', hosts[1])} /><HostBadge host={executionHostProjection('local', _hygiene_fixturePath("cwd"), hosts[0])} /><HostBadge context="Host" host={hostIdentityProjection('orphan')} /></>)
-  expect(badges().map(b => b.dataset.hostId)).toEqual(['farm', 'orphan'])
-  expect(badges()[0]!.textContent).toBe('')
-  expect(badges()[0]!.getAttribute('aria-label')).toContain('Build machine · farm')
-  expect(badges()[1]!.dataset.hostKind).toBe('unknown')
+it('suppresses only confirmed local Execution Host while Host and unknown identities remain accessible', async () => {
+  await mount(<><HostBadge context="Host" host={hostIdentityProjection('local', hosts[0])} /><HostBadge context="Host" compact host={hostIdentityProjection('farm', hosts[1])} /><HostBadge host={executionHostProjection('local', _hygiene_fixturePath("cwd"), hosts[0])} /><HostBadge context="Host" host={hostIdentityProjection('orphan')} /><HostBadge host={executionHostProjection(null, _hygiene_fixturePath("cwd"))} /></>)
+  expect(badges().map(b => b.dataset.hostId)).toEqual(['local', 'farm', 'orphan', ''])
+  expect(badges()[0]!.textContent).toBe('This Mac')
+  expect(badges()[0]!.getAttribute('aria-label')).toBe('Host: This Mac · local')
+  expect(badges()[0]!.querySelector('.lucide-square-terminal')).not.toBeNull()
+  expect(badges()[1]!.textContent).toBe('')
+  expect(badges()[1]!.getAttribute('aria-label')).toContain('Build machine · farm')
+  expect(badges()[1]!.querySelector('.lucide-radio-tower')).not.toBeNull()
+  expect(badges()[2]!.dataset.hostKind).toBe('unknown')
+  expect(badges()[2]!.querySelector('.lucide-circle-help')).not.toBeNull()
+  expect(badges()[3]!.dataset.executionHostId).toBe('')
+  expect(badges()[3]!.getAttribute('aria-label')).toBe('Execution Host: Host unknown')
 })
 it('Focus distinguishes same named original project lanes by their own machine without changing selection', async () => {
-  const lane = (hostId: string): FocusProjectLane => ({ id: hostId, hostId, workspaceId: hostId, projectId: hostId, name: 'Same project', path: _hygiene_fixturePath("same/path"), labels: ['Same project'], topicId: null, recovery: null, projectWorkspaceId: null, summary: null, activeAgentIds: [], contextIds: [] })
+  const lane = (hostId: string): FocusProjectLane => ({ id: hostId, hostId, workspaceId: hostId, projectId: 'shared-project', name: 'Same project', path: _hygiene_fixturePath("same/path"), labels: ['Same project'], topicId: null, recovery: null, projectWorkspaceId: null, summary: null, activeAgentIds: [], contextIds: [] })
   const onSelect = vi.fn()
-  await mount(<FocusProjectLanes lanes={['local', 'farm', 'removed'].map(lane)} selectedWorkspaceId="farm" onSelect={onSelect} renderLane={(_, heading) => heading} />)
-  expect(badges().map(b => b.dataset.hostId)).toEqual(['farm', 'removed'])
+  await mount(<FocusProjectLanes lanes={['local', 'farm', 'removed'].map(lane)} selectedProjectKey={focusProjectKey('farm', 'shared-project')} onSelect={onSelect} renderLane={(_, heading) => heading} />)
+  expect(badges().map(b => b.dataset.hostId)).toEqual(['local', 'farm', 'removed'])
   expect(container.querySelectorAll('.focus-project-lanes__label strong')).toHaveLength(3)
-  expect(container.querySelector('[data-project-id="farm"]')?.classList.contains('is-selected')).toBe(true)
-  await act(async () => (container.querySelector('[data-project-id="removed"] button') as HTMLButtonElement).click())
-  expect(onSelect).toHaveBeenCalledExactlyOnceWith('removed')
+  expect(container.querySelector('[data-lane-id="farm"]')?.classList.contains('is-selected')).toBe(true)
+  expect(container.querySelector('[data-lane-id="local"]')?.classList.contains('is-selected')).toBe(false)
+  await act(async () => (container.querySelector('[data-lane-id="removed"] button') as HTMLButtonElement).click())
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith(focusProjectKey('removed', 'shared-project'))
 })
 it('breadcrumb consumes readable configured machine name and preserves branch identity', async () => {
   await mount(<TopBreadcrumb />)
@@ -85,7 +93,7 @@ it('mixed Group members retain original project icons and exact host labels incl
   useAppStore.setState({ config: { ...config, workspaces }, projectGroups: [{ groupId: 'group', name: 'Purpose', projectIds: [directoryIdentity('farm', _hygiene_fixturePath("same/path")), directoryIdentity('local', _hygiene_fixturePath("same/path")), directoryIdentity('removed', _hygiene_fixturePath("same/path"))] }], spaceObjectIcons: {}, collapsedProjectGroups: {} })
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
   await mount(<ProjectGroupsTree projects={projects} query="" activeProjectId="project" onCreate={() => {}} onEdit={() => {}} onDissolve={() => {}} sessionsByProject={new Map()} lastActivityByProject={new Map()} visible />)
-  expect(badges().map(b => b.dataset.hostId)).toEqual(['farm', 'removed'])
+  expect(badges().map(b => b.dataset.hostId)).toEqual(['farm', 'local', 'removed'])
   expect(container.querySelectorAll('.project-group__member .project-rail-row__icon')).toHaveLength(3)
   expect([...container.querySelectorAll('.project-group__member')].map(member => member.getAttribute('aria-label'))).toEqual(['Same project · Build machine · farm', 'Same project · This Mac · local', 'path · removed · removed · Registration unavailable'])
   expect(container.querySelector('[data-host-id="removed"]')?.getAttribute('aria-label')).toContain('Not configured')

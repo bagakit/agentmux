@@ -163,9 +163,33 @@
 
 - **设备管理沿原 Host Authority。** 接入、真实设备 principal、管理方法和撤销边界唯一沿[《手机版 Relay 连接》](#手机版-relay-连接)。传输来源和取消信号由实际 owner 提供，客户端参数不提升权限，未知副作用不自动重放。
 
-**当前实现与未实现范围。** `f-2j28fqcvt` 已交付严格 JSON-RPC 2.0 公共服务、对象化 CLI、Unix／显式 HTTP 与 SSH stdio 转发、只读 PMO 手册、真实全局发现，以及显式 Project 资源与 Space 落点的首 Tab／首任务编排。公开 wire 不再使用旧 schema5 信封；内部 Client DTO 仍由原业务 owner 持有。三传输的权限与独立观察者释放、真实 Client 调用和私有普通进程重启恢复已有对应证据。五个 `runtime.*` 有限公共端口、原 Host SDK 派生类型、真实上下文与权限隔离，以及 Node／浏览器共用的纯 HTTP/SSE 入口已完成公共 producer 的 Source 验收与 main 发布。手机 Host 组合、Relay、有限浏览器 SDK 和设备管理沿下述范围；构建不代替真实设备验收。
+**当前实现与未实现范围。** 公共类型、CLI、传输和第一方消费链见[公共能力来源导航](../../specs/public-capabilities.md#cli-与服务的当前来源)。源码合同、构建、安装与实际运行分别核对；Source 不代替三传输的权限与独立观察者释放、真实 Client 调用或私有普通进程重启恢复的行为证据。内部 Client DTO 仍由原业务 owner 持有。五个 `runtime.*` 的有限端口、原 Host SDK 派生类型、真实上下文与权限隔离，以及 Node／浏览器共用的纯 HTTP/SSE 入口沿上文 Host 公开能力合同；手机 Host 组合、Relay、有限浏览器 SDK 和设备管理沿下述范围。构建不代替真实设备验收。
 
-**已评审的派生合同与实施边界。** 新 Zone 以 `--project`／typed `projectId` 显式选择资源，既有 Zone 不需要该项；Project 由原 Workspace 配置的 Host 与仓库根／目录同一性派生，不添加第二 registry。新 Zone 可用 `--source-workspace` 明确选择该 Project 内的执行来源；未指定时仅接受唯一根目录来源或唯一已登记来源，多工作区且没有根目录时明确要求消歧，不从第一个工作区或当前 HEAD 猜分支起点。一个 `--endpoint` descriptor 只定位同一公共服务，不承担资源或空间身份；普通 CLI 的 `system endpoint` 只描述选中地址，返回 `connection: "not-attempted"`，不连接、不证明可达；真正 RPC 的同名方法返回 `connection: "responded"`，只确认该次服务响应。`local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。聚合发现与检查保留原 Session 的 `hostId`，另返回该服务内可复用的 `routeHostId`，用于后续按 Host 范围准确读取；配置 Host ID 不是 SSH 地址或跨 endpoint 的全局机器 ID。`agent context` 的 `hostId` 是本次路由，`sourceHostId` 与 descriptor 保留源服务身份。发现结果只在同一 endpoint 范围续用，未知或多 owner 不按首项猜测；HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保原自定义 wire 或兼容别名。`--operation-id` 是沿原 owner 对账的业务操作身份，JSON-RPC `id` 只关联一次 wire 请求；订阅只有一次响应，先响应再通知，取消／断线只释放相应 reader，不停健康 Agent 或原业务 operation。完整命令树、原业务保留和第一方指引须一起落地，Toolkit 原 add／remove 能力改为 create／delete，update／action 保留；具体过滤与载体实现仍受上述真实来源和 typed 合同约束。少量独立端到端切片可并行推进，最终验收消费同一候选的公共 RPC、完整对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付。
+**已评审的派生合同与实施边界。**
+
+### 新 Zone 的资源来源
+
+新 Zone 以 `--project`／typed `projectId` 显式选择资源，既有 Zone 不需要该项；Project 由原 Workspace 配置的 Host 与仓库根／目录同一性派生，不添加第二 registry。
+
+新 Zone 可用 `--source-workspace` 明确选择该 Project 内的执行来源；未指定时仅接受唯一根目录来源或唯一已登记来源，多工作区且没有根目录时明确要求消歧，不从第一个工作区或当前 HEAD 猜分支起点。
+
+### Endpoint、Host 路由与源身份
+
+一个 `--endpoint` descriptor 只定位同一公共服务，不承担资源或空间身份。普通 CLI 的 `system endpoint` 只描述选中地址，返回 `connection: "not-attempted"`，不连接、不证明可达；真正 RPC 的同名方法返回 `connection: "responded"`，只确认该次服务响应。
+
+`local` 指接收业务调用的 Core 服务本机，直接连接远端时不指 CLI 所在机器。聚合发现与检查保留原 Session 的 `hostId`，另返回该服务内可复用的 `routeHostId`，用于后续按 Host 范围准确读取；配置 Host ID 不是 SSH 地址或跨 endpoint 的全局机器 ID。`agent context` 的 `hostId` 是本次路由，`sourceHostId` 与 descriptor 保留源服务身份。发现结果只在同一 endpoint 范围续用，未知或多 owner 不按首项猜测。
+
+### 传输、业务回执与持续读取
+
+HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保旧 schema5 信封、原自定义 wire 或兼容别名。
+
+`--operation-id` 是沿原 owner 对账的业务操作身份，JSON-RPC `id` 只关联一次 wire 请求。订阅只有一次响应，先响应再通知；取消／断线只释放相应 reader，不停健康 Agent 或原业务 operation。
+
+### 对象命名与完整交付
+
+完整命令树、原业务保留和第一方指引须一起落地，Toolkit 原 add／remove 能力改为 create／delete，update／action 保留；具体过滤与载体实现仍受上述真实来源和 typed 合同约束。
+
+少量独立端到端切片可并行推进，最终验收消费同一候选的公共 RPC、完整对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付。
 
 ## Topics 知识库的公共接入
 
