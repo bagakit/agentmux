@@ -24,7 +24,7 @@ import {
   Wrench,
   X
 } from 'lucide-react'
-import { createPortal } from 'react-dom'
+import { StableWorkbenchView } from './StableWorkbenchView'
 import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import {
   BROWSER_VIEWPORT_PRESETS,
@@ -73,7 +73,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { BrowserWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
 import { BrowserPresentationStage, useBrowserPresentationCapture, type WorkbenchBrowserPresentation } from './BrowserPresentationStage'
-import type { WorkbenchViewTarget } from '../lib/workbench-presentation'
+import { WorkbenchPresentationContext, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
@@ -147,21 +147,6 @@ export function BrowserPane({
   // Selection comes from the owning surface, never the first rendered occurrence.
   const selectedPresentationId = useAppStore(state => selectedBrowserPresentationId(presentations, state))
   const media = useBrowserPresentationCapture(tab.browserId)
-  const [presentationHosts, setPresentationHosts] = useState<ReadonlyMap<string, HTMLElement>>(() => new Map())
-  const presentationKey = presentations.map(presentation => presentation.occurrence.presentationId).join('\n')
-  useLayoutEffect(() => {
-    let cancelled = false
-    queueMicrotask(() => {
-      if (cancelled) return
-      const hosts = new Map<string, HTMLElement>()
-      for (const presentation of presentations) {
-        const host = document.getElementById(presentation.stageHostId)
-        if (host) hosts.set(presentation.occurrence.presentationId, host)
-      }
-      setPresentationHosts(hosts)
-    })
-    return () => { cancelled = true }
-  }, [presentationKey, presentationTargetId])
   const stageRef = useRef<HTMLDivElement>(null)
   // 焦点结论用 ref 承接，边界同步那条 effect 从 ref 读它而不订阅它（#545）：直接把 prop 放进那条
   // effect 的依赖数组会让它在每次焦点切换时拆了重建，中间闪一帧（见那条 effect 的注释）。ref 保证
@@ -1259,9 +1244,16 @@ export function BrowserPane({
   const primary = presentations.find(presentation => presentation.target.hostId === presentationTargetId) ?? presentations[0]
   return <>
     {renderPane(primary)}
-    {presentations.filter(presentation => presentation !== primary).map(presentation => {
-      const host = presentationHosts.get(presentation.occurrence.presentationId)
-      return host && renderPresentationFrame ? createPortal(renderPresentationFrame(renderPane(presentation), presentation.target), host, presentation.occurrence.presentationId) : null
-    })}
+    {renderPresentationFrame ? presentations.filter(presentation => presentation !== primary).map(presentation =>
+      <StableWorkbenchView key={presentation.occurrence.presentationId} kind="region"
+        homeId={`${presentation.stageHostId}:parked`} targetId={presentation.stageHostId}
+        reference={presentation.occurrence.location}
+        active={presentation.active} visible={presentation.visible}
+        retainedRegionId={presentation.occurrence.location.regionId}>
+        <WorkbenchPresentationContext.Consumer>
+          {({ tabHostId }) => renderPresentationFrame(renderPane({ ...presentation,
+            visible: presentation.visible && tabHostId === presentation.stageHostId }), presentation.target)}
+        </WorkbenchPresentationContext.Consumer>
+      </StableWorkbenchView>) : null}
   </>
 }
