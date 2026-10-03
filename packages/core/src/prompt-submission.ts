@@ -29,6 +29,21 @@ const TERMINAL_PROMPT_RENDER_TIMEOUT_MS = 10_000
 /** Bound the optional initial-composer observation; expiry never disables prompt input. */
 const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
 
+function promptFailureCauseDetail(error: unknown): string {
+  const cause = error instanceof AgentMuxError
+    ? { code: error.code, ...(error.detail === undefined ? {} : { detail: error.detail }),
+      ...(error.controlFailure === undefined ? {} : { controlFailure: error.controlFailure }) }
+    : { code: error instanceof Error ? error.name : 'unknown' }
+  return JSON.stringify(cause)
+}
+
+/** Invocation-local pre-input failure; it says nothing about an older logical operation. */
+export function promptPreparationFailure(error: unknown): AgentMuxError {
+  if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_PREPARATION_FAILED') return error
+  return new AgentMuxError('This call ended during read-only preparation before attempting input. The original operation and healthy terminal are kept.',
+    'AGENT_PROMPT_PREPARATION_FAILED', promptFailureCauseDetail(error), { disposition: 'not_applied', confirmedInputBytes: 0 })
+}
+
 /** One original pre-input observation, not durable authorization or another submission owner. */
 export type AgentPromptTransportQualification = Readonly<{
   agentSessionId: string
@@ -133,7 +148,7 @@ export class AgentPromptSubmissionCoordinator {
 
   /** Called outside the input lane. A claimed/unknown original operation is never prepared anew. */
   async qualifyInputTransport(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string,
-    prompt: string, signal: AbortSignal): Promise<AgentPromptTransportQualification | undefined> {
+    prompt: string, signal: AbortSignal, onPreparationStarted?: () => void): Promise<AgentPromptTransportQualification | undefined> {
     const provider = this.deps.providers.get(session.providerId)
     if (!provider.preparePromptExecutionTransport) return undefined
     const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
@@ -141,6 +156,7 @@ export class AgentPromptSubmissionCoordinator {
     const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
       !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
     if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId || unfinished) return undefined
+    onPreparationStarted?.()
     const deadline = Date.now() + 40_000
     try {
       this.deps.assertAgentRun(current, run)
@@ -167,8 +183,7 @@ export class AgentPromptSubmissionCoordinator {
     } catch (error) {
       await this.publishDeliveryDegrade(current, { state: 'unverified', mode: 'degraded',
         reason: 'immediate-context-unconfirmed', submissionId, run: current.run, observedAt: Date.now() })
-      throw new AgentMuxError('Immediate input preparation is unconfirmed. The original message and healthy terminal are kept.',
-        'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', error instanceof AgentMuxError ? error.code : 'unknown')
+      throw promptPreparationFailure(error)
     }
   }
 
@@ -553,6 +568,8 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {
+      const rejoiningOriginal = session.promptCompletionAdmission?.submissionId === submissionId
+      let inputAttempted = false
       try {
         const transportEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
         await verifyTransport(transportEvidence?.sourceId, session.promptCompletionAdmission?.submissionId !== submissionId || !session.promptCompletionAdmission.frameRefresh)
@@ -605,6 +622,7 @@ export class AgentPromptSubmissionCoordinator {
           if (!frameRefresh.acknowledged) {
             const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
             if (run.acceptedInputBytes === null || run.acceptedInputBytes < frameRefresh.inputByteRange.endByte) assertAdmission(current)
+            inputAttempted = true
             const accepted = await this.applyInput(session, submissionId, {
               ownerInstanceId: current.promptCompletionAdmission!.intent!.ownerInstanceId,
               operationId: frameRefresh.operationId, expectedByte: frameRefresh.inputByteRange.startByte, data: plan.prepare.refresh
@@ -667,8 +685,9 @@ export class AgentPromptSubmissionCoordinator {
       } catch (error) {
         await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
           reason: 'immediate-context-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
+        if (!rejoiningOriginal && !inputAttempted) throw promptPreparationFailure(error)
         throw new AgentMuxError('Immediate execution context is unconfirmed. This message is kept; ordinary input and the healthy Run remain available. Review native pending input or draft, then retry this exact message.',
-          'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', error instanceof AgentMuxError ? error.code : 'unknown')
+          'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', promptFailureCauseDetail(error), error instanceof AgentMuxError ? error.controlFailure : undefined)
       }
     }
     const promptDigest = createHash('sha256').update(prompt).digest('base64url')
@@ -1012,7 +1031,7 @@ export class AgentPromptSubmissionCoordinator {
         await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
           reason: 'immediate-context-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
         throw new AgentMuxError('Native immediate preparation is unconfirmed. The original message and Run are kept; do not resend it as ordinary input. The terminal remains available.',
-          'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', error instanceof AgentMuxError ? error.code : 'unknown')
+          'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED', promptFailureCauseDetail(error), error instanceof AgentMuxError ? error.controlFailure : undefined)
       }
     }
     await applyPhase('payload', plan.payload)
