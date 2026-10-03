@@ -11,7 +11,7 @@ export type ResponseAttempt = { phase: PromptAttempt['phase']; message: string }
 function restoredMessage(value: PromptAttempt['phase'], interaction = false): string {
   if (value === 'unknown') return interaction
     ? '重启后的原请求答复回执未知；不会重复回答，请核对原会话。'
-    : '重启后的原输入回执未知；草稿保留，不会重新投递，请刷新核对原会话。'
+    : '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。'
   return value === 'confirmed' ? '先前已由 Core 确认；当前连接另行核对。' : '原输入未发送或已被拒绝；草稿保留。'
 }
 
