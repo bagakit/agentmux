@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowDown, ArrowLeft, History, LoaderCircle, RefreshCw } from 'lucide-react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
+import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -81,9 +82,10 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
   control, readingKey, label, onClose, visible, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, primaryAction, describeSpeaker,
-  expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation
+  expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation, renderMessageActions
 }: {
   control: SessionHistoryReference
+  renderMessageActions?: (source: ConversationReplySource) => ReactNode
   /** A live caller fences its reading window when its retained Run changes. Retired readers have no Run. */
   readingKey?: string
   label: string
@@ -373,6 +375,7 @@ export function SessionHistoryView({
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
         {page ? <ConversationNativeThread page={page} sessionId={control.agentSessionId}
+          {...(renderMessageActions ? { renderMessageActions } : {})}
           describeSpeaker={resolveSpeaker} showSource={false} messageIdForRecord={rawMessageId}
           workspaceRoot={workspaceRoot} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink}
           expandedTraces={openedTraces} onToggleTrace={handleToggleTrace}

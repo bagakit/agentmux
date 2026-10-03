@@ -1,6 +1,7 @@
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import { memo, useMemo } from 'react'
+import { memo, useMemo, type ReactNode } from 'react'
+import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { buildNativeContinuationPrompt } from '../lib/native-continuation.js'
 import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
@@ -18,6 +19,7 @@ type Props = ReadingProps & {
   onContinue?: (prompt: string) => void
   locatedMessageKey?: string | null
   renderProcess?: ConversationProcessRenderer
+  renderMessageActions?: (source: ConversationReplySource) => ReactNode
   /** Hosts may retain an existing annotation/disclosure identity without replacing presentation. */
   messageIdForRecord?: (item: AgentSessionHistoryItem) => string
   showSource?: boolean
@@ -25,7 +27,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationNativeThread = memo(function ConversationNativeThread({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, messageIdForRecord, showSource = true, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = true, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
@@ -54,6 +56,9 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
           {...(describeSpeaker ? { describeSpeaker } : {})}
           {...(item.startedAt === undefined ? {} : { createdAt: item.startedAt })}
           {...(user && onContinue ? { onContinue: () => onContinue(buildNativeContinuationPrompt(page, item)) } : {})}
+          {...(renderMessageActions && item.kind === 'assistant-message' && item.messagePhase !== 'progress' && item.contentParts.some(part => part.kind === 'text' && part.text.trim())
+            ? { messageActions: renderMessageActions({ kind: 'native', agentSessionId: sessionId,
+              providerId: page.source.providerId, nativeSessionId: page.source.nativeSessionId, recordId: item.id }) } : {})}
           {...reading} />
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
