@@ -17,9 +17,9 @@ export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCa
     const original = sessions.get(row.id)
     const executorId = original?.kind === 'agent' ? original.executorId : undefined
     const avatar = executorId ? state.config?.executors[executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[executorId] : undefined
-    return { agentSessionId: row.id, name: row.name.slice(0, 256), project: row.workspace ? row.workspaceName.slice(0, 256) : 'Project unconfirmed',
-      detail: row.detail.slice(0, 512), group: focusColumnFor(row), state: row.state, providerId: row.providerId ?? '',
-      recap: row.recap ? { text: row.recap.text.slice(0, 512), source: row.recap.source } : null, ...(avatar ? { avatar } : {}) }
+    return { agentSessionId: row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
+      detail: row.detail, group: focusColumnFor(row), state: row.state, providerId: row.providerId ?? '',
+      recap: row.recap ? { text: row.recap.text, source: row.recap.source } : null, ...(avatar ? { avatar } : {}) }
   })
 }
 export async function readSpatialAppearance(state: State, catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[], readAvatar: (target: MoteAvatarTarget, choice: MoteAvatarRef) => Promise<MoteAvatarImage>): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>> {

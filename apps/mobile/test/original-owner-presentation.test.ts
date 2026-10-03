@@ -1,5 +1,7 @@
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { describe, expect, it, vi } from 'vitest'
+import { launcherTimelineRecap } from '../../desktop/src/renderer/src/lib/launcher-resume'
+import { parseSpaceControlSuccessReceipt } from '../../../packages/core/src/space-control-parser'
 import { readAgentPresentation, readSpatialAppearance } from '../../desktop/src/renderer/src/lib/mobile-presentation'
 import { directoryIdentity } from '../../desktop/src/shared/space-addresses'
 import { topicSpaceIconTarget } from '../../desktop/src/renderer/src/lib/space-object-appearance'
@@ -10,6 +12,19 @@ const config = { workspaces: [workspace], executors: {}, appearance: {} }
 const state = { config, sessions: [], timelines: {}, agentNames: {}, scratchTopicSnapshots: {}, spaceObjectIcons: {}, spaceZoneBindings: {} } as any
 const catalog = { spaces: [{ spaceId: key, kind: 'mote', name: 'Debuger', hostId: 'local', directoryPath: topic.physicalDirectoryPath, topicId: topic.id, projectId: null }], zones: [], tabs: [], regions: [], bindings: [], locations: [] } as any
 describe('Mobile consumes the original Desktop owners', () => {
+  it('passes actual long Chinese and emoji owner output through the public catalog codec', () => {
+    const session = { kind: 'agent', id: 'original', label: 'codex · Project', providerId: 'codex', executorId: 'exec', hostId: 'local', workspacePath: fixturePath("configured/project"), processState: 'running', capabilities: { timeline: true }, status: { state: 'running', source: 'run-process', observedAt: Date.now() }, control: { kind: 'agent', hostId: 'local', agentSessionId: 'original', run: { runId: 'run' } } }
+    const avatar = { tint: '#aabbcc', badge: 'spark' }
+    const rows = readAgentPresentation({ ...state, config: { ...config, executors: { exec: { avatar } }, workspaces: [{ ...workspace, id: 'project', name: '中文工作空间😀'.repeat(100), path: session.workspacePath }] }, sessions: [session], timelines: { original: { agentSessionId: 'original', revision: 1, items: [{ id: 'prompt', agentSessionId: 'original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 1, updatedAt: 1, title: 'Input', content: ('中文😀项目'.repeat(100)) }, { id: 'answer', agentSessionId: 'original', kind: 'assistant_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Reply', content: ('中文回复🧑‍💻'.repeat(200)) }] } } } as any)
+
+    const input = { ...catalog, agentPresentation: rows }
+    expect(() => parseSpaceControlSuccessReceipt({ schemaVersion: 5, requestId: 'read', ok: true, operation: 'space.ls', result: { catalog: input } })).not.toThrow()
+    expect(rows[0]?.name).toContain('中文')
+    expect(rows[0]?.recap?.text).toContain('中文回复')
+    expect(rows[0]!.recap).toEqual({ text: launcherTimelineRecap({ items: [{ kind: 'assistant_message', content: '中文回复🧑‍💻'.repeat(200) }] } as any)!.text, source: 'Last assistant message' })
+    expect(rows[0]!.project).toBe('中文工作空间😀'.repeat(100))
+  })
+
   it('uses durable custom-avatar identity despite a different physical cwd; no dragon for ordinary Motes', async () => {
     const face = { kind: 'face', shape: 'soft', palette: 'peach', eyes: 'round', brows: 'soft', mouth: 'smile', accessory: 'tuft' }
     expect(topicSpaceIconTarget(workspace, topic, {})?.key).toBe(key)
