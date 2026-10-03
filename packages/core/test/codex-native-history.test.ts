@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
 import { mkdtemp, mkdir, readFile, writeFile, rm, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -16,9 +16,9 @@ const entries = [
   { turnId: 'turn-1', item: { type: 'userMessage', id: 'user-older', content: [
     { type: 'text', text: '\n  exact user 中\n' }, { type: 'image', url: 'https://synthetic.invalid/image.png' },
     { type: 'text', text: 'after image ' }, { type: 'image', fileId: 'native-image-file-id' },
-    { type: 'localImage', path: upstreamFixturePath("synthetic/local.png") }, { type: 'audio', url: 'native:audio' },
-    { type: 'localAudio', path: upstreamFixturePath("synthetic/local.wav") }, { type: 'skill', name: 'skill', path: upstreamFixturePath("synthetic/SKILL.md") },
-    { type: 'mention', name: 'file', path: upstreamFixturePath("synthetic/file.ts") }
+    { type: 'localImage', path: fixturePath("synthetic/local.png") }, { type: 'audio', url: 'native:audio' },
+    { type: 'localAudio', path: fixturePath("synthetic/local.wav") }, { type: 'skill', name: 'skill', path: fixturePath("synthetic/SKILL.md") },
+    { type: 'mention', name: 'file', path: fixturePath("synthetic/file.ts") }
   ] } }
 ]
 
@@ -28,9 +28,9 @@ async function fixture(
   verify: (owner: { client: AgentMuxClient; store: AgentMuxFileAgentSessionStore;
     read(options?: AgentSessionHistoryPageOptions): ReturnType<AgentMuxClient['sessionHistoryPage']>;
     requests(): Promise<Request[]>; helpers(): Promise<Helper[]>; home: string }) => Promise<void>,
-  mode = 'normal'
+  mode = 'normal', records: unknown[] = entries
 ): Promise<void> {
-  const home = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-native-stdio-test-"))
+  const home = await mkdtemp(fixturePath("tmp/amx-native-stdio-test-"))
   const workspace = join(home, 'workspace')
   await mkdir(workspace)
   const script = join(home, 'native-fixture.mjs')
@@ -40,7 +40,7 @@ async function fixture(
 import { appendFileSync } from 'node:fs'
 import { createInterface } from 'node:readline'
 import { spawn } from 'node:child_process'
-const entries = ${JSON.stringify(entries)}
+const entries = ${JSON.stringify(records)}
 const nativeId = ${JSON.stringify(nativeId)}
 const mode = process.env.AMX_NATIVE_MODE
 const descendant=mode==='orphan-descendant'?spawn(process.execPath,['-e','setInterval(()=>{},60000)'],{stdio:'ignore'}):null
@@ -94,7 +94,7 @@ input.on('line', line => {
     hostId:'local',workspacePath:workspace,run:{runId:'original-run'},retiredRuns:[],
     hookBindingId:'synthetic-binding',hookToken:'synthetic-token',createdAt:1,updatedAt:1,
     nativeHandle:{kind:'provider',providerId:'codex',sessionId:nativeId,
-      transcriptPath:upstreamFixturePath("synthetic/untrusted-child-path-is-ignored.jsonl")} })
+      transcriptPath:fixturePath("synthetic/untrusted-child-path-is-ignored.jsonl")} })
   const client = new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(path)})
   const invocation: AgentSessionHistoryPageOptions = {commandOverride:process.execPath,
     args:[script,'configured-argument'],env:{CODEX_HOME:home,AMX_NATIVE_MODE:mode,
@@ -128,11 +128,11 @@ describe('actual public Client to owned native stdio read protocol', () => {
         {kind:'resource',resourceType:'image',reference:'https://synthetic.invalid/image.png'},
         {kind:'text',text:'after image '},
         {kind:'resource',resourceType:'image',reference:'native-image-file-id'},
-        {kind:'resource',resourceType:'image',reference:upstreamFixturePath("synthetic/local.png")},
+        {kind:'resource',resourceType:'image',reference:fixturePath("synthetic/local.png")},
         {kind:'resource',resourceType:'audio',reference:'native:audio'},
-        {kind:'resource',resourceType:'audio',reference:upstreamFixturePath("synthetic/local.wav")},
-        {kind:'resource',resourceType:'file',reference:upstreamFixturePath("synthetic/SKILL.md"),label:'skill'},
-        {kind:'resource',resourceType:'file',reference:upstreamFixturePath("synthetic/file.ts"),label:'file'}
+        {kind:'resource',resourceType:'audio',reference:fixturePath("synthetic/local.wav")},
+        {kind:'resource',resourceType:'file',reference:fixturePath("synthetic/SKILL.md"),label:'skill'},
+        {kind:'resource',resourceType:'file',reference:fixturePath("synthetic/file.ts"),label:'file'}
       ])
       expect(first.items[1]).toEqual({id:'unknown-activity',turnId:'turn-2',kind:'activity',title:'futureActivity',
         contentParts:[{kind:'text',text:JSON.stringify(entries[1]!.item,null,2)}]})
@@ -201,7 +201,7 @@ describe('actual public Client to owned native stdio read protocol', () => {
   })
   it('reports a missing configured command without requiring a connected Run',async()=>{
     await fixture(async({read,store,requests})=>{
-      await expect(read({commandOverride:upstreamFixturePath("missing/agentmux-native-helper")})).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_UNAVAILABLE'})
+      await expect(read({commandOverride:fixturePath("missing/agentmux-native-helper")})).rejects.toMatchObject({code:'AGENT_SESSION_HISTORY_UNAVAILABLE'})
       expect(await requests()).toEqual([])
       expect((await loadAgentSessions(store)).map(session=>session.run)).toEqual([{runId:'original-run'}])
     })
@@ -232,5 +232,52 @@ describe('actual public Client to owned native stdio read protocol', () => {
       expect(owners.map(owner=>owner.home)).toEqual([home,other])
       expect(owners[0]!.pid).toBe(first.pid)
     })
+  })
+})
+
+
+const processRecords = [
+  { turnId: 'process-turn', item: { type: 'userMessage', id: 'input', content: [{type:'text',text:'Review the recorded work.'}] } },
+  { turnId: 'process-turn', startedAtMs: 100, completedAtMs: 101, item: { type: 'reasoning', id: 'empty-a', summary: [], content: [] } },
+  { turnId: 'process-turn', item: { type: 'reasoning', id: 'content-r', summary: ['Summary stays secondary'], content: ['\n  Visible content 中\n', 'After'] } },
+  { turnId: 'process-turn', item: { type: 'collabAgentToolCall', id: 'spawn', tool: 'spawnAgent', status: 'inProgress', senderThreadId: nativeId, receiverThreadIds: ['worker-a'], prompt: '\n  Review the input.\n', agentsStates: { 'worker-a': {status: 'completed', message: 'Recorded review result.'} } } },
+  { turnId: 'process-turn', item: { type: 'subAgentActivity', id: 'activity', kind: 'interacted', agentThreadId: 'worker-a', agentPath: 'root/reviewer' } },
+  { turnId: 'process-turn', item: { type: 'collabAgentToolCall', id: 'send', tool: 'sendMessage', status: 'completed', senderThreadId: nativeId, receiverThreadIds: ['worker-a'], prompt: 'Inspect the edge case.', agentsStates: {} } },
+  { turnId: 'process-turn', item: { type: 'collabAgentToolCall', id: 'wait', tool: 'wait', status: 'completed', receiverThreadIds: ['worker-a', 'worker-b'], agentsStates: {'worker-a': {status: 'completed', message: 'Recorded review result.'}, 'worker-b': {status: 'errored', message: 'Recorded failure.'}} } },
+  { turnId: 'process-turn', item: { type: 'reasoning', id: 'empty-b', summary: [''], content: [''] } },
+  { turnId: 'process-turn', item: { type: 'reasoning', id: 'summary-r', summary: ['\n  Visible summary 中\n'], content: [] } },
+  { turnId: 'process-turn', item: { type: 'agentMessage', id: 'answer', text: 'The answer remains readable.', phase: 'final_answer' } },
+  { turnId: 'process-turn', item: { type: 'reasoning', id: 'extended-r', summary: [], content: [], extra: {text:'Never discard this unrecognized payload.'} } },
+  { turnId: 'process-turn', item: { type: 'reasoning', id: 'unknown-r', summary: [], content: [{type:'future-format',text:'Uninterpreted content remains readable.'}] } },
+  { turnId: 'process-turn', item: { type: 'reasoning', id: 'incomplete-r', summary: [] } }
+]
+
+describe('public native process semantics', () => {
+  it('reads empty reasoning markers without turning their protocol metadata into prose', async () => {
+    await fixture(async ({ read, store }) => {
+      const page = await read({limit:30})
+      expect(page.items.map(item => item.id)).toEqual(processRecords.map(record => record.item.id))
+      for (const id of ['empty-a', 'empty-b']) expect(page.items.find(item => item.id === id)?.contentParts).toEqual([{kind:'reasoning',text:''}])
+      expect(page.items.find(item => item.id === 'empty-a')).toMatchObject({id:'empty-a',kind:'activity',turnId:'process-turn',startedAt:100,completedAt:101})
+      expect(page.items.find(item => item.id === 'content-r')?.contentParts).toEqual([{kind:'reasoning',text:'\n  Visible content 中\n\nAfter'}])
+      expect(page.items.find(item => item.id === 'summary-r')?.contentParts).toEqual([{kind:'reasoning',text:'\n  Visible summary 中\n'}])
+      for (const id of ['extended-r','unknown-r','incomplete-r']) expect(page.items.find(item => item.id === id)?.contentParts)
+        .toEqual([{kind:'text',text:JSON.stringify(processRecords.find(record => record.item.id === id)!.item,null,2)}])
+      expect((await loadAgentSessions(store)).map(session => session.run)).toEqual([{runId:'original-run'}])
+    },'normal',[...processRecords].reverse())
+  })
+  it('reads recorded collaboration with operation and target states kept distinct', async () => {
+    await fixture(async ({ read, requests }) => {
+      const page = await read({limit:30}), source = {providerId:'codex',nativeSessionId:nativeId}
+      expect(page.items.find(item => item.id === 'spawn')?.collaboration).toEqual({kind:'operation',operation:'spawn',status:'running',sender:source,
+        receivers:[{providerId:'codex',nativeSessionId:'worker-a'}],prompt:'\n  Review the input.\n',agentStates:[{source:{providerId:'codex',nativeSessionId:'worker-a'},state:'completed',message:'Recorded review result.'}]})
+      expect(page.items.find(item => item.id === 'send')?.collaboration).toMatchObject({kind:'operation',operation:'send-message',status:'completed',prompt:'Inspect the edge case.'})
+      expect(page.items.find(item => item.id === 'wait')?.collaboration).toMatchObject({kind:'operation',operation:'wait',status:'completed',agentStates:[{state:'completed'},{state:'failed'}]})
+      expect(page.items.find(item => item.id === 'activity')?.collaboration).toEqual({kind:'agent-activity',event:'interacted',agent:{providerId:'codex',nativeSessionId:'worker-a'},path:'root/reviewer'})
+      for (const id of ['spawn','send','wait','activity']) expect(page.items.find(item => item.id === id)?.contentParts)
+        .toEqual([{kind:'text',text:JSON.stringify(processRecords.find(record => record.item.id === id)!.item,null,2)}])
+      expect((await requests()).map(request => request.method)).toEqual(['initialize','initialized','thread/read','thread/items/list'])
+      if (process.env.AGENTMUX_NATIVE_PROCESS_PUBLIC_PAGE) await writeFile(process.env.AGENTMUX_NATIVE_PROCESS_PUBLIC_PAGE,JSON.stringify(page,null,2)+'\n')
+    },'normal',[...processRecords].reverse())
   })
 })
