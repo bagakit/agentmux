@@ -24,9 +24,9 @@ async function saveMobileConnection(mobileConnection: MobileConnectionPreference
 }
 
 export const toolkitSettingsModule = {
-  id: 'toolkit', group: 'toolkit', title: 'Tool library', icon: Wrench,
+  id: 'toolkit', group: 'toolkit', title: 'Toolkit Library', icon: Wrench,
   description: 'Local tools and results, right where you work.',
-  keywords: 'performance cpu memory rss process resource toolkit tool built in script javascript directory arguments status bar icon label phone mobile connection device 手机 连接 设备 状态 auth account usage quota reset 账号 账户 鉴权 用量 额度 重置',
+  keywords: 'mods performance cpu memory rss process resource toolkit tool built in script javascript directory arguments status bar icon label phone mobile connection device 手机 连接 设备 状态 auth account usage quota reset 账号 账户 鉴权 用量 额度 重置',
   savedSummary(config) {
     const preferences = resolvePerformancePreferences(config)
     const mobile = resolveMobileConnectionPreferences(config)

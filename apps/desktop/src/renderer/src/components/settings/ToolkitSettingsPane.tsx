@@ -95,7 +95,7 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
     </header>
     {metadata.error ? <p className="settings-inline-error" role="status">Package files could not be read: {metadata.error} Your configuration and drafts are kept. <button type="button" className="small-button" onClick={() => void metadata.refresh()}>Refresh files</button></p> : null}
     <div className="toolkit-workbench__body">
-      <section className="toolkit-library" aria-label="Tool library">
+      <section className="toolkit-library" aria-label="Toolkit Library">
         <label className="toolkit-library__search"><Search size={14} aria-hidden="true" /><input ref={searchInput} aria-label="Search tools" placeholder="Find a tool…" value={query} onChange={event => setQuery(event.target.value)} />{query ? <button type="button" aria-label="Clear tool search" onClick={() => { setQuery(''); searchInput.current?.focus() }}><X size={12} /></button> : null}</label>
         <div ref={library} className="toolkit-library__items">
           <LiquidSelectionSurface selected={selectedId} active={active && (!narrow || view === 'library')} targetAttribute="data-tool-id" />

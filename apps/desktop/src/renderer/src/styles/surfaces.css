@@ -183,7 +183,7 @@
   .settings-sidebar > header { grid-column: 1 / -1; padding: var(--sp-3) 0 0; }
   .settings-sidebar__brand > span { display: flex; align-items: baseline; gap: var(--sp-3); }
   .settings-sidebar nav { display: none; }
-  .settings-section-picker { display: flex; width: 132px; }
+  .settings-section-picker { display: flex; width: auto; white-space: nowrap; }
   .settings-sidebar__brand .brand-icon { width: 24px; height: 24px; }
   .settings-search { height: 32px; margin: 0; }
   .settings-content { min-height: 0; flex: 1 1 auto; padding-top: 0; }
