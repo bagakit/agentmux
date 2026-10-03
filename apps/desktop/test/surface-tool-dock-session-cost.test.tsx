@@ -37,18 +37,23 @@ const agent = (id: string, index: number): SessionSnapshot => ({ ...composerSess
   workspacePath: path(index), executorId: `executor-${id}`, updatedAt: 1 })
 const first = agent('one', 1), second = agent('two', 2)
 beforeEach(() => {
+  // happy-dom has no layout engine. Give the actual virtual tree a visible viewport,
+  // while keeping its real projection, renderer, nodes and updates intact.
+  vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('file-tree') ? 240 : 0 })
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('file-tree') ? 300 : 0 })
   useAppStore.setState({ config: composerConfig, activeWorkspaceId: workspace.id,
     workspaceTool: 'files-branches', projectRailOpen: true, explorerCollapsed: { [workspace.id]: false },
     sessions: [first, second], tabs: {}, layouts: {}, demands: {}, agentNames: {} })
+  vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ path: 'README.md', name: 'README.md', isDirectory: false, isSymlink: false }])
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'git-repository', hostId: workspace.hostId,
-    repoPath: workspace.path, currentBranch: 'branch-0', branches: Array.from({ length: 500 }, (_, i) => ({
+    repoPath: workspace.path, branches: Array.from({ length: 500 }, (_, i) => ({
       name: `branch-${i}`, isCurrent: i === 0, workspaceId: `workspace-${i}`, worktreePath: path(i)
     })) })
 })
 const reset = () => { observed.files = 0; observed.menus = 0; observed.presence = [] }
 it('isolates a real nonempty file tree and 500 branch menus while matching worktree presence stays live', async () => {
   await dom.render(<SurfaceToolDock workspace={workspace} />)
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+  await act(async () => { await vi.waitFor(() => expect(dom.container.querySelectorAll('[role="treeitem"]').length).toBeGreaterThan(0)) })
   expect(observed.files).toBeGreaterThan(0)
   expect(observed.menus).toBeGreaterThanOrEqual(500)
   expect(dom.container.querySelectorAll('.branch-row').length).toBe(500)

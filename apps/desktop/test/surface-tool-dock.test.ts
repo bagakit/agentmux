@@ -31,7 +31,7 @@ import {
   getToolDockMinimumWidth,
   resolveExplorerCollapsed,
   resolveWorkspaceTools,
-  workspaceAgentGroups
+  workspaceAgentSessions
 } from '../src/renderer/src/lib/surface-tool-dock.js'
 
 const topicsPanelSource = readFileSync(
@@ -563,8 +563,8 @@ describe('shared surface tool dock resize', () => {
     expect(canRenameFileExplorerNode('__scratch__', { ...topicDirectory, path: `nested/${topicDirectory.path}` })).toBe(true)
   })
 
-  it('projects only the current Workspace Agents through the Board status groups', () => {
-    const groups = workspaceAgentGroups([
+  it('keeps only the exact Workspace Agent membership independently of Focus status grouping', () => {
+    const agents = workspaceAgentSessions([
       session({ id: 'working-old', updatedAt: 10 }),
       session({ id: 'working-new', updatedAt: 30 }),
       session({ id: 'blocked', state: 'blocked', updatedAt: 20 }),
@@ -574,23 +574,17 @@ describe('shared surface tool dock resize', () => {
       session({ id: 'other-host', hostId: 'studio', updatedAt: 70 })
     ], workspace)
 
-    expect(groups.map((group) => [group.id, group.sessions.map((item) => item.id)])).toEqual([
-      ['working', ['working-new', 'working-old']],
-      ['needs-you', ['blocked']],
-      ['recent', ['finished']]
-    ])
+    expect(agents.map(item => item.id)).toEqual(['working-old', 'working-new', 'blocked', 'finished'])
   })
 
-  it('shares one presentation layer between the Branch bar and the Topic bar', () => {
-    // 用户第 5 条：两个 bar "底层是不是可以复用一个可复用组件"。判据不是"看起来一样"，是
-    // **真的是同一段代码**——竖切闭合检查：只接一侧就等于抽了个组件却没接上，两处仍会各自漂移
-    // （此前正是如此：Branch 侧头像截断到 4 给 +N，Topic 侧无上限铺完；一个 header 用 small
-    // 一个用 em）。这条断言两个面板都经同一批共享符号渲染。
+  it('shares compact rows and presence between Branch and Topic bars while each header owns its actions', () => {
     for (const source of [topicsPanelSource, branchesPanelSource]) {
       expect(source).toContain("from './SelectorList'")
-      expect(source).toContain('<SelectorListHeader')
       expect(source).toContain('<SelectorRow')
     }
+    expect(topicsPanelSource).toContain('<SelectorListHeader')
+    expect(branchesPanelSource).toContain('aria-label="Branch actions"')
+    expect(branchesPanelSource).toContain('aria-label="Compare two local branches"')
     expect(branchesPanelSource).toContain('<SelectorPresence')
     expect(topicsPanelSource).toContain("import { TopicPresence } from './TopicPresence'")
     expect(topicsPanelSource).toContain('<TopicPresence')

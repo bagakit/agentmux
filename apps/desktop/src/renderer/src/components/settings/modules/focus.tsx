@@ -18,7 +18,7 @@ export const focusSettingsModule = {
   title: 'Focus',
   description: 'How long task activity keeps a project near the front.',
   icon: Clock3,
-  keywords: 'workflows work recent activity hours window project lanes timeline time ruler time zone',
+  keywords: 'focus work recent activity hours window project lanes timeline time ruler time zone',
   savedSummary: config => `${resolveFocusRecentActivityHours(config.focus?.recentActivityHours)} hours · ${resolveFocusLinkDestination(config.focus?.linkDestination) === 'region' ? 'Links beside the Agent' : 'Links in Space'}`,
   Pane({ config }) {
     return <FocusSettingsPane recentActivityHours={config.focus?.recentActivityHours} {...(config.focus?.linkDestination ? { linkDestination: config.focus.linkDestination } : {})} onSave={saveRecentActivityHours} />

@@ -3,52 +3,45 @@ import { TopicNavigationPanel } from './TopicNavigationPanel'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
 import { useScratchTopics } from '../hooks/useScratchTopics'
-import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { MoteDetailsPanel } from './MoteDetailsPanel'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { AgentAvatar } from './AgentAvatar'
+import { AgentContextContent } from './AgentContextContent'
+import { useShallow } from 'zustand/react/shallow'
+import { agentContextForSession, FOCUS_COLUMNS, groupFocusContexts, focusNeutralGroupSummary, type FocusColumn } from '../lib/focus-context'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import {
-  Activity,
   ArrowUpRight,
-  BellRing,
   Bot,
-  CheckCircle2,
   ChevronDown,
   ChevronRight,
   FolderGit2,
-  History,
   NotebookText,
   Plus,
   RadioTower,
   RefreshCw
 } from 'lucide-react'
-import { useContext, useEffect, useRef, useState } from 'react'
+import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import type {
   SessionSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
-import { BOARD_COLUMN_DESCRIPTIONS } from '../lib/project-board'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import {
   contentSlotPresentation,
   resolveExplorerCollapsed,
   resolveWorkspaceTools,
-  workspaceAgentGroups,
-  type WorkspaceAgentGroupId,
+  workspaceAgentSessions,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
-import { formatRelativeAge } from '../lib/relative-age'
-import { contextPressure, contextUsedPercent } from '../lib/agent-usage'
-import { CONTEXT_PRESSURE_HINT } from './AgentRoster'
+import { CONTEXT_PRESSURE_HINT, contextPressure, contextUsedPercent } from '../lib/agent-usage'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useGitHistory } from '../hooks/useGitHistory'
-import { agentProviderLabel } from './AgentProviderIcon'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { GitHistoryPanel } from './GitHistoryPanel'
@@ -247,20 +240,9 @@ export function WorkspaceFilesTool({
   )
 }
 
-// working / needs-you 的措辞取自 BOARD_COLUMN_DESCRIPTIONS：这两组就是 Board 那两列按 workspace 收窄，
-// 同一个归类却在两个面上说两句话是漂移的入口（needs-you 这句原先手抄成 "Waiting or blocked"，漏掉了
-// 那一列同样收着的 disconnected 与 error）。recent 有自己的话，因为它是 done 列在这里换了个名字。
-const AGENT_GROUP_META: Record<WorkspaceAgentGroupId, {
-  label: string
-  description: string
-  icon: typeof Activity
-}> = {
-  working: { label: 'Working', description: BOARD_COLUMN_DESCRIPTIONS.working, icon: Activity },
-  'needs-you': { label: 'Needs You', description: BOARD_COLUMN_DESCRIPTIONS['needs-you'], icon: BellRing },
-  recent: { label: 'Recent', description: 'Finished Agents', icon: History }
-}
+const AGENT_GROUP_LABELS: Record<FocusColumn, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown', disconnected: 'Disconnected' }
 
-export function WorkspaceAgentsTool({
+export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   workspace,
   sessions,
   onOpen
@@ -269,59 +251,57 @@ export function WorkspaceAgentsTool({
   sessions: readonly SessionSnapshot[]
   onOpen(sessionId: string): void
 }) {
-  const topics = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
-  const groups = workspaceAgentGroups(sessions, workspace, topics)
-  const count = groups.reduce((total, group) => total + group.sessions.length, 0)
+  const topics = useAppStore(useShallow(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))
+  const scoped = useMemo(() => workspaceAgentSessions(sessions, workspace, topics), [sessions, workspace, topics])
+  const timelines = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.timelines[session.id]]))))
+  const names = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.agentNames[session.id]]))))
+  const percentById = useMemo(() => Object.fromEntries(scoped.map(session => [session.id, contextUsedPercent(session.turnUsage?.context)])), [scoped])
+  const groups = useMemo(() => groupFocusContexts(scoped.map(session => agentContextForSession(session, timelines[session.id], names[session.id], workspace,
+    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics))).sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))), [scoped, timelines, names, workspace, topics])
+  const openFocus = useAppStore(state => state.setMainSurface)
+  const count = scoped.length
 
   return (
     <section className="workspace-agents-tool">
       <div className="workspace-tool-context">
         <span>
           <strong>{workspace.name}</strong>
-          <small>Agent Sessions</small>
         </span>
         <em>{count}</em>
+        <button type="button" className="workspace-agents-tool__focus" onClick={() => openFocus('agents')}><ArrowUpRight size={12} aria-hidden="true" />去 Focus 中查看</button>
       </div>
       <div className="workspace-agents-tool__scroll">
-        <p className="workspace-agents-tool__hint">Agents kept during Tab close remain available here.</p>
         {count === 0 ? (
           <div className="workspace-agents-tool__empty">
             <Bot size={18} />
             <strong>No Agents in this workspace</strong>
             <span>Use + to start an Agent. Choose “Keep Session” on close to leave it running here.</span>
           </div>
-        ) : groups.map((group) => {
-          if (group.sessions.length === 0) return null
-          const meta = AGENT_GROUP_META[group.id]
-          const Icon = meta.icon
+        ) : FOCUS_COLUMNS.map((column) => {
+          const contexts = groups[column]
+          if (contexts.length === 0) return null
+          const label = column === 'idle' ? focusNeutralGroupSummary(contexts).label : AGENT_GROUP_LABELS[column]
           return (
-            <section className="workspace-agent-group" key={group.id}>
+            <section className="workspace-agent-group" key={column}>
               <header>
-                <span><Icon size={11} /><strong>{meta.label}</strong><small>{meta.description}</small></span>
-                <em>{group.sessions.length}</em>
+                <strong>{label}</strong><em>{contexts.length}</em>
               </header>
               <div>
-                {group.sessions.map((session) => {
-                  // 上下文压力：与花名册同源（agent-usage.ts 的 contextPressure/contextUsedPercent），
-                  // 不在这里另立门槛。这是**空闲 Agent 也能看见压力**的地方——花名册那条 surface 已被
-                  // 收进这个 dock，而 recent 组恰好收着跑完待机的 Agent，正是「快满却没人管」的那一类。
-                  const percent = contextUsedPercent(session.turnUsage?.context)
+                {contexts.map((context) => {
+                  // Preserve the existing usage thresholds and hints, including Idle Agents.
+                  const percent = percentById[context.id] ?? null
                   const pressure = contextPressure(percent)
                   return (
                   <button
                     type="button"
-                    className="workspace-agent-row"
-                    key={session.id}
-                    title={`Open or focus ${session.label}`}
-                    onClick={() => onOpen(session.id)}
+                    className="workspace-agent-row focus-context"
+                    key={context.id}
+                    data-session-id={context.id} data-state={context.state} data-bucket={context.bucket}
+                    title={`${context.name} · ${context.stateLabel}\n${context.detail}\n${context.lastActivityAt === null ? 'Activity time unknown' : `Last active ${new Date(context.lastActivityAt).toLocaleString()}`}\nOpen in Space`}
+                    aria-label={`${context.name} · ${context.stateLabel} · Open in Space`}
+                    onClick={() => onOpen(context.id)}
                   >
-                    <span className="workspace-agent-row__mark">
-                      <AgentAvatar sessionId={session.id} executorId={session.executorId} label={session.label} state={session.status.state} providerId={session.providerId} size={18} />
-                    </span>
-                    <span className="workspace-agent-row__identity">
-                      <strong>{session.label}</strong>
-                      <small>
-                        {agentProviderLabel(session.providerId)} · {session.status.state}
+                    <AgentContextContent context={context} metadata={<span className="workspace-agent-row__metadata">
                         {/* 够上门槛才出现，且文案说的是下一步不是颜色名——沿用花名册那枚 data-pressure
                             标记（CSS 在 agent-panels.css），逻辑层不出现颜色。缺席即正常。 */}
                         {pressure ? (
@@ -333,10 +313,9 @@ export function WorkspaceAgentsTool({
                             {percent}%
                           </span>
                         ) : null}
-                      </small>
-                    </span>
-                    <time title={new Date(session.updatedAt).toLocaleString()}>{formatRelativeAge(Date.now() - session.updatedAt)}</time>
-                    <ArrowUpRight size={11} />
+                      {context.lastActivityAt === null ? <span title="Activity time unknown">—</span> : <time dateTime={new Date(context.lastActivityAt).toISOString()} title={`Last active ${new Date(context.lastActivityAt).toLocaleString()}`}>{new Date(context.lastActivityAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</time>}
+                    </span>} />
+                    <ArrowUpRight className="focus-context__open" size={11} aria-hidden="true" />
                   </button>
                   )
                 })}
@@ -344,16 +323,17 @@ export function WorkspaceAgentsTool({
             </section>
           )
         })}
+        <button type="button" className="workspace-agents-tool__focus workspace-agents-tool__focus--footer" onClick={() => openFocus('agents')}>去 Focus 关注 <ArrowUpRight size={12} aria-hidden="true" /></button>
       </div>
     </section>
   )
-}
+})
 
 function ConnectedWorkspaceAgentsTool({ workspace, onOpen }: {
   workspace: WorkspaceRecord
   onOpen(sessionId: string): void
 }) {
-  const sessions = useAppStore((state) => state.sessions)
+  const sessions = useAppStore(useShallow(state => workspaceAgentSessions(state.sessions, workspace, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))))
   return <WorkspaceAgentsTool workspace={workspace} sessions={sessions} onOpen={onOpen} />
 }
 
@@ -432,7 +412,7 @@ export function SurfaceToolDock({
         {selectedTool === 'files-branches' && workspace ? (
           <WorkspaceFilesTool workspace={workspace} isScratch={isScratch} visible={visible} />
         ) : null}
-        {effectiveWorkspaceTool === 'agents' && workspace ? (
+        {visible && effectiveWorkspaceTool === 'agents' && workspace ? (
           <ConnectedWorkspaceAgentsTool
             workspace={workspace}
             onOpen={(sessionId) => selectSession(sessionId, activePaneId)}

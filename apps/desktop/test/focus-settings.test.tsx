@@ -3,6 +3,7 @@ import { fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-valu
 import { act } from 'react'
 import { expect, it, vi } from 'vitest'
 import { focusSettings } from '../src/main/settings/modules/focus'
+import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
 import { focusSettingsModule } from '../src/renderer/src/components/settings/modules/focus'
 import { FocusSettingsPane } from '../src/renderer/src/components/settings/FocusSettingsPane'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
@@ -115,4 +116,15 @@ it('updates the actual GlobalFocusSurface for 12 and 72 hours while retaining pr
   expect(useAppStore.getState().sessions).toBe(sessions)
   expect(useAppStore.getState().sessions.map(session => session.control.run)).toEqual(sessions.map(session => session.control.run))
   expect(dom.container.querySelector('[data-session-id="unknown"]')).not.toBeNull()
+})
+
+
+it('places the actual Focus contribution in the existing Work catalogue group without a Workflows alias', () => {
+  const groups = settingsCatalog.navGroups('focus')
+  expect(groups.length).toBeGreaterThan(0)
+  const focus = groups.flatMap(group => group.items.map(item => ({ group: group.id, item }))).filter(({ item }) => item.id === 'focus')
+  expect(focus).toHaveLength(1)
+  expect(focus[0]?.group).toBe('work')
+  expect(focus[0]?.item).toBe(focusSettingsModule)
+  expect(focusSettingsModule.keywords.toLowerCase()).not.toContain('workflows')
 })

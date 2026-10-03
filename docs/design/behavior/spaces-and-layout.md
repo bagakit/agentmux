@@ -228,6 +228,8 @@ The stable spatial graph is part of amux and is maintained by Core even on a rem
 
 新增一种 Space 不能重新实现整套 Zone、Tab/Group/Region、分割、焦点、文件动作或恢复；只在底层调用共享组件，却另造一套 Zone 导航、文件树或 Tab 管理，也不满足共同框架约束。对象选择和专属二级内容在上述框架内表达，工作面操作仍沿公共实现。框架确有能力缺口时在公共 owner 补全，不在单类对象造旁路，也不抹去其必要的二级内容。设计与能力补全保原身份、全部合法展示绑定、健康 Session/Run、草稿、焦点和恢复；位置、握手或恢复未确认不拿走已有可用内容，保原工作面与持续服务窗。共同机制仍遵守 Core、ctxmux 与 client 的原分层及相关消费者成本。
 
+Space 的 Agents 目录以原准确范围确定成员，复用 [Focus 卡片的 Context 与真实活动事实](focus-context.md#卡片内容预览与-agent-操作)及现有用量判定；任务上下文、必要服务说明、最近真实活跃时间和 Context 压力保留，Idle、高压力、Mote 或活动未知不因呈现统一被移除，Focus 的执行筛选不成为 Space 的成员规则。点击 Agent 沿原 SID 与已确认完整展示位置打开原工作面，位置多义或未知时保原内容并说明，不按名称、首个位置或执行 cwd 猜目标。目录的顶部和末尾 Focus 入口沿同一原导航进入 Focus，保原 Session／Run、草稿与输入；“去 Focus 关注”不新增持久关注或订阅能力。
+
 ## Topics 知识库的层级与沉淀
 
 Topics 是从日常讨论持续积累知识的入口。临时交流可以先开始，再按实际聚集的主题整理；分类不是开始聊天的前置手续。「自然沉淀」要求知识能被找回、引用、修订和继续讨论，不把全部聊天自动当成已确认知识。
@@ -620,7 +622,7 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - Pinned item 必须是可点击的导航入口；Topic 的 pin 标记贴近标题并保持在标题行的视觉轨道内，不漂浮到整行中央。
 - Topic 行的 Tab/Region 摘要按真实成员和 Tab 顺序呈现，Region 内的 Agent 图标、状态与对应位置成组表达；不按全部 Scratch Tab 或执行 cwd 猜成员。没有打开 Region 的后台健康 Agent 仍通过原独立身份入口可见可达，范围与终局判据见[《Topic 行的 Region 与 Agent 在场状态》](#topic-行的-region-与-agent-在场状态)。
 - Project Rail 的密度由用户在 Projects 标题行就地切换（加号旁），不进设置页；提供默认、紧凑、更紧凑三档，按同一个入口循环。切换只改变行高、行图标尺寸与每层缩进，**不改变树结构、归属、选中项或滚动位置**——密度是看法，不是数据。默认档的树缩进也要保持克制，避免切换后仍把项目标题推得太远；该选择重启后仍然有效（视觉档位见 DEN「Project Rail 与 Topic 行密度」）。
-- running 与 working 必须**同时**在字形与动势上可分：`running`（进程活着、未在产出）保持静态 glyph，`working`（正在产出）带节奏动势。只换提示文字、只换颜色、或两者都静态都不满足这条；reduced-motion 下动势退化为静态但**字形差异必须保留**（约束原文见 DEN「Agents、队列与语义 token 密度」，此处只补「哪一个是哪一个」）。
+- Project Rail 与 Topic presence 的非共享 Context 状态标记中，running 与 working 必须**同时**在字形与动势上可分：`running`（进程活着、未在产出）保持静态 glyph，`working`（正在产出）带节奏动势；只换提示文字、只换颜色或两者都静态不满足，reduced-motion 下动势退化为静态但**字形差异必须保留**。Focus 与 Space Agents 共用的执行条目采用 [Focus 卡片的静态状态语义](focus-context.md#卡片内容预览与-agent-操作)，不套用本条动势要求；其余状态标记仍沿原 DEN“Agents、队列与语义 token 密度”合同。
 
 ## Topic 行的 Region 与 Agent 在场状态
 
