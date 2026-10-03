@@ -7,6 +7,7 @@ import type {
   AgentHookLifecycleEvent,
   AgentProviderId,
   AgentNativeSessionHandle,
+  AgentHookToolInvocation,
   AgentSemanticState,
   AgentStatus,
   NativeHookEnvelope,
@@ -58,6 +59,19 @@ export type AgentNativeSubagentTracking = {
 export type AgentNativeHookSpecification = {
   rules: readonly AgentNativeHookStateRule[]
   nativeTurnIdKeys?: readonly string[]
+  /** Provider protocol correlation with the immediately preceding durable Hook. */
+  resolveInteractionToolCallId?: (
+    eventName: string,
+    payload: Readonly<Record<string, unknown>>,
+    context: AgentProviderHookNormalizationContext
+  ) => string | undefined
+  /** Pure Provider projection of actual open tool facts into the original HookReceipt owner. */
+  toolInvocation?: (
+    eventName: string,
+    payload: Readonly<Record<string, unknown>>,
+    context: AgentProviderHookNormalizationContext,
+    mainSubject: boolean
+  ) => AgentHookToolInvocation | undefined
   /** Pure native Session membership/transition evidence; false preserves only observation. */
   matchesNativeSession?: (
     eventName: string,
@@ -362,6 +376,17 @@ export function nativeHookToolCallId(payload: Record<string, unknown>): string |
   return stringField(flattenNestedPayload(payload), ...TOOL_CALL_ID_KEYS)
 }
 
+/** Pure projection only: safe to repeat at the durable CAS without replaying roster or lifecycle effects. */
+export function projectNativeHookToolInvocation(
+  specification: AgentNativeHookSpecification,
+  eventName: string,
+  payload: Record<string, unknown>,
+  context: AgentProviderHookNormalizationContext,
+  mainSubject: boolean
+): AgentHookToolInvocation | undefined {
+  return specification.toolInvocation?.(eventName, flattenNestedPayload(payload), context, mainSubject)
+}
+
 type NativeToolSubject = {
   kind: 'main' | 'child'
   nativeSessionId: string
@@ -609,6 +634,18 @@ export function normalizeNativeHook(
       return typeof value === 'string' ? { nativeTurnId: value } : {}
     })(),
     ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
+    ...(() => {
+      const nativeToolCallId = nativeHookToolCallId(payload)
+      const toolName = stringField(payload, 'tool_name', 'toolName', 'name')
+      const input = payload.tool_input ?? payload.toolInput ?? payload.toolArgs ?? payload.args ?? payload.input
+      const toolInput = typeof input === 'string' ? input : input === undefined ? undefined : JSON.stringify(input)
+      if (specification.toolInvocation) {
+        const invocation = projectNativeHookToolInvocation(specification, eventName, payload, context, mainSubject)
+        return invocation ? { toolInvocation: invocation } : {}
+      }
+      return mainSubject && toolSubject?.kind === 'main' && nativeToolCallId && toolName && toolInput
+        ? { toolInvocation: { nativeSessionId: toolSubject.nativeSessionId, nativeToolCallId, toolName, toolInput } } : {}
+    })(),
     semanticState,
     status,
     timeline: buildTimeline(specification, envelope, eventName, nativeLifecycleEvent, payload, observedAt, toolSubject),

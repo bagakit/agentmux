@@ -272,6 +272,19 @@ export class AgentScreenEvidenceStore {
     return this.generations.get(agentSessionId) ?? 0
   }
 
+  /** Observe the existing owner only; this accessor never builds, waits or writes bytes. */
+  currentCompleteFrame(session: AgentMuxAgentSession): {
+    snapshot: import('./types.js').AgentTerminalScreenSnapshot
+    outputThroughByte: number
+    geometryRevision: number
+    evidenceGeneration: number
+  } | null {
+    const entry = this.evidence.get(session.agentSessionId)
+    if (!entry || entry.runId !== session.run.runId) return null
+    const current = entry.evidence.completeSnapshot
+    return current ? { ...current, evidenceGeneration: this.generation(session.agentSessionId) } : null
+  }
+
   discard(agentSessionId: string): void {
     // 世代**无条件**递增，且排在早退之前：在途的 build 此刻还没有 entry，只有让它的世代过期才拦得住
     // 它事后登记（见 `generations` 的说明）。写成「有 entry 才递增」会让那条路径原封不动地留着。

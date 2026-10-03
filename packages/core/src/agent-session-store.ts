@@ -564,6 +564,11 @@ function hookReceipt(value: unknown): AgentHookReceipt {
       'INVALID_AGENT_SESSION_STORE'
     )
   }
+  const invocation = source.toolInvocation === undefined ? undefined : record(source.toolInvocation, 'hookReceipt.toolInvocation')
+  if (invocation && (Object.keys(invocation).some(key => !['nativeSessionId', 'nativeToolCallId', 'nativeTurnId', 'nativeTranscriptPath', 'toolName', 'toolInput', 'ambiguous'].includes(key)) ||
+    invocation.ambiguous !== undefined && invocation.ambiguous !== true)) {
+    throw new AgentMuxError('hookReceipt.toolInvocation is invalid.', 'INVALID_AGENT_SESSION_STORE')
+  }
   return {
     id: string(source.id, 'hookReceipt.id'),
     providerId: string(source.providerId, 'hookReceipt.providerId'),
@@ -571,6 +576,15 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     run: runRef(source.run),
     eventName,
     ...(source.nativeTurnId === undefined ? {} : { nativeTurnId: string(source.nativeTurnId, 'hookReceipt.nativeTurnId') }),
+    ...(invocation ? { toolInvocation: {
+      nativeSessionId: string(invocation.nativeSessionId, 'hookReceipt.toolInvocation.nativeSessionId'),
+      nativeToolCallId: string(invocation.nativeToolCallId, 'hookReceipt.toolInvocation.nativeToolCallId'),
+      ...(invocation.nativeTurnId === undefined ? {} : { nativeTurnId: string(invocation.nativeTurnId, 'hookReceipt.toolInvocation.nativeTurnId') }),
+      ...(invocation.nativeTranscriptPath === undefined ? {} : { nativeTranscriptPath: string(invocation.nativeTranscriptPath, 'hookReceipt.toolInvocation.nativeTranscriptPath') }),
+      toolName: string(invocation.toolName, 'hookReceipt.toolInvocation.toolName'),
+      toolInput: string(invocation.toolInput, 'hookReceipt.toolInvocation.toolInput'),
+      ...(invocation.ambiguous ? { ambiguous: true as const } : {})
+    } } : {}),
     ...(source.lifecycleEvent === null ? { lifecycleEvent: null } : lifecycleEvent ? { lifecycleEvent } : {}),
     observedAt: timestamp(source.observedAt, 'hookReceipt.observedAt'),
     ...(outputCursorBytes === undefined ? {} : { outputCursorBytes })

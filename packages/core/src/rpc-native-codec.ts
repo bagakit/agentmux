@@ -16,6 +16,7 @@ import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } f
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
 import { AGENTMUX_AGENT_MESSAGING_RULES } from './agent-messaging-guidance.js'
 import { normalizeAgentSession } from './agent-session-store.js'
+import { agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
 import { validateAgentMuxMessageEnvelope } from './agent-global-message-queue.js'
 import { validateAgentPromptCondition } from './agent-prompt-condition.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
@@ -70,7 +71,9 @@ export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown>
   return p
 }
 function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSession>, routed = false): void {
-  const p = record(value, [...(routed ? ['routeHostId'] : []), 'session', 'run', 'capabilities', 'observation']), session = parseRpcAgentSession(p.session)
+  const p = record(value, [...(routed ? ['routeHostId'] : []), 'session', 'run', 'capabilities', 'observation', 'interactionResponseUnavailableReason']), session = parseRpcAgentSession(p.session)
+  const responseReason = session.pendingInteraction && agentInteractionResponseUnavailableReason(session.pendingInteraction)
+  if (p.interactionResponseUnavailableReason !== (responseReason || undefined)) fail()
   const run = record(p.run)
   if (run.runId !== session.run.runId || run.agentSessionId !== session.agentSessionId || run.kind !== 'agent' ||
     run.providerId !== session.providerId || run.executorId !== session.executorId || run.workspacePath !== session.workspacePath) fail()

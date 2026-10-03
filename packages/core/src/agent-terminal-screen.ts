@@ -237,6 +237,12 @@ export class AgentTerminalScreenEvidence {
     return this.completeFrame
   }
 
+  /** A half-written frame, gap or invalidated geometry cannot authorize current input. */
+  get completeSnapshot(): { snapshot: AgentTerminalScreenSnapshot; outputThroughByte: number; geometryRevision: number } | null {
+    if (this.failed || !this.screen.authoritative || this.pendingFrameStartByte !== null || !this.completeFrame) return null
+    return { snapshot: this.screen.snapshot(), outputThroughByte: this.screen.throughByte, geometryRevision: this.screen.geometryRevision }
+  }
+
   /** Observe actual pre-checkpoint frame markers without replaying their drawing
    * into the restored grid. Only a contiguous original suffix at that exact fence
    * can seed this observation; synthetic restore bytes never prove a native frame.
