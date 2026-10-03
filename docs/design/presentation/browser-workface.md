@@ -15,7 +15,8 @@
 
 - 地址／搜索输入历史沿原 input 下面的紧凑按需列表，复用 Graphite／Mint、现有字体、选中与焦点语言，不增加常驻历史栏、第二工具栏或成套线框。地址／搜索词可辨，单条删除与清空当前范围可达，正常、234.5px 窄 Pane 与短窗不挤掉输入或覆盖 More／Close；列表关闭后原页面与草稿仍可用。复制／粘贴／剪切沿平台原生菜单，不画一组常驻按钮。人工聚焦、历史范围、隐私、恢复、IME、晚结果与编辑归属只引用交互 SSOT[《Browser 地址／搜索输入历史与基础编辑》](../behavior/browser-workface.md#browser-地址搜索输入历史与基础编辑)。
 - Browser 操作状态与详情的控件语言统一见[《Browser 任务工具与证据的紧凑呈现》](#browser-任务工具与证据的紧凑呈现)，本节不另定义常驻状态条。
-- 本地书签保存／源码动作沿现 Browser 紧凑工具栏与 hover 提示语言；恢复后的可用与禁用表达、格式、读取和保存边界只引用交互 SSOT[《书签文件（.webloc / .url，）》](../behavior/files-and-git.md#书签文件webloc--url)，不增加重复卡片或警告层。
+- Browser 的四方向 Region 动作沿原按需菜单分组与方向图标呈现；现有多格关闭放在 Browser 自己的紧凑操作条，同一 Region 不再重复通用外置关闭按钮。正常、窄分割与短窗口中，More、关闭和地址输入各有清楚且不交叠的命中区；资格与动作结果只引用[《Browser 工作面》](../behavior/browser-workface.md#browser-工作面-1)，关闭仍沿原 Region owner。
+- 本地书签保存／源码动作沿现 Browser 紧凑工具栏与 hover 提示语言；保存反馈以就地一行 Saved、真实相对路径及明确 Open bookmark 呈现，不增加常驻栏、重复卡片或警告层。结果、再次打开、恢复后的可用与禁用、格式和保存边界只引用交互 SSOT[《书签文件（.webloc / .url，）》](../behavior/files-and-git.md#书签文件webloc--url)。
 - Agent 的后台 Browser 活动沿原 Tab／Browser 就地符号可辨，不通过选中 sidebar、切 Tab、闪烁或新增常驻栏索取注意与焦点；行为只见交互 SSOT[《Browser 工作面》](../behavior/browser-workface.md#browser-工作面-1)的 CLI 优先与保用户焦点约束，页面动效沿本节既有约束。
 - 操作条上的 Agent 身份取自那个 Session 的真实事实（它自己的名字与 Provider），不得由 Session id 拼出一个名字。解析不到时显示 id 本身并让 Provider 图标缺席：一个显示 id 的操作条会让人去查这是谁，一个显示「Agent 7f3a9c2e」的操作条会让人以为那就是它的名字。
 - Agent 接管和交还使用同一条身份语言：驱动时显示头像与“正在操作”，人接管后变成安静的确认态并保留最后一步；不靠颜色或呼吸动画表达唯一事实。
