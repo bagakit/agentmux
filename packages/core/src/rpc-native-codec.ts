@@ -1,3 +1,7 @@
+import { isDeepStrictEqual } from 'node:util'
+import { normalizeAgentTimelineMutation } from './session-timeline.js'
+import { normalizeSessionHistoryPage } from './session-history.js'
+import { parseAgentContextParams } from './agent-context.js'
 import { parseConnectionOffer } from '@agentmux/relay/offer'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -125,6 +129,81 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     const p = record(value), input = record(params)
     if (['schemaVersion', 'requestId', 'operation'].some(key => Object.hasOwn(p, key))) fail()
     switch (method) {
+      case 'agent.context': {
+        const expected = parseAgentContextParams(input)
+        record(p, ['hostId', 'sourceHostId', 'agentSessionId', 'descriptor', 'session', 'status', 'runtimeDiagnostics', 'captured', 'native', 'unavailable', 'nextCursor'])
+        if (p.hostId !== expected.hostId || p.agentSessionId !== expected.agentSessionId) fail()
+        string(p.sourceHostId)
+        const descriptor = record(p.descriptor, ['hostId', 'agentSessionId', 'state', 'retiredAt', 'pendingReopen', 'history'])
+        if (descriptor.hostId !== p.sourceHostId || descriptor.agentSessionId !== expected.agentSessionId) fail()
+        member(descriptor.state, ['active', 'retired'])
+        if (descriptor.state === 'retired') count(descriptor.retiredAt)
+        else if (descriptor.retiredAt !== undefined) fail()
+        if (descriptor.pendingReopen !== undefined) { const pending = record(descriptor.pendingReopen, ['operationId']); if (pending.operationId !== undefined) string(pending.operationId) }
+        if (descriptor.history !== undefined) {
+          const h = record(descriptor.history, ['providerId', 'executorId', 'workspacePath', 'createdAt', 'nativeHandle', 'observedNativeHandle'])
+          for (const key of ['providerId', 'executorId', 'workspacePath']) string(h[key]); count(h.createdAt)
+          for (const key of ['nativeHandle', 'observedNativeHandle'] as const) if (h[key] !== undefined) {
+            const handle = record(h[key], ['kind', 'providerId', 'adapterId', 'sessionId', 'transcriptPath'])
+            member(handle.kind, ['provider', 'acp']); string(handle.sessionId)
+            if (handle.kind === 'provider') { string(handle.providerId); if (handle.providerId !== h.providerId || handle.adapterId !== undefined) fail() }
+            else { string(handle.adapterId); if (handle.providerId !== undefined) fail() }
+            if (handle.transcriptPath !== undefined) string(handle.transcriptPath)
+          }
+        }
+        const contextSession = (value: unknown) => {
+          const session = parseRpcAgentSession(value)
+          if (session.hostId !== p.sourceHostId || session.agentSessionId !== expected.agentSessionId || descriptor.state !== 'active') fail()
+          if (descriptor.history !== undefined) {
+            const h = record(descriptor.history)
+            for (const key of ['providerId', 'executorId', 'workspacePath', 'createdAt'] as const) if (h[key] !== session[key]) fail()
+            // Absence in an earlier diagnostic is unknown; a present binding
+            // must describe the same exact source rather than another fork.
+            if (session.nativeHandle !== undefined && !isDeepStrictEqual(session.nativeHandle, h.nativeHandle)) fail()
+          }
+          return session
+        }
+        if (p.session !== null) contextSession(p.session)
+        if (p.status !== null) {
+          contextSession(record(p.status).session)
+          status(p.status, p.session === null ? undefined : contextSession(p.session))
+        }
+        if (p.captured !== null) {
+          const timeline = record(p.captured, ['agentSessionId', 'revision', 'items'])
+          if (timeline.agentSessionId !== expected.agentSessionId) fail(); count(timeline.revision)
+          array(timeline.items, value => {
+            const item = record(value, ['id', 'agentSessionId', 'kind', 'status', 'source', 'createdAt', 'updatedAt', 'title', 'authorAgentSessionId', 'authorHuman', 'sourceDevice', 'sourceChannel', 'content', 'toolName', 'toolInput', 'toolOutput', 'eventName', 'activityState'])
+            if (item.agentSessionId !== expected.agentSessionId) fail()
+            const mutation = normalizeAgentTimelineMutation({ type: 'append', agentSessionId: expected.agentSessionId, item })
+            if (mutation.type !== 'append' || !isDeepStrictEqual(mutation.item, item)) fail()
+          })
+        }
+        if (p.native !== null) {
+          const page = record(p.native, ['agentSessionId', 'source', 'items', 'nextCursor', 'sourceSizeBytes'])
+          if (page.agentSessionId !== expected.agentSessionId) fail()
+          const source = record(page.source, ['providerId', 'nativeSessionId']); string(source.providerId); string(source.nativeSessionId)
+          if (descriptor.history !== undefined && record(descriptor.history).providerId !== source.providerId) fail()
+          const handle = descriptor.history === undefined ? undefined : record(descriptor.history).nativeHandle
+          if (handle !== undefined && record(handle).kind === 'provider' && (record(handle).sessionId !== source.nativeSessionId || record(handle).providerId !== source.providerId)) fail()
+          const normalized = normalizeSessionHistoryPage(source as { providerId: string; nativeSessionId: string }, page, expected.limit ?? 30)
+          const { agentSessionId: _sid, ...body } = page
+          if (!isDeepStrictEqual(normalized, body)) fail()
+          if (page.sourceSizeBytes !== undefined) count(page.sourceSizeBytes)
+        }
+        array(p.unavailable, value => { const issue = record(value, ['source', 'code', 'message', 'recovery']); member(issue.source, ['captured', 'native', 'session', 'status', 'runtime']); string(issue.code); text(issue.message); text(issue.recovery) })
+        string(p.nextCursor, true)
+        if (p.runtimeDiagnostics !== null) {
+          const d = record(p.runtimeDiagnostics, ['nodeVersion', 'platform', 'arch', 'supported', 'ctxmux'])
+          for (const key of ['nodeVersion', 'platform', 'arch']) string(d[key]); bool(d.supported)
+          const kernel = record(d.ctxmux, ['state', 'serving', 'bundled', 'ready', 'capabilities']), state = record(kernel.state, ['configuredDirectory', 'servingDirectory'])
+          string(state.configuredDirectory); string(state.servingDirectory, true); bool(kernel.ready)
+          const serving = record(kernel.serving, ['buildIdentity', 'protocolVersion', 'instanceId', 'sourceCommit']); string(serving.buildIdentity); string(serving.instanceId); count(serving.protocolVersion); if (serving.sourceCommit !== null) fail()
+          const bundled = record(kernel.bundled, ['version', 'sourceCommit', 'artifactPlatform']); for (const key of ['version', 'sourceCommit', 'artifactPlatform']) string(bundled[key])
+          const capabilities = record(kernel.capabilities, ['transport', 'orderedOutputBytes', 'boundedReplay', 'recoverableInput', 'resize', 'interrupt', 'completeStop'])
+          if (capabilities.transport !== 'local-unix') fail(); for (const key of ['orderedOutputBytes', 'boundedReplay', 'recoverableInput', 'resize', 'interrupt', 'completeStop']) if (capabilities[key] !== true) fail()
+        }
+        break
+      }
       case 'runtime.bootstrap': parseRpcHostedBootstrap(p); break
       case 'runtime.invoke': record(p, ['value']); if (!Object.hasOwn(p, 'value')) fail(); break
       case 'runtime.release-consumer': record(p, ['released']); bool(p.released); break

@@ -6,7 +6,7 @@ import { scratchTopicsForWorkspace, scratchTopicKind } from './scratch-topic-sna
 import { spatialCatalog } from './space-agent-control'
 import { useAppStore, retainRecoveryMessageIntent, agentRegionExecution, rereadAgentRegionExecution, adoptAgentRegionObservation } from '../store'
 
-export type RecoveryMode = 'takeover' | 'analyze'
+export type RecoveryMode = 'analyze'
 export type RecoverySource = SessionHistoryReference & {
   workspaceId: string; tabId: string; regionId: string; displayWorkspaceId: string; groupId?: string
   diagnostic: string
@@ -96,12 +96,12 @@ export function recoveryReferenceNote(source: RecoverySource, mode: RecoveryMode
   const reference = `--host ${shellWord(source.hostId)} --session ${shellWord(source.agentSessionId)}`
   return [
     `Original Agent Session reference: ${JSON.stringify({ hostId: source.hostId, agentSessionId: source.agentSessionId, historySource, mode })}`,
-    `This is ${mode === 'takeover' ? 'an independent takeover Agent, not native resume' : 'an analysis request, not authorization to continue or execute the original task'}. Keep the original Session and unsent inputs intact.`,
+    'This is an analysis request, not authorization to continue or execute the original task. Keep the original Session and unsent inputs intact.',
     'Read the original owner before answering or continuing:',
     `agentmux agent history ${reference} --source ${historySource} --limit 20 --max-bytes 32768`,
     `Optional diagnostics: agentmux agent inspect --session ${shellWord(source.agentSessionId)}. This inspect command is not Host-qualified. Consume its diagnostics only after verifying the returned execution Host matches ${JSON.stringify(source.hostId)}; otherwise report diagnostics unavailable and use the Host-qualified history above. Do not infer a cross-Host binding from the Session ID alone.`,
     'Follow nextCursor with the same exact Host, Session and source. Preserve revision, provenance, gaps and unavailable/empty distinctions. For a fragment, read its contiguous continuation, concatenate json-utf8-base64 bytes, verify sha256, then decode the item; do not silently skip oversized items. An invalid cursor requires re-reading the first page.',
-    mode === 'takeover' ? 'First establish what the user asked, what was completed and what remains; then continue the original task. Do not replay unconfirmed old input.' : 'Report completed work, unfinished work, blockers and suggested next steps. Do not execute those steps or switch into takeover without a new user instruction.',
+    'Report completed work, unfinished work, blockers and suggested next steps. Do not execute those steps or switch into takeover without a new user instruction.',
     `Observed recovery diagnostic (not a lifetime claim): ${source.diagnostic.slice(0, 700) || 'Current native resume identity or state is unconfirmed.'}`
   ].join('\n\n')
 }
@@ -176,13 +176,13 @@ export async function createRecoveryAgent(source: RecoverySource, mode: Recovery
   if (!location?.spaceId || !location.zoneId) throw new Error('The original Project placement is unconfirmed. Its Session and work remain; re-read the same Project before creating a new Agent.')
   const result = await state.executeControl({ schemaVersion: 5, requestId, operation: 'agent.open', focus: false,
     destination: { spaceId: location.spaceId, zoneId: location.zoneId, displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, newTab: true },
-    content: { kind: 'new-agent', executorId, prompt: mode === 'takeover' ? 'Read the referenced original work, then take over the unfinished task.' : 'Read and analyze the referenced original work. Do not continue or execute its task.' }
+    content: { kind: 'new-agent', executorId, prompt: 'Read and analyze the referenced original work. Do not continue or execute its task.' }
   }, undefined, { agentMuxNote: recoveryReferenceNote(source, mode, historySource), authorize: () => current() && ownsRecoverySource(source), recovery: {
     hostId: source.hostId, agentSessionId: source.agentSessionId, tabId: source.tabId, regionId: source.regionId, mode, historySource, executorId
   } })
   if (result.operation !== 'agent.open') throw new Error('Creation returned another operation; its result is unknown. Check the original request.')
   return { requestId, report: result, kind: result.outcome === 'opened' ? 'confirmed' : 'unknown', message: result.outcome === 'opened'
-    ? `New ${mode === 'takeover' ? 'takeover' : 'analysis'} Agent created in a separate Tab. The original Session is retained.`
+    ? 'New analysis Agent created in a separate Tab. The original Session is retained.'
     : `Creation is unconfirmed. ${result.issues.map(item => item.message).join(' ')}` }
 }
 

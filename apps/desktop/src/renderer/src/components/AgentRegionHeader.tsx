@@ -1,4 +1,4 @@
-import { History, MoreHorizontal, PanelsTopLeft, RotateCcw } from 'lucide-react'
+import { ArrowRight, History, MoreHorizontal, PanelsTopLeft, RotateCcw } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -7,7 +7,7 @@ import { HostBadge } from './HostBadge'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview }: {
   name: string
   executorLabel: string
   sessionId: string
@@ -16,6 +16,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   regionId: string | undefined
   readOnly: boolean
   onHistory: (() => void) | undefined
+  onTakeOver?: (() => void) | undefined
   onRefreshObservation?: (() => void) | undefined
   refreshing?: boolean
   /** One precise owner may present its existing controls in the Focus bar. */
@@ -24,6 +25,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
 }) {
   const entries = useRegionMenuEntries()
   const home = useRef<HTMLDivElement>(null)
+  const handoffFocus = useRef(false)
   const [host] = useState(() => {
     // Static SessionPane presentation has no DOM host to move.
     if (typeof document === 'undefined') return null
@@ -50,6 +52,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   }, [host, targetId])
   useLayoutEffect(() => () => host?.remove(), [host])
   const header = <header className="agent-region-header"
+    data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} data-owner-region-id={regionId}
     data-session-kind={sessionKind}
     aria-label={`${sessionKind === 'agent' ? 'Agent' : 'Terminal'} ${name}; ${readOnly ? 'Read-only; ' : ''}${executorLabel}; ${sessionKind === 'agent' ? 'Session' : 'Terminal'} ${sessionId}; Host ${executionHost.label}`}>
     {merged ? null : <strong className="agent-region-header__name" title={name}>{name}</strong>}
@@ -64,7 +67,11 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
         data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={4} collisionPadding={8}
-        onPointerDown={(event) => event.stopPropagation()}>
+        onPointerDown={(event) => event.stopPropagation()}
+        onCloseAutoFocus={event => {
+          if (handoffFocus.current) event.preventDefault()
+          handoffFocus.current = false
+        }}>
         <DropdownMenu.Label className="agent-region-menu__context">
           <span>{name}</span>
           {sessionKind === 'agent' ? <><span>Executor: {executorLabel}</span><span>Session: {sessionId}</span></> : <span>Terminal: {sessionId}</span>}
@@ -72,7 +79,13 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
           <span>Directory: {executionHost.cwd || 'Unknown'}</span>
         </DropdownMenu.Label>
-        {onHistory || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}
+        {onHistory || onTakeOver || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}
+        {onTakeOver && !readOnly && sessionKind === 'agent' ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => {
+          handoffFocus.current = true
+          onTakeOver()
+        }}>
+          <ArrowRight size={14} /><span>Take over</span>
+        </DropdownMenu.Item> : null}
         {onRefreshObservation ? <DropdownMenu.Item className="tab-context-menu__item" disabled={refreshing} onSelect={onRefreshObservation}>
           <RotateCcw size={14} /><span>{refreshing ? 'Refreshing observation…' : 'Refresh observation'}</span>
         </DropdownMenu.Item> : null}

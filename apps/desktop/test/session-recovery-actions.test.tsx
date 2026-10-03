@@ -55,6 +55,7 @@ beforeEach(async () => {
 afterEach(() => { dispose?.(); dispose = undefined })
 async function mount() { await dom.render(<SessionPane sessionId="original" surfaceKind="agent" visible interactiveResize={false} linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }} />) }
 async function button(text: string) { const item = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.trim() === text); expect(item, text).toBeDefined(); await act(async () => { item!.click(); await new Promise(resolve => setTimeout(resolve, 20)) }) }
+async function cancelTakeover() { const cancel = document.querySelector<HTMLButtonElement>('[aria-label="Cancel takeover"]'); expect(cancel).not.toBeNull(); await act(async () => { cancel!.click(); await new Promise(resolve => setTimeout(resolve, 160)) }); expect(document.querySelector('.session-takeover')).toBeNull() }
 async function choose(label: string, value: string) { const select = document.querySelector<HTMLSelectElement>(`select[aria-label="${label}"]`)!; expect(select).not.toBeNull(); await act(async () => { select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); await new Promise(resolve => setTimeout(resolve, 0)) }) }
 function preserved(originalTab: unknown, drafts: unknown) { expect(useAppStore.getState().tabs['original-tab']).toBe(originalTab); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); expect(useAppStore.getState().activeWorkspaceId).toBe('workspace'); expect(useAppStore.getState().sessions.some(item => item.id === 'original')).toBe(true) }
 
@@ -62,31 +63,23 @@ describe('actual SessionPane explicit recovery actions', () => {
   it('opens, selects and cancels without any create or send; native restore missing identity remains explicit', async () => {
     await mount(); const restore = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent?.includes('Restore original'))!
     expect(restore.disabled).toBe(true); expect(dom.container.textContent).toContain('Provider was not invoked'); expect(dom.container.textContent).not.toContain('never recorded')
-    await button('Take over…'); expect(document.querySelector<HTMLSelectElement>('[aria-label="Recovery Executor"]')!.value).toBe('')
-    await choose('Recovery Executor', 'claude'); await button('Cancel')
+    const takeoverTrigger = dom.container.querySelector<HTMLButtonElement>('[data-takeover-session-id="original"][data-takeover-region-id="original-region"]')!
+    expect(takeoverTrigger).not.toBeNull(); takeoverTrigger.focus()
+    await button('Take over'); expect(document.querySelector('.session-takeover')).not.toBeNull()
+    expect(document.querySelector('.session-takeover .agent-picks')).not.toBeNull()
+    expect(document.querySelector('[role="dialog"]')).toBeNull()
+    expect(document.querySelector('[aria-label="Original history source"]')).toBeNull()
+    await cancelTakeover(); expect(document.activeElement).toBe(takeoverTrigger)
     await button('Analyze…'); await act(async () => [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(input => input.parentElement?.textContent?.includes('Chosen Mote'))!.click()); await button('Cancel')
     expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().agentSteerQueues).toEqual({})
-  })
-  it('creates exactly the selected Executor in a new SID/Tab with a bounded read-first reference and retains original work', async () => {
-    const old = useAppStore.getState().tabs['original-tab'], drafts = useAppStore.getState().agentComposerDrafts
-    await mount(); await button('Take over…'); await choose('Recovery Executor', 'claude'); await button('Create takeover Agent')
-    expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1)
-    const input = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0]
-    expect(input.executorId).toBe('claude'); expect(input.agentSessionId).not.toBe('original'); expect(input.createOperationId).toBe(await recoveryOperationId(source, 'takeover'))
-    expect(input.agentMuxNote).toContain('--host \'local\' --session \'original\' --source captured --limit 20 --max-bytes 32768'); expect(input.agentMuxNote).toContain('then continue the original task')
-    expect(input.prompt).not.toContain('Original unsent draft'); expect(input.agentMuxNote).not.toContain('Original unsent draft'); expect(input.agentMuxNote!.length).toBeLessThan(2400)
-    expect(Object.values(useAppStore.getState().tabs).some(tab => tab.id !== 'original-tab' && Object.values(tab.regions).some(region => region.kind === 'agent' && region.sessionId === input.agentSessionId))).toBe(true)
-    const stored = JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state
-    expect(stored.spatialRequests[input.createOperationId!].recovery).toMatchObject({ executorId: 'claude', agentSessionId: 'original', historySource: 'captured', mode: 'takeover' })
-    preserved(old, drafts)
   })
   it('lost create ACK and complete dialog/Pane remount read the original request and never launch another Agent', async () => {
     let receipt!: AgentLaunchResult
     vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { receipt = launched(input); throw new Error('lost create ACK') })
     vi.spyOn(api.sessions, 'creation').mockImplementation(async (host, id) => { expect(host).toBe('local'); expect(id).toBe(receipt.created.agentSessionId); return receipt.created })
-    await mount(); await button('Take over…'); await choose('Recovery Executor', 'codex'); await button('Create takeover Agent')
+    await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await button('Create analysis Agent')
     expect(document.body.textContent).toContain('Creation is unconfirmed'); const originalId = vi.mocked(api.sessions.launchAgent).mock.calls[0]![0].createOperationId
-    await button('Cancel'); await dom.render(null); await mount(); await button('Take over…'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
+    await button('Cancel'); await dom.render(null); await mount(); await button('Analyze…'); await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(document.querySelector<HTMLSelectElement>('[aria-label="Recovery Executor"]')!.value).toBe('codex'); expect(document.querySelector<HTMLSelectElement>('[aria-label="Recovery Executor"]')!.disabled).toBe(true)
     await button('Check original request'); expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(api.sessions.creation).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().spatialRequests[originalId!]!.agentSessionId).toBe(receipt.created.agentSessionId)
@@ -95,7 +88,7 @@ describe('actual SessionPane explicit recovery actions', () => {
   it('repeated clicks while a create reply is pending retain one admitted request and refuse another target after remount', async () => {
     let release!: () => void
     vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { await new Promise<void>(resolve => { release = resolve }); return launched(input) })
-    await mount(); await button('Take over…'); await choose('Recovery Executor', 'codex'); await button('Create takeover Agent')
+    await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await button('Create analysis Agent')
     const busy = [...document.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === 'Checking…')!; await act(async () => { busy.click(); busy.click() })
     expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); await act(async () => release())
   })
@@ -103,7 +96,7 @@ describe('actual SessionPane explicit recovery actions', () => {
     let receipt!: AgentLaunchResult
     vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { receipt = launched(input); throw new Error('lost ACK') })
     vi.spyOn(api.sessions, 'creation').mockImplementation(async () => ({ ...receipt.created, creation: { createOperationId: 'another-operation', initialPrompt: 'confirmed' } }))
-    await mount(); await button('Take over…'); await choose('Recovery Executor', 'codex'); await button('Create takeover Agent'); await button('Check original request')
+    await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await button('Create analysis Agent'); await button('Check original request')
     expect(document.body.textContent).toContain('original creation operation identity')
     expect(api.sessions.launchAgent).toHaveBeenCalledTimes(1); expect(useAppStore.getState().pendingAgentLaunches[receipt.created.agentSessionId]?.created).toBeUndefined()
   })
@@ -111,10 +104,10 @@ describe('actual SessionPane explicit recovery actions', () => {
     let receipt!: AgentLaunchResult, release!: () => void
     vi.mocked(api.sessions.launchAgent).mockImplementation(async input => { receipt = launched(input); throw new Error('lost ACK') })
     vi.spyOn(api.sessions, 'creation').mockImplementation(async () => { await new Promise<void>(resolve => { release = resolve }); return receipt.created })
-    await mount(); await button('Take over…'); await choose('Recovery Executor', 'codex'); await button('Create takeover Agent')
-    const pending = inspectRecoveryRequest(source, 'takeover')
+    await mount(); await button('Analyze…'); await choose('Recovery Executor', 'codex'); await button('Create analysis Agent')
+    const pending = inspectRecoveryRequest(source, 'analyze')
     await vi.waitFor(() => expect(release).toBeTypeOf('function'))
-    const state = useAppStore.getState(), binding = state.spatialRequests[await recoveryOperationId(source, 'takeover')]!, tab = state.tabs[binding.tabId]!
+    const state = useAppStore.getState(), binding = state.spatialRequests[await recoveryOperationId(source, 'analyze')]!, tab = state.tabs[binding.tabId]!
     await act(async () => useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: { ...tab, regions: { ...tab.regions,
       [binding.regionId]: { ...tab.regions[binding.regionId]!, kind: 'agent', phase: 'attached', sessionId: 'replacement' } } } } }))
     release(); const result = await pending
@@ -226,12 +219,12 @@ describe('actual SessionPane explicit recovery actions', () => {
     release(); await expect(pending).rejects.toThrow(/changed|replacement/); expect(useAppStore.getState().agentSteerQueues).toEqual({}); expect(submit).not.toHaveBeenCalled(); expect(api.sessions.launchAgent).not.toHaveBeenCalled()
   })
   it('scopes stable correlation to the exact original Host/SID/Region and shell-quotes references without copying history', async () => {
-    const id = await recoveryOperationId(source, 'takeover'); expect(await recoveryOperationId({ ...source }, 'takeover')).toBe(id)
-    for (const other of [{ ...source, hostId: 'remote' }, { ...source, agentSessionId: 'other' }, { ...source, regionId: 'other-region' }]) expect(await recoveryOperationId(other, 'takeover')).not.toBe(id)
+    const id = await recoveryOperationId(source, 'analyze'); expect(await recoveryOperationId({ ...source }, 'analyze')).toBe(id)
+    for (const other of [{ ...source, hostId: 'remote' }, { ...source, agentSessionId: 'other' }, { ...source, regionId: 'other-region' }]) expect(await recoveryOperationId(other, 'analyze')).not.toBe(id)
     expect(recoveryReferenceNote({ ...source, hostId: "host'with quote" }, 'analyze', 'captured')).toContain("--host 'host'\\''with quote'")
   })
   it('parses real emitted read commands with the compiled production CLI, preserving exact Host/SID and no invented inspect flag', async () => {
-    const note = recoveryReferenceNote({ ...source, hostId: "remote'host", agentSessionId: 'exact-original' }, 'takeover', 'native')
+    const note = recoveryReferenceNote({ ...source, hostId: "remote'host", agentSessionId: 'exact-original' }, 'analyze', 'native')
     const history = note.split('\n').find(line => line.startsWith('agentmux agent history '))!
     const parsed = await parseAgentMuxCliInvocation(split(history).slice(1))
     expect(parsed.command.method).toBe('agent.history'); expect(parsed.params).toMatchObject({ hostId: "remote'host", agentSessionId: 'exact-original', source: 'native', limit: 20, maxBytes: 32768 })
@@ -275,10 +268,26 @@ function graphFor(original: Awaited<ReturnType<typeof unobservedOriginal>>) {
 }
 
 describe('actual unobserved SessionPane original reference', () => {
+  it('the retired-history recovery caller opens the same central picker and leaves history and drafts intact on cancel', async () => {
+    const state = useAppStore.getState(), originalTab = state.tabs['original-tab'], drafts = state.agentComposerDrafts
+    const original = state.sessions.find(item => item.id === 'original')!
+    vi.spyOn(api.sessions, 'historySources').mockResolvedValue([{ agentSessionId: 'original', hostId: 'local', state: 'retired', retiredAt: 10,
+      history: { providerId: 'codex', executorId: 'codex', workspacePath: _hygiene_fixturePath("repo"), createdAt: 1 } }])
+    vi.spyOn(api.spatial, 'read').mockResolvedValue(graphFor(original as Awaited<ReturnType<typeof unobservedOriginal>>))
+    await act(async () => useAppStore.setState({ sessions: state.sessions.filter(item => item.id !== 'original') }))
+    await mount()
+    await vi.waitFor(() => expect(dom.container.querySelector('[data-agent-surface-mode]')?.getAttribute('data-agent-surface-mode')).toBe('retained-history'))
+    await button('Take over'); expect(document.querySelector('.session-takeover .agent-picks')).not.toBeNull()
+    expect(document.querySelector('[role="dialog"]')).toBeNull(); expect(document.querySelector('[aria-label="Original history source"]')).toBeNull()
+    await cancelTakeover()
+    expect(dom.container.querySelector('[data-agent-surface-mode]')?.getAttribute('data-agent-surface-mode')).toBe('retained-history')
+    expect(useAppStore.getState().tabs['original-tab']).toBe(originalTab); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+    expect(api.sessions.launchAgent).not.toHaveBeenCalled(); expect(useAppStore.getState().sessions.some(item => item.id === 'original')).toBe(false)
+  })
   it('a known candidate without a current Session offers choices and re-reads only its exact original Host', async () => {
     const original = await unobservedOriginal(); useAppStore.setState({ recoveryCandidates: [candidate(original)] }); const creation = observe(original)
     const tab = useAppStore.getState().tabs['original-tab'], drafts = useAppStore.getState().agentComposerDrafts
-    await mount(); await button('Take over…'); await button('Cancel'); await button('Analyze…'); await button('Cancel'); noLifecycle()
+    await mount(); await button('Take over'); await cancelTakeover(); await button('Analyze…'); await button('Cancel'); noLifecycle()
     await button('Check original'); expect(creation).toHaveBeenCalledWith('exact-original-host', 'original')
     expect(api.sessions.refresh).toHaveBeenCalledWith(original.control); expect(useAppStore.getState().sessions.find(item => item.id === 'original')).toEqual(original)
     expect(useAppStore.getState().tabs['original-tab']).toBe(tab); expect(useAppStore.getState().agentComposerDrafts).toBe(drafts); noLifecycle()
@@ -287,7 +296,7 @@ describe('actual unobserved SessionPane original reference', () => {
     const original = await unobservedOriginal(); const created = { ...agentCreationFixture(original), hostId: 'local', creation: { createOperationId: 'original-admitted-operation', initialPrompt: 'confirmed' as const } }
     useAppStore.setState({ pendingAgentLaunches: { original: { request: { executorId: 'codex', hostId: 'exact-original-host', workspacePath: _hygiene_fixturePath("original"), prompt: 'Original submitted request' }, events: [], overflowed: false, created, projectionFailures: [{ step: 'session', message: 'Original snapshot unavailable.' }] } } })
     const creation = observe(original); await mount(); expect(dom.container.querySelector('[data-agent-surface-mode]')?.getAttribute('data-agent-surface-mode')).toBe('unconfirmed')
-    await button('Take over…'); await button('Cancel'); await button('Analyze…'); await button('Cancel')
+    await button('Take over'); await cancelTakeover(); await button('Analyze…'); await button('Cancel')
     creation.mockResolvedValue({ ...agentCreationFixture(original), creation: { createOperationId: 'another-operation', initialPrompt: 'confirmed' } })
     await button('Check original'); expect(dom.container.textContent).toContain('original creation operation is not confirmed'); expect(api.sessions.refresh).not.toHaveBeenCalled(); noLifecycle()
     creation.mockResolvedValue({ ...agentCreationFixture(original), creation: { createOperationId: 'original-admitted-operation', initialPrompt: 'confirmed' } })
@@ -297,28 +306,28 @@ describe('actual unobserved SessionPane original reference', () => {
     const original = await unobservedOriginal(), graph = graphFor(original)
     vi.spyOn(api.spatial, 'read').mockResolvedValue(graph); await rereadAgentRegionExecution(identity)
     expect(agentRegionExecution({ ...identity, agentSessionId: 'replacement' })).toBeNull(); expect(agentRegionExecution({ ...identity, regionId: 'replacement-region' })).toBeNull()
-    await mount(); await button('Take over…'); expect(document.body.textContent).toContain('Host · exact-original-host'); await button('Cancel'); noLifecycle()
+    await mount(); await button('Take over'); expect(document.querySelector('.session-takeover')).not.toBeNull(); expect(agentRegionExecution(identity)?.hostId).toBe('exact-original-host'); await cancelTakeover(); noLifecycle()
   })
   it('a missing Host explicitly re-reads the existing Core owner, preserving original layout and drafts', async () => {
     const original = await unobservedOriginal(), graph = graphFor(original), creation = observe(original)
     const unknown = { ...graph, graph: { ...graph.graph, regions: graph.graph.regions.map(region => region.regionId === identity.regionId ? { ...region, execution: null } : region) } }
     const read = vi.mocked(api.spatial.read); read.mockResolvedValue(unknown); await rereadAgentRegionExecution(identity)
     read.mockClear(); read.mockResolvedValue(graph); const state = useAppStore.getState()
-    await mount(); expect(dom.container.textContent).toContain('original execution Host is not confirmed'); expect(dom.container.textContent).not.toContain('Take over…')
+    await mount(); expect(dom.container.textContent).toContain('original execution Host is not confirmed'); expect(dom.container.textContent).not.toContain('Take over')
     await button('Check original identity'); expect(read).toHaveBeenCalledTimes(1); expect(creation).toHaveBeenCalledWith('exact-original-host', 'original')
     expect(useAppStore.getState().tabs['original-tab']).toBe(state.tabs['original-tab']); expect(useAppStore.getState().layouts).toBe(state.layouts); expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts); noLifecycle()
   })
   it('conflicting original Hosts remain unknown and an empty re-read cannot erase the confirmed spatial reference', async () => {
     const original = await unobservedOriginal(), graph = graphFor(original); const read = vi.spyOn(api.spatial, 'read').mockResolvedValue(graph)
     await rereadAgentRegionExecution(identity); useAppStore.setState({ recoveryCandidates: [{ ...candidate(original), hostId: 'other-original-host' }] }); const creation = observe(original)
-    read.mockResolvedValue(null); await mount(); expect(dom.container.textContent).toContain('Original Host references conflict'); expect(dom.container.textContent).not.toContain('Take over…')
+    read.mockResolvedValue(null); await mount(); expect(dom.container.textContent).toContain('Original Host references conflict'); expect(dom.container.textContent).not.toContain('Take over')
     await button('Check original identity'); expect(dom.container.textContent).toContain('original Core spatial document was not returned'); expect(agentRegionExecution(identity)?.hostId).toBe('exact-original-host'); expect(creation).not.toHaveBeenCalled(); noLifecycle()
   })
   it('a failed exact original read retains its real error and both explicit alternatives', async () => {
     const original = await unobservedOriginal(); useAppStore.setState({ recoveryCandidates: [candidate(original)] })
     vi.spyOn(api.sessions, 'creation').mockRejectedValue(new Error('Original Host is unavailable: observation receipt missing.'))
     await mount(); await button('Check original'); expect(dom.container.textContent).toContain('Original Host is unavailable: observation receipt missing.')
-    expect(dom.container.textContent).toContain('Take over…'); expect(dom.container.textContent).toContain('Analyze…'); expect(api.sessions.refresh).not.toHaveBeenCalled(); noLifecycle()
+    expect(dom.container.textContent).toContain('Take over'); expect(dom.container.textContent).toContain('Analyze…'); expect(api.sessions.refresh).not.toHaveBeenCalled(); noLifecycle()
   })
   it('a late original creation read cannot query or attach to a replaced Region', async () => {
     const original = await unobservedOriginal(); useAppStore.setState({ recoveryCandidates: [candidate(original)] }); let release!: () => void
@@ -368,9 +377,9 @@ describe('actual unobserved SessionPane original reference', () => {
     useAppStore.setState({ recoveryCandidates: [{ ...candidate(original), hostId: 'another-original-host' }] })
     expect(ownsRecoverySource(unknown)).toBe(false); expect(ownsRecoverySource(historyReference)).toBe(true); noLifecycle()
   })
-  it('an explicit takeover cannot admit a creation after its new unknown reference becomes conflicting', async () => {
+  it('an explicit analysis cannot admit a creation after its new unknown reference becomes conflicting', async () => {
     const original = await unobservedOriginal(), unknown = unobservedRecoveryReference(identity).source!
-    const pending = createRecoveryAgent(unknown, 'takeover', 'codex', 'captured', () => true)
+    const pending = createRecoveryAgent(unknown, 'analyze', 'codex', 'captured', () => true)
     useAppStore.setState({ recoveryCandidates: [{ ...candidate(original), hostId: 'another-original-host' }] })
     await expect(pending).rejects.toThrow('original Session or this selection changed'); noLifecycle()
   })

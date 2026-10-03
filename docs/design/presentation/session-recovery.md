@@ -20,6 +20,7 @@
 - [断电恢复中的状态与附着反馈](#断电恢复中的状态与附着反馈)
 - [Prompt 恢复服务窗](#prompt-恢复服务窗)
 - [运行期保存告示](#运行期保存告示)
+- [接手的中央 Agent 选择](#接手的中央-agent-选择)
 - [确认与任务弹层的统一品质](#确认与任务弹层的统一品质)
 - [启动与恢复的分量分开](#启动与恢复的分量分开)
 
@@ -118,6 +119,13 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共用同一套
 
 实际持久化归属缺失、新空数据库与旧备份恢复的事实边界统一见交互 SSOT[《Tab、Tab Group 与 Region》](../behavior/spaces-and-layout.md#tabtab-group-与-region)；沿同一保存／恢复服务窗表达，不把空白首页或欢迎面当作原工作面已经恢复。
 
+## 接手的中央 Agent 选择
+
+接手在准确来源 Region 的当前画面中央呈现初始 Launcher 共用的 Agent 选择区域，保留原内容作工作上下文，不使用独立 Dialog、全局遮罩或 captured / native 来源下拉框。身份、材料与提交保护只见[《接手原会话的工作》](../behavior/session-recovery.md#接手原会话的工作)；候选的头像、名称、选中反馈与可用性表达沿[《初始 Launcher 的现代工作台密度》](spaces-and-layout.md#初始-launcher-的现代工作台密度)，不另画一套普通 Executor select。
+
+选择区域以短促有限的进入与退出回应 Take over，内容与可点击目标稳定，减少动态时直接呈现完整静态状态，输入、取消与提交不等待动画完成。沿共享动态 token 和控件呈现实际选择，不画假加载或循环装饰。宽窄、明暗和短 Region 中，长名称、完整候选、选中标记、键盘焦点、取消及真实失败均清楚可达；局部关闭返回原入口，不抢旁侧健康工作面的焦点。动效中间帧与静态终态均需独立实际看图。
+
+
 ## 确认与任务弹层的统一品质
 
 用户认为 Stop Agent Session 弹窗「太土」，希望类似界面都更加现代、精致、简洁、紧凑。操作与状态真源仅见交互 SSOT[《Stop Agent Session 与同类弹窗的统一品质》](../behavior/session-recovery.md#stop-agent-session-与同类弹窗的统一品质)。
@@ -129,7 +137,7 @@ Browser restoring、Agent Terminal attach 和 Terminal restoring 共用同一套
 - 动效仅是短促渐显与轻微位移，不缩放文字、改变布局或反复呼吸；减少动态效果偏好下静态完整。小窗与矮窗弹层有界，必要时内部滚动，对象、正文、输入与所有动作都能到达。
 
 
-原 Session 的恢复动作沿[三种显式动作](../behavior/session-recovery.md#恢复原会话接手与分析)呈现：Restore original、Take over 与 Analyze 保持紧凑的一组，前者继续原身份，后两者的弹层清楚展示原 Session／Host、所选 Executor 或 Mote 输入及历史来源。选择与取消不表示提交；未知回复原位保留同一请求的检查动作，不能用新建成功措辞覆盖未确认结果。明暗主题、窄窗与内部滚动复用上面的任务弹层品质。
+原 Session 的恢复动作沿[三种显式动作](../behavior/session-recovery.md#恢复原会话接手与分析)呈现：Restore original、Take over 与 Analyze 保持紧凑的一组，前者继续原身份。Take over 沿[接手的中央 Agent 选择](#接手的中央-agent-选择)展开共享选择器；Analyze 的弹层清楚展示原 Session／Host、所选 Executor 或 Mote 输入及历史来源。选择与取消不表示提交；未知回复原位保留同一请求的检查动作，不能用新建成功措辞覆盖未确认结果。Analyze 在明暗主题、窄窗与内部滚动中复用上面的任务弹层品质。
 
 ## 启动与恢复的分量分开
 
