@@ -88,6 +88,10 @@ const api: AgentMuxPreloadApi = {
   spatial: {
     read:()=>ipcRenderer.invoke('spatial:read'),
     commit:input=>ipcRenderer.invoke('spatial:commit',input),
+    renameLabel:input=>ipcRenderer.invoke('spatial:renameLabel',input),
+    retainLabels:values=>ipcRenderer.invoke('spatial:retainLabels',values),
+    confirmNameCommit:operationId=>ipcRenderer.invoke('spatial:confirmNameCommit',operationId),
+    nameHistory:input=>ipcRenderer.invoke('spatial:nameHistory',input),
     onChange:listener=>{const receive=(_event:unknown,state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>listener(state);ipcRenderer.on('spatial:changed',receive);return ()=>ipcRenderer.removeListener('spatial:changed',receive)}
   },
   config: {

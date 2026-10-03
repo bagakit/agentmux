@@ -2,6 +2,7 @@ import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { directoryIdentity } from '../../../shared/space-addresses'
 import { revealFileExplorerPath } from '../lib/file-explorer-selection'
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
+import { projectedNameRevision } from '../lib/name-authority'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import {
   DndContext,
@@ -268,7 +269,8 @@ function SortableWorkbenchTab({
   }
   // Inline rename reuses the topic-row pattern: a right-click menu entry flips the tab into an input, no
   // second menu infrastructure. `rename` says which name this edit targets so one input serves both.
-  const [rename, setRename] = useState<{ target: 'tab' | 'agent'; value: string } | null>(null)
+  const [rename, setRename] = useState<{ target: 'tab' | 'agent'; id: string; value: string; expectedNameRevision: number } | null>(null)
+  const savingName = useRef(false)
 
   async function closeTabs(
     tabIds: readonly string[],
@@ -352,15 +354,21 @@ function SortableWorkbenchTab({
     // Seed the input with the CURRENT shown name, so an edit refines rather than starts blank. For a
     // tab that is still on the derived strategy, `tab.name` is empty and the field seeds from displayName.
     const seed = target === 'tab' ? (tab.name ?? displayName) : displayName
-    setRename({ target, value: seed })
+    const id = target === 'tab' ? tab.id : copyableAgentSessionId
+    if (!id) return
+    setRename({ target, id, value: seed, expectedNameRevision: projectedNameRevision(useAppStore.getState().nameLabels, target === 'tab' ? 'tab' : 'agent-session', id) })
   }
 
-  function commitRename(): void {
-    if (!rename) return
+  async function commitRename(): Promise<void> {
+    if (!rename || savingName.current) return
     const value = rename.value.trim()
-    if (rename.target === 'tab') renameTab(tab.id, value.length > 0 ? value : null)
-    else if (copyableAgentSessionId) renameAgent(copyableAgentSessionId, value.length > 0 ? value : null)
-    setRename(null)
+    savingName.current = true
+    try {
+      const applied = rename.target === 'tab'
+        ? await renameTab(rename.id, value.length > 0 ? value : null, rename.expectedNameRevision)
+        : await renameAgent(rename.id, value.length > 0 ? value : null, rename.expectedNameRevision)
+      if (applied) setRename(current => current === rename ? null : current)
+    } finally { savingName.current = false }
   }
 
   return (
@@ -427,7 +435,7 @@ function SortableWorkbenchTab({
               className="workbench-tab__rename"
               aria-label={rename.target === 'tab' ? 'Rename tab' : 'Rename agent'}
               value={rename.value}
-              onChange={(event) => setRename({ target: rename.target, value: event.target.value })}
+              onChange={(event) => setRename({ ...rename, value: event.target.value })}
               onClick={(event) => event.stopPropagation()}
               onPointerDown={(event) => event.stopPropagation()}
               onBlur={commitRename}

@@ -829,7 +829,8 @@ export type AgentMuxControlBrowserSubscription = {
 export interface AgentMuxControlHost {
   metrics?: AgentMuxMetricsPort
   toolkit?: AgentMuxToolkitPort
-  execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
+  /** Attribution comes from the authenticated transport, never business parameters. */
+  execute(request: AgentMuxControlRequest, context?: import('./display-label.js').AgentMuxNameContext): Promise<AgentMuxControlResult>
   /**
    * 建立一条进度订阅。**可选**——不实现它的宿主照旧服务其余 14 个操作，订阅请求得到一个类型化的
    * 「这个宿主不提供进度订阅」。这不是 fallback，是能力协商：一个没有 Browser 的宿主（比如只跑
@@ -1015,3 +1016,4 @@ export function isAgentMuxControlOperation(value: unknown): value is AgentMuxCon
 }
 
 export * from './public-rpc-topics.js'
+export type { AgentMuxNameTarget, AgentMuxNameActor, AgentMuxNameContext, AgentMuxNameChangeIntent, AgentMuxNameChangeRecord, AgentMuxNameChangeAdmission, AgentMuxNameChangeSettlement, AgentMuxNameHistoryQuery, AgentMuxNameHistoryPage, AgentMuxDisplayLabelMutation, AgentMuxDisplayLabelResult } from './display-label.js'

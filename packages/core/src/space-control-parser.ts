@@ -1,5 +1,6 @@
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
+import { parseNameChangeRecord } from './display-label.js'
 import { settingsResourceEnvelope } from './settings-resource-json.js'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest, AgentMuxSpaceControlResult,
@@ -48,6 +49,10 @@ function budget(value: unknown, code: Code): void {
 }
 function nullableString(value: unknown, name: string, code: Code): string | null {
   return value === null ? null : string(value, name, code)
+}
+function nameRevision(value: unknown, code: Code): number {
+  if (!Number.isSafeInteger(value) || (value as number) < 0) fail('An exact nonnegative name revision is required.', code)
+  return value as number
 }
 function nullableId(value: unknown, name: string, code: Code, spatial = false): string | null {
   return value === null ? null : spaceControlId(value, name, code, spatial)
@@ -104,7 +109,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -130,11 +135,11 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       ...(Object.hasOwn(source, 'spaceId') ? { spaceId: spaceControlId(source.spaceId, 'Space', code, true) } : {}),
       ...(Object.hasOwn(source, 'displayWorkspaceId') ? { displayWorkspaceId: spaceControlId(source.displayWorkspaceId, 'Display Workspace', code), groupId: spaceControlId(source.groupId, 'Group', code) } : {}) }
   } else if (operation === 'agent.rename') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name'], code)
-    request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code) }
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId', 'name', 'expectedNameRevision'], code)
+    request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code) }
   } else if (operation === 'space.rename') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'tabId', 'name'], code)
-    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code, true), name: nullableString(source.name, 'Display name', code) }
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'tabId', 'name', 'expectedNameRevision'], code)
+    request = { ...base, operation, tabId: spaceControlId(source.tabId, 'Tab', code, true), name: nullableString(source.name, 'Display name', code), expectedNameRevision: nameRevision(source.expectedNameRevision, code) }
   } else if (operation === 'agent.inspect') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId'], code)
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code) }
@@ -241,9 +246,10 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Zone issue', code) } : {}) }
   }, 'Zones', code), item => item.zoneId, 'Zones', code)
   const tabs = unique(list(source.tabs, value => {
-    const item = fields(value, ['zoneId', 'workspaceId', 'tabId', 'name', 'regionIds', 'issue'], code)
+    const item = fields(value, ['zoneId', 'workspaceId', 'tabId', 'name', 'nameRevision', 'regionIds', 'issue'], code)
     return { zoneId: nullableId(item.zoneId, 'Zone', code, true), workspaceId: spaceControlId(item.workspaceId, 'Workspace', code),
       tabId: spaceControlId(item.tabId, 'Tab', code, true), name: nullableString(item.name, 'Tab name', code),
+      ...(Object.hasOwn(item, 'nameRevision') ? { nameRevision: nameRevision(item.nameRevision, code) } : {}),
       regionIds: unique(list(item.regionIds, value => spaceControlId(value, 'Region', code, true), 'Region IDs', code), value => value, 'Region IDs', code), ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Tab issue', code) } : {}) }
   }, 'Tabs', code), item => item.tabId, 'Tabs', code)
   const regions = unique(list(source.regions, value => regionFact(value, code), 'Regions', code), item => item.regionId, 'Regions', code)
@@ -359,9 +365,11 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
     result = { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), override: nullableString(body.override, 'Display override', code) }
   } else if (operation === 'agent.rename' || operation === 'space.rename') {
     const target = operation === 'agent.rename' ? 'agentSessionId' : 'tabId'
-    const body = fields(source.result, [target, 'override', 'changed', 'outcome', 'save'], code)
+    const body = fields(source.result, [target, 'override', 'changed', 'outcome', 'save', 'nameRevision', 'record'], code)
     const actual = { override: nullableString(body.override, 'Display override', code), changed: bool(body.changed, 'Changed', code),
-      outcome: member(body.outcome, ['renamed', 'unchanged', 'partial'], 'Rename outcome', code), save: save(body.save, code) }
+      outcome: member(body.outcome, ['renamed', 'unchanged', 'partial'], 'Rename outcome', code), save: save(body.save, code),
+      nameRevision: nameRevision(body.nameRevision, code), record: parseNameChangeRecord(body.record) }
+    if (actual.record.target.kind !== (operation === 'agent.rename' ? 'agent-session' : 'tab') || actual.record.target.id !== body[target]) fail('Name record belongs to a different target.', code)
     result = operation === 'agent.rename'
       ? { operation, agentSessionId: spaceControlId(body.agentSessionId, 'Agent Session', code), ...actual }
       : { operation, tabId: spaceControlId(body.tabId, 'Tab', code, true), ...actual }

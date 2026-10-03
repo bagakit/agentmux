@@ -361,7 +361,11 @@ const mockApi: AgentMuxDesktopApi = {
     if((mockSpatialState?.revision??0)!==input.expectedRevision) throw new Error('Spatial state changed.')
     mockSpatialState={schemaVersion:1,revision:input.expectedRevision+1,graph:structuredClone(input.graph)}
     for(const listener of mockSpatialListeners)listener(structuredClone(mockSpatialState));return structuredClone(mockSpatialState)
-  },onChange:listener=>{mockSpatialListeners.add(listener);return ()=>{mockSpatialListeners.delete(listener)}}},
+  },renameLabel:async()=>{throw new Error('Display name persistence requires the real spatial owner.')},
+    retainLabels:async()=>{if(!mockSpatialState)throw new Error('Spatial owner is unavailable.');return structuredClone(mockSpatialState)},
+    confirmNameCommit:async()=>{throw new Error('Name disk confirmation requires the original durable owner.')},
+    nameHistory:async()=>({records:[],nextCursor:null}),
+    onChange:listener=>{mockSpatialListeners.add(listener);return ()=>{mockSpatialListeners.delete(listener)}}},
   config: {
     get: async () => structuredClone(mockConfig),
     save: async (config, expected) => {

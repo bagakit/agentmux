@@ -2,6 +2,8 @@ import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
+import { displayLabel } from '@agentmux/core/spatial-graph'
+import { desktopNameContext } from './name-change-audit.js'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
 import { sessionLaunchResult } from '../shared/session-launch-result.js'
@@ -731,8 +733,48 @@ export async function registerIpc(args: {
   const disposeSpatial = spatialState.subscribe(state => {
     if(!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send('spatial:changed',state)
   })
-  handleWithEvent('spatial:read',async event=>{requireTrustedSender('spatial:read',event);return spatialState.read()})
+  handleWithEvent('spatial:read',async event=>{requireTrustedSender('spatial:read',event);return spatialState.readForLayout()})
   handleWithEvent('spatial:commit',async (event,input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit)=>{requireTrustedSender('spatial:commit',event);return spatialState.commit(input)})
+  handleWithEvent('spatial:renameLabel', async (event, input: import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation) => {
+    requireTrustedSender('spatial:renameLabel', event)
+    if (!input || Object.keys(input).some(key => !['operationId', 'target', 'value', 'source', 'expectedNameRevision'].includes(key)) ||
+        !input.target || !['agent-session', 'tab', 'zone'].includes(input.target.kind)) throw new Error('An exact supported label mutation is required.')
+    const current = await spatialState.readForLayout()
+    const regions = current?.graph.regions.filter(region => input.target.kind === 'agent-session' && region.agentSessionId === input.target.id) ?? []
+    const tab = current?.graph.tabs.find(tab => input.target.kind === 'tab' && tab.tabId === input.target.id)
+    const zone = current?.graph.zones.find(zone => input.target.kind === 'zone' && zone.zoneId === input.target.id)
+    const sessions = input.target.kind !== 'agent-session' ? [] : args.runtime.rpcClients().flatMap(({ hostId, client }) => {
+      try { return [{ hostId, session: client.agentSession(input.target.id) }] } catch { return [] }
+    })
+    const known = current && (tab || zone || regions.length > 0 || sessions.length > 0 ||
+      (input.target.kind === 'agent-session' && displayLabel(current.graph, input.target)))
+    if (!known) throw new Error('The original name target is unobserved. Keep the name and restore its original workface before retrying.')
+    const context = desktopNameContext('spatial:renameLabel', event.sender, args.window.webContents, args.window.id)
+    const onlyRegion = regions.length === 1 ? regions[0] : undefined
+    const regionTab = onlyRegion && current!.graph.tabs.find(tab => tab.tabId === onlyRegion.tabId)
+    const onlySession = sessions.length === 1 ? sessions[0] : undefined
+    return spatialState.mutateDisplayLabel(input, { ...context, source: input.source === 'manual' ? context.source : input.source,
+      location: { ...context.location, targetKind: input.target.kind, targetId: input.target.id,
+        workspaceId: tab?.workspaceId ?? zone?.workspaceId ?? regionTab?.workspaceId ?? null,
+        tabId: tab?.tabId ?? onlyRegion?.tabId ?? null, regionId: onlyRegion?.regionId ?? null,
+        agentSessionId: input.target.kind === 'agent-session' ? input.target.id : null,
+        runId: onlySession?.session.run.runId ?? onlyRegion?.runId ?? null,
+        hostId: onlySession?.hostId ?? zone?.hostId ?? onlyRegion?.execution?.hostId ?? null,
+        cwd: onlySession?.session.workspacePath ?? zone?.directoryPath ?? onlyRegion?.execution?.cwd ?? null } })
+  })
+  handleWithEvent('spatial:retainLabels', async (event, values: { target: import('@agentmux/core/spatial-graph').AgentMuxNameTarget; value: string }[]) => {
+    requireTrustedSender('spatial:retainLabels', event)
+    if (!Array.isArray(values) || values.some(value => !value?.target || !['agent-session', 'tab', 'zone'].includes(value.target.kind))) throw new Error('Only observed original display names may be retained.')
+    return spatialState.retainDisplayLabels(values)
+  })
+  handleWithEvent('spatial:nameHistory', async (event, input: { target?: import('@agentmux/core/spatial-graph').AgentMuxNameTarget; afterId?: string; limit?: number } = {}) => {
+    requireTrustedSender('spatial:nameHistory', event); return spatialState.queryNameChanges(input)
+  })
+  handleWithEvent('spatial:confirmNameCommit', async (event, operationId: string) => {
+    requireTrustedSender('spatial:confirmNameCommit', event)
+    if (typeof operationId !== 'string' || !operationId) throw new Error('An exact original name operation is required.')
+    return spatialState.confirmNameCommit(operationId)
+  })
   handleWithEvent('ui:requestStorageFlush', async (event) => {
     requireTrustedSender('ui:requestStorageFlush', event)
     requireWorkbenchStorageAuthority(await observeWorkbenchStorageAuthority(args.window.webContents.session, {

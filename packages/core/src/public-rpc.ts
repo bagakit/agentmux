@@ -117,7 +117,7 @@ export type AgentMuxRpcAgentInspection = {
   session: ReturnType<AgentMuxClient['agentSession']>
   status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null
   unavailable: AgentMuxRpcUnavailable[]
-  displayName: { override: string | null; availability: 'observed' | 'unavailable' }
+  displayName: { override: string | null; nameRevision: number | null; availability: 'observed' | 'unavailable' }
 }
 export type AgentMuxRpcSnapshotParams = {
   projectId?: string; workspaceId?: string; topicId?: string; agentSessionId?: string;
@@ -162,6 +162,8 @@ type NativeParams = TopicParameterMap & FileParameterMap & ScheduleParamsMap & A
   'space.state': Record<string, never>
   'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
   'space.resolve': import('./spatial-state.js').AgentMuxSpatialResolve
+  'name.history': import('./display-label.js').AgentMuxNameHistoryQuery
+  'name.confirm': { operationId: string }
   whoami: Record<string, never>
   'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
@@ -198,6 +200,8 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
   'space.resolve': ReturnType<typeof import('./spatial-state.js').resolveSpatialRegion>
+  'name.history': import('./display-label.js').AgentMuxNameHistoryPage
+  'name.confirm': { state: import('./spatial-state.js').AgentMuxSpatialState }
   whoami: { session: ReturnType<AgentMuxClient['agentSession']>; status: Awaited<ReturnType<AgentMuxClient['statusAgent']>> | null;
     view: import('./agent-self-context.js').SelfViewOutcome; topic: string;
     messaging: typeof import('./agent-messaging-guidance.js').AGENTMUX_AGENT_MESSAGING_RULES; unavailable: AgentMuxRpcUnavailable[] }
@@ -251,7 +255,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
-  'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short',
+  'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.context': 'long', 'agent.history': 'long', 'agent.question.reply': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',

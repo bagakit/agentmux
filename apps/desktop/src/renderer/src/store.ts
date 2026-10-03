@@ -8,6 +8,9 @@ import type { AgentMuxProjectGroupFact, TopicCategory } from '@agentmux/core/con
 import { refreshTopicSpatial } from './lib/topic-knowledge-actions'
 import { categoriesFromSpatial } from '../../shared/topic-categories'
 import {DesktopSpatialPersistence,desktopSpatialGraph,desktopWorkbenchFromSpatial,desktopBindingsFromSpatial,sameSpatialValue} from './lib/desktop-spatial-state'
+import { acknowledgedNameProjection, projectedNameRevision } from './lib/name-authority'
+import type { AgentMuxDisplayLabel, AgentMuxNameTarget, AgentMuxDisplayLabelResult } from '@agentmux/core/spatial-graph'
+import { displayLabel } from '@agentmux/core/spatial-graph'
 import { createSurveyBrowser } from './lib/survey-browser-creation'
 import { isToolkitRequest } from '@agentmux/core/control'
 import { restoredSurveyExplorationNames } from './lib/survey-exploration-name'
@@ -548,6 +551,9 @@ type AppState = {
    * 展示字符串，改它不动任何地址。Tab 手改名不在这里——它是 WorkbenchTab.name，与 Tab 同生命周期。
    */
   agentNames: Record<string, string>
+  nameLabels: Record<string, AgentMuxDisplayLabel>
+  nameAuthorityRevision: number
+  nameAcknowledgementRevision: number
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
   notebookRecoveries: NotebookRecovery[]
@@ -558,7 +564,7 @@ type AppState = {
   /** Explicit Survey creation or saved display membership; Browser existence does not imply membership. */
   surveyCollectedZones: Record<string, true>
   surveyExplorationNames: Record<string, string>
-  setSurveyExplorationName(zoneId: string, name: string): boolean
+  setSurveyExplorationName(zoneId: string, name: string, expectedNameRevision?: number): Promise<boolean>
   setSurveyZoneCollected(zoneId: string, collected: boolean): boolean
   surveyToolsOpen: boolean
   surveySidebarWidth: number
@@ -709,6 +715,10 @@ type AppState = {
   errorDismissed: boolean
   /** UI projection of the latest save request failure, never a persistence or Agent health owner. */
   workbenchSaveWarning: string | null
+  nameSaveUnconfirmed: { operationId: string; target: AgentMuxNameTarget; message: string } | null
+  nameEditFailure: { operationId: string; target: AgentMuxNameTarget; message: string } | null
+  confirmNameSave(): Promise<void>
+  reviewNameEdit(): Promise<void>
   reportWorkbenchSaveFailure(error: unknown): void
   retryWorkbenchSave(): Promise<void>
   initialize(): Promise<() => void>
@@ -896,12 +906,12 @@ type AppState = {
    * 给一个 Agent 设用户手改名（传空清除，交还派生链）。只写 `agentNames[sessionId]`，不碰 session id、
    * run、寻址或 Core——名字是纯展示投影，永不进 Core Session 事实。
    */
-  renameAgent(sessionId: string, name: string | null): void
+  renameAgent(sessionId: string, name: string | null, expectedNameRevision?: number): Promise<boolean>
   /**
    * 给一张 Tab 设用户手改名（传空清除，交还默认策略）。只改 `WorkbenchTab.name` 一个字段，id 与三级
    * 地址原样不动。用户手改后，"单 Agent 对齐 / 多 Region 家族名"两条自动策略对这张 Tab 永久停手。
    */
-  renameTab(tabId: string, name: string | null): void
+  renameTab(tabId: string, name: string | null, expectedNameRevision?: number): Promise<boolean>
   /**
    * 在当前 Workspace 里建文件或目录，返回**它实际用的**那个 workspaceId。
    *
@@ -2404,6 +2414,7 @@ function partializeAppState(state: AppState): PersistedAppState {
     restoredWorkbench: projectPersistedWorkbench({ tabs, layouts })
   }
   if(coreSpatialPersistence?.ready) { delete projection.restoredWorkbench;delete projection.spaceZoneBindings;delete projection.projectGroups }
+  if (state.nameAuthorityRevision > 0) { delete projection.agentNames; delete projection.surveyExplorationNames }
   previousCoreSpatialReady=Boolean(coreSpatialPersistence?.ready)
   previousPersistedInputs = inputs
   previousPersistedProjection = projection
@@ -2412,6 +2423,54 @@ function partializeAppState(state: AppState): PersistedAppState {
 
 let coreSpatialPersistence:DesktopSpatialPersistence|null=null
 let disposeCoreSpatial:(()=>void)|null=null
+export function currentDisplayNameRevision(kind: string, id: string): number {
+  return projectedNameRevision(useAppStore.getState().nameLabels, kind, id)
+}
+function applyNameAcknowledgement(saved: import('@agentmux/core/spatial-graph').AgentMuxSpatialState): void {
+  const current = useAppStore.getState(), names = acknowledgedNameProjection(saved, current.nameAuthorityRevision)
+  // A watch read may project this revision before its write ACK. ACKs are a
+  // separate, ephemeral fact; they cannot restore an older layout or label.
+  const ack = saved.revision >= current.nameAcknowledgementRevision ? saved.nameCommit : undefined
+  if (!names && !ack) return
+  const nameSaveUnconfirmed = ack?.diskDurability === 'unconfirmed' && ack.applied
+    ? { operationId: ack.operationId, target: ack.target, message: ack.issue ?? 'The name was applied; its disk confirmation is unknown.' }
+    : ack?.diskDurability === 'confirmed' && ack.operationId === current.nameSaveUnconfirmed?.operationId ? null : current.nameSaveUnconfirmed
+  let tabs = current.tabs
+  for (const label of Object.values(names?.nameLabels ?? {})) {
+    if (label.target.kind !== 'tab' || !tabs[label.target.id]) continue
+    const tab = tabs[label.target.id]!, renamed = renameWorkbenchTab(tab, label.value)
+    if (renamed !== tab) tabs = { ...tabs, [tab.id]: renamed }
+  }
+  useAppStore.setState({ ...names, tabs, nameSaveUnconfirmed,
+    ...(ack ? { nameAcknowledgementRevision: saved.revision } : {}) })
+}
+async function commitDisplayName(target: AgentMuxNameTarget, value: string | null,
+  source: 'manual' | 'launch', expectedNameRevision = currentDisplayNameRevision(target.kind, target.id)):
+  Promise<AgentMuxDisplayLabelResult> {
+  // Capture the name revision before awaiting a layout save; a later edit wins.
+  const operationId = crypto.randomUUID()
+  try {
+    if (!coreSpatialPersistence) throw new Error('Name storage is unconfirmed. Original names and the running Agent are retained; restore storage and retry the edit.')
+    await coreSpatialPersistence.flush()
+    const result = await api.spatial.renameLabel({ operationId, target,
+      value: value?.trim() || null, source, expectedNameRevision })
+    coreSpatialPersistence.acceptNames(result.state)
+    applyNameAcknowledgement(result.state)
+    if (!result.applied && source === 'manual') useAppStore.setState({ nameEditFailure: { operationId, target,
+      message: [result.record.reason, result.issue].filter(Boolean).join(' ') || 'This name edit conflicted. Review the current name before making a new edit.' } })
+    else if (result.applied && result.diskDurability !== 'confirmed') useAppStore.setState({ nameSaveUnconfirmed: { operationId: result.record.id,
+      target: result.record.target, message: result.issue ?? 'The name was applied, but disk confirmation is unknown. Keep it and inspect its name record before making a new edit.' } })
+    else if (result.applied && source === 'manual') {
+      const failed = useAppStore.getState().nameEditFailure
+      if (failed?.target.kind === target.kind && failed.target.id === target.id) useAppStore.setState({ nameEditFailure: null })
+    }
+    return result
+  } catch (error) {
+    if (source === 'manual') useAppStore.setState({ nameEditFailure: { operationId, target,
+      message: `This edit has no confirmed result: ${presentError(error)}. Review the current name, then make a new edit; the running Agent remains available.` } })
+    throw error
+  }
+}
 
 export type AgentRegionReference = { tabId: string; regionId: string; agentSessionId: string }
 
@@ -2862,6 +2921,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   launcherOptionDrafts: {},
   noticeReadReceipts: {},
   agentNames: {},
+  nameLabels: {},
+  nameAuthorityRevision: 0,
+  nameAcknowledgementRevision: 0,
   mainSurface: 'workbench',
   notebookRecoveries: [],
   surveyNotebookId: null, surveyNoteId: null,
@@ -2869,14 +2931,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   surveyZoneSelection: null,
   surveyCollectedZones: {},
   surveyExplorationNames: {},
-  setSurveyExplorationName(zoneId, name) {
+  async setSurveyExplorationName(zoneId, name, expectedNameRevision) {
     const state = get(), trimmed = name.trim()
     const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
     if (!spatialCatalog(state, topics).zones.some(zone => zone.zoneId === zoneId && zone.kind !== 'unknown')) return false
-    if (trimmed) set({ surveyExplorationNames: { ...state.surveyExplorationNames, [zoneId]: trimmed } })
-    else { const { [zoneId]: _removed, ...surveyExplorationNames } = state.surveyExplorationNames; set({ surveyExplorationNames }) }
-    void saveWorkbenchSelection(false)
-    return true
+    try { const result = await commitDisplayName({ kind: 'zone', id: zoneId }, trimmed || null, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }
+    catch { return false }
   },
   surveySidebarCollapsed: false,
   setSurveySidebarCollapsed(surveySidebarCollapsed) { set({ surveySidebarCollapsed }) },
@@ -2953,6 +3013,34 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   errorNoticeContext: null,
   errorDismissed: false,
   workbenchSaveWarning: null,
+  nameSaveUnconfirmed: null,
+  nameEditFailure: null,
+  async confirmNameSave() {
+    const pending = get().nameSaveUnconfirmed
+    if (!pending) return
+    try {
+      const saved = await api.spatial.confirmNameCommit(pending.operationId)
+      coreSpatialPersistence?.acceptNames(saved); applyNameAcknowledgement(saved)
+    } catch (error) {
+      if (get().nameSaveUnconfirmed === pending) set({ nameSaveUnconfirmed: { ...pending,
+        message: `The current name is retained; disk confirmation is still unknown: ${presentError(error)}. Restore storage and confirm again; do not replay the old edit.` } })
+    }
+  },
+  async reviewNameEdit() {
+    const pending = get().nameEditFailure
+    if (!pending) return
+    try {
+      const saved = await api.spatial.read()
+      if (saved) { coreSpatialPersistence?.acceptNames(saved); applyNameAcknowledgement(saved) }
+      if (get().nameEditFailure !== pending) return
+      const label = saved ? displayLabel(saved.graph, pending.target) : null
+      const actual = label ? label.value === null ? 'cleared' : JSON.stringify(label.value) : 'unknown'
+      set({ nameEditFailure: { ...pending, message: `Current name: ${actual}. Reading does not confirm the earlier edit. Open this object's name editor to make a new edit against its current revision.` } })
+    } catch (error) {
+      if (get().nameEditFailure === pending) set({ nameEditFailure: { ...pending,
+        message: `The current name could not be read: ${presentError(error)}. Restore storage access and review it again; the original work remains available.` } })
+    }
+  },
   reportWorkbenchSaveFailure(error) {
     // A timed-out quit request must not later clear its warning without a new retry result.
     ++workbenchSaveRequest
@@ -3342,10 +3430,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             return [id,{...tab,regions}]
           }))}
           set({tabs,layouts:saved.graph.layouts,topicCategories:categoriesFromSpatial(saved.graph),projectGroups:saved.graph.projectGroups ?? [],spaceZoneBindings:desktopBindingsFromSpatial(saved.graph)})
+          applyNameAcknowledgement(saved)
         }
         // Keep observation and local edit capture available even when the first storage read
         // or bootstrap fails. The existing save Retry re-reads Core before admitting a write.
-        const offRemote=spatial.connect(apply)
+        const offRemote=spatial.connect(apply, applyNameAcknowledgement)
         const offLocal=useAppStore.subscribe((state,previous)=>{
           if(state.loading || (state.topicCategories===previous.topicCategories && state.projectGroups===previous.projectGroups && state.tabs===previous.tabs && state.layouts===previous.layouts && state.spaceZoneBindings===previous.spaceZoneBindings && state.config===previous.config)) return
           spatial.stage(capture())
@@ -3353,6 +3442,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         disposeCoreSpatial=()=>{offLocal();offRemote()}
         try {
           await spatial.bootstrap(capture())
+          const legacy = get()
+          const retained = [
+            ...Object.entries(legacy.agentNames).map(([id,value]) => ({ target: { kind: 'agent-session', id }, value })),
+            ...Object.entries(legacy.surveyExplorationNames).map(([id,value]) => ({ target: { kind: 'zone', id }, value })),
+            ...Object.values(legacy.tabs).flatMap(tab => tab.name ? [{ target: { kind: 'tab', id: tab.id }, value: tab.name }] : [])
+          ]
+          const acknowledged = await api.spatial.retainLabels(retained)
+          spatial.acceptNames(acknowledged)
+          applyNameAcknowledgement(acknowledged)
           set({}) // Rewrite UI preferences after the Core ACK, removing the old entity snapshot.
         } catch(error) {get().reportWorkbenchSaveFailure(error)}
       }
@@ -3854,27 +3952,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         override: agentDisplayOverride(get().agentNames, request.agentSessionId) }
     }
     if (request.operation === 'agent.rename') {
-      agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
-      const before = agentDisplayOverride(get().agentNames, request.agentSessionId)
-      get().renameAgent(request.agentSessionId, request.name)
-      const override = agentDisplayOverride(get().agentNames, request.agentSessionId)
-      const changed = override !== before
-      const save = await saveWorkbenchSelection(false)
-      return { operation: request.operation, agentSessionId: request.agentSessionId, override, changed,
-        outcome: save.reason !== null ? 'partial' : changed ? 'renamed' : 'unchanged', save }
+      throw controlFailure('CONTROL_UNAVAILABLE', 'Display name edits belong to the public spatial label owner; this Renderer is a projection.')
     }
     if (request.operation === 'space.rename') {
-      const tabs = get().tabs
-      const tab = Object.hasOwn(tabs, request.tabId) ? tabs[request.tabId] : undefined
-      if (!tab) throw controlFailure('TAB_NOT_OPEN', 'Tab is not open in the Desktop.')
-      const before = tab.name ?? null
-      get().renameTab(request.tabId, request.name)
-      const renamedTabs = get().tabs
-      const override = Object.hasOwn(renamedTabs, request.tabId) ? renamedTabs[request.tabId]?.name ?? null : null
-      const changed = override !== before
-      const save = await saveWorkbenchSelection(false)
-      return { operation: request.operation, tabId: request.tabId, override, changed,
-        outcome: save.reason !== null ? 'partial' : changed ? 'renamed' : 'unchanged', save }
+      throw controlFailure('CONTROL_UNAVAILABLE', 'Tab name edits belong to the public spatial label owner; keep this workface and use that owner.')
     }
     if (request.operation === 'inspect.client') {
       const discoveryWorkspace = get().config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
@@ -5300,24 +5381,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       regionId, (bridge) => bridge.branchDiff(surface.workspaceId, surface.comparison)
     )
   },
-  renameAgent(sessionId, name) {
-    const trimmed = name?.trim() ?? ''
-    set((state) => {
-      if (trimmed.length > 0) {
-        return { agentNames: { ...state.agentNames, [sessionId]: trimmed } }
-      }
-      if (state.agentNames[sessionId] === undefined) return state
-      const { [sessionId]: _cleared, ...rest } = state.agentNames
-      return { agentNames: rest }
-    })
+  async renameAgent(sessionId, name, expectedNameRevision) {
+    try { const result = await commitDisplayName({ kind: 'agent-session', id: sessionId }, name, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }
+    catch { return false }
   },
-  renameTab(tabId, name) {
-    set((state) => {
-      const tab = state.tabs[tabId]
-      if (!tab) return state
-      const renamed = renameWorkbenchTab(tab, name)
-      return renamed === tab ? state : { tabs: { ...state.tabs, [tabId]: renamed } }
-    })
+  async renameTab(tabId, name, expectedNameRevision) {
+    try { const result = await commitDisplayName({ kind: 'tab', id: tabId }, name, 'manual', expectedNameRevision); return result.applied && result.diskDurability === 'confirmed' }
+    catch { return false }
   },
   setMainSurface(mainSurface) {
     set({ workbenchNavigationInputPolicy: null, regionCaretFocus: null })
@@ -6948,6 +7018,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const submittedPrompt = originalPrompt !== undefined &&
       (originalPrompt === prompt || expandSemanticReferences(originalPrompt) === prompt) ? originalPrompt : undefined
     const requestedNames = { agentName: names?.agentName?.trim() || undefined, tabName: names?.tabName?.trim() || undefined }
+    const requestedTabNameRevision = currentDisplayNameRevision('tab', tabId)
     const originalNames = state.launcherNameDrafts[regionId]
     const submittedNames = originalNames &&
       (originalNames.agentName.trim() || undefined) === requestedNames.agentName &&
@@ -7106,8 +7177,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       })
       // 名字与草稿同一时机落地：Agent 已经挂上，两个 id 才真正指向一个存在的东西。失败路径不写，
       // 否则会留下一个指向已消失 session 的孤儿名字。留空即不写，显示名交还派生链。
-      if (requestedNames.agentName) get().renameAgent(sessionId, requestedNames.agentName)
-      if (requestedNames.tabName) get().renameTab(tabId, requestedNames.tabName)
+      if (requestedNames.agentName) await commitDisplayName({ kind: 'agent-session', id: sessionId }, requestedNames.agentName, 'launch', 0)
+        .catch(error => get().reportWorkbenchSaveFailure(error))
+      if (requestedNames.tabName) await commitDisplayName({ kind: 'tab', id: tabId }, requestedNames.tabName, 'launch', requestedTabNameRevision)
+        .catch(error => get().reportWorkbenchSaveFailure(error))
       if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
       if (priorFailure && get().errorNoticeContext === priorFailure) {
         set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
@@ -8604,6 +8677,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   merge: (persisted, current) => {
     const state = { ...current, ...persisted as Partial<AppState> }
+    // Old Chromium reads never overwrite acknowledged names or clear tombstones.
+    if (current.nameAuthorityRevision > 0) {
+      state.agentNames = current.agentNames
+      state.surveyExplorationNames = current.surveyExplorationNames
+      state.nameLabels = current.nameLabels
+      state.nameAuthorityRevision = current.nameAuthorityRevision
+    }
     return { ...state, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection) }
   },
   partialize: partializeAppState

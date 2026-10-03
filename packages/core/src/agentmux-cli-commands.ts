@@ -162,6 +162,14 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   empty('topic.migrate.preview', 'Preview existing local Topic identities and exact category changes without writing.'),
   command('topic.migrate.apply', '--revision NUMBER', 'Apply the inspected local Topic organization at its exact spatial revision.', { '--revision': 'value' }, f => ({ expectedRevision: Number(value(f, '--revision', true)) }), 'Read topic migrate preview first. The original owner preserves content and writes a backup before the spatial change. ' + SAVE_NOTICE),
   empty('space.state', 'Read the Core durable spatial graph and revision without a graphical frontend.'),
+  command('name.confirm', '--operation-id ID', 'Confirm the current name document on disk without replaying a prior name edit.',
+    { '--operation-id': 'value' }, f => ({ operationId: value(f, '--operation-id', true)! })),
+  command('name.history', '[--kind KIND --id ID] [--after ID] [--limit N]', 'Read durable name records; use nextCursor with --after for the next page.',
+    { '--kind': 'data', '--id': 'data', '--after': 'data', '--limit': 'value' }, f => {
+      if (f.values.has('--kind') !== f.values.has('--id')) invalid('Name history target requires both --kind and --id.')
+      return { ...(f.values.has('--kind') ? { target: { kind: id(f, '--kind'), id: id(f, '--id') } } : {}),
+        ...(f.values.has('--after') ? { afterId: id(f, '--after') } : {}), ...numbers(f, { '--limit': 'limit' }) }
+    }),
   command('space.commit', '--revision N [--allow-entity-removal] < graph.json', 'Commit a spatial graph from JSON stdin using an exact revision; stale writes are refused.',
     {'--revision':'value','--allow-entity-removal':'boolean'}, f => {
       const expectedRevision = Number(value(f,'--revision',true))
@@ -232,7 +240,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
         ? { kind: 'new-agent', executorId: id(f, selected), ...fields(f, { '--prompt': 'prompt' }) }
         : { kind: 'agent-session', agentSessionId: id(f, selected, true) }, destination: dest, focus: focus(f) }
     }, `Use --zone ZONE --new-tab for an existing Zone. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; its Host and directory determine execution. Space is a presentation and cannot choose or change an existing Session Host or cwd. No existing Tab anchor is required. ${SAVE_NOTICE}`),
-  command('agent.rename', '--session ID (--name TEXT|--clear)', 'Set or clear the original Session display override.', { '--session': 'data', '--name': 'data', '--clear': 'boolean', ...OP }, f => ({ ...operation(f), agentSessionId: id(f, '--session', true), name: name(f) }), SAVE_NOTICE),
+  command('agent.rename', '--session ID --name-revision N (--name TEXT|--clear)', 'Edit the exact Session display name at its observed revision.', { '--session': 'data', '--name': 'data', '--clear': 'boolean', '--name-revision': 'value', ...OP }, f => ({ ...operation(f), agentSessionId: id(f, '--session', true), name: name(f), expectedNameRevision: Number(value(f, '--name-revision', true)) }), SAVE_NOTICE),
   command('agent.view', '--session ID [--mode terminal|activity]', 'Read or change all presentations of one exact SID without taking focus.', { '--session': 'data', '--mode': 'value', ...OP }, f => ({ agentSessionId: id(f, '--session', true), ...fields(f, { '--mode': 'mode' }), ...(f.values.has('--mode') ? operation(f) : {}) }), 'Without --mode this is read-only. A known durable Agent projection remains usable while Core facts are unknown; no healthy Run is stopped.'),
   { ...command('agent.output', '--session ID [--after-byte N] [--follow]', 'Read replay or follow ordered raw output bytes, with cursor and Gap facts.', { '--session': 'data', '--after-byte': 'value', '--follow': 'boolean' }, f => ({ agentSessionId: id(f, '--session'), ...numbers(f, { '--after-byte': 'afterByte' }), follow: f.booleans.has('--follow') }), 'Replay and live bytes use bounded base64 notifications, never reconstructed terminal text. Without --follow, the reader ends after replay. Ctrl-C cancels this reader, not the Agent Run.'), stream: true },
   command('message.pending.ls', '--session ID', 'Read every unsubmitted client-owned message with exact input identity and edit eligibility.', { '--session': 'data' }, f => ({ agentSessionId: id(f, '--session', true) })),
@@ -259,7 +267,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     if (f.values.has('--operation-id') && Object.keys(selected).length) invalid('--operation-id cannot be combined with a spatial selector.')
     return { target: f.values.has('--operation-id') ? { operationId: id(f, '--operation-id') } : selected }
   }),
-  command('space.rename', '--tab ID (--name TEXT|--clear)', 'Set or clear one exact Tab entity display override.', { '--tab': 'data', '--name': 'data', '--clear': 'boolean', ...OP }, f => ({ ...operation(f), tabId: id(f, '--tab', true), name: name(f) }), SAVE_NOTICE),
+  command('space.rename', '--tab ID --name-revision N (--name TEXT|--clear)', 'Edit one exact Tab name at its observed revision.', { '--tab': 'data', '--name': 'data', '--clear': 'boolean', '--name-revision': 'value', ...OP }, f => ({ ...operation(f), tabId: id(f, '--tab', true), name: name(f), expectedNameRevision: Number(value(f, '--name-revision', true)) }), SAVE_NOTICE),
   command('space.mv', '--from-region ID --expect-session SID <destination>', 'Move a presentation while keeping Session, Run, Host and cwd.', { ...DESTINATION, '--from-region': 'data', '--expect-session': 'data', '--from-space': 'data', '--from-display-workspace': 'data', '--from-group': 'data' }, f => {
     const fromLocation = fields(f, { '--from-space': 'spaceId', '--from-display-workspace': 'displayWorkspaceId', '--from-group': 'groupId' })
     return { ...operation(f), fromRegionId: id(f, '--from-region', true), expectedAgentSessionId: id(f, '--expect-session', true), ...(Object.keys(fromLocation).length ? { fromLocation } : {}), destination: destination(f), focus: focus(f) }

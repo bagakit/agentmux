@@ -6,6 +6,7 @@ import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopi
 import { isFileMethod, parseFileReadParams, parseFileReadResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
+import { displayLabel, type AgentMuxNameContext } from './display-label.js'
 import { createHash, randomUUID } from 'node:crypto'
 import type { AgentMuxClient } from './client.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates,
@@ -58,6 +59,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   files?: AgentMuxRpcFilesOwner
   schedules?: AgentMuxRpcSchedulesOwner
   spatialState?: AgentMuxSpatialStateStore
+  /** Optional host aggregation of original named owners; Core interprets no host target kinds. */
+  nameHistory?(query: import('./display-label.js').AgentMuxNameHistoryQuery): Promise<import('./display-label.js').AgentMuxNameHistoryPage>
   endpoint?: import('./public-rpc.js').AgentMuxRpcEndpoint
   /** Borrow existing SDK clients. Their lifecycle remains with their host. */
   coreClients?(): readonly AgentMuxRpcCoreClient[] | Promise<readonly AgentMuxRpcCoreClient[]>
@@ -89,6 +92,8 @@ const NATIVE_FIELDS = {
   'notebook.ls': [], 'notebook.inspect': ['notebookId','noteId','operationId'], 'notebook.apply': ['expectedRevision','operationId','change'],
   'space.state': [], 'space.commit': ['expectedRevision','graph','allowEntityRemoval'],
   'space.resolve': ['tabId','regionId','direction'],
+  'name.history': ['target','afterId','limit'],
+  'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
@@ -225,9 +230,9 @@ export class AgentMuxRpcService {
     if (!caller) throw new AgentMuxError('This method requires an authenticated managed Agent.', 'MANAGED_AGENT_CONTEXT_REQUIRED')
     return caller
   }
-  private async execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult> {
+  private async execute(request: AgentMuxControlRequest, context?: AgentMuxNameContext): Promise<AgentMuxControlResult> {
     if (!this.ports.execute && ['space.ls','space.inspect','space.bind','space.unbind'].includes(request.operation)) {
-      const state = await this.spatial.read()
+      const state = await this.spatial.readForLayout()
       if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
       if (request.operation === 'space.ls' || request.operation === 'space.inspect') {
         if ('requestId' in request.target) throw new AgentMuxError('No mutation journal is attached to this headless owner.', 'CONTROL_UNAVAILABLE')
@@ -241,7 +246,7 @@ export class AgentMuxRpcService {
       }
     }
     if (!this.ports.execute) throw new AgentMuxError('The original Desktop business owner is unavailable.', 'CONTROL_UNAVAILABLE')
-    const result = await this.ports.execute(request)
+    const result = await this.ports.execute(request, context)
     if (result.operation !== request.operation) throw new AgentMuxError('Business owner returned another operation.', 'CONTROL_PROTOCOL_ERROR')
     const { operation, ...body } = result
     const parsed = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -434,15 +439,47 @@ export class AgentMuxRpcService {
       const internalCaller: AgentMuxControlCaller | undefined = caller
         ? { agentSessionId: caller.agentSessionId, capability: caller.capability } : undefined
       const request = rpcControlRequest(method as keyof typeof AGENTMUX_RPC_CONTROL_METHODS, body, internalCaller)
+      const nameContext: AgentMuxNameContext = {
+        actor: caller ? { kind: 'agent', id: caller.agentSessionId, verified: true }
+          : context.principal ? { kind: context.transport === 'unix' && context.principal.kind === 'user' ? 'device' : context.principal.kind,
+            id: context.principal.id, verified: true }
+          : { kind: 'unknown', id: null, verified: false },
+        source: 'explicit-edit', entryPoint: method, transport: context.transport ?? null,
+        location: caller ? { workspacePath: caller.session.workspacePath, hostId: caller.hostId,
+          callerSessionId: caller.agentSessionId, callerRunId: caller.session.run.runId, callerCwd: caller.session.workspacePath } : {}
+      }
+      if (request.operation === 'agent.rename' || request.operation === 'space.rename') {
+        const agentOwner = request.operation === 'agent.rename' ? await this.owner(request.agentSessionId) : null
+        const target = request.operation === 'agent.rename' ? { kind: 'agent-session', id: request.agentSessionId } : { kind: 'tab', id: request.tabId }
+        const state = await this.spatial.readForLayout()
+        const regions = state?.graph.regions.filter(region => target.kind === 'agent-session' && region.agentSessionId === target.id) ?? []
+        const region = regions.length === 1 ? regions[0] : null
+        const tab = state?.graph.tabs.find(tab => tab.tabId === (target.kind === 'tab' ? target.id : region?.tabId))
+        Object.assign(nameContext.location, { targetKind: target.kind, targetId: target.id,
+          workspaceId: tab?.workspaceId ?? null, tabId: tab?.tabId ?? null, regionId: region?.regionId ?? null,
+          targetRunId: agentOwner?.session.run.runId ?? region?.runId ?? null,
+          targetHostId: agentOwner?.hostId ?? region?.execution?.hostId ?? null,
+          targetCwd: agentOwner?.session.workspacePath ?? region?.execution?.cwd ?? null })
+        const changed = await this.spatial.mutateDisplayLabel({ target, operationId: request.requestId,
+          value: request.name?.trim() || null, expectedNameRevision: request.expectedNameRevision, source: 'manual' }, nameContext)
+        const report = { override: changed.label?.value ?? null, changed: changed.changed,
+          nameRevision: changed.label?.nameRevision ?? 0, record: changed.record,
+          outcome: !changed.applied || changed.diskDurability !== 'confirmed' ? 'partial' as const : changed.changed ? 'renamed' as const : 'unchanged' as const,
+          save: { layoutApplied: false, localStorageWritten: false, storageFlushRequested: false, diskDurability: changed.diskDurability,
+            reason: changed.issue ?? changed.record.reason } }
+        return rpcControlResult(method, request.operation === 'agent.rename'
+          ? { operation: request.operation, agentSessionId: request.agentSessionId, ...report }
+          : { operation: request.operation, tabId: request.tabId, ...report }) as AgentMuxRpcResult<M>
+      }
       if ((request.operation === 'interrupt' || request.operation === 'resume' || request.operation === 'stop') && request.target.kind === 'agent-session') {
         request.target = { kind: 'agent-session', agentSessionId: (await this.owner(request.target.agentSessionId)).agentSessionId }
       }
       if (request.operation === 'demand.start' && request.sessionId !== undefined) {
         request.sessionId = (await this.owner(request.sessionId)).agentSessionId
       }
-      result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal)
+      result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
-        : await this.execute(request)
+        : await this.execute(request, nameContext)
       return rpcControlResult(method, result as AgentMuxControlResult) as AgentMuxRpcResult<M>
     }
     const fields = NATIVE_FIELDS[method as keyof typeof NATIVE_FIELDS]
@@ -456,7 +493,16 @@ export class AgentMuxRpcService {
         if(!actor)throw new AgentMuxError('Notebook writing requires the authenticated original user, device or Agent. Knowledge and Runs are retained.', 'CONTROL_PERMISSION_DENIED')
         result={state:await this.notebooks.apply(p as unknown as import('./notebook-catalog.js').NotebookWrite,actor)};break
       }
-      case 'space.state': result = {state:await this.spatial.read()}; break
+      case 'space.state': result = {state:await this.spatial.readForLayout()}; break
+      case 'name.confirm': result = { state: await this.spatial.confirmNameCommit(rpcString(p.operationId, 'Exact name operation ID')) }; break
+      case 'name.history': {
+        const target = p.target === undefined ? undefined : rpcRecord(p.target, ['kind', 'id'])
+        const query = {
+          ...(target ? { target: { kind: rpcString(target.kind, 'Name target kind'), id: rpcString(target.id, 'Name target ID') } } : {}),
+          ...(p.afterId === undefined ? {} : { afterId: rpcString(p.afterId, 'Name cursor') }), limit: rpcCount(p.limit, 50, 1000) }
+        result = { ...(this.ports.nameHistory ? await this.ports.nameHistory(query)
+          : { ...await this.spatial.queryNameChanges(query), coverage: 'spatial' }), diskAcknowledgement: 'not-observed' }; break
+      }
       case 'space.commit': {
         if (p.allowEntityRemoval !== undefined && typeof p.allowEntityRemoval !== 'boolean') throw new AgentMuxError('Explicit entity removal must be boolean.', 'INVALID_CONTROL_REQUEST')
         result = {state:await this.spatial.commit({expectedRevision:rpcCount(p.expectedRevision,-1,Number.MAX_SAFE_INTEGER),graph:p.graph as import('./spatial-state.js').AgentMuxSpatialGraph,
@@ -465,7 +511,7 @@ export class AgentMuxRpcService {
       case 'space.resolve': {
         const tabId = rpcString(p.tabId,'Tab ID'), regionId = rpcString(p.regionId,'Region ID')
         if (!['left','right','up','down'].includes(String(p.direction))) throw new AgentMuxError('A spatial direction is required.', 'INVALID_CONTROL_REQUEST')
-        const state = await this.spatial.read()
+        const state = await this.spatial.readForLayout()
         if (!state) throw new AgentMuxError('No durable spatial graph has been registered.', 'SPATIAL_STATE_ABSENT')
         result = resolveSpatialRegion(state.graph,{tabId,regionId,direction:p.direction as import('./spatial-layout.js').SplitDirection}); break
       }
@@ -550,11 +596,12 @@ export class AgentMuxRpcService {
           status = await client.statusAgent(session.agentSessionId)
           if (status.session.run.runId !== session.run.runId) throw new AgentMuxError('Session changed during inspection.', 'STALE_AGENT_SESSION')
         } catch (error) { status = null; issues.push(unavailable(error)) }
-        let displayName: { override: string | null; availability: 'observed' | 'unavailable' } = { override: null, availability: 'unavailable' }
+        let displayName: { override: string | null; nameRevision: number | null; availability: 'observed' | 'unavailable' } = { override: null, nameRevision: null, availability: 'unavailable' }
         try {
-          const alias = await this.execute(this.request('agent.inspect', { agentSessionId: session.agentSessionId }))
-          if (alias.operation !== 'agent.inspect') throw new AgentMuxError('Agent alias result is mismatched.', 'CONTROL_PROTOCOL_ERROR')
-          displayName = { override: alias.override, availability: 'observed' }
+          const state = await this.spatial.readForLayout()
+          if (!state) throw new AgentMuxError('The name owner is unavailable; original names are retained.', 'SPATIAL_STATE_ABSENT')
+          const label = displayLabel(state.graph, { kind: 'agent-session', id: session.agentSessionId })
+          displayName = { override: label?.value ?? null, nameRevision: label?.nameRevision ?? 0, availability: 'observed' }
         } catch (error) { issues.push(unavailable(error)) }
         result = { routeHostId, session, status, displayName, unavailable: issues }; break
       }
@@ -658,11 +705,11 @@ export class AgentMuxRpcService {
     return result as AgentMuxRpcResult<M>
   }
 
-  private async toolkit(request: AgentMuxControlRequest, signal?: AbortSignal) {
+  private async toolkit(request: AgentMuxControlRequest, signal?: AbortSignal, context?: AgentMuxNameContext) {
     if (!this.ports.toolkit) throw new AgentMuxError('Toolkit owner is unavailable.', 'TOOLKIT_UNSUPPORTED')
     const { isToolkitRequest, parseToolkitResult, assertToolkitResultTarget } = await import('./toolkit.js')
     if (!isToolkitRequest(request)) throw new AgentMuxError('Toolkit request is invalid.', 'INVALID_CONTROL_REQUEST')
-    const raw = rpcRecord(await this.ports.toolkit.execute(request, signal ?? new AbortController().signal), undefined, 'CONTROL_PROTOCOL_ERROR')
+    const raw = rpcRecord(await this.ports.toolkit.execute(request, signal ?? new AbortController().signal, context), undefined, 'CONTROL_PROTOCOL_ERROR')
     const { operation, ...body } = raw
     if (operation !== request.operation) throw new AgentMuxError('Toolkit operation mismatch.', 'CONTROL_PROTOCOL_ERROR')
     const result = parseToolkitResult(request.operation, body)
