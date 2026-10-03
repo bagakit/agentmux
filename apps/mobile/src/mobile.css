@@ -195,12 +195,6 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-drawer .mobile-sheet-handle { display:none; }
 .mobile-drawer .mobile-sheet-title h2 { font-size:22px; margin:8px 0; }
 .mobile-drawer > p { color:var(--text-3); font-size:12px; margin:8px 0 24px; }
-.mobile-drawer-navigation { display:grid; gap:5px; }
-.mobile-drawer-navigation button { display:flex; align-items:center; gap:14px; min-height:48px; padding:8px 12px; background:transparent; border-radius:24px; font-size:17px; text-align:left; }
-.mobile-drawer-navigation button[aria-current='page'] { background:var(--surface-3); color:var(--green); font-weight:600; }
-.mobile-drawer-settings { margin-top:auto; padding-top:28px; }
-.mobile-drawer .mobile-home-settings label { min-height:44px; border:0; padding-block:6px; }
-.mobile-drawer .mobile-home-settings small { display:none; }
 .mobile-drawer .mobile-menu-row { border:0; }
 .mobile-session-copy { flex:1; min-width:0; gap:2px!important; }
 .mobile-session-project { font-size:11px; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -215,11 +209,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-object-avatar img { width:100%; height:100%; border-radius:30%; object-fit:cover; }
 .mobile-object-avatar .mote-face { width:100%; height:100%; }
 .mobile-avatar-issue { position:absolute; right:-2px; bottom:-2px; background:var(--surface-0); color:var(--amber); border-radius:50%; font-size:10px; padding:1px 3px; }
-.mobile-mote-heading { position:relative; display:grid; justify-items:center; gap:2px; padding:5px 0 2px; }
-.mobile-mote-heading strong { font-size:15px; max-width:190px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
-.mobile-mote-heading small { color:var(--text-3); font-size:10px; }
 [data-mobile-workface='mote'] .mobile-session-toolbar { min-height:36px; border:0; }
-[data-mobile-workface='mote'] .mobile-session-toolbar > span { visibility:hidden; }
 [data-mobile-workface='mote'] .mobile-navigation { display:none; }
 .mobile-connect-page { margin:0 auto; min-height:100%; padding:20px 24px 30px; display:flex; flex-direction:column; align-items:center; text-align:center; justify-content:center; }
 .mobile-connect-dragon { width:min(66vw,270px); height:min(66vw,270px); object-fit:contain; margin-bottom:12px; }
@@ -232,3 +222,30 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-navigation svg { stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
 .mobile-navigation button[aria-current='page'] { background:#8de3ae0d; }
 @media (prefers-reduced-motion:reduce) { .mobile-app { transition:none; } }
+
+/* Compact phone workfaces: one navigation layer and no duplicate Mote title band. */
+.mobile-app { font-size:13px; }
+.mobile-spatial-panel { padding:4px 12px 10px; }
+.mobile-spatial-panel h1 { font-size:18px; }
+.mobile-spatial-panel .mobile-section-heading { padding-bottom:8px; }
+.mobile-spatial-panel .mobile-session-list > li > button { min-height:58px; padding:5px 0; gap:8px; }
+.mobile-spatial-panel .mobile-session-list strong, .mobile-session-copy strong { font-size:13px!important; line-height:1.3; }
+.mobile-session-project { font-size:10px; }
+.mobile-spatial-panel .mobile-session-recap { display:block; margin:0!important; font-size:11px!important; line-height:1.35; color:var(--text-3); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.mobile-session-state { font-size:10px; }
+.mobile-executor-avatar { position:relative; width:28px; height:28px; flex:none; display:grid; place-items:center; }
+.mobile-executor-avatar small { position:absolute; right:-1px; bottom:-1px; display:grid; place-items:center; background:var(--surface-0); border-radius:50%; width:10px; height:10px; }
+.mobile-executor-mark { display:flex; }
+.mobile-executor-mark-filters { position:absolute; width:0; height:0; }
+.mobile-header { min-height:44px; padding-block:4px; }
+.mobile-brand { font-size:14px; }
+.mobile-settings-button { width:40px; height:40px; }
+.mobile-mote-heading { display:grid; place-items:center; padding:0; background:transparent; border:0; min-height:44px; width:44px; justify-self:center; }
+[data-mobile-workface='mote'] .mobile-header { background:transparent; border:0; box-shadow:none; }
+[data-mobile-workface='mote'] .mobile-session-toolbar { display:none; }
+.mobile-drawer-settings { margin-top:12px; padding-top:0; }
+.mobile-home-select { display:flex; align-items:center; justify-content:space-between; min-height:44px; gap:12px; font-size:13px; }
+.mobile-home-select select { max-width:130px; border:0; border-radius:12px; padding:8px 10px; background:var(--surface-2); color:var(--text); font-size:16px; }
+.mobile-drawer .mobile-sheet-title h2 { font-size:18px; }
+.mobile-navigation { padding-block:2px; }
+.mobile-navigation > button { padding-block:2px; }

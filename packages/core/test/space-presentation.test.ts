@@ -17,3 +17,18 @@ describe('public spatial presentation contract',()=>{
   expect(()=>rpcControlRequest('space.ls',{target:{},presentation:'yes'})).toThrow()
  })
 })
+
+import { parseSpaceControlSuccessReceipt } from '../src/space-control-parser.js'
+const spaceId = JSON.stringify(['host', upstreamFixturePath("configured/mote")])
+const boundedCatalog = { spaces: [{ spaceId, kind: 'mote', name: 'Mote', hostId: 'host', directoryPath: upstreamFixturePath("configured/mote"), projectId: null }], zones: [], tabs: [], regions: [], bindings: [], locations: [],
+  appearance: [{ spaceId, expression: 'identity', activities: [{ agentSessionId: 'original', runId: 'original-run', expression: 'tool' }] }],
+  agentPresentation: [{ agentSessionId: 'original', name: 'Actual name', project: 'Actual Project', group: 'working', state: 'working', providerId: 'provider', detail: 'Observed', recap: { text: 'Original recap', source: 'Last assistant message' }, avatar: { tint: '#aabbcc', badge: 'spark' } }] }
+function receipt(value: unknown) { return parseSpaceControlSuccessReceipt({ schemaVersion: 5, requestId: 'read', ok: true, operation: 'space.ls', result: { catalog: value } }) }
+describe('public bounded owner presentation', () => {
+  it('carries original Session/Run and presentation through the same public receipt', () => { expect(receipt(boundedCatalog).result).toMatchObject({ catalog: boundedCatalog }) })
+  it('rejects oversized names and duplicate activity identities', () => {
+    expect(() => receipt({ ...boundedCatalog, agentPresentation: [{ ...boundedCatalog.agentPresentation[0], name: 'a'.repeat(257) }] })).toThrow()
+    expect(() => receipt({ ...boundedCatalog, appearance: [{ ...boundedCatalog.appearance[0], activities: [boundedCatalog.appearance[0]!.activities[0], boundedCatalog.appearance[0]!.activities[0]] }] })).toThrow()
+  })
+  it('rejects appearance attributed to a different original Space', () => { expect(() => receipt({ ...boundedCatalog, appearance: [{ ...boundedCatalog.appearance[0], spaceId: JSON.stringify(['other', upstreamFixturePath("wrong")]) }] })).toThrow() })
+})

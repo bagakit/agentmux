@@ -32,7 +32,8 @@ export type SpatialControlPorts = {
   get(): SpatialWorkbench
   patch(patch: SpatialPatch): void
   topics(): Promise<readonly ScratchTopicSnapshot[]>
-  appearance?(catalog: AgentMuxSpaceCatalog, imageSpaceId?: string): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>>
+  appearance?(catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[]): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>>
+  agentPresentation?(): NonNullable<AgentMuxSpaceCatalog['agentPresentation']>
   createResource(input: SpaceZoneResourceInput): Promise<SpaceZoneResourceResult>
   launch(input: AgentLaunchInput & { agentSessionId: string; createOperationId: string }): Promise<AgentLaunchResult>
   creation(hostId: string, sessionId: string): Promise<AgentMuxAgentSession>
@@ -157,6 +158,7 @@ export function selectSpatialCatalog(catalog: AgentMuxSpaceCatalog, target: Agen
   const selectedBindings = bindings.filter(binding => selectedZoneIds.has(binding.zoneId))
   const selectedSpaceIds = new Set(selectedBindings.map(binding => binding.spaceId))
   return {
+    ...(catalog.agentPresentation ? { agentPresentation: catalog.agentPresentation.filter(value => catalog.regions.some(region => region.agentSessionId === value.agentSessionId && selectedIds.has(region.tabId))) } : {}),
     ...(catalog.appearance ? { appearance: catalog.appearance.filter(value => target.spaceId ? value.spaceId === target.spaceId : selectedSpaceIds.has(value.spaceId)) } : {}),
     spaces: catalog.spaces.filter(space => target.spaceId ? space.spaceId === target.spaceId : selectedSpaceIds.has(space.spaceId)),
     zones: catalog.zones.filter(zone => selectedZoneIds.has(zone.zoneId)),
@@ -414,8 +416,11 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   let catalog = spatialCatalog(ports.get(), topics)
   if (request.operation === 'space.bind' || request.operation === 'space.unbind') return await executeBinding(ports, topics, request)
   if ((request.operation === 'space.ls' || request.operation === 'space.inspect') && request.presentation && ports.appearance) {
-    const imageSpaceId = request.operation === 'space.inspect' && !('requestId' in request.target) ? request.target.spaceId : undefined
-    catalog = { ...catalog, appearance: await ports.appearance(catalog, imageSpaceId) }
+    const target = request.target && !('requestId' in request.target) ? request.target : undefined
+    const selected = selectSpatialCatalog(catalog, target ?? {})
+    const imageSpaceId = request.operation === 'space.inspect' ? target?.spaceId : undefined
+    catalog = { ...selected, appearance: await ports.appearance(selected, imageSpaceId, topics),
+      ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation() } : {}) }
   }
   if (request.operation === 'space.ls') return { operation: request.operation, catalog: selectSpatialCatalog(catalog, request.target) }
   if (request.operation === 'space.inspect') {

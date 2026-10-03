@@ -74,11 +74,21 @@ export type AgentMuxProjectGroupFact = {
 export type AgentMuxSpaceAppearance = {
   spaceId: string
   glyph?: string
+  preset?: string
+  expression?: string
+  activities?: { agentSessionId: string; runId: string; expression: string }[]
   parts?: Record<string, string>
   image?: { dataUrl: string | null; revision?: string }
   issue?: string
 }
+export type AgentMuxAgentPresentation = {
+  agentSessionId: string; name: string; project: string; detail: string
+  group: string; state: string; providerId: string
+  recap: { text: string; source: string } | null
+  avatar?: { tint?: string; badge?: string }
+}
 export type AgentMuxSpaceCatalog = {
+  agentPresentation?: AgentMuxAgentPresentation[]
   appearance?: AgentMuxSpaceAppearance[]
   projectGroups?: AgentMuxProjectGroupFact[]
   spaces: AgentMuxSpaceFact[]

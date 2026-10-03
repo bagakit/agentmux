@@ -49,7 +49,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [showSession, setShowSession] = useState(false)
   const [objectIdentity, setObjectIdentity] = useState<MobileObjectIdentity | null>(null)
   const sessionTitle = objectIdentity?.name ?? null
-  const [sheet, setSheet] = useState<'connection' | 'attachments' | 'settings' | null>(null)
+  const [sheet, setSheet] = useState<'connection' | 'attachments' | 'settings' | 'identity' | null>(null)
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
   const [attachment, setAttachment] = useState<LocalAttachment | null>(null)
   const [choosingFile, setChoosingFile] = useState(false)
@@ -112,9 +112,9 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   return <div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={showSession && objectIdentity?.mote ? 'mote' : 'workspace'}>
     <header className="mobile-header">
       <button className="mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><Settings2 size={20} /><span className="mobile-status-dot" aria-label={label} /></button>
-      {showSession && objectIdentity?.mote ? <div className="mobile-mote-heading"><MobileIdentity identity={objectIdentity} {...(selected ? { session: selected } : {})} client={client} connected={connected} size={58} /><strong>{objectIdentity.name}</strong><small>{connected ? selected?.pendingInteraction ? '需要回应' : ({ working: '正在执行', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认' } as Record<string, string>)[selected?.semanticStatus?.state ?? ''] ?? '状态未确认' : label}</small></div>
+      {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => setSheet('identity')}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} /></button>
         : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
-      <span className="mobile-header-spacer" />
+      {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' }))}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button> : <span className="mobile-header-spacer" />}
     </header>
     {workspaceVisible && showSession && <div className="mobile-session-toolbar">
       <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'}</button>
@@ -149,19 +149,23 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     </nav>}
     <Dialog.Root open={sheet !== null} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'attachments' ? '本地附件' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><X size={19} /></Dialog.Close></div>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'identity' ? objectIdentity?.name ?? 'Mote' : sheet === 'attachments' ? '本地附件' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><X size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
-          <nav className="mobile-drawer-navigation" aria-label="侧边导航">{(['mote', 'focus', 'space'] as const).map(value => <button key={value} aria-current={home === value ? 'page' : undefined} onClick={() => { setHome(value); setShowSession(false); setSheet(null) }}>{value === 'mote' ? <MoteMark size={24} /> : value === 'focus' ? <List size={24} /> : <Layers size={24} />}<span>{value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'}</span></button>)}</nav>
+
           <div className="mobile-drawer-settings">
-          <fieldset className="mobile-home-settings"><legend>连接后的默认主页</legend>
-            {(['mote', 'focus', 'space'] as const).map(value => <label key={value}><span><strong>{value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'}</strong><small>{value === 'mote' ? '协调与长期讨论' : value === 'focus' ? '执行状态与待处理事项' : '工作空间与已有 Agent'}</small></span><input type="radio" name="mobile-default-home" value={value} aria-label={value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'} checked={defaultHome === value} onChange={() => {
-              try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
-              catch { setHomeIssue('默认主页未保存。当前会话和草稿保留，请稍后重试。') }
-            }} /></label>)}
-          </fieldset>
+          {showSession && <button className="mobile-menu-row" onClick={() => { setShowSession(false); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</span></button>}
+          <label className="mobile-home-select">默认主页<select aria-label="连接后的默认主页" value={defaultHome} onChange={event => {
+            const value = event.target.value as MobileHome
+            try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
+            catch { setHomeIssue('默认主页未保存；原设置和草稿保留。') }
+          }}><option value="mote">Mote</option><option value="focus">Focus</option><option value="space">Space</option></select></label>
           {homeIssue && <p className="mobile-spatial-notice" role="status">{homeIssue}</p>}
           <button className="mobile-menu-row" onClick={() => setSheet('connection')}><Wifi size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ChevronRight size={16} /></button></div>
+        </> : sheet === 'identity' ? <>
+          <Dialog.Description id="mobile-sheet-description">当前 Mote</Dialog.Description>
+          <button className="mobile-menu-row" onClick={() => { setShowSession(false); setSheet(null) }}><ArrowLeft size={18} /><span>返回 Mote</span></button>
+          <button className="mobile-menu-row" onClick={() => { setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })); setSheet(null) }}><SquareTerminal size={18} /><span>{workface.panel === 'terminal' ? '查看对话' : '查看终端'}</span></button>
         </> : sheet === 'attachments' ? <>
           <Dialog.Description id="mobile-sheet-description">系统已选中附件，文件仍在这台设备上。</Dialog.Description>
           {attachment && <div className="mobile-selected-file"><File size={22} /><div><strong>{attachment.name}</strong><small>{attachment.mimeType} · {(attachment.size / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB</small></div><Check size={17} /></div>}

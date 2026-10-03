@@ -7,6 +7,11 @@ import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-w
 import { button, click, deferred, editor, evidence, fixture, history, mount, mounted, paste, session } from './conversation-fixture'
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
+async function refreshOriginal(element: HTMLElement) {
+  const action = [...element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.getAttribute('aria-label') === '刷新原对话')
+  if (!action) await click(button(element, 'Show the message tool row'))
+  await click(button(element, '刷新原对话'))
+}
 const STORAGE = 'agentmux-mobile-workface-v1'
 beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 function props(f: ReturnType<typeof fixture>): MobileConversationSurfaceProps {
@@ -18,16 +23,15 @@ afterEach(async () => {
   vi.unstubAllGlobals()
 })
 describe('mounted mobile consumer of the original hosted Session and shared UI', () => {
-  it('preserves an editable draft and continuation reference without an authorized client', async () => {
+  it('preserves an editable draft and references without an authorized client', async () => {
     const f = fixture(), attach = vi.fn(), options = props(f)
     const view = await mount(<MobileConversationSurface {...options} onAttach={attach} />)
-    await paste(view.element, '待完成的草稿')
-    await click(button(view.element, 'Continue from here'))
+    await paste(view.element, '待完成的草稿\n原生输入')
     expect(editor(view.element).textContent).toContain('待完成的草稿')
     expect(editor(view.element).textContent).toContain('原生输入')
     await view.render(<MobileConversationSurface {...options} client={null}
       connection={{ state: 'unavailable', message: '尚未授权' }} onAttach={attach} />)
-    expect(view.element.textContent).toContain('当前不能发送；草稿与引用保留')
+    expect(view.element.textContent).toContain('当前不能发送；草稿与阅读保留')
     expect(editor(view.element).textContent).toContain('待完成的草稿')
     expect(editor(view.element).textContent).toContain('原生输入')
     expect(button(view.element, 'Send').disabled).toBe(true)
@@ -52,7 +56,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
       platform={createBrowserPlatform({ clipboard: { writeText: copy } })} />)
     expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
       .toEqual(['native-input', 'native-answer'])
-    expect(view.element.textContent).toContain('peer')
+    expect(view.element.textContent).toContain('来自同事')
     expect(view.element.textContent).toContain('来自本人')
     expect(view.element.textContent).toContain('未记录作者')
     await click(button(view.element, '文档'))
@@ -98,16 +102,16 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
       { id: 'prompt:other-operation', agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 2, updatedAt: 2, title: 'Input', content: input.prompt, authorHuman: true }
     ] })
-    await click(button(view.element, '刷新'))
+    await refreshOriginal(view.element)
     expect(editor(view.element).textContent).toContain('保留引用')
     expect(button(view.element, 'Send').disabled).toBe(true)
     f.setTimeline({ agentSessionId: 'session-original', revision: 3, items: [
       { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'native-hook', createdAt: 3, updatedAt: 3, title: 'Input', content: input.prompt, authorHuman: true }
     ] })
-    await click(button(view.element, '刷新'))
+    await refreshOriginal(view.element)
     expect(editor(view.element).textContent).toBe('')
     expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].draft).toBe('')
-    expect(view.element.textContent).toContain('Core 已确认输入')
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('confirmed')
     expect(f.submit).toHaveBeenCalledOnce()
   })
 
@@ -188,7 +192,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     delete settled.pendingInteraction
     f.sessions.set(value.agentSessionId, settled)
     await act(async () => f.emit({ type: 'agent-session', session: settled }))
-    await click(button(view.element, '刷新'))
+    await refreshOriginal(view.element)
     expect(button(view.element, 'Send').disabled).toBe(true)
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledOnce()
@@ -249,7 +253,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
   it('retains reading when a history probe fails and accepts healthy Session input without gating on that probe', async () => {
     const f = fixture(), view = await mount(<MobileConversationSurface {...props(f)} />)
     f.readHistory.mockRejectedValueOnce(new Error('native transcript temporarily unavailable'))
-    await click(button(view.element, '刷新'))
+    await refreshOriginal(view.element)
     expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
       .toEqual(['native-input', 'native-answer'])
     expect(view.element.textContent).toContain('native transcript temporarily unavailable')
@@ -257,7 +261,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     await click(button(view.element, 'Send'))
     expect(f.submit).toHaveBeenCalledOnce()
     f.readHistory.mockResolvedValueOnce({ ...history(), agentSessionId: 'unexpected', items: [{ id: 'wrong', kind: 'assistant-message', contentParts: [{ kind: 'text', text: '错误会话历史' }] }] })
-    await click(button(view.element, '刷新'))
+    await refreshOriginal(view.element)
     expect(view.element.textContent).not.toContain('错误会话历史')
     expect([...view.element.querySelectorAll('[data-native-record-id]')].map(value => value.getAttribute('data-native-record-id')))
       .toEqual(['native-input', 'native-answer'])
@@ -293,8 +297,8 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     f.setTimeline({ agentSessionId: 'session-original', revision: 2, items: [
       { id: `prompt:${input.operationId}`, agentSessionId: 'session-original', kind: 'user_message', status: 'complete', source: 'user', createdAt: 2, updatedAt: 2, title: 'Prompt', content: input.prompt, authorHuman: true }
     ] })
-    await click(button(restored.element, '刷新'))
-    expect(restored.element.textContent).toContain('Core 已确认输入')
+    await refreshOriginal(restored.element)
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts[0][1].phase).toBe('confirmed')
     expect(editor(restored.element).textContent).toContain('冷启后的补充')
     expect(button(restored.element, 'Send').disabled).toBe(false)
     expect(f.submit).toHaveBeenCalledOnce()
@@ -316,7 +320,7 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
     expect(restored.element.querySelector('[data-request-id="request-original"] button')).toBeNull()
     expect(f.respond).toHaveBeenCalledOnce()
-    await click(button(restored.element, '刷新'))
+    await refreshOriginal(restored.element)
     expect(f.respond).toHaveBeenCalledOnce()
     await act(async () => receipt.resolve())
     expect(restored.element.textContent).toContain('重启后的原请求答复回执未知')
