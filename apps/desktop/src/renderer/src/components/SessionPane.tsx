@@ -33,6 +33,7 @@ import { unobservedRecoveryReference, rereadUnobservedSession, type RecoverySour
 import { errorIdentity, presentError } from '@agentmux/client-ui/error-presentation'
 import { AgentLifecycleFeedback } from './AgentLifecycleFeedback'
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard'
+import { replyConversationQuestion } from '../lib/conversation-question'
 import { ActivityView } from './ActivityView'
 import { OpenDestinationPopover, type OpenDestinationRequest } from './OpenDestinationBar'
 import { TerminalView } from './TerminalView'
@@ -887,7 +888,8 @@ export function SessionPane({
     ...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {}),
     readPastedImage, openHttpLink: onProseLinkClick,
     ...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {}), describeSpeaker,
-    moteConversation: moteOwner !== null, renderMessageActions
+    moteConversation: moteOwner !== null, renderMessageActions,
+    ...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input) } : {})
   }
   // Covering/hiding a location freezes that location's already-presented elements.
   if (session.kind === 'agent' && visible && viewMode !== 'terminal' && !historyOpen && !pendingAgentRestore) {
@@ -984,6 +986,7 @@ export function SessionPane({
             openWorkspaceFile={openWorkspaceFile}
             openHttpLink={onProseLinkClick}
             describeSpeaker={describeSpeaker}
+            {...(hasAgentComposer ? { onReplyQuestion: input => replyConversationQuestion(session.control, input) } : {})}
             expandedTraces={historyDisclosures}
             {...(hasAgentComposer ? { onSelectAnnotation: selectAnnotation } : {})}
             onToggleTrace={(traceId, open) => {

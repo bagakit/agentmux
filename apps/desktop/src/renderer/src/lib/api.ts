@@ -985,6 +985,7 @@ const mockApi: AgentMuxDesktopApi = {
     submitPrompt: async (control, prompt) => {
       await mockApi.sessions.write(control, `${prompt.trim()}\r`, 'user')
     },
+    replyQuestion: async () => { throw new Error('Native question replies require the original Desktop Core.') },
     submitMessage: async () => { throw new Error('Authenticated Agent messaging requires the Desktop Runtime.') },
     respondInteraction: async (control, response) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)

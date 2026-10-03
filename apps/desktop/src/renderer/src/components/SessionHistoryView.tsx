@@ -7,7 +7,8 @@ import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationNativeThread, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import { NativeProcessObservation } from './NativeProcessObservation'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { createSpeakerResolver, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
@@ -82,9 +83,10 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 /** Volatile reading window over Core-owned native records. This never controls the live Run. */
 export function SessionHistoryView({
   control, readingKey, label, onClose, visible, workspaceRoot, openWorkspaceFile, openHttpLink, returnLabel = 'Terminal', serviceNotice, primaryAction, describeSpeaker,
-  expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation, renderMessageActions
+  expandedTraces: expandedTracesProp, onToggleTrace: onToggleTraceProp, onSelectAnnotation, renderMessageActions, onReplyQuestion
 }: {
   control: SessionHistoryReference
+  onReplyQuestion?: ConversationQuestionReply
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
   /** A live caller fences its reading window when its retained Run changes. Retired readers have no Run. */
   readingKey?: string
@@ -374,7 +376,8 @@ export function SessionHistoryView({
           {reading.loading ? <><LoaderCircle size={12} className="spin" /> Reading history…</> : reading.source && reading.nextCursor === null ? 'Beginning of the available native history' : null}
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
-        {page ? <ConversationNativeThread page={page} sessionId={control.agentSessionId} executionHostId={control.hostId}
+        {page ? <ConversationNativeThread renderQuestionNotice={renderConversationQuestionNotice}
+          {...(onReplyQuestion ? { onReplyQuestion } : {})} page={page} sessionId={control.agentSessionId} executionHostId={control.hostId}
           {...(renderMessageActions ? { renderMessageActions } : {})}
           describeSpeaker={resolveSpeaker} showSource={false} messageIdForRecord={rawMessageId}
           workspaceRoot={workspaceRoot} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink}

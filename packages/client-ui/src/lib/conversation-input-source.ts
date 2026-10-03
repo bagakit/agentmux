@@ -3,6 +3,7 @@ import type { AgentMessageChannel, AgentSessionUserMessageSource } from '@agentm
 const channelLabels: Readonly<Record<AgentMessageChannel, string>> = {
   terminal: 'Terminal',
   'message-tool': 'Message Tool',
+  'question-reply': 'Question reply',
   cli: 'CLI',
   api: 'API',
   'agent-message': 'Agent message',

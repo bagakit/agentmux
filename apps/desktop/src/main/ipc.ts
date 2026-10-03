@@ -978,6 +978,12 @@ export async function registerIpc(args: {
     pauseUserProgress(session, 'Paused for your message.')
     await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
   })
+  handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
+    input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
+    assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+    pauseUserProgress(session, 'Paused for your question reply.')
+    return await args.runtime.replyQuestion(session, input, config)
+  })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => {
     await args.runtime.submitMessage(session, message)
     pauseUserProgress(session, 'Paused for your message.')

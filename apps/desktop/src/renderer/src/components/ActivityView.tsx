@@ -35,7 +35,8 @@ import { conversationRulerRecords, conversationRulerWindow, type RulerRecord, ty
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationNativeThread, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
@@ -375,6 +376,7 @@ export function ActivityView({
   onSelectAnnotation,
   describeSpeaker,
   moteConversation = false,
+  onReplyQuestion,
   renderMessageActions
 }: {
   sessionId: string
@@ -407,6 +409,7 @@ export function ActivityView({
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
+  onReplyQuestion?: ConversationQuestionReply
 }) {
   const { unifiedItems, segments } = useMemo(() => {
     const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
@@ -815,6 +818,8 @@ export function ActivityView({
       </div>
       {nativeHistoryPage ? <ConversationNativeThread
         page={nativeHistoryPage}
+        renderQuestionNotice={renderConversationQuestionNotice}
+        {...(onReplyQuestion ? { onReplyQuestion } : {})}
         {...(renderMessageActions ? { renderMessageActions } : {})}
         renderProcess={(props) => <NativeProcessObservation {...props} />}
         sessionId={sessionId}
