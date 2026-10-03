@@ -57,8 +57,8 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   const [draft, setDraft] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const renameRef = useRef<HTMLInputElement>(null)
-  const expectedNameRevision = useRef(0), savingName = useRef(false), editGeneration = useRef(0)
-  useEffect(() => () => { ++editGeneration.current }, [tab?.id])
+  const expectedNameRevision = useRef({ revision: 0 }), savingName = useRef(false), editGeneration = useRef(0)
+  useEffect(() => () => { ++editGeneration.current; expectedNameRevision.current = { revision: 0 } }, [tab?.id])
   const identityRef = useRef<HTMLButtonElement>(null)
   const menuOriginRef = useRef<HTMLButtonElement | null>(null)
   const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
@@ -82,8 +82,13 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     const value = draft.trim() || null
     if (!tab || savingName.current) return
     savingName.current = true
-    const generation = editGeneration.current
-    try { if (await renameTab(tab.id, value, expectedNameRevision.current) && generation === editGeneration.current) { ++editGeneration.current; setDraft(null) } }
+    const generation = editGeneration.current, baseline = expectedNameRevision.current
+    try {
+      if (await renameTab(tab.id, value, baseline.revision) && expectedNameRevision.current === baseline) {
+        ++baseline.revision
+        if (generation === editGeneration.current) { ++editGeneration.current; setDraft(null) }
+      }
+    }
     finally { savingName.current = false }
   }
   function currentReference(): WorkbenchProjectionSelection | null {
@@ -135,7 +140,7 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     }
   }
   const actions = [
-    ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: Pencil, run: () => { ++editGeneration.current; expectedNameRevision.current = currentDisplayNameRevision('tab', tab.id); setDraft(name) } }] : []),
+    ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: Pencil, run: () => { ++editGeneration.current; expectedNameRevision.current = { revision: currentDisplayNameRevision('tab', tab.id) }; setDraft(name) } }] : []),
     ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: Square, run: onToggleRegion }] : []),
     ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: Inbox, run: onReview }] : []),
     ...(selected?.kind === 'agent' ? [{ key: 'stop', label: 'Stop Agent', icon: Square, run: () => stop.requestStop(selectedId, selected.name, menuOriginRef.current) }] : []),
