@@ -54,6 +54,37 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   }
 
   useLayoutEffect(() => {
+    const list = listRef.current
+    if (!list || suppressed || dismissed) return
+    const updateScrollPivot = () => {
+      list.style.setProperty('--queue-pivot-y', list.scrollTop + list.offsetHeight + 'px')
+    }
+    const updateLayoutPivot = () => {
+      const offsets = Array.from(list.children, card => ({
+        card: card as HTMLElement, x: (card as HTMLElement).offsetLeft, y: (card as HTMLElement).offsetTop
+      }))
+      list.style.setProperty('--queue-pivot-x', list.offsetWidth + 'px')
+      updateScrollPivot()
+      for (const { card, x, y } of offsets) {
+        card.style.setProperty('--queue-offset-x', x + 'px')
+        card.style.setProperty('--queue-offset-y', y + 'px')
+      }
+    }
+    updateLayoutPivot()
+    // Native scrolling changes only the shared pivot, not React or queue state.
+    list.addEventListener('scroll', updateScrollPivot, { passive: true })
+    const resize = new ResizeObserver(updateLayoutPivot)
+    resize.observe(list)
+    return () => { list.removeEventListener('scroll', updateScrollPivot); resize.disconnect() }
+  }, [queued, currentIndex, dismissed, suppressed])
+
+  useLayoutEffect(() => {
+    if (suppressed || dismissed || !selected) return
+    const card = Array.from(listRef.current?.children ?? []).find(node => (node as HTMLElement).dataset.operationId === selected.id)
+    card?.scrollIntoView({ block: 'nearest' })
+  }, [selected?.id, dismissed, suppressed])
+
+  useLayoutEffect(() => {
     const anchor = anchorRef.current, floating = surfaceRef.current
     if (suppressed || !queued.length || !anchor?.isConnected || !floating) return
     const composer = anchor.closest<HTMLElement>('.composer')
@@ -63,23 +94,22 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     let disposed = false, revision = 0
     const update = async () => {
       const request = ++revision
-      if (!anchor.isConnected || anchor.closest('[hidden], [inert]')) return
-      const tool = composer.getBoundingClientRect(), mailbox = anchor.getBoundingClientRect()
-      const terminal = terminalContainer?.querySelector<HTMLElement>('.xterm')
-      const screen = terminal?.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
+      if (!composer.isConnected || composer.closest('[hidden], [inert]')) return
+      const tool = composer.getBoundingClientRect()
+      const terminal = Array.from(composer.closest('.agent-surface')?.querySelectorAll<HTMLElement>('.terminal-view__xterm .xterm') ?? [])
+        .find(node => !node.closest('[hidden], [inert]') && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0)
       const helper = terminal?.querySelector<HTMLElement>('.xterm-helper-textarea')
       const rowHeight = helper ? Number.parseFloat(getComputedStyle(helper).lineHeight) : 0
-      // xterm projects its actual cell height onto the helper. Protect the live
-      // last row as content; a cached hidden terminal must not move this surface.
-      const terminalDock = screen && screen.height > 0 && rowHeight > 0 && !terminal?.closest('[hidden], [inert]')
-        ? screen.bottom - rowHeight : tool.top
-      const anchorY = Math.min(tool.top, terminalDock)
-      const reference = { contextElement: anchor, getBoundingClientRect: () => new DOMRect(mailbox.right, anchorY, 0, 0) }
+      // Keep the native input row and up to one row of grid-fit slack clear.
+      // Only the tool owns the absolute anchor; stale inner height cannot move it.
+      const clearance = Number.isFinite(rowHeight) && rowHeight > 0 ? rowHeight * 2 : 0
+      const reference = { contextElement: composer, getBoundingClientRect: () => new DOMRect(tool.right, tool.top, 0, 0) }
+      const padding = { top: 8, left: 8, right: 0, bottom: 0 }
       const position = await computePosition(reference, floating, {
-        strategy: 'fixed', placement: 'top-end', middleware: [offset(8), shift({ boundary: region, padding: 8 }),
-          size({ boundary: region, padding: 8, apply({ availableWidth, availableHeight }) {
+        strategy: 'fixed', placement: 'top-end', middleware: [offset(8 + clearance), shift({ boundary: region, padding }),
+          size({ boundary: region, padding, apply({ availableWidth, availableHeight }) {
             if (disposed || request !== revision) return
-            floating.style.maxWidth = Math.max(0, Math.min(360, availableWidth, mailbox.right - region.getBoundingClientRect().left - 8)) + 'px'
+            floating.style.maxWidth = Math.max(0, Math.min(360, availableWidth, tool.right - region.getBoundingClientRect().left - 8)) + 'px'
             floating.style.maxHeight = Math.max(0, Math.min(320, availableHeight)) + 'px'
           } })]
       })
@@ -87,7 +117,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       floating.style.left = position.x + 'px'; floating.style.top = position.y + 'px'
       floating.dataset.positioned = 'true'
     }
-    const stop = autoUpdate(anchor, floating, () => { void update() }, { ancestorScroll: false })
+    const stop = autoUpdate(composer, floating, () => { void update() })
     const resize = new ResizeObserver(() => { void update() }); resize.observe(composer); resize.observe(region); if (terminalContainer) resize.observe(terminalContainer)
     return () => { disposed = true; stop(); resize.disconnect() }
   }, [anchorRef, queued.length, dismissed, suppressed])

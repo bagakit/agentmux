@@ -321,14 +321,16 @@
 .composer-pending__reading p { max-width: 42ch; margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.45; }
 .composer-pending__reading .composer-pending__reading-state { display: flex; flex-wrap: wrap; gap: 2px 6px; max-width: none; margin-top: 6px; color: var(--text-3); font-size: var(--fs-micro); }
 .composer-pending__reading-state strong { color: var(--text-2); font-weight: 500; }
-.composer-pending__cards { display: grid; max-height: 160px; min-height: 0; margin: 0; padding: 4px 4px 2px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
-.composer-pending__card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 5px; box-sizing: border-box; height: 28px; min-height: 28px; width: calc(100% - var(--queue-depth) * 8px); margin: -5px 0 0 auto; padding: 1px 3px 1px 7px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-2); box-shadow: 0 4px 2px rgb(0 0 0 / 15%), 0 7px 14px rgb(0 0 0 / 14%); transform: perspective(520px) rotateX(calc(6deg + var(--queue-depth) * 4deg)) rotateY(calc(var(--queue-depth) * -3deg)) translateZ(calc(var(--queue-depth) * -8px)); transform-origin: right bottom; transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
+.composer-pending__cards { position: relative; display: grid; max-height: 160px; min-height: 0; margin: 0; padding: 4px 4px 8px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
+.composer-pending__card { position: relative; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; column-gap: 5px; box-sizing: border-box; height: 28px; min-height: 28px; width: calc(100% - var(--queue-depth) * 8px); margin: -8px 0 0 auto; padding: 1px 3px 1px 7px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-2); box-shadow: 0 4px 2px rgb(0 0 0 / 15%), 0 7px 14px rgb(0 0 0 / 14%); transform: perspective(600px) rotateX(calc(4deg + var(--queue-depth) * 2deg)) rotateY(calc(var(--queue-depth) * -.35deg)) translateZ(calc(var(--queue-depth) * -8px)); transform-origin: calc(var(--queue-pivot-x, 100%) - var(--queue-offset-x, 0px)) calc(var(--queue-pivot-y, 100%) - var(--queue-offset-y, 0px)); transition: transform 120ms ease, border-color 120ms ease, box-shadow 120ms ease; }
 /* Native view progress moves each original card through depth without owning scroll. */
 .composer-pending__card { animation: composer-pending-depth linear both; animation-duration: auto; animation-timeline: view(block); animation-range: entry 0% exit 100%; }
 @keyframes composer-pending-depth {
-  0% { transform: perspective(520px) rotateX(20deg) rotateY(-4deg) translateZ(-26px); }
+  0% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(-26px); }
+  20% { transform: perspective(520px) rotateX(20deg) rotateY(-4deg) translateZ(-12px); }
   45%, 55% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(6px); }
-  100% { transform: perspective(520px) rotateX(-20deg) rotateY(4deg) translateZ(-26px); }
+  80% { transform: perspective(520px) rotateX(-20deg) rotateY(4deg) translateZ(-12px); }
+  100% { transform: perspective(520px) rotateX(0deg) rotateY(0deg) translateZ(-26px); }
 }
 .composer-pending__card:first-child { margin-top: 0; }
 .composer-pending__card[data-selected='true'] { animation-name: none; z-index: 1; transform: perspective(520px) rotateX(0deg) translateZ(8px); border-color: var(--line); box-shadow: 0 7px 18px rgb(0 0 0 / 22%); }

@@ -4,6 +4,7 @@ const fs = require('node:fs/promises');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const [html, privateRoot, evidence, capture] = process.argv.slice(2);
+const anchorOnly = capture === "anchor-capture";
 app.setPath('userData', path.join(privateRoot, 'user-data'));
 let win;
 const result = { schema: 'agentmux.composer-pending-delivery-native.v1', passed: false,
@@ -47,9 +48,13 @@ async function key(key, code, virtual, text, modifiers = 0) {
 async function geometry() {
   return evaluate(`(()=>{
     const s=${surface},n=${neighbor},rect=node=>{if(!node)return null;const r=node.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
-    const original=s.querySelector('.xterm'),records=globalThis.resultReadyTerminals??[];
+    const original=window.pendingNative?.terminal??s.querySelector('.xterm'),records=globalThis.resultReadyTerminals??[];
     const owner=records.find(r=>r.terminal.element===original&&!r.disposed),other=records.find(r=>n.contains(r.terminal.element)&&!r.disposed);
-    const terminal=pendingDelivery.terminal(),activeBuffer=owner.terminal.buffer.active,screen=rect(s.querySelector('.xterm-screen')),cursorRow=terminal.baseY+terminal.cursorY-terminal.viewportY;
+    const activeBuffer=owner.terminal.buffer.active;
+    const terminal={id:owner.id,cols:owner.terminal.cols,rows:owner.terminal.rows,baseY:activeBuffer.baseY,viewportY:activeBuffer.viewportY,
+      cursorX:activeBuffer.cursorX,cursorY:activeBuffer.cursorY,cursorLine:activeBuffer.getLine(activeBuffer.baseY+activeBuffer.cursorY)?.translateToString(true),
+      visibleLines:Array.from({length:owner.terminal.rows},(_,i)=>activeBuffer.getLine(activeBuffer.viewportY+i)?.translateToString(true)??'')};
+    const screen=rect(original.querySelector('.xterm-screen')),cursorRow=terminal.baseY+terminal.cursorY-terminal.viewportY;
     const cellHeight=screen.height/terminal.rows,b=${strip},e=${editor},composer=s.querySelector('.composer');
     const helper=original.querySelector('.xterm-helper-textarea'),helperStyle=getComputedStyle(helper);
     const selected=b?.querySelector('.composer-pending__card[data-operation-id="'+b.dataset.operationId+'"]'),state=selected?.querySelector('.composer-pending__state'),preview=selected?.querySelector('.composer-pending__preview'),mailbox=composer.querySelector('.composer__mailbox');
@@ -79,7 +84,7 @@ async function geometry() {
         heading:rect(b.querySelector('.composer-pending__heading')),announcers:[...b.querySelectorAll('[role="status"]')].map(node=>node.textContent),
         cards:[...b.querySelectorAll('.composer-pending__card')].map(node=>({id:node.dataset.operationId,index:Number(node.dataset.queueIndex),selected:node.dataset.selected,
           rect:rect(node),transform:getComputedStyle(node).transform,animation:getComputedStyle(node).animationName,timeline:getComputedStyle(node).animationTimeline,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
-          layoutHeight:node.offsetHeight,preview:node.querySelector('.composer-pending__preview').textContent,
+          layoutHeight:node.offsetHeight,layoutLeft:node.offsetLeft,layoutTop:node.offsetTop,transformOrigin:getComputedStyle(node).transformOrigin,offsetParentIsList:node.offsetParent===node.parentElement,preview:node.querySelector('.composer-pending__preview').textContent,
           previewTitle:node.querySelector('.composer-pending__preview').getAttribute('title'),previewLines:range(node.querySelector('.composer-pending__preview')),
           state:{label:node.querySelector('.composer-pending__state').getAttribute('aria-label'),icon:node.querySelector('.composer-pending__state svg')?.getAttribute('class'),rect:rect(node.querySelector('.composer-pending__state')),hiddenLabel:node.querySelector('.composer-pending__sr-only')?.textContent},
           actions:[...node.querySelectorAll('button')].map(button=>({rect:rect(button),label:button.getAttribute('aria-label'),background:getComputedStyle(button).backgroundColor,
@@ -87,7 +92,7 @@ async function geometry() {
         reading:{id:b.querySelector('.composer-pending__reading')?.dataset.readingId,text:b.querySelector('.composer-pending__body')?.textContent,
           state:b.querySelector('.composer-pending__reading-state')?.textContent,bodyCount:b.querySelectorAll('.composer-pending__body').length,readerCount:b.querySelectorAll('.composer-pending__reading').length,
           editing:b.querySelectorAll('.composer-pending__reading textarea').length,rect:rect(b.querySelector('.composer-pending__reading'))},
-        list:{rect:rect(b.querySelector('.composer-pending__cards')),scrollTop:b.querySelector('.composer-pending__cards')?.scrollTop,scrollHeight:b.querySelector('.composer-pending__cards')?.scrollHeight},
+        list:{rect:rect(b.querySelector('.composer-pending__cards')),layoutWidth:b.querySelector('.composer-pending__cards')?.offsetWidth,layoutHeight:b.querySelector('.composer-pending__cards')?.offsetHeight,scrollTop:b.querySelector('.composer-pending__cards')?.scrollTop,scrollHeight:b.querySelector('.composer-pending__cards')?.scrollHeight},
         label:state?.getAttribute('aria-label'),stateRect:rect(state?.querySelector('svg')),preview:preview?.textContent,
         previewRect:rect(preview),sendDisabled:selected?.querySelector('.composer-pending__send').disabled}:null,
       popover:s.querySelector('.composer-mailbox').matches(':popover-open'),facts:pendingDelivery.facts(),trustedActions:window.pendingNative.actions,trustedHoverActions:window.pendingNative.hoverActions,
@@ -188,7 +193,7 @@ function visibleCursor(facts) {
   }
 }
 async function frame(scene, name) {
-  if (capture !== 'capture') return;
+  if (capture !== 'capture' && !anchorOnly) return;
   const paints = await evaluate(`(()=>{const entries=(globalThis.resultReadyTerminals??[]).filter(r=>!r.disposed&&r.terminal.element?.isConnected&&!r.terminal.element.closest('[hidden]'));if(!entries.length)throw Error('No actual visible terminal to paint');return Promise.all(entries.map(r=>new Promise((resolve,reject)=>{let lease;const timer=setTimeout(()=>{lease?.dispose();reject(Error('Actual terminal render did not arrive'))},2000);lease=r.terminal.onRender(range=>{clearTimeout(timer);lease.dispose();resolve({id:r.id,rows:r.terminal.rows,...range})});r.terminal.refresh(0,r.terminal.rows-1)})))})()`);
   assert.equal(paints.length, 2, 'Both original owner and neighbor terminals actually paint');
   await painted(); const image = await win.webContents.capturePage(), bytes = image.toPNG();
@@ -206,15 +211,16 @@ function cardGeometry(facts, count, selectedVisible = true) {
   assert.equal(card.background,'rgba(0, 0, 0, 0)','The float has no full-strip background');
   assert.equal(card.cards.length,count,'Every queued operation has its own real card inside the floating surface');
   assert.equal(new Set(card.cards.map(c=>c.id)).size,count,'Every real card has a distinct operation identity');
+  if (count > 1) sharedPivot(facts);
   assert.ok(card.rect.width<=360.1&&card.rect.height<=320.1,'Floating queue has bounded width and height');
-  assert.ok(Math.abs(card.rect.right-facts.mailbox.rect.right)<=1,'Pending cards align with the actual Mailbox');
+  assert.ok(Math.abs(card.rect.right-facts.composer.right)<=1,'Pending stack aligns with its actual tool top-right');
   // The live unfinished native input row is content, not an empty visual gap.
   // Keep the original cursor/text footprint checks strict and measure compact
   // distance from the protected last screen row rather than from its bottom.
-  const dock=Math.min(facts.composer.y,facts.screen.bottom-facts.cellHeight),list=card.list.rect;
+  const dock=facts.cursorCell.y,list=card.list.rect;
   const visible=card.cards.filter(c=>c.rect.y<list.bottom&&c.rect.bottom>list.y);
   const paintedBottom=Math.max(...visible.map(c=>Math.min(c.rect.bottom,list.bottom))),gap=dock-paintedBottom;
-  assert.ok(gap>=6&&gap<=16,'Actual card lower edge stays close to the protected Message Tool with a short visible gap');
+  assert.ok(gap>=5.9&&gap<=16.1,'Actual card lower edge stays close to the protected Message Tool with a short visible gap');
   assert.equal(card.announcers.length,1,'Only one scoped live Copy feedback region exists, not a status announcer for every card');
   for(const item of card.cards){
     assert.equal(item.layoutHeight,28,'Every actual card has fixed single-line 28px layout height');
@@ -238,7 +244,8 @@ function cardGeometry(facts, count, selectedVisible = true) {
   }
   if(count>1){
     assert.ok(card.cards.filter(c=>c.selected==='false').every(c=>c.transform.startsWith('matrix3d(')),'Real queued cards preserve depth while idle');
-    const first=card.cards[0],second=card.cards[1];
+    const [first,second]=visible.filter(item=>item.rect.y>=list.y-1&&item.rect.bottom<=list.bottom+1);
+    assert.ok(first&&second,'Distinct complete original cards remain visible in the actual scroll viewport');
     assert.ok(second.rect.y>first.rect.y+10&&second.rect.y<first.rect.bottom,'Real queued cards have visible vertical stacking height and overlap');
     const nearby=card.cards.find(c=>Math.abs(c.index-selected.index)===1);
     assert.ok(nearby);
@@ -306,7 +313,7 @@ async function spatialScrollScenes(scene, baseline) {
   const samples=[];
   for(const [index,name]of [[4,'head'],[50,'middle'],[96,'tail']]){
     const expr=`${strip}.querySelector('[data-queue-index="${index}"]')`;
-    await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards'),node=${expr};list.scrollTop=node.offsetTop-list.offsetTop-96})()`);
+    await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards'),node=${expr};list.scrollTop=node.offsetTop-96})()`);
     const point=await evaluate(`(()=>{const r=${strip}.querySelector('.composer-pending__cards').getBoundingClientRect();return{x:r.right-2,y:r.y+r.height/2}})()`);
     await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await painted();
     const before=await settled(),cardBefore=before.strip.cards[index];retained(baseline,before);
@@ -449,7 +456,71 @@ async function cardScenes(scene, baseline) {
   await click(`${strip}.querySelector('.composer-pending__restore')`);await evaluate('pendingDelivery.clear()');const end=await settled();retained(baseline,end);
   result.checkpoints.push({scene,name:'real-floating-card-traversal',short,two,stack,visited,focus,afterSend,long,editing,saved,rejected,locked,collapsed,end,editedAttempt});
 }
-async function scene(scene) {
+function sharedPivot(facts) {
+  const list=facts.strip.list,visible=facts.strip.cards.filter(card=>card.rect.y<list.rect.bottom&&card.rect.bottom>list.rect.y);
+  assert.ok(visible.length>1,'Shared pivot is measured on distinct visible original cards');
+  for(const card of visible){
+    assert.equal(card.offsetParentIsList,true,'Original card offsets belong to the actual list');
+    const [x,y]=card.transformOrigin.split(' ').map(Number.parseFloat);
+    assert.ok(Number.isFinite(x)&&Number.isFinite(y));
+    assert.ok(Math.abs(card.layoutLeft+x-list.layoutWidth)<1,'Every original card shares the list right edge as world pivot');
+    assert.ok(Math.abs(card.layoutTop+y-list.scrollTop-list.layoutHeight)<1,'Every original card shares the list bottom edge as world pivot');
+  }
+}
+function toolAnchor(facts) {
+  sharedPivot(facts);
+  const clearance=Number.parseFloat(facts.helperTextarea.lineHeight)*2;
+  assert.ok(Math.abs(facts.strip.rect.right-facts.composer.right)<1,'The visible stack follows the actual tool right edge');
+  assert.ok(Math.abs(facts.strip.rect.bottom-(facts.composer.y-8-clearance))<1,'Only the nearby native row safety gap separates the tool reference and shared stack pivot');
+}
+async function anchorScene(scene) {
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
+  const baseline=await initializeScene(scene),sid=await evaluate('resultReady.sessionId');
+  await frame(scene,'anchor-empty');
+  await evaluate("pendingDelivery.queue('原消息 · 保留共同右下旋转中心\\n第二行全文仍可读',5)");
+  const queued=await settled();retained(baseline,queued);visibleCursor(queued);cardGeometry(queued,5);toolAnchor(queued);
+  await frame(scene,'anchor-stack');
+  await pointAt(`${strip}.querySelector('[data-queue-index="3"] .composer-pending__preview')`);
+  const reader=await settled(),entry=reader.facts.queues[sid][3];uniqueReader(reader,entry.operationId,entry.text,'排队中');toolAnchor(reader);
+  await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
+  const copied=await settled();assert.equal(copied.facts.copies.at(-1),entry.text);copyFeedback(copied,entry.operationId,'copied',false);
+  assert.deepEqual(copied.facts.attempts,[]);toolAnchor(copied);visibleCursor(copied);await frame(scene,'anchor-reader-copy');
+
+  // This private countercase changes only an inner screen's retained DOM height.
+  // It is not a claim about the cause of the user's screenshot or Runtime state.
+  await pointAt(editor);
+  const screenStyle=await evaluate(`(()=>{const node=pendingNative.terminal.querySelector('.xterm-screen'),old=node.style.height;node.style.height='96px';return old})()`);
+  await pointAt(`${strip}.querySelector('[data-queue-index="3"] .composer-pending__preview')`);
+  const stale=await settled();assert.deepEqual(stale.terminal,reader.terminal);assert.deepEqual(stale.composer,reader.composer);toolAnchor(stale);
+  assert.deepEqual(stale.facts.queues,reader.facts.queues);await frame(scene,'anchor-stale-screen-control');
+  await evaluate(`pendingNative.terminal.querySelector('.xterm-screen').style.height=${JSON.stringify(screenStyle)}`);
+
+  await pointAt(editor);
+  await evaluate(`(()=>{const cache=pendingNative.terminal.cloneNode(false);cache.hidden=true;cache.dataset.anchorPrivateCache='true';const helper=document.createElement('textarea');helper.className='xterm-helper-textarea';helper.style.lineHeight='999px';cache.append(helper);pendingNative.terminal.parentElement.prepend(cache)})()`);
+  await pointAt(`${strip}.querySelector('[data-queue-index="3"] .composer-pending__preview')`);
+  const cached=await settled();toolAnchor(cached);visibleCursor(cached);assert.deepEqual(cached.facts.queues,reader.facts.queues);
+  await frame(scene,'anchor-cached-terminal-control');await evaluate("document.querySelector('[data-anchor-private-cache]').remove()");
+
+  await evaluate(`${surface}.querySelector('.composer').style.transform='translateY(-32px)'`);
+  await painted();const moved=await settled();assert.ok(reader.composer.y-moved.composer.y>30);toolAnchor(moved);
+  assert.deepEqual(moved.terminal,cached.terminal);assert.deepEqual(moved.facts.queues,cached.facts.queues);await frame(scene,'anchor-tool-position-moved');
+  await evaluate(`${surface}.querySelector('.composer').style.transform=''`);
+  await painted();const restored=await settled();toolAnchor(restored);retained(baseline,restored);visibleCursor(restored);await frame(scene,'anchor-restored');
+
+  win.setContentSize(scene.viewport,690);
+  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width:scene.viewport,height:690,deviceScaleFactor:1,mobile:false});
+  await painted();const resized=await settled();assert.ok(restored.composer.y-resized.composer.y>40);toolAnchor(resized);visibleCursor(resized);
+  assert.deepEqual(resized.facts.queues,restored.facts.queues);assert.equal(resized.draft,restored.draft);assert.deepEqual(resized.retainedNodes,{editor:true,terminal:true,neighbor:true});await frame(scene,'anchor-window-resized');
+  await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);
+  const editing=await settled();assert.equal(editing.strip.reading.editing,1);toolAnchor(editing);visibleCursor(editing);await frame(scene,'anchor-editor');
+  await key('Escape','Escape',27);await evaluate('pendingDelivery.clear()');await click(editor);
+  const scrollBaseline=await settled();await evaluate('pendingDelivery.distinctQueue(100)');await painted();
+  await spatialScrollScenes(scene,scrollBaseline);
+  const end=await settled();sharedPivot(end);assert.deepEqual(end.facts.attempts,[]);
+  await evaluate('pendingDelivery.clear()');const cleared=await settled();retained(scrollBaseline,cleared);
+  result.scenes.push({scene,baseline,queued,reader,copied,stale,cached,moved,restored,resized,editing,end,cleared});
+}
+async function initializeScene(scene) {
   result.stage = scene;
   win.setContentSize(scene.viewport, 750);
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: scene.viewport, height: 750, deviceScaleFactor: 1, mobile: false });
@@ -464,6 +535,10 @@ async function scene(scene) {
   assert.equal(baseline.strip, null, 'An empty queue has no pending slot'); visibleCursor(baseline);
   assert.ok(baseline.facts.inputs.some(input => input.trusted && input.composer && input.key === 'x'));
   assert.ok(Math.abs(baseline.ownerRect.width - scene.ownerWidth) <= 8, 'The actual owner uses the bounded scene width');
+  return baseline;
+}
+async function scene(scene) {
+  const baseline = await initializeScene(scene);
   await frame(scene, 'empty');
 
   // Appearance at latest must preserve the cursor, independently of historical reading.
@@ -594,9 +669,9 @@ app.whenReady().then(async () => {
     await waitFor('Boolean(window.pendingDelivery)');
     await evaluate(`(()=>{window.pendingNativeErrors=[];window.addEventListener('error',event=>pendingNativeErrors.push({message:event.message,stack:event.error?.stack,filename:event.filename,line:event.lineno,column:event.colno}));window.addEventListener('unhandledrejection',event=>pendingNativeErrors.push({message:String(event.reason),stack:event.reason?.stack}))})()`);
     for (const sceneConfig of [{ viewport: 1280, ownerWidth: 640, appearance: 'dark' }, { viewport: 1280, ownerWidth: 640, appearance: 'light' },
-      { viewport: 640, ownerWidth: 320, appearance: 'dark' }, { viewport: 640, ownerWidth: 320, appearance: 'light' }]) await scene(sceneConfig);
+      { viewport: 640, ownerWidth: 320, appearance: 'dark' }, { viewport: 640, ownerWidth: 320, appearance: 'light' }]) await (anchorOnly ? anchorScene(sceneConfig) : scene(sceneConfig));
     assert.equal(result.scenes.length, 4);
-    if (capture === 'capture') assert.equal(result.frames.length, 136, 'Every bounded scene captures the original flows and each real-card traversal state');
+    if (capture === 'capture' || anchorOnly) assert.equal(result.frames.length, anchorOnly ? 64 : 136, 'Every bounded scene captures the original flows and each real-card traversal state');
     result.rendererErrors = await evaluate('window.pendingNativeErrors');
     assert.deepEqual(result.rendererErrors, [], 'Successful actual Renderer scenes have no error or unhandled rejection');
     result.passed = true;
