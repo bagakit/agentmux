@@ -76,7 +76,8 @@ export function WorkspaceTopicsPanel({
   const category = useAppStore(state => state.topicCategories.find(category => category.spaceId === categorySpaceId))
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
-  const topicId = layout ? activeTopicIdFromLayout(layout, tabs) : null
+  const selection = useAppStore(state => state.workbenchSpaceSelection)
+  const topicId = selection?.workspaceId === workspace.id ? selection.topicId : layout ? activeTopicIdFromLayout(layout, tabs) : null
   const sessions = useAppStore((state) => state.sessions)
   const config = useAppStore((state) => state.config)
   // 头像簇要显示的是**显示名**，不是 session.label（那是命名链最低一档）。链的两个高档输入就是这
@@ -252,13 +253,9 @@ export function WorkspaceTopicsPanel({
     }
   }
 
-  async function selectTopicTab(tabId: string): Promise<void> {
+  async function selectTopicTab(nextTopicId: string, tabId: string): Promise<void> {
     try {
-      await useAppStore.getState().selectWorkspace(workspace.id)
-      const state = useAppStore.getState()
-      const group = state.layouts[workspace.id]?.groups.find((group) => group.tabOrder.includes(tabId))
-      if (!group || !state.tabs[tabId]) throw new Error('This Tab is no longer available.')
-      state.activateTab(workspace.id, group.id, tabId)
+      await openScratchTopic(nextTopicId, workspace.id, { tabId })
     } catch (cause) {
       setError(presentError(cause))
     }
@@ -476,7 +473,7 @@ export function WorkspaceTopicsPanel({
                         <TopicPresence
                           cells={openMosaics.get(topic.id)}
                           tabs={topicTabDetails.get(topic.id) ?? []}
-                          onSelectTab={(tabId) => { void selectTopicTab(tabId) }}
+                          onSelectTab={(tabId) => { void selectTopicTab(topic.id, tabId) }}
                           agents={topic.agents
                             .filter((agent) => agent.live !== null && agent.live.processState === 'running')
                             .sort((left, right) => (sessionTabRank.get(left.sessionId) ?? Number.MAX_SAFE_INTEGER) - (sessionTabRank.get(right.sessionId) ?? Number.MAX_SAFE_INTEGER))

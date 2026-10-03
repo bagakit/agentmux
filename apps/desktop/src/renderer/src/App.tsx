@@ -93,6 +93,7 @@ function DesktopApp() {
   const tabs = useAppStore((state) => state.tabs)
   const resourceWorkspaces = useMemo(() => workbenchResourceTabs(tabs), [tabs])
   const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
+  const topicCategories = useAppStore(state => state.topicCategories)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
 
@@ -348,7 +349,10 @@ function DesktopApp() {
     fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
-  const toolsVisible = toolsAvailable && toolsOpen
+  const topicCategoryOverview = workbenchSpaceSelection?.workspaceId === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection.zoneId === null &&
+    topicCategories.some(category => category.spaceId === workbenchSpaceSelection.spaceId)
+  // The Category directory lives in the main page; entering a Topic restores its secondary Chats directory.
+  const toolsVisible = toolsAvailable && toolsOpen && !topicCategoryOverview
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
   const renderedToolDockWidth = Math.min(toolDockMaximumWidth, getRenderedToolDockWidth(toolDockWidth, projectRailOpen))

@@ -379,9 +379,6 @@ const mockApi: AgentMuxDesktopApi = {
   deviceManagement: {
     link: async () => { throw new Error('Connection links require the original Mac Host.') },
     ls: async () => { throw new Error('Device state requires the original Mac Host. This preview cannot read authorization.') },
-    invite: async () => { throw new Error('Device invitations require confirmation on the original Mac.') },
-    approve: async () => { throw new Error('Device approval requires confirmation on the original Mac.') },
-    reject: async () => { throw new Error('Rejecting a device requires confirmation on the original Mac.') },
     revoke: async () => { throw new Error('Revoking a device requires confirmation on the original Mac.') }
   },
   demands: {

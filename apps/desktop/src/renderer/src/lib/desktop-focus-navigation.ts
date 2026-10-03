@@ -111,7 +111,7 @@ function reject(code: string, message: string, candidates?: AgentMuxSpaceSelecto
 }
 
 /** Resolve the durable placement, never execution cwd or the first unrelated Tab/Agent. */
-export function resolveDesktopSpaceSelection(state: DesktopSelectionState, catalog: AgentMuxSpaceCatalog,
+export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Partial<Pick<SpatialWorkbench, 'spaceZoneBindings'>>, catalog: AgentMuxSpaceCatalog,
   target: AgentMuxSpaceSelector): AgentMuxDesktopSpaceSelection {
   const selected = selectSpatialCatalog(catalog, {
     ...(target.spaceId ? { spaceId: target.spaceId } : {}), ...(target.zoneId ? { zoneId: target.zoneId } : {}),
@@ -129,14 +129,18 @@ export function resolveDesktopSpaceSelection(state: DesktopSelectionState, catal
   const workspaceId = target.displayWorkspaceId ?? zone?.workspaceId ?? tab?.workspaceId
   if (!workspaceId) reject('SPACE_RESOURCE_UNKNOWN', 'The original entity context is not currently confirmed.')
   const layout = state.layouts[workspaceId]
+  const origin = zoneId ? state.spaceZoneBindings?.[zoneId] : undefined
+  const base = { spaceId, zoneId, workspaceId, topicId: selected.spaces.find(space => space.spaceId === spaceId)?.topicId
+    ?? (origin?.workspaceId === zone?.workspaceId ? origin?.topicId : undefined) ?? null }
   let selectedTab = tab
   if (!selectedTab) {
     const group = layout?.groups.find(group => group.id === (target.groupId ?? layout.activeGroupId))
     selectedTab = selected.tabs.find(tab => tab.tabId === group?.activeTabId)
     if (!selectedTab && selected.tabs.length === 1) selectedTab = selected.tabs[0]
+    // An explicit Zone can be opened without choosing one of its child Tabs.
+    if (!selectedTab && target.zoneId && !target.tabId && !target.regionId && !target.groupId) return { ...base, tabId: null, groupId: null, regionId: null }
     if (!selectedTab && selected.tabs.length > 1) reject('SPACE_TAB_REQUIRED', 'Choose one exact Tab.', selected.tabs.map(tab => ({ tabId: tab.tabId })))
   }
-  const base = { spaceId, zoneId, workspaceId, topicId: selected.spaces.find(space => space.spaceId === spaceId)?.topicId ?? null }
   if (!selectedTab) return { ...base, tabId: null, groupId: null, regionId: null }
   const regionId = target.regionId ?? state.tabs[selectedTab.tabId]?.layout.activeRegionId
   const candidates = selected.locations.filter(location => location.tabId === selectedTab!.tabId && location.regionId === regionId &&
