@@ -153,7 +153,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
       if (!groups || rows.clientWidth <= 0) return
       const style = getComputedStyle(groups), cards = groups.querySelector<HTMLElement>('.focus-context-group__cards')
       const gap = parseFloat(style.columnGap) || 0
-      const next = { width: rows.clientWidth, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
+      const next = { width: groups.getBoundingClientRect().width, padding: (parseFloat(style.paddingLeft) || 0) + (parseFloat(style.paddingRight) || 0), gap, cardGap: cards ? parseFloat(getComputedStyle(cards).columnGap) || 0 : gap }
       setLaneMetrics(current => current.width === next.width && current.padding === next.padding && current.gap === next.gap && current.cardGap === next.cardGap ? current : next)
     }
     measure()
