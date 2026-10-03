@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from 'vitest'
+import { act } from 'react'
+import { RemoteCoreUpgradeNotices } from '../src/renderer/src/components/RemoteCoreUpgradeNotices'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { useAppStore } from '../src/renderer/src/store'
@@ -38,4 +40,27 @@ it('keeps an unknown handshake distinct from a version update and retains its or
   expect(notice.querySelector('.service-window__mode')!.textContent).toContain('unconfirmed')
   expect(notice.querySelector('.service-window__mode')!.textContent).not.toContain('older')
   expect(notice.querySelector('details')!.textContent).toContain('Arbitrary malformed result')
+})
+
+const mountVisible = () => dom.render(<SettingsNavigation.Provider value={{ open: vi.fn(), openToolkit: vi.fn(), openHost }}><RemoteCoreUpgradeNotices /></SettingsNavigation.Provider>)
+it('shows the automatic compatibility warning without opening the inbox and preserves healthy inputs', async () => {
+  const drafts = useAppStore.getState().agentComposerDrafts, tabs = useAppStore.getState().tabs
+  await mountVisible()
+  expect(dom.container.querySelector('.remote-core-upgrade-notices .service-window')).not.toBeNull()
+  expect(dom.container.querySelector('.global-system-notices__trigger')).toBeNull()
+  expect(dom.container.textContent).toContain('Build server: Remote service needs an update')
+  expect(dom.container.querySelector('details')!.open).toBe(false)
+  await dom.click('.remote-core-upgrade-notices button')
+  expect(openHost).toHaveBeenCalledExactlyOnceWith('remote-id')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+  expect(useAppStore.getState().tabs).toBe(tabs)
+  await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [] }))
+  expect(dom.container.querySelector('.remote-core-upgrade-notices')).toBeNull()
+})
+it('never labels an unknown malformed connection as a version problem', async () => {
+  useAppStore.setState({ runtimeEndpointWarnings: [{ hostId: 'remote-id', step: 'Connecting', code: 'CONTROL_PROTOCOL_ERROR',
+    message: 'Arbitrary malformed result', recovery: 'Retry observation' }] })
+  await mountVisible()
+  expect(dom.container.textContent).not.toContain('needs an update')
+  expect(dom.container.querySelector('.remote-core-upgrade-notices')).toBeNull()
 })

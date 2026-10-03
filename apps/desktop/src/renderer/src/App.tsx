@@ -13,6 +13,7 @@ import {
 } from './lib/surface-tool-dock'
 import { SettingsPanel, type SettingsPageId } from './components/SettingsPanel'
 import { GlobalSystemNotices } from './components/GlobalSystemNotices'
+import { RemoteCoreUpgradeNotices } from './components/RemoteCoreUpgradeNotices'
 import { ToolkitStatusBar } from './components/toolkit/ToolkitStatusBar'
 import { WindowUtilityBar } from './components/WindowUtilityBar'
 import { WindowOverlayHost } from './components/WindowOverlayHost'
@@ -547,6 +548,7 @@ function DesktopApp() {
             </section>
           </div>
         <div className="main-shell__notices">
+          <RemoteCoreUpgradeNotices />
           <TransientErrorNotice
             error={lifecycleError ? null : error}
             dismissed={errorDismissed}

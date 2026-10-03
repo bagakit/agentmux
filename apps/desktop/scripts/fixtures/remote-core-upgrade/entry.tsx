@@ -5,6 +5,7 @@ import { api } from '../../../src/renderer/src/lib/api'
 import { applyAppAppearance } from '../../../src/renderer/src/lib/app-appearance'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
+import { RemoteCoreUpgradeNotices } from '../../../src/renderer/src/components/RemoteCoreUpgradeNotices'
 import { GlobalSystemNotices } from '../../../src/renderer/src/components/GlobalSystemNotices'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -23,8 +24,9 @@ useAppStore.setState({ config, loading: false, sessions: [], sessionSnapshots: {
     code: 'REMOTE_CORE_UPGRADE_REQUIRED', message: 'The remote Core uses an older endpoint interface without a confirmed connection receipt.',
     recovery: 'Update this exact service while retaining its original Runtime and Sessions.' }] })
 const calls: string[] = []
+let releaseCheck: (() => void) | undefined
 Object.assign(api.hosts, {
-  upgradeCheck: async (input: unknown) => { calls.push('check'); return { input, eligible: false, reason: 'runtime-update-required',
+  upgradeCheck: async (input: unknown) => { calls.push('check'); await new Promise<void>(done => { releaseCheck = done }); return { input, eligible: false, reason: 'runtime-update-required',
     candidate: { digest: 'controlled-candidate', sourceCommit: 'controlled-source', protocolVersion: 22 },
     detail: 'This service uses Runtime protocol 21. The update needs protocol 22. A safe Runtime upgrade is not available for this deployment; existing Agents were kept.' } },
   upgrade: async () => { throw new Error('The controlled preview never upgrades a service') },
@@ -35,12 +37,15 @@ function Fixture() {
   const navigation = { open: (section: SettingsNavigationRequest['section']) => setRequest({ section }),
     openToolkit: (toolId: string) => setRequest({ section: 'toolkit', toolId }),
     openHost: (hostId: string) => { calls.push('open-host:' + hostId); setRequest({ section: 'hosts', hostId }) } }
-  return <DesktopClientUiProvider><SettingsNavigation.Provider value={navigation}><div className="app-shell">
-    {request ? <SettingsPanel initialSection={request.section} navigationRequest={request} onClose={() => setRequest(null)} /> :
-      <main className="app-shell__workspace"><div className="focus-empty"><h2>AgentMux</h2><p>Remote connection observation</p></div></main>}
+  return <DesktopClientUiProvider><SettingsNavigation.Provider value={navigation}><div className="app-shell app-shell--project-rail-collapsed">
+    <div className="app-shell__workspace" aria-hidden={Boolean(request)} inert={Boolean(request)}><main className="main-shell main-shell--merged">
+      <div className="workbench-shell"><section className="workspace-main-surface"><div className="focus-empty"><h2>AgentMux</h2><p>Remote connection observation</p></div></section></div>
+      <div className="main-shell__notices"><RemoteCoreUpgradeNotices /></div>
+    </main></div>
+    {request ? <SettingsPanel initialSection={request.section} navigationRequest={request} onClose={() => setRequest(null)} /> : null}
     <footer className="window-status-bar"><GlobalSystemNotices /></footer>
   </div></SettingsNavigation.Provider></DesktopClientUiProvider>
 }
-Object.assign(window, { remoteUpgradePreview: { ready: true, calls,
+Object.assign(window, { remoteUpgradePreview: { ready: true, calls, releaseCheck: () => { const release = releaseCheck; releaseCheck = undefined; release?.() },
   boundary: 'Actual production notification, SettingsPanel and Host editor/CSS. Controlled endpoint and maintenance DTOs; no real SSH, Main, installation or Run qualification.' } })
 createRoot(document.getElementById('root')!).render(<Fixture />)
