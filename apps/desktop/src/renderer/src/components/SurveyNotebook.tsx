@@ -1,5 +1,7 @@
+import * as Dialog from '@radix-ui/react-dialog'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { Archive, ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search } from 'lucide-react'
+import { Archive, ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search, X } from 'lucide-react'
 import { DEFAULT_NOTEBOOK_ID, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { notebookPageRows } from '../lib/notebook-page-tree'
 import { NotebookOperationIssue, useNotebookOperation } from './NotebookPageDetails'
@@ -72,4 +74,32 @@ export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, query
         <FileText size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ArrowUpRight size={14} />
       </button>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div></> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
   </section>
+}
+
+/** Creating a container is deliberate; the original metadata operation owns uncertain receipts. */
+export function NotebookCreateDialog({ open, active, onClose, onCreated }: { open: boolean; active: boolean; onClose(): void; onCreated(notebookId: string): void }) {
+  const [name, setName] = useState('')
+  const operation = useNotebookOperation()
+  const input = useRef<HTMLInputElement>(null)
+  function close() { if (operation.busy) return; if (!operation.pending) setName(''); onClose() }
+  async function create() {
+    if (operation.busy || !name.trim()) return
+    if (operation.pending) { await operation.retry(); return }
+    const notebookId = crypto.randomUUID()
+    await operation.run({ kind: 'create', notebookId, name: name.trim() }, () => { setName(''); onCreated(notebookId) })
+  }
+  return <Dialog.Root open={open} onOpenChange={value => { if (!value) close() }}>
+    <Dialog.Portal container={resolveOverlayContainer()}>
+      <Dialog.Overlay className="dialog-scrim" />
+      <Dialog.Content className="notebook-create-dialog dialog-surface" onOpenAutoFocus={event => { if (!operation.pending) { event.preventDefault(); input.current?.focus() } }} onCloseAutoFocus={event => { if (!active) event.preventDefault() }} onEscapeKeyDown={event => { if (operation.busy) event.preventDefault() }} onInteractOutside={event => { if (operation.busy) event.preventDefault() }}>
+        <header><Dialog.Title>New notebook</Dialog.Title><button type="button" className="icon-button" aria-label="Close notebook creation" disabled={operation.busy} onClick={close}><X size={15} /></button></header>
+        <Dialog.Description className="notebook-create-description">A home for related notes.</Dialog.Description>
+        <form aria-label="Create notebook" onSubmit={event => { event.preventDefault(); void create() }}>
+          <label>Name<input ref={input} aria-label="New notebook name" placeholder="e.g. Reading notes" value={name} maxLength={160} disabled={operation.busy || Boolean(operation.pending)} onChange={event => setName(event.target.value)} /></label>
+          {operation.issue ? <p role="status" className="notebook-create-issue">{operation.issue}</p> : null}
+          <footer><button type="button" className="small-button" disabled={operation.busy} onClick={close}>Cancel</button><button type="submit" className="primary-button" disabled={operation.busy || !name.trim()}>{operation.busy ? 'Creating…' : operation.pending ? 'Retry creation' : 'Create notebook'}</button></footer>
+        </form>
+      </Dialog.Content>
+    </Dialog.Portal>
+  </Dialog.Root>
 }

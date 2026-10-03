@@ -1,5 +1,7 @@
-import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type NotebookPage } from '@agentmux/core/notebook-catalog'
-import { NotebookHome, NotebookNavigation } from './SurveyNotebook'
+import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { NotebookHome, NotebookNavigation, NotebookCreateDialog } from './SurveyNotebook'
+import { ConfirmationDialog } from './ConfirmationDialog'
+import { useNotebookOperation } from './NotebookPageDetails'
 import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
 import { openNotebookPage, prepareNotebookWorkface } from '../lib/survey-notebooks'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
@@ -53,11 +55,17 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   useEffect(() => { setPageQuery(''); setArchivedPages(false) }, [notebookId])
   const noteId = useAppStore(state => state.surveyNoteId)
   const selectedArchiveRoot = noteId && library ? notebookPageArchiveRoot(library.pages, noteId)?.noteId : undefined
-  useEffect(() => { if (noteId && library) setArchivedPages(Boolean(selectedArchiveRoot)) }, [noteId, selectedArchiveRoot])
+  useEffect(() => { if (noteId && library) setArchivedPages(Boolean(selectedArchiveRoot)) }, [notebookId, noteId, selectedArchiveRoot])
   const activeNotebook = notebookId ? library?.notebooks[notebookId] : undefined
   const notebooks = useMemo(() => Object.values(library?.notebooks ?? {}), [library])
   const pages = useMemo(() => Object.values(library?.pages ?? {}), [library])
-  const newNotebookIntent = useRef<{ notebookId: string; name: string; operationId: string } | null>(null)
+  const [notebookCreateOpen, setNotebookCreateOpen] = useState(false)
+  const notebookStarted = useRef(0)
+  const notebookControlsActive = useRef(visible && !controlsCoverPage)
+  notebookControlsActive.current = visible && !controlsCoverPage
+  const [deleteNotebookOpen, setDeleteNotebookOpen] = useState(false)
+  const [deleteNotebookTarget, setDeleteNotebookTarget] = useState<(Notebook & { pageCount: number }) | null>(null)
+  const notebookDeletion = useNotebookOperation()
   const config = useAppStore(state => state.config)
   const browserInput = useRef<BrowserAddressInputHandle>(null)
   const [inputHistoryNotice, setInputHistoryNotice] = useState<string | null>(null)
@@ -237,17 +245,23 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     const state = useAppStore.getState()
     state.setSurveyNotebook(id); state.setSurveyZoneSelection(null); setError(null)
   }
-  async function newNotebook(): Promise<void> {
-    if (opening) return
-    const started = intent.current
-    setOpening(true); setError(null)
-    const prepared = newNotebookIntent.current ?? { notebookId: crypto.randomUUID(), name: 'Untitled notebook', operationId: crypto.randomUUID() }
-    newNotebookIntent.current = prepared
-    try {
-      await changeNotebook({ kind: 'create', notebookId: prepared.notebookId, name: prepared.name }, prepared.operationId)
-      newNotebookIntent.current = null; if (intent.current === started) chooseNotebook(prepared.notebookId)
-    } catch (cause) { setError('Notebook could not be saved. Retry this same creation; existing pages are kept. ' + presentError(cause)) }
-    finally { setOpening(false) }
+  function newNotebook(): void {
+    notebookStarted.current = intent.current
+    setNotebookCreateOpen(true)
+  }
+  function requestNotebookDeletion(): void {
+    if (!activeNotebook || activeNotebook.notebookId === DEFAULT_NOTEBOOK_ID) return
+    if (!notebookDeletion.pending) setDeleteNotebookTarget({ ...activeNotebook, pageCount: pages.filter(page => page.notebookId === activeNotebook.notebookId).length })
+    setDeleteNotebookOpen(true)
+  }
+  async function deleteNotebook(): Promise<void> {
+    if (!deleteNotebookTarget) return
+    const id = deleteNotebookTarget.notebookId
+    await notebookDeletion.run({ kind: 'delete', notebookId: id }, () => {
+      setDeleteNotebookOpen(false); setDeleteNotebookTarget(null)
+      const state = useAppStore.getState()
+      if (state.surveyNotebookId === id) state.setSurveyNotebook(DEFAULT_NOTEBOOK_ID, state.surveyNoteId)
+    })
   }
   async function showNotebookPage(page: NotebookPage): Promise<void> {
     intent.current += 1
@@ -397,6 +411,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const options = <SurveyItemOptions compact={!!activeNotebook} key={String(sidebarCollapsed)} visible={visible && !controlsCoverPage} title={activeNotebook ? activeNotebook.name : currentZone ? itemTitle(currentZone) : selection ? 'Retained exploration' : 'New exploration'}
     zone={currentZone ?? null} workspace={workspace ?? null} collected={activeNotebook && !selection ? true : !!selection && collected[selection.zoneId] === true} relatedSpaces={related.spaces} relatedSpacesUnconfirmed={related.unconfirmed}
     activityDetails={currentZone ? activity(currentZone).details : null}
+    onDeleteNotebook={activeNotebook && activeNotebook.notebookId !== DEFAULT_NOTEBOOK_ID ? requestNotebookDeletion : undefined}
     onSaveToTopic={saveToTopic} currentPanelAvailable={Boolean(currentPanel)}
     {...(currentZone && !activeNotebook ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
     onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
@@ -405,6 +420,11 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
     style={{ '--survey-navigation-width': `${sidebarCollapsed ? 40 : effectiveSidebarWidth}px` } as CSSProperties} aria-label="Survey" hidden={!visible} inert={!visible} aria-hidden={!visible}>
+    <NotebookCreateDialog active={visible && !controlsCoverPage} open={visible && !controlsCoverPage && notebookCreateOpen} onClose={() => setNotebookCreateOpen(false)} onCreated={id => { setNotebookCreateOpen(false); if (notebookControlsActive.current && intent.current === notebookStarted.current) chooseNotebook(id) }} />
+    <ConfirmationDialog open={visible && !controlsCoverPage && deleteNotebookOpen} title="Delete notebook?" subject={deleteNotebookTarget?.name ?? ''}
+      description={(() => { const count = deleteNotebookTarget?.pageCount ?? 0; return count ? `${count} ${count === 1 ? 'page will' : 'pages will'} move to 随手记. Contents, page hierarchy and archived status stay intact.` : 'This empty notebook will be removed.' })()}
+      confirmLabel={notebookDeletion.pending ? 'Retry deletion' : 'Delete notebook'} busy={notebookDeletion.busy} onCancel={() => setDeleteNotebookOpen(false)} onConfirm={() => void deleteNotebook()}
+      feedback={notebookDeletion.issue ? <p className="notebook-create-issue" role="status">{notebookDeletion.issue}</p> : null} />
     <nav ref={sidebarRef} className={`survey-navigation${isResizing ? ' survey-tabs--resizing' : ''}`} aria-label="Exploration navigation" data-collapsed={sidebarCollapsed} inert={controlsCoverPage}>
       <div className="survey-titlebar project-rail-titlebar" role="group" aria-label="Survey window controls">
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>

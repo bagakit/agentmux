@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { AlertTriangle } from 'lucide-react'
-import { useRef } from 'react'
+import { useRef, type ReactNode } from 'react'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 export function ConfirmationDialog({
@@ -9,6 +9,7 @@ export function ConfirmationDialog({
   description,
   subject,
   confirmLabel,
+  feedback,
   intent = 'danger',
   secondaryLabel,
   busy = false,
@@ -21,6 +22,7 @@ export function ConfirmationDialog({
   description: string
   subject?: string
   confirmLabel: string
+  feedback?: ReactNode
   intent?: 'danger' | 'neutral'
   secondaryLabel?: string
   busy?: boolean
@@ -48,6 +50,7 @@ export function ConfirmationDialog({
           </header>
           {subject ? <p className="confirmation-dialog__subject">{subject}</p> : null}
           <Dialog.Description className="confirmation-dialog__description">{description}</Dialog.Description>
+          {feedback}
           <footer>
             <button ref={cancelRef} type="button" className="small-button confirmation-dialog__cancel" disabled={busy} onClick={onCancel}>Cancel</button>
             {secondaryLabel && onSecondary ? (

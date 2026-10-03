@@ -1434,8 +1434,17 @@ it('refuses to replace a different live Region with a saved Note and keeps its f
   expect(writes.get(receipt.path)).toContain(receipt.noteId); expect(api.files.write).toHaveBeenCalledTimes(1); healthy()
 })
 
-async function startNotebookWithPage() {
+async function createNotebook(name = 'Research notebook') {
   await dom.click('[aria-label="New notebook"]')
+  const input = document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')!
+  expect(input).not.toBeNull()
+  await fill(input, name)
+  await submit(document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!)
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.notebooks[useAppStore.getState().surveyNotebookId!]?.name).toBe(name))
+}
+
+async function startNotebookWithPage() {
+  await createNotebook()
   await vi.waitFor(() => expect(useAppStore.getState().surveyNotebookId).not.toBeNull())
   await dom.click('.notebook-create-page')
 }
@@ -1466,14 +1475,14 @@ it('keeps Notebook navigation scoped to its directory and returns to the origina
   vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: files.get(path)!, revision: 'same-note' } }))
   await renderApp(); await enterSurvey(); await choose()
   const browsers = Object.values(useAppStore.getState().tabs).flatMap(workbenchSurfaces).filter(surface => surface.kind === 'browser')
-  await dom.click('[aria-label="New notebook"]')
+  await createNotebook()
   await vi.waitFor(() => expect(dom.container.querySelector('.survey-notebook-navigation')).not.toBeNull())
   const bookId = useAppStore.getState().surveyNotebookId!, navigation = dom.container.querySelector('.survey-navigation')!
   expect(navigation.querySelectorAll('[data-survey-zone-id]')).toHaveLength(0)
   expect(navigation.querySelector('[aria-label="New webpage"]')).toBeNull()
   expect(navigation.querySelector('[aria-label="Current exploration actions"]')).toBeNull()
   expect(navigation.textContent).toContain('No pages yet')
-  await dom.click('[aria-label="New page in Untitled notebook"]'); await readyNoteRegion()
+  await dom.click('[aria-label="New page in Research notebook"]'); await readyNoteRegion()
   await renameNotebookField('Page title', 'A clear notebook page')
   await vi.waitFor(() => expect(navigation.querySelector('.survey-notebook-page')?.textContent).toBe('A clear notebook page'))
   const saved = structuredClone(await api.notebooks.read()), originalRegion = useAppStore.getState().surveyZoneSelection!.active!, noteBody = [...files.values()][0]!
@@ -1550,12 +1559,20 @@ it('keeps every existing Note Region on an ambiguous directory reopen rather tha
   expect(api.browser.close).not.toHaveBeenCalled(); healthy()
 })
 
-it('creates an empty Notebook from the left and keeps 随手记 visible without creating any Note or Browser', async () => {
+it('requires a name and deliberate submission to create a Notebook and cancels without any persistent side effect', async () => {
   const write = vi.spyOn(api.files, 'write')
   await renderApp(); await enterSurvey()
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Notebooks"]')?.textContent).toContain('随手记'))
+  const original = await api.notebooks.read()
   await dom.click('[aria-label="New notebook"]')
-  await vi.waitFor(() => expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Notebook name"]')?.value).toBe('Untitled notebook'))
+  expect(await api.notebooks.read()).toEqual(original)
+  const form = document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!
+  expect(form.querySelector<HTMLButtonElement>('[type="submit"]')?.disabled).toBe(true)
+  await fill(document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')!, 'Cancelled draft')
+  await act(async () => [...form.querySelectorAll('button')].find(button => button.textContent === 'Cancel')!.click())
+  expect(await api.notebooks.read()).toEqual(original)
+  await createNotebook('Reading notes')
+  await vi.waitFor(() => expect(dom.container.querySelector<HTMLInputElement>('[aria-label="Notebook name"]')?.value).toBe('Reading notes'))
   expect(useAppStore.getState().surveyZoneSelection).toBeNull()
   expect(Object.values((await api.notebooks.read()).pages)).toHaveLength(0)
   expect(write).not.toHaveBeenCalled(); expect(api.browser.create).not.toHaveBeenCalled()
@@ -1623,7 +1640,7 @@ async function chooseNotebookSelect(label: string, value: string) {
 }
 it('organizes a real Notebook wiki tree through rename, subpage creation, search and subtree move without copying Note blocks', async () => {
   const files = noteTransport(); await renderApp(); await enterSurvey()
-  await dom.click('[aria-label="New notebook"]')
+  await createNotebook()
   await vi.waitFor(() => expect(dom.container.querySelector('[aria-label="Notebook name"]')).not.toBeNull())
   const bookId = useAppStore.getState().surveyNotebookId!
   await renameNotebookField('Notebook name', 'Research wiki')
@@ -1769,7 +1786,7 @@ it('saves a Notebook source and borrowed-page history without copying Note resou
   const files = noteTransport(); const fileMove = vi.spyOn(api.files,'move'); await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
   await dom.click('[aria-label="Add note to this exploration"]'); await readyNoteRegion()
   const borrowed = Object.values((await api.notebooks.read()).pages)[0]!
-  await dom.click('[aria-label="New notebook"]'); const bookId = useAppStore.getState().surveyNotebookId!
+  await createNotebook(); const bookId = useAppStore.getState().surveyNotebookId!
   await dom.click('.notebook-create-page'); await readyNoteRegion()
   const actual = Object.values((await api.notebooks.read()).pages).find(page=>page.noteId!==borrowed.noteId)!
   const {changeNotebook} = await import('../src/renderer/src/lib/notebook-library')
@@ -1792,7 +1809,7 @@ it('saves a Notebook source and borrowed-page history without copying Note resou
 
 
 it('keeps an open standalone Notebook page and every exact foreign Group selected after the original File owner changes its Tab ID', async () => {
-  const files = noteTransport(); await renderApp(); await enterSurvey(); await dom.click('[aria-label="New notebook"]')
+  const files = noteTransport(); await renderApp(); await enterSurvey(); await createNotebook()
   await dom.click('.notebook-create-page'); const raw = await readyNoteRegion()
   const page = Object.values((await api.notebooks.read()).pages)[0]!, bytes = files.get(page.resource.path)!
   const location = observation.survey.at(-1)!.selection!.active!
@@ -1832,7 +1849,7 @@ it('archives from the actual page menu and reopens and restores the original Not
   await vi.waitFor(() => expect(dom.container.querySelector('.survey-notebook-navigation [aria-label="Archived pages"]')?.getAttribute('aria-pressed')).toBe('true'))
   expect(dom.container.querySelector('.global-survey-surface .note-editor')).toBe(editor)
   expect(dom.container.querySelector('.notebook-archive-status')?.textContent).toContain('Archived')
-  await dom.click(`[aria-label="Notebook directory: Untitled notebook"]`)
+  await dom.click(`[aria-label="Notebook directory: Research notebook"]`)
   const pagesToggle = [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-notebook-navigation .notebook-directory-views button')].find(button => button.textContent === 'Pages')!
   await act(async () => pagesToggle.click())
   expect(dom.container.querySelector('.survey-notebook-page')).toBeNull()
@@ -1904,4 +1921,81 @@ it('keeps a separately archived child when restoring its parent and finds it thr
   expect(dom.container.querySelector('.notebook-page-directory')?.textContent).not.toContain('Original question')
   expect((await api.notebooks.read()).pages[child.noteId]?.parentNoteId).toBe(parent.noteId)
   expect(files.size).toBe(2); expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
+
+async function requestDeleteNotebook() {
+  await openItemOptions()
+  const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.includes('Delete notebook'))!
+  expect(item).not.toBeUndefined()
+  await act(async () => item.click())
+  await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).not.toBeNull())
+}
+async function confirmDeleteNotebook() { await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog [data-confirm-label]')!.click()) }
+
+it('deletes the selected Notebook only after confirmation and retains the original open Note, archived child and hierarchy in 随手记', async () => {
+  const files = noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  await renameNotebookField('Page title', 'Original question')
+  const parent = Object.values((await api.notebooks.read()).pages)[0]!, bookId = parent.notebookId
+  await dom.click('[aria-label="Add subpage to Original question"]'); await readyNoteRegion()
+  const child = Object.values((await api.notebooks.read()).pages).find(page => page.parentNoteId === parent.noteId)!
+  await archiveCurrentNotebookPage()
+  const original = await api.notebooks.read(), body = new Map(files), writes = vi.mocked(api.files.write).mock.calls.length
+  const editor = dom.container.querySelector('.global-survey-surface .note-editor .ProseMirror')!
+  expect(editor).not.toBeNull()
+  const selected = useAppStore.getState().surveyZoneSelection
+  await requestDeleteNotebook()
+  expect(document.querySelector('.confirmation-dialog')?.textContent).toContain('2 pages will move to 随手记')
+  await act(async () => document.querySelector<HTMLButtonElement>('.confirmation-dialog__cancel')!.click())
+  expect(await api.notebooks.read()).toEqual(original)
+  await requestDeleteNotebook(); await confirmDeleteNotebook()
+  await vi.waitFor(async () => expect((await api.notebooks.read()).notebooks[bookId]).toBeUndefined())
+  await vi.waitFor(() => expect(useAppStore.getState().surveyNotebookId).toBe('quick-notes'))
+  const final = await api.notebooks.read()
+  expect(final.pages[parent.noteId]).toMatchObject({ notebookId: 'quick-notes', resource: parent.resource, parentNoteId: null })
+  expect(final.pages[child.noteId]).toMatchObject({ notebookId: 'quick-notes', resource: child.resource, parentNoteId: parent.noteId, archivedAt: original.pages[child.noteId]!.archivedAt })
+  expect(files).toEqual(body); expect(api.files.write).toHaveBeenCalledTimes(writes)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(selected)
+  expect(dom.container.querySelector('.global-survey-surface .note-editor .ProseMirror')).toBe(editor)
+  expect(dom.container.querySelector('[aria-label="Archived pages"]')?.getAttribute('aria-pressed')).toBe('true')
+  expect(dom.container.querySelector('.survey-notebook-page')?.textContent).toBe(child.title)
+  expect(final.trail.filter(event => event.operationId === final.trail.at(-1)!.operationId)).toHaveLength(2)
+  await dom.click('[aria-label="Page history"]')
+  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Research notebook / Original question → 随手记 / Original question')
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
+it('reconciles the same Notebook deletion after a lost reply without removing later navigation', async () => {
+  noteTransport(); await renderApp(); await enterSurvey(); await createNotebook('Disposable book')
+  const id = useAppStore.getState().surveyNotebookId!, original = vi.mocked(api.notebooks.apply).getMockImplementation()!
+  vi.mocked(api.notebooks.apply).mockImplementationOnce(async input => { await original(input); throw new Error('Deletion reply lost') })
+  await requestDeleteNotebook(); await confirmDeleteNotebook()
+  await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog [role="status"]')?.textContent).toContain('Deletion reply lost'))
+  const first = vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0]
+  expect(first.change).toEqual({ kind: 'delete', notebookId: id })
+  const { changeNotebook } = await import('../src/renderer/src/lib/notebook-library')
+  await act(async () => { await changeNotebook({ kind: 'create', notebookId: 'later-book', name: 'Later choice' }, 'later-book-create'); useAppStore.getState().setSurveyNotebook('later-book') })
+  await confirmDeleteNotebook()
+  await vi.waitFor(() => expect(document.querySelector('.confirmation-dialog')).toBeNull())
+  expect(vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0].operationId).toBe(first.operationId)
+  expect(useAppStore.getState().surveyNotebookId).toBe('later-book')
+  expect((await api.notebooks.read()).notebooks[id]).toBeUndefined(); healthy()
+})
+
+it('keeps one exact named creation after a lost reply and does not navigate over a later Notebook choice', async () => {
+  await renderApp(); await enterSurvey()
+  const original = vi.mocked(api.notebooks.apply).getMockImplementation()!
+  vi.mocked(api.notebooks.apply).mockImplementationOnce(async input => { await original(input); throw new Error('Creation reply lost') })
+  await dom.click('[aria-label="New notebook"]')
+  await fill(document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')!, 'One exact book')
+  await submit(document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!)
+  await vi.waitFor(() => expect(document.querySelector('.notebook-create-issue')?.textContent).toContain('Creation reply lost'))
+  const first = vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0]
+  expect(document.querySelector<HTMLInputElement>('[aria-label="New notebook name"]')?.disabled).toBe(true)
+  await act(async () => useAppStore.getState().setSurveyNotebook('quick-notes'))
+  await submit(document.querySelector<HTMLFormElement>('[aria-label="Create notebook"]')!)
+  await vi.waitFor(() => expect(document.querySelector('.notebook-create-dialog')).toBeNull())
+  expect(vi.mocked(api.notebooks.apply).mock.calls.at(-1)![0].operationId).toBe(first.operationId)
+  expect(Object.values((await api.notebooks.read()).notebooks).filter(book => book.name === 'One exact book')).toHaveLength(1)
+  expect(useAppStore.getState().surveyNotebookId).toBe('quick-notes'); healthy()
 })

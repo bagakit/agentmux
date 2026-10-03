@@ -12,12 +12,13 @@ export type NotebookPage = { noteId: string; notebookId: string; parentNoteId: s
   topics: { spaceId: string; topicId?: string }[] }
 export type NoteTrailEvent = { eventId: string; operationId: string; noteId: string; at: number; actor: NotebookActor;
   action: 'created' | 'moved' | 'renamed' | 'source-added' | 'organized' | 'relocated' | 'archived' | 'restored';
-  before: { notebookId: string; parentNoteId: string | null; title: string; resource: NoteResource; archivedAt?: number } | null;
-  after: { notebookId: string; parentNoteId: string | null; title: string; resource: NoteResource; archivedAt?: number };
+  before: { notebookId: string; notebookName?: string; parentNoteId: string | null; title: string; resource: NoteResource; archivedAt?: number } | null;
+  after: { notebookId: string; notebookName?: string; parentNoteId: string | null; title: string; resource: NoteResource; archivedAt?: number };
   source?: NoteSource; topic?: { spaceId: string; topicId?: string } }
 export type NotebookChange =
   | { kind: 'create'; notebookId: string; name: string; workface?: NotebookWorkface }
   | { kind: 'rename'; notebookId: string; name: string }
+  | { kind: 'delete'; notebookId: string }
   | { kind: 'bind'; notebookId: string; workface: NotebookWorkface }
   | { kind: 'register'; noteId: string; notebookId?: string; parentNoteId?: string | null; title: string;
       resource: NoteResource; workface?: NotebookWorkface; source?: NoteSource }
@@ -113,7 +114,7 @@ export function parseNotebookState(value: unknown): NotebookState {
     if (new Set(p.sources.map((s: NoteSource) => s.sourceId)).size !== p.sources.length) invalid('A source identity is duplicated.')
   }
   const events = new Set<string>()
-  for (const e of s.trail) { object(e, ['eventId', 'operationId', 'noteId', 'at', 'actor', 'action', 'before', 'after', 'source', 'topic']); if(!pages[e.noteId] || events.has(text(e.eventId,'event ID'))) invalid('A Note history identity is invalid.');events.add(e.eventId);text(e.operationId,'operation ID');timestamp(e.at);actor(e.actor);if(!['created','moved','renamed','source-added','organized','relocated','archived','restored'].includes(e.action))invalid('Unknown Note history action.');for (const point of e.before === null ? [e.after] : [e.before, e.after]) { object(point, ['notebookId', 'parentNoteId', 'title', 'resource', 'archivedAt']); if (point.archivedAt !== undefined) timestamp(point.archivedAt); text(point.notebookId, 'Notebook ID'); if (point.parentNoteId !== null) text(point.parentNoteId, 'parent Note ID'); text(point.title, 'page title'); resource(point.resource) }if(e.source)source(e.source);if(e.topic)topic(e.topic) }
+  for (const e of s.trail) { object(e, ['eventId', 'operationId', 'noteId', 'at', 'actor', 'action', 'before', 'after', 'source', 'topic']); if(!pages[e.noteId] || events.has(text(e.eventId,'event ID'))) invalid('A Note history identity is invalid.');events.add(e.eventId);text(e.operationId,'operation ID');timestamp(e.at);actor(e.actor);if(!['created','moved','renamed','source-added','organized','relocated','archived','restored'].includes(e.action))invalid('Unknown Note history action.');for (const point of e.before === null ? [e.after] : [e.before, e.after]) { object(point, ['notebookId', 'notebookName', 'parentNoteId', 'title', 'resource', 'archivedAt']); if (point.notebookName !== undefined) text(point.notebookName, 'recorded Notebook name'); if (point.archivedAt !== undefined) timestamp(point.archivedAt); text(point.notebookId, 'Notebook ID'); if (point.parentNoteId !== null) text(point.parentNoteId, 'parent Note ID'); text(point.title, 'page title'); resource(point.resource) }if(e.source)source(e.source);if(e.topic)topic(e.topic) }
   for (const [id, o] of Object.entries(operations)) { text(id,'operation ID');text(object(o, ['fingerprint', 'actor']).fingerprint,'original operation');actor(o.actor) }
   const result = structuredClone(s) as NotebookState
   for (const map of [result.notebooks, result.pages, result.operations]) Object.setPrototypeOf(map, null)
@@ -122,7 +123,7 @@ export function parseNotebookState(value: unknown): NotebookState {
 /** One semantic writer shared by Node persistence and the explicitly labelled Renderer preview. */
 export function applyNotebookChange(state: NotebookState, input: NotebookWrite, recordedBy: NotebookActor, at: number): NotebookState {
   object(input, ['operationId', 'expectedRevision', 'change'])
-  const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], archive: ['noteId'], restore: ['noteId'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource', 'from'] }
+  const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], delete: ['notebookId'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], archive: ['noteId'], restore: ['noteId'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource', 'from'] }
   const changeKind = object(input.change).kind
   if (!Object.hasOwn(fields, changeKind)) invalid('Unknown Notebook action. Original knowledge is kept.')
   object(input.change, ['kind', ...fields[changeKind]!])
@@ -134,7 +135,7 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
   }
   if (input.expectedRevision !== state.revision) throw Object.assign(new Error('The Notebook changed. Refresh its directory before retrying this same operation; the Note file is kept.'), { code: 'NOTEBOOK_CONFLICT' })
   timestamp(at)
-  const next = parseNotebookState(state), location = (p: NotebookPage) => ({ notebookId:p.notebookId,parentNoteId:p.parentNoteId,title:p.title,resource:structuredClone(p.resource),...(p.archivedAt !== undefined ? { archivedAt: p.archivedAt } : {}) })
+  const next = parseNotebookState(state), location = (p: NotebookPage) => ({ notebookId:p.notebookId,notebookName:next.notebooks[p.notebookId]!.name,parentNoteId:p.parentNoteId,title:p.title,resource:structuredClone(p.resource),...(p.archivedAt !== undefined ? { archivedAt: p.archivedAt } : {}) })
   const getPage = (id: unknown): NotebookPage => { const p = next.pages[text(id,'Note ID')]; if(!p)return invalid('The exact Note is not in the catalog. Keep its file and refresh the directory.'); return p }
   const getBook = (id: unknown): Notebook => { const n = next.notebooks[text(id,'Notebook ID')]; if(!n)return invalid('The exact Notebook is unavailable. Its pages and resources are kept.'); return n }
   const event = (p: NotebookPage, action: NoteTrailEvent['action'], before: NoteTrailEvent['before'], extra: Partial<Pick<NoteTrailEvent,'source'|'topic'>> = {}) => { p.updatedAt=at;next.trail.push({eventId:operationId+':'+p.noteId,operationId,noteId:p.noteId,at,actor:recorded,action,before,after:location(p),...extra}) }
@@ -144,6 +145,18 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
       next.notebooks[id]={notebookId:id,name:text(change.name,'Notebook name').trim(),createdAt:at,...(change.workface?{workface:workface(change.workface)}:{})};break
     }
     case 'rename': { const n=getBook(change.notebookId);if(n.notebookId===DEFAULT_NOTEBOOK_ID)invalid('随手记 keeps its default name. Choose another Notebook to rename.');n.name=text(change.name,'Notebook name').trim();break }
+    case 'delete': {
+      const book = getBook(change.notebookId)
+      if (book.notebookId === DEFAULT_NOTEBOOK_ID) invalid('随手记 is the default destination for saved notes and cannot be deleted. Other Notebooks can be removed without deleting their pages.')
+      // Remove the container in one durable transaction; content and spatial owners stay intact.
+      for (const page of Object.values(next.pages)) if (page.notebookId === book.notebookId) {
+        const before = location(page)
+        page.notebookId = DEFAULT_NOTEBOOK_ID
+        event(page, 'moved', before)
+      }
+      delete next.notebooks[book.notebookId]
+      break
+    }
     case 'bind': getBook(change.notebookId).workface=workface(change.workface);break
     case 'register': {
       const id=text(change.noteId,'Note ID'),book=getBook(change.notebookId??DEFAULT_NOTEBOOK_ID),old=next.pages[id],r=resource(change.resource)
