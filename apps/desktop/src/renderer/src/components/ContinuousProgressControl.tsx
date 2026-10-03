@@ -6,6 +6,7 @@ import { api } from '../lib/api'
 import { ContinuousProgressPanel } from './ContinuousProgressPanel'
 import { ComposerTextarea } from './ComposerTextarea'
 import { agentProviderLabel } from './AgentProviderIcon'
+import { CalendarScheduleControl } from './CalendarScheduleControl'
 
 export type ContinuousProgressStatus = 'inactive' | 'active' | 'paused' | 'unconfirmed'
 
@@ -15,13 +16,14 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
   onStatusChange?: (status: ContinuousProgressStatus) => void
 }) {
   const displayPath = usePathDisplay()
-  const target = useMemo(() => ({ hostId: session.hostId, agentSessionId: session.id,
+  const target = useMemo(() => ({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId,
     providerId: session.providerId, workspacePath: session.workspacePath }),
-  [session.hostId, session.id, session.providerId, session.workspacePath])
+  [session.control.hostId, session.control.agentSessionId, session.providerId, session.workspacePath])
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
   const [observedTarget, setObservedTarget] = useState<typeof target>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
+  const [calendarStatus, setCalendarStatus] = useState<ContinuousProgressStatus>('unconfirmed')
   const [interval, setInterval] = useState('30')
   const [prompt, setPrompt] = useState('')
   const [bindSource, setBindSource] = useState(false)
@@ -63,9 +65,14 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
   const displayed = loop ?? (observedTarget === target ? loops.at(-1) : undefined)
   const status: ContinuousProgressStatus = error || displayed?.lastOutcome === 'unknown' || observedTarget !== target
     ? 'unconfirmed' : loop?.status === 'active' ? 'active' : loop?.status === 'paused' ? 'paused' : 'inactive'
-  useEffect(() => { onStatusChange?.(status) }, [onStatusChange, status])
+  const combinedStatus = [status, calendarStatus].includes('unconfirmed') ? 'unconfirmed' : [status, calendarStatus].includes('active') ? 'active' : [status, calendarStatus].includes('paused') ? 'paused' : 'inactive'
+  useEffect(() => { onStatusChange?.(combinedStatus) }, [onStatusChange, combinedStatus])
   const action = (kind: 'pause' | 'resume' | 'stop' | 'check') => loop && void run(() => api.continuousProgress.action(target, loop.loopId, kind))
   return <div className="continuous-progress-control" data-progress-state={status}>
+    <CalendarScheduleControl target={target} onStatusChange={setCalendarStatus} />
+    <details className="continuous-progress-control__details" data-progress-details="interval" onToggle={event => event.stopPropagation()}>
+      <summary>Continuous progress</summary>
+      <div className="continuous-progress-control__detail-body">
     <header className="continuous-progress-control__heading">
       <h3>Continuous progress</h3>
       <span>{status === 'unconfirmed' ? 'Unconfirmed' : displayed?.status === 'stopped' ? 'Stopped' : status === 'inactive' ? 'Not enabled' : status === 'active' ? 'Active' : 'Paused'}</span>
@@ -108,6 +115,8 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
       </section>
         <button type="submit" className="small-button" disabled={busy || !prompt.trim() || (bindSource && (!sourceRoot.trim() || !sourceId.trim() || !readerPath.trim()))}>Enable continuous progress</button>
       </form> : null}
+      </div>
+    </details>
     <details className="continuous-progress-control__details" data-progress-details="target" onToggle={event => event.stopPropagation()}>
       <summary>Target details</summary>
       <dl className="continuous-progress-control__detail-body">
