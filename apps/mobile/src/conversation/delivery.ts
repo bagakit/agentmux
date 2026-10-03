@@ -1,8 +1,12 @@
 /** Only explicit Core rejection facts can unlock a write after its RPC was dispatched. */
 export function deliveryOutcome(error: unknown, operation: 'prompt' | 'interaction'): 'rejected' | 'unknown' {
   if (!error || typeof error !== 'object') return 'unknown'
-  const { code, detail } = error as { code?: unknown; detail?: unknown }
+  const { code, detail, controlFailure } = error as { code?: unknown; detail?: unknown; controlFailure?: { disposition?: unknown; confirmedInputBytes?: unknown } }
   if (detail === 'unknown') return 'unknown'
+  // This specific Core boundary is read-only preparation before any input in this call.
+  // Mobile dispatches a fresh operation once; it never uses this fact to replay an older unknown operation.
+  if (operation === 'prompt' && code === 'AGENT_PROMPT_PREPARATION_FAILED'
+    && controlFailure?.disposition === 'not_applied' && controlFailure.confirmedInputBytes === 0) return 'rejected'
   // A Prompt can have an accepted payload and a rejected submit phase. A phase-level
   // Native rejection alone does not permit sending the complete Prompt again.
   if (detail === 'not_applied' && operation === 'interaction') return 'rejected'
@@ -10,7 +14,7 @@ export function deliveryOutcome(error: unknown, operation: 'prompt' | 'interacti
   // admission during receipt settlement. AGENT_INTERACTION_PENDING can appear between
   // payload and submit too; neither proves that the whole Prompt was unapplied.
   const beforeInput = operation === 'prompt'
-    ? ['INVALID_AGENT_PROMPT', 'AGENT_PROMPT_CANCELLED', 'AGENT_PROMPT_SUBMISSION_BUSY']
+    ? ['INVALID_AGENT_PROMPT', 'AGENT_PROMPT_CANCELLED', 'AGENT_PROMPT_SUBMISSION_BUSY', 'AGENT_TURN_END_UNCONFIRMED']
     : ['UNKNOWN_AGENT_INTERACTION', 'INVALID_AGENT_INTERACTION_RESPONSE', 'AGENT_INTERACTION_UNSUPPORTED']
   return typeof code === 'string' && [
     ...beforeInput, 'INVALID_CONTROL_REQUEST',

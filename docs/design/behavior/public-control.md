@@ -243,6 +243,8 @@ CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace
 设备工作面采用明确的持久来源和可导出保全记录；重启与卸载后的存储条件分别说明，不假定密钥跨卸载必存。身份丢失后打开原 Mac 链接登记新设备，不创建替代 Host Session。iPhone 与 Android 保留同能力范围，未执行真机验收不得据构建成功宣称两类设备验收通过。
 
 ### 手机对象身份与工作面
+手机 Send／Cmd+Enter 的单条输入语义沿[《Composer 消息队列与紧凑状态》](conversation-input.md#composer-消息队列与紧凑状态)，消费原 Core 的显式输入能力；普通 Enter 保持原常规输入，重连与读取不生成发送授权。输入前拒绝与已尝试投递的未知回执可辨，草稿、阅读和原 Run 保留；提示与恢复动作在输入区外完整可读，不因长诊断挤压正文或编辑器。
+
 手机 Focus 行同时展示已确认的项目、Agent 名称与语义状态。项目关系消费公共事实，不以 cwd 猜空间归属；显示名沿原名称解析链；事实不可读时标记未确认并保留原工作面。Mote 使用原保存头像及动画；会话顶部仅呈头像，身份与状态按需查看，不以不透明标题栏遮挡对话。左上入口揭示侧栏并保留工作面；连接与设备设置位于侧栏。
 
 `space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间 PNG。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。
