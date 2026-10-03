@@ -14,7 +14,7 @@ const evidence=join(root,'.tmp/immediate-steer',String(globalThis.crypto.randomU
 await mkdir(evidence,{recursive:true})
 const store='apps/desktop/src/renderer/src/store.ts',service='packages/core/src/public-rpc-service.ts',main='apps/desktop/src/main/runtime-controller.ts',client='packages/core/src/client.ts',queue='packages/core/src/agent-global-message-queue.ts',cli='packages/core/src/agentmux-cli-commands.ts'
 const composer='apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx'
-const owned=[store,service,main,client,queue,cli,composer,'apps/desktop/src/shared/contracts.ts','apps/desktop/src/renderer/src/lib/service-window-notice.ts','packages/core/src/control-codec.ts','packages/core/src/public-rpc.ts','packages/core/src/control.ts']
+const owned=[store,service,main,client,queue,cli,composer,'apps/desktop/test/first-execution-agent-restore.test.ts','apps/desktop/test/agent-steer-queue-phase.test.ts','apps/desktop/test/agent-explicit-steer.test.tsx','packages/core/test/public-immediate-message.test.ts','apps/desktop/scripts/fixtures/immediate-steer/vitest.config.mts','apps/desktop/src/shared/contracts.ts','apps/desktop/src/renderer/src/lib/service-window-notice.ts','packages/core/src/control-codec.ts','packages/core/src/public-rpc.ts','packages/core/src/control.ts']
 const originals=new Map(await Promise.all(owned.map(async p=>[p,await readFile(join(root,p),'utf8')])))
 const receipt={schema:'agentmux.immediate-steer-proof.v1',passed:false,userRunTouched:false,sharedSourceWritten:false,sourceHashes:Object.fromEntries([...originals].map(([p,b])=>[p,sha(b)])),mutations:[]}
 
@@ -51,7 +51,7 @@ async function source(){
  receipt.source.signatureMutation={sha256:sha(changed),red};await writeFile(join(evidence,'source.json'),JSON.stringify(receipt.source,null,2))
 }
 async function prepare(){
- for(const directory of ['apps/desktop/src','apps/desktop/test','apps/desktop/browser-extension','apps/desktop/scripts/fixtures','packages/core/src','packages/core/test','packages/core/dist','packages/core/bin','packages/demand/src','packages/client-ui/src','packages/layout/src'])await cp(join(root,directory),join(privateRoot,directory),{recursive:true})
+ for(const directory of ['apps/desktop/src','apps/desktop/test','apps/desktop/browser-extension','apps/desktop/scripts/fixtures','packages/core/src','packages/core/test','packages/core/bin','packages/demand/src','packages/client-ui/src','packages/layout/src'])await cp(join(root,directory),join(privateRoot,directory),{recursive:true})
  for(const path of ['package.json','tsconfig.base.json','tsconfig.shared.json','vitest.setup.ts','apps/desktop/package.json','apps/desktop/tsconfig.json',...['core','demand','client-ui','layout'].flatMap(p=>['package.json','tsconfig.json','tsconfig.build.json'].map(n=>'packages/'+p+'/'+n))]){
   try{await cp(join(root,path),join(privateRoot,path))}catch(e){if(e.code!=='ENOENT')throw e}
  }
@@ -68,15 +68,21 @@ async function mounted(label,red=false){
  await writeFile(join(evidence,label+'.log'),output)
  const discovery=JSON.parse(await readFile(report,'utf8'))
  await writeFile(join(evidence,label+'.json'),JSON.stringify(discovery,null,2))
- assert.ok(discovery.numTotalTests>=16,'Owning test discovery must be nonempty')
- assert.equal(discovery.testResults.length,2);assert.deepEqual(discovery.testResults.map(item=>relative(privateRoot,item.name)).sort(),['apps/desktop/test/agent-explicit-steer.test.tsx','packages/core/test/public-immediate-message.test.ts'].sort())
+ assert.ok(discovery.numTotalTests>=49,'Owning test discovery must be nonempty')
+ assert.equal(discovery.testResults.length,4);assert.deepEqual(discovery.testResults.map(item=>relative(privateRoot,item.name)).sort(),['apps/desktop/test/first-execution-agent-restore.test.ts','apps/desktop/test/agent-steer-queue-phase.test.ts','apps/desktop/test/agent-explicit-steer.test.tsx','packages/core/test/public-immediate-message.test.ts'].sort())
  if(red){assert.notEqual(code,0);assert.ok(discovery.numFailedTests>0);assert.ok(discovery.testResults.some(suite=>suite.assertionResults.some(item=>item.status==='failed'&&item.failureMessages.some(message=>/AssertionError|promise resolved .*instead of rejecting/s.test(message)))))}else{assert.equal(code,0,output);assert.equal(discovery.numFailedTests,0)}
  return{code,tests:discovery.numTotalTests,failed:discovery.numFailedTests,log:label+'.log'}
 }
 async function mutations(){
  const cases=[
-  [store,'explicit-capability-lost',"explicitAttempt ? agentSteerExecution(pending, fresh.capabilities) : 'default'","'default'"],
-  [store,'ordinary-input-interrupts',"explicitAttempt ? agentSteerExecution(pending, fresh.capabilities) : 'default'","agentSteerExecution(pending, fresh.capabilities)"],
+  [store,'explicit-capability-lost',"? { ...entry, execution } : entry) } }))","? entry : entry) } }))"],
+  [store,'ordinary-input-gains-explicit',"const explicitAttempt = drain.explicitSteers.delete(entry.operationId) ||\n            entry.promptCondition === null && entry.execution !== undefined","const explicitAttempt = drain.explicitSteers.delete(entry.operationId) || entry.promptCondition === null"],
+  [store,'fresh-capability-upgrades-default',"explicitAttempt ? (pending.execution ?? 'default') : 'default'","explicitAttempt ? agentSteerExecution({ ...pending, execution: undefined }, fresh.capabilities) : 'default'"],
+  [store,'ordinary-preparation-stores-a-selection',"...(explicitAttempt ? { execution } : {})","...{ execution }"],
+  [store,'known-local-preparation-stays-unknown',"const unadmitted = preparedHere && !dispatchStarted","const unadmitted = false"],
+  [store,'invoked-BUSY-recreates-condition',"const unadmitted = preparedHere && !dispatchStarted","const unadmitted = preparedHere"],
+  [store,'ordinary-known-working-input-invoked',/if \(!explicitAttempt && (?:entry.promptCondition === null && session|fresh)\.status\.state === 'working'\) return/g,''],
+  [store,'restart-borrows-old-selection',"errorCode: EXECUTION_NOT_REQUESTED\n        }))","...(entry.execution === undefined ? { errorCode: EXECUTION_NOT_REQUESTED } : {})\n        }))"],
   [main,'Main-drops-execution',"          ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),",''],
   [service,'public-RPC-loses-execution',"agentSessionId: recipientId, envelope: queued.envelope, condition: promptCondition,\n        execution,","agentSessionId: recipientId, envelope: queued.envelope, condition: promptCondition,\n        execution: 'default',"],
   [queue,'changed-mode-reuses-delivered-id',/ \|\| \(existing\.execution \?\? 'default'\) !== execution/g,''],
