@@ -90,8 +90,8 @@ async function fixture(interrupt = '\x1b', endEvent = 'Interrupt', refresh?: str
 describe('single authorized native immediate preparation', () => {
   it('refuses a source replacement between native transport proof and preparation before any input', async () => {
     const f = await fixture();try {
-      f.fault('source');await expect(f.submit()).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED'})
-      expect(f.writes).toEqual([])
+      f.fault('source');await expect(f.submit()).rejects.toMatchObject({code:'AGENT_PROMPT_PREPARATION_FAILED',controlFailure:{disposition:'not_applied',confirmedInputBytes:0}})
+      expect(f.writes).toEqual([]); expect(f.kernel.input).not.toHaveBeenCalled()
       await f.submit('default','healthy-ordinary');expect(f.writes).toEqual(['ONLY_AUTHORIZED_MESSAGE','\r'])
     }finally{f.screen.dispose()}
   })
@@ -130,8 +130,8 @@ describe('single authorized native immediate preparation', () => {
       if(kind==='draft')await f.draw('UNAUTHORIZED_DRAFT',true)
       if(kind==='transport')f.fault('transport')
       if(kind==='native-unknown')f.native(null)
-      await expect(f.submit()).rejects.toMatchObject({code:'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED'})
-      expect(f.writes).toEqual([]);expect(f.registry.get('private-immediate').promptCompletionAdmission).toBeUndefined()
+      await expect(f.submit()).rejects.toMatchObject({code:'AGENT_PROMPT_PREPARATION_FAILED',controlFailure:{disposition:'not_applied',confirmedInputBytes:0}})
+      expect(f.writes).toEqual([]);expect(f.kernel.input).not.toHaveBeenCalled();expect(f.registry.get('private-immediate').promptCompletionAdmission).toBeUndefined()
       expect(f.registry.get('private-immediate').terminalPromptDelivery?.reason).toBe('immediate-context-unconfirmed')
       await f.submit('default','ordinary');expect(f.writes).toEqual(['ONLY_AUTHORIZED_MESSAGE','\r'])
     } finally {f.screen.dispose()}
@@ -197,8 +197,8 @@ describe('explicit Provider-owned non-submitting refresh', () => {
   const f = await fixture('\x1b', 'Interrupt', '\x1b[I')
   try {
    const s = f.registry.get('private-immediate')
-   await expect(f.coordinator().submitInputPlan(s, f.run(), 'automatic', 'ONLY_AUTHORIZED_MESSAGE', f.provider.planPromptInput('ONLY_AUTHORIZED_MESSAGE', { execution: 'immediate' }), agentPromptCondition(s), 'completed', undefined, true, undefined, 0, undefined, 'immediate')).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
-   expect(f.writes).toEqual([])
+   await expect(f.coordinator().submitInputPlan(s, f.run(), 'automatic', 'ONLY_AUTHORIZED_MESSAGE', f.provider.planPromptInput('ONLY_AUTHORIZED_MESSAGE', { execution: 'immediate' }), agentPromptCondition(s), 'completed', undefined, true, undefined, 0, undefined, 'immediate')).rejects.toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+   expect(f.writes).toEqual([]); expect(f.kernel.input).not.toHaveBeenCalled()
   } finally { f.screen.dispose() }
  })
 })

@@ -1,16 +1,24 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it, vi } from 'vitest'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, defineAgentProvider } from '../src/agent-provider.js'
-import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import { AgentMuxError } from '../src/errors.js'
 import type { AgentProviderPreparedPromptTransport, AgentProviderPromptExecutionContext } from '../src/agent-provider.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '../src/control-host.js'
+import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import { hostedTestOwner, hostedTestFence, logicalHostedEvents } from './helpers/hosted-runtime-port.js'
 
 /** Public Client and real coordinator/store; Runtime bytes are explicitly synthetic here. */
-async function fixture() {
-  const store = new AgentMuxMemoryAgentSessionStore()
+async function fixture(storePath?: string) {
+  const store = storePath ? new AgentMuxFileAgentSessionStore(storePath) : new AgentMuxMemoryAgentSessionStore()
   const stored = (id: string): AgentMuxStoredAgentSession => ({ kind: 'agent', agentSessionId: id, providerId: 'fixture',
     executorId: 'fixture', hostId: 'local', workspacePath: upstreamFixturePath("private/preparation"), run: { runId: `${id}-run` },
     retiredRuns: [], hookBindingId: 'binding', hookToken: 'token', createdAt: 1, updatedAt: 1 })
@@ -69,7 +77,8 @@ async function fixture() {
     if (id === 'prepare-run') cursor = range.endByte
     receipts.set(op.operationId, range); writes.push({ run: id, data: op.data })
     if (id === 'prepare-run' && op.data !== '\r') await draw(op.data === '\x1b[I' ? '' : op.data)
-    if (lostAck && op.data === '\x1b[I') { lostAck = false; throw new AgentMuxError('lost original refresh ACK', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown') }
+    if (lostAck && op.data === '\x1b[I') { lostAck = false; throw new AgentMuxError('lost original refresh ACK', 'CTXMUX_INPUT_UNCONFIRMED', 'unknown',
+      { disposition: 'unknown', confirmedInputBytes: null }) }
     return { run: run(id), appliedByteRange: range }
   }
   owner.screenEvidence.wait = async (...args: unknown[]) => {
@@ -81,7 +90,7 @@ async function fixture() {
   owner.connected = true
   const submit = (signal?: AbortSignal) => client.submitAgentPrompt({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' },
     afterSubmissionId: null, operationId: 'original-send', prompt: 'ORIGINAL_BODY', execution: 'immediate', ...(signal ? { signal } : {}) })
-  return { client, provider, preparation, entered, release, writes, submit,
+  return { client, owner, store, provider, preparation, entered, release, writes, submit,
     finalStatusFault: (kind: string) => { finalStatusFault = kind }, rawDuringFinalStatus: () => rawDuringFinalStatus,
     change: (kind: string) => { if (kind === 'source') source = 'source-other'; if (kind === 'pid') pid++; if (kind === 'cursor') cursor++;
       if (kind === 'final') recheck = false; if (kind === 'lost-ack') lostAck = true },
@@ -106,7 +115,8 @@ describe('original immediate transport preparation', () => {
   it.each(['source', 'pid', 'cursor', 'final'])('rejects changed %s before the first possible input', async kind => {
     const f = await fixture()
     try {
-      const submitted = f.submit(); const result = expect(submitted).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+      const submitted = f.submit(); const result = expect(submitted).rejects.toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED',
+        controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
       await f.entered; f.change(kind); f.release(); await result
       expect(f.writes).toEqual([])
       expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
@@ -117,7 +127,8 @@ describe('original immediate transport preparation', () => {
     const f = await fixture()
     try {
       f.finalStatusFault(kind); f.release()
-      await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+      await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED',
+        controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
       await f.rawDuringFinalStatus()
       expect(f.writes.map(write => write.data)).toEqual(kind === 'raw-cancel' ? ['RAW_AT_FINAL_BOUNDARY'] : [])
       expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
@@ -194,11 +205,144 @@ describe('original immediate transport preparation', () => {
     const f = await fixture()
     try {
       f.change('lost-ack'); f.release()
-      await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+      await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED',
+        controlFailure: { disposition: 'unknown', confirmedInputBytes: null } })
       expect(f.writes.map(write => write.data)).toEqual(['\x1b[I'])
       await f.submit()
       expect(f.preparation).toHaveBeenCalledTimes(1)
       expect(f.writes.map(write => write.data)).toEqual(['\x1b[I', 'ORIGINAL_BODY', '\r'])
     } finally { await f.close() }
+  })
+
+  it('keeps an original unknown refresh as unknown when its read-only rejoin fails', async () => {
+    const f = await fixture()
+    try {
+      f.change('lost-ack'); f.release()
+      await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+      f.change('final')
+      const error = await f.submit().then(() => null, value => value)
+      expect(error.code).toBe('AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+      expect(error.controlFailure).not.toEqual({ disposition: 'not_applied', confirmedInputBytes: 0 })
+      expect(f.preparation).toHaveBeenCalledTimes(1)
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[I'])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission?.frameRefresh?.acknowledged).toBe(false)
+    } finally { await f.close() }
+  })
+
+  it('preserves the original preparation cause while reporting only this invocation as not applied', async () => {
+    const f = await fixture()
+    f.preparation.mockRejectedValue(new AgentMuxError('readonly source unavailable', 'SOURCE_READ_UNAVAILABLE', 'source-private',
+      { disposition: 'unknown', confirmedInputBytes: null }))
+    try {
+      const error = await f.submit().then(() => null, value => value)
+      expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(JSON.parse(error.detail)).toEqual({ code: 'SOURCE_READ_UNAVAILABLE', detail: 'source-private',
+        controlFailure: { disposition: 'unknown', confirmedInputBytes: null } })
+      expect(f.writes).toEqual([])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+      await f.client.writeAgent({ agentSessionId: 'healthy', expectedRun: { runId: 'healthy-run' }, data: 'HEALTHY_RAW', source: 'user' })
+      expect(f.writes).toEqual([{ run: 'healthy-run', data: 'HEALTHY_RAW' }])
+    } finally { await f.close() }
+  })
+
+  it.each(['cancel', 'timeout'] as const)('prevents late uncooperative preparation from adding input after a public %s failure', async kind => {
+    const f = await fixture(), cancel = new AbortController()
+    let entered!: () => void, resolve!: (value: AgentProviderPreparedPromptTransport) => void
+    const started = new Promise<void>(done => { entered = done })
+    f.preparation.mockImplementation(async () => { entered(); return await new Promise(done => { resolve = done }) })
+    if (kind === 'timeout') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })
+    try {
+      const submitted = f.submit(cancel.signal).then(() => null, error => error); await started
+      if (kind === 'cancel') cancel.abort(new AgentMuxError('Public observation cancelled.', 'CLIENT_CANCELLED', 'observer-only'))
+      else await vi.advanceTimersByTimeAsync(40_001)
+      const error = await submitted
+      expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(JSON.parse(error.detail).code).toBe(kind === 'cancel' ? 'CLIENT_CANCELLED' : 'AGENT_INPUT_PREPARATION_UNCONFIRMED')
+      vi.useRealTimers()
+      resolve({ nativeSourceId: 'source-1', verifyCurrentTransport: async () => true })
+      await new Promise(done => setImmediate(done))
+      expect(f.writes).toEqual([])
+      expect(f.client.agentSession('prepare').promptCompletionAdmission).toBeUndefined()
+      await f.client.writeAgent({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, data: 'RAW_AFTER_CANCEL', source: 'user' })
+      expect(f.writes.map(write => write.data)).toEqual(['RAW_AFTER_CANCEL'])
+    } finally { vi.useRealTimers(); await f.close() }
+  })
+
+  it('transports actual Core preparation facts through public RPC and compiled CLI while the logical delivery remains unknown', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-phase-')), queuePath = join(root, 'messages.ndjson')
+    vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', queuePath)
+    const f = await fixture(join(root, 'sessions.json'))
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [{ hostId: 'local', client: f.client }] })
+    let rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+    f.preparation.mockRejectedValue(new AgentMuxError('Readonly native evidence is unavailable.', 'NATIVE_OBSERVATION_UNAVAILABLE', 'readonly-source'))
+    try {
+      await server.start()
+      rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(root, 'control.sock') } })
+      const error = await rpc.call('agent.send', { target: { kind: 'agent-session', agentSessionId: 'prepare' }, text: 'RPC_BODY',
+        messageId: 'rpc-phase-message', operationId: 'rpc-phase-operation', execution: 'immediate' }).then(() => null, value => value)
+      expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(JSON.parse(error.detail)).toEqual({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', detail: 'readonly-source' })
+      const args = ['agent', 'send', '--to-session', 'prepare', '--text', 'CLI_BODY', '--execution', 'immediate',
+        '--operation-id', 'cli-phase-operation', '--message-id', 'cli-phase-message']
+      const result = await runCompiledObjectCli(args, objectCliEnvironment(root))
+      expect(result.code).not.toBe(0)
+      const output = JSON.parse(result.stderr)
+      expect(output.error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(JSON.parse(output.error.detail)).toEqual({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', detail: 'readonly-source' })
+      const preparationCalls = f.preparation.mock.calls.length
+      const retry = await runCompiledObjectCli(args, objectCliEnvironment(root))
+      expect(retry.code).not.toBe(0); expect(JSON.parse(retry.stderr).error.code).toBe('AGENT_PROMPT_UNCONFIRMED')
+      expect(f.preparation).toHaveBeenCalledTimes(preparationCalls)
+      const records = await new DurableAgentMuxMessageQueue(queuePath).listAfter(0)
+      expect(records).toHaveLength(2)
+      expect(records.every(record => record.delivery.state === 'queued' && Boolean(record.delivery.reason))).toBe(true)
+      expect(f.writes).toEqual([])
+      await f.client.writeAgent({ agentSessionId: 'healthy', expectedRun: { runId: 'healthy-run' }, data: 'HEALTHY_RAW', source: 'user' })
+      expect(f.writes.map(write => write.data)).toEqual(['HEALTHY_RAW'])
+    } finally { await rpc?.dispose(); await server.stop(); await f.close(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) }
+  }, 30_000)
+
+  it('retains a different Core original unknown input while reporting this concurrent invocation preparation failure', async () => {
+    const f = await fixture()
+    const { preparePromptExecutionTransport: _prepare, ...peerProvider } = f.provider
+    const peer = new AgentMuxClient({ store: f.store, providers: [peerProvider] }), peerOwner = peer as any
+    let entered!: () => void, reject!: (error: unknown) => void
+    const started = new Promise<void>(done => { entered = done })
+    f.preparation.mockImplementation(async () => { entered(); return await new Promise((_resolve, failure) => { reject = failure }) })
+    try {
+      await peerOwner.registry.load('local')
+      for (const method of ['isConnected', 'identity', 'status', 'input']) peerOwner.kernel[method] = f.owner.kernel[method]
+      peerOwner.screenEvidence.wait = f.owner.screenEvidence.wait
+      peerOwner.screenEvidence.generation = f.owner.screenEvidence.generation
+      peerOwner.connected = true
+      const first = f.submit().then(() => null, error => error); await started
+      f.change('lost-ack')
+      await expect(peer.submitAgentPrompt({ agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, afterSubmissionId: null,
+        operationId: 'original-send', prompt: 'ORIGINAL_BODY', execution: 'immediate' })).rejects.toMatchObject({ code: 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED' })
+      const original = (await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'prepare')!.promptCompletionAdmission!
+      reject(new AgentMuxError('This observer did not qualify.', 'NATIVE_OBSERVATION_UNAVAILABLE'))
+      expect(await first).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      const retained = (await loadAgentSessions(f.store)).find(session => session.agentSessionId === 'prepare')!.promptCompletionAdmission!
+      expect(retained).toEqual(original)
+      expect(retained.frameRefresh?.acknowledged).toBe(false)
+      expect(retained.notApplied).not.toBe(true)
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[I'])
+      await f.client.writeAgent({ agentSessionId: 'healthy', expectedRun: { runId: 'healthy-run' }, data: 'HEALTHY_RAW', source: 'user' })
+      expect(f.writes.map(write => write.data)).toEqual(['\x1b[I', 'HEALTHY_RAW'])
+    } finally { await peer.dispose(); await f.close() }
+  })
+
+  it('preserves invocation-local preparation facts through the finite Hosted runtime consumer', async () => {
+    const f = await fixture(), hosted = new AgentMuxHostedRuntimeService(f.client, null, () => hostedTestOwner(f.client))
+    let consumer: Awaited<ReturnType<typeof hosted.subscribe>> | undefined
+    f.preparation.mockRejectedValue(new AgentMuxError('Readonly provider unavailable.', 'NATIVE_OBSERVATION_UNAVAILABLE', 'read-only'))
+    try {
+      consumer = await hosted.subscribe('runtime.events', { fence: hostedTestFence, consumerId: 'phase-consumer' }, logicalHostedEvents(() => {})); await consumer.start?.()
+      await expect(hosted.call('runtime.invoke', { fence: hostedTestFence, consumerId: 'phase-consumer', invocation: { method: 'submitAgentPrompt', args: [{
+        agentSessionId: 'prepare', expectedRun: { runId: 'prepare-run' }, afterSubmissionId: null, operationId: 'hosted-phase-operation', prompt: 'ORIGINAL_BODY', execution: 'immediate'
+      }] } })).rejects.toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED',
+        detail: JSON.stringify({ code: 'NATIVE_OBSERVATION_UNAVAILABLE', detail: 'read-only' }), controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+      expect(f.writes).toEqual([])
+    } finally { await consumer?.dispose(); await hosted.dispose(); await f.close() }
   })
 })

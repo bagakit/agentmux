@@ -75,7 +75,7 @@ import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './ag
 import { observeAgent, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
-import { AgentPromptSubmissionCoordinator } from './prompt-submission.js'
+import { AgentPromptSubmissionCoordinator, promptPreparationFailure, type AgentPromptTransportQualification } from './prompt-submission.js'
 import {
   CTXMUX_COMMIT,
   CTXMUX_VERSION,
@@ -3911,11 +3911,19 @@ export class AgentMuxClient {
     const provider = this.providers.get(session.providerId)
     const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const renderObservation = new AbortController()
-    const transportQualification = input.execution === 'immediate'
-      ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
+    let preparationStarted = false
+    let transportQualification: AgentPromptTransportQualification | undefined
+    try {
+      transportQualification = input.execution === 'immediate'
+        ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
         const run = await this.requireCurrentAgentRun(session)
-        return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal)
+        return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
+          () => { preparationStarted = true })
       }, input.signal) : undefined
+    } catch (error) {
+      if (preparationStarted) throw promptPreparationFailure(error)
+      throw error
+    }
     const delivered = await this.serializeAgentInput(session, async (current, run) => {
       let plan = ordinaryPlan
       if (questionReply) {
