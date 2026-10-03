@@ -1,6 +1,7 @@
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { readAntigravitySessionHistoryPage } from './antigravity-native-history.js'
+import { discoverAntigravityNativeSession, observeAntigravitySessionHistory } from './antigravity-native-session.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { ANTIGRAVITY_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
@@ -61,7 +62,9 @@ export function createAntigravityManagedHookPlan(homeOrWorkspacePath?: string): 
 
 export function createAntigravityProvider(defineAgentProvider: ProviderFactory): AgentProvider {
   const provider = defineAgentProvider({
+    discoverNativeSession: discoverAntigravityNativeSession,
     readSessionHistoryPage: readAntigravitySessionHistoryPage,
+    observeSessionHistory: observeAntigravitySessionHistory,
     planManagedHooks: () => createAntigravityManagedHookPlan(),
     catalog: catalog({
       id: 'antigravity', label: 'Antigravity', executable: 'agy', expectedProcess: 'agy',
