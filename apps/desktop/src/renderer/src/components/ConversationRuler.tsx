@@ -1,5 +1,6 @@
 import { Info } from 'lucide-react'
-import { Fragment, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
+import { useAppStore } from '../store'
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from 'react'
 import type { AgentActivityHistoryProjection } from '@agentmux/core'
 import { describeReadout, describeRulerAxis, describeRulerRange, describeSpan, rulerBand, stepRulerSelection, type RulerReadoutText, type RulerScale } from '../lib/activity-ruler'
 import { formatClock } from '@agentmux/client-ui/conversation-time'
@@ -226,6 +227,13 @@ export function Ruler({
   const selectedText =
     selectedIndex === null ? undefined : describeReadout(scale.readoutOf(selectedIndex), scale.count).summary
 
+  const legendId = useId()
+  const legendAnchor = `--ruler-guide-${legendId.replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const acquireOverlay = useAppStore(state => state.acquireNativeSurfaceOverlay)
+  const releaseOverlay = useAppStore(state => state.releaseNativeSurfaceOverlay)
+  const overlayLease = useRef<(() => void) | null>(null)
+  useEffect(() => () => { overlayLease.current?.(); overlayLease.current = null }, [])
+
   const participants = axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })
 
   return (
@@ -295,13 +303,33 @@ export function Ruler({
         </span> : <span className="activity-ruler__span">Record order</span>}
         <span className="activity-ruler__count">{scale.count} records</span>
       </div>
-      {controls?.(closeReadout)}
-      <span
-        className="activity-ruler__note"
-        title="Loaded records only · Blue: recorded working · Dotted: recorded idle · Amber: awaiting input · Unmarked: unknown · Brighter rail: latest recorded hour · Height: record density"
-      >
-        <Info size={12} />
-      </span>
+      <div className="activity-ruler__actions">
+        {controls?.(closeReadout)}
+        <button type="button" className="activity-ruler__guide-trigger" aria-label="Timeline guide"
+          title="Explain this timeline" popoverTarget={legendId} popoverTargetAction="toggle"
+          style={{ anchorName: legendAnchor }} onClick={closeReadout}><Info size={13} aria-hidden="true" /></button>
+      </div>
+      <div id={legendId} popover="auto" className="activity-ruler__guide" role="dialog"
+        aria-labelledby={`${legendId}-title`} style={{ positionAnchor: legendAnchor }}
+        onToggle={event => {
+          // The browser owns dismissal; hold only the existing native-surface resource lease.
+          if (event.newState === 'open' && !overlayLease.current) {
+            acquireOverlay(); overlayLease.current = releaseOverlay
+          } else if (event.newState === 'closed') {
+            overlayLease.current?.(); overlayLease.current = null
+          }
+        }}>
+        <h3 id={`${legendId}-title`}>Timeline guide</h3>
+        <p className="activity-ruler__guide-scope">Only loaded records · Not the entire session</p>
+        <dl className="activity-ruler__guide-keys">
+          <div><dt><span className="activity-ruler__guide-swatch" data-key="range" data-axis={scale.axis} />Reading range</dt><dd>The conversation currently in view</dd></div>
+          <div><dt><span className="activity-ruler__guide-swatch" data-key="recent" />Brighter rail</dt><dd>The latest recorded hour</dd></div>
+        </dl>
+        <div className="activity-ruler__guide-states" aria-label="Recorded activity">
+          <span><i data-key="working" />Working</span><span><i data-key="idle" />Idle</span><span><i data-key="waiting" />Awaiting input</span>
+        </div>
+        <p className="activity-ruler__guide-footnote">Height shows record density, not execution. Unmarked time is unknown.</p>
+      </div>
       {readout && (readout.body.kind !== 'range' || range) ? (
         <div
           className="activity-ruler__readout"

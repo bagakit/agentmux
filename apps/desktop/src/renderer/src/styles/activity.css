@@ -63,7 +63,6 @@
 .activity-ruler__span-arrow { margin:0 var(--sp-1); opacity: .55; }
 /* 耗时是这一行里唯一"被算出来"的数，给它一档更亮的字色，让扫视先落在它上面。 */
 .activity-ruler__span-elapsed { color: var(--text-2); }
-.activity-ruler__note { grid-row:1; display: inline-flex; color: var(--text-3); cursor: help; }
 /* The whole track is one focusable slider (click + keyboard both resolve to an event). Its focus ring
    must be visible like every other interactive control in the surface. */
 .activity-ruler__track { outline: none; cursor: pointer; }
