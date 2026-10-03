@@ -424,8 +424,8 @@ export function ActivityView({
   const [feedEl, setFeedEl] = useState<HTMLDivElement | null>(null)
   const anchorRef = useRef<ReturnType<typeof conversationReadingAnchor>>(null)
   const returnRef = useRef<HTMLButtonElement>(null)
-  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent) => {
-    if (protectsConversationWindow(feedEl, page, intent === 'earlier')) return false
+  const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal) => {
+    if (protectsConversationWindow(feedEl, page, intent === 'earlier', currentOriginal)) return false
     anchorRef.current = intent === 'earlier' && feedEl ? conversationReadingAnchor(feedEl) : null
     if (intent === 'current') followRef.current = { ...followRef.current, following: true }
     return true

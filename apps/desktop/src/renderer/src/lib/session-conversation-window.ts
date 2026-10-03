@@ -51,17 +51,19 @@ function rangeIntersectsElement(range: Range, el: HTMLElement): boolean {
 }
 
 /** Check real retained nodes before replacing any displayed raw record, including a cross-page Range. */
-export function protectsConversationWindow(viewport: HTMLElement | null, next: AgentSessionHistoryPage, preserveAnchor = true): boolean {
+export function protectsConversationWindow(viewport: HTMLElement | null, next: AgentSessionHistoryPage, preserveAnchor = true, currentOriginal?: AgentSessionHistoryPage): boolean {
   if (!viewport) return false
   const retained = new Set(next.items.map(item => item.id))
+  // Entering the original window can leave unselected context outside that window.
+  const original = currentOriginal ? new Set(currentOriginal.items.map(item => item.id)) : null
   const source = JSON.stringify([next.source.providerId, next.source.nativeSessionId])
   const sameSource = (node: HTMLElement): boolean => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === source
   const anchor = conversationReadingAnchor(viewport)
-  if (preserveAnchor && anchor?.kind === 'record' && !retained.has(anchor.id)) return true
+  if (preserveAnchor && anchor?.kind === 'record' && (!original || original.has(anchor.id)) && !retained.has(anchor.id)) return true
   if (preserveAnchor && anchor?.kind === 'group') {
     const article = [...viewport.querySelectorAll<HTMLElement>('[data-observation-id]')].find(node => node.dataset.observationId === anchor.id)
     const ids: string[] = JSON.parse(article?.closest<HTMLElement>('[data-native-record-ids]')?.dataset.nativeRecordIds ?? '[]')
-    if (ids.length && !ids.some(id => retained.has(id))) return true
+    if (ids.length && (!original || ids.some(id => original.has(id))) && !ids.some(id => retained.has(id))) return true
   }
   const selection = viewport.ownerDocument.defaultView?.getSelection()
   if (!selection || selection.isCollapsed || !selection.rangeCount) return false
@@ -95,7 +97,7 @@ function preserveRecords(page: AgentSessionHistoryPage, before: AgentSessionHist
 
 /** Local navigation only. Recent shared facts/observation, Provider parsing and opaque cursors keep their owners. */
 export function useSessionConversationWindow(reading: ConversationReading | undefined, recent: AgentSessionHistoryPage | null,
-  beforeCommit: (page: AgentSessionHistoryPage, intent: 'current' | 'earlier') => boolean,
+  beforeCommit: (page: AgentSessionHistoryPage, intent: 'current' | 'earlier', currentOriginal?: AgentSessionHistoryPage) => boolean,
   contextItems?: AgentSessionHistoryPage['items']) {
   const currentContext = useMemo(() => recent && contextItems ? { ...recent, items: contextItems } : recent, [recent, contextItems])
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
@@ -152,7 +154,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       const nextWindow: ReadingWindow = { page: nextPage,
         newerOutside: Boolean(baseline && nextPage.items.at(-1)?.id !== baseline.items.at(-1)?.id) }
       if (JSON.stringify(nextPage.items).length * 2 > PAGE_BYTES) throw new Error('This original-sequence window exceeds its byte budget. The displayed records are kept.')
-      if (!live.current.beforeCommit(nextPage, direction)) throw new Error('Move your reading position or clear the selection before changing this window. Your reading position, selected content, records and cursor are kept.')
+      if (!live.current.beforeCommit(nextPage, direction, direction === 'earlier' && !before ? start.recent ?? undefined : undefined)) throw new Error('Move your reading position or clear the selection before changing this window. Your reading position, selected content, records and cursor are kept.')
       update({ key: start.key, window: nextWindow, loading: false, error: null })
     } catch (cause) {
       if (current()) update({ key: start.key, window: before, loading: false, error: presentError(cause) })
