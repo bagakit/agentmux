@@ -847,7 +847,7 @@ export type AgentProviderSessionHistoryObservationContext = Omit<AgentProviderSe
 export type AgentOperationDevice = { hostId: string; deviceId: string; name: string }
 
 /** Supplied by the actual input owner; a native user role does not establish this fact. */
-export const AGENT_MESSAGE_CHANNELS = ['terminal', 'message-tool', 'cli', 'api', 'agent-message', 'reaction'] as const
+export const AGENT_MESSAGE_CHANNELS = ['terminal', 'message-tool', 'cli', 'api', 'agent-message', 'reaction', 'question-reply'] as const
 export type AgentMessageChannel = (typeof AGENT_MESSAGE_CHANNELS)[number]
 
 export type AgentSessionUserMessageSource =

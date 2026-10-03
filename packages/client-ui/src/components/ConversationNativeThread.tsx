@@ -1,4 +1,4 @@
-import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
+import type { AgentSessionHistoryItem, AgentSessionHistoryPage, AgentMuxSessionQuestionReplyInput, AgentSessionQuestionReplyReceipt } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { memo, useMemo, type ReactNode } from 'react'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
@@ -7,12 +7,17 @@ import { speakerOfUserMessage, type DescribeSpeaker } from '../lib/conversation-
 import { ConversationMessage, type ConversationMessageProps } from './ConversationMessage.js'
 import { ConversationRecordSequence, type ConversationProcessRenderer, type ConversationRecordRenderer } from './ConversationRecordSequence.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
+import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyncQuestionCard.js'
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
   'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
+export type ConversationQuestionReply = (input: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'answers' | 'operationId'>) => Promise<AgentSessionQuestionReplyReceipt>
+
 type Props = ReadingProps & {
+  onReplyQuestion?: ConversationQuestionReply
+  renderQuestionNotice?: QuestionNoticeRenderer
   page: AgentSessionHistoryPage
   sessionId: string
   describeSpeaker?: DescribeSpeaker
@@ -27,12 +32,16 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationNativeThread = memo(function ConversationNativeThread({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = true, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = true, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
   if (page.agentSessionId !== sessionId || page.items.length === 0) return null
   const users = new Map(messages.map((message) => [message.rawId, message]))
+  const answers = new Map<string, string>()
+  for (const item of page.items) if (item.kind === 'user-message') {
+    for (const answer of item.questionAnswers ?? []) answers.set(answer.questionId, answer.answer)
+  }
   const seen = new Set<string>()
   const records = page.items.filter((item) => {
     if (seen.has(item.id)) return false
@@ -62,6 +71,12 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
           {...reading} />
       return <div key={recordId} className="conversation-native-thread__record" data-native-record-id={item.id}>
         {wrapBody ? wrapBody(body) : body}
+        {item.questionRequest ? <AgentAsyncQuestionCard key={JSON.stringify([sessionId, recordId])} request={item.questionRequest} recordedAnswers={answers}
+          {...(onReplyQuestion && item.turnId ? { onSubmit: (selected, operationId) => onReplyQuestion({
+            source: { ...page.source }, turnId: item.turnId!, recordId: item.id, answers: selected, operationId }) } : {})}
+          {...(renderQuestionNotice ? { renderNotice: renderQuestionNotice } : {})} /> : null}
+        {item.questionDiagnostic ? renderQuestionNotice ? renderQuestionNotice(item.questionDiagnostic)
+          : <p className="agent-interaction__error" role="status">{item.questionDiagnostic.message}</p> : null}
       </div>
 
   }

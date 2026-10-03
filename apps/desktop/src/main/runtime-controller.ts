@@ -10,6 +10,7 @@ import {
   type AgentPromptCondition,
   type AgentPromptExecution,
   type AgentMessageChannel,
+  type AgentSessionQuestionReplyReceipt,
   type AgentMuxAgentMessageInput,
   type AgentMuxRpcCallContext,
   runtimeStorageUsage,
@@ -55,6 +56,7 @@ import type {
   SessionSnapshot,
   SessionHistoryPageOptions,
   SessionHistoryReference,
+  SessionQuestionReplyInput,
   TerminalLaunchInput
 } from '../shared/contracts.js'
 import { runInterruptionFact, SESSION_EVENT_CHANNEL } from '../shared/contracts.js'
@@ -1386,6 +1388,22 @@ export class RuntimeController {
           ...(runState ? { runState } : {})
         })
       }
+    })
+  }
+
+  async replyQuestion(control: AgentSessionControl, input: SessionQuestionReplyInput, config: AppConfig): Promise<AgentSessionQuestionReplyReceipt> {
+    const condition = validateAgentPromptCondition(input)
+    const hostId = control.hostId, agentSessionId = control.agentSessionId
+    if (control.run.runId !== condition.expectedRun.runId) throw new AgentMuxError('Question reply targets another Run.', 'STALE_AGENT_SESSION')
+    const original = { source: { ...input.source }, turnId: input.turnId, recordId: input.recordId,
+      answers: input.answers.map(answer => ({ ...answer })), operationId: input.operationId,
+      ...(input.allowUncertainTurn === undefined ? {} : { allowUncertainTurn: input.allowUncertainTurn }) }
+    return await this.trackHostLifecycleOperation(hostId, async () => {
+      const client = await this.connectedClient(hostId)
+      const executor = requireSessionExecutor(config, client.agentSession(agentSessionId))
+      return await client.replySessionQuestion({ ...condition, ...original, agentSessionId,
+        commandOverride: executor.command, args: executor.args, env: executor.env,
+        authorHuman: true, sourceChannel: 'question-reply' })
     })
   }
 
