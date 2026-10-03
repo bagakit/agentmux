@@ -154,8 +154,18 @@
 .survey-sidebar-actions .survey-new-page { flex: 1; justify-content: center; gap: 6px; min-width: 0; }
 .survey-notebooks { display: flex; flex-direction: column; gap: 2px; padding-bottom: 10px; margin-bottom: 8px; border-bottom: 1px solid var(--line-soft); }
 .survey-notebook-item { width: 100%; }
-.survey-notebook-count { margin-left: auto; font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
-.survey-notebook-pages { display: flex; flex-direction: column; margin: 2px 0 4px 16px; border-left: 1px solid var(--line-soft); padding-left: 8px; gap: 2px; }
+.survey-page-list[data-notebook-view="true"] { overflow: hidden; }
+.survey-notebook-navigation { display: flex; flex: 1; flex-direction: column; min-height: 0; gap: var(--sp-2); }
+.survey-notebook-back { display: flex; flex: none; align-items: center; gap: var(--sp-2); min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; text-align: left; font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.survey-notebook-back:hover { background: var(--wash-1); color: var(--text); }
+.survey-notebook-heading { display: flex; flex: none; align-items: center; min-width: 0; border-bottom: 1px solid var(--survey-edge); padding-bottom: var(--sp-2); }
+.survey-notebook-heading > .survey-notebook-item { flex: 1; color: var(--text); }
+.survey-notebook-heading .survey-notebook-item strong { font-weight: 600; }
+.survey-notebook-heading > .survey-item-options { flex: none; width: 28px; height: 28px; padding: 0; }
+.survey-notebook-new-page { display: flex; flex: none; align-items: center; gap: var(--sp-2); min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 0; border-radius: var(--radius-sm); background: var(--wash-1); color: var(--text-2); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.survey-notebook-new-page:hover { background: var(--wash-2); color: var(--text); }
+.survey-notebook-pages { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; gap: 2px; }
+.survey-notebook-pages > .survey-notebook-page-row { flex: none; }
 .survey-notebook-page { display: flex; align-items: center; gap: 7px; padding: 7px 8px; min-width: 0; border: 0; border-radius: 7px; background: transparent; color: var(--text-2); text-align: left; font-size: 12px; }
 .survey-notebook-page svg { flex-shrink: 0; opacity: .6; }
 .survey-notebook-page span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -163,7 +173,6 @@
 .survey-notebook-page[data-selected="true"], .survey-notebook-item[data-selected="true"] { background: var(--surface-3); color: var(--text); }
 .survey-notebook-home { width: 100%; max-width: 760px; margin: 0 auto; padding: clamp(34px, 7vh, 74px) clamp(24px, 6vw, 72px); overflow: auto; box-sizing: border-box; }
 .notebook-cover-mark { display: grid; place-items: center; width: 58px; height: 66px; border: 1px solid color-mix(in srgb, var(--text-2) 20%, transparent); border-radius: 10px 15px 15px 10px; background: linear-gradient(145deg, color-mix(in srgb, var(--text) 8%, transparent), transparent); color: var(--text-2); box-shadow: inset 4px 0 0 color-mix(in srgb, var(--text) 6%, transparent); margin-bottom: 25px; }
-.notebook-eyebrow { font-size: 10px; letter-spacing: .14em; color: var(--text-3); }
 .survey-notebook-home h1 { margin: 8px 0 12px; font-size: clamp(25px, 3vw, 34px); font-weight: 550; letter-spacing: -.035em; color: var(--text); }
 .survey-notebook-home header p { margin: 0; color: var(--text-3); font-size: 13px; line-height: 1.7; }
 .notebook-create-page { display: inline-flex; align-items: center; gap: 7px; margin-top: 25px; padding: 8px 13px; font-size: 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--wash-2); color: var(--text); }

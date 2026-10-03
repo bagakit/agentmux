@@ -1440,6 +1440,116 @@ async function startNotebookWithPage() {
   await dom.click('.notebook-create-page')
 }
 
+it('inherits the selected Notebook through the real generic Launcher Note action', async () => {
+  const files = noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  const state = useAppStore.getState(), bookId = state.surveyNotebookId!, page = Object.values((await api.notebooks.read()).pages)[0]!
+  const workspaceId = page.resource.workspaceId, groupId = state.layouts[workspaceId]!.activeGroupId
+  const tabId = state.openLauncher({ workspaceId, displayWorkspaceId: workspaceId, tabGroupId: groupId, zoneId: page.workface!.zoneId, reveal: false })!
+  const tab = useAppStore.getState().tabs[tabId]!, reference = { tabId, regionId: tab.layout.activeRegionId }
+  await act(async () => { state.setSurveyNotebook(bookId); state.setSurveyZoneSelection({ zoneId: page.workface!.zoneId, selection: [reference], active: reference }) })
+  await vi.waitFor(() => expect(dom.container.querySelector('.global-survey-surface [aria-label="Create blank note"]')).not.toBeNull())
+  await dom.click('.global-survey-surface [aria-label="Create blank note"]')
+  await vi.waitFor(async () => expect(Object.values((await api.notebooks.read()).pages)).toHaveLength(2))
+  const saved = Object.values((await api.notebooks.read()).pages)
+  expect(saved.every(member => member.notebookId === bookId)).toBe(true)
+  expect(savedNotes().at(-1)?.notebook).toEqual({ notebookId: bookId })
+  expect(files.size).toBe(2)
+  // Same-day names use the original file owner's one conflict followed by its next available name.
+  expect(api.files.write).toHaveBeenCalledTimes(3)
+  expect(dom.container.querySelectorAll('.survey-notebook-page')).toHaveLength(2)
+  expect(dom.container.querySelector('.survey-navigation [data-survey-zone-id]')).toBeNull(); healthy()
+})
+
+it('keeps Notebook navigation scoped to its directory and returns to the original Survey overview without changing content', async () => {
+  const files = new Map<string, string>()
+  vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { files.set(input.path, input.content); return { status: 'written', revision: 'same-note' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: files.get(path)!, revision: 'same-note' } }))
+  await renderApp(); await enterSurvey(); await choose()
+  const browsers = Object.values(useAppStore.getState().tabs).flatMap(workbenchSurfaces).filter(surface => surface.kind === 'browser')
+  await dom.click('[aria-label="New notebook"]')
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-notebook-navigation')).not.toBeNull())
+  const bookId = useAppStore.getState().surveyNotebookId!, navigation = dom.container.querySelector('.survey-navigation')!
+  expect(navigation.querySelectorAll('[data-survey-zone-id]')).toHaveLength(0)
+  expect(navigation.querySelector('[aria-label="New webpage"]')).toBeNull()
+  expect(navigation.querySelector('[aria-label="Current exploration actions"]')).toBeNull()
+  expect(navigation.textContent).toContain('No pages yet')
+  await dom.click('[aria-label="New page in Untitled notebook"]'); await readyNoteRegion()
+  await renameNotebookField('Page title', 'A clear notebook page')
+  await vi.waitFor(() => expect(navigation.querySelector('.survey-notebook-page')?.textContent).toBe('A clear notebook page'))
+  const saved = structuredClone(await api.notebooks.read()), originalRegion = useAppStore.getState().surveyZoneSelection!.active!, noteBody = [...files.values()][0]!
+  const writeCount = vi.mocked(api.files.write).mock.calls.length
+  expect(navigation.querySelector('.survey-notebook-page')?.getAttribute('aria-current')).toBe('page')
+  await dom.click('[aria-label="Back to Survey"]')
+  expect(useAppStore.getState().surveyNotebookId).toBeNull()
+  expect(navigation.querySelectorAll('[data-survey-zone-id]').length).toBeGreaterThan(0)
+  expect(navigation.querySelector('[aria-label="New webpage"]')).not.toBeNull()
+  expect(navigation.querySelector('.survey-notebook-page')).toBeNull()
+  const book = navigation.querySelector<HTMLButtonElement>(`[data-notebook-id="${bookId}"]>.survey-notebook-item`)!
+  await act(async () => book.click())
+  expect(navigation.querySelectorAll('[data-survey-zone-id]')).toHaveLength(0)
+  expect(navigation.querySelector('.survey-notebook-page')?.textContent).toBe('A clear notebook page')
+  await dom.click('.survey-notebook-page')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyNoteId).toBe(Object.keys(saved.pages)[0]))
+  expect(useAppStore.getState().surveyZoneSelection!.active).toEqual(originalRegion)
+  expect(await api.notebooks.read()).toEqual(saved)
+  expect(vi.mocked(api.files.write).mock.calls).toHaveLength(writeCount)
+  expect([...files.values()][0]).toBe(noteBody)
+  expect(Object.values(useAppStore.getState().tabs).flatMap(workbenchSurfaces).filter(surface => surface.kind === 'browser')).toEqual(browsers)
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
+it('keeps an unregistered Note workface reachable without claiming it belongs to 随手记 and avoids duplicating confirmed pages', async () => {
+  await renderApp(); await enterSurvey()
+  const state = useAppStore.getState(), created = await state.createWorkbenchZone({ workspaceId: workspace.id, spaceIds: [] })
+  const note = { kind: 'file' as const, regionId: 'unregistered-note-region', workspaceId: workspace.id, path: 'Unfiled.note.json' }
+  const original = createWorkbenchTab('unregistered-note-tab', note, 'An existing note')
+  original.space = { zoneId: created.zone.zoneId, spaceId: directoryIdentity(workspace.hostId, workspace.path) }
+  await act(async () => { useAppStore.setState({ tabs: { ...state.tabs, [original.id]: original } }); useAppStore.getState().setSurveyZoneCollected(created.zone.zoneId, true) })
+  const selectBook = dom.container.querySelector<HTMLButtonElement>('[data-notebook-id="quick-notes"]>.survey-notebook-item')!
+  expect(dom.container.querySelector(`[data-survey-zone-id="${created.zone.zoneId}"]`)).not.toBeNull()
+  await act(async () => selectBook.click())
+  expect(dom.container.querySelector('.survey-navigation [data-survey-zone-id]')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="随手记 pages"]')?.textContent).toBe('No pages yet')
+  expect((await api.notebooks.read()).pages).toEqual({})
+  await dom.click('[aria-label="Back to Survey"]')
+  expect(dom.container.querySelector(`[data-survey-zone-id="${created.zone.zoneId}"]`)).not.toBeNull()
+  await act(async () => changeNotebook({ kind: 'register', notebookId: 'quick-notes', noteId: 'existing-note', title: 'An existing note',
+    resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: note.path }, workface: { zoneId: created.zone.zoneId, workspaceId: workspace.id } }))
+  expect(dom.container.querySelector(`[data-survey-zone-id="${created.zone.zoneId}"]`)).toBeNull()
+  expect(useAppStore.getState().tabs[original.id]).toEqual(original)
+  const quick = dom.container.querySelector<HTMLButtonElement>('[data-notebook-id="quick-notes"]>.survey-notebook-item')!
+  await act(async () => quick.click())
+  expect(dom.container.querySelector('[aria-label="随手记 pages"]')?.textContent).toContain('An existing note')
+  healthy()
+})
+
+it('keeps every existing Note Region on an ambiguous directory reopen rather than creating another Tab', async () => {
+  const files = new Map<string, string>()
+  vi.spyOn(api.files, 'write').mockImplementation(async (_id, input) => { files.set(input.path, input.content); return { status: 'written', revision: 'same-note' } })
+  vi.spyOn(api.files, 'read').mockImplementation(async (_id, path) => ({ status: 'read', document: { path, content: files.get(path)!, revision: 'same-note' } }))
+  await renderApp(); await enterSurvey(); await startNotebookWithPage()
+  const state = useAppStore.getState(), page = Object.values((await api.notebooks.read()).pages)[0]!
+  const selected = state.surveyZoneSelection!.active!, tab = state.tabs[selected.tabId]!, region = tab.regions[selected.regionId]!
+  const duplicated = addWorkbenchRegion(tab, selected.regionId, 'right', { ...region, regionId: 'second-note-location' })
+  await act(async () => useAppStore.setState({ tabs: { ...state.tabs, [tab.id]: duplicated } }))
+  await dom.click(`[aria-label="Notebook directory: ${(await api.notebooks.read()).notebooks[page.notebookId]!.name}"]`)
+  const originalTabs = useAppStore.getState().tabs, catalog = await api.notebooks.read()
+  await dom.click('.survey-notebook-page')
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-error')?.textContent).toContain('already open in multiple locations'))
+  expect(useAppStore.getState().tabs).toEqual(originalTabs)
+  expect(await api.notebooks.read()).toEqual(catalog)
+  expect(api.files.write).toHaveBeenCalledTimes(1)
+  await vi.waitFor(async () => { await act(async () => {}); expect(dom.container.querySelector('.global-survey-surface .note-editor .ProseMirror')).not.toBeNull() })
+  const secondRegion = dom.container.querySelector<HTMLElement>('.global-survey-surface [data-workbench-region-id="second-note-location"]')!
+  expect(secondRegion).not.toBeNull()
+  await act(async () => secondRegion.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+  await dom.click('.survey-notebook-page')
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-error')).toBeNull())
+  expect(useAppStore.getState().surveyZoneSelection?.active).toEqual({ tabId: tab.id, regionId: 'second-note-location' })
+  expect(useAppStore.getState().tabs).toEqual(originalTabs)
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
 it('creates an empty Notebook from the left and keeps 随手记 visible without creating any Note or Browser', async () => {
   const write = vi.spyOn(api.files, 'write')
   await renderApp(); await enterSurvey()

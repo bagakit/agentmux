@@ -250,7 +250,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     intent.current += 1
     useAppStore.getState().setSurveyNotebook(page.notebookId, page.noteId)
     setError(null)
-    try { await openNotebookPage(page, onSelectReference) } catch (cause) { setError(presentError(cause)) }
+    try { await openNotebookPage(page, onSelectReference, selection?.active) } catch (cause) { setError(presentError(cause)) }
   }
 
   async function openBrowser(input = 'about:blank', newItem = false): Promise<void> {
@@ -407,28 +407,33 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <button type="button" className="survey-icon-button" aria-label={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} title={sidebarCollapsed ? 'Show Survey items' : 'Hide Survey items'} onClick={() => setSidebarCollapsed(!sidebarCollapsed)}>{sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}</button>
       </div>
       <aside className="survey-tabs" aria-label="Survey items" hidden={sidebarCollapsed} inert={sidebarCollapsed} data-survey-workspace-id={resourceWorkspaceId ?? undefined}>
-        <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New webpage" disabled={opening} onClick={() => void openBrowser('about:blank', true)}>
+        {!activeNotebook ? <div className="survey-sidebar-actions"><button type="button" className="survey-new-page" aria-label="New webpage" title="New webpage" disabled={opening} onClick={() => void openBrowser('about:blank', true)}>
           <Globe2 size={14} /><span>Webpage</span>
-        </button><button type="button" className="survey-new-page" aria-label="New notebook" title="New notebook" disabled={opening} onClick={() => void newNotebook()}><NotebookPen size={14} /><span>Notebook</span></button></div>
-        <div className="survey-page-list">
-          <NotebookNavigation notebooks={notebooks} pages={pages} selectedId={notebookId} selectedNoteId={noteId} onSelect={chooseNotebook} onOpen={page => void showNotebookPage(page)} query={pageQuery} onQuery={setPageQuery} onCreateChild={page => { setPageQuery(''); void openNote(false, false, true, page.noteId) }} />
+        </button><button type="button" className="survey-new-page" aria-label="New notebook" title="New notebook" disabled={opening} onClick={() => void newNotebook()}><NotebookPen size={14} /><span>Notebook</span></button></div> : null}
+        <div className="survey-page-list" data-notebook-view={!!activeNotebook}>
+          <NotebookNavigation notebooks={notebooks} pages={pages} selectedId={notebookId} selectedNoteId={noteId} onSelect={chooseNotebook} onOpen={page => void showNotebookPage(page)} query={pageQuery} onQuery={setPageQuery} onCreateChild={page => { setPageQuery(''); void openNote(false, false, true, page.noteId) }}
+            onBack={() => { intent.current += 1; useAppStore.getState().setSurveyNotebook(null); setSelection(null); setError(null) }}
+            onCreate={() => void openNote(false, false, true)} pending={opening} actions={options} />
+          {!activeNotebook ? <>
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
             <span className="survey-relation-notice" role="status">Original source is not confirmed. Its reference is kept.</span>
           </div>)}
-          {items.filter(zone => !notebooks.some(book => book.workface?.zoneId === zone.zoneId)).map(zone => {
+          {items.filter(zone => !notebooks.some(book => book.workface?.zoneId === zone.zoneId) && !pages.some(page => page.workface?.zoneId === zone.zoneId &&
+            (tabsByZone.get(zone.zoneId) ?? []).length > 0 && (tabsByZone.get(zone.zoneId) ?? []).every(tabId => !!tabs[tabId] && workbenchSurfaces(tabs[tabId]!).every(surface => surface.kind === 'file' && pages.some(member => member.resource.workspaceId === surface.workspaceId && member.resource.path === surface.path))))).map(zone => {
             const status = activity(zone)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
               activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
               onRename={name => { const applied = useAppStore.getState().setSurveyExplorationName(zone.zoneId, name); if (!applied) setError('The exploration source is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
           })}
+          </> : null}
         </div>
       </aside>
-      <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
+      {!activeNotebook || sidebarCollapsed ? <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
         {activeNotebook ? <button className="survey-tab-view" onClick={() => chooseNotebook(activeNotebook.notebookId)}><NotebookPen size={14} /><span>Pages</span></button> : options}
         {activeNotebook ? options : null}
         {activeNotebook ? <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, false, true)}><Plus size={14} /><span>New page</span></button> : selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Write a note alongside this page' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
-      </div>
+      </div> : null}
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
         hidden={sidebarCollapsed}
         aria-orientation="vertical" aria-valuemin={minWidth} aria-valuemax={maxWidth} aria-valuenow={effectiveSidebarWidth} onMouseDown={onResizeStart}
@@ -445,7 +450,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         {creationNotice ? <p className="survey-relation-notice" role="status">{creationNotice}{noteRecovery ? <button className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Retry Notebook registration</button> : null}</p> : null}
         {notebookRecoveries.length ? <p className="survey-history-recovery" role="status"><span>History update pending. Your notes are saved.</span><button className="note-text-button" disabled={recoveringHistory} onClick={() => void recoverHistory()}>Retry history</button></p> : null}
         {libraryIssue && !creationNotice ? <p className="survey-relation-notice" role="status">Notebook directory is unconfirmed. Saved pages and browsing are kept. <button onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh</button><details><summary>Details</summary>{libraryIssue}</details></p> : null}
-        {activeNotebook && !selection ? <NotebookHome query={pageQuery} onQuery={sidebarCollapsed ? setPageQuery : undefined} notebook={activeNotebook} pages={pages.filter(page => page.notebookId === activeNotebook.notebookId)} pending={opening} onCreate={() => void openNote(false, false, true)} onOpen={page => void showNotebookPage(page)} /> : !selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
+        {activeNotebook && !selection ? <NotebookHome query={pageQuery} onQuery={sidebarCollapsed ? setPageQuery : undefined} navigationVisible={!sidebarCollapsed} notebook={activeNotebook} pages={pages.filter(page => page.notebookId === activeNotebook.notebookId)} pending={opening} onCreate={() => void openNote(false, false, true)} onOpen={page => void showNotebookPage(page)} /> : !selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
           <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
             <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
             <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><button type="button" className="survey-start-note" disabled={opening || !workspace} onClick={() => void newNotebook()}><NotebookPen size={16} /><span>Start a notebook</span></button>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}

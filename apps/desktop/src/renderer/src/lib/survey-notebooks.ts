@@ -8,6 +8,7 @@ import { surveyInitialZoneSelection, surveySelectReference } from './survey-work
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { readNoteDocument } from '../../../shared/note-document'
 import type { WorkbenchProjection, WorkbenchProjectionSelection } from './workbench-projection'
+import { sameWorkbenchProjectionSelection } from './workbench-projection'
 
 function catalogNow() {
   const state = useAppStore.getState()
@@ -23,29 +24,38 @@ export async function prepareNotebookWorkface(notebook: Notebook, workspaceId: s
   return workface
 }
 /** Closing a page never loses this resource. Reopening uses the same file and original workbench. */
-export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void): Promise<boolean> {
+export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void, selectedReference?: WorkbenchProjectionSelection | null): Promise<boolean> {
   const before = useAppStore.getState()
   if (!notebookPageResourceMatches(page, before.config)) throw new Error('The Note’s original Host or folder is unavailable. Its page and history are kept; reconnect this resource.')
   const catalog = catalogNow(), zone = catalog.zones.find(z => z.zoneId === page.workface?.zoneId)
   if (!zone || zone.workspaceId !== page.resource.workspaceId) throw new Error('This page’s work surface is unavailable. Its saved Note and history remain in this Notebook.')
   const layout = before.layouts[page.resource.workspaceId]
   if (!layout) throw new Error('This Note’s work surface is restoring. Its saved page is kept; try opening it again.')
-  const groupId = layout.activeGroupId, heldBook = before.surveyNotebookId, heldNote = before.surveyNoteId
+  const matches = catalog.locations.filter(location => {
+    const region = before.tabs[location.tabId]?.regions[location.regionId]
+    return location.zoneId === zone.zoneId && region?.kind === 'file' && region.workspaceId === page.resource.workspaceId && region.path === page.resource.path
+  })
+  const inCurrentGroup = matches.filter(location => location.displayWorkspaceId === page.resource.workspaceId && location.groupId === layout.activeGroupId)
+  const selectedMatches = selectedReference ? matches.filter(location => sameWorkbenchProjectionSelection(location, selectedReference)) : []
+  const reference = selectedMatches.length === 1 ? selectedMatches[0] : inCurrentGroup.length === 1 ? inCurrentGroup[0] : matches.length === 1 ? matches[0] : undefined
+  const groupId = reference?.groupId ?? layout.activeGroupId, displayWorkspaceId = reference?.displayWorkspaceId ?? page.resource.workspaceId
+  const heldBook = before.surveyNotebookId, heldNote = before.surveyNoteId
   const initial = surveyInitialZoneSelection(catalog, zone.zoneId, before.layouts, before.tabs, page.resource.workspaceId)
   before.setSurveyZoneSelection(initial)
   const heldSelection = useAppStore.getState().surveyZoneSelection
   const observed = await api.files.read(page.resource.workspaceId, page.resource.path)
   const read = observed.status === 'read' ? readNoteDocument(observed.document.content) : null
   if (read?.status !== 'valid' || read.note.noteId !== page.noteId) throw new Error('The original Note file could not be confirmed. Its directory entry and sources are kept; reconnect or restore this same file.')
+  if (matches.length && !reference) throw new Error('This page is already open in multiple locations. Choose its Tab in the work surface, then reopen from this Notebook. Your page and all locations are kept.')
   const current = useAppStore.getState()
   if (current.surveyNotebookId !== heldBook || current.surveyNoteId !== heldNote || current.surveyZoneSelection !== heldSelection) return false
   const projection: WorkbenchProjection = { entity: { kind: 'zone', zoneId: zone.zoneId }, presentationId: 'survey-workbench',
-    displayWorkspaceId: page.resource.workspaceId, catalog: catalogNow(), selection: [], onSelect(reference) {
+    displayWorkspaceId, catalog: catalogNow(), selection: [], onSelect(reference) {
       const now = useAppStore.getState()
       if (now.mainSurface === 'survey' && now.surveyNotebookId === heldBook && now.surveyNoteId === heldNote && now.surveyZoneSelection === heldSelection)
         { now.setSurveyZoneSelection(surveySelectReference(initial, reference)); onSelectReference?.(reference) }
     } }
   return current.openFile(page.resource.path, groupId, undefined, page.resource.workspaceId, true,
-    { displayWorkspaceId: page.resource.workspaceId, space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
+    { displayWorkspaceId, ...(reference ? { reference } : {}), space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
       resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, projection })
 }
