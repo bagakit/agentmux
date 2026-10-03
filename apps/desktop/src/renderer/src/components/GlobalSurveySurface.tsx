@@ -1,7 +1,7 @@
 import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NotebookHome, NotebookNavigation, NotebookCreateDialog } from './SurveyNotebook'
 import { ConfirmationDialog } from './ConfirmationDialog'
-import { useNotebookOperation } from './NotebookPageDetails'
+import { useNotebookOperation } from './NotebookOperation'
 import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
 import { openNotebookPage, prepareNotebookWorkface } from '../lib/survey-notebooks'
 import { surveyExplorationName } from '../lib/survey-exploration-name'

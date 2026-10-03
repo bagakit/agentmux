@@ -3,7 +3,11 @@ import { emptyNotebookState, applyNotebookChange } from '@agentmux/core/notebook
 import { changeNotebook, useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 // @vitest-environment happy-dom
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
+import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -94,6 +98,7 @@ const key = documentKey(workspace.id, file.path)
 let savedStorage: string | null
 let savedLauncherStorage: string | null
 let css: HTMLStyleElement
+let nameOwnerCleanup: (() => Promise<void>) | undefined
 
 beforeEach(() => {
   let catalog = emptyNotebookState()
@@ -133,13 +138,36 @@ beforeEach(() => {
   css.textContent = readFileSync(resolve('apps/desktop/src/renderer/src/styles/survey.css'), 'utf8')
   document.head.append(css)
 })
-afterEach(() => {
+afterEach(async () => {
+  await nameOwnerCleanup?.(); nameOwnerCleanup = undefined
   vi.useRealTimers()
   css?.remove(); vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true)
   if (savedLauncherStorage === null) localStorage.removeItem('agentmux-launcher'); else localStorage.setItem('agentmux-launcher', savedLauncherStorage)
   if (savedStorage === null) localStorage.removeItem('agentmux-workbench-v1'); else localStorage.setItem('agentmux-workbench-v1', savedStorage)
 })
 async function renderApp() { await dom.render(<DesktopClientUiProvider><App /></DesktopClientUiProvider>) }
+/** Name writes require the production durable owner, not the Browser preview transport. */
+async function realNameOwner() {
+  const directory = await mkdtemp(join(tmpdir(), 'amux-survey-name-'))
+  const owner = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
+  const state = useAppStore.getState()
+  await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph(state, []) })
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
+  vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => owner.mutateDisplayLabel(input, {
+    actor: { kind: 'device', id: 'survey-test-user', verified: true }, source: 'desktop-ui',
+    entryPoint: 'spatial:renameLabel', transport: 'electron-ipc', location: { windowId: 'survey-test' }
+  }))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
+  vi.spyOn(api.config, 'get').mockResolvedValue(state.config!)
+  const snapshot = await api.sessions.snapshot()
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ ...snapshot, sessions: state.sessions, recoveryCandidates: [] })
+  useAppStore.setState({ nameLabels: {}, nameAuthorityRevision: 0, nameAcknowledgementRevision: 0,
+    restoredWorkbench: { tabs: state.tabs, layouts: state.layouts } })
+  const dispose = await realInitialize()
+  nameOwnerCleanup = async () => { await useAppStore.getState().retryWorkbenchSave(); dispose(); await rm(directory, { recursive: true, force: true }) }
+}
 function savedNotes() { return Object.values(useLauncherState.getState().drafts).flatMap(draft => draft.noteCreation ? [draft.noteCreation] : []) }
 function pendingNoteReference() { const receipt = savedNotes().at(-1)!; expect(receipt.launcher).toBeDefined(); return receipt.launcher! }
 function noteTransport(status: 'written' | 'unknown' | 'error' = 'written', waiting?: Promise<void>) {
@@ -903,16 +931,21 @@ it('flat list exposes one Item-options menu in either sidebar state and keeps th
 
 
 it('renames an exploration through its real menu without renaming or rebuilding any original Tab', async () => {
+  await realNameOwner()
   await renderApp(); await enterSurvey(); await choose()
   const zoneId = originalZoneId(), before = useAppStore.getState()
+  const originalView = slot().querySelector('.retained-workbench-view')!
+  expect(originalView).not.toBeNull()
   await openItemOptions()
   const rename = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Rename exploration')!
   expect(rename).not.toBeNull(); await act(async () => rename.click())
   const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Exploration name"]')!
   await fill(input, 'Understanding the workflow'); await submit(input.closest('form')!)
-  expect(useAppStore.getState().surveyExplorationNames).toEqual({ [zoneId]: 'Understanding the workflow' })
+  await vi.waitFor(() => expect(useAppStore.getState().surveyExplorationNames).toEqual({ [zoneId]: 'Understanding the workflow' }))
   expect(dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent).toBe('Understanding the workflow')
-  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  // The real owner canonicalizes model objects on a watch read; the same mounted view and contents remain.
+  expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().layouts).toEqual(before.layouts)
+  expect(slot().querySelector('.retained-workbench-view')).toBe(originalView)
   expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection); healthy()
 })
 
@@ -1396,9 +1429,11 @@ it('opens a Note Region from collapsed navigation without changing foreign displ
 })
 
 it('uses the existing Region menu to show the same Note alone and reopens its canonical file without copying blocks', async () => {
-  noteTransport(); await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
+  noteTransport(); await realNameOwner(); await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageA.regionId)
   const originalTitle = dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent
+  const originalPage = useAppStore.getState().tabs[mixed.id]!.regions[pageA.regionId]!
   await dom.click('[aria-label="Add note to this exploration"]'); const ref = await readyNoteRegion(), receipt = savedNotes().at(-1)!
+  await vi.waitFor(() => expect(useAppStore.getState().surveyExplorationNames[originalZoneId()]).toBe(originalTitle))
   const region = [...dom.container.querySelectorAll<HTMLElement>('.global-survey-surface [data-workbench-region-id]')].find(node => node.dataset.workbenchRegionId === ref.regionId)!
   await act(async () => region.dispatchEvent(new MouseEvent('contextmenu', {bubbles:true,clientX:10,clientY:10})))
   const promote = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.includes('Move to New Tab'))!
@@ -1406,7 +1441,7 @@ it('uses the existing Region menu to show the same Note alone and reopens its ca
   const current = useAppStore.getState(), shown = current.surveyZoneSelection!.active!, note = current.tabs[shown.tabId]!.regions[shown.regionId]!
   expect(dom.container.querySelector('.survey-item-row[data-selected="true"] strong')!.textContent).toBe(originalTitle)
   expect(shown.regionId).toBe(ref.regionId); expect(shown.tabId).not.toBe(mixed.id); expect(note).toMatchObject({kind:'file',path:receipt.path})
-  expect(Object.keys(current.tabs[shown.tabId]!.regions)).toHaveLength(1); expect(current.tabs[mixed.id]!.regions[pageA.regionId]).toBe(pageA)
+  expect(Object.keys(current.tabs[shown.tabId]!.regions)).toHaveLength(1); expect(current.tabs[mixed.id]!.regions[pageA.regionId]).toEqual(originalPage)
   const originalDocument = current.documents[documentKey(workspace.id, receipt.path)]!, parsed = JSON.parse(originalDocument.content)
   expect(parsed.noteId).toBe(receipt.noteId)
   await act(async () => { await current.openFile(receipt.path, shown.groupId, undefined, workspace.id) })
