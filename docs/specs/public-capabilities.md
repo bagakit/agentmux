@@ -40,6 +40,8 @@
 | Topics 分类内容、主题发现与归属转移 | [Topic 公共类型与严格 codec](../../packages/core/src/public-rpc-topics.ts)；分类内容由 [Host 内容 owner](../../apps/desktop/src/main/topic-knowledge.ts)持有，分类关系由 [Topic 空间适配器](../../apps/desktop/src/main/topic-spatial-owner.ts)提交同一 Core 图 | Main 注入 `AgentMuxRpcServiceOptions.topics`；GUI 经 trusted IPC／preload 的 `topics.call` 消费同一 owner。默认语义 Host 将 CLI 的 typed `topic` 调用经已绑定的 Desktop business transport 转发至原内容 owner，沿同一参数、调用身份与结果校验；没有本地 owner 或已绑定转发端口时如实未知。创建与转移不隐式启动 Agent |
 | Goal／Demand 内容、确认与接受 | [`openDemandStore`](../../packages/demand/src/demand-store.ts)、[Goal 类型与 readiness helpers](../../packages/demand/src/goals.ts) | Main IPC 的 Demand handlers 与 Renderer Goal 操作；Agent proposal 不代替人类确认／接受 |
 
+原 Zone 文件的已保存正文沿[文件读取类型与严格 codec](../../packages/core/src/public-rpc-files.ts)公开。`file read` CLI → 公共服务 → Main 注入的 [FileReadOwner](../../apps/desktop/src/main/file-read-owner.ts) 解析准确 Zone／资源，再委托原 [WorkspaceFiles](../../apps/desktop/src/main/workspace-files.ts)；GUI 经 trusted `files:readPublic`／preload 消费同一 owner。结果保留完整原 revision、Host／Workspace／Zone 与原读取状态；观察未知不冒文件不存在，也不另建 Memory 存储。
+
 输入应用、Prompt 投递、任务接受、Agent 状态和工作完成是不同事实，准确边界见 Core 接入说明与 owning 设计。初始 Prompt 的投递事实消费 `createAgentWithDelivery` 的同次返回；缺失回执不自行重启、重发或换目标。
 
 ## CLI 与服务的当前来源

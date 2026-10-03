@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
+import { parseFileReadCommand } from './agentmux-cli-files.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
 import type { AgentMuxRpcParams } from './public-rpc.js'
@@ -270,6 +271,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     return { ...operation(f), target: tab === 'self' ? { kind: 'self' } : { kind: 'tab', tabId: tab }, mode: f.values.has('--preset') ? { kind: 'preset', preset: value(f, '--preset') } : { kind: f.booleans.has('--balance') ? 'balance' : 'active-first' } }
   }),
   command('file.open', '--path PATH --zone ID [--space ID] [--display-workspace ID --group ID] [--focus]', 'Open a Zone-relative file through its existing document owner.', { '--path': 'data', '--zone': 'data', '--space': 'data', '--display-workspace': 'data', '--group': 'data', '--focus': 'boolean', ...OP }, f => ({ ...operation(f), path: value(f, '--path', true), ...selector(f), focus: focus(f) }), SAVE_NOTICE),
+  command('file.read', '--zone ID --path PATH --host ID --workspace ID --workspace-path PATH [--space ID]', 'Read the original Zone-relative file with its exact resource and saved revision.',
+    { '--zone': 'data', '--path': 'data', '--host': 'data', '--workspace': 'data', '--workspace-path': 'data', '--space': 'data' },
+    f => parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,
+      ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}) }) as unknown as Record<string, unknown>),
   command('file.view', '--region ID [--mode source|diff|preview]', 'Read or change one FileRegion mode without forcing focus.', { '--region': 'data', '--mode': 'value', ...OP }, f => ({ regionId: id(f, '--region', true), ...fields(f, { '--mode': 'mode' }), ...(f.values.has('--mode') ? operation(f) : {}) })),
   command('terminal.open', `[--command TEXT] ${PLACEMENT_USAGE}`, 'Open a terminal at an exact destination.', { ...PLACEMENT, '--command': 'data' }, f => ({ ...operation(f), ...openPlacement(f), ...fields(f, { '--command': 'shellCommand' }) })),
   command('browser.open', `--url URL ${PLACEMENT_USAGE}`, 'Open a Browser at an exact destination.', { ...PLACEMENT, '--url': 'data' }, f => ({ ...operation(f), ...openPlacement(f), url: id(f, '--url') })),

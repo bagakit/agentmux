@@ -67,6 +67,14 @@ agentmux space swap --region '<region-a>' --with '<region-b>'
 
 `space swap` 交换同一 Tab 的两个 Region 位置，作用于这个 Tab 的全部展示位置；它保留原 Session、Run、执行目录、文档、草稿、分割比例和逻辑活动 Region。跨 Tab、正在关闭或不唯一的目标会在改动前拒绝，自己与自己交换返回 `unchanged`。这四个入口都不默认抢输入；操作完成后原输入失去资格，回执会如实返回 `partial` 和输入问题，保留已应用结果。保存请求不等于落盘；只有原 Core 持久空间 owner 返回的 `save.diskDurability` 为 `confirmed` 才是耐久确认，`unconfirmed` 保留已应用结果、未保存改动与健康 Agent。
 
+读取已经保存的原文件，不打开 Tab 或读取编辑器中的未保存草稿：
+
+```sh
+agentmux file read --zone '<zone-id>' --path 'saved.md' --host '<host-id>' --workspace '<resource-workspace-id>' --workspace-path "$RESOURCE_DIRECTORY"
+```
+
+先从 `space ls`／`space inspect` 的原 Zone 资源确认 Host、Workspace 与目录；这些是文件资源，不是当前显示 Workspace。`--path` 相对该 Zone；可加 `--space` 核对原绑定，多处合法绑定不会改变文件身份。结果的 `resource` 与 `result` 分别表达准确来源和原 Files 的读取事实：文本保留完整 `sha256` revision，二进制、已删除、目录和原错误保持原状态。`unknown` 表示这次观察未确认，保留原引用并重新发现／读取；不解释为文件已删除，也不影响原文件编辑或健康 Agent。
+
 ## 改显示名，再读取当前值
 
 ```sh
@@ -90,6 +98,7 @@ agentmux space rename --tab '<tab-id>' --name '评审'
 | 导航 Space／Goal／工作面，观察选择与输入归属 | `space focus`、`goal focus`、`app focus/inspect` |
 | 打开 Terminal／Browser，操作已开的 Browser | `terminal open`、`browser open`、`browser` |
 | 按 Zone 目录后台打开或复用文件 | `file open` |
+| 读取准确 Zone 原文件的已保存正文与完整版本 | `file read` |
 | 读取或切换 Agent／File Region 正文模式 | `agent view`、`file view` |
 | 交换同一 Tab 的两个 Region 位置 | `space swap` |
 | 提升 Region 为 Tab、调整布局 | `space promote/arrange` |

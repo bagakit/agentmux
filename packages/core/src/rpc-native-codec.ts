@@ -2,6 +2,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { inspectNotebook, notebookFingerprint, parseNotebookState } from './notebook-catalog.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
+import { isFileMethod, parseFileReadParams, parseFileReadResult } from './public-rpc-files.js'
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
@@ -114,6 +115,7 @@ function activity(value: unknown): void {
 export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, params: unknown,
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
+    if (isFileMethod(method)) return parseFileReadResult(value, parseFileReadParams(params)) as unknown as Record<string, unknown>
     if (isTopicMethod(method)) return parseTopicResult(method, value, parseTopicParams(method, params)) as unknown as Record<string, unknown>
     if (isAgentMuxRpcDeviceMethod(method)) return parseAgentMuxRpcDeviceResult(method, value,
       parseAgentMuxRpcDeviceParams(method, params)) as unknown as Record<string, unknown>

@@ -1,5 +1,7 @@
 import { AGENTMUX_RPC_TOPIC_METHODS } from './public-rpc-topics.js'
 import type { TopicParameterMap, TopicResultMap, TopicMethod } from './public-rpc-topics.js'
+import { AGENTMUX_RPC_FILE_METHODS } from './public-rpc-files.js'
+import type { FileParameterMap, FileResultMap, FileMethod } from './public-rpc-files.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentPromptExecution } from './types.js'
 import { AGENTMUX_HOSTED_RPC_METHODS } from './hosted-client-contract.js'
@@ -147,7 +149,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = TopicParameterMap & FileParameterMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string }
   'notebook.apply': import('./notebook-catalog.js').NotebookWrite
@@ -181,7 +183,7 @@ type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMux
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = TopicResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = TopicResultMap & FileResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null }
   'notebook.apply': { state: import('./notebook-catalog.js').NotebookState }
@@ -217,8 +219,8 @@ type NativeResult = TopicResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHosted
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = TopicParameterMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | TopicMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = TopicParameterMap & FileParameterMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | TopicMethod | FileMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -234,6 +236,7 @@ export type AgentMuxRpcSpacePresentation = {
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_TOPIC_METHODS,
+  ...AGENTMUX_RPC_FILE_METHODS,
   ...AGENTMUX_RPC_DEVICE_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
