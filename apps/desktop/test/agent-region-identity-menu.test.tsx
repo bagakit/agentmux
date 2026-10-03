@@ -20,6 +20,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { formatRegionAddress } from '../src/renderer/src/lib/agent-address'
 import { openAgentHistory } from './helpers/agent-history-menu'
+import { absoluteFocusFixtureInputs } from './fixtures/focus-workbench'
 
 const initial=useAppStore.getState(),workspaceId='identity-workspace',tabId='identity-tab',leftId='identity-left',rightId='identity-right'
 const names=['Layout coordinator · recovery audit','Notes researcher']
@@ -27,13 +28,15 @@ let root: Root,container:HTMLDivElement,sessionIds:string[]
 beforeEach(async()=>{
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true)
   vi.stubGlobal('ResizeObserver',class{observe(){}unobserve(){}disconnect(){}})
-  const sessions=(await api.sessions.snapshot()).sessions.filter(session=>session.kind==='agent').slice(0,2)
+  const input=absoluteFocusFixtureInputs(await api.config.get(),(await api.sessions.snapshot()).sessions.filter(session=>session.kind==='agent').slice(0,2))
+  input.config.workspaces[0]={...input.config.workspaces[0]!,id:workspaceId}
+  const sessions=input.sessions
   expect(sessions).toHaveLength(2)
   sessions[1]={...sessions[1]!,providerId:sessions[0]!.providerId,executorId:sessions[0]!.executorId,label:sessions[0]!.label}
   sessionIds=sessions.map(session=>session.id)
   let tab=createWorkbenchTab(tabId,{regionId:leftId,kind:'agent',phase:'attached',workspaceId,sessionId:sessionIds[0]!})
   tab=addWorkbenchRegion(tab,leftId,'right',{regionId:rightId,kind:'agent',phase:'attached',workspaceId,sessionId:sessionIds[1]!})
-  useAppStore.setState({...initial,config:await api.config.get(),sessions,tabs:{[tabId]:tab},layouts:{[workspaceId]:createWorkspaceLayout('identity-group',[tabId])},activeWorkspaceId:workspaceId,
+  useAppStore.setState({...initial,config:input.config,sessions,tabs:{[tabId]:tab},layouts:{[workspaceId]:createWorkspaceLayout('identity-group',[tabId])},activeWorkspaceId:workspaceId,mainSurface:'workbench',
     agentNames:Object.fromEntries(sessionIds.map((id,index)=>[id,names[index]!])),viewModes:Object.fromEntries(sessionIds.map(id=>[id,'terminal'])),agentComposerDrafts:{[sessionIds[1]!]: 'Keep this draft'}},true)
   container=document.createElement('div');document.body.append(container);root=createRoot(container)
 })
@@ -100,7 +103,8 @@ it('the actual name and receiver survive the existing view switch and explicit R
   await mount();const before=structuredClone(useAppStore.getState().sessions)
   const toggle=left().querySelector<HTMLButtonElement>('.composer-tool--view-toggle');expect(toggle).not.toBeNull()
   await act(async()=>toggle!.click());expect(left().querySelector('.agent-region-header strong')!.textContent).toBe(names[0]);expect(toggle!.getAttribute('aria-label')).toBe('Show Terminal')
-  await act(async()=>toggle!.click());await openAgentHistory(left())
+  const terminalToggle=left().querySelector<HTMLButtonElement>('.composer-tool--view-toggle');expect(terminalToggle).not.toBeNull()
+  await act(async()=>terminalToggle!.click());await openAgentHistory(left())
   expect(left().querySelector('[aria-label="Conversation history"]')).not.toBeNull()
   expect(left().querySelectorAll('.agent-region-header')).toHaveLength(1)
   expect(left().querySelector('.agent-region-header strong')!.textContent).toBe(names[0])

@@ -1,4 +1,4 @@
-import { ArrowRight, History, MoreHorizontal, PanelsTopLeft, RotateCcw } from 'lucide-react'
+import { ArrowRight, History, MoreHorizontal, RotateCcw } from 'lucide-react'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import * as DropdownMenu from './HoverDropdownMenu'
@@ -33,7 +33,6 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     element.className = 'agent-region-header-host'
     return element
   })
-  const [merged, setMerged] = useState(false)
   const targetId = readOnly ? null : portalTargetId
   useLayoutEffect(() => {
     if (!host) return
@@ -41,7 +40,6 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
       const target = targetId ? document.getElementById(targetId) : null
       const destination = target ?? home.current
       if (destination && host.parentElement !== destination) destination.append(host)
-      setMerged(target !== null)
       return targetId === null || target !== null
     }
     // Missing destinations keep the original local Header readable and operable.
@@ -55,15 +53,15 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} data-owner-region-id={regionId}
     data-session-kind={sessionKind}
     aria-label={`${sessionKind === 'agent' ? 'Agent' : 'Terminal'} ${name}; ${readOnly ? 'Read-only; ' : ''}${executorLabel}; ${sessionKind === 'agent' ? 'Session' : 'Terminal'} ${sessionId}; Host ${executionHost.label}`}>
-    {merged ? null : <strong className="agent-region-header__name" title={name}>{name}</strong>}
+    <strong className="agent-region-header__name" title={name}>{name}</strong>
     <HostBadge host={executionHost} />
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {resultReview}
     <DropdownMenu.Root>
       <DropdownMenu.Trigger className="agent-region-header__more"
-        aria-label={`More actions for ${name}`} title={`${merged ? 'Region actions · ' : ''}${name}; ${executorLabel}; ${executionHost.label}`}
+        aria-label={`More actions for ${name}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
         onPointerDown={(event) => event.stopPropagation()}>
-        {merged ? <PanelsTopLeft size={14} /> : <MoreHorizontal size={14} />}
+        <MoreHorizontal size={14} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
         data-owner-region-id={regionId} data-agent-session-id={sessionKind === 'agent' ? sessionId : undefined} side="bottom" align="end" sideOffset={4} collisionPadding={8}

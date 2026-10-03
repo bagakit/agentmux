@@ -176,7 +176,7 @@ it('the Focus portal preserves the same Header and original Host, including a lo
     headerPortalTargetId={target.id} linkOrigin={{ workspaceId: 'local-display', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }} />
   await act(async () => root.render(render()))
   const header = target.querySelector<HTMLElement>('.agent-region-header')!
-  expect(header).not.toBeNull(); expect(header.querySelector('.agent-region-header__name')).toBeNull()
+  expect(header).not.toBeNull(); expect(header.querySelector('.agent-region-header__name')?.textContent).toBe('Original Agent')
   expect(badge().dataset.executionHostId).toBe(remoteId)
   const long = 'A very long build machine name with a precise original execution identity'
   await act(async () => useAppStore.setState({ config: { ...config, hosts: config.hosts.map(host => host.id === remoteId ? { ...host, label: long } : host) } }))
