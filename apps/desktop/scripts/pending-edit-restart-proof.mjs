@@ -14,16 +14,25 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const packages = ['core', 'demand', 'client-ui', 'layout']
 
 /** A new restart mode reuses the real harness; only its build tree is private. */
-export async function runPendingEditRestart(arguments_) {
-  const evidence = join(root, '.tmp/composer-pending-edit-restart', String(globalThis.crypto.randomUUID()))
+export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
+  assert.ok(['pending-edit', 'steer-recovery'].includes(mode), 'Only the owning private proof modes may use this build')
+  const steerRecovery = mode === 'steer-recovery'
+  const diagnosticOnly = steerRecovery && arguments_.includes('--steer-recovery-diagnostic')
+  const typedCrossCore = steerRecovery && arguments_.includes('--typed-response-cross-core')
+  assert.ok(!(diagnosticOnly && typedCrossCore), 'Distinct bounded proof modes cannot be combined')
+  const environmentKey = steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
+  const worker = steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
+  const resultField = typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
+  const evidence = join(root, steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(globalThis.crypto.randomUUID()))
   // The inner real harness has Unix sockets below this tree. macOS's per-user
   // tmpdir prefix would exceed sockaddr_un's path limit after that nesting.
-  const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), 'amx-pe-')))
+  const privateRoot = await realpath(await mkdtemp(join(process.platform === 'darwin' ? _hygiene_fixturePath("tmp") : tmpdir(), steerRecovery ? 'amx-sr-' : 'amx-pe-')))
   await mkdir(evidence, { recursive: true })
   const requestedReceipt = arguments_.find(value => value.startsWith('--receipt-path='))?.slice('--receipt-path='.length)
   const receiptPath = requestedReceipt ? resolve(root, requestedReceipt) : join(evidence, 'receipt.json')
   const buildReceiptPath = join(evidence, 'build.json')
-  const requestedSourceRef = arguments_.find(value => value.startsWith('--pending-edit-source-ref='))?.slice('--pending-edit-source-ref='.length)
+  const sourceArchivePath = join(evidence, 'source.tar')
+  const requestedSourceRef = arguments_.find(value => value.startsWith('--' + mode + '-source-ref='))?.slice(('--' + mode + '-source-ref=').length)
   const sourceCommit = (await exec('git', ['rev-parse', '--verify', '--end-of-options', (requestedSourceRef ?? 'HEAD') + '^{commit}'], { cwd: root })).stdout.trim()
   const build = { schema: 'agentmux.pending-edit-restart-build.v1', privateRoot, sources: {}, compiled: {},
     sharedSourceWritten: false, userRunTouched: false, sourceCommit,
@@ -49,22 +58,33 @@ export async function runPendingEditRestart(arguments_) {
   }
   try {
     if (requestedSourceRef) {
-      const archive = join(evidence, 'source.tar')
+      const archive = sourceArchivePath
       await exec('git', ['archive', '--format=tar', '--output=' + archive, sourceCommit], { cwd: root })
       await exec('tar', ['-xf', archive, '-C', privateRoot])
       await rm(archive)
       // Overlay only the two owning proof scripts from this execution tree;
       // all product code comes from the exact committed source.
-      for (const path of ['apps/desktop/scripts/verify-workbench-persistence-restart.mjs', 'apps/desktop/scripts/pending-edit-restart-proof.mjs'])
+      for (const path of ['apps/desktop/scripts/verify-workbench-persistence-restart.mjs', 'apps/desktop/scripts/pending-edit-restart-proof.mjs', ...(steerRecovery ? ['apps/desktop/scripts/steer-recovery-native-proof.mjs'] : [])])
         await cp(join(root, path), join(privateRoot, path))
+    }
+    if (diagnosticOnly) {
+      const probeSource = join(root, ".tmp/message-tool-compact-feedback-fixture/first-send-prepare-probe/prepare-call-probe.mjs")
+      const bytes = await readFile(probeSource)
+      assert.equal(sha(bytes), '0d51f7b83a56b1e73065fa3c40a2b52b51f6cb0fad9da57c3862057f536d0f0b')
+      const probePath = join(privateRoot, '.restart-proof-prepare-call-probe.mjs')
+      await writeFile(probePath, bytes)
+      build.diagnosticProbe = { path: probePath, source: probeSource, sha256: sha(bytes), boundary: 'Test-only host preload; product source/dist unchanged; this run qualifies diagnosis only.' }
     }
     const directories = ['apps/desktop/src', 'apps/desktop/browser-extension', 'apps/desktop/scripts', 'apps/desktop/brand', 'apps/desktop/native', 'apps/desktop/resources', 'apps/host/src',
       'packages/core/src', 'packages/core/scripts', 'packages/core/bin', 'packages/core/vendor',
       'packages/demand/src', 'packages/demand/bin', 'packages/client-ui/src', 'packages/layout/src', 'patches']
     for (const directory of directories) {
-      if (!requestedSourceRef) await cp(join(root, directory), join(privateRoot, directory), { recursive: true })
+      if (!requestedSourceRef) {
+        try { await cp(join(root, directory), join(privateRoot, directory), { recursive: true }) }
+        catch (error) { if (!(directory === 'apps/desktop/brand' && error.code === 'ENOENT')) throw error }
+      }
       try { await record(join(privateRoot, directory), build.sources) }
-      catch (error) { if (!(requestedSourceRef && directory === 'apps/desktop/brand' && error.code === 'ENOENT')) throw error }
+      catch (error) { if (!(directory === 'apps/desktop/brand' && error.code === 'ENOENT')) throw error }
     }
     for (const path of ['package.json', 'tsconfig.base.json', 'tsconfig.shared.json', 'pnpm-lock.yaml', 'pnpm-workspace.yaml', 'apps/desktop/package.json', 'apps/desktop/electron.vite.config.ts',
       'apps/host/package.json', ...packages.flatMap(pkg => ['package.json', 'tsconfig.json', 'tsconfig.build.json'].map(name => 'packages/' + pkg + '/' + name))]) {
@@ -77,6 +97,15 @@ export async function runPendingEditRestart(arguments_) {
       await mkdir(join(privateRoot, directory, '@agentmux'), { recursive: true })
       for (const entry of await readdir(join(root, directory))) {
         if (entry === '@agentmux') continue
+        if (['.pnpm', '.pnpm_patches', '.vite', '.vite-temp'].includes(entry)) {
+          await mkdir(join(privateRoot, directory, entry), { recursive: true }); continue
+        }
+        if (entry === '.bin') {
+          await cp(join(root, directory, entry), join(privateRoot, directory, entry), { recursive: true, dereference: true }); continue
+        }
+        if (['.modules.yaml', '.pnpm-workspace-state-v1.json'].includes(entry)) {
+          await cp(join(root, directory, entry), join(privateRoot, directory, entry)); continue
+        }
         if (entry.startsWith('@')) {
           await mkdir(join(privateRoot, directory, entry), { recursive: true })
           for (const pkg of await readdir(join(root, directory, entry))) {
@@ -86,19 +115,79 @@ export async function runPendingEditRestart(arguments_) {
       }
       for (const pkg of packages) await symlink(join(privateRoot, 'packages', pkg), join(privateRoot, directory, '@agentmux', pkg), 'dir')
     }
-    // Resolve the declared ws dependency from the installed pool when a copied
-    // workspace has no direct link. This fixture never installs dependencies;
-    // the receipt records both the declared version and consumed package.
-    try { require.resolve('ws', { paths: [join(privateRoot, 'apps/desktop')] }) }
-    catch (error) {
-      if (error.code !== 'MODULE_NOT_FOUND') throw error
-      const installed = (await readdir(join(root, 'node_modules/.pnpm'))).filter(name => /^ws@/.test(name))
-      assert.equal(installed.length, 1, 'Private fixture requires an unambiguous installed ws version')
-      const path = join(root, 'node_modules/.pnpm', installed[0], 'node_modules/ws')
-      await symlink(path, join(privateRoot, 'apps/desktop/node_modules/ws'), 'dir')
-      build.fixtureInstalledDependency = { name: 'ws', path, packageSha256: sha(await readFile(join(path, 'package.json'))),
-        declaredVersion: JSON.parse(await readFile(join(privateRoot, 'apps/desktop/package.json'), 'utf8')).dependencies?.ws ?? null,
-        reason: 'Private copied build resolves the one already installed ws package directly; no install or shared dependency edit.' }
+    if (steerRecovery) {
+      // This candidate's vendored SDK owns both its runtime bundle and TypeScript surface.
+      // Sharing the installed SDK can mix a newer/older peer dependency with this archive.
+      const artifactDirectory = join(privateRoot, 'packages/core/vendor/ctxmux', process.platform + '-' + process.arch)
+      const manifestPath = join(artifactDirectory, 'manifest.json')
+      const manifestBytes = await readFile(manifestPath)
+      const manifest = JSON.parse(manifestBytes)
+      const contract = JSON.parse(await readFile(join(privateRoot, 'packages/core/src/ctxmux-artifact-contract.json'), 'utf8'))
+      assert.equal(sha(manifestBytes), contract.manifests[process.platform + '-' + process.arch])
+      const archive = join(artifactDirectory, manifest.sdk.archive.path)
+      const archiveBytes = await readFile(archive)
+      assert.equal(sha(archiveBytes), manifest.sdk.archive.sha256)
+      assert.equal(archiveBytes.byteLength, manifest.sdk.archive.bytes)
+      const unpacked = join(privateRoot, '.restart-proof-sdk')
+      await mkdir(unpacked)
+      await exec('tar', ['-xzf', archive, '-C', unpacked])
+      const sdk = join(unpacked, 'package')
+      const packageJson = JSON.parse(await readFile(join(sdk, 'package.json'), 'utf8'))
+      await symlink(join(privateRoot, 'packages/core/node_modules'), join(sdk, 'node_modules'), 'dir')
+      const consumerEntries = {}
+      for (const directory of ['node_modules', 'apps/desktop/node_modules', ...packages.map(pkg => 'packages/' + pkg + '/node_modules')]) {
+        const scope = join(privateRoot, directory, '@ctxmux')
+        await mkdir(scope, { recursive: true })
+        const sdkLink = join(scope, 'sdk')
+        await rm(sdkLink, { recursive: true, force: true })
+        await symlink(sdk, sdkLink, 'dir')
+        const consumer = join(privateRoot, directory, 'restart-proof-consumer.mjs')
+        await writeFile(consumer, `import{fileURLToPath}from'node:url';import * as sdk from '@ctxmux/sdk';console.log(JSON.stringify({entry:fileURLToPath(import.meta.resolve('@ctxmux/sdk')),loaded:typeof sdk.CtxmuxClient==='function'}));\n`)
+        const resolved = JSON.parse((await exec(process.execPath, [consumer], { cwd: privateRoot })).stdout)
+        await rm(consumer)
+        const entry = await realpath(resolved.entry)
+        assert.equal(resolved.loaded, true)
+        assert.equal(entry, join(sdk, packageJson.exports['.'].import))
+        consumerEntries[directory] = { entry: relative(privateRoot, entry), sha256: sha(await readFile(entry)) }
+      }
+      const types = join(sdk, packageJson.exports['.'].types)
+      assert.equal(packageJson.name, '@ctxmux/sdk')
+      assert.equal(packageJson.version, manifest.sdk.version)
+      build.ctxmuxSdk = { manifestSha256: sha(manifestBytes), sourceCommit: manifest.source.commit,
+        archiveSha256: sha(archiveBytes), archive: relative(privateRoot, archive),
+        packageSha256: sha(await readFile(join(sdk, 'package.json'))),
+        types: relative(privateRoot, types), typesSha256: sha(await readFile(types)), consumerEntries,
+        reason: 'Every private consumer resolves the exact candidate manifest SDK; shared dependency links remain untouched.' }
+    }
+    // The archive's lockfile owns dependency identity; concurrent root links can be stale.
+    // Resolve only installed exact packages and write links solely below the private build.
+    const yaml = require(require.resolve('yaml', { paths: [join(root, 'packages/core')] }))
+    const lock = yaml.parse(await readFile(join(privateRoot, 'pnpm-lock.yaml'), 'utf8'))
+    const desktopPackage = JSON.parse(await readFile(join(privateRoot, 'apps/desktop/package.json'), 'utf8'))
+    const installedPool = await readdir(join(root, 'node_modules/.pnpm'))
+    build.fixtureInstalledDependencies = []
+    for (const [name, specification] of Object.entries(desktopPackage.dependencies)) {
+      if (specification.startsWith('workspace:')) continue
+      const locked = lock.importers?.['apps/desktop']?.dependencies?.[name]?.version
+      assert.equal(typeof locked, 'string', 'Candidate dependency must have its actual lockfile resolution: ' + name)
+      const version = locked.split('(')[0]
+      const privateLink = join(privateRoot, 'apps/desktop/node_modules', name)
+      let packageBytes
+      try { packageBytes = await readFile(join(privateLink, 'package.json')) }
+      catch (error) { if (error.code !== 'ENOENT') throw error }
+      if (packageBytes && JSON.parse(packageBytes).version === version) continue
+      const prefix = name.replace('/', '+') + '@' + version
+      const matches = installedPool.filter(entry => entry === prefix || entry.startsWith(prefix + '_'))
+      assert.equal(matches.length, 1, 'Candidate dependency requires one installed exact resolution: ' + name)
+      const installed = join(root, 'node_modules/.pnpm', matches[0], 'node_modules', name)
+      packageBytes = await readFile(join(installed, 'package.json'))
+      assert.equal(JSON.parse(packageBytes).version, version)
+      await mkdir(dirname(privateLink), { recursive: true })
+      await rm(privateLink, { recursive: true, force: true })
+      await symlink(installed, privateLink, 'dir')
+      build.fixtureInstalledDependencies.push({ name, specification, locked, path: installed,
+        packageSha256: sha(packageBytes),
+        reason: 'The exact candidate lockfile resolution is linked only in the private build; shared links remain unchanged.' })
     }
     const bannerPath = 'apps/desktop/resources/settings-banner.png'
     try { await readFile(join(privateRoot, bannerPath)) }
@@ -114,7 +203,7 @@ export async function runPendingEditRestart(arguments_) {
     const brandScript = join(privateRoot, 'apps/desktop/scripts/build-brand-assets.mjs')
     try { await readFile(brandScript); await command('private-brand-build', process.execPath, [brandScript], privateRoot) }
     catch (error) {
-      if (!(requestedSourceRef && error.code === 'ENOENT')) throw error
+      if (error.code !== 'ENOENT') throw error
       build.brandInputs = { reason: 'This exact committed source has no brand derivation script; its tracked consumer bitmaps are used unchanged.' }
     }
     await command('private-workspace-helper-build', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-workspace-move-helper.mjs')], privateRoot)
@@ -134,18 +223,18 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     await record(join(privateRoot, 'packages/core/dist'), build.compiled)
     assert.ok(Object.keys(build.compiled).length > 100)
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
-    const args = arguments_.filter(value => !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--pending-edit-source-ref='))
+    const args = arguments_.filter(value => !value.startsWith('--receipt-path=') && !value.startsWith('--probe-root=') && !value.startsWith('--' + mode + '-source-ref='))
     const lines = []
-    const executionEnvironment = { ...process.env, AGENTMUX_PENDING_EDIT_BUILD_RECEIPT: buildReceiptPath }
+    const executionEnvironment = { ...process.env, [environmentKey]: buildReceiptPath }
     delete executionEnvironment.ELECTRON_RUN_AS_NODE
-    outcome = await runProbeProcess(process.execPath, [join(privateRoot, 'apps/desktop/scripts/verify-workbench-persistence-restart.mjs'), ...args,
+    outcome = await runProbeProcess(process.execPath, [join(privateRoot, 'apps/desktop/scripts', worker), ...args,
       '--probe-root=' + privateRoot, '--receipt-path=' + receiptPath], { cwd: privateRoot, temporaryRoot: privateRoot,
-      env: executionEnvironment, timeoutMs: 130_000, onLine: line => lines.push(line) })
+      env: executionEnvironment, timeoutMs: steerRecovery ? 300_000 : 130_000, onLine: line => lines.push(line) })
     await writeFile(join(evidence, 'restart.log'), lines.join('\n') + '\n')
     assert.equal(outcome.timedOut, false)
     assert.equal(outcome.exitCode, 0)
     const result = JSON.parse(await readFile(receiptPath, 'utf8'))
-    assert.equal(result.passed, true); assert.equal(result.pendingEdit?.passed, true)
+    assert.equal(result.passed, true); assert.equal(result[resultField]?.passed, true)
   } catch (error) { failure = error }
   finally {
     const differenceField = requestedSourceRef ? 'capturedSourceVsSharedWorkingAtCompletion' : 'sharedSourceChangesDuringProof'
@@ -157,11 +246,15 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     }
     assert.deepEqual(await listProbeProcesses(-1, privateRoot), [], 'Private restart leaves no processes in its build or fixture tree')
     await rm(privateRoot, { recursive: true, force: true }); build.privateRootRemoved = true
+    // A failed extraction can leave the reproducible committed archive; it contains no Run or
+    // unsaved data. Keep its exact sourceCommit and failure receipt, not a redundant cache.
+    await rm(sourceArchivePath, { force: true })
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
-    await writeFile(join(evidence, 'summary.json'), JSON.stringify({ schema: 'agentmux.pending-edit-restart-proof.v1', passed: !failure,
-      receiptPath, buildReceiptPath, outcome, userRunTouched: false, sharedSourceWritten: false,
+    await writeFile(join(evidence, 'summary.json'), JSON.stringify({ schema: steerRecovery ? 'agentmux.steer-recovery-restart-proof.v1' : 'agentmux.pending-edit-restart-proof.v1', passed: !failure,
+      receiptPath, buildReceiptPath, outcome, qualifiedScope: typedCrossCore ? 'SDK-two-Core-Native-only' : diagnosticOnly ? 'first-Send-diagnostic-only' : mode, userRunTouched: false, sharedSourceWritten: false,
       failure: failure ? { name: failure.name, message: failure.message, stack: failure.stack } : null }, null, 2))
   }
-  process.stdout.write(JSON.stringify({ mode: '--pending-edit', passed: !failure, receiptPath, buildReceiptPath, evidence, failure: failure?.message }) + '\n')
+  process.stdout.write(JSON.stringify({ mode: '--' + mode, passed: !failure, receiptPath, buildReceiptPath, evidence,
+    failure: steerRecovery ? failure?.message.split('\n')[0] : failure?.message }) + '\n')
   return failure ? 1 : 0
 }

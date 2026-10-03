@@ -7,21 +7,28 @@ import { createRequire } from 'node:module'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { join, resolve } from 'node:path'
 import { isDeepStrictEqual, promisify } from 'node:util'
-import { AgentMuxSpatialStateStore } from '../../../packages/core/dist/spatial-state.js'
-import { regionIds } from '../../../packages/core/dist/spatial-layout.js'
-import { AgentMuxFileAgentSessionStore, connectLocalAgentMux } from '../../../packages/core/dist/index.js'
-import { connectAgentMuxRpc } from '../../../packages/core/dist/public-rpc-client.js'
-import { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace, readRecoverySpatialState } from './goals-alignment-restart-proof.mjs'
 import { listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
-import { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } from './workbench-swap-restart-proof.mjs'
-import { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns, proveOriginalRunOutput } from './goals-entry-restart-proof.mjs'
 
 // This new mode always runs the original restart harness against a private current-source build.
 // Other modes keep their existing build and invocation contract.
+if (process.argv.includes('--steer-recovery')) {
+  const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
+  process.exit(await runPendingEditRestart(process.argv.slice(2), 'steer-recovery'))
+}
+
 if (process.argv.includes('--pending-edit') && !process.env.AGENTMUX_PENDING_EDIT_BUILD_RECEIPT) {
   const { runPendingEditRestart } = await import('./pending-edit-restart-proof.mjs')
   process.exit(await runPendingEditRestart(process.argv.slice(2)))
 }
+
+// Resolve legacy proof dependencies only after the isolated build dispatch.
+const { AgentMuxSpatialStateStore } = await import('../../../packages/core/dist/spatial-state.js')
+const { regionIds } = await import('../../../packages/core/dist/spatial-layout.js')
+const { AgentMuxFileAgentSessionStore, connectLocalAgentMux } = await import('../../../packages/core/dist/index.js')
+const { connectAgentMuxRpc } = await import('../../../packages/core/dist/public-rpc-client.js')
+const { createGoalsRestartFixture, approveGoalsInActualUI, readGoalsSurface, restoreGoalsBeforeSpace, readRecoverySpatialState } = await import('./goals-alignment-restart-proof.mjs')
+const { createSwapPeers, seedSwapRegions, readSwapFacts, selectSwapTarget, restoreSwapMenu, cleanupSwapPeers, swapRunBirth } = await import('./workbench-swap-restart-proof.mjs')
+const { createGoalsEntryFixture, clickGoalsEntryInActualUI, readGoalsEntryNativeBaseline, restoreGoalsEntryBeforeSpace, finishGoalsEntryNativeProof, cleanupGoalsEntryRuns, proveOriginalRunOutput } = await import('./goals-entry-restart-proof.mjs')
 
 // The same real Desktop/Core/private-cat seam as verify-session-history-delivery. No native history
 // source is bound or read. Seeded queue times are synthetic historical facts; the owning source test
