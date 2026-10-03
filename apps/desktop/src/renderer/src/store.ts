@@ -1,3 +1,4 @@
+import { conversationReplySourceKey, type ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import type { AgentMuxPendingMessage } from '@agentmux/core/control'
 import type { AgentPromptExecution } from '@agentmux/core'
 import { changeNotebook, type NoteNotebookContext } from './lib/notebook-library'
@@ -392,6 +393,9 @@ const EXECUTION_NOT_REQUESTED = 'AGENT_EXECUTION_NOT_REQUESTED'
 const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string> }>()
 
 
+export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
+export type AgentSteerOptions = { reaction?: AgentSteerReaction; sourceChannel?: import('@agentmux/core').AgentMessageChannel }
+
 export type AgentSteerQueueEntry = {
   operationId: string
   /** The first accepted local intent time; absent means it was never recorded. */
@@ -402,6 +406,9 @@ export type AgentSteerQueueEntry = {
   text: string
   /** Explicit producer context, frozen with the original user body. */
   agentMuxNote?: string
+  /** Original reply reference, frozen in the existing durable intent, never inferred from text. */
+  reaction?: AgentSteerReaction
+  sourceChannel?: import('@agentmux/core').AgentMessageChannel
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
@@ -972,13 +979,13 @@ type AppState = {
   appendAgentComposerDraft(sessionId: string, text: string): void
   clearAgentComposerDraftIfUnchanged(sessionId: string, expectedText: string): void
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
-  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string): boolean
+  enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
   flushAgentSteerQueue(sessionId: string, explicitOperationId?: string): Promise<void>
-  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string): boolean
+  send(sessionId: string, text: string, onRejected?: (error: unknown) => void, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse): Promise<void>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
@@ -2590,13 +2597,17 @@ function restoredBoolean(candidate: unknown, fallback: boolean): boolean {
   return typeof candidate === 'boolean' ? candidate : fallback
 }
 
-function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual', agentMuxNote?: string): string | false {
+function reactionIntentKey(reaction?: AgentSteerReaction): string | undefined {
+  return reaction ? JSON.stringify([reaction.code, conversationReplySourceKey(reaction.replySource)]) : undefined
+}
+
+function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId: string = crypto.randomUUID(), origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): string | false {
   if (!text.trim() && !agentMuxNote?.trim()) return false
   const session = useAppStore.getState().sessions.find((item) => item.id === sessionId)
   if (!session || session.kind !== 'agent') return false
   const existing = useAppStore.getState().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
   if (existing) {
-    if (existing.text === text && existing.agentMuxNote === agentMuxNote) return operationId
+    if (existing.text === text && existing.agentMuxNote === agentMuxNote && reactionIntentKey(existing.reaction) === reactionIntentKey(options?.reaction) && existing.sourceChannel === options?.sourceChannel) return operationId
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
     return false
   }
@@ -2615,10 +2626,12 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     operationId,
     promptCondition: null,
     enqueuedAt: Date.now(),
-    ...(session.processState === 'running' && session.status.state !== 'disconnected'
+    ...(session.processState === 'running' && (session.status.state !== 'disconnected' || options?.reaction !== undefined)
       ? { runId: session.control.run.runId } : {}),
     text,
     ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
+    ...(options?.reaction ? { reaction: structuredClone(options.reaction) } : {}),
+    ...(options?.sourceChannel ? { sourceChannel: options.sourceChannel } : {}),
     status: 'queued',
     ...(origin === 'manual' ? { origin: 'manual' } : {})
   }
@@ -7710,8 +7723,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { agentComposerDrafts }
     })
   },
-  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote) {
-    return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote) !== false
+  enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) {
+    return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) !== false
   },
   removeAgentSteer(sessionId, operationId) {
     // A submitted request cannot be recalled by deleting its local projection.
@@ -7940,7 +7953,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               explicitAttempt ? { allowUncertainTurn: true,
                 ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
                 : pending.execution === 'immediate' ? { execution: 'immediate' } : undefined,
-              pending.origin === 'manual', pending.agentMuxNote)
+              pending.origin === 'manual', pending.agentMuxNote, pending.sourceChannel)
             drain.submitted.add(entry.operationId)
             set((current) => {
               const next = (current.agentSteerQueues[sessionId] ?? []).filter((item) => item.operationId !== entry.operationId)
@@ -8011,9 +8024,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     agentSteerDrains.set(sessionId, drain)
     return drain.promise
   },
-  send(sessionId, text, onRejected, origin, agentMuxNote) {
+  send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin, agentMuxNote)
+    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin, agentMuxNote, options)
     if (operationId === false) return false
     void get().flushAgentSteerQueue(sessionId, operationId)
     return true
