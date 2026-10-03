@@ -17,7 +17,7 @@ export function homeZoneId(spaceId: string): string { return JSON.stringify([spa
 
 /** A failed Host read cannot replace the durable original identity with a logical-path guess. */
 export function originalTopicAddress(workspace: WorkspaceRecord, topic: ScratchTopicSnapshot, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
-  if (topic.readError && !topic.identityDirectoryPath && !topic.physicalDirectoryPath) {
+  if (topic.readError && !topic.identityDirectoryPath) {
     const original = Object.entries(bindings).filter(([, binding]) => binding.topicId === topic.id && binding.workspaceId === workspace.id);
     return original.length === 1 ? { spaceId: original[0]![1].spaceId, zoneId: original[0]![0] } : null;
   }

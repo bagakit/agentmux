@@ -203,6 +203,10 @@ export async function registerIpc(args: {
     if (bound !== config) config = await args.configStore.save(bound)
   } catch (error) { initialBindingError = error }
   args.runtime.commit(initialRuntime)
+  // Directory metadata maintenance is advisory and never holds up the original Runtime/input.
+  const scratchForIdentity = config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
+  if (scratchForIdentity) void Promise.resolve().then(() => args.scratchTopics.normalizeDirectoryIdentities(scratchForIdentity))
+    .catch(error => process.stderr.write(`Directory identity startup maintenance: ${String(error)}\n`))
   if (initialBindingError) args.runtime.reportBindingSaveFailure(initialRuntime, initialBindingError)
   let releaseExecutorConfigEdit: (() => void) | undefined
   let toolkit: ToolkitOwner

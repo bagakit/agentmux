@@ -3,6 +3,7 @@ import { constants, lstat, mkdir, open, readdir, readlink, realpath, stat } from
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
+import { inspectDirectoryIdentity, retainDirectoryIdentity, normalizeDirectoryIdentity } from '../src/main/scratch-directory-identity.mjs'
 
 const directoryPattern = /^topic--(launcher|session|view)--([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
 const defaultHelper = resolve(import.meta.dirname, '../resources/bin/agentmux-workspace-move')
@@ -43,53 +44,11 @@ async function classify(path, id) {
 }
 
 async function readIdentity(directory, expected) {
-  const metadata = join(directory, '.agentmux')
-  const parent = await optionalInfo(metadata)
-  if (!parent) return null
-  if (!parent.isDirectory() || parent.isSymbolicLink()) throw failure('Object metadata is not a regular directory.', 'DIRECTORY_IDENTITY_INVALID')
-  const path = join(metadata, 'directory-identity.json')
-  const info = await optionalInfo(path)
-  if (!info) return null
-  if (!info.isFile() || info.isSymbolicLink() || info.size > 4096n) throw failure('Directory identity is not a bounded regular file.', 'DIRECTORY_IDENTITY_INVALID')
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-  try {
-    const current = await handle.stat()
-    if (!current.isFile() || current.size > 4096) throw failure('Directory identity is not a bounded regular file.', 'DIRECTORY_IDENTITY_INVALID')
-    let value
-    try { value = JSON.parse(await handle.readFile('utf8')) }
-    catch { throw failure('Directory identity metadata is unreadable or invalid.', 'DIRECTORY_IDENTITY_INVALID') }
-    if (!value || value.version !== 1 || value.identityDirectoryPath !== expected ||
-        Object.keys(value).sort().join(',') !== 'identityDirectoryPath,version') {
-      throw failure('Directory identity does not match this original Scratch object.', 'DIRECTORY_IDENTITY_INVALID')
-    }
-    return value
-  } finally { await handle.close() }
+  return await inspectDirectoryIdentity(directory, expected)
 }
 
-async function retainIdentity(directory, expected) {
-  const previous = await readIdentity(directory, expected)
-  if (previous) return previous
-  const metadata = join(directory, '.agentmux')
-  await ensureDirectory(metadata)
-  const path = join(metadata, 'directory-identity.json')
-  let handle
-  try { handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) }
-  catch (error) {
-    if (error.code !== 'EEXIST') throw error
-    const existing = await readIdentity(directory, expected)
-    if (!existing) throw failure('The identity write result is unknown.', 'DIRECTORY_IDENTITY_INVALID')
-    return existing
-  }
-  // An incomplete write is retained as an explicit error, never overwritten on retry.
-  try {
-    await handle.writeFile(JSON.stringify({ version: 1, identityDirectoryPath: expected }) + '\n')
-    await handle.sync()
-  } finally { await handle.close() }
-  await syncDirectory(metadata)
-  await syncDirectory(directory)
-  const confirmed = await readIdentity(directory, expected)
-  if (!confirmed) throw failure('The saved directory identity could not be confirmed.', 'DIRECTORY_IDENTITY_INVALID')
-  return confirmed
+async function retainIdentity(directory, expected, helperPath) {
+  return await retainDirectoryIdentity(directory, expected, { helperPath })
 }
 
 async function runHelper(helperPath, args) {
@@ -155,6 +114,7 @@ export async function migrateTopicDirectories({ home = homedir(), execute = fals
         const destinationInfo = await requireDirectory(destinationPath)
         const kind = await classify(destinationPath, id)
         if (parent !== (kind === 'mote' ? 'motes' : 'topics')) throw failure('The alias destination conflicts with the confirmed object kind.', 'DIRECTORY_MIGRATION_ALIAS_INVALID')
+        if (execute) await normalizeDirectoryIdentity(destinationPath, sourcePath, { helperPath })
         await confirmAlias(sourcePath, destinationPath, identity(destinationInfo), link)
         Object.assign(row, { kind, destinationPath, ...identity(destinationInfo), state: 'already-migrated' })
         continue
@@ -172,7 +132,7 @@ export async function migrateTopicDirectories({ home = homedir(), execute = fals
       if (process.platform !== 'darwin') throw failure('Atomic alias exchange is unavailable on this platform; the original object remains available.', 'DIRECTORY_MIGRATION_UNSUPPORTED')
       await ensureDirectory(join(root, parent))
       await syncDirectory(root)
-      await retainIdentity(sourcePath, sourcePath)
+      await retainIdentity(sourcePath, sourcePath, helperPath)
       await runHelper(helperPath, ['--alias-swap', root, rootInfo.dev.toString(), rootInfo.ino.toString(), `scratch/${name}`, `${parent}/${name}`, sourceInfo.dev.toString(), sourceInfo.ino.toString()])
       await confirmAlias(sourcePath, destinationPath, identity(sourceInfo), `../${parent}/${name}`)
       row.state = 'migrated'
@@ -181,6 +141,42 @@ export async function migrateTopicDirectories({ home = homedir(), execute = fals
       row.issue = issue(error, 'The object migration could not be confirmed.')
       report.success = false
     }
+  }
+  // Repair already-canonical records even when their old alias has been explicitly removed.
+  const known = new Set(report.objects.map(row => row.id))
+  for (const parent of ['motes', 'topics']) {
+    const canonicalRoot = join(root, parent)
+    try {
+      if (!await optionalInfo(canonicalRoot)) continue
+      await requireDirectory(canonicalRoot)
+      for (const name of (await readdir(canonicalRoot)).sort()) {
+        const match = directoryPattern.exec(name)
+        if (!match) continue
+        const id = `${match[1]}:${match[2]}`
+        if (known.has(id)) continue
+        const destinationPath = join(canonicalRoot, name), original = join(legacyRoot, name)
+        const row = { id, sourcePath: destinationPath, identityDirectoryPath: original, destinationPath, state: 'unknown' }
+        try {
+          await requireDirectory(destinationPath)
+          const saved = await readIdentity(destinationPath, original)
+          if (!saved) continue // New canonical objects keep their own identity and need no legacy record.
+          report.objects.push(row); known.add(id)
+          const other = join(root, parent === 'motes' ? 'topics' : 'motes', name)
+          if (await optionalInfo(other)) throw failure('Canonical object locations conflict; neither identity is rewritten.', 'DIRECTORY_IDENTITY_INVALID')
+          const kind = await classify(destinationPath, id)
+          if (parent !== (kind === 'mote' ? 'motes' : 'topics')) throw failure('The canonical location conflicts with the confirmed object kind.', 'DIRECTORY_IDENTITY_INVALID')
+          row.kind = kind
+          if (!execute) row.state = saved.needsUpgrade ? 'identity-upgrade-planned' : 'identity-confirmed'
+          else {
+            const result = await normalizeDirectoryIdentity(destinationPath, original, { helperPath })
+            row.state = result.state === 'upgraded' ? 'identity-upgraded' : 'identity-confirmed'
+          }
+        } catch (error) {
+          if (!known.has(id)) { report.objects.push(row); known.add(id) }
+          row.state = 'error'; row.issue = issue(error, 'The original canonical identity could not be confirmed.'); report.success = false
+        }
+      }
+    } catch (error) { report.issues.push(issue(error, 'Canonical identity repair could not inspect its original root.')); report.success = false }
   }
   return report
 }

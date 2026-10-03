@@ -1,7 +1,7 @@
 import type { AgentMuxRpcSnapshot, AgentMuxRpcSnapshotParams, AgentMuxRpcTopic } from '@agentmux/core'
 import type { AppConfig } from '../shared/contracts.js'
 import { directoryIdentity, spatialSources } from '../shared/space-addresses.js'
-import { SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath } from '../shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicPhysicalPath } from '../shared/scratch-topics.js'
 import type { ScratchTopics } from './scratch-topics.js'
 
 /** Read the original config and filesystem owners; observation never ensures or writes a Topic. */
@@ -45,7 +45,7 @@ export async function observeClientRpcSnapshot(config: AppConfig, scratchTopics:
         ...(snapshot.wiki !== undefined ? { wiki: snapshot.wiki } : {}),
         ...(snapshot.moteArchive !== undefined ? { moteArchive: snapshot.moteArchive } : {}),
         path: scratchTopicPhysicalPath(workspace, snapshot), spaceId: space?.spaceId ?? null,
-        kind: snapshot.readError ? 'unknown' : space?.kind === 'mote' ? 'mote' : space?.kind === 'topic' ? 'topic' : 'unknown' }
+        kind: snapshot.id === PMO_TEAMS_TOPIC_ID || snapshot.soul !== undefined || snapshot.moteArchive !== undefined ? 'mote' : snapshot.readError ? 'unknown' : space?.kind === 'topic' ? 'topic' : 'unknown' }
     })
     if (wanted('topics')) result.topics = topics
     if (wanted('motes')) result.motes = topics.filter(topic => topic.kind === 'mote')

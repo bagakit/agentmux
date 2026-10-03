@@ -1,8 +1,9 @@
-import { constants, lstat, mkdir, open, readdir, readlink, realpath, stat } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readlink, realpath, stat } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
 
-export const SCRATCH_DIRECTORY_IDENTITY_PATH = '.agentmux/directory-identity.json'
+import { readDirectoryIdentity } from './scratch-directory-identity.mjs'
+export { SCRATCH_DIRECTORY_IDENTITY_PATH } from './scratch-directory-identity.mjs'
 
 function missing(error: unknown): boolean { return (error as NodeJS.ErrnoException).code === 'ENOENT' }
 
@@ -56,18 +57,10 @@ export async function resolveScratchTopicDirectory(scratchRoot: string, topicId:
 export async function scratchDirectoryIdentity(scratchRoot: string, topicId: string, physical: string): Promise<string> {
   const original = join(scratchRoot, scratchTopicDirectoryName(topicId))
   try {
-    const metadata = await lstat(join(physical, '.agentmux'))
-    if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('Directory identity metadata is not a regular directory.')
-    const handle = await open(join(physical, SCRATCH_DIRECTORY_IDENTITY_PATH), constants.O_RDONLY | constants.O_NOFOLLOW)
-    try {
-      const info = await handle.stat()
-      if (!info.isFile() || info.size > 4096) throw new Error('Directory identity metadata is not a bounded regular file.')
-      const value = JSON.parse(await handle.readFile('utf8'))
-      if (!value || value.version !== 1 || value.identityDirectoryPath !== original ||
-        Object.keys(value).sort().join(',') !== 'identityDirectoryPath,version')
-        throw new Error('Directory identity is unconfirmed. Repair the original identity record before retrying.')
-      return value.identityDirectoryPath
-    } finally { await handle.close() }
+    const identity = await readDirectoryIdentity(physical, original)
+    if (identity) return identity
+    const absent = Object.assign(new Error('Directory identity record is absent.'), { code: 'ENOENT' })
+    throw absent
   } catch (error) {
     if (!missing(error)) throw error
     try {
