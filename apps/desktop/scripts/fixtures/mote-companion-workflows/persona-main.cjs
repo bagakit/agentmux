@@ -1,0 +1,125 @@
+const { app, BrowserWindow, Menu } = require('electron')
+const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
+const [html, privateRoot, evidence] = process.argv.slice(2)
+const ideasOnly = process.argv.includes('--ideas-only')
+const feedbackOnly = process.argv.includes('--feedback-only')
+app.setPath('userData', path.join(privateRoot, 'userData'))
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
+const result = { passed: false, pid: process.pid, images: [], operations: [], errors: [], restartInputs: [] }
+app.whenReady().then(async () => {
+  let win
+  try {
+    Menu.setApplicationMenu(null)
+    win = new BrowserWindow({ width: 1080, height: 850, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
+    win.webContents.on('console-message', (_event, details) => { if (details.level === 'error') result.errors.push(details.message) })
+    await win.loadFile(html)
+    const read = async script => { try { return await win.webContents.executeJavaScript(script) } catch (error) { throw new Error('Renderer probe failed: ' + script.slice(0, 180), { cause: error }) } }
+    for (let i = 0; i < 100 && !(await read('!!document.querySelector("[data-mote-details]")')); i++) await pause(30)
+    assert.equal(await read('!!document.querySelector("[data-mote-details]")'), true)
+    const click = async selector => {
+      const rect = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw Error('missing actual control');n.scrollIntoView({block:'center'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+      win.webContents.sendInputEvent({ type: 'mouseDown', x: Math.round(rect.x), y: Math.round(rect.y), button: 'left', clickCount: 1 })
+      win.webContents.sendInputEvent({ type: 'mouseUp', x: Math.round(rect.x), y: Math.round(rect.y), button: 'left', clickCount: 1 }); await pause(120)
+    }
+    const clickText = async text => {
+      await read(`(()=>{const n=[...document.querySelectorAll('[data-mote-details] button')].find(n=>n.textContent===${JSON.stringify(text)});if(!n)throw Error('missing named control');n.setAttribute('data-capture-target','yes')})()`)
+      await click('[data-capture-target="yes"]'); await read('document.querySelector("[data-capture-target]")?.removeAttribute("data-capture-target")')
+    }
+    const type = async (selector, text) => {
+      await click(selector)
+      win.webContents.selectAll()
+      win.webContents.insertText(text); await pause(120)
+    }
+    const capture = async name => {
+      await pause(100)
+      const facts = await read(`(()=>{const n=document.querySelector('[data-mote-details]');return {overflow:n.scrollWidth>n.clientWidth,originalDraft:moteCompanion.facts().drafts['original-region'],otherDraft:moteCompanion.facts().drafts['second-region'],scope:n.dataset.moteDetails,text:n.textContent,calls:moteCompanion.facts().calls,selectedDraft:moteCompanion.facts().selectedDraft,selection:moteCompanion.facts().selection,ideaInputs:moteCompanion.facts().ideaInputs}})()`)
+      assert.equal(facts.overflow, false); assert.equal(facts.originalDraft, 'An original unsent question stays here.'); assert.equal(facts.otherDraft, 'The other Mote keeps its own unsent draft.')
+      await fs.writeFile(path.join(evidence, name + '.png'), (await win.webContents.capturePage()).toPNG()); result.images.push(name + '.png'); result.operations.push({ name, ...facts })
+      if (['cooperation-new-launcher-no-executor', 'cooperation-later-input-kept', 'ideas-context-unknown', 'ideas-mote-aba-input-kept'].includes(name)) {
+        result.restartInputs.push({ name, state: await read('moteCompanion.restartInput()') })
+      }
+    }
+    if (!ideasOnly && !feedbackOnly) {
+    await capture('cooperation-wide')
+    await clickText('Adjust cooperation'); await type('[aria-label="Custom cooperation preferences"]', 'Use concrete examples and ask before changing the scope.')
+    await capture('cooperation-preferences-wide')
+    win.setContentSize(680, 900); await capture('cooperation-preferences-narrow')
+    await clickText('Review in editor'); for (let i = 0; i < 100 && !(await read('!!document.querySelector(".monaco-editor")')); i++) await pause(30)
+    assert.equal(await read('moteCompanion.facts().calls.some(c=>c.operation==="write")'), false)
+    await capture('cooperation-original-editor-draft')
+    await read('moteCompanion.reset()'); await pause(160); await type('[aria-label="Try a cooperation question"]', 'How should I choose the next useful step?')
+    await clickText('Prepare new discussion')
+    assert.equal(await read('Object.values(moteCompanion.facts().drafts).includes("How should I choose the next useful step?")'), true)
+    await capture('cooperation-new-launcher-no-executor')
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__note')
+    win.setContentSize(1080, 850); await capture('materials-wide')
+    await read('moteCompanion.unknown()'); await pause(180); win.setContentSize(680, 900); await capture('materials-narrow-unknown')
+    assert.equal(await read('document.querySelector(".mote-details__preview").textContent.includes("Last confirmed saved content")'), true)
+    await clickText('Correct or remove a detail in editor'); await pause(160); await capture('materials-original-editor')
+    await read('moteCompanion.reset();moteCompanion.armLaterDraft()'); await pause(160)
+    await type('[aria-label="Try a cooperation question"]', 'Keep my original trial question here.'); await clickText('Prepare new discussion')
+    assert.equal(await read('Object.values(moteCompanion.facts().drafts).includes("Later user input stays in the new Launcher.")'), true)
+    assert.equal(await read(`document.querySelector('[aria-label="Try a cooperation question"]').value`), 'Keep my original trial question here.')
+    assert.equal(await read('moteCompanion.facts().calls.some(c=>c.operation==="error"&&c.message.includes("later input"))'), true)
+    await capture('cooperation-later-input-kept')
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await read('moteCompanion.armLateRead()'); await click('.mote-details__note')
+    assert.equal(await read('moteCompanion.facts().hasLateRead'), true)
+    await click('.mote-details__note:nth-child(2)'); await click('.mote-details__note:first-child'); await read('moteCompanion.finishLateRead()'); await pause(160)
+    assert.equal(await read('document.querySelector(".mote-details__preview").textContent.includes("STALE ORIGINAL MOTE SECRET")'), false)
+    assert.equal(await read('document.querySelector(".mote-details__preview").textContent.includes("A saved decision")'), true)
+    await capture('materials-file-aba-late-read')
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await read('moteCompanion.armLateRead()'); await click('.mote-details__note')
+    assert.equal(await read('moteCompanion.facts().hasLateRead'), true)
+    await click('[data-fixture-mote="launcher:analyst"]')
+    assert.equal(await read('document.querySelector("[data-mote-details]").dataset.moteDetails'), 'launcher:analyst')
+    await click('.mote-details__note'); assert.equal(await read('document.querySelector(".mote-details__preview").textContent.includes("Analyst material")'), true)
+    await capture('materials-other-mote-scope')
+    await click('[data-fixture-mote]:first-child'); await click('.mote-details__note'); await read('moteCompanion.finishLateRead()'); await pause(160)
+    assert.equal(await read('document.querySelector(".mote-details__preview").textContent.includes("STALE ORIGINAL MOTE SECRET")'), false)
+    assert.equal(await read('document.querySelector(".mote-details__preview").textContent.includes("A saved decision")'), true)
+    await capture('materials-mote-aba-late-read')
+    }
+    if (!feedbackOnly) {
+    await read('moteCompanion.reset();moteCompanion.selectExactContext()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__note'); await click('.mote-details__idea-request summary')
+    await type('[aria-label="Idea direction"]', 'Find a small experiment that helps us decide the next step.'); await click('[aria-label="Include exact discussion and linked Goals"]')
+    win.setContentSize(1080, 850); await capture('ideas-request-wide'); win.setContentSize(680, 900); await capture('ideas-request-narrow')
+    await clickText('Prepare idea request'); await pause(160)
+    assert.equal(await read('moteCompanion.facts().calls.some(c=>c.operation==="historyPage"&&c.agentSessionId==="core-fixture-context"&&c.limit===8)'), true)
+    assert.equal(await read('moteCompanion.facts().selectedDraft.includes("renderer-linked-idea-goal")'), true)
+    assert.equal(await read('moteCompanion.facts().selectedDraft.includes("core-alias-not-linked")'), false)
+    assert.equal(await read('moteCompanion.facts().selectedDraft.includes("background-goal-not-selected")'), false)
+    await capture('ideas-editable-new-launcher')
+    await read('moteCompanion.reset();moteCompanion.unknown()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__idea-request summary')
+    await type('[aria-label="Idea direction"]', 'Explore this question while the saved context is unconfirmed.'); await click('[aria-label="Include exact discussion and linked Goals"]'); await clickText('Prepare idea request'); await pause(160)
+    assert.equal(await read('moteCompanion.facts().selectedDraft.includes("unconfirmed")'), true); await capture('ideas-context-unknown')
+    }
+    win.setContentSize(680, 900)
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__note'); await click('.mote-details__idea-feedback summary')
+    await type('[aria-label="Idea feedback comment"]', 'Useful when the idea names a small next experiment.'); await clickText('Review feedback in SOUL'); await pause(160)
+    assert.equal(await read('Object.values(moteCompanion.facts().documents).some(d=>d.content.includes("Saved file revision: sha256:")&&d.content.includes("Useful when the idea names"))'), true)
+    const editorPainted = () => read(`(()=>{const text=document.querySelector('.monaco-editor .view-lines')?.textContent??'';return text.includes('custom')&&text.includes('feedback')&&text.includes('experiment')})()`)
+    for (let i = 0; i < 100 && !(await editorPainted()); i++) await pause(30)
+    assert.equal(await editorPainted(), true, 'The actual original Editor must visibly render both its custom paragraph and staged feedback before capture')
+    assert.equal(await read('moteCompanion.facts().calls.some(c=>c.operation==="write")'), false); await capture('ideas-feedback-original-editor')
+    if (!feedbackOnly) {
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__note'); await click('.mote-details__idea-feedback summary')
+    await type('[aria-label="Idea feedback comment"]', 'Keep this feedback while the original SOUL cannot be read.'); await read('moteCompanion.unconfirmedEditor()'); await clickText('Review feedback in SOUL'); await pause(160)
+    assert.equal(await read('Object.values(moteCompanion.facts().dirty).some(Boolean)'), false)
+    assert.equal(await read('moteCompanion.facts().calls.some(c=>c.operation==="write")'), false)
+    assert.equal(await read(`document.querySelector('[aria-label="Idea feedback comment"]').value`), 'Keep this feedback while the original SOUL cannot be read.')
+    await capture('ideas-feedback-editor-unconfirmed')
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__idea-request summary'); await type('[aria-label="Idea direction"]', 'Earlier idea direction')
+    await read('moteCompanion.armLateRead()'); await clickText('Prepare idea request'); await type('[aria-label="Idea direction"]', 'Later idea direction stays here.'); await read('moteCompanion.finishLateRead()'); await pause(160)
+    assert.equal(await read('moteCompanion.facts().tabs.length'), 2); assert.equal(await read(`document.querySelector('[aria-label="Idea direction"]').value`), 'Later idea direction stays here.')
+    await capture('ideas-later-direction-kept')
+    await read('moteCompanion.reset()'); await pause(160); await clickText('Inspect saved materials'); await click('.mote-details__idea-request summary'); await type('[aria-label="Idea direction"]', 'Retained Mote A idea direction.')
+    await read('moteCompanion.armLateRead()'); await clickText('Prepare idea request'); await click('[data-fixture-mote="launcher:analyst"]'); await click('.mote-details__idea-request summary'); await type('[aria-label="Idea direction"]', 'Separate Mote B idea direction.')
+    await click('[data-fixture-mote]:first-child'); await click('.mote-details__idea-request summary'); await read('moteCompanion.finishLateRead()'); await pause(160)
+    assert.equal(await read('moteCompanion.facts().tabs.length'), 2); assert.equal(await read(`document.querySelector('[aria-label="Idea direction"]').value`), 'Retained Mote A idea direction.')
+    assert.equal(await read('moteCompanion.facts().ideaInputs.some(i=>i.direction==="Separate Mote B idea direction.")'), true)
+    await capture('ideas-mote-aba-input-kept')
+    }
+    result.passed = true
+  } catch (error) { result.error = { message: error.message, stack: error.stack } }
+  finally { await fs.writeFile(path.join(evidence, 'renderer-result.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
+})

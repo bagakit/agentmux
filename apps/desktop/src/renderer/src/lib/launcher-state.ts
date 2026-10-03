@@ -9,7 +9,8 @@ export type LauncherSectionMode = 'expanded' | 'collapsed' | 'hidden'
 export const DEFAULT_LAUNCHER_SECTIONS: Record<LauncherSection, LauncherSectionMode> = {
   agents: 'expanded', terminal: 'expanded', browser: 'collapsed', note: 'collapsed'
 }
-export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt;
+export type MoteIdeaDraft = { direction: string; includeDiscussion: boolean; feedback: Record<string, { vote: '' | 'useful' | 'less-useful'; comment: string }> }
+export type LauncherDraft = { browser: string; note: string; noteCreation?: NoteCreationReceipt; moteIdea?: MoteIdeaDraft;
   prompt?: string; names?: LauncherNames; optionsByProvider?: LauncherProviderOptions }
 export const EMPTY_LAUNCHER_DRAFT: LauncherDraft = { browser: '', note: '' }
 
@@ -21,6 +22,7 @@ type LauncherState = {
   moteTopicId: string | null
   setSection(workspaceId: string, section: LauncherSection, mode: LauncherSectionMode): boolean
   setDraft(launcherId: string, field: 'browser' | 'note' | 'prompt', value: string): boolean
+  setMoteIdeaDraft(launcherId: string, value: MoteIdeaDraft): boolean
   setAgentName(launcherId: string, field: LauncherNameField, value: string): boolean
   setAgentOption(launcherId: string, providerId: string, optionId: string, choiceId: string | null): boolean
   copyUtilityDraft(fromLauncherId: string, toLauncherId: string): boolean
@@ -45,6 +47,10 @@ export const useLauncherState = create<LauncherState>()(persist((set) => {
   setDraft(launcherId, field, value) {
     try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), [field]: value } } })); return true }
     catch { reportStorageIssue('Launcher changes could not be saved. Current input remains available.'); return false }
+  },
+  setMoteIdeaDraft(launcherId, value) {
+    try { set(state => ({ persistenceIssue: null, drafts: { ...state.drafts, [launcherId]: { ...(state.drafts[launcherId] ?? EMPTY_LAUNCHER_DRAFT), moteIdea: value } } })); return true }
+    catch { reportStorageIssue('Idea inputs could not be saved. Current input remains available.'); return false }
   },
   setNoteCreation(launcherId, receipt) {
     try { set(state => {
