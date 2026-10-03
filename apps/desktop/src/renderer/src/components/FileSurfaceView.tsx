@@ -109,7 +109,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     ? <SourceImage key={key} content={doc.content} name={surface.path} visible={visible} />
     : dataKind
     ? <FileDataPreview key={key} content={doc.content} kind={dataKind} comments={format.extension === 'jsonc'} />
-    : <AgentMarkdown documentMode className="file-markdown-preview" content={doc.content} workspaceRoot={workspaceRoot} sourcePath={surface.path}
+    : <AgentMarkdown documentMode outline className="file-markdown-preview" content={doc.content} workspaceRoot={workspaceRoot} sourcePath={surface.path}
       renderWorkspaceImage={(path, alt, linked) => <WorkspaceImage key={`${surface.workspaceId}:${path}`} workspaceId={surface.workspaceId} path={path} alt={alt} linked={Boolean(linked)} openFile={() => openReference(path)} />}
       openWorkspaceFile={openReference}
       openHttpLink={(url) => {

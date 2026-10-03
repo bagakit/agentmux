@@ -1,3 +1,5 @@
+@import './markdown-outline.css';
+
 /* Conversation hierarchy stays compact; document hierarchy has its own reading rhythm. */
 .md { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; white-space: normal; }
 .md > :first-child { margin-top: 0; }

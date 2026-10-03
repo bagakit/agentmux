@@ -28,6 +28,9 @@ export type BlockNode =
   | { kind: 'table'; align: TableAlign[]; header: InlineNode[][]; rows: InlineNode[][][] }
   | { kind: 'footnotes'; items: MarkdownFootnote[] }
 
+export type MarkdownHeading = Extract<BlockNode, { kind: 'heading' }>
+export type MarkdownDocument = { blocks: BlockNode[]; headings: MarkdownHeading[] }
+
 const processor = unified().use(remarkParse).use(remarkGfm)
 type ParseContext = {
   source: string
@@ -35,6 +38,7 @@ type ParseContext = {
   footnotes: Map<string, FootnoteDefinition>
   references: Map<string, { number: number; count: number }>
   anchors: Set<string>
+  headings: MarkdownHeading[] | null
 }
 
 /** Definitions can occur in a quote or list; CommonMark uses the first definition. */
@@ -119,7 +123,9 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
     switch (node.type) {
       case 'heading': {
         const children = inlineFrom(node.children, context)
-        out.push({ kind: 'heading', level: node.depth, anchor: headingAnchor(children, context), children })
+        const heading: MarkdownHeading = { kind: 'heading', level: node.depth, anchor: headingAnchor(children, context), children }
+        out.push(heading)
+        context.headings?.push(heading)
         break
       }
       case 'paragraph':
@@ -161,10 +167,11 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
 }
 
 /** Malformed source stays readable; parsing never repairs content or creates HTML. */
-export function parseAgentMarkdown(source: string): BlockNode[] {
+function parseMarkdown(source: string, collectHeadings: boolean): MarkdownDocument {
+  const headings: MarkdownHeading[] = []
   try {
     const tree = processor.parse(source) as Root
-    const context: ParseContext = { source, definitions: new Map(), footnotes: new Map(), references: new Map(), anchors: new Set() }
+    const context: ParseContext = { source, definitions: new Map(), footnotes: new Map(), references: new Map(), anchors: new Set(), headings: collectHeadings ? headings : null }
     collectDefinitions(tree, context)
     const blocks = blocksFrom(tree.children, context), notes: MarkdownFootnote[] = []
     // Map iteration includes references introduced by a footnote; each definition is projected once.
@@ -173,10 +180,24 @@ export function parseAgentMarkdown(source: string): BlockNode[] {
     }
     for (const note of notes) note.references = context.references.get(note.identifier)!.count
     if (notes.length) blocks.push({ kind: 'footnotes', items: notes })
-    return blocks
+    return { blocks, headings }
   } catch {
-    return source.trim() === '' ? [] : [{ kind: 'paragraph', children: [{ kind: 'text', text: source }] }]
+    return { blocks: source.trim() === '' ? [] : [{ kind: 'paragraph', children: [{ kind: 'text', text: source }] }], headings: [] }
   }
+}
+
+export function parseAgentMarkdown(source: string): BlockNode[] {
+  return parseMarkdown(source, false).blocks
+}
+
+/** File outlines retain the original heading nodes during the same grammar projection. */
+export function parseAgentMarkdownDocument(source: string): MarkdownDocument {
+  return parseMarkdown(source, true)
+}
+
+/** Only an open outline needs a plain label; anchors remain owned by the original parse. */
+export function markdownHeadingText(heading: MarkdownHeading): string {
+  return inlineText(heading.children)
 }
 
 /** Conversation prose retains literal text unless it contains Markdown signals; files always parse. */
