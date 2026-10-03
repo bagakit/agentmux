@@ -301,7 +301,8 @@ export class AgentMuxRpcService {
         ? await client.reopenAgent(input as unknown as Parameters<AgentMuxClient['reopenAgent']>[0])
         : await client.reconcileAgentReopen(input as unknown as Parameters<AgentMuxClient['reconcileAgentReopen']>[0]) } as AgentMuxRpcResult<M>
     }
-    if (method === 'message.pending.edit' || method === 'message.pending.send' || method === 'agent.question.reply') {
+    if (method === 'message.pending.edit' || method === 'message.pending.send' ||
+        method === 'message.pending.archive' || method === 'message.pending.restore' || method === 'agent.question.reply') {
       if (context.caller !== undefined || !context.principal ||
           !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' ||
           !context.principal.id.trim() || context.principal.id.includes('\0')) {

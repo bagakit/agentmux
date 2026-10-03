@@ -268,7 +268,7 @@ export function AgentSessionComposer({
     <SessionMailbox key={sessionId} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
-        queued={queuedEntries.map((entry) => ({
+        queued={queuedEntries.filter(entry => !entry.archived).map((entry) => ({
           id: entry.operationId,
           text: entry.text,
           ...(entry.enqueuedAt !== undefined ? { enqueuedAt: entry.enqueuedAt } : {}),

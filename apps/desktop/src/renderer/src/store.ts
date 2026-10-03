@@ -52,7 +52,7 @@ import { clampFocusTimelineNameWidth, FOCUS_TIMELINE_NAME_WIDTH_DEFAULT } from '
 import { DEFAULT_FOCUS_RULER, restoreFocusRuler, sameFocusRuler, type FocusRulerPreferences } from './lib/focus-timeline-ruler'
 import { readTerminalViewObservation } from './lib/terminal-view-observation'
 import type { GitBranchDiffDescriptor } from '../../shared/git-contracts'
-import { reconcileDeliveredSteers } from './lib/steer-queue-delivery'
+import { confirmedSteerDelivery, reconcileDeliveredSteers } from './lib/steer-queue-delivery'
 import { browserOperatorForSession } from './lib/browser-operator-identity'
 import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project-rail-width'
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
@@ -424,6 +424,8 @@ export type AgentSteerQueueEntry = {
   errorCode?: string
   /** Restart pauses execution authority independently of the original delivery failure. */
   awaitingExplicitSend?: true
+  /** Retain this exact intent and its delivery facts outside active queue consumption. */
+  archived?: true
   origin?: 'manual'
   /** Frozen when explicitly selected, before awaits. Queue-only default leaves it absent;
    * known-null retains that original selection across recovery/wait, but boot pauses it. */
@@ -432,7 +434,16 @@ export type AgentSteerQueueEntry = {
 
 /** A missing or frozen condition is not evidence that this message was never submitted. */
 export function agentSteerCanEdit(entry: AgentSteerQueueEntry, inFlightId?: string): boolean {
-  return entry.promptCondition === null && entry.operationId !== inFlightId
+  return !entry.archived && entry.promptCondition === null && entry.operationId !== inFlightId
+}
+
+function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, phase?: 'preparing' | 'submitting', confirmed = false): AgentMuxPendingMessage {
+  return { pendingId: entry.operationId, text: entry.text, runId: entry.runId ?? null,
+    enqueuedAt: entry.enqueuedAt ?? null, status: entry.status,
+    phase: entry.operationId === inFlightId ? phase ?? 'preparing' : null,
+    editable: !confirmed && agentSteerCanEdit(entry, inFlightId),
+    delivery: confirmed ? 'confirmed' : entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
+    errorCode: entry.errorCode ?? null, error: entry.error ?? null, archived: entry.archived === true }
 }
 
 /** One admission and its labels share the original execution choice, including unknown old input. */
@@ -1009,6 +1020,7 @@ type AppState = {
   /** Queue a steer. `false` means it was refused (empty, not an Agent, or over the size budget) and the caller must keep the draft. */
   enqueueAgentSteer(sessionId: string, text: string, onRejected?: (error: unknown) => void, operationId?: string, origin?: 'manual', agentMuxNote?: string, options?: AgentSteerOptions): boolean
   removeAgentSteer(sessionId: string, operationId: string): void
+  archiveAgentSteer(sessionId: string, operationId: string, expectedText: string, archived: boolean): Promise<{ changed: boolean; entry: AgentSteerQueueEntry }>
   moveAgentSteer(sessionId: string, operationId: string, direction: 'up' | 'down'): void
   editQueuedAgentSteer(sessionId: string, operationId: string, expectedText: string, nextText: string): void
   sendQueuedAgentSteer(sessionId: string, operationId: string): Promise<'submitted' | 'unconfirmed'>
@@ -1987,7 +1999,7 @@ function startSessionMembershipResync(
           const current = useAppStore.getState(), session = current.sessions.find((item) => item.id === sessionId)
           if (session && restoredDuringRead.has(session.hostId)) continue
           if (!session || current.runtimeEndpointWarnings?.some(warning => warning.hostId === session.hostId && warning.availability !== 'connected')) continue
-          const pending = current.agentSteerQueues[sessionId]?.find((item) => !item.awaitingExplicitSend &&
+          const pending = current.agentSteerQueues[sessionId]?.find((item) => !item.archived && !item.awaitingExplicitSend &&
             (item.runId === undefined || steerEntryTargetsRun(item, session.control.run.runId)))
           if (entry.restoredHostIds.has(session.hostId) && pending && pending.promptCondition !== null) {
             // A fresh timeline can settle a delivery receipt. Its absence cannot prove that an
@@ -2690,8 +2702,8 @@ function admitAgentSteer(sessionId: string, text: string, onRejected?: (error: u
     ;(onRejected ?? useAppStore.getState().reportError)(new Error('This message identity already belongs to different content. Your draft is kept.'))
     return false
   }
-  if ((useAppStore.getState().agentSteerQueues[sessionId]?.length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
-    (onRejected ?? useAppStore.getState().reportError)(new Error(`The message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Copy or remove queued messages before adding another. Your draft is kept.`))
+  if ((useAppStore.getState().agentSteerQueues[sessionId]?.filter(entry => !entry.archived).length ?? 0) >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+    (onRejected ?? useAppStore.getState().reportError)(new Error(`The active message queue is full (${MAX_AGENT_STEER_QUEUE_ENTRIES} messages). Archive queued messages before adding another. Your draft is kept.`))
     return false
   }
   // The shared Core formatter owns byte accounting; transport still keeps body and note separate.
@@ -3938,20 +3950,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return session
     }
     requireActive()
-    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send') {
+    if (request.operation === 'message.pending.ls' || request.operation === 'message.pending.edit' || request.operation === 'message.pending.send' ||
+        request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
       const session = agentSession({ kind: 'agent-session', agentSessionId: request.agentSessionId })
       const records = (): AgentMuxPendingMessage[] => {
         const state = get()
         const current = reconcileDeliveredSteers(state, session.id)
-        return (current.agentSteerQueues[session.id] ?? []).map(entry => ({
-          pendingId: entry.operationId, text: entry.text, runId: entry.runId ?? null,
-          enqueuedAt: entry.enqueuedAt ?? null, status: entry.status,
-          phase: entry.operationId === state.agentSteerInFlight[session.id]
-            ? state.agentSteerInFlightPhase[session.id] ?? 'preparing' : null,
-          editable: agentSteerCanEdit(entry, state.agentSteerInFlight[session.id]),
-          delivery: entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
-          errorCode: entry.errorCode ?? null, error: entry.error ?? null
-        }))
+        return (current.agentSteerQueues[session.id] ?? []).map(entry =>
+          pendingSteerRecord(entry, state.agentSteerInFlight[session.id], state.agentSteerInFlightPhase[session.id],
+            Boolean(confirmedSteerDelivery(state.timelines[session.id], session.id, entry.operationId))))
       }
       if (request.operation === 'message.pending.ls') return { operation: request.operation, agentSessionId: session.id, messages: records() }
       const before = records().find(item => item.pendingId === request.pendingId)
@@ -3960,6 +3967,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         get().editQueuedAgentSteer(session.id, request.pendingId, request.expectedText, request.text)
         const message = records().find(item => item.pendingId === request.pendingId)!
         return { operation: request.operation, agentSessionId: session.id, message, changed: before.text !== message.text }
+      }
+      if (request.operation === 'message.pending.archive' || request.operation === 'message.pending.restore') {
+        const result = await get().archiveAgentSteer(session.id, request.pendingId, request.expectedText, request.operation === 'message.pending.archive')
+        // Capture the successful mutation itself. A later delivery event can remove restored
+        // Pending before a reader inspects it; that event cannot erase this business result.
+        const facts = { agentSessionId: session.id, message: pendingSteerRecord(result.entry, undefined, undefined,
+          Boolean(confirmedSteerDelivery(get().timelines[session.id], session.id, result.entry.operationId))), changed: result.changed }
+        if (request.operation === 'message.pending.archive') return { operation: request.operation, ...facts }
+        return { operation: request.operation, ...facts }
       }
       const disposition = await get().sendQueuedAgentSteer(session.id, request.pendingId)
       const message = records().find(item => item.pendingId === request.pendingId) ?? null
@@ -7922,6 +7938,41 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   enqueueAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) {
     return admitAgentSteer(sessionId, text, onRejected, operationId, origin, agentMuxNote, options) !== false
   },
+  async archiveAgentSteer(sessionId, operationId, expectedText, archived) {
+    let changed = false
+    let result!: AgentSteerQueueEntry
+    set(state => {
+      const queue = state.agentSteerQueues[sessionId]
+      const entry = queue?.find(item => item.operationId === operationId)
+      if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is no longer available. No replacement was created.')
+      if (entry.text !== expectedText) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message changed. Read its current text before archiving or restoring it.')
+      if (state.agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original call is preparing or submitting. Archiving cannot recall Provider input; its original facts are kept.')
+      if (!archived && confirmedSteerDelivery(state.timelines[sessionId], sessionId, operationId)) {
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'Core confirmed this original input. Its archived record is kept; read the confirmed History instead of restoring it to Pending.')
+      }
+      if (!archived && entry.archived && queue!.filter(item => !item.archived).length >= MAX_AGENT_STEER_QUEUE_ENTRIES) {
+        throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The active message queue is full. Archive another active message before restoring this original record; its archived facts are kept.')
+      }
+      result = entry
+      if ((entry.archived === true) === archived) return state
+      changed = true
+      return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue!.map(item => {
+        if (item !== entry) return item
+        if (archived) return (result = { ...item, archived: true as const })
+        const { archived: _archive, ...original } = item
+        return (result = { ...original, awaitingExplicitSend: true as const })
+      }) } }
+    })
+    if (changed) agentSteerDrains.get(sessionId)?.explicitSteers.delete(operationId)
+    // Archive/restore preserve the original tuple; neither grants input permission nor wakes a drain.
+    // Flush the local debounce and await the existing platform flush request before returning.
+    // That owner's void flushStorageData call is not a disk/fsync ACK; actual restart retention
+    // needs its own evidence. A failed request retains the current record and reports its cause.
+    try {
+      await flushMessageWorkbench(false)
+    } catch (error) { get().reportWorkbenchSaveFailure(error); throw error }
+    return { changed, entry: result }
+  },
   removeAgentSteer(sessionId, operationId) {
     // A submitted request cannot be recalled by deleting its local projection.
     if (get().agentSteerInFlight[sessionId] === operationId) return
@@ -7966,10 +8017,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const current = reconcileDeliveredSteers(state, sessionId)
       const queue = current.agentSteerQueues[sessionId]
       if (!queue) return current
-      const index = queue.findIndex((entry) => entry.operationId === operationId)
-      const adjacent = index + (direction === 'up' ? -1 : 1)
+      const active = queue.filter(entry => !entry.archived)
+      const activeIndex = active.findIndex(entry => entry.operationId === operationId)
+      const index = queue.findIndex(entry => entry.operationId === operationId)
+      const neighborId = active[activeIndex + (direction === 'up' ? -1 : 1)]?.operationId
+      const adjacent = queue.findIndex(entry => entry.operationId === neighborId)
       const entry = queue[index], neighbor = queue[adjacent]
-      if (!entry || !neighbor) return current
+      if (!entry || entry.archived || !neighbor) return current
       const sending = current.agentSteerInFlight[sessionId]
       if (entry.operationId === sending || neighbor.operationId === sending) return current
       const next = [...queue]
@@ -7981,6 +8035,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   async sendQueuedAgentSteer(sessionId, operationId) {
     const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
+    if (entry?.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is archived. Restore it before explicitly choosing Send; no input was requested.')
     const session = get().sessions.find((item) => item.id === sessionId)
     if (!entry || session?.kind !== 'agent' || entry.runId !== undefined &&
       !steerEntryTargetsRun(entry, session.control.run.runId)) return 'unconfirmed'
@@ -8001,7 +8056,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const current = get()
     const target = current.sessions.find(item => item.id === sessionId)
     const selected = current.agentSteerQueues[sessionId]?.find(entry => entry.operationId === explicitOperationId)
-    const requested = explicitOperationId !== undefined && selected && target?.kind === 'agent' &&
+    const requested = explicitOperationId !== undefined && selected && !selected.archived && target?.kind === 'agent' &&
       (selected.runId === undefined || steerEntryTargetsRun(selected, target.control.run.runId))
       ? explicitOperationId : undefined
     if (requested !== undefined && target?.kind === 'agent' && selected?.promptCondition === null && selected.execution === undefined) {
@@ -8020,7 +8075,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return active.promise
     }
     const selectedIds = (get().agentSteerQueues[sessionId] ?? []).filter(entry =>
-      !entry.awaitingExplicitSend && entry.promptCondition === null && entry.execution !== undefined)
+      !entry.archived && !entry.awaitingExplicitSend && entry.promptCondition === null && entry.execution !== undefined)
       .map(entry => entry.operationId)
     const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>() }
     drain.promise = Promise.resolve().then(async () => {
@@ -8035,7 +8090,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           if (state.runtimeEndpointWarnings?.some((warning) => warning.hostId === sessionHostId && warning.availability !== 'connected')) return
           const currentRunId = session.control.run.runId
           const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
-            !item.awaitingExplicitSend &&
+            !item.archived && !item.awaitingExplicitSend &&
             (item.runId === undefined || steerEntryTargetsRun(item, currentRunId)))
           // Explicit steer selects its exact intent, leaving queue-only work untouched. Multiple
           // explicit requests retain their author order in this one queue, including across awaits.
@@ -8067,7 +8122,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           let attemptCondition = entry.promptCondition
           let attemptExecution = entry.execution
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
-            item.operationId === entry.operationId && item.runId === attemptRunId &&
+            !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
             item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
             item.sourceChannel === entry.sourceChannel && reactionIntentKey(item.reaction) === reactionIntentKey(entry.reaction) &&
             (!dispatchStarted || item.execution === attemptExecution) &&
@@ -8215,7 +8270,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const fresh = get()
             const freshSession = fresh.sessions.find(item => item.id === sessionId)
             const explicitPending = freshSession?.kind === 'agent' && fresh.agentSteerQueues[sessionId]?.some(item =>
-              drain.explicitSteers.has(item.operationId) && !item.awaitingExplicitSend &&
+              drain.explicitSteers.has(item.operationId) && !item.archived && !item.awaitingExplicitSend &&
               (item.runId === undefined || steerEntryTargetsRun(item, freshSession.control.run.runId)))
             if (!explicitPending && (explicitAttempt || stillPending && !drain.wake)) return
           }

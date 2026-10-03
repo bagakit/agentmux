@@ -268,13 +268,17 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const code = 'INVALID_CONTROL_REQUEST'
     const fields = ['schemaVersion', 'requestId', 'operation', 'agentSessionId',
       ...(source.operation === 'message.pending.ls' ? [] : ['pendingId']),
-      ...(source.operation === 'message.pending.edit' ? ['expectedText', 'text'] : [])]
+      ...(source.operation === 'message.pending.edit' ? ['expectedText', 'text'] :
+        source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore' ? ['expectedText'] : [])]
     settingsFields(source, fields, code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId,
       agentSessionId: identity(source.agentSessionId, 'Pending message Session ID is invalid.', code) }
     if (source.operation === 'message.pending.ls') return { ...base, operation: source.operation }
     const pendingId = identity(source.pendingId, 'Pending message ID is invalid.', code)
     if (source.operation === 'message.pending.send') return { ...base, operation: source.operation, pendingId }
+    if (source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore') {
+      return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code) }
+    }
     const edited = text(source.text, 'Edited message', code)
     if (!edited.trim() || edited.includes('\0')) throw new AgentMuxError('Edited message is invalid.', code)
     return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code), text: edited }
@@ -930,19 +934,24 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (isPendingMessageOperation(operation)) {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsFields(result, operation === 'message.pending.ls' ? ['agentSessionId', 'messages']
-      : operation === 'message.pending.edit' ? ['agentSessionId', 'message', 'changed']
+      : operation !== 'message.pending.send' ? ['agentSessionId', 'message', 'changed']
       : ['agentSessionId', 'pendingId', 'disposition', 'message'], code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const }
     const agentSessionId = identity(result.agentSessionId, 'Pending message Session ID is invalid.', code)
     if (operation === 'message.pending.ls') {
-      if (!Array.isArray(result.messages) || result.messages.length > 100) throw new AgentMuxError('Pending message list is invalid.', code)
+      if (!Array.isArray(result.messages)) throw new AgentMuxError('Pending message list is invalid.', code)
       const messages = result.messages.map(parsePendingMessage)
+      if (messages.filter(item => !item.archived).length > 100) throw new AgentMuxError('Active pending message list is invalid.', code)
       if (new Set(messages.map(item => item.pendingId)).size !== messages.length) throw new AgentMuxError('Pending message identities repeat.', code)
       return { ...base, operation, result: { agentSessionId, messages } }
     }
-    if (operation === 'message.pending.edit') {
+    if (operation !== 'message.pending.send') {
       if (typeof result.changed !== 'boolean') throw new AgentMuxError('Pending message edit result is invalid.', code)
-      return { ...base, operation, result: { agentSessionId, message: parsePendingMessage(result.message), changed: result.changed } }
+      const message = parsePendingMessage(result.message)
+      if (operation === 'message.pending.archive' && !message.archived || operation === 'message.pending.restore' && message.archived) {
+        throw new AgentMuxError('Pending message archive result does not match the action.', code)
+      }
+      return { ...base, operation, result: { agentSessionId, message, changed: result.changed } }
     }
     const pendingId = identity(result.pendingId, 'Pending message ID is invalid.', code)
     if (result.disposition !== 'submitted' && result.disposition !== 'unconfirmed') throw new AgentMuxError('Pending message send result is invalid.', code)
