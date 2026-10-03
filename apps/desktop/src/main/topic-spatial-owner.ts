@@ -70,7 +70,10 @@ export class TopicSpatialOwner implements TopicSpatialPort {
       error('The original Core identity belongs to a Mote. Its workface and content are retained.', 'TOPIC_TARGET_IS_MOTE')
     const ids = new Set(state ? categoriesFromSpatial(state.graph).map(category => category.spaceId) : [])
     return { zoneId, categorySpaceIds: state?.graph.bindings.filter(binding => binding.zoneId === zoneId && ids.has(binding.spaceId)).map(binding => binding.spaceId) ?? [],
-      chatIds: state?.graph.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId) ?? [], spatialRevision: state?.revision ?? 0 }
+      chatIds: state?.graph.tabs.filter(tab => tab.zoneId === zoneId).map(tab => tab.tabId) ?? [], spatialRevision: state?.revision ?? 0,
+      ...(origin && typeof origin === 'object' && !Array.isArray(origin) && origin.contentKind === 'topic' &&
+        origin.topicId === topic.id && origin.workspaceId === workspace.id && original.some(zone => zone.zoneId === zoneId)
+        ? { contentKind: 'topic' as const } : {}) }
   }
   async ensureCategory(category: TopicCategory): Promise<void> {
     const current = await this.ports.state.read(), graph = structuredClone(current?.graph ?? emptyGraph())
