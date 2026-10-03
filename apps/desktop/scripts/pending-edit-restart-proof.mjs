@@ -19,10 +19,12 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
   const steerRecovery = mode === 'steer-recovery'
   const diagnosticOnly = steerRecovery && arguments_.includes('--steer-recovery-diagnostic')
   const typedCrossCore = steerRecovery && arguments_.includes('--typed-response-cross-core')
+  const typedFirstHook = steerRecovery && arguments_.includes('--typed-response-first-hook')
+  assert.ok(!typedFirstHook || typedCrossCore, 'First-Hook qualification must use the two-Core Native mode')
   assert.ok(!(diagnosticOnly && typedCrossCore), 'Distinct bounded proof modes cannot be combined')
   const environmentKey = steerRecovery ? 'AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT' : 'AGENTMUX_PENDING_EDIT_BUILD_RECEIPT'
   const worker = steerRecovery ? 'steer-recovery-native-proof.mjs' : 'verify-workbench-persistence-restart.mjs'
-  const resultField = typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
+  const resultField = typedFirstHook ? 'typedResponseFirstHook' : typedCrossCore ? 'typedResponseCrossCore' : steerRecovery ? 'steerRecovery' : 'pendingEdit'
   const evidence = join(root, steerRecovery ? '.tmp/steer-recovery-restart' : '.tmp/composer-pending-edit-restart', String(globalThis.crypto.randomUUID()))
   // The inner real harness has Unix sockets below this tree. macOS's per-user
   // tmpdir prefix would exceed sockaddr_un's path limit after that nesting.
@@ -251,7 +253,7 @@ export default Object.fromEntries(Object.entries(actual).map(([key,value])=>[key
     await rm(sourceArchivePath, { force: true })
     await writeFile(buildReceiptPath, JSON.stringify(build, null, 2))
     await writeFile(join(evidence, 'summary.json'), JSON.stringify({ schema: steerRecovery ? 'agentmux.steer-recovery-restart-proof.v1' : 'agentmux.pending-edit-restart-proof.v1', passed: !failure,
-      receiptPath, buildReceiptPath, outcome, qualifiedScope: typedCrossCore ? 'SDK-two-Core-Native-only' : diagnosticOnly ? 'first-Send-diagnostic-only' : mode, userRunTouched: false, sharedSourceWritten: false,
+      receiptPath, buildReceiptPath, outcome, qualifiedScope: typedFirstHook ? 'SDK-two-Core-first-Hook-Native-only' : typedCrossCore ? 'SDK-two-Core-Native-only' : diagnosticOnly ? 'first-Send-diagnostic-only' : mode, userRunTouched: false, sharedSourceWritten: false,
       failure: failure ? { name: failure.name, message: failure.message, stack: failure.stack } : null }, null, 2))
   }
   process.stdout.write(JSON.stringify({ mode: '--' + mode, passed: !failure, receiptPath, buildReceiptPath, evidence,

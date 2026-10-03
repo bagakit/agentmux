@@ -20,8 +20,10 @@ const receiptPath = process.argv.find(value => value.startsWith('--receipt-path=
 const probeRoot = process.argv.find(value => value.startsWith('--probe-root='))?.slice('--probe-root='.length)
 const diagnosticOnly = process.argv.includes('--steer-recovery-diagnostic')
 const typedCrossCore = process.argv.includes('--typed-response-cross-core')
+const typedFirstHook = process.argv.includes('--typed-response-first-hook')
+assert.ok(!typedFirstHook || typedCrossCore, 'First-Hook qualification must use the two-Core Native mode')
 assert.ok(!(diagnosticOnly && typedCrossCore), 'Diagnostic and two-Core qualification are distinct proof modes')
-for (const arg of process.argv.slice(2)) assert.ok(arg === '--steer-recovery' || arg === '--steer-recovery-diagnostic' || arg === '--typed-response-cross-core' || arg.startsWith('--receipt-path=') || arg.startsWith('--probe-root='), 'Unknown bounded native option: ' + arg)
+for (const arg of process.argv.slice(2)) assert.ok(arg === '--steer-recovery' || arg === '--steer-recovery-diagnostic' || arg === '--typed-response-cross-core' || arg === '--typed-response-first-hook' || arg.startsWith('--receipt-path=') || arg.startsWith('--probe-root='), 'Unknown bounded native option: ' + arg)
 assert.ok(receiptPath && probeRoot && process.env.AGENTMUX_STEER_RECOVERY_BUILD_RECEIPT)
 const root = await realpath(await mkdtemp(join(probeRoot, 'sr-')))
 const userData = join(root, 'ui'), runtime = join(root, 'rt'), workspace = join(root, 'ws'), codexHome = join(root, 'home')
@@ -34,13 +36,17 @@ Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE
   AGENTMUX_SPATIAL_STATE_STORE: env.AGENTMUX_SPATIAL_STATE_STORE, AGENTMUX_MESSAGE_QUEUE_PATH: env.AGENTMUX_MESSAGE_QUEUE_PATH, CODEX_HOME: codexHome })
 for (const dir of [userData, runtime, join(runtime, 'state/ctxmux'), workspace, codexHome]) await mkdir(dir, { recursive: true, mode: 0o700 })
 const report = { schema: 'agentmux.steer-recovery-native.v1', passed: false, userRunTouched: false, sharedSourceWritten: false,
-  root, phases: [], diagnosticOnly, typedCrossCore, boundary: 'A actual Desktop native resume; B real permission on that recovered Run; independent Desktop restart is separate.' }
+  root, phases: [], diagnosticOnly, typedCrossCore, typedFirstHook, boundary: 'A actual Desktop native resume; B real permission on that recovered Run; independent Desktop restart is separate.' }
 const progress = async stage => { report.stage = stage; await writeFile(receiptPath, JSON.stringify(report, null, 2)); console.log('private_native_stage=' + stage) }
 const responseClaims = []
+const pendingTransitions = []
 class ObservedResponseStore extends AgentMuxFileAgentSessionStore {
   async compareAndSwap(...args) {
     const result = await super.compareAndSwap(...args), next = args[1]
     if (next?.pendingInteraction?.response) responseClaims.push({ observedAt: Date.now(), response: structuredClone(next.pendingInteraction.response) })
+    if (typedFirstHook && (args[0]?.pendingInteraction || next?.pendingInteraction)) pendingTransitions.push({ observedAt: Date.now(),
+      expected: { run: structuredClone(args[0]?.run), pendingInteraction: structuredClone(args[0]?.pendingInteraction), hookReceipt: structuredClone(args[0]?.hookReceipt) },
+      next: { run: structuredClone(next?.run), pendingInteraction: structuredClone(next?.pendingInteraction), hookReceipt: structuredClone(next?.hookReceipt) } })
     return result
   }
 }
@@ -77,7 +83,7 @@ const backend = createServer(async (request, response) => {
     assert.ok(JSON.stringify(tool.parameters.properties.sandbox_permissions).includes('require_escalated'))
     report.nativeTool = { name: tool.name, schema: tool.parameters }
     permissionIssued = true
-    const arguments_ = JSON.stringify({ cmd: 'printf PRIVATE_PERMISSION_PROBE', sandbox_permissions: 'require_escalated', justification: 'Private recovery fixture approval' })
+    const arguments_ = JSON.stringify({ cmd: typedFirstHook ? 'sleep 0.2; printf PRIVATE_PERMISSION_PROBE' : 'printf PRIVATE_PERMISSION_PROBE', sandbox_permissions: 'require_escalated', justification: 'Private recovery fixture approval' })
     const item = { type: 'function_call', id: 'private_tool_item_' + requests.length, call_id: 'private_approval_call_' + requests.length, name: tool.name, arguments: arguments_, status: 'completed' }
     event({ type: 'response.output_item.added', output_index: 0, item: { ...item, arguments: '', status: 'in_progress' } })
     event({ type: 'response.function_call_arguments.delta', output_index: 0, item_id: item.id, delta: arguments_ })
@@ -251,9 +257,11 @@ async function captureStartupFailureFacts() {
   await progress('startup-failure-facts-captured-before-cleanup')
 }
 async function proveTypedResponseCrossCore(initial) {
-  report.schema = 'agentmux.typed-response-cross-core-native.v1'
-  report.qualifiedScope = 'Actual SDK two Core on one real private Native Run; Desktop recovery and original selected pending remain unqualified.'
-  report.earlyHookReadinessWindowRepaired = false
+  report.schema = typedFirstHook ? 'agentmux.typed-response-first-hook-native.v1' : 'agentmux.typed-response-cross-core-native.v1'
+  report.qualifiedScope = typedFirstHook
+    ? 'Actual SDK two Core at the first observed official PermissionRequest on one real private Native Run; Desktop recovery and original selected pending remain unqualified.'
+    : 'Actual SDK two Core on one real private Native Run; Desktop recovery and original selected pending remain unqualified.'
+  if (!typedFirstHook) report.earlyHookReadinessWindowRepaired = false
   await until('first Core actual native done readiness', async () => {
     const value = await canonical(); return value?.semanticStatus?.state === 'done' && value.terminalPromptReadiness?.readyThroughByte !== undefined && value
   })
@@ -263,33 +271,75 @@ async function proveTypedResponseCrossCore(initial) {
   typedPeer = new AgentMuxClient({ store }); await typedPeer.connect(); await typedPeer.refreshAgentSession(id, initial.run)
   const setupId = randomUUID(), body = 'PRIVATE_PERMISSION_SETUP_TWO_CORE'
   await typedPeer.submitAgentPrompt({ ...agentPromptCondition(typedPeer.agentSession(id)), agentSessionId: id, operationId: setupId, prompt: body })
+  let hookObservedAt
   const waiting = await until('actual cross-Core native PermissionRequest', async () => {
-    const value = await canonical(); return value?.pendingInteraction?.request?.kind === 'permission' && value
+    const value = await canonical()
+    if (value?.pendingInteraction?.request?.kind !== 'permission') return false
+    hookObservedAt = Date.now(); return value
   })
-  const request = waiting.pendingInteraction.request, authority = (await client.statusAgent(id)).run
-  assert.equal(authority.runId, initial.run.runId); assert.ok(authority.acceptedInputBytes > legitimateCursor)
+  const request = waiting.pendingInteraction.request
+  // The first-Hook path has no fixture Runtime read or progress-file await between
+  // observing the official request and calling the public typed response method.
+  const authority = typedFirstHook ? undefined : (await client.statusAgent(id)).run
+  const expectedCursor = typedFirstHook ? waiting.terminalPromptSubmission?.submit?.inputByteRange.endByte : authority.acceptedInputBytes
+  assert.equal((authority ?? waiting.run).runId, initial.run.runId); assert.ok(expectedCursor > legitimateCursor)
   assert.equal(client.agentInputCursors.get(id), legitimateCursor)
+  if (typedFirstHook) {
+    assert.equal(waiting.terminalPromptSubmission?.submit?.acknowledged, true)
+    assert.equal(request.evidence.source, 'native-hook'); assert.equal(request.evidence.run.runId, initial.run.runId)
+    assert.equal(request.nativeToolCallId, 'private_approval_call_2')
+  }
   report.crossCoreCounterexample = { setupId, setupSubmission: waiting.terminalPromptSubmission, request,
-    localCursor: legitimateCursor, authority: authority.acceptedInputBytes, run: authority }
-  await progress('typed-cross-core-real-request-and-stale-local-cursor')
+    localCursor: legitimateCursor, authority: authority?.acceptedInputBytes, expectedCursor, run: authority ?? waiting.run,
+    ...(typedFirstHook ? { cursorOracleSource: 'Actual peer setup acknowledged submit range, not a fixture fresh Runtime read' } : {}) }
+  if (!typedFirstHook) await progress('typed-cross-core-real-request-and-stale-local-cursor')
   // This setup explicitly qualifies Native consumption only after the real pane.
   // It does not repair the early Hook window or the Desktop first-send boundary.
-  let approvalSnapshot
-  const approvalThroughByte = await client.screenEvidence.wait(client.agentSession(id), authority.latestOutputBytes, false, screen => {
+  let approvalSnapshot, approvalThroughByte
+  if (!typedFirstHook) approvalThroughByte = await client.screenEvidence.wait(client.agentSession(id), authority.latestOutputBytes, false, screen => {
     approvalSnapshot = screen.snapshot(); const text = approvalSnapshot.lines.map(line => line.text).join('\n')
     return text.includes('Would you like to run the following command?') && text.includes('Press enter to confirm or esc to cancel') && text.includes('PRIVATE_PERMISSION_PROBE')
   }, { timeoutMs: 10_000, requireCompleteFrame: true, timeoutMessage: 'Actual complete native approval pane unavailable', terminalMessage: 'Private Run ended before native approval pane' })
   const option = request.options.find(item => item.kind === 'allow-once'); assert.ok(option)
   const response = { kind: 'permission', requestId: request.id, decision: { outcome: 'selected', optionId: option.id } }
+  const firstHookFacts = typedFirstHook ? { hookObservedAt, nativeHookObservedAt: request.evidence.observedAt,
+    request: structuredClone(request), outputPrefixAtCall: output, responseClaims, pendingTransitions,
+    boundary: 'First observed authenticated PermissionRequest; no fixture pane, transport or status wait before public SDK call' } : undefined
+  if (firstHookFacts) { report.firstHookResponse = firstHookFacts; firstHookFacts.callAt = Date.now() }
   await client.respondAgentInteraction({ agentSessionId: id, expectedRun: initial.run, response })
+  if (firstHookFacts) {
+    firstHookFacts.returnedAt = Date.now()
+    firstHookFacts.afterReturn = await canonical(); firstHookFacts.afterReturnObservedAt = Date.now()
+    const pending = firstHookFacts.afterReturn?.pendingInteraction
+    assert.equal(pending?.request.id, request.id, 'A genuine ACK-known pending window must be observed; absence cannot qualify this fixture')
+    assert.equal(pending.response?.acknowledged, true, 'Typed bytes must be ACKed while original native request is still pending')
+    assert.equal(pending.nativeCompleted, undefined, 'The measured ACK-only window must precede native completion')
+    await progress('typed-first-hook-actual-ACK-known-pending-window')
+  }
   const frozen = responseClaims.find(item => item.response.value.requestId === request.id)?.response
-  assert.ok(frozen); assert.equal(frozen.inputByteRange.startByte, authority.acceptedInputBytes)
+  assert.ok(frozen); assert.equal(frozen.inputByteRange.startByte, expectedCursor)
+  if (typedFirstHook) for (const claim of responseClaims.filter(item => item.response.value.requestId === request.id)) {
+    const { acknowledged: _ack, ...identity } = claim.response, { acknowledged: _frozenAck, ...frozenIdentity } = frozen
+    assert.deepEqual(identity, frozenIdentity, 'The same typed response identity and original range must remain frozen through completion')
+  }
   const settled = await until('cross-Core answer native completion', async () => {
     const value = await canonical(); return !value?.pendingInteraction && value?.semanticStatus?.state === 'done' && value
   })
   const after = (await client.statusAgent(id)).run
-  assert.equal(after.runId, authority.runId); assert.equal(after.pid, authority.pid)
+  assert.equal(after.runId, (authority ?? before).runId); assert.equal(after.pid, (authority ?? before).pid)
   assert.equal(after.acceptedInputBytes, frozen.inputByteRange.endByte)
+  if (firstHookFacts) {
+    const completion = pendingTransitions.find(item => item.expected.pendingInteraction?.request.id === request.id &&
+      item.expected.pendingInteraction.response?.acknowledged === true && item.next.pendingInteraction?.request.id !== request.id &&
+      item.next.hookReceipt?.eventName === 'PostToolUse' && item.next.hookReceipt.run.runId === initial.run.runId)
+    assert.ok(completion, 'The original pending request must settle through actual corresponding native PostToolUse, never ACK alone')
+    firstHookFacts.completionTransition = completion; firstHookFacts.settled = settled
+    let snapshot
+    const throughByte = await client.screenEvidence.wait(client.agentSession(id), after.latestOutputBytes, false, screen => {
+      snapshot = screen.snapshot(); return new AgentProviderRegistry().get('codex').inspectPromptExecution(snapshot) === 'idle'
+    }, { timeoutMs: 10_000, requireCompleteFrame: true, timeoutMessage: 'Ordinary native empty composer unavailable after exact tool completion', terminalMessage: 'Private Run ended before empty composer observation' })
+    firstHookFacts.nativeEmptyComposer = { observedAt: Date.now(), throughByte, snapshot, inspection: 'idle' }
+  }
   const nativeBytes = await readFile(settled.nativeHandle.transcriptPath)
   const nativePath = receiptPath + '.typed-response.native.jsonl'; await writeFile(nativePath, nativeBytes)
   const rows = nativeBytes.toString('utf8').split('\n').filter(Boolean).map(line => JSON.parse(line))
@@ -297,14 +347,17 @@ async function proveTypedResponseCrossCore(initial) {
   const toolRows = rows.filter(row => row.type === 'response_item' && row.payload?.type === 'function_call_output' && row.payload.call_id === 'private_approval_call_2')
   const actualToolReplies = requests.flatMap(value => value.input?.filter(item => item.type === 'function_call_output' && item.call_id === 'private_approval_call_2') ?? [])
   assert.equal(userRows.length, 1); assert.equal(toolRows.length, 1); assert.equal(actualToolReplies.length, 1)
+  if (typedFirstHook) assert.equal(toolRows[0].payload.call_id, request.nativeToolCallId)
   assert.ok(toolRows[0].payload.output.includes('PRIVATE_PERMISSION_PROBE'))
   assert.equal(requests.filter(value => textOf(value) === body).length, 2) // setup and the actual tool-output continuation share original user input
-  report.phases.push({ phase: 'T007-two-Core-native-typed-response-only', passed: true, initialRun: initial.run,
+  report.phases.push({ phase: typedFirstHook ? 'T008-first-Hook-two-Core-native-typed-response-only' : 'T007-two-Core-native-typed-response-only', passed: true, initialRun: initial.run,
     nativeHandle: settled.nativeHandle, approvalThroughByte, approvalSnapshot, frozen, responseClaims, afterRun: after,
-    nativePath, nativeSha256: sha(nativeBytes), userRows, toolRows, actualToolReplies,
+    nativePath, nativeSha256: sha(nativeBytes), userRows, toolRows, actualToolReplies, ...(typedFirstHook ? { firstHookFacts } : {}),
     entryPoint: 'public SDK submitAgentPrompt through second Core; public SDK respondAgentInteraction through original Core' })
-  report.typedResponseCrossCore = { passed: true, qualifiedScope: report.qualifiedScope, earlyHookReadinessWindowRepaired: false }
-  report.passed = true; await progress('typed-cross-core-actual-native-consumed-once')
+  if (typedFirstHook) report.typedResponseFirstHook = { passed: true, qualifiedScope: report.qualifiedScope, fixtureApprovalPaneWaitUsed: false,
+    actualAckPendingWindowObserved: true, nativeCompletedAndOrdinaryEmptyComposerObserved: true }
+  else report.typedResponseCrossCore = { passed: true, qualifiedScope: report.qualifiedScope, earlyHookReadinessWindowRepaired: false }
+  report.passed = true; await progress(typedFirstHook ? 'typed-first-hook-actual-native-consumed-once' : 'typed-cross-core-actual-native-consumed-once')
 }
 const diagnosticError = error => ({ name: error?.name, message: error?.message, code: error?.code, detail: error?.detail })
 async function captureFirstSendDiagnostic(cdp, failure) {
