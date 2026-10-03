@@ -11,13 +11,25 @@ export async function verifyMotePersonaTask(task) {
   const output = join(base, '.tmp/mote-companion-' + task); await mkdir(output, { recursive: true })
   const attempt = await mkdtemp(join(output, 'attempt-')), isolated = join(attempt, 'source')
   const cooperation = task === 'cooperation', ideas = task === 'ideas'
-  const tests = cooperation ? ['test/mote-cooperation.test.tsx'] : ideas ? ['test/mote-ideas.test.tsx', 'test/mote-default-knowledge.test.ts'] : ['test/mote-materials-inspection.test.tsx', 'test/mote-materials-public-read.test.ts']
+  const tests = cooperation ? ['test/mote-cooperation.test.tsx', 'test/mote-behavior.test.ts'] : ideas ? ['test/mote-ideas.test.tsx', 'test/mote-default-knowledge.test.ts'] : ['test/mote-materials-inspection.test.tsx', 'test/mote-materials-public-read.test.ts']
   const variants = cooperation ? [
     { id: 'new-launcher-draft', path: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', from: 'current.setAgentComposerDraft(region.regionId, prompt)', to: 'current.setAgentComposerDraft(region.regionId, "")' },
     { id: 'later-launcher-input', path: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', from: 'if ((current.agentComposerDrafts[region.regionId] ?? \'\') !== \'\')', to: 'if (false)' },
     { id: 'launcher-resource-fence', path: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', from: "region?.kind !== 'launcher' || region.workspaceId !== owner.workspace.id ||", to: "region?.kind !== 'launcher' ||" },
     { id: 'preserve-group-inputs', path: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', from: 'tabGroupId: destination.groupId, zoneId, reveal: true })', to: 'tabGroupId: destination.groupId, zoneId, reveal: true, initialInputs: { prompt: "Retained Group unsent", names: { agentName: "", tabName: "" }, optionsByProvider: {} } })' },
-    { id: 'preserve-original-soul', path: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', from: 'document.content + (document.content.endsWith', to: '"" + (document.content.endsWith' }
+    { id: 'preserve-original-soul', path: 'apps/desktop/src/renderer/src/lib/mote-behavior.ts', from: 'return content + (content.endsWith', to: 'return "" + (content.endsWith' },
+    { id: 'explicit-four-axis-code', path: 'apps/desktop/src/renderer/src/lib/mote-behavior.ts', from: "MOTE_BEHAVIOR_AXES.map(axis => draft[axis.id]).join('')", to: "MOTE_BEHAVIOR_AXES.map(axis => draft[axis.id]).reverse().join('')" },
+    { id: 'strict-owned-block', path: 'apps/desktop/src/renderer/src/lib/mote-behavior.ts', from: 'if (serializeMoteBehaviorBlock(preferences) !== block)', to: 'if (false)' },
+    { id: 'confirmed-empty-group-rejected', path: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', from: '?? emptyMoteDestination(state, scope, { reference })', to: '?? null' },
+    { id: 'saved-unknown-borrows-empty', path: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', from: 'if (choice?.tabId || choice?.regionId) return null', to: 'if (false) return null' },
+    { id: 'recent-ideas-action-does-nothing', path: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', from: 'label="View ideas and saved materials" onClick={onShowIdeas}', to: 'label="View ideas and saved materials" onClick={() => {}}' },
+    { id: 'initial-later-form', path: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', from: 'else if (!edited.current)', to: 'else if (true)' },
+    { id: 'original-read-lifetime', path: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', from: 'if (lifetime.current !== epoch) return\n      if (changed)', to: 'if (false) return\n      if (changed)' },
+    { id: 'review-later-form', path: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', from: 'lifetime.current === epoch && form.current === submitted', to: 'lifetime.current === epoch' },
+    { id: 'review-later-trial-input', path: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', from: ' && trialInput.current === submittedTrial', to: '' },
+    { id: 'review-navigation-epoch', path: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', from: "if (changed || !stillCurrent() || result.status !== 'read'", to: "if (false || !stillCurrent() || result.status !== 'read'" },
+    { id: 'unknown-save-label', path: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', from: '!loading && !issue && !documentIssue &&', to: '!loading && !issue &&' },
+    { id: 'later-original-document', path: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', from: 'before && (current?.content !== before.content || current.revision !== before.revision)', to: 'false' }
   ] : ideas ? [
     { id: 'idea-source-revision', path: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', from: 'revision: document.revision, excerpt:', to: 'revision: "lost-revision", excerpt:' },
     { id: 'idea-goal-association', path: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', from: 'goal.sessionIds.includes(session.id)', to: 'goal.sessionIds.includes(session.control.agentSessionId)' },
@@ -33,8 +45,13 @@ export async function verifyMotePersonaTask(task) {
     { id: 'public-files-owner-route', path: 'packages/core/src/public-rpc-service.ts', from: "await this.ports.files.read(input)", to: "({resource:null,result:{status:'unknown',code:'MUTATED_OWNER',message:'Original owner omitted'}})" }
   ]
   const callerChecks = cooperation ? [
-    { symbol: 'openMoteDiscussionDraft', definition: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', caller: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', anchor: 'openMoteDiscussionDraft(scope, question' },
-    { symbol: 'stageMoteCooperationPreferences', definition: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', caller: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', anchor: 'void stageMoteCooperationPreferences(scope, preferences, onOpenPath)' }
+    { symbol: 'openMoteDiscussionDraft', definition: 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', caller: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', anchor: 'if (openMoteDiscussionDraft(scope, question' },
+    { symbol: 'stageMoteBehaviorPreferences', definition: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', caller: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', anchor: 'await stageMoteBehaviorPreferences(' },
+    { symbol: 'MoteBehaviorDialog', definition: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', caller: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', anchor: '<MoteBehaviorDialog ' },
+    { symbol: 'deriveMoteBehaviorCode', definition: 'apps/desktop/src/renderer/src/lib/mote-behavior.ts', caller: 'apps/desktop/src/renderer/src/components/MoteBehaviorDialog.tsx', anchor: 'code = deriveMoteBehaviorCode(draft)' },
+    { symbol: 'parseMoteBehaviorBlock', definition: 'apps/desktop/src/renderer/src/lib/mote-behavior.ts', caller: 'apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', anchor: 'saved ? parseMoteBehaviorBlock(saved.content)' },
+    { symbol: 'replaceMoteBehaviorBlock', definition: 'apps/desktop/src/renderer/src/lib/mote-behavior.ts', caller: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', anchor: 'return replaceMoteBehaviorBlock(' },
+    { symbol: 'stageMoteSoulAddition', definition: 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', caller: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', anchor: 'return stageMoteSoulAddition(' }
   ] : ideas ? [
     { symbol: 'prepareMoteIdeaDraft', definition: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', caller: 'apps/desktop/src/renderer/src/components/MoteIdeaControls.tsx', anchor: 'finish(prepareMoteIdeaDraft(' },
     { symbol: 'stageMoteIdeaFeedback', definition: 'apps/desktop/src/renderer/src/lib/mote-idea-request.ts', caller: 'apps/desktop/src/renderer/src/components/MoteIdeaControls.tsx', anchor: 'finish(stageMoteIdeaFeedback(' },
@@ -48,7 +65,12 @@ export async function verifyMotePersonaTask(task) {
     { symbol: 'parseFileReadCommand', definition: 'packages/core/src/agentmux-cli-files.ts', caller: 'packages/core/src/agentmux-cli-commands.ts', anchor: 'parseFileReadCommand(' }
   ]
   const config = 'apps/desktop/scripts/fixtures/mote-companion-workflows/vitest.persona.config.mts'
-  const files = [...new Set([...variants.map(item => item.path), ...callerChecks.flatMap(item => [item.definition, item.caller]), ...tests.map(path => 'apps/desktop/' + path), config])]
+  const files = [...new Set([...variants.map(item => item.path), ...callerChecks.flatMap(item => [item.definition, item.caller]), ...tests.map(path => 'apps/desktop/' + path), config,
+    ...(cooperation ? ['apps/desktop/src/renderer/src/styles/mote-workface.css', 'apps/desktop/scripts/verify-mote-persona-task.mjs', 'apps/desktop/scripts/verify-mote-cooperation.mjs',
+      'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/renderer/src/lib/desktop-spatial-state.ts',
+      'apps/desktop/src/renderer/src/lib/launcher-state.ts', 'apps/desktop/src/renderer/src/lib/workbench-persistence.ts',
+      'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/space-addresses.ts', 'packages/core/src/toolkit.ts',
+      'packages/core/src/control.ts', 'packages/core/src/spatial-state.ts', 'packages/core/src/spatial-graph.ts'] : [])])]
   const original = Object.fromEntries(await Promise.all(files.map(async path => [path, await readFile(join(base, path))])))
   const digest = bytes => createHash('sha256').update(bytes).digest('hex')
   const receipt = { schema: 'agentmux.mote-companion-persona-verification.v1', task, passed: false, source: Object.fromEntries(Object.entries(original).map(([path, bytes]) => [path, digest(bytes)])), runs: [], callers: [], failure: null,
@@ -59,7 +81,7 @@ export async function verifyMotePersonaTask(task) {
     let stdout = '', stderr = ''; child.stdout.on('data', bytes => { stdout += bytes }); child.stderr.on('data', bytes => { stderr += bytes })
     const status = await new Promise((done, reject) => { child.once('error', reject); child.once('exit', (code, signal) => done({ code, signal })) })
     await writeFile(join(attempt, label + '.log'), stdout + stderr)
-    const text = stdout + stderr, count = cooperation ? 6 : ideas ? 10 : 7
+    const text = stdout + stderr, count = cooperation ? 19 : ideas ? 10 : 7
     const collected = new RegExp('Tests\\s+(?:' + count + ' (?:passed|failed)|\\d+ failed \\| \\d+ passed \\(' + count + '\\))').test(text)
     const assertion = /AssertionError:|expected .* to /.test(text)
     receipt.runs.push({ label, expected, ...status, collected, assertion })

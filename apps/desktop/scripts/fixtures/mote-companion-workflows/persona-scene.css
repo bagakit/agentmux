@@ -5,3 +5,4 @@ html, body, #root { height: 100%; margin: 0; }
 .persona-scene__tab { padding: 10px 14px; border-bottom: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .persona-scene__navigation { display: flex; gap: 6px; padding-bottom: 8px; }
 @media (max-width: 700px) { .persona-scene { grid-template-columns: 280px minmax(0, 1fr); } }
+@media (max-width: 420px) { .persona-scene { grid-template-columns: minmax(0, 1fr); } .persona-scene__work { display: none; } }

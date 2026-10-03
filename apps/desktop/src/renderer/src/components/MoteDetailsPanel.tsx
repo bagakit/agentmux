@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
-import { FileText, Pencil, Plus } from 'lucide-react'
+import { ArrowRight, FileText, Pencil, Plus } from 'lucide-react'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
@@ -7,8 +7,10 @@ import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { sessionPresentationById } from '../lib/session-presentation'
-import { openMoteDiscussionDraft } from '../lib/mote-materials-actions'
-import { readMoteMaterial, stageMoteCooperationPreferences, type MoteCooperationPreferences } from '../lib/mote-cooperation'
+import { documentKey } from '../lib/workbench-tabs'
+import { readMoteMaterial } from '../lib/mote-cooperation'
+import { MOTE_BEHAVIOR_AXES, parseMoteBehaviorBlock } from '../lib/mote-behavior'
+import { MoteBehaviorAction, MoteBehaviorDialog } from './MoteBehaviorDialog'
 import { useAppStore } from '../store'
 import { useWorkspaceFileTree } from './file-tree/useWorkspaceFileTree'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -89,9 +91,9 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
   const [selected, setSelected] = useState<string | null>(null)
   const [note, setNote] = useState<{ path: string; content: string; revision: string } | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(false), [attempt, setAttempt] = useState(0)
-  const [preferences, setPreferences] = useState<MoteCooperationPreferences>({ responses: 'concise', decisions: 'ask', custom: '' })
-  const [cooperationIssue, setCooperationIssue] = useState<string | null>(null), [question, setQuestion] = useState('')
-  const [guideOpen, setGuideOpen] = useState(false), [staging, setStaging] = useState(false)
+  const [behaviorOpen, setBehaviorOpen] = useState(false)
+  const behaviorInvoker = useRef<HTMLElement | null>(null)
+  useEffect(() => { setBehaviorOpen(false) }, [section])
   useEffect(() => {
     if (!selected || section !== 'ideas') return
     let current = true; setLoading(true); setIssue(null)
@@ -116,32 +118,11 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
   return <div key={section} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}>
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
-      <div className="mote-details__self">
-        <div className="mote-details__section-actions"><span>How we work</span><button type="button" className="icon-button" aria-label="Edit self setting" title="Edit original SOUL file" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}><Pencil size={12} /></button></div>
-        {scope.topic.soul ? <details className="mote-details__soul"><summary>Read original SOUL</summary><AgentMarkdown content={scope.topic.soul.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
-          workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /></details> : <p role="status" className="mote-details__hint">Self setting is not confirmed yet. Open the original file to inspect it.</p>}
-        <p className="mote-details__hint">Saved SOUL changes apply to new Sessions. Existing discussions keep their context; your current directions take priority.</p>
-        <button type="button" className="small-button" aria-expanded={guideOpen} onClick={() => setGuideOpen(value => !value)}>Adjust cooperation</button>
-        {guideOpen ? <div className="mote-details__cooperation">
-          <label>Replies<select aria-label="Cooperation replies" value={preferences.responses} onChange={event => setPreferences(value => ({ ...value, responses: event.target.value as MoteCooperationPreferences['responses'] }))}><option value="concise">Concise, with detail on request</option><option value="detailed">Explain reasoning and details</option></select></label>
-          <label>Choices<select aria-label="Cooperation choices" value={preferences.decisions} onChange={event => setPreferences(value => ({ ...value, decisions: event.target.value as MoteCooperationPreferences['decisions'] }))}><option value="ask">Ask when my judgment is needed</option><option value="propose">Propose a concrete next step</option></select></label>
-          <label>Anything else<textarea aria-label="Custom cooperation preferences" value={preferences.custom} onChange={event => setPreferences(value => ({ ...value, custom: event.target.value }))} placeholder="What helps us work together?" rows={2} /></label>
-          <div className="mote-details__section-actions"><button type="button" className="small-button" onClick={() => {
-            if (staging) return
-            setCooperationIssue(null); setStaging(true)
-            void stageMoteCooperationPreferences(scope, preferences, onOpenPath).catch(error => setCooperationIssue(presentError(error))).finally(() => setStaging(false))
-          }}>{staging ? 'Opening original editor…' : 'Review in editor'}</button><button type="button" className="small-button" onClick={() => setGuideOpen(false)}>Skip for now</button></div>
-          <p className="mote-details__hint">Your original SOUL text stays intact. Review the added preferences and use Save in the editor.</p>
-        </div> : null}
-        <div className="mote-details__cooperation">
-          <label>Try your own question<textarea aria-label="Try a cooperation question" value={question} onChange={event => setQuestion(event.target.value)} placeholder="Bring a real question to a new discussion" rows={2} /></label>
-          <button type="button" className="small-button" onClick={() => { setCooperationIssue(null); openMoteDiscussionDraft(scope, question, { reference }) }}>Prepare new discussion</button>
-          <p className="mote-details__hint">Choose the Agent and model in the new Launcher, edit your question, then Start. This keeps your current discussion running.</p>
-        </div>
-        {cooperationIssue ? <p role="status" className="mote-details__issue">{cooperationIssue}</p> : null}
-      </div>
+      <MoteBehaviorSummary scope={scope} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
+        onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
       <div className="mote-details__recent">
-        <div className="mote-details__section-actions"><span>Recent ideas</span><button type="button" className="small-button" onClick={onShowIdeas}>Inspect saved materials</button></div>
+        <div className="mote-details__section-actions"><span>Recent ideas</span><MoteBehaviorAction label="View ideas and saved materials" onClick={onShowIdeas}><ArrowRight size={16} /></MoteBehaviorAction></div>
         {notesIssue}
         {!tree.rootCache?.loading && recent.length > 0 && notes.some(entry => typeof entry.mtimeMs !== 'number' || !Number.isFinite(entry.mtimeMs)) ? <p role="status" className="mote-details__hint">Some recent updates are not confirmed. All notes remain in Ideas.</p> : null}
         <div className="mote-details__notes">{recent.map(entry => <button type="button" key={entry.path} className="mote-details__note" onClick={() => { setSelected(entry.path); onShowIdeas() }}><FileText size={13} /><span>{entry.name.replace(/\.(md|txt)$/i, '')}</span></button>)}</div>
@@ -167,5 +148,42 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
       </div> : null}
       <p className="mote-details__hint">Notes stay in your files. Use the file tree for other folders and formats.</p>
     </>}
+  </div>
+}
+
+/** Confirmed summary is derived only from the current original saved file, never a local form. */
+function MoteBehaviorSummary({ scope, onEdit, onOpenPath }: {
+  scope: MoteWorkfaceScope; onEdit(): void; onOpenPath(path: string): Promise<unknown>
+}) {
+  const revision = useAppStore(state => state.workspaceFileRevisions[scope.workspace.id] ?? 0)
+  const documentIssue = useAppStore(state => state.documentIssues[documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)])
+  const savedRevision = useAppStore(state => state.documents[documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)]?.revision)
+  const [saved, setSaved] = useState<{ content: string; revision: string } | null>(null)
+  const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0)
+  const epoch = useRef<object>({})
+  useEffect(() => {
+    const request = {}; epoch.current = request; setLoading(true); setIssue(null)
+    void readMoteMaterial(scope, scope.rootPath + '/' + MOTE_SOUL_PATH).then(observation => {
+      if (epoch.current !== request) return
+      const result = observation.result
+      if (result.status === 'read') setSaved(result.document)
+      else setIssue('Saved behavior is unconfirmed. ' + (result.status === 'unknown' || result.status === 'error' ? result.message : result.status))
+    }).catch(cause => { if (epoch.current === request) setIssue(presentError(cause)) })
+      .finally(() => { if (epoch.current === request) setLoading(false) })
+    return () => { epoch.current = {} }
+  }, [revision, attempt, documentIssue?.kind, savedRevision])
+  const parsed = saved ? parseMoteBehaviorBlock(saved.content) : null
+  const confirmed = !loading && !issue && !documentIssue && parsed?.status === 'valid' ? parsed : null
+  const summary = confirmed ? MOTE_BEHAVIOR_AXES.map(axis => axis.choices.find(choice => choice.value === confirmed.preferences[axis.id])!.title).join(' · ') : null
+  return <div className="mote-details__self mote-behavior-summary">
+    <div className="mote-details__section-actions"><span>Behavior</span><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><Pencil size={14} /></MoteBehaviorAction></div>
+    {confirmed ? <><span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span><p className="mote-behavior-summary__rules" title={summary!}>{summary}</p></> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : issue || documentIssue ? 'Saved behavior is unconfirmed.' : parsed?.status === 'unconfirmed' ? 'Original behavior needs review.' : 'Not set yet.'}</p>}
+    {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry settings</button></div> : null}
+    <details className="mote-details__soul"><summary>Original SOUL</summary>
+      {saved || scope.topic.soul ? <AgentMarkdown content={saved?.content ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
+        workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : <p className="mote-details__hint">Open the original file to inspect it.</p>}
+      <p className="mote-details__hint">Saved changes apply to new Sessions. Current discussions keep their context; your current directions take priority.</p>
+      <button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}>Open original SOUL</button>
+    </details>
   </div>
 }

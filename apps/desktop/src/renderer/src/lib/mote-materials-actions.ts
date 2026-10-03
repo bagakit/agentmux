@@ -108,7 +108,7 @@ function confirmedMoteDestination(state: ReturnType<typeof useAppStore.getState>
   return destination
 }
 
-function emptyMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope, options: {
+export function emptyMoteDestination(state: ReturnType<typeof useAppStore.getState>, owner: MoteWorkfaceScope, options: {
   floating?: boolean | undefined; reference?: WorkbenchProjectionSelection | null | undefined; destination?: FileDestination | null | undefined
 }): FileDestination | null {
   if (options.reference) return null

@@ -11,7 +11,7 @@ import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } f
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
-let app: MoteAppFixture
+let app: MoteAppFixture, initialIdeaContext: boolean
 const root = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = root + '/saved-direction.md', revision = 'sha256:' + 'f'.repeat(64)
 const panel = () => app.container.querySelector<HTMLElement>('[data-mote-details]')!
 const button = (name: string) => [...panel().querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === name)!
@@ -24,9 +24,9 @@ async function type(selector: string, value: string) {
   const input = panel().querySelector<HTMLTextAreaElement>(selector)!
   await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }); await settleMoteApp()
 }
-async function ideas() { await moteClick(button('Inspect saved materials')) }
+async function ideas() { await moteClick(panel().querySelector<HTMLButtonElement>('[aria-label="View ideas and saved materials"]')!); if (!initialIdeaContext) { vi.mocked(api.files.readPublic).mockClear(); initialIdeaContext = true } }
 beforeEach(() => {
-  app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
+  initialIdeaContext = false; app = createMoteApp(); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { [SCRATCH_WORKSPACE_ID]: false } })
   useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([{ path, name: 'saved-direction.md', isDirectory: false, isSymlink: false, ignored: false }])
   vi.spyOn(api.files, 'observe').mockResolvedValue(); vi.spyOn(api.files, 'unobserve').mockResolvedValue()
@@ -78,7 +78,8 @@ describe('original Ideas request and feedback owners', () => {
   })
   it('latches same-Mote Region A to B to A navigation and retains a separate Mote direction across a late read', async () => {
     let finish!: (value: FileReadResult) => void, captured!: FileReadParams
-    const read = vi.spyOn(api.files, 'readPublic').mockImplementation(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    const read = vi.fn<(params: FileReadParams) => Promise<FileReadResult>>(params => { captured = params; return new Promise(resolve => { finish = resolve }) })
+    vi.spyOn(api.files, 'readPublic').mockImplementation(params => panel()?.querySelector('[aria-label="Idea direction"]') ? read(params) : Promise.resolve(publicRead(params)))
     await app.mount(); await ideas(); await type('[aria-label="Idea direction"]', 'Retained original Mote direction'); const before = useAppStore.getState()
     await moteClick(button('Prepare idea request'))
     await act(async () => { useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', neighborTab.id); useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', defaultTab.id) }); await settleMoteApp()
