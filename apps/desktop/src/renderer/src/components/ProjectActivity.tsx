@@ -26,6 +26,7 @@ import { SemanticIcon } from './semantic-icons'
 
 /** 时间轴按需拉取，绝大多数 Session 此刻没有——统一退回这份空数组，让派生落到基于状态的答案。 */
 const NO_TIMELINE: readonly AgentTimelineItem[] = []
+const NO_CONTEXTS: readonly ActivityContextInput[] = []
 
 function sessionReason(
   session: SessionSnapshot,
@@ -88,13 +89,16 @@ function contextMeta(group: ActivityGroup, path: string | null): string | null {
 
 export function ProjectActivity({
   sessions,
-  contexts = [],
-  compact = false
+  contexts = NO_CONTEXTS,
+  compact = false,
+  visible = true
 }: {
   sessions: SessionSnapshot[]
   contexts?: readonly ActivityContextInput[]
   compact?: boolean
+  visible?: boolean
 }) {
+  const [open, setOpen] = useState(false)
   const displayPath = usePathDisplay()
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
@@ -104,14 +108,14 @@ export function ProjectActivity({
   // Read only this consumer's facts. Another Session's output must not wake every Space row.
   const timelines = useAppStore(useShallow((state) => {
     const owned: Record<string, AgentTimelineSnapshot> = {}
+    if (!visible) return owned
     for (const id of agentIds) {
       const timeline = state.timelines[id]
       if (timeline) owned[id] = timeline
     }
     return owned
   }))
-  const agentNames = useAppStore(useShallow((state) => Object.fromEntries(agentIds.map((id) => [id, state.agentNames[id]]))))
-  const [open, setOpen] = useState(false)
+  const agentNames = useAppStore(useShallow((state) => visible && open ? Object.fromEntries(agentIds.map((id) => [id, state.agentNames[id]])) : {}))
   const [, setNow] = useState(Date.now)
   // A new observation can arrive between ticks. Sample once per actual render;
   // the visible timer only requests another render when the menu is silent.
@@ -134,7 +138,7 @@ export function ProjectActivity({
   const attentionMetrics = metrics.filter((metric) => metric.key === 'needs-you' || metric.key === 'error')
   const visibleMetrics = compact ? (attentionMetrics.length > 0 ? attentionMetrics : metrics.slice(0, 1)) : metrics
   useEffect(() => {
-    if (!open || !hasActivity) return
+    if (!visible || !open || !hasActivity) return
     let timer: ReturnType<typeof setInterval> | undefined
     const updateVisibility = () => {
       if (timer !== undefined) clearInterval(timer)
@@ -149,14 +153,14 @@ export function ProjectActivity({
       if (timer !== undefined) clearInterval(timer)
       document.removeEventListener('visibilitychange', updateVisibility)
     }
-  }, [open, hasActivity])
-  if (!hasActivity) return null
+  }, [visible, open, hasActivity])
   // 数量作为图标角标，完整状态名称与数量仍由外层 aria-label/title 提供。
   // 网格保留长数字的自然宽度；紧凑布局不截断计数，也不另存一份状态。
-  const groups = buildActivityGroups(sessions, contexts)
-  const details = groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n')
+  const groups = useMemo(() => visible ? buildActivityGroups(sessions, contexts) : [], [visible, sessions, contexts])
+  const details = useMemo(() => groups.map((group) => `${contextLabel(group)}: ${groupSummary(group, timelines, config ?? null)}`).join('\n'), [groups, timelines, config])
+  if (!hasActivity) return null
   const metricLabel = metrics.map((metric) => `${metric.count} ${metric.label}`).join(' · ')
-  return <DropdownMenu.Root onOpenChange={setOpen}>
+  return <DropdownMenu.Root open={visible && open} onOpenChange={setOpen}>
     <DropdownMenu.Trigger className="project-activity" data-category={attention.category ?? 'active'} title={`${metricLabel} · ${details}`} aria-label={`${metricLabel}. ${details}`}>
       <span className="project-activity__metrics" aria-hidden="true">
         {visibleMetrics.map((metric) => (
@@ -170,7 +174,7 @@ export function ProjectActivity({
     <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu project-activity-menu" side="right" align="start" sideOffset={4}>
       <DropdownMenu.Label className="composer-menu__hint">Activity by work line · select a row to open</DropdownMenu.Label>
       {compact ? <DropdownMenu.Label className="composer-menu__hint">{metricLabel}</DropdownMenu.Label> : null}
-      {groups.map((group) => {
+      {visible && open ? groups.map((group) => {
         const first = group.sessions[0]
         if (!first) return null
         const rosterRows = buildAgentRoster({ sessions: group.sessions, providerCatalog })
@@ -235,7 +239,7 @@ export function ProjectActivity({
             })}
           </div> : null}
         </div>
-      })}
+      }) : null}
       {attention.category ? <div className="composer-menu__hint">Pending requests remain here until answered.</div> : null}
     </DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>
