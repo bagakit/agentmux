@@ -797,9 +797,13 @@ export type AgentProviderSessionHistoryObservationContext = Omit<AgentProviderSe
 /** Authenticated operation origin supplied by the Host, independent of message authorship. */
 export type AgentOperationDevice = { hostId: string; deviceId: string; name: string }
 
+/** Supplied by the actual input owner; a native user role does not establish this fact. */
+export const AGENT_MESSAGE_CHANNELS = ['terminal', 'message-tool', 'cli', 'api', 'agent-message', 'reaction'] as const
+export type AgentMessageChannel = (typeof AGENT_MESSAGE_CHANNELS)[number]
+
 export type AgentSessionUserMessageSource =
   | { kind: 'native'; providerId: AgentProviderId; nativeSessionId: string; recordId: string }
-  | { kind: 'captured'; submissionId: string; device?: AgentOperationDevice }
+  | { kind: 'captured'; submissionId: string; channel?: AgentMessageChannel; device?: AgentOperationDevice }
 
 export type AgentSessionUserMessageAuthor =
   | { kind: 'human' }
@@ -896,6 +900,7 @@ export type AgentPromptMessageContent = {
   authorAgentSessionId?: string
   authorHuman?: true
   sourceDevice?: AgentOperationDevice
+  sourceChannel?: AgentMessageChannel
 }
 
 export type AgentTerminalHandshakeState = {
@@ -1421,6 +1426,7 @@ export type AgentTimelineItem = {
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
   sourceDevice?: AgentOperationDevice
+  sourceChannel?: AgentMessageChannel
   content?: string
   toolName?: string
   toolInput?: string

@@ -35,6 +35,8 @@ import {
 } from './hook-turn-phase.js'
 import { runBoundedReconnect } from './ctxmux-reconnect.js'
 import { judgeReconnectFlap, shouldClearFlapLedger } from './ctxmux-reconnect-budget.js'
+import { normalizeMessageChannel } from './message-origin.js'
+import { normalizeOperationDevice } from './operation-device.js'
 import { composeAgentLaunchPrompt, composeAgentPrompt } from './agent-outbound-message.js'
 import { hashAgentCapability, issueAgentCapability, resolveCapabilityAuthor } from './agent-capability.js'
 import { planDiscussion } from './agent-discussion.js'
@@ -257,6 +259,7 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
   sourceDevice?: import('./types.js').AgentOperationDevice
+  sourceChannel?: import('./types.js').AgentMessageChannel
   /** Explicit host-generated context; a tag inside prompt cannot supply this fact. */
   agentMuxNote?: string
   prompt: string
@@ -265,6 +268,8 @@ export type AgentMuxAgentPromptInput = AgentPromptCondition & {
 export type AgentMuxAgentMessageInput = {
   agentSessionId: string
   envelope: AgentMuxMessageEnvelope
+  sourceDevice?: import('./types.js').AgentOperationDevice
+  sourceChannel?: import('./types.js').AgentMessageChannel
   execution?: import('./types.js').AgentPromptExecution
   condition: AgentPromptCondition
   caller?: { agentSessionId: string; capability: string }
@@ -3722,7 +3727,8 @@ export class AgentMuxClient {
       ...(content.trim() ? { userContent: content } : {}),
       ...(composed.systemContext ? { systemContext: composed.systemContext } : {}),
       ...(authorAgentSessionId ? { authorAgentSessionId } : input.authorHuman === true ? { authorHuman: true } : {}),
-      ...(input.sourceDevice ? { sourceDevice: input.sourceDevice } : {})
+      ...(input.sourceDevice ? { sourceDevice: normalizeOperationDevice(input.sourceDevice) } : {}),
+      sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api')
     }
     const operationId = safeId(input.operationId, 'Agent prompt operation id')
     // 握手绝不做发 prompt 的前置门。这里不是生命周期路径——run 早就活着，用户此刻正在提交。
@@ -3788,7 +3794,8 @@ export class AgentMuxClient {
     if (queued.delivery.state !== 'queued') throw new AgentMuxError('This message has a final delivery outcome.', 'AGENT_DELIVERY_STATE_INVALID')
     const originalCondition = await this.messageQueue.preparePrompt(envelope.messageId, async () => condition)
     await this.submitPromptInternal({ ...originalCondition, agentSessionId: input.agentSessionId,
-      operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true, ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
+      operationId: envelope.messageId, prompt: renderAgentMuxMessageEnvelope(envelope), allowUncertainTurn: true,
+      sourceChannel: input.sourceChannel ?? 'agent-message', ...(input.sourceDevice ? { sourceDevice: input.sourceDevice } : {}), ...(input.execution === undefined ? {} : { execution: input.execution }) }, authorAgentSessionId)
     await this.messageQueue.recordDelivery(envelope.messageId, 'delivered')
   }
 
@@ -4828,7 +4835,8 @@ export class AgentMuxClient {
       title, message.userContent, now, 'user', { status,
         ...(message.authorAgentSessionId ? { authorAgentSessionId: message.authorAgentSessionId } : {}),
         ...(message.authorHuman ? { authorHuman: true } : {}),
-        ...(message.sourceDevice ? { sourceDevice: message.sourceDevice } : {}) })
+        ...(message.sourceDevice ? { sourceDevice: message.sourceDevice } : {}),
+        ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}) })
   }
 
   /** Transport owner records an operation on its exact Session without duplicating Runtime state. */
@@ -4847,7 +4855,7 @@ export class AgentMuxClient {
     content: string,
     observedAt: number,
     source: 'user' | 'agentmux',
-    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
+    delivery: { sourceDevice?: import('./types.js').AgentOperationDevice; sourceChannel?: import('./types.js').AgentMessageChannel; authorAgentSessionId?: string; authorHuman?: boolean; status?: 'complete' | 'failed' } = {}
   ): Promise<void> {
     const mutation: AgentTimelineMutation = {
       type: 'append',
@@ -4863,6 +4871,7 @@ export class AgentMuxClient {
         title,
         content,
         ...(delivery.sourceDevice ? { sourceDevice: delivery.sourceDevice } : {}),
+        ...(delivery.sourceChannel ? { sourceChannel: delivery.sourceChannel } : {}),
         ...(source === 'user' && delivery.authorAgentSessionId
           ? { authorAgentSessionId: delivery.authorAgentSessionId }
           : source === 'user' && delivery.authorAgentSessionId === undefined && delivery.authorHuman === true

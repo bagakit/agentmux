@@ -6,6 +6,7 @@ import {
   validateAgentPromptCondition,
   type AgentPromptCondition,
   type AgentPromptExecution,
+  type AgentMessageChannel,
   type AgentMuxAgentMessageInput,
   runtimeStorageUsage,
   agentInteractionResponseUnavailableReason,
@@ -1327,7 +1328,8 @@ export class RuntimeController {
     automation?: { completionId: string; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
     choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution },
     authorHuman?: boolean,
-    agentMuxNote?: string
+    agentMuxNote?: string,
+    sourceChannel: AgentMessageChannel = 'message-tool'
   ): Promise<void> {
     const capturedCondition = validateAgentPromptCondition(condition)
     await this.trackHostLifecycleOperation(control.hostId, async () => {
@@ -1353,6 +1355,7 @@ export class RuntimeController {
           ...(automation ? { expectedCompletionId: automation.completionId, expectedInputByte: automation.inputByte, signal: automation.signal } : {}),
           prompt,
           ...(agentMuxNote === undefined ? {} : { agentMuxNote }),
+          sourceChannel,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
           ...(authorHuman === true ? { authorHuman: true } : {})

@@ -1,3 +1,4 @@
+import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { isAgentActivityStatusSource, semanticStatusStale } from './agent-status-freshness.js'
@@ -190,6 +191,7 @@ function normalizeItem(value: unknown): AgentTimelineItem {
     ...optionalField(source, 'content'),
     ...authorAgent,
     ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),
+    ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
     ...(authorAgent.authorAgentSessionId === undefined && source.authorHuman === true ? { authorHuman: true } : {}),
     ...optionalField(source, 'toolName'),
     ...optionalField(source, 'toolInput'),

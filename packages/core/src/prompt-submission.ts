@@ -30,7 +30,7 @@ const TERMINAL_COMPOSER_READY_TIMEOUT_MS = 120_000
 
 function promptMessageIdentity(message: AgentPromptMessageContent | undefined): string {
   return JSON.stringify(message === undefined ? null : [message.userContent, message.systemContext,
-    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice])
+    message.authorAgentSessionId, message.authorHuman === true, message.sourceDevice, message.sourceChannel])
 }
 
 /**

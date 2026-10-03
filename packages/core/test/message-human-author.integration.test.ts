@@ -14,6 +14,7 @@ import {
   type AgentMuxStoredAgentSession,
   type AgentSessionHistoryPage,
   type AgentSessionUserMessage,
+  type AgentMessageChannel,
   type AgentTimelineSnapshot
 } from '@agentmux/core'
 
@@ -278,17 +279,17 @@ describe('Core user message author facts and projection', () => {
       allowUncertainTurn: true
     })
 
-    // Immediate replay of op-unknown-1 with authorHuman: true:
-    // PTY write is not repeated and author remains unknown (no upgrade on replay).
+    // Reusing the accepted operation cannot change its frozen author facts.
+    // The original coordinator rejects this conflict; PTY and stored author stay intact.
     const writesAfterThird = writes.length
-    await client.submitAgentPrompt({
+    await expect(client.submitAgentPrompt({
       ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)),
       agentSessionId: AGENT_SESSION_ID,
       operationId: 'op-unknown-1',
       prompt: 'Default instruction',
       authorHuman: true,
       allowUncertainTurn: true
-    })
+    })).rejects.toMatchObject({ code: 'AGENT_PROMPT_OPERATION_CONFLICT' })
     expect(writes.length).toBe(writesAfterThird)
 
     expect(writes).toEqual([
@@ -375,5 +376,58 @@ describe('Core user message author facts and projection', () => {
     expect(storedItem).toBeDefined()
     expect(storedItem!.authorAgentSessionId).toBe('agent-peer-9')
     expect(storedItem!.authorHuman).toBeUndefined()
+  })
+})
+
+
+describe('Frozen delivery channel and device over the original admission and durable message record', () => {
+  it('persists Message Tool channel with the original sending device independently of execution Host', async () => {
+    const { client, store, writes } = await createFixtureClient()
+    const device = { hostId: 'physical-origin-host', deviceId: 'linked-phone', name: 'My phone' }
+    await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'origin-device-message', prompt: 'Exact original content', authorHuman: true, sourceChannel: 'message-tool', sourceDevice: device })
+    device.name = 'Changed after acceptance'
+    const timeline = await new AgentMuxFileAgentSessionStore(store.path).loadTimeline(AGENT_SESSION_ID)
+    const messages = projectSessionUserMessages({ agentSessionId: AGENT_SESSION_ID, timeline })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.source).toEqual({ kind: 'captured', submissionId: 'prompt:origin-device-message', channel: 'message-tool',
+      device: { hostId: 'physical-origin-host', deviceId: 'linked-phone', name: 'My phone' } })
+    expect(messages[0]!.author).toEqual({ kind: 'human' })
+    expect(messages[0]!.content).toBe('Exact original content')
+    expect(writes.join('')).toContain('Exact original content')
+  })
+
+  it('rejects only invalid channel input before side effects and keeps the original healthy manual input', async () => {
+    const { client, store, writes } = await createFixtureClient()
+    const input = { ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'invalid-origin-message', prompt: 'Original healthy input', sourceChannel: 'forged' as AgentMessageChannel }
+    await expect(client.submitAgentPrompt(input)).rejects.toMatchObject({ code: 'INVALID_AGENT_PROMPT' })
+    expect(writes).toHaveLength(0)
+    expect((await store.loadTimeline(AGENT_SESSION_ID)).items).toHaveLength(0)
+    await client.submitAgentPrompt({ ...input, sourceChannel: 'cli' })
+    expect(projectSessionUserMessages({ agentSessionId: AGENT_SESSION_ID, timeline: await store.loadTimeline(AGENT_SESSION_ID) })[0]!.source)
+      .toEqual({ kind: 'captured', submissionId: 'prompt:invalid-origin-message', channel: 'cli' })
+    expect(writes).toHaveLength(1)
+  })
+
+  it('does not invent Terminal delivery or a sending device from native input role and execution metadata', () => {
+    const page: AgentSessionHistoryPage = { agentSessionId: AGENT_SESSION_ID,
+      source: { providerId: 'codex', nativeSessionId: 'original-codex' }, nextCursor: null,
+      items: [{ id: 'native-same-body', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Exact original content' }] }] }
+    const messages = projectSessionUserMessages({ agentSessionId: AGENT_SESSION_ID, historyPage: page })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]!.source).toEqual({ kind: 'native', providerId: 'codex', nativeSessionId: 'original-codex', recordId: 'native-same-body' })
+    expect(messages[0]!.author).toEqual({ kind: 'unknown' })
+  })
+
+  it('does not change the channel of an already accepted intent when the same operation is retried', async () => {
+    const { client, store, writes } = await createFixtureClient()
+    const input = { ...agentPromptCondition(client.agentSession(AGENT_SESSION_ID)), agentSessionId: AGENT_SESSION_ID,
+      operationId: 'frozen-origin-message', prompt: 'Frozen input', sourceChannel: 'message-tool' as const }
+    await client.submitAgentPrompt(input)
+    const before = structuredClone(await store.loadTimeline(AGENT_SESSION_ID)), accepted = [...writes]
+    await expect(client.submitAgentPrompt({ ...input, sourceChannel: 'reaction' })).rejects.toBeDefined()
+    expect(await store.loadTimeline(AGENT_SESSION_ID)).toEqual(before)
+    expect(writes).toEqual(accepted)
   })
 })
