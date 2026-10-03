@@ -1,4 +1,6 @@
 import { gitIgnoredNames } from './workspace-git-ignore.js'
+import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
+import type { FileNameListing } from '@agentmux/core'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
 import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './scratch-topic-directories.js'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
@@ -38,6 +40,7 @@ type LocalWorkerRequest =
   | { action: 'read'; name: string }
   | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string }
   | { action: 'list' }
+  | { action: 'list-files'; limit: number }
   | { action: 'reveal'; name: string | null }
   | { action: 'observe'; name: string }
   | {
@@ -108,10 +111,11 @@ export const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
 import { constants, link, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawn } from 'node:child_process'
 import { join, sep } from 'node:path'
 
 ${fileBytesAreBinary.toString()}
+${LOCAL_FILE_LIST_SOURCE}
 
 const request = JSON.parse(process.argv[1] ?? '')
 const expectedRoot = process.argv[2]
@@ -207,6 +211,8 @@ try {
         readCost: { payloadBytes: position }
       }))
     } finally { await handle.close() }
+  } else if (request.action === 'list-files') {
+    process.stdout.write(JSON.stringify(await listFileNames(request.limit)))
   } else if (request.action === 'list') {
     const entries = await readdir('.', { withFileTypes: true })
     const ignored = new Set()
@@ -1126,6 +1132,44 @@ export class WorkspaceFiles {
       action: 'reveal',
       name: basename(resolved.target)
     })).toString('utf8')
+  }
+
+  async listFiles(workspace: WorkspaceRecord, requestedPath = '.', limit = 20000): Promise<FileNameListing> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20000) throw new Error('File discovery limit must be between 1 and 20000')
+    const resource = { ...workspace }, host = this.hostFor(resource.hostId)
+    if (host.kind === 'local') {
+      const directory = await localReadablePath(resource, requestedPath)
+      return JSON.parse((await runLocalWorker(directory.target, directory.root, { action: 'list-files', limit })).toString('utf8')) as FileNameListing
+    }
+    // Remote directory facts already enforce its Host/root and symlink boundaries. No second SSH codec.
+    const pending = [requestedPath], files: string[] = []
+    const base = requestedPath.split('/').filter(part => part && part !== '.').join('/')
+    const deadline = Date.now() + 10000
+    let visited = 0, partialReason: FileNameListing['partialReason'] = null
+    while (pending.length && !partialReason) {
+      if (Date.now() >= deadline || visited >= 128) { partialReason = 'budget'; break }
+      const directories = pending.splice(0, Math.min(4, 128 - visited)); visited += directories.length
+      const results = await Promise.allSettled(directories.map(path => this.readDirectory(resource, path)))
+      if (this.hostFor(resource.hostId) !== host) throw new Error('The original file discovery Host changed. Retry the original resource.')
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!
+        if (result.status === 'rejected') { partialReason = 'unreadable'; continue }
+        for (const entry of result.value) {
+          if (entry.ignored || entry.name === '.git') continue
+          if (entry.isDirectory) {
+            if (!entry.isSymlink) {
+              if (pending.length < 128 - visited) pending.push(entry.path)
+              else partialReason = partialReason || 'budget'
+            }
+            continue
+          }
+          if (entry.linkIssue) continue
+          if (files.length === limit) { partialReason = 'limit'; break }
+          files.push(base ? entry.path.slice(base.length + 1) : entry.path)
+        }
+      }
+    }
+    return { status: 'listed', files, complete: partialReason === null, omitted: 'git-ignored', partialReason }
   }
 
   async readDirectory(

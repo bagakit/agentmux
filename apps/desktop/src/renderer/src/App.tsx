@@ -37,7 +37,7 @@ import { WorkspaceWorkbench as WorkspaceWorkbenchView } from './components/Works
 import { executionFocusSessionId } from './lib/agent-focus'
 import { executionFocusPresentation } from './lib/focus-tab-projection'
 import { api } from './lib/api'
-import { useAppStore } from './store'
+import { fileNavigationSelection, useAppStore } from './store'
 import { observeRejectedFileExplorerDirectoryLoads } from './components/file-tree/file-explorer-report-probe'
 import { isMacPlatform } from './lib/host-platform'
 import { applyAppAppearance } from './lib/app-appearance'
@@ -76,6 +76,7 @@ function DesktopApp() {
   const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit }), [openSettings, openToolkit])
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
+  const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
   const startupProgress = useAppStore((state) => state.startupProgress)
@@ -424,7 +425,13 @@ function DesktopApp() {
         insideTerminal: target.closest('.xterm') !== null
       })
       const handlers = windowShortcutHandlers(useAppStore.getState(), {
-        toggleQuickSwitch: () => setQuickSwitchOpen((current) => !current),
+        toggleQuickSwitch: () => {
+          if (!presentationRef.current.overlays.quickSwitcher) quickSwitchOrigin.current = {
+            element: document.activeElement instanceof HTMLElement ? document.activeElement : null,
+            navigation: fileNavigationSelection(useAppStore.getState())
+          }
+          setQuickSwitchOpen(current => !current)
+        },
         openShortcuts: () => openSettings('keyboard-shortcuts')
       })
       if (routeWindowShortcut(event, isMac, editableTarget, handlers)) event.preventDefault()
@@ -572,7 +579,10 @@ function DesktopApp() {
           <WindowUtilityBar toolkit={<ToolkitStatusBar />} />
         </div>
       </footer>
-      <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} />
+      <QuickSwitcher open={quickSwitchOpen} onClose={() => setQuickSwitchOpen(false)} returnFocus={() => {
+        const original = quickSwitchOrigin.current
+        return original?.navigation === fileNavigationSelection(useAppStore.getState()) ? original.element : null
+      }} />
       </div>
       <WindowOverlayHost />
       </RendererResourceOwners>

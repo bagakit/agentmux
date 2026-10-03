@@ -1,4 +1,4 @@
-import { AgentMuxError, parseFileReadParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult } from '@agentmux/core'
+import { AgentMuxError, parseFileReadParams, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../shared/contracts'
 import { zoneFileResource } from '../shared/zone-file-resource'
@@ -9,12 +9,29 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
   constructor(private readonly ports: {
     catalog(): Promise<AgentMuxSpaceCatalog | null>
     workspace(id: string): WorkspaceRecord | undefined
-    files: Pick<WorkspaceFiles, 'read'>
+    files: Pick<WorkspaceFiles, 'read' | 'listFiles'>
   }) {}
   async read(input: FileReadParams): Promise<FileReadResult> {
     const params = parseFileReadParams(input)
-    let resource: FileReadResource | null = null
-    const unknown = (message: string): FileReadResult => ({ resource, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message } })
+    const resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    try { return { resource, result: await this.ports.files.read(workspace, resource.path) } }
+    catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
+  async list(input: FileListParams): Promise<FileListResult> {
+    const params = parseFileListParams(input), resolved = await this.resolve(params)
+    if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: resolved.message } }
+    const { resource, workspace } = resolved
+    try {
+      const result = await this.ports.files.listFiles(workspace, resource.path, params.limit)
+      const current = this.ports.workspace(workspace.id)
+      if (!current || current.hostId !== workspace.hostId || current.path !== workspace.path) throw new Error('The original File resource changed during discovery. Inspect it before retrying.')
+      return { resource, result }
+    } catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
+  }
+  private async resolve(params: FileReadParams): Promise<{ resource: FileReadResource; workspace: WorkspaceRecord } | { message: string }> {
+    const unknown = (message: string) => ({ message })
     let catalog: AgentMuxSpaceCatalog | null
     try { catalog = await this.ports.catalog() } catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
     if (!catalog) return unknown('The original Zone observation is unavailable. Keep the original file reference and retry discovery.')
@@ -33,9 +50,8 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
       throw new AgentMuxError('The original File resource changed. Inspect its exact Host and Workspace before retrying this read.', 'FILE_RESOURCE_MISMATCH')
     }
     const mapped = zoneFileResource(workspace, zone, params.path)
-    resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path,
+    const resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path,
       zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path }
-    try { return { resource, result: await this.ports.files.read({ ...workspace }, mapped.path) } }
-    catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
+    return { resource, workspace: { ...workspace } }
   }
 }

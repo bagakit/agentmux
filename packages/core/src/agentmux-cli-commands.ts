@@ -4,6 +4,7 @@ import { AgentMuxError } from './errors.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseFileReadCommand } from './agentmux-cli-files.js'
+import { parseFileListParams } from './public-rpc-files.js'
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
@@ -292,6 +293,11 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     f => parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path', true)!, hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,
       ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}) }) as unknown as Record<string, unknown>),
   command('file.view', '--region ID [--mode source|diff|preview]', 'Read or change one FileRegion mode without forcing focus.', { '--region': 'data', '--mode': 'value', ...OP }, f => ({ regionId: id(f, '--region', true), ...fields(f, { '--mode': 'mode' }), ...(f.values.has('--mode') ? operation(f) : {}) })),
+  { ...command('file.ls', '--zone ID --host ID --workspace ID --workspace-path PATH [--path DIR] [--space ID] [--limit N]', 'Discover original Zone-relative file names without reading content or changing focus.',
+    { '--zone': 'data', '--host': 'data', '--workspace': 'data', '--workspace-path': 'data', '--path': 'data', '--space': 'data', '--limit': 'value' },
+    f => parseFileListParams({ ...parseFileReadCommand({ zoneId: value(f, '--zone', true)!, path: value(f, '--path') ?? '.', hostId: value(f, '--host', true)!, workspaceId: value(f, '--workspace', true)!, workspacePath: value(f, '--workspace-path', true)!,
+      ...(f.values.has('--space') ? { spaceId: value(f, '--space', true)! } : {}) }), ...numbers(f, { '--limit': 'limit' }) }) as unknown as Record<string, unknown>,
+    'Calls file.list. Results are relative to the requested directory. Git ignore rules apply; complete/partial and its reason are explicit. To continue with file open --zone, prepend the requested directory to each result for --path (omit the default dot prefix).'), rpcMethod: 'file.list' },
   command('terminal.open', `[--command TEXT] ${PLACEMENT_USAGE}`, 'Open a terminal at an exact destination.', { ...PLACEMENT, '--command': 'data' }, f => ({ ...operation(f), ...openPlacement(f), ...fields(f, { '--command': 'shellCommand' }) })),
   command('browser.open', `--url URL ${PLACEMENT_USAGE}`, 'Open a Browser at an exact destination.', { ...PLACEMENT, '--url': 'data' }, f => ({ ...operation(f), ...openPlacement(f), url: id(f, '--url') })),
   command('browser.targets', '[--workspace ID]', 'Discover original embedded and explicitly shared external Browser targets without selecting or focusing them.', { '--workspace': 'data' }, f => f.values.has('--workspace') ? { workspaceId: id(f, '--workspace') } : {}, 'Each target carries its source, readiness, document identity and actual capabilities/CDP methods. Pairing alone does not share a tab. Choose its exact id for browser run; disconnected or revoked targets require the original connection or another explicit share. Unshared tabs remain outside discovery.'),

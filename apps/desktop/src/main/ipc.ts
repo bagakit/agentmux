@@ -621,6 +621,9 @@ export async function registerIpc(args: {
   handle('files:readDirectory', async (workspaceId: string, path: string) =>
     await files.readDirectory(workspace(config, workspaceId), path)
   )
+  handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
+    await files.listFiles(workspace(config, workspaceId), path, limit)
+  )
   const publicFiles = new FileReadOwner({ files, workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
