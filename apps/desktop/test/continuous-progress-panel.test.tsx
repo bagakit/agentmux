@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ContinuousProgressPanel } from '../src/renderer/src/components/ContinuousProgressPanel'
 import { ContinuousProgressControl } from '../src/renderer/src/components/ContinuousProgressControl'
@@ -10,6 +10,10 @@ import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import type { ContinuousProgressLoop } from '@agentmux/core'
 
 const dom = composerDOM()
+beforeEach(() => {
+  vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
+  vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => vi.fn())
+})
 const target = { hostId: 'local', agentSessionId: 'agent-1', providerId: 'codex', workspacePath: _hygiene_fixturePath("repo") }
 const savedPrompt = 'Keep the original input.\nRead every line of this saved continuation.\nEnd of the saved prompt.'
 const saved = (status: ContinuousProgressLoop['status'] = 'active'): ContinuousProgressLoop => ({
@@ -75,7 +79,7 @@ describe('continuous progress panel', () => {
     await dom.render(<div onToggle={ownerToggle}><ContinuousProgressControl session={composerSession()} /></div>)
     await vi.waitFor(() => expect(dom.container.querySelector('[data-progress-details="configuration"]')).not.toBeNull())
     const details = [...dom.container.querySelectorAll<HTMLDetailsElement>('[data-progress-details]')]
-    expect(details).toHaveLength(2)
+    expect(details).toHaveLength(3)
     await act(async () => {
       for (const detail of details) {
         detail.open = true
