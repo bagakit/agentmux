@@ -13,6 +13,7 @@ import { WorkspaceFiles } from '../src/main/workspace-files'
 import { TopicKnowledgeOwner } from '../src/main/topic-knowledge'
 import { TopicSpatialOwner } from '../src/main/topic-spatial-owner'
 import { MOTE_SOUL_PATH, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../src/shared/scratch-topics'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { AgentMuxControlServer as SourceControlServer } from '../../../packages/core/src/public-rpc-server'
@@ -69,6 +70,8 @@ describe('Knowledge entries retain exact source identity through original file C
     expect(stored).not.toHaveProperty('revision')
     expect(stored).not.toHaveProperty('expectedRevision')
     const restarted = new TopicKnowledgeOwner(new ScratchTopics(), new WorkspaceFiles(() => ({ kind: 'local' } as ExecutionHost)), () => f.workspace)
+    restarted.setSpatialPort(new TopicSpatialOwner({ state: new AgentMuxSpatialStateStore(f.state.path), workspace: () => f.workspace,
+      topics: () => restarted.listTopicSnapshots(), categories: () => restarted.listCategories(), ensureDefaultCategory: () => restarted.ensureDefaultCategoryContent() }))
     expect(await restarted.call('topic.knowledge.read', { topicId: f.topic.topicId, entryId: ENTRY })).toEqual({ entry: saved.entry })
     expect((await f.owner.call('topic.knowledge.search', { query: '原讨论' })).entries).toEqual([saved.entry])
     expect((await f.owner.call('topic.knowledge.search', { query: 'source-block' })).entries).toEqual([saved.entry])
@@ -163,6 +166,94 @@ describe('Knowledge entries retain exact source identity through original file C
       expect(JSON.parse(listed.stdout).result.entries).toEqual([entry])
       expect(await client.call('topic.knowledge.read', { topicId: f.topic.topicId, entryId: ENTRY })).toEqual({ entry })
     } finally { await client.dispose() }
+  })
+  it('retains original Core Mote identity with missing SOUL through the real knowledge owner, RPC and compiled CLI', async () => {
+    const f = await fixture(), mote = await f.scratch.ensureMote(f.workspace, 'view:retained-mote')
+    const directory = scratchTopicPhysicalPath(f.workspace, mote), spaceId = directoryIdentity('local', directory), zoneId = homeZoneId(spaceId)
+    const current = (await f.state.read())!, graph = structuredClone(current.graph)
+    graph.spaces.push({ spaceId, kind: 'mote', name: 'Retained Mote', hostId: 'local', directoryPath: directory, projectId: null, topicId: mote.id })
+    graph.zones.push({ zoneId, workspaceId: f.workspace.id, kind: 'home', hostId: 'local', directoryPath: directory, branch: null })
+    graph.bindings.push({ spaceId, zoneId })
+    graph.resources['zone:' + zoneId] = { spaceId, workspaceId: f.workspace.id, topicId: mote.id, contentKind: 'mote' }
+    graph.tabs.push({ tabId: 'retained-mote-chat', zoneId, workspaceId: f.workspace.id, name: 'Original chat', regionIds: ['retained-mote-thread'] })
+    graph.regions.push({ regionId: 'retained-mote-thread', tabId: 'retained-mote-chat', kind: 'agent', agentSessionId: 'healthy-session', runId: 'healthy-run', execution: { hostId: 'local', cwd: directory } })
+    graph.resources['tab:retained-mote-chat'] = { draft: 'Unsent original draft', pin: true }
+    await f.state.commit({ expectedRevision: current.revision, graph })
+    const privateDirectory = join(directory, 'knowledge'); await mkdir(privateDirectory)
+    const privateBytes = JSON.stringify({ ...f.authored, topicId: mote.id, content: 'Private retained Mote source-block', updatedAt: 1 }) + '\n'
+    await writeFile(join(privateDirectory, ENTRY + '.json'), privateBytes)
+    const originalTopic = await readFile(join(directory, 'topic.md'), 'utf8')
+    await rm(join(directory, MOTE_SOUL_PATH))
+    const snapshot = await f.scratch.read(f.workspace, mote.id)
+    expect(snapshot).toMatchObject({ id: mote.id, physicalDirectoryPath: directory })
+    expect(snapshot!.soul).toBeUndefined()
+    expect(snapshot!.moteArchive).toBeUndefined()
+    expect(snapshot!.readError).toBeUndefined()
+    const saved = await f.owner.call('topic.knowledge.write', f.authored), originalState = await f.state.read()
+    const socketPath = join(f.root, 'rpc.sock'), server = new AgentMuxControlServer({ socketPath, spatialState: f.state, coreClients: () => [], topics: f.owner })
+    servers.push(server); await server.start()
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    const env = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + socketPath })
+    try {
+      await expect(client.call('topic.inspect', { topicId: mote.id })).rejects.toMatchObject({ code: 'TOPIC_TARGET_IS_MOTE' })
+      await Promise.all([
+        client.call('topic.knowledge.read', { topicId: mote.id, entryId: ENTRY }),
+        client.call('topic.knowledge.write', { ...f.authored, topicId: mote.id, expectedRevision: null }),
+        client.call('topic.knowledge.ls', { topicId: mote.id }),
+        client.call('topic.knowledge.search', { topicId: mote.id, query: 'source-block' })
+      ].map(operation => expect(operation).rejects.toMatchObject({ code: 'TOPIC_TARGET_IS_MOTE' })))
+      const cliResults = []
+      for (const args of [
+        ['topic', 'knowledge', 'read', '--topic', mote.id, '--entry', ENTRY],
+        ['topic', 'knowledge', 'write', '--input', '-'],
+        ['topic', 'knowledge', 'ls', '--topic', mote.id],
+        ['topic', 'knowledge', 'search', '--topic', mote.id, '--query', 'source-block']
+      ]) {
+        const result = await runCompiledObjectCli(args, env, JSON.stringify({ ...f.authored, topicId: mote.id }))
+        expect(result.code).toBe(1)
+        expect(JSON.parse(result.stderr)).toMatchObject({ error: { code: 'TOPIC_TARGET_IS_MOTE' } })
+        cliResults.push({ args, ...result })
+      }
+      expect(cliResults).toHaveLength(4)
+      const read = await runCompiledObjectCli(['topic', 'knowledge', 'read', '--topic', f.topic.topicId, '--entry', ENTRY], env)
+      expect(read.code, read.stderr).toBe(0)
+      expect(JSON.parse(read.stdout).result.entry).toEqual(saved.entry)
+      const global = await client.call('topic.knowledge.search', { query: 'source-block' })
+      expect(global.entries).toEqual([saved.entry])
+      expect(global.unavailable).toContainEqual(expect.objectContaining({ code: 'TOPIC_SCOPE_UNCONFIRMED' }))
+      const globalCli = await runCompiledObjectCli(['topic', 'knowledge', 'search', '--query', 'source-block'], env)
+      expect(globalCli.code, globalCli.stderr).toBe(0)
+      expect(JSON.parse(globalCli.stdout)).toMatchObject({ ok: true, operation: 'topic.knowledge.search', result: global })
+      expect(await f.state.read()).toEqual(originalState)
+      expect(await readFile(join(privateDirectory, ENTRY + '.json'), 'utf8')).toBe(privateBytes)
+      expect(await readFile(join(directory, 'topic.md'), 'utf8')).toBe(originalTopic)
+      // The durable fixture retains Run/workface facts; no actual Native Run is started or qualified here.
+      expect((await f.state.read())!.graph.regions.find(region => region.regionId === 'retained-mote-thread')).toEqual(graph.regions.at(-1))
+      if (process.env.AGENTMUX_TEST_TOPIC_KIND_CLI_RECEIPT) await writeFile(process.env.AGENTMUX_TEST_TOPIC_KIND_CLI_RECEIPT,
+        JSON.stringify({ exactMote: cliResults, ordinaryRead: read, globalSearch: globalCli, privateBytesPreserved: true, graphPreserved: true }) + '\n')
+    } finally { await client.dispose() }
+  }, 25_000)
+  it('does not guess ordinary kind from readable metadata when the original Core kind is unconfirmed', async () => {
+    const f = await fixture(), saved = await f.owner.call('topic.knowledge.write', f.authored)
+    const neighbor = await f.owner.call('topic.create', { topicId: 'view:confirmed-neighbor', title: 'Still usable' })
+    const healthy = await f.owner.call('topic.knowledge.write', { ...f.authored, topicId: neighbor.topic.topicId })
+    const current = (await f.state.read())!, graph = structuredClone(current.graph)
+    delete graph.resources['zone:' + f.topic.zoneId]
+    await f.state.commit({ expectedRevision: current.revision, graph })
+    const originalState = await f.state.read(), originalBytes = await readFile(join(f.topic.directoryPath, 'knowledge', ENTRY + '.json'), 'utf8')
+    await Promise.all([
+      f.owner.call('topic.knowledge.read', { topicId: f.topic.topicId, entryId: ENTRY }),
+      f.owner.call('topic.knowledge.write', { ...f.authored, expectedRevision: saved.entry.revision }),
+      f.owner.call('topic.knowledge.ls', { topicId: f.topic.topicId }),
+      f.owner.call('topic.knowledge.search', { topicId: f.topic.topicId, query: 'source-block' })
+    ].map(operation => expect(operation).rejects.toMatchObject({ code: 'TOPIC_IDENTITY_UNCONFIRMED' })))
+    const global = await f.owner.call('topic.knowledge.search', { query: 'source-block' })
+    expect(global.entries).toEqual([healthy.entry])
+    expect(global.unavailable).toContainEqual(expect.objectContaining({ code: 'TOPIC_IDENTITY_UNCONFIRMED', source: f.topic.topicId }))
+    expect(await f.owner.call('topic.knowledge.read', { topicId: neighbor.topic.topicId, entryId: ENTRY })).toEqual({ entry: healthy.entry })
+    expect((await f.owner.call('topic.inspect', { topicId: f.topic.topicId })).topic?.topicId).toBe(f.topic.topicId)
+    expect(await f.state.read()).toEqual(originalState)
+    expect(await readFile(join(f.topic.directoryPath, 'knowledge', ENTRY + '.json'), 'utf8')).toBe(originalBytes)
   })
 })
 

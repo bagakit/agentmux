@@ -8,7 +8,7 @@ import type { WorkspaceRecord } from '../shared/contracts.js'
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { UNCLASSIFIED_TOPIC_CATEGORY_ID } from '../shared/topic-categories.js'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicPhysicalPath,
-  scratchTopicStorageRoots, scratchTopicDirectoryName, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_TOPIC_WIKI_STATE_PATH, type ScratchTopicSnapshot } from '../shared/scratch-topics.js'
+  scratchTopicStorageRoots, scratchTopicDirectoryName, SCRATCH_TOPIC_WIKI_PATH, SCRATCH_TOPIC_WIKI_STATE_PATH, type ScratchTopicSnapshot, type ScratchTopicList } from '../shared/scratch-topics.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult, parseTopicKnowledge } from '@agentmux/core/control'
 import { ensureScratchStorageRoot } from './scratch-topic-directories.js'
 import type { ScratchTopics } from './scratch-topics.js'
@@ -17,6 +17,7 @@ import type { WorkspaceFiles } from './workspace-files.js'
 export type TopicSpatialInspection = {
   zoneId: string; categorySpaceIds: string[]; chatIds: string[]; spatialRevision: number;
   contentIdentity?: string
+  contentKind?: 'topic' | 'mote'
 }
 /** Borrows the original Core graph; content metadata never copies membership. */
 export interface TopicSpatialPort {
@@ -117,7 +118,7 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   async ensureDefaultCategoryContent(): Promise<TopicCategory> {
     return await this.createCategoryContent(UNCLASSIFIED_TOPIC_CATEGORY_ID, '未分类')
   }
-  async listTopicSnapshots(): Promise<ScratchTopicSnapshot[]> { return await this.scratch.list(this.scope()) }
+  async listTopicSnapshots(): Promise<ScratchTopicList> { return await this.scratch.list(this.scope()) }
   private async confirmTopicScaffold(topic: ScratchTopicSnapshot): Promise<void> {
     const directory = scratchTopicPhysicalPath(this.scope(), topic)
     for (const path of ['topic.md', SCRATCH_TOPIC_WIKI_PATH, SCRATCH_TOPIC_WIKI_STATE_PATH]) {
@@ -135,6 +136,17 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   private async requireTopic(topicId: string): Promise<ScratchTopicSnapshot | null> {
     const topic = await this.scratch.read(this.scope(), topicId)
     if (topic && this.isMote(topic)) throw new AgentMuxError('Choose an ordinary knowledge Topic. This target is a Mote; its original content and work remain available.', 'TOPIC_TARGET_IS_MOTE')
+    return topic
+  }
+  /** Missing personality metadata cannot override an original Core Mote identity. */
+  private async confirmKnowledgeTopic(topic: ScratchTopicSnapshot): Promise<void> {
+    if (topic.readError) throw new AgentMuxError('This content scope is unconfirmed. Repair the original metadata before reading its knowledge; the original files and work remain available.', 'TOPIC_SCOPE_UNCONFIRMED')
+    const original = await this.spatialPort().inspect(topic)
+    if (original.contentKind !== 'topic') throw new AgentMuxError('The original Topic kind is not confirmed. Refresh its original spatial identity before this knowledge operation; content, workfaces and healthy Agents remain available.', 'TOPIC_IDENTITY_UNCONFIRMED')
+  }
+  private async requireKnowledgeTopic(topicId: string): Promise<ScratchTopicSnapshot | null> {
+    const topic = await this.requireTopic(topicId)
+    if (topic) await this.confirmKnowledgeTopic(topic)
     return topic
   }
   private topicFact(topic: ScratchTopicSnapshot, spatial: TopicSpatialInspection): KnowledgeTopic {
@@ -158,7 +170,6 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   }
   private async knowledgeEntries(topic: ScratchTopicSnapshot, query: string | null, limit: number,
     entries: TopicKnowledgeItem[], unavailable: TopicUnavailable[], budget: { bytes: number }): Promise<void> {
-    if (topic.readError) throw new AgentMuxError('This content scope is unconfirmed. Repair the original metadata before reading its knowledge; the original files and work remain available.', 'TOPIC_SCOPE_UNCONFIRMED')
     let directory: string
     try { directory = await this.knowledgeDirectory(topic) } catch (error) { if (missing(error)) return; throw error }
     const names = (await readdir(directory)).filter(name => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\.json$/u.test(name)).sort()
@@ -243,11 +254,11 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
           spatialRevision: position.spatialRevision, diskDurability: 'confirmed' }; break
       }
       case 'topic.knowledge.read': {
-        const topic = await this.requireTopic(p.topicId as string)
+        const topic = await this.requireKnowledgeTopic(p.topicId as string)
         result = { entry: topic ? await this.readKnowledge(topic, p.entryId as string) : null }; break
       }
       case 'topic.knowledge.write': {
-        const topic = await this.requireTopic(p.topicId as string)
+        const topic = await this.requireKnowledgeTopic(p.topicId as string)
         if (!topic) throw new AgentMuxError('Choose an existing exact Topic before saving knowledge.', 'TOPIC_NOT_FOUND')
         const directory = await this.knowledgeDirectory(topic, true)
         const { expectedRevision, ...authored } = input as TopicKnowledgeWrite
@@ -262,11 +273,16 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
       case 'topic.knowledge.ls': case 'topic.knowledge.search': {
         const entries: TopicKnowledgeItem[] = [], unavailable: TopicUnavailable[] = [], limit = p.limit as number ?? 32
         const query = method === 'topic.knowledge.search' ? (p.query as string).toLocaleLowerCase() : null
-        const topics = p.topicId ? [await this.requireTopic(p.topicId as string)].filter((topic): topic is ScratchTopicSnapshot => topic !== null)
-          : (await this.listTopicSnapshots()).filter(topic => !this.isMote(topic))
+        const discovery = p.topicId ? null : await this.listTopicSnapshots()
+        for (const message of discovery?.issues ?? []) unavailable.push(issue(new AgentMuxError(message, 'TOPIC_SCOPE_UNCONFIRMED')))
+        const topics = p.topicId ? [await this.requireKnowledgeTopic(p.topicId as string)].filter((topic): topic is ScratchTopicSnapshot => topic !== null)
+          : discovery!.filter(topic => !this.isMote(topic))
         const budget = { bytes: 0 }
         for (const topic of topics) {
-          try { await this.knowledgeEntries(topic, query, limit, entries, unavailable, budget) }
+          try {
+            if (!p.topicId) await this.confirmKnowledgeTopic(topic)
+            await this.knowledgeEntries(topic, query, limit, entries, unavailable, budget)
+          }
           catch (error) { unavailable.push(issue(error, topic.id)) }
         }
         result = { entries, unavailable }; break
