@@ -43,7 +43,7 @@ beforeEach(async () => {
 })
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();useAppStore.setState(initial,true);vi.restoreAllMocks();vi.unstubAllGlobals()})
 const mount=()=>act(async()=>root.render(createElement(GlobalFocusSurface)))
-function lane(){const node=container.querySelector<HTMLElement>('.focus-project-board > .focus-project-lanes [data-project-id="repo"]');expect(node).not.toBeNull();return node!}
+function lane(){const node=container.querySelector<HTMLElement>('.focus-project-board__live > .focus-project-lanes [data-project-id="repo"]');expect(node).not.toBeNull();return node!}
 function offlineColumn(){const node=lane().querySelector<HTMLElement>('section[data-bucket="disconnected"]');expect(node).not.toBeNull();return node!}
 function row(id:string){const node=container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`);expect(node).not.toBeNull();return node!}
 async function expand(){const node=offlineColumn().querySelector<HTMLButtonElement>('.focus-recovery-toggle');expect(node).not.toBeNull();await act(async()=>node!.click())}
@@ -90,7 +90,7 @@ it('one selected offline Context still has only the compact entry until explicit
 })
 
 const drawer=()=>container.querySelector<HTMLElement>('[aria-label="Disconnected projects"]')!
-const mainIds=()=>[...container.querySelectorAll('.focus-project-board > .focus-project-lanes .focus-context')].map(n=>n.getAttribute('data-session-id'))
+const mainIds=()=>[...container.querySelectorAll('.focus-project-board__live > .focus-project-lanes .focus-context')].map(n=>n.getAttribute('data-session-id'))
 it('healthy observation loss and pending Attention stay outside confirmed offline',async()=>{
  await act(async()=>useAppStore.setState({sessions:[agent('healthy','disconnected'),agent('offline','disconnected','interrupted'),{...agent('permission','disconnected','interrupted'),pendingInteraction:{id:'p',kind:'permission',title:'Allow editing?',operation:'edit'} as never}]}));await mount()
  expect(row('healthy').closest('[data-bucket="idle"]')).not.toBeNull();expect(row('permission').closest('[data-bucket="attention"]')).not.toBeNull()
@@ -109,7 +109,7 @@ it('hover has three actual summaries and no history/control changes',async()=>{
  expect(useAppStore.getState().sessions).toBe(state.sessions);expect(useAppStore.getState().agentFocus).toBe(state.agentFocus);expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
  // Repeat the same actual caller with two registered Branches of one project.
  await act(async()=>useAppStore.setState(current=>({config:{...current.config!,workspaces:[...current.config!.workspaces,{id:'checkout-a',name:'Checkout A',hostId:'local',kind:'worktree',path:_hygiene_fixturePath("checkout-a"),repoPath:_hygiene_fixturePath("repo"),branch:'feature/a'},{id:'checkout-b',name:'Checkout B',hostId:'local',kind:'worktree',path:_hygiene_fixturePath("checkout-b"),repoPath:_hygiene_fixturePath("repo"),branch:'feature/b'}]},sessions:[agent('branch-live-a','working','running',_hygiene_fixturePath("checkout-a")),agent('branch-off-a','disconnected','interrupted',_hygiene_fixturePath("checkout-a")),agent('branch-live-b','working','running',_hygiene_fixturePath("checkout-b")),agent('branch-off-b','disconnected','interrupted',_hygiene_fixturePath("checkout-b"))]})))
- const branches=[...container.querySelectorAll<HTMLElement>('.focus-project-board > .focus-project-lanes [data-project-id="repo"]')]
+ const branches=[...container.querySelectorAll<HTMLElement>('.focus-project-board__live > .focus-project-lanes [data-project-id="repo"]')]
  expect(branches).toHaveLength(2);expect(new Set(branches.map(node=>node.dataset.laneId)).size).toBe(2)
  const branch=branches.find(node=>node.querySelector('.focus-project-lanes__axis')?.textContent?.includes('feature/b'))!;expect(branch).toBeDefined()
  const branchEntry=branch.querySelector<HTMLButtonElement>('.focus-disconnected-entry')!;expect(branchEntry).not.toBeNull()
@@ -127,7 +127,7 @@ it('mixed and pure offline belong to one shared view and filters keep the same q
 it('same project Topics reveal by exact lane and Return keeps draft/focus',async()=>{
  const other={...ordinary,id:'launcher:other',title:'Another topic',directoryPath:_hygiene_fixturePath("scratch/topic--launcher--other"),topicPath:_hygiene_fixturePath("scratch/topic--launcher--other/topic.md")}
  await act(async()=>useAppStore.setState({sessions:[agent('live','working','running',ordinary.directoryPath),agent('off-a','disconnected','interrupted',ordinary.directoryPath),agent('off-b','disconnected','interrupted',other.directoryPath)],scratchTopicSnapshots:{[SCRATCH_WORKSPACE_ID]:{scope:scratchTopicsScope(scratch),revision:0,topics:[ordinary,other],error:null,reading:false}}}));await mount()
- const lanes=[...container.querySelectorAll<HTMLElement>('.focus-project-board > .focus-project-lanes [data-lane-id]')];expect(lanes).toHaveLength(2)
+ const lanes=[...container.querySelectorAll<HTMLElement>('.focus-project-board__live > .focus-project-lanes [data-lane-id]')];expect(lanes).toHaveLength(2)
  expect(new Set(lanes.map(n=>n.dataset.laneId)).size).toBe(2)
  const desired=lanes.find(n=>n.textContent?.includes('Another topic'))!;expect(desired).toBeDefined()
  const trigger=desired.querySelector<HTMLButtonElement>('.focus-disconnected-entry')!;const state=useAppStore.getState()
@@ -147,16 +147,16 @@ it('Return preserves a later deliberate input and only explicit context click na
  await act(async()=>trigger.click());await act(async()=>row('offline').click());expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('offline')
 })
 
-it('returns to the valid collection header when the originating entry became disabled',async()=>{
+it('returns to the valid search control when the originating entry became disabled',async()=>{
  await act(async()=>useAppStore.setState(s=>({sessions:[...s.sessions,agent('old-off','disconnected','interrupted',_hygiene_fixturePath("old"))]})));await mount()
  const trigger=offlineColumn().querySelector<HTMLButtonElement>('.focus-disconnected-entry')!
  await act(async()=>{trigger.focus();trigger.click()})
  expect(drawer().querySelectorAll('.focus-context')).toHaveLength(2)
  await act(async()=>useAppStore.setState(s=>({sessions:s.sessions.map(item=>item.id==='offline'?{...item,processState:'running',status:{...item.status,state:'working'}}:item)})))
  expect(trigger.isConnected).toBe(true);expect(trigger.disabled).toBe(true)
- const returnButton=drawer().querySelector<HTMLButtonElement>('.focus-disconnected-projects__return')!,header=drawer().querySelector<HTMLButtonElement>('.focus-recovery-toggle')!
- expect(returnButton).not.toBeNull()
+ const returnButton=drawer().querySelector<HTMLButtonElement>('.focus-disconnected-projects__return')!,fallback=container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+ expect(returnButton).not.toBeNull();expect(fallback).not.toBeNull()
  await act(async()=>{returnButton.focus();returnButton.click()})
- expect(document.activeElement,'disabled original entry must not drop Return to BODY').toBe(header)
+ expect(document.activeElement,'disabled original entry returns to the valid search control').toBe(fallback)
  expect(drawer().querySelectorAll('.focus-context')).toHaveLength(0)
 })

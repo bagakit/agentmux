@@ -171,7 +171,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} style={{ '--focus-card-columns': layout.columns[index] ?? 1, '--focus-group-width': `${layout.widths[index] ?? 32}px` } as CSSProperties} key={bucket}>
           {bucket === 'disconnected' ? <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><FocusDisconnectedGroup contexts={grouped} laneId={lane.id} onReveal={openDisconnected} /></header> : <>
-            <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} /><strong>{label}</strong><span>{grouped.length}</span></span></header>
+            <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong>{grouped.length > 0 ? <span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span> : null}</span></header>
             <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
           </>}
         </section>

@@ -55,12 +55,13 @@
 .focus-context-group__header strong { font-weight: 500; }
 .focus-context-group__header span { font-variant-numeric: tabular-nums; }
 .focus-context-group__bucket { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+.focus-context-group__count { position: relative; top: -3px; display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: color-mix(in srgb, currentColor 10%, transparent); font-size: 10px; line-height: 14px; font-weight: 500; }
 .focus-context-group[data-empty='true'] .focus-context-group__header strong { display: none; }
-.focus-context-group[data-empty='true'] .focus-context-group__header { justify-content: center; padding: 4px 0; }
-.focus-context-group[data-empty='true'] .focus-context-group__bucket { flex-direction: column; gap: 3px; }
+.focus-context-group[data-empty='true'] .focus-context-group__header { justify-content: center; padding: 0; }
 .focus-context-group[data-bucket='attention'] > .focus-context-group__header { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
 .focus-context-group[data-bucket='working'] > .focus-context-group__header { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
 .focus-context-group[data-bucket='results'] > .focus-context-group__header { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
+.focus-context-group[data-empty='true'] > .focus-context-group__header { color: var(--text-3); background: transparent; }
 .focus-context { width: 100%; min-width: 0; min-height: 52px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-context--compact { min-height: 28px; height: 28px; padding-top: 0; padding-bottom: 0; }
 .focus-context--compact .focus-context__detail { display: none; }
@@ -115,7 +116,9 @@
 .focus-context-hover footer { display: flex; flex-direction: column; gap: 3px; margin-top: 12px; padding-top: 9px; border-top: 1px solid var(--line); color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .focus-context-hover footer strong { color: var(--text-2); font-weight: 500; }
 .focus-context-hover footer code { font: var(--fs-micro)/1.4 var(--font-mono); }
-.focus-disconnected-entry { width: 32px; display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 4px 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; cursor: pointer; }
+.focus-disconnected-entry { position: relative; width: 32px; height: 24px; display: flex; align-items: center; justify-content: center; padding: 0; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; cursor: pointer; }
+.focus-disconnected-entry:has(.focus-context-group__count) > svg { position: absolute; left: 2px; bottom: 0; }
+.focus-disconnected-entry .focus-context-group__count { position: absolute; top: 0; right: 0; height: 12px; line-height: 12px; }
 .focus-disconnected-entry:hover { background: var(--surface-2); color: var(--text); }
 .focus-disconnected-entry:disabled { cursor: default; }
 .focus-disconnected-entry:focus-visible { outline: 1px solid var(--green); outline-offset: -1px; }
