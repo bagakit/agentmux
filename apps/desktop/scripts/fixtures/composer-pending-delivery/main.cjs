@@ -78,7 +78,7 @@ async function geometry() {
         previewClipped:preview?preview.scrollWidth>preview.clientWidth:false,
         heading:rect(b.querySelector('.composer-pending__heading')),announcers:[...b.querySelectorAll('[role="status"]')].map(node=>node.textContent),
         cards:[...b.querySelectorAll('.composer-pending__card')].map(node=>({id:node.dataset.operationId,index:Number(node.dataset.queueIndex),selected:node.dataset.selected,
-          rect:rect(node),transform:getComputedStyle(node).transform,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
+          rect:rect(node),transform:getComputedStyle(node).transform,animation:getComputedStyle(node).animationName,timeline:getComputedStyle(node).animationTimeline,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
           layoutHeight:node.offsetHeight,preview:node.querySelector('.composer-pending__preview').textContent,
           previewTitle:node.querySelector('.composer-pending__preview').getAttribute('title'),previewLines:range(node.querySelector('.composer-pending__preview')),
           state:{label:node.querySelector('.composer-pending__state').getAttribute('aria-label'),icon:node.querySelector('.composer-pending__state svg')?.getAttribute('class'),rect:rect(node.querySelector('.composer-pending__state')),hiddenLabel:node.querySelector('.composer-pending__sr-only')?.textContent},
@@ -201,7 +201,7 @@ async function pointAt(expression) {
   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point });
   await delay(160); await painted();
 }
-function cardGeometry(facts, count) {
+function cardGeometry(facts, count, selectedVisible = true) {
   const card=facts.strip;assert.ok(card);assert.equal(card.count,`待发 ${count}`);
   assert.equal(card.background,'rgba(0, 0, 0, 0)','The float has no full-strip background');
   assert.equal(card.cards.length,count,'Every queued operation has its own real card inside the floating surface');
@@ -229,7 +229,7 @@ function cardGeometry(facts, count) {
   for(const action of selected.actions){
     assert.ok(action.rect.width>=23.9&&action.rect.height>=23.9,'Compact action retains a full actual 24px hit and focus area');
     assert.ok(action.rect.x>=selected.rect.x-1&&action.rect.right<=selected.rect.right+1,'Every selected action fits inside its real card');
-    assert.ok(action.rect.y>=list.y-1&&action.rect.bottom<=list.bottom+1,'Every selected action has a complete visible hit area inside the bounded card list');
+    if(selectedVisible) assert.ok(action.rect.y>=list.y-1&&action.rect.bottom<=list.bottom+1,'Every selected action has a complete visible hit area inside the bounded card list');
   }
   assert.equal(selected.actions[0].background,'rgba(0, 0, 0, 0)','Send remains a quiet action without a heavy button background');
   if(card.reading.readerCount){
@@ -299,6 +299,47 @@ async function copyOutcomeScenes(scene, baseline) {
   await evaluate('pendingDelivery.clear()');await click(editor);const end=await settled();retained(baseline,end);
   result.checkpoints.push({scene,name:'original-copy-outcomes',before,motion,reduced,idle,failed,held,changed,late,end});
 }
+async function spatialScrollScenes(scene, baseline) {
+  assert.equal(await evaluate("CSS.supports('animation-timeline','view(block)')"),true,'Actual Native supports per-card view timelines');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
+  await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards');window.pendingScrollNodes=[...list.children];window.pendingScrollWheels=[];list.addEventListener('wheel',event=>pendingScrollWheels.push({trusted:event.isTrusted,defaultPrevented:event.defaultPrevented,deltaY:event.deltaY}),{passive:true})})()`);
+  const samples=[];
+  for(const [index,name]of [[4,'head'],[50,'middle'],[96,'tail']]){
+    const expr=`${strip}.querySelector('[data-queue-index="${index}"]')`;
+    await evaluate(`(()=>{const list=${strip}.querySelector('.composer-pending__cards'),node=${expr};list.scrollTop=node.offsetTop-list.offsetTop-96})()`);
+    const point=await evaluate(`(()=>{const r=${strip}.querySelector('.composer-pending__cards').getBoundingClientRect();return{x:r.right-2,y:r.y+r.height/2}})()`);
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...point});await painted();
+    const before=await settled(),cardBefore=before.strip.cards[index];retained(baseline,before);
+    assert.equal(cardBefore.selected,'false','Wheel traverses the same original unselected card');
+    assert.equal(cardBefore.animation,'composer-pending-depth');assert.equal(cardBefore.timeline,'view()');
+    await frame(scene,'card-scroll-'+name+'-before');
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:46});
+    await waitFor(`${strip}.querySelector('.composer-pending__cards').scrollTop>${before.strip.list.scrollTop}+20`);
+    const after=await settled(),cardAfter=after.strip.cards[index];retained(before,after);
+    result.checkpoints.push({scene,name:'spatial-wheel-observation-'+name,index,before,after});
+    cardGeometry(after,100,false); // Passive scrolling can move the original selected card offscreen; hover action probes still require full hit visibility.
+    const inside=card=>card.rect.y>=after.strip.list.rect.y-1&&card.rect.bottom<=after.strip.list.rect.bottom+1;
+    assert.ok(inside(cardBefore)&&inside(cardAfter),'Both measured positions keep the same complete card in the viewport');
+    assert.equal(cardAfter.id,cardBefore.id);assert.equal(after.strip.operationId,before.strip.operationId,'Wheel does not change the selected original operation');
+    assert.notEqual(cardAfter.transform,cardBefore.transform,'The same original card changes depth and tilt with trusted native scroll');
+    const matrix=value=>value.slice(9,-1).split(',').map(Number),a=matrix(cardBefore.transform),b=matrix(cardAfter.transform);
+    assert.equal(a.length,16);assert.equal(b.length,16);
+    assert.ok(Math.abs(a[14]-b[14])>2&&Math.abs(a[6]-b[6])>.02,'Trusted wheel changes actual depth and X tilt, beyond planar Y displacement');
+    assert.deepEqual(after.facts.queues,before.facts.queues);assert.deepEqual(after.facts.attempts,before.facts.attempts);
+    assert.equal(await evaluate(`window.pendingScrollNodes.every((node,index)=>node===${strip}.querySelector('.composer-pending__cards').children[index])`),true,'Native wheel retains every original card node');
+    assert.ok(await evaluate('pendingScrollWheels.some(event=>event.trusted&&!event.defaultPrevented&&event.deltaY>0)'),'Trusted wheel remains native and is not intercepted');
+    await frame(scene,'card-scroll-'+name+'-after');samples.push({index,name,before,after});
+  }
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  const reduced=await settled();retained(baseline,reduced);
+  assert.ok(reduced.strip.cards.filter(card=>card.selected==='false').every(card=>card.animation==='none'&&card.transform.startsWith('matrix3d(')),'Reduced motion preserves original static depth on every actual card');
+  const before=reduced.strip.cards[96].transform,listBefore=reduced.strip.list.scrollTop;
+  const point=await evaluate(`(()=>{const r=${strip}.querySelector('.composer-pending__cards').getBoundingClientRect();return{x:r.right-2,y:r.y+r.height/2}})()`);
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...point,deltaX:0,deltaY:-46});
+  await waitFor(`${strip}.querySelector('.composer-pending__cards').scrollTop<${listBefore}-20`);
+  const end=await settled();retained(reduced,end);assert.equal(end.strip.cards[96].transform,before,'Reduced motion scrolls without depth animation');
+  await frame(scene,'card-scroll-reduced');result.checkpoints.push({scene,name:'spatial-native-scroll',samples,reduced,end});
+}
 async function cardScenes(scene, baseline) {
   await pointAt(surface);await evaluate("pendingDelivery.queue('稍后复查')");
   const short=await settled();pendingGeometry(baseline,short,'排队中',false,false);cardGeometry(short,1);
@@ -306,6 +347,7 @@ async function cardScenes(scene, baseline) {
   await evaluate("pendingDelivery.queue('第二条真实卡片')");const two=await settled();cardGeometry(two,2);retained(short,two);await frame(scene,'card-two');
   await evaluate("pendingDelivery.distinctQueue(98)");const stack=await settled();cardGeometry(stack,100);retained(two,stack);
   assert.ok(stack.strip.list.scrollHeight>stack.strip.list.rect.height,'Long queues traverse inside the same bounded floating surface');await frame(scene,'card-stack');
+  await spatialScrollScenes(scene,baseline);
   const sid=await evaluate('resultReady.sessionId'),entries=stack.facts.queues[sid],visited=[];
   for(const index of [0,49,99]){
     const expr=`${strip}.querySelector('[data-queue-index="${index}"]')`;
@@ -353,6 +395,23 @@ async function cardScenes(scene, baseline) {
   const textarea=`${strip}.querySelector('textarea')`;
   await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);await waitFor(`Boolean(${textarea})`);
   await evaluate(`${textarea}.select()`);await win.webContents.debugger.sendCommand('Input.insertText',{text:editText});await painted();
+  await evaluate(`${textarea}.setSelectionRange(2,6)`);
+  const caret=[];
+  for(const [name,code,virtual]of [['ArrowUp','ArrowUp',38],['ArrowDown','ArrowDown',40],['Home','Home',36],['End','End',35]]){
+    await key(name,code,virtual);
+    const actual=await evaluate(`(()=>{const node=${textarea};return{focused:document.activeElement===node,text:node.value,start:node.selectionStart,end:node.selectionEnd,operationId:${strip}.dataset.operationId}})()`);
+    assert.equal(actual.focused,true,'Editing native navigation retains the original textarea focus');assert.equal(actual.text,editText);assert.equal(actual.operationId,originalLong.operationId);caret.push({key:name,...actual});
+  }
+  // The editor itself stops bubbling. This surface guard also protects real card actions while the same edit is open.
+  const editingCopy=`${selectedCard}.querySelector('.composer-pending__copy')`;
+  await click(editingCopy);
+  const copyKeys=[];
+  for(const [name,code,virtual]of [['ArrowUp','ArrowUp',38],['ArrowDown','ArrowDown',40],['Home','Home',36],['End','End',35]]){
+    await key(name,code,virtual);
+    const actual=await evaluate(`(()=>{const node=${textarea};return{focused:document.activeElement===${editingCopy},text:node.value,operationId:${strip}.dataset.operationId}})()`);
+    assert.equal(actual.focused,true,'Editing native card-action navigation retains the original Copy focus');assert.equal(actual.text,editText);assert.equal(actual.operationId,originalLong.operationId);copyKeys.push({key:name,...actual});
+  }
+  result.checkpoints.push({scene,name:'original-edit-native-caret',caret,copyKeys});
   const editing=await settled();retained(long,editing);cardGeometry(editing,1);assert.equal(await evaluate(`${more}.disabled`),true,'Editing locks header queue navigation without discarding the local draft');assert.equal(editing.facts.queues[sid][0].text,originalLong.text,'Typing an edit has no queue write');await frame(scene,'card-editing');
   await evaluate(`(window.pendingNativeEditNode=${textarea},true)`);
   await pointAt(`${surface}.querySelector('.composer__mailbox')`);await waitFor(`${panel}.matches(':popover-open')`);
@@ -537,7 +596,7 @@ app.whenReady().then(async () => {
     for (const sceneConfig of [{ viewport: 1280, ownerWidth: 640, appearance: 'dark' }, { viewport: 1280, ownerWidth: 640, appearance: 'light' },
       { viewport: 640, ownerWidth: 320, appearance: 'dark' }, { viewport: 640, ownerWidth: 320, appearance: 'light' }]) await scene(sceneConfig);
     assert.equal(result.scenes.length, 4);
-    if (capture === 'capture') assert.equal(result.frames.length, 108, 'Every bounded scene captures the original flows and each real-card traversal state');
+    if (capture === 'capture') assert.equal(result.frames.length, 136, 'Every bounded scene captures the original flows and each real-card traversal state');
     result.rendererErrors = await evaluate('window.pendingNativeErrors');
     assert.deepEqual(result.rendererErrors, [], 'Successful actual Renderer scenes have no error or unhandled rejection');
     result.passed = true;
