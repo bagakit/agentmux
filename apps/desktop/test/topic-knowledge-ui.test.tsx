@@ -15,6 +15,7 @@ import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '../src/main/file-read-owner'
 import { TopicKnowledgeOwner } from '../src/main/topic-knowledge'
+import { TopicSearchHistoryOwner } from '../src/main/topic-search-history'
 import { TopicSpatialOwner } from '../src/main/topic-spatial-owner'
 import { TopicKnowledgePanel } from '../src/renderer/src/components/TopicKnowledgePanel'
 import { TopicKnowledgeCapture, TopicKnowledgeEditor } from '../src/renderer/src/components/TopicKnowledgeEditor'
@@ -50,8 +51,9 @@ vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('No avatar writes in this proof') } } }))
 const initial = useAppStore.getState(), CATEGORY = '11111111-1111-4111-8111-111111111111'
 let directories: string[] = [], root: Root | null = null, host: HTMLDivElement
+const pendingOwnerCalls = new Set<Promise<unknown>>()
 beforeEach(() => { vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); useAppStore.setState(initial, true); host = document.createElement('div'); document.body.append(host) })
-afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; document.body.replaceChildren(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }) })
+afterEach(async () => { if (root) await act(async () => root!.unmount()); root = null; await Promise.allSettled([...pendingOwnerCalls]); document.body.replaceChildren(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }) })
 async function settle(predicate: () => boolean) {
   for (let i = 0; i < 100 && !predicate(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   expect(predicate()).toBe(true)
@@ -67,7 +69,7 @@ async function fixture() {
   const path = join(directory, 'scratch'); await mkdir(path)
   const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', kind: 'folder', path }
   const scratch = new ScratchTopics(), files = new WorkspaceFiles(() => ({ kind: 'local' } as ExecutionHost)), state = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
-  const owner = new TopicKnowledgeOwner(scratch, files, () => workspace)
+  const owner = new TopicKnowledgeOwner(scratch, files, () => workspace, new TopicSearchHistoryOwner(join(path, '..', 'topic-search-history.json')))
   owner.setSpatialPort(new TopicSpatialOwner({ state, workspace: () => workspace, topics: () => owner.listTopicSnapshots(), categories: () => owner.listCategories(), ensureDefaultCategory: () => owner.ensureDefaultCategoryContent() }))
   const publicFiles = new FileReadOwner({ workspace: id => id === workspace.id ? workspace : undefined,
     topicForDirectory: (candidate, directory) => scratch.readForDirectory(candidate, directory), files,
@@ -85,7 +87,11 @@ async function fixture() {
   await state.commit({ expectedRevision: original.revision, graph })
   const topics = await scratch.list(workspace), config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
   useAppStore.setState({ config, loading: false, activeWorkspaceId: workspace.id, mainSurface: 'workbench', tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: layout }, topicCategories: categoriesFromSpatial(graph), spaceZoneBindings: desktopBindingsFromSpatial(graph), scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 0, reading: false, error: null, topics } }, workbenchSpaceSelection: { workspaceId: workspace.id, spaceId: first.categorySpaceIds[0]!, zoneId: first.zoneId, topicId: first.topicId, tabId: tabs[0]!.id, groupId: layout.activeGroupId, regionId: tabs[0]!.layout.activeRegionId }, pinnedItems: { [workspace.id]: [first.topicId] }, agentComposerDrafts: { ['healthy:' + first.topicId]: 'Original unsent draft' } })
-  vi.spyOn(api.topics, 'call').mockImplementation(owner.call.bind(owner))
+  const call: typeof owner.call = async (method, params) => {
+    const pending = owner.call(method, params); pendingOwnerCalls.add(pending)
+    try { return await pending } finally { pendingOwnerCalls.delete(pending) }
+  }
+  vi.spyOn(api.topics, 'call').mockImplementation(call)
   vi.spyOn(api.spatial, 'read').mockImplementation(() => state.read())
   vi.spyOn(api.scratch, 'listTopics').mockImplementation(() => scratch.list(workspace))
   vi.spyOn(api.scratch, 'readTopic').mockImplementation((_workspace, id) => scratch.read(workspace, id))
@@ -96,6 +102,43 @@ async function fixture() {
   vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   return { workspace, owner, state, first, second, category, topics, tabs, layout, publicFiles }
 }
+
+describe('Knowledge search observations do not take away healthy results', () => {
+  it('repeats the same submitted query and shows history failure separately from incomplete search', async () => {
+    const f = await fixture(), file = join(f.first.directoryPath, 'outcome', 'disk.md')
+    const historyPath = join(f.workspace.path, '..', 'topic-search-history.json')
+    await writeFile(file, '磁盘原始资料')
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId), topics: f.topics }))
+    await settle(() => !!host.querySelector('[data-document-path="outcome/disk.md"]'))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!
+    await input(field, '磁盘'); await click(button('Search'))
+    await settle(() => !!host.textContent?.includes('磁盘原始资料'))
+    const before = await f.owner.call('topic.knowledge.history', { query: '磁盘' })
+    expect(before.records).toHaveLength(1)
+    await writeFile(file, '磁盘后来更新的资料')
+    await click(button('Search'))
+    await settle(() => !!host.textContent?.includes('磁盘后来更新的资料'))
+    const after = await f.owner.call('topic.knowledge.history', { query: '磁盘' })
+    expect(after.records).toHaveLength(2)
+    expect(new Set(after.records.map(record => record.searchId)).size).toBe(2)
+    const saved = await readFile(historyPath, 'utf8')
+    await writeFile(historyPath, '{broken history')
+    await click(button('Search'))
+    await settle(() => !!host.querySelector('[aria-label="Search history unavailable"]'))
+    expect(host.textContent).toContain('磁盘后来更新的资料')
+    expect(host.textContent).not.toContain('Search incomplete')
+    expect(await readFile(historyPath, 'utf8')).toBe('{broken history')
+    await click(host.querySelector('[data-document-path="outcome/disk.md"]')!)
+    await settle(() => !!host.querySelector('[aria-label="Original document detail"]')?.textContent?.includes('磁盘后来更新的资料'))
+    expect(button('Open original file').disabled).toBe(false)
+    await click(button('Clear search'))
+    expect(host.querySelector('[aria-label="Search history unavailable"]')?.textContent).toContain('Submit a search to retry')
+    await writeFile(historyPath, saved)
+    await input(field, '磁盘'); await click(button('Search'))
+    await settle(() => host.querySelector('[aria-label="Search history unavailable"]') === null)
+    expect(host.querySelector('[data-document-path="outcome/disk.md"]')).not.toBeNull()
+  })
+})
 async function entry(owner: TopicKnowledgeOwner, topicId: string, title: string, sources: TopicKnowledgeSource[] = []): Promise<TopicKnowledge> {
   return (await owner.call('topic.knowledge.write', { topicId, entryId: crypto.randomUUID(), title, content: 'Useful original conclusion', form: sources.length ? 'reference' : 'derived', certainty: 'decision', sources, expectedRevision: null })).entry
 }
@@ -223,15 +266,17 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     await click(host.querySelector('.topic-knowledge-row')!)
     expect(host.querySelector('.topic-knowledge-entry')).not.toBeNull()
     let release!: () => void
+    let finish!: () => void
+    const completed = new Promise<void>(resolve => { finish = resolve })
     vi.mocked(api.topics.call).mockImplementation(async (method, request) => {
       if (method === 'topic.knowledge.search') await new Promise<void>(resolve => { release = resolve })
-      return f.owner.call(method, request)
+      try { return await f.owner.call(method, request) } finally { finish() }
     })
     await input(field, 'Later result'); await click(button('Search')); await settle(() => !!release)
     await click(button('Clear search'))
     expect(field.value).toBe(''); expect(document.activeElement).toBe(field)
     expect(host.querySelector('.topic-knowledge-entry')).toBeNull(); expect(host.querySelector('.topic-knowledge-row')).toBeNull()
-    await act(async () => release())
+    await act(async () => { release(); await completed })
     expect(host.querySelector('.topic-knowledge-row')).toBeNull()
     expect(host.textContent).toContain('Search across all Topics to find saved knowledge and original text documents.')
     expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)

@@ -1,4 +1,5 @@
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
+import { TopicSearchHistoryOwner } from './topic-search-history.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
@@ -752,7 +753,8 @@ export async function registerIpc(args: {
     requireTrustedSender('notebook:apply', event)
     return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
   })
-  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
+  const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID),
+    new TopicSearchHistoryOwner(join(app.getPath('userData'), 'topic-search-history.json')))
   topicKnowledge.setFileReadPort(publicFiles)
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
     workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),

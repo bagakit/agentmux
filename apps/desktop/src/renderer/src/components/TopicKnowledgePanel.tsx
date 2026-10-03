@@ -31,19 +31,21 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [] }: {
   const [documents, setDocuments] = useState<TopicKnowledgeDocument[]>([])
   const [selectedDocument, setSelectedDocument] = useState<TopicKnowledgeDocument | null>(null)
   const [loading, setLoading] = useState(false), [error, setError] = useState<string | null>(null)
+  const [historyIssue, setHistoryIssue] = useState<string | null>(null)
   const [moveTarget, setMoveTarget] = useState<TopicMoveTarget | null>(null)
   const searchInput = useRef<HTMLInputElement>(null)
   const selectedRow = useRef<HTMLButtonElement>(null)
-  useEffect(() => { setMoveTarget(null) }, [topic?.id])
+  useEffect(() => { setMoveTarget(null); setHistoryIssue(null) }, [topic?.id])
   useEffect(() => {
     let live = true
     if (!topic && !search) { setEntries([]); setDocuments([]); setSelected(null); setSelectedDocument(null); setError(null); setLoading(false); return }
     setLoading(true)
     void Promise.all([topic ? api.topics.call('topic.inspect', { topicId: topic.id }) : Promise.resolve(null), search
-      ? api.topics.call('topic.knowledge.search', { ...(topic ? { topicId: topic.id } : {}), query: search, limit: 100 })
-      : api.topics.call('topic.knowledge.ls', { topicId: topic!.id, limit: 100 })]).then(([inspection, knowledge]) => {
+      ? api.topics.call('topic.knowledge.search', { ...(topic ? { topicId: topic.id } : {}), query: search, limit: 100 }).then(knowledge => ({ knowledge, historyUnavailable: knowledge.observation.unavailable }))
+      : api.topics.call('topic.knowledge.ls', { topicId: topic!.id, limit: 100 }).then(knowledge => ({ knowledge, historyUnavailable: null }))]).then(([inspection, { knowledge, historyUnavailable }]) => {
       if (!live) return
       setFact(inspection?.topic ?? null); setEntries(knowledge.entries); setDocuments(knowledge.documents); setError([...(inspection?.unavailable ?? []), ...knowledge.unavailable].map(issue => issue.message).join(' ') || null)
+      if (historyUnavailable !== null) setHistoryIssue(historyUnavailable.map(issue => issue.message).join(' ') || null)
       setSelected(previous => previous ? knowledge.entries.find((entry): entry is TopicKnowledge => !('readError' in entry) && entry.topicId === previous.topicId && entry.entryId === previous.entryId) ?? (knowledge.unavailable.length ? previous : null) : null)
       setSelectedDocument(previous => previous ? knowledge.documents.find(document => documentKey(document) === documentKey(previous)) ?? (knowledge.unavailable.length ? previous : null) : null)
     }).catch(cause => { if (live) setError(presentError(cause)) }).finally(() => { if (live) setLoading(false) })
@@ -74,13 +76,14 @@ export function TopicKnowledgePanel({ workspace, topic, topics = [] }: {
       {topic ? <button type="button" className="icon-button" aria-label="Move to category…" title="Move to category…" onClick={() => setMoveTarget({ topicId: topic.id, title: topic.title })}><ArrowRightLeft size={14} /></button> : null}
       <button type="button" className="icon-button" aria-label="Refresh knowledge" onClick={() => setAttempt(value => value + 1)}><RefreshCw size={13} /></button>
       {topic ? <button type="button" className="icon-button" aria-label="New knowledge" onClick={() => setEdit({ topicId: topic.id })}><Plus size={14} /></button> : null}</header>
-    <form className="topic-knowledge-search" role="search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()) }}>
+    <form className="topic-knowledge-search" role="search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()); setAttempt(value => value + 1) }}>
       <Search size={14} aria-hidden="true" />
       <input ref={searchInput} type="text" aria-label={topic ? 'Search this Topic' : 'Search all Topics'} value={query} placeholder="Search knowledge and files…" onChange={event => { setQuery(event.target.value); if (!event.target.value) clearSearch() }} onKeyDown={event => { if (event.key === 'Escape' && query && !isImeCompositionKeyDown(event)) { event.preventDefault(); event.stopPropagation(); clearSearch() } }} />
       {query ? <button type="button" className="icon-button" aria-label="Clear search" title="Clear search" onClick={clearSearch}><X size={12} /></button> : null}
       <button type="submit" className="icon-button topic-knowledge-search__submit" aria-label="Search" title="Search · Enter"><CornerDownLeft size={14} /></button>
     </form>
     {error || topic?.readError ? <div className="surface-inline-error" role="status">{error || topic?.readError} Existing discussions and files remain available.</div> : null}
+    {historyIssue ? <div className="surface-inline-error" role="status" aria-label="Search history unavailable">{historyIssue} {search ? 'Refresh to retry.' : 'Submit a search to retry.'}</div> : null}
     <div className="topic-knowledge-results" data-detail-open={selected || selectedDocument ? '' : undefined}>
       <p className="topic-knowledge-results__label" role="status">{resultLabel}</p>
       <div className="topic-knowledge-list" aria-label="Knowledge results">{entries.map(entry => {

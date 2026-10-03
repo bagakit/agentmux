@@ -91,7 +91,9 @@ describe('Topic search consumes bounded original Files instead of a second knowl
       expect(original.resource).toMatchObject({ zoneId: f.topic.zoneId, workspaceId: f.workspace.id, path: scratchTopicDirectoryName(f.topic.topicId) + '/outcome/report.md' })
       const cli = await runCompiledObjectCli(['topic', 'knowledge', 'search', '--query', '挂载磁盘权限', '--topic', f.topic.topicId], env)
       expect(cli.code, cli.stderr).toBe(0)
-      expect(JSON.parse(cli.stdout).result).toEqual(searched)
+      const cliSearch = JSON.parse(cli.stdout).result
+      expect(cliSearch).toMatchObject({ entries: searched.entries, documents: searched.documents, unavailable: searched.unavailable })
+      expect(cliSearch.observation.record).toMatchObject({ query: '挂载磁盘权限', topicId: f.topic.topicId, outcome: 'complete', counters: { documentMatches: 1 } })
       const read = await runCompiledObjectCli(['file', 'read', '--zone', doc.target.zoneId, '--path', doc.target.path,
         '--host', 'local', '--workspace', f.workspace.id, '--workspace-path', f.workspace.path, '--max-bytes', '131072'], env)
       expect(read.code, read.stderr).toBe(0)
@@ -180,6 +182,8 @@ describe('Topic search consumes bounded original Files instead of a second knowl
     expect(result.entries).toEqual([]); expect(result.documents).toEqual([])
     expect(result.unavailable).toContainEqual(expect.objectContaining({ code: 'TOPIC_KNOWLEDGE_PARTIAL' }))
     const actual = costs.reduce((total, bytes) => total + bytes, 0)
+    expect(result.observation.record).toMatchObject({ outcome: 'partial', stopReason: 'byte-limit',
+      counters: { readBytes: actual, chargedBytes: actual, unconfirmedReads: 0 } })
     expect(actual).toBeGreaterThan(3 * 1024 * 1024)
     expect(actual).toBeLessThanOrEqual(4 * 1024 * 1024)
     expect(costs.filter(bytes => bytes === 131072)).toHaveLength(31)
@@ -209,6 +213,7 @@ describe('Topic search consumes bounded original Files instead of a second knowl
     expect(result.documents).toEqual([])
     expect(result.unavailable).toContainEqual(expect.objectContaining({ code: 'TOPIC_KNOWLEDGE_PARTIAL' }))
     expect(started).toBe(1)
+    expect(result.observation.record).toMatchObject({ outcome: 'partial', stopReason: 'deadline' })
     expect(await f.state.read()).toEqual(before)
   })
   it('preserves discovered names beside a deleted file, binary text suffix, unknown resource and candidate exhaustion', async () => {

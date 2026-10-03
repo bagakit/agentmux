@@ -42,6 +42,19 @@ export type TopicKnowledgeDocument = {
   snippet: string | null; revision: string | null; readScope: 'name' | 'full'
 }
 export type TopicKnowledgeWrite = Omit<TopicKnowledge, 'revision' | 'updatedAt'> & { expectedRevision: string | null }
+/** An executed query observation; no source body, snippet or inferred knowledge. */
+export type TopicSearchRecord = {
+  searchId: string; query: string; topicId: string | null; limit: number;
+  startedAt: number; finishedAt: number; durationMs: number;
+  outcome: 'complete' | 'partial' | 'cancelled' | 'error';
+  counters: { topicsVisited: number; candidates: number; readBytes: number; chargedBytes: number;
+    unconfirmedReads: number; entryMatches: number; documentMatches: number };
+  stopReason: 'result-limit' | 'candidate-limit' | 'byte-limit' | 'deadline' | 'cancelled' | null;
+  issues: Array<{ code: string; source?: string }>; omittedIssueCount: number
+}
+export type TopicSearchObservation = { record: TopicSearchRecord; history: 'saved' | 'unavailable'; unavailable: TopicUnavailable[] }
+export type TopicSearchHistory = { records: TopicSearchRecord[]; hasMore: boolean;
+  retention: { maxRecords: number; maxBytes: number; prunedRecords: number }; unavailable: TopicUnavailable[] }
 export type TopicParameterMap = {
   'topic.category.ls': Record<string, never>
   'topic.category.create': { categoryId: string; title: string }
@@ -54,6 +67,7 @@ export type TopicParameterMap = {
   'topic.migrate.apply': { expectedRevision: number }
   'topic.knowledge.ls': { topicId: string; limit?: number }
   'topic.knowledge.search': { topicId?: string; query: string; limit?: number }
+  'topic.knowledge.history': { topicId?: string; query?: string; searchId?: string; limit?: number }
   'topic.knowledge.read': { topicId: string; entryId: string }
   'topic.knowledge.write': TopicKnowledgeWrite
 }
@@ -68,7 +82,8 @@ export type TopicResultMap = {
   'topic.migrate.preview': TopicMigrationPreview
   'topic.migrate.apply': TopicMigrationReceipt
   'topic.knowledge.ls': { entries: TopicKnowledgeItem[]; documents: TopicKnowledgeDocument[]; unavailable: TopicUnavailable[] }
-  'topic.knowledge.search': { entries: TopicKnowledgeItem[]; documents: TopicKnowledgeDocument[]; unavailable: TopicUnavailable[] }
+  'topic.knowledge.search': { entries: TopicKnowledgeItem[]; documents: TopicKnowledgeDocument[]; unavailable: TopicUnavailable[]; observation: TopicSearchObservation }
+  'topic.knowledge.history': TopicSearchHistory
   'topic.knowledge.read': { entry: TopicKnowledge | null }
   'topic.knowledge.write': { entry: TopicKnowledge; diskDurability: 'confirmed' }
 }
@@ -82,7 +97,7 @@ export const AGENTMUX_RPC_TOPIC_METHODS = {
   'topic.category.ls': 'short', 'topic.category.create': 'long', 'topic.category.rename': 'long',
   'topic.ls': 'long', 'topic.inspect': 'short', 'topic.create': 'long', 'topic.move': 'long',
   'topic.migrate.preview': 'long', 'topic.migrate.apply': 'long',
-  'topic.knowledge.ls': 'long', 'topic.knowledge.search': 'long', 'topic.knowledge.read': 'short', 'topic.knowledge.write': 'long'
+  'topic.knowledge.ls': 'long', 'topic.knowledge.search': 'long', 'topic.knowledge.history': 'short', 'topic.knowledge.read': 'short', 'topic.knowledge.write': 'long'
 } as const satisfies Record<TopicMethod, 'short' | 'long'>
 export function isTopicMethod(value: unknown): value is TopicMethod {
   return typeof value === 'string' && Object.hasOwn(AGENTMUX_RPC_TOPIC_METHODS, value)
@@ -136,6 +151,50 @@ function unavailable(value: unknown): void {
     if (p.source !== undefined) string(p.source, code)
   }
 }
+export function parseTopicSearchRecord(value: unknown): TopicSearchRecord {
+  const code = 'CONTROL_PROTOCOL_ERROR'
+  const p = rpcRecord(value, ['searchId','query','topicId','limit','startedAt','finishedAt','durationMs','outcome','counters','stopReason','issues','omittedIssueCount'], code)
+  categoryId(p.searchId, code); string(p.query, code)
+  if (!(p.query as string).trim()) invalid('A recorded query must be nonempty.', code)
+  if (p.topicId !== null) topicId(p.topicId, code)
+  if (!Number.isSafeInteger(p.limit) || (p.limit as number) < 1 || (p.limit as number) > 100) invalid('Recorded search limit is invalid.', code)
+  for (const key of ['startedAt','finishedAt','durationMs','omittedIssueCount']) count(p[key], code)
+  if ((p.finishedAt as number) < (p.startedAt as number)) invalid('Search timestamps are reversed.', code)
+  if (typeof p.outcome !== 'string' || !['complete','partial','cancelled','error'].includes(p.outcome)) invalid('Search outcome is unconfirmed.', code)
+  if (p.stopReason !== null && (typeof p.stopReason !== 'string' || !['result-limit','candidate-limit','byte-limit','deadline','cancelled'].includes(p.stopReason))) invalid('Search stop reason is invalid.', code)
+  const c = rpcRecord(p.counters, ['topicsVisited','candidates','readBytes','chargedBytes','unconfirmedReads','entryMatches','documentMatches'], code)
+  for (const key of ['topicsVisited','candidates','readBytes','chargedBytes','unconfirmedReads','entryMatches','documentMatches']) count(c[key], code)
+  if ((c.readBytes as number) > (c.chargedBytes as number) || (c.unconfirmedReads as number) > (c.candidates as number)
+    || (c.entryMatches as number) + (c.documentMatches as number) > (p.limit as number)
+    || (c.entryMatches as number) + (c.documentMatches as number) > (c.candidates as number)
+    || (c.chargedBytes as number) > 0 && c.candidates === 0
+    || (c.candidates as number) > 0 && c.topicsVisited === 0
+    || c.unconfirmedReads === 0 && c.chargedBytes !== c.readBytes
+    || p.topicId !== null && (c.topicsVisited as number) > 1) invalid('Search counters contradict their scope.', code)
+  if (!Array.isArray(p.issues) || p.issues.length > 32) invalid('Search issues must be bounded.', code)
+  for (const value of p.issues) {
+    const item = rpcRecord(value, ['code','source'], code); string(item.code, code, 120)
+    if (item.source !== undefined) string(item.source, code)
+  }
+  const hasIssues = p.issues.length > 0 || (p.omittedIssueCount as number) > 0
+  if (p.outcome === 'complete' && (hasIssues || p.stopReason !== null)
+    || p.outcome === 'partial' && !hasIssues
+    || (p.outcome === 'error' || p.outcome === 'cancelled') && !hasIssues
+    || p.outcome === 'cancelled' && p.stopReason !== 'cancelled'
+    || p.stopReason === 'cancelled' && p.outcome !== 'cancelled') invalid('Search outcome contradicts its completion facts.', code)
+  return p as TopicSearchRecord
+}
+function searchObservation(value: unknown, input: Record<string, unknown>, entries: TopicKnowledgeItem[], documents: unknown[], issues: unknown[]): void {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['record','history','unavailable'], code)
+  const record = parseTopicSearchRecord(p.record)
+  if (record.query !== input.query || record.topicId !== (input.topicId ?? null) || record.limit !== (input.limit ?? 32)
+    || record.counters.entryMatches !== entries.filter(entry => !('readError' in entry)).length
+    || record.counters.documentMatches !== documents.length || record.outcome !== (issues.length ? 'partial' : 'complete'))
+    invalid('Search observation belongs to another query or result.', code)
+  unavailable(p.unavailable)
+  if (p.history !== 'saved' && p.history !== 'unavailable' || p.history === 'saved' && (p.unavailable as unknown[]).length
+    || p.history === 'unavailable' && !(p.unavailable as unknown[]).length) invalid('Search persistence is unconfirmed.', code)
+}
 const knowledgeFields = ['topicId','entryId','title','content','form','certainty','sources','scope'] as const
 function knowledgePayload(p: Record<string, unknown>, code: string): void {
   topicId(p.topicId, code); categoryId(p.entryId, code); title(p.title, code)
@@ -178,12 +237,13 @@ const PARAM_FIELDS: Record<TopicMethod, readonly string[]> = {
   'topic.inspect': ['topicId'], 'topic.create': ['topicId','title','categoryId'],
   'topic.move': ['topicId','categoryId','expectedRevision'], 'topic.migrate.preview': [], 'topic.migrate.apply': ['expectedRevision'],
   'topic.knowledge.ls': ['topicId','limit'], 'topic.knowledge.search': ['topicId','query','limit'],
+  'topic.knowledge.history': ['topicId','query','searchId','limit'],
   'topic.knowledge.read': ['topicId','entryId'], 'topic.knowledge.write': [...knowledgeFields,'expectedRevision']
 }
 export function parseTopicParams<M extends TopicMethod>(method: M, value: unknown): TopicParams<M> {
   const p = rpcRecord(value, PARAM_FIELDS[method]), code = 'INVALID_CONTROL_REQUEST'
-  if (method !== 'topic.ls' && method !== 'topic.knowledge.search' && PARAM_FIELDS[method].includes('topicId')) topicId(p.topicId, code)
-  if ((method === 'topic.ls' || method === 'topic.knowledge.search') && p.topicId !== undefined) topicId(p.topicId, code)
+  if (method !== 'topic.ls' && method !== 'topic.knowledge.search' && method !== 'topic.knowledge.history' && PARAM_FIELDS[method].includes('topicId')) topicId(p.topicId, code)
+  if ((method === 'topic.ls' || method === 'topic.knowledge.search' || method === 'topic.knowledge.history') && p.topicId !== undefined) topicId(p.topicId, code)
   if (p.categoryId !== undefined || method === 'topic.category.create' || method === 'topic.category.rename' || method === 'topic.move') categoryId(p.categoryId, code)
   if (PARAM_FIELDS[method].includes('title')) title(p.title, code)
   if (method === 'topic.category.rename') revision(p.expectedRevision, code)
@@ -191,6 +251,10 @@ export function parseTopicParams<M extends TopicMethod>(method: M, value: unknow
   if (method === 'topic.knowledge.write') { knowledgePayload(p, code); revision(p.expectedRevision, code, true) }
   if (method === 'topic.knowledge.read') categoryId(p.entryId, code)
   if (method === 'topic.knowledge.search') { string(p.query, code, 4096); if (!(p.query as string).trim()) invalid('Choose a nonempty knowledge query.', code) }
+  if (method === 'topic.knowledge.history') {
+    if (p.query !== undefined) { string(p.query, code); if (!(p.query as string).trim()) invalid('Choose a nonempty query filter.', code) }
+    if (p.searchId !== undefined) categoryId(p.searchId, code)
+  }
   if (p.limit !== undefined && (!Number.isSafeInteger(p.limit) || (p.limit as number) < 1 || (p.limit as number) > 100)) invalid('Knowledge limit must be between 1 and 100.', code)
   return p as TopicParams<M>
 }
@@ -202,7 +266,9 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
     : method === 'topic.create' ? ['topic','diskDurability']
     : method === 'topic.move' ? ['topic','previousCategorySpaceIds','spatialRevision','diskDurability']
     : method === 'topic.migrate.preview' ? ['spatialRevision','topics','category','required','unavailable']
-    : method === 'topic.knowledge.ls' || method === 'topic.knowledge.search' ? ['entries','documents','unavailable']
+    : method === 'topic.knowledge.ls' ? ['entries','documents','unavailable']
+    : method === 'topic.knowledge.search' ? ['entries','documents','unavailable','observation']
+    : method === 'topic.knowledge.history' ? ['records','hasMore','retention','unavailable']
     : method === 'topic.knowledge.read' ? ['entry'] : method === 'topic.knowledge.write' ? ['entry','diskDurability']
     : ['spatialRevision','backupPath','migratedTopicIds','diskDurability']
   const p = rpcRecord(value, fields, code)
@@ -229,6 +295,19 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
       const t = rpcRecord(item, ['topicId','sourceSpaceId','zoneId','categorySpaceId'], code)
       topicId(t.topicId, code); for (const key of ['sourceSpaceId','zoneId','categorySpaceId']) string(t[key], code)
     }
+  } else if (method === 'topic.knowledge.history') {
+    if (!Array.isArray(p.records) || p.records.length > (input.limit as number ?? 32) || typeof p.hasMore !== 'boolean') invalid('Search history is invalid or exceeds its scope.', code)
+    const ids = new Set<string>()
+    for (const value of p.records) {
+      const record = parseTopicSearchRecord(value)
+      if (ids.has(record.searchId) || input.topicId !== undefined && record.topicId !== input.topicId
+        || input.query !== undefined && record.query !== input.query || input.searchId !== undefined && record.searchId !== input.searchId)
+        invalid('Search history contains a different requested scope or duplicate observation.', code)
+      ids.add(record.searchId)
+    }
+    const retention = rpcRecord(p.retention, ['maxRecords','maxBytes','prunedRecords'], code)
+    for (const key of ['maxRecords','maxBytes','prunedRecords']) count(retention[key], code)
+    if (!(retention.maxRecords as number) || !(retention.maxBytes as number) || p.records.length > (retention.maxRecords as number)) invalid('History retention is invalid.', code)
   } else if (method === 'topic.knowledge.ls' || method === 'topic.knowledge.search') {
     if (!Array.isArray(p.entries) || !Array.isArray(p.documents) || p.entries.length + p.documents.length > (input.limit as number ?? 32)) invalid('Knowledge list is invalid or exceeds its requested scope.', code)
     for (const value of p.entries) { const entry = knowledgeItem(value); if (input.topicId !== undefined && entry.topicId !== input.topicId) invalid('Another Topic knowledge scope was returned.', code) }
@@ -251,6 +330,7 @@ export function parseTopicResult<M extends TopicMethod>(method: M, value: unknow
         revision(d.revision, code)
       } else invalid('The original document read scope is invalid.', code)
     }
+    if (method === 'topic.knowledge.search') searchObservation(p.observation, input, p.entries.map(knowledgeItem), p.documents, p.unavailable as unknown[])
   } else if (method === 'topic.knowledge.read' || method === 'topic.knowledge.write') {
     if (p.entry !== null || method === 'topic.knowledge.write') { const entry = parseTopicKnowledge(p.entry); if (entry.topicId !== input.topicId || entry.entryId !== input.entryId) invalid('Another knowledge entry was returned.', code) }
   } else {
