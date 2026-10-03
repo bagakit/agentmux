@@ -71,7 +71,8 @@ it('shows the existing labelled recap together with a newer concrete tool withou
   await mount(); expect(container.querySelectorAll('.focus-context')).toHaveLength(2)
   expect(recapLine().textContent).toBe(responseText)
   expect(recapLine().getAttribute('title')).toBe('Last assistant message (timeline)')
-  expect(row().querySelector('.focus-context__activity')!.textContent).toBe('Bash pnpm test --filter scroll-anchor')
+  expect(row().querySelector('.focus-context__activity')).toBeNull()
+  expect(row().getAttribute('aria-label')).toContain('Bash pnpm test --filter scroll-anchor')
   expect(row().dataset.bucket).toBe('working'); expect(native.mock.calls).toEqual([]); expect(reread.mock.calls).toEqual([])
 })
 it('falls back to the recorded request while empty facts keep the existing honest work detail', async () => {
@@ -85,8 +86,8 @@ it('labels an old reply as an excerpt without making the next request a current 
   await update({ status: { ...agent.status, state: 'done' } })
   await act(async () => useAppStore.setState({ timelines: { [firstId]: timeline([message('assistant_message', responseText, 2), message('user_message', '继续检查加载', 4)]) } }))
   await mount(); expect(row().dataset.bucket).toBe('idle'); expect(row().getAttribute('aria-label')).toContain('Last assistant message (timeline)')
-  expect(row().querySelector('.focus-context__activity')).not.toBeNull()
-  expect(row().querySelector('.focus-context__activity')!.textContent).toBe('Prompt · 继续检查加载')
+  expect(row().querySelector('.focus-context__activity')).toBeNull()
+  expect(row().getAttribute('aria-label')).toContain('Prompt · 继续检查加载')
   expect(row().getAttribute('aria-label')).toContain('Prompt · 继续检查加载')
 })
 it('keeps a legitimate retained result excerpt when the process is no longer running', async () => {
@@ -122,7 +123,7 @@ it.each([
 it('copies the exact second same-name Session with no guessed Region or lifecycle action', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), source = useAppStore.getState()
   await mount(); await open()
-  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Session Address'])
+  expect([...menu().querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())).toEqual(['Rename Agent', 'Copy Session Address', 'Stop Agent'])
   await choose('Copy Session Address'); expect(copy).toHaveBeenCalledExactlyOnceWith(formatSessionAddress(secondId, resolveAgentSharingMetadata(secondId, source)))
   expect(copy.mock.calls[0]![0]).not.toContain('region:'); expect(useAppStore.getState().agentFocus).toBe(source.agentFocus)
   expect(useAppStore.getState().sessions).toBe(source.sessions); expect(useAppStore.getState().agentComposerDrafts).toBe(source.agentComposerDrafts)

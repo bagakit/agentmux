@@ -39,14 +39,15 @@ afterEach(async () => { await act(async () => root.unmount()); container.remove(
 const mount = () => act(async () => root.render(createElement(GlobalFocusSurface)))
 const groups = () => container.querySelector<HTMLElement>('.focus-project-board__live > .focus-project-lanes .focus-project-lanes__groups')!
 const section = (state: string) => groups().querySelector<HTMLElement>(`[data-bucket="${state}"]`)!
+const titleState = (state: string) => container.querySelector<HTMLElement>(`.focus-project-board__live .focus-project-lanes__status-rail [data-bucket="${state}"]`)!
 
 it('zero states are icon-only while positive badges retain exact counts, stable order and the original card', async () => {
   await mount()
   expect(groups(), container.innerHTML).not.toBeNull()
-  expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['attention', 'working', 'results', 'idle', 'disconnected'])
+  expect([...groups().children].map(node => (node as HTMLElement).dataset.bucket)).toEqual(['working'])
   for (const state of ['attention', 'results', 'idle', 'disconnected']) {
-    const group = section(state), header = group.querySelector<HTMLElement>('header')!
-    expect(group.dataset.empty).toBe('true'); expect(header.querySelector('svg')).not.toBeNull()
+    const group = titleState(state), header = group
+    expect(section(state)).toBeNull(); expect(header.querySelector('svg')).not.toBeNull()
     expect(header.querySelector('.focus-context-group__count')).toBeNull()
     expect(header.title).toContain('0'); expect(header.getAttribute('aria-label')).toContain('0')
     expect(group.querySelectorAll('button')).toHaveLength(state === 'disconnected' ? 1 : 0)
@@ -67,7 +68,7 @@ it('zero states are icon-only while positive badges retain exact counts, stable 
 it('disconnected badges stay bounded without losing exact hover facts, directory navigation or Return', async () => {
   await act(async () => useAppStore.setState({ sessions: [agent('working'), ...Array.from({ length: 105 }, (_, i) => agent('offline-' + i, true))] }))
   await mount()
-  const state = useAppStore.getState(), group = section('disconnected'), entry = group.querySelector<HTMLButtonElement>('.focus-disconnected-entry')!
+  const state = useAppStore.getState(), group = titleState('disconnected'), entry = group.querySelector<HTMLButtonElement>('.focus-disconnected-entry')!
   expect(entry).not.toBeNull(); expect(entry.disabled).toBe(false)
   expect(entry.querySelector('.focus-context-group__count')?.textContent).toBe('99+')
   expect(entry.title).toBe('Disconnected · 105'); expect(entry.getAttribute('aria-label')).toBe('View disconnected contexts · 105')

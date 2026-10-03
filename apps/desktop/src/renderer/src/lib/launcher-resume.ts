@@ -1,15 +1,20 @@
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { resolveAgentName } from './display-name'
 import { firstPromptFromTimeline } from './workbench-tabs'
 import { workspaceProjectId } from './workspace-projects'
 
-export type LauncherRecap = { text: string; source: 'Last assistant message' | 'Last prompt'; origin: 'timeline' | 'native' }
+export type LauncherRecap = { text: string; displayText?: string; source: 'Last assistant message' | 'Last prompt'; origin: 'timeline' | 'native' }
 
-function excerpt(text: string | undefined): string | null {
+function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displayText'> | null {
   const value = text?.replace(/\s+/gu, ' ').trim()
-  return value ? (value.length > 800 ? `${value.slice(0, 799).trimEnd()}…` : value) : null
+  if (!value) return null
+  const clamp = (body: string) => body.length > 800 ? `${body.slice(0, 799).trimEnd()}…` : body
+  // Interpret complete reading wrappers before flattening; declarations prove no author.
+  const body = parseAgentMuxMessagePrefix(text!)?.body.replace(/\s+/gu, ' ').trim()
+  return { text: clamp(value), ...(body && body !== value ? { displayText: clamp(body) } : {}) }
 }
 
 /** A recap is a labelled excerpt of observed conversation, never an invented summary. */
@@ -20,7 +25,7 @@ export function launcherTimelineRecap(timeline: AgentTimelineSnapshot | undefine
       const item = timeline.items[index]!
       if (item.kind !== kind) continue
       const text = excerpt(item.content)
-      if (text) return { text, source: kind === 'assistant_message' ? 'Last assistant message' : 'Last prompt', origin: 'timeline' }
+      if (text) return { ...text, source: kind === 'assistant_message' ? 'Last assistant message' : 'Last prompt', origin: 'timeline' }
     }
   }
   return null
@@ -32,7 +37,7 @@ export function launcherNativeRecap(page: AgentSessionHistoryPage): LauncherReca
       const item = page.items[index]!
       if (item.kind !== kind) continue
       const text = excerpt(item.contentParts.flatMap(part => part.kind === 'text' ? [part.text] : []).join(' '))
-      if (text) return { text, source: kind === 'assistant-message' ? 'Last assistant message' : 'Last prompt', origin: 'native' }
+      if (text) return { ...text, source: kind === 'assistant-message' ? 'Last assistant message' : 'Last prompt', origin: 'native' }
     }
   }
   return null

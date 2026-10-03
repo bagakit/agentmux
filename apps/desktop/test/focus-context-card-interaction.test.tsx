@@ -88,7 +88,7 @@ afterEach(async () => {
   await useAppStore.getState().retryWorkbenchSave()
   container.remove(); destination.remove(); document.getElementById('agentmux-window-overlay-host')?.remove()
   useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
-  await rm(privateSpatialRoot, { recursive: true })
+  await rm(privateSpatialRoot, { recursive: true, force: true, maxRetries: 3, retryDelay: 10 })
 })
 
 it('reveals held facts and scoped inputs after intent, allows reading transfer and inner scrolling without moving input', async () => {

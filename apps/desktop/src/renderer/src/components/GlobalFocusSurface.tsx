@@ -2,7 +2,7 @@ import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusProjectionSelector, focusNeutralGroupSummary, type FocusBucket, type FocusContext } from '../lib/focus-context'
+import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_COLUMNS, focusColumnFor as columnFor, groupFocusContexts, type FocusColumn } from '../lib/focus-context'
 import { FocusContextRow } from './FocusContextRow'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
@@ -30,13 +30,6 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
-
-type FocusColumn = FocusBucket | 'disconnected'
-// Presentation only: an observation connection loss cannot retire a running Run.
-function columnFor(context: FocusContext): FocusColumn {
-  return context.bucket !== 'attention' && context.state === 'disconnected' && context.processState !== 'running'
-    ? 'disconnected' : context.bucket
-}
 
 export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, visible: hostVisible = true }: {
   visible?: boolean
@@ -153,27 +146,34 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     observer.observe(rows)
     return () => observer.disconnect()
   }, [visible, hasBoardLanes, disconnectedExpanded])
-  const neutralSummary = focusNeutralGroupSummary(matching.filter(row => columnFor(row) === 'idle'))
+  const matchingGroups = groupFocusContexts(matching)
+  const neutralSummary = focusNeutralGroupSummary(matchingGroups.idle)
   const bucketMeta = { attention: { label: 'Attention', icon: Inbox }, working: { label: 'Working', icon: PlayCircle }, results: { label: 'Results', icon: CheckCircle2 }, idle: { label: neutralSummary.label, icon: CirclePause }, disconnected: { label: 'Disconnected', icon: Unplug } }
-  const buckets = Object.keys(bucketMeta) as FocusColumn[]
+  const buckets = FOCUS_COLUMNS
   const projectOptions = [...new Map(allLanes.map(lane => [lane.projectId, { id: lane.projectId, name: lane.labels[0]! }])).values()]
   const filterSummary = `${projectOptions.find(option => option.id === project)?.name ?? 'All projects'} · ${bucketFilter === 'all' ? 'All states' : bucketMeta[bucketFilter].label}`
   const filterCount = Number(project !== 'all') + Number(bucketFilter !== 'all')
   const laneRows = (lane: typeof focusProjectLanes[number], heading: ReactNode) => {
     const rows = lane.contextIds.flatMap(id => { const row = rowsById.get(id); return row ? [row] : [] })
-    const groups = buckets.map(bucket => rows.filter(row => columnFor(row) === bucket))
-    const counts: FocusLaneCounts = [groups[0]!.length, groups[1]!.length, groups[2]!.length, groups[3]!.length]
-    return <>{heading}<FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
+    const groups = groupFocusContexts(rows)
+    const counts: FocusLaneCounts = [groups.attention.length, groups.working.length, groups.results.length, groups.idle.length]
+    return <><div className="focus-project-lanes__title">{heading}<div className="focus-project-lanes__status-rail" aria-label="Other context states">
+      {buckets.filter(bucket => bucket === 'disconnected' || groups[bucket].length === 0).map(bucket => {
+        const meta = bucketMeta[bucket], Icon = meta.icon
+        return <span className="focus-context-group__header" data-bucket={bucket} title={`${meta.label} · ${groups[bucket].length}`} aria-label={`${meta.label} · ${groups[bucket].length}`} key={bucket}>
+          {bucket === 'disconnected' ? <FocusDisconnectedGroup contexts={groups.disconnected} laneId={lane.id} onReveal={openDisconnected} /> : <Icon size={12} aria-hidden="true" />}
+        </span>
+      })}
+    </div></div><FocusLaneGroups counts={counts} metrics={laneMetrics}>{layout =>
       buckets.map((bucket, index) => {
-        const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[index]!
+        const meta = bucketMeta[bucket], Icon = meta.icon, grouped = groups[bucket]
+        if (bucket === 'disconnected' || grouped.length === 0) return null
         const neutral = bucket === 'idle' ? focusNeutralGroupSummary(grouped) : null
         const label = neutral?.label ?? meta.label
         const countDescription = neutral?.detail ?? `${label} · ${grouped.length}`
-        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-empty={grouped.length === 0 ? 'true' : undefined} style={{ '--focus-card-columns': layout.columns[index] ?? 1, '--focus-group-width': `${layout.widths[index] ?? 32}px` } as CSSProperties} key={bucket}>
-          {bucket === 'disconnected' ? <header className="focus-context-group__header" title={`${meta.label} · ${grouped.length}`} aria-label={`${meta.label} · ${grouped.length}`}><FocusDisconnectedGroup contexts={grouped} laneId={lane.id} onReveal={openDisconnected} /></header> : <>
-            <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong>{grouped.length > 0 ? <span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span> : null}</span></header>
+        return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} style={{ '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
+          <header className="focus-context-group__header" title={countDescription} aria-label={countDescription}><span className="focus-context-group__bucket"><Icon size={12} aria-hidden="true" /><strong>{label}</strong><span className="focus-context-group__count" aria-hidden="true">{grouped.length > 99 ? '99+' : grouped.length}</span></span></header>
             <div className="focus-context-group__cards">{grouped.map(context => <FocusContextRow key={context.id} context={context} selected={selectedId === context.id} onSelect={focusExecutionSession} />)}</div>
-          </>}
         </section>
       })
     }</FocusLaneGroups></>
@@ -202,7 +202,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
               <FilterMenu.Separator className="tab-context-menu__separator" />
               <FilterMenu.Label className="focus-filter-menu__label">State</FilterMenu.Label>
               <FilterMenu.RadioGroup aria-label="Focus state filter" value={bucketFilter} onValueChange={value => setBucketFilter(value as FocusColumn | 'all')}>
-                {[{ id: 'all', label: 'All states' }, ...buckets.map(bucket => ({ id: bucket, label: `${bucketMeta[bucket].label} · ${matching.filter(row => columnFor(row) === bucket).length}` }))].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-state={option.id} className="tab-context-menu__item focus-filter-menu__item">
+                {[{ id: 'all', label: 'All states' }, ...buckets.map(bucket => ({ id: bucket, label: `${bucketMeta[bucket].label} · ${matchingGroups[bucket].length}` }))].map(option => <FilterMenu.RadioItem key={option.id} value={option.id} data-focus-state={option.id} className="tab-context-menu__item focus-filter-menu__item">
                   <span className="focus-filter-menu__check"><FilterMenu.ItemIndicator><Check size={13} /></FilterMenu.ItemIndicator></span><span>{option.label}</span>
                 </FilterMenu.RadioItem>)}
               </FilterMenu.RadioGroup>
