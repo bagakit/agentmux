@@ -18,6 +18,10 @@ try {
   const alias = {}
   const workerInputs = {}
   const workers = { name: 'original-monaco-workers', setup(plugin) {
+    plugin.onResolve({ filter: /\?url$/ }, args => ({ path: require.resolve(args.path.replace(/\?url$/, '')), namespace: 'original-url' }))
+    plugin.onLoad({ filter: /.*/, namespace: 'original-url' }, async args => {
+      workerInputs[args.path] = {}; return { loader: 'file', contents: await fs.readFile(args.path) }
+    })
     plugin.onResolve({ filter: /\?worker$/ }, args => ({ path: require.resolve(args.path.replace(/\?worker$/, '')), namespace: 'original-worker' }))
     plugin.onLoad({ filter: /.*/, namespace: 'original-worker' }, async args => {
       const output = await build({ absWorkingDir: root, entryPoints: [args.path], bundle: true, write: false, platform: 'browser', format: 'iife', target: 'esnext', metafile: true, logLevel: 'error' })
@@ -35,8 +39,8 @@ try {
   }
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'persona-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [workers],
-    loader: { '.png': 'file', '.svg': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
-  for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
+    loader: { '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff2': 'file', '.ttf': 'file' }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' } })
+  for (const file of Object.keys({ ...built.metafile.inputs, ...workerInputs }).filter(file => !file.startsWith('original-worker:') && !file.startsWith('original-url:'))) receipt.source[file] = sha(await fs.readFile(path.resolve(root, file)))
   for (const name of ['capture-persona.mjs', 'persona-main.cjs']) receipt.source[path.relative(root, path.join(fixture, name))] = sha(await fs.readFile(path.join(fixture, name)))
   for (const file of ['apps/desktop/src/renderer/src/components/MoteDetailsPanel.tsx', 'apps/desktop/src/renderer/src/lib/mote-cooperation.ts', 'apps/desktop/src/renderer/src/lib/mote-materials-actions.ts', 'apps/desktop/src/renderer/src/components/FileSurfaceView.tsx']) assert.ok(receipt.source[file], 'Nonempty original product inputs are required')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="persona-entry.css"></head><body><div id="root"></div><script type="module" src="persona-entry.js"></script></body></html>')

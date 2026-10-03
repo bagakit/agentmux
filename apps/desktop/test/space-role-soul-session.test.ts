@@ -1,6 +1,7 @@
+import { execFileSync } from 'node:child_process'
 import { mkdtemp, readFile, realpath, rename, rm, unlink, mkdir, lstat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import {
   AgentMuxClient,
@@ -226,7 +227,11 @@ it('migrates the original Mote while actual Core recovery keeps its saved cwd an
   const nativeHandle = { kind: 'provider' as const, providerId: stored.providerId, sessionId: 'pre-migration-native-session' }
   await h.inner.registry.put({ ...stored, nativeHandle }, stored.run)
 
-  const migrated = await migrateTopicDirectories({ home: h.root, execute: true })
+  // Exercise the original native implementation without requiring packaged App resources.
+  const helperPath = join(h.root, 'workspace-move')
+  execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror',
+    resolve(import.meta.dirname, '../native/workspace-move.c'), '-o', helperPath])
+  const migrated = await migrateTopicDirectories({ home: h.root, execute: true, helperPath })
   expect(migrated).toMatchObject({ success: true, objects: [{
     id: moteId, state: 'migrated', sourcePath: original, destinationPath: canonical, identityDirectoryPath: original
   }] })
