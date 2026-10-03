@@ -72,7 +72,7 @@ import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt
 import { agentPromptCondition, validateAgentPromptCondition, type AgentPromptCondition } from './agent-prompt-condition.js'
 import { agentTurnEndEvidence, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
-import { observeAgent, type AgentObservation } from './agent-status-freshness.js'
+import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { AgentPromptSubmissionCoordinator, promptPreparationFailure, type AgentPromptTransportQualification } from './prompt-submission.js'
@@ -686,6 +686,7 @@ export class AgentMuxClient {
   //
   // 与 endedRuns 同处清空（断连后重新 list 出真相）。也不逐条删：一个 runId 的收尾状态只由
   // user-prompt-submit 重新打开，删掉等于把「已收尾」忘掉，迟到的工具事件又能把它点亮。
+  private readonly hookNativeWitnesses = new Map<string, { candidate: string; handle?: AgentNativeSessionHandle; childSessionIds?: readonly string[]; reason?: string }>()
   private readonly hookTurnPhases = new Map<string, HookTurnPhase>()
   private readonly screenEvidence: AgentScreenEvidenceStore
   private readonly promptSubmission: AgentPromptSubmissionCoordinator
@@ -1339,6 +1340,7 @@ export class AgentMuxClient {
     this.unsubscribeConnectionLost = null
     this.kernel.disconnect()
     this.runPids.clear()
+    this.hookNativeWitnesses.clear()
     this.stopRequestedRuns.clear()
     this.endedRuns.clear()
     this.hookTurnPhases.clear()
@@ -1470,6 +1472,7 @@ export class AgentMuxClient {
   async refreshAgentSession(agentSessionId: string, expectedRun: AgentMuxRunRef): Promise<AgentMuxAgentSession> {
     this.requireConnected()
     const session = await this.registry.refresh(agentSessionId, expectedRun)
+    this.hookNativeWitnesses.delete(session.run.runId)
     this.queueNativeIdentityCapture(session)
     return cloneSession(session)
   }
@@ -1621,6 +1624,7 @@ export class AgentMuxClient {
       }
     }
     const descriptor = await this.historyDescriptor(agentSessionId)
+    if (options.cursor === undefined && this.registry.has(agentSessionId)) this.hookNativeWitnesses.delete(this.registry.get(agentSessionId).run.runId)
     const session = descriptor.history
     if (!session) throw new AgentMuxError('No native history locator was retained for this Session.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
     const provider = this.providers.get(session.providerId)
@@ -1676,9 +1680,11 @@ export class AgentMuxClient {
         }
         return current
       }
-      const diagnose = (message: string): void => this.publisher.publish({ type: 'agent-error', agentSessionId,
+      const diagnose = (message: string, identityUnconfirmed = false): void => this.publisher.publish({ type: 'agent-error', agentSessionId,
         code: 'AGENT_NATIVE_SOURCE_UNCONFIRMED',
-        message: `The current native source could not be confirmed. The retained records and Agent input remain available; Refresh retries confirmation. ${message}`,
+        message: identityUnconfirmed
+          ? `${message} Agent input remains available; Refresh retries confirmation.`
+          : `The current native source could not be confirmed. The retained records and Agent input remain available; Refresh retries confirmation. ${message}`,
         evidence: { source: 'agentmux', run: { ...expected.run }, observedAt: Date.now() } })
       try {
         const firstRun = await this.kernel.status(expected.run.runId)
@@ -1712,12 +1718,23 @@ export class AgentMuxClient {
           throw new AgentMuxError('No unique main native Session was confirmed. The original Run is kept.',
             'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
         }
-        handle = { ...discovered.handle }
+        handle = { ...discovered.handle,
+          ...(retained?.kind === 'provider' && retained.providerId === discovered.handle.providerId &&
+            retained.sessionId === discovered.handle.sessionId && discovered.handle.transcriptPath === undefined &&
+            retained.transcriptPath !== undefined ? { transcriptPath: retained.transcriptPath } : {}) }
+        const protectsDifferentTarget = (value: AgentMuxStoredAgentSession): boolean =>
+          (value.reopenedFrom !== undefined || value.nativeBinding?.source === 'semantic-resume-target') &&
+          value.nativeHandle !== undefined && (value.nativeHandle.kind !== handle!.kind ||
+            value.nativeHandle.sessionId !== handle!.sessionId ||
+            (value.nativeHandle.kind === 'provider' && handle!.kind === 'provider' &&
+              (value.nativeHandle.providerId !== handle!.providerId ||
+                (value.nativeHandle.transcriptPath !== undefined && handle!.transcriptPath !== undefined &&
+                  value.nativeHandle.transcriptPath !== handle!.transcriptPath))))
         assertWitness = async () => { await checkRun(); await discovered.assertCurrent(); await checkRun() }
         await assertWitness()
         if (options.requireCurrentSource) strictWitness = assertWitness
         const current = await checkRun()
-        if (!sameNativeHandle(current.nativeHandle, handle)) {
+        if (!sameNativeHandle(current.nativeHandle, handle) || current.observedNativeHandle !== undefined) {
           await this.registry.refresh(agentSessionId, expected.run)
           await assertWitness()
           let indexedOwner: AgentMuxStoredAgentSession | undefined
@@ -1732,6 +1749,18 @@ export class AgentMuxClient {
           if (indexedOwner?.agentSessionId !== durableOwner?.agentSessionId) {
             throw new AgentMuxError('Native source ownership changed during confirmation. Refresh its exact source.',
               'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+          }
+          if (durableOwner && durableOwner.agentSessionId !== agentSessionId && protectsDifferentTarget(current)) {
+            const observed = await this.registry.update(agentSessionId, expected.run, value => {
+              if (!protectsDifferentTarget(value) || !sameNativeHandle(value.nativeHandle, retained)) {
+                throw new AgentMuxError('The original resume target changed during confirmation.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+              }
+              return { ...value, observedNativeHandle: handle!, updatedAt: Math.max(value.updatedAt, Date.now()) }
+            }, signal)
+            this.publisher.publish({ type: 'agent-session', session: cloneSession(observed) })
+            throw new AgentMuxError(
+              'The confirmed current source differs from the explicit semantic resume target. The target and retained records were kept; this refresh did not change the conversation.',
+              'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
           }
           if (durableOwner && durableOwner.agentSessionId !== agentSessionId) {
             // This Run proves a readable source, not permission to take another Session's identity.
@@ -1750,13 +1779,27 @@ export class AgentMuxClient {
                 throw new AgentMuxError('Native discovery cannot replace a concurrent confirmed identity.',
                   'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
               }
-              return { ...value, nativeHandle: handle!, updatedAt: Date.now() }
+              const observedAt = Date.now()
+              if (protectsDifferentTarget(value)) return { ...value, observedNativeHandle: handle!,
+                updatedAt: Math.max(value.updatedAt, observedAt) }
+              const next = { ...value, nativeHandle: handle!,
+                nativeBinding: { source: value.reopenedFrom !== undefined || value.nativeBinding?.source === 'semantic-resume-target'
+                  ? 'semantic-resume-target' as const : 'process-witness' as const,
+                  run: { ...value.run }, observedAt }, updatedAt: Math.max(value.updatedAt, observedAt) }
+              delete next.observedNativeHandle
+              return next
             }, signal)
             this.publisher.publish({ type: 'agent-session', session: cloneSession(next) })
+            if (protectsDifferentTarget(next)) throw new AgentMuxError(
+              'The confirmed current source differs from the explicit semantic resume target. The target and retained records were kept; this refresh did not change the conversation.',
+              'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
           } catch (error) {
             const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
             // A durable commit can report an error after writing; confirm it without reintroducing Runtime.
             const saved = await checkStored()
+            if (protectsDifferentTarget(saved)) throw new AgentMuxError(
+              'The confirmed current source differs from the explicit semantic resume target. The target and retained records were kept; this refresh did not change the conversation.',
+              'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
             if (sameNativeHandle(saved.nativeHandle, handle)) {
               // The same source was durably confirmed by this or another operation.
             } else if (['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS', 'EMFILE', 'ENFILE',
@@ -1781,8 +1824,9 @@ export class AgentMuxClient {
         await checkStored()
         handle = retained
         assertWitness = undefined
-        diagnose(error instanceof Error ? error.message : 'Provider source observation failed.')
+        diagnose(error instanceof Error ? error.message : 'Provider source observation failed.', code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
       }
+      this.hookNativeWitnesses.delete(expected.run.runId)
     }
     if (handle?.kind !== 'provider' || handle.providerId !== session.providerId) {
       throw new AgentMuxError('The exact native Session identity is not available.', 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
@@ -2232,7 +2276,7 @@ export class AgentMuxClient {
     // 三条轴的观察合同：语义活性优先取 Session 自己声明的 semanticStatus（它带 native-hook/acp 来源，
     // 以及那条声明的观察时刻）；缺席时如实退回进程投影这条中性事实（source `run-process`），绝不伪造一条
     // 活动声明。就绪性读 pendingInteraction（卡在待答请求上）与终端能力降级（握手未确认）。
-    const status = (projectedRun.state === 'running' ? session.semanticStatus : undefined) ?? {
+    const status = (projectedRun.state === 'running' ? currentAgentSemanticStatus(session.semanticStatus) : undefined) ?? {
       state: runDisplayState(projectedRun),
       source: 'run-process' as const,
       observedAt: projectedRun.observedAt
@@ -3203,8 +3247,10 @@ export class AgentMuxClient {
       throw this.reopenUnconfirmed('The original continue has no single confirmed matching Run. Keep its history and check again.')
     }
     const run = candidates[0]!, retirement = reservation.expectedRetirement
+    const nativeBindingObservedAt = Date.now()
     const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [retirement.run],
-      reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }, updatedAt: Date.now() }
+      reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }, updatedAt: Math.max(prepared.updatedAt + 1, nativeBindingObservedAt),
+      ...(prepared.nativeHandle ? { nativeBinding: { source: 'semantic-resume-target' as const, run: runRef(run.runId), observedAt: nativeBindingObservedAt } } : {}) }
     // A lost start ACK cannot reconstruct a pre-start Provider observation.
     delete next.nativePromptPredecessor
     try { await this.registry.commitLifecycle(reservation, next) }
@@ -3285,6 +3331,9 @@ export class AgentMuxClient {
       }
       if (!current.nativeHandle || current.nativeHandle.kind !== 'provider') {
         throw new AgentMuxError('Provider-native resume requires a verified provider session handle.', 'AGENT_RESUME_UNAVAILABLE')
+      }
+      if ('observedNativeHandle' in current && current.observedNativeHandle && current.observedNativeHandle.sessionId !== current.nativeHandle.sessionId) {
+        throw new AgentMuxError('The retained native resume target differs from this Run’s confirmed native source. Confirm the original target; no new Run was started.', 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
       }
       let oldRun: CtxmuxAdapterRun | null = null
       try {
@@ -3399,6 +3448,7 @@ export class AgentMuxClient {
         }
         throw error
       })
+      const nativeBindingObservedAt = Date.now()
       const next: AgentMuxStoredAgentSession = {
         ...current,
         kind: 'agent',
@@ -3409,9 +3459,11 @@ export class AgentMuxClient {
         hookToken: hookBinding.endpoint.token,
         // 新 Run 换新凭证：旧 Run 的那枚从此认不出来，无法再以此 Agent 名义说话。
         capabilityHash: hashAgentCapability(invocationCapability),
-        updatedAt: Date.now(),
-        nativeHandle: structuredClone(current.nativeHandle)
+        updatedAt: Math.max(current.updatedAt + 1, nativeBindingObservedAt),
+        nativeHandle: structuredClone(current.nativeHandle),
+        nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt: nativeBindingObservedAt }
       }
+      delete next.observedNativeHandle
       delete next.nativePromptPredecessor
       if (nativePromptEvidence) next.nativePromptPredecessor = {
         run: runRef(run.runId), previousRun: { ...current.run },
@@ -5546,6 +5598,7 @@ export class AgentMuxClient {
       if (expectedByte === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
+      const idleObservationAt = source === 'user' && session.semanticStatus?.state === 'done' ? session.semanticStatus.observedAt : undefined
       const idleEntryTime = session.semanticStatus?.state === 'done'
         ? session.semanticStatus.stateEnteredAt : undefined
       const operationId = randomUUID()
@@ -5591,8 +5644,9 @@ export class AgentMuxClient {
       }
       this.agentInputCursors.set(session.agentSessionId, result.run.acceptedInputBytes)
       const idleStatus = this.registry.findByRun(session.run)?.semanticStatus
-      if (idleEntryTime !== undefined && idleStatus?.state === 'done' &&
-          idleStatus.stateEnteredAt === idleEntryTime) {
+      if (idleObservationAt !== undefined && idleStatus?.state === 'done' &&
+          !(idleStatus.idleEvidenceConsumed && idleStatus.aggregateActivityAt === undefined) &&
+          idleStatus.observedAt === idleObservationAt && idleStatus.stateEnteredAt === idleEntryTime) {
         try {
           const next = await this.updateExactAgentSession(session.agentSessionId, session.run, (current) => {
             const invalidated = invalidateAgentIdleEvidence(current, idleEntryTime)
@@ -5740,6 +5794,44 @@ export class AgentMuxClient {
     }
   }
 
+  /** Only this Run's first or mismatching native subject requires a bounded process observation. */
+  private async hookNativeWitness(session: AgentMuxStoredAgentSession, envelope: NativeHookEnvelope, signal: AbortSignal): Promise<{ handle?: AgentNativeSessionHandle; childSessionIds?: readonly string[]; reason?: string }> {
+    const provider = this.providers.get(session.providerId)
+    if (!provider.hook.processNativeIdentity) return {}
+    const payload = envelope.payload ?? {}
+    const nested = payload.extra && typeof payload.extra === 'object' ? payload.extra as Record<string, unknown> : {}
+    const incoming = (provider.hook.nativeHandle?.sessionIdKeys ?? []).map(key => normalizeNativeSessionId(payload[key] ?? nested[key])).find(Boolean)
+    const candidate = JSON.stringify(incoming ?? null)
+    const childCandidate = (provider.hook.subagentTracking?.idKeys ?? []).map(key => normalizeNativeSessionId(payload[key] ?? nested[key])).find(Boolean)
+    const previous = this.hookNativeWitnesses.get(session.run.runId)
+    if (previous && (previous.candidate === candidate || previous.handle?.sessionId === incoming) &&
+      (!childCandidate || previous.reason === 'native-witness-unavailable' || previous.childSessionIds?.includes(childCandidate) || previous.reason === `native-child-unconfirmed:${childCandidate}`)) return previous
+    let result: { candidate: string; handle?: AgentNativeSessionHandle; childSessionIds?: readonly string[]; reason?: string } = { candidate }
+    try {
+      const before = await this.observeHookRun(session.run.runId, signal)
+      this.assertAgentRun(session, before)
+      if (before.state.type !== 'running' || !before.pid || !provider.discoverNativeSession) throw new Error('Native process witness unavailable.')
+      const witness = await provider.discoverNativeSession({ processId: before.pid, command: before.program ?? provider.executable, args: before.args,
+        env: {}, workspacePath: session.workspacePath, signal })
+      if (!witness || witness.handle.kind !== 'provider' || witness.handle.providerId !== session.providerId) throw new Error('No unique main native record.')
+      await witness.assertCurrent()
+      const after = await this.observeHookRun(session.run.runId, signal)
+      this.assertAgentRun(session, after)
+      if (after.state.type !== 'running' || after.pid !== before.pid) throw new Error('Native process changed during observation.')
+      result = { candidate, handle: { ...witness.handle },
+        ...(witness.childSessionIds !== undefined ? { childSessionIds: witness.childSessionIds } : {}),
+        ...(childCandidate && !witness.childSessionIds?.includes(childCandidate) ? { reason: `native-child-unconfirmed:${childCandidate}` } : {}) }
+    } catch (error) {
+      signal.throwIfAborted()
+      result.reason = 'native-witness-unavailable'
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
+        code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'Native Hook identity could not be confirmed from this Run. The Run and input remain available; Refresh the native Session observation to retry.',
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
+    }
+    this.hookNativeWitnesses.set(session.run.runId, result)
+    return result
+  }
+
   private async acceptHookEvent(envelope: NativeHookEnvelope, signal: AbortSignal): Promise<void> {
     signal.throwIfAborted()
     // 进程已经终结的 run 不再收它的 hook。这一条挡的是**两个**写入点：下面既发 agent-status 事件、又把
@@ -5760,13 +5852,35 @@ export class AgentMuxClient {
       session.providerId !== envelope.providerId
     ) return
     const provider = this.providers.get(envelope.providerId)
+    const witness = await this.hookNativeWitness(session, envelope, signal)
+    if (this.endedRuns.has(envelope.runId)) return
+    const protectedTarget = session.reopenedFrom !== undefined || session.nativeBinding?.source === 'semantic-resume-target'
+    const witnessTargetMismatch = witness.handle && session.nativeHandle && witness.handle.sessionId !== session.nativeHandle.sessionId
     const context: AgentProviderHookNormalizationContext = Object.freeze({
       ...(session.nativeHandle ? { nativeHandle: Object.freeze({ ...session.nativeHandle }) } : {}),
       ...(session.hookReceipt && sameRun(session.hookReceipt.run, session.run)
         ? { previousHookReceipt: Object.freeze({ ...session.hookReceipt,
-          ...(session.hookReceipt.toolInvocation ? { toolInvocation: Object.freeze({ ...session.hookReceipt.toolInvocation }) } : {}) }) } : {})
+          ...(session.hookReceipt.toolInvocation ? { toolInvocation: Object.freeze({ ...session.hookReceipt.toolInvocation }) } : {}) }) } : {}),
+      ...(protectedTarget ? { protectedNativeTarget: true } : {}),
+      ...(witness.childSessionIds ? { processNativeChildSessionIds: witness.childSessionIds } : {}),
+      ...(witness.handle && !(protectedTarget && witnessTargetMismatch) ? { processNativeHandle: Object.freeze({ ...witness.handle }) } : {}),
+      ...(protectedTarget && witnessTargetMismatch ? { nativeIdentityReason: 'resume-target-mismatch' } : witness.reason ? { nativeIdentityReason: witness.reason } : {})
     })
     const normalized = provider.normalizeHook(envelope, context)
+    if (protectedTarget && normalized.nativeHandle && session.nativeHandle && (
+      normalized.nativeHandle.kind !== session.nativeHandle.kind ||
+      normalized.nativeHandle.sessionId !== session.nativeHandle.sessionId ||
+      (normalized.nativeHandle.kind === 'provider' && session.nativeHandle.kind === 'provider' && (
+        normalized.nativeHandle.providerId !== session.nativeHandle.providerId ||
+        (normalized.nativeHandle.transcriptPath !== undefined && session.nativeHandle.transcriptPath !== undefined &&
+          normalized.nativeHandle.transcriptPath !== session.nativeHandle.transcriptPath)))
+    )) {
+      const message = 'Continued native identity is unconfirmed. The original stored conversation and current Run are retained.'
+      this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message,
+        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: normalized.status.observedAt } })
+      throw new AgentMuxError(message, 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
+    }
+    const canPromoteLocator = !witnessTargetMismatch || (!protectedTarget && session.nativeBinding?.source === 'native-hook' && sameRun(session.nativeBinding.run, session.run))
     const precedingInteractionReceiptId = normalized.interaction?.nativeToolCallId &&
       !nativeHookToolCallId(envelope.payload ?? {}) ? context.previousHookReceipt?.id : undefined
     const activityId = JSON.stringify(['activity-state', 'native-hook', session.run.runId, envelope.receiptId])
@@ -5782,10 +5896,6 @@ export class AgentMuxClient {
     // 而**那时**这里的顺序才开始承重。仍写成先读后推，是因为它读起来就是判据本身要说的话。
     const turnPhase = this.hookTurnPhases.get(envelope.runId) ??
       (agentTurnEndEvidence(session) ? 'turn-ended' : undefined)
-    if (session.reopenedFrom && normalized.nativeHandle &&
-      JSON.stringify(normalized.nativeHandle) !== JSON.stringify(session.nativeHandle)) {
-      throw new AgentMuxError('Continued native identity is unconfirmed. The original stored conversation and current Run are retained.', 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')
-    }
     const nextTurnPhase = hookTurnPhaseAfter(normalized.lifecycleEvent)
     // 闸门的前提是「收尾之后要再动工必先开新一轮」。这家 Provider 若声明不出任何重开事件，前提不成立，
     // 抑制就会从可逆退化成永久——所以把前提可满足性算出来喂进去，而不是让闸门默认它成立。
@@ -5849,6 +5959,12 @@ export class AgentMuxClient {
       ...(normalized.toolInvocation ? { toolInvocation: normalized.toolInvocation } : {}),
       ...(normalized.lifecycleEvent !== undefined ? { lifecycleEvent: normalized.lifecycleEvent } : {}),
       observedAt: normalized.status.observedAt,
+      ...(normalized.subject ? { subject: normalized.subject } : {}),
+      decision: { activityApplied: updatesSemanticStatus || normalized.childActivity === true,
+        lifecycleApplied: normalized.lifecycleEvent !== undefined && normalized.lifecycleEvent !== null && (updatesSemanticStatus || normalized.lifecycleEvent === 'turn-end'),
+        reason: updatesSemanticStatus ? normalized.mainSubject ? 'main-semantic-applied' : 'pending-parent-completion-applied' : normalized.childActivity ? 'proven-child-activity' :
+          normalized.subject?.kind === 'main' ? normalized.semanticState !== 'unknown' ? 'main-turn-already-ended' : 'no-semantic-rule' :
+          normalized.subject?.kind === 'child' ? 'child-observation-only' : normalized.subject?.reason ?? 'no-semantic-rule' },
       ...(stopRun ? { outputCursorBytes: stopRun.latestOutputBytes } : {})
     }
     const completion = normalized.interactionCompletion
@@ -5894,6 +6010,7 @@ export class AgentMuxClient {
       if (nextTurnPhase === 'in-turn' && nativeReadiness) {
         delete currentBase.terminalPromptReadiness
       }
+      if (witness.handle && canPromoteLocator && normalized.nativeHandle) delete currentBase.observedNativeHandle
       const next: AgentMuxStoredAgentSession = {
         ...currentBase,
         updatedAt: Math.max(current.updatedAt, normalized.status.observedAt),
@@ -5922,7 +6039,17 @@ export class AgentMuxClient {
               }
             }
           : {}),
-        ...(normalized.nativeHandle ? { nativeHandle: normalized.nativeHandle } : {}),
+        ...(normalized.childActivity ? { semanticStatus: { ...(current.semanticStatus ?? { state: 'running' as const, source: 'native-hook' as const, observedAt: 0 }),
+          aggregateActivityAt: normalized.status.observedAt,
+          currentActivityRevision: (current.semanticStatus?.currentActivityRevision ?? 0) + 1 } } : {}),
+        ...(witness.handle && witnessTargetMismatch && !(canPromoteLocator && normalized.nativeHandle) ? { observedNativeHandle: witness.handle } : {}),
+        ...(normalized.nativeHandle && canPromoteLocator ? {
+          nativeHandle: witness.handle ?? { ...normalized.nativeHandle,
+            ...(normalized.nativeHandle.kind === 'provider' && current.nativeHandle?.kind === 'provider' &&
+              normalized.nativeHandle.sessionId === current.nativeHandle.sessionId && normalized.nativeHandle.transcriptPath === undefined &&
+              current.nativeHandle.transcriptPath ? { transcriptPath: current.nativeHandle.transcriptPath } : {}) },
+          nativeBinding: { source: protectedTarget ? 'semantic-resume-target' as const : witness.handle ? 'process-witness' as const : 'native-hook' as const, run: { ...current.run }, observedAt: normalized.status.observedAt }
+        } : {}),
         // turnUsage 三分支权威解析。清空这一半与上面把 turnUsage 从 ...currentBase 里 destructure 掉
         // 的那半成对（同 fix #1 陷阱）：turnUsage 已从基础展开剔出，此处「不写入」等于「清掉」，而非「保留」。
         // 1) 本条回执带 usage → 用新的（fresh number wins）。
@@ -6020,6 +6147,16 @@ export class AgentMuxClient {
     if (!persistedReceipt) {
       throw new AgentMuxError('Native Hook receipt was not persisted.', 'HOOK_RECEIPT_INVALID')
     }
+    if (witness.handle && next.nativeHandle && witness.handle.sessionId !== next.nativeHandle.sessionId) this.publisher.publish({
+      type: 'agent-error', agentSessionId: next.agentSessionId,
+      code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: 'The current process native identity differs from the retained conversation target. The target was preserved; confirm the original native Session before continuing it. The current Run and input remain available.',
+      evidence: { source: 'agentmux', run: { ...next.run }, observedAt: persistedReceipt.observedAt }
+    })
+    else if (normalized.subject?.reason === 'resume-target-mismatch' || normalized.subject?.reason === 'native-session-mismatch') this.publisher.publish({
+      type: 'agent-error', agentSessionId: next.agentSessionId, code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED',
+      message: 'This Native Hook did not confirm the stored conversation identity. Its main activity and permission were not applied; the stored target, current Run and input remain available.',
+      evidence: { source: 'agentmux', run: { ...next.run }, observedAt: persistedReceipt.observedAt }
+    })
     const evidence = {
       source: 'native-hook' as const,
       observedAt: normalized.status.observedAt,

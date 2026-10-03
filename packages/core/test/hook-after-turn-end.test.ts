@@ -1,4 +1,5 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -33,7 +34,7 @@ function storedSession(providerId: AgentProviderId = 'codex'): AgentMuxStoredAge
     providerId,
     executorId: providerId,
     hostId: 'local',
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     run: { runId: 'run-1' },
     retiredRuns: [],
     hookBindingId: 'binding-hook-after-turn'.padEnd(43, 'A'),
@@ -52,7 +53,7 @@ function runningRun(): CtxmuxAdapterRun {
     lifecycleOperationId: null,
     program: 'codex',
     args: [],
-    workspacePath: upstreamFixturePath("repo"),
+    workspacePath: fixturePath("repo"),
     pid: 999,
     state: { type: 'running' },
     cols: 80,
@@ -104,7 +105,12 @@ async function harness(providerId: AgentProviderId = 'codex'): Promise<{
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
   await store.compareAndSwap(null, storedSession(providerId))
-  const client = new AgentMuxClient({ store })
+  const client = new AgentMuxClient({ store, providers: BUILT_IN_AGENT_PROVIDERS.map(provider => provider.id !== 'codex' ? provider : {
+    ...provider,
+    // The fake Runtime PID has no OS record. This unit seam supplies the Provider's
+    // exact discovery witness; session-status-authority separately exercises real OS discovery.
+    discoverNativeSession: async () => ({ handle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'native-1' }, assertCurrent: async () => {} })
+  }) })
   const internals = client as unknown as Internals
   await internals.registry.load('local')
   internals.connected = true

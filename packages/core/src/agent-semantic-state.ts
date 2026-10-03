@@ -6,12 +6,14 @@ export function transitionAgentSemanticStatus(
   observation: AgentStatus
 ): AgentStatus {
   const { stateEnteredAt: _suppliedEntryTime, ...status } = observation
-  const stateEnteredAt = previous?.state === status.state
+  const stateEnteredAt = previous?.state === status.state && !previous.idleEvidenceConsumed
     ? previous.stateEnteredAt
     // Equal or backwards observation clocks cannot identify a new epoch. Keep it unknown
     // rather than inventing a later timestamp or confusing a delayed input ACK with this state.
     : previous && status.observedAt <= previous.observedAt ? undefined : status.observedAt
-  return { ...status, ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }) }
+  return { ...status,
+    ...(previous?.currentActivityRevision === undefined ? {} : { currentActivityRevision: previous.currentActivityRevision + 1 }),
+    ...(stateEnteredAt === undefined ? {} : { stateEnteredAt }) }
 }
 
 /** Input consumes idle evidence; it does not prove a new semantic state or recent activity. */
@@ -20,8 +22,9 @@ export function invalidateAgentIdleEvidence(
   expectedStateEnteredAt?: number
 ): AgentMuxStoredAgentSession {
   const status = current.semanticStatus
-  if (status?.state !== 'done' || status.stateEnteredAt === undefined ||
+  if (status?.state !== 'done' || (status.idleEvidenceConsumed && status.aggregateActivityAt === undefined) ||
       (expectedStateEnteredAt !== undefined && status.stateEnteredAt !== expectedStateEnteredAt)) return current
-  const { stateEnteredAt: _consumedEntryTime, ...semanticStatus } = status
-  return { ...current, semanticStatus }
+  const { stateEnteredAt: _consumedEntryTime, aggregateActivityAt: _consumedChildActivity, ...semanticStatus } = status
+  return { ...current, semanticStatus: { ...semanticStatus, idleEvidenceConsumed: true,
+    currentActivityRevision: (status.currentActivityRevision ?? 0) + 1 } }
 }

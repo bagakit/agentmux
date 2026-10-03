@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { NameChangeAudit } from './name-change-audit.js'
 import { mkdir, readFile } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { durableWriteFile } from '@agentmux/core'
@@ -71,7 +72,7 @@ export class BrowserTaskAssets {
   private readonly listeners = new Set<(browserId: string) => void | Promise<void>>()
   private readonly now: () => number
   private readonly id: () => string
-  constructor(private readonly store: BrowserTaskAssetStore, options: { now?: () => number; id?: () => string } = {}) {
+  constructor(private readonly store: BrowserTaskAssetStore, private readonly options: { now?: () => number; id?: () => string; nameAudit?: NameChangeAudit } = {}) {
     this.now = options.now ?? Date.now; this.id = options.id ?? randomUUID
   }
 
@@ -217,12 +218,25 @@ export class BrowserTaskAssets {
   async edit(assetId: string, expectedRevision: number, replacement: BrowserTaskContent): Promise<BrowserTaskAsset> {
     return this.change(async () => {
       const asset = this.requireAsset(assetId)
-      if (asset.revision !== expectedRevision) throw new Error('Task draft changed; reload before editing.')
       // A full replacement is deliberate. In particular, an empty step list stays empty.
-      asset.draft = content(replacement)
-      asset.revision += 1; asset.updatedAt = this.now()
-      await this.persist(asset.browserId)
-      return copy(asset)
+      const next = content(replacement)
+      const revisionConflict = asset.revision !== expectedRevision
+        ? new Error('Task draft changed; reload before editing.') : null
+      const change = { target: { kind: 'browser-task', id: assetId },
+        location: { browserId: asset.browserId }, before: asset.draft.name,
+        requested: next.name, ownerRevision: asset.revision }
+      const apply = async (): Promise<BrowserTaskAsset> => {
+        if (revisionConflict) throw revisionConflict
+        asset.draft = next
+        asset.revision += 1; asset.updatedAt = this.now()
+        await this.persist(asset.browserId)
+        return copy(asset)
+      }
+      return this.options.nameAudit
+        ? await this.options.nameAudit.run([change], apply,
+          result => ({ actual: result.draft.name, ownerRevision: result.revision,
+            reason: result.draft.name === change.before ? 'unchanged' : null }),
+          error => error === revisionConflict ? 'failed' : 'unknown') : await apply()
     })
   }
   async saveVersion(assetId: string, expectedRevision: number): Promise<BrowserTaskAsset> {

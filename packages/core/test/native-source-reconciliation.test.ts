@@ -1,25 +1,41 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile, appendFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile, appendFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
+import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
 import { nativeProcessFiles } from '../src/agent-native-process.js'
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { connectHostedAgentMux } from '../src/hosted-client.js'
 import type { AgentMuxHostedRpcPort } from '../src/hosted-client-contract.js'
 import { hostedTestOwner } from './helpers/hosted-runtime-port.js'
 import * as runner from '../src/process-runner.js'
+import { DurableWriteError } from '../src/durable-write.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession, AgentProviderNativeSessionDiscoveryContext } from '../src/types.js'
 
 const SID = 'private-native-owner', NATIVE = 'exact-native-main', RUN = 'same-original-run'
 const BODY = '\n  Genuine recorded final 原文\n'
+const durableFailure = vi.hoisted(() => ({ path: null as string | null, syncs: 0 }))
+vi.mock('node:fs/promises', async importOriginal => {
+ const actual = await importOriginal<typeof import('node:fs/promises')>()
+ return { ...actual, open: async (...args: Parameters<typeof actual.open>) => {
+  const handle = await actual.open(...args)
+  if (durableFailure.path && String(args[0]).startsWith(durableFailure.path + '.') && args[1] === 'wx') {
+   handle.sync = async () => { durableFailure.syncs++; throw Object.assign(new Error('owned pre-replacement fsync failure'), { code: 'EIO' }) }
+  }
+  return handle
+ } }
+})
+const fixtureReceipts: Array<{ processId: number; root: string; exited: boolean; recordsRemoved: boolean }> = []
 const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks() })
+afterEach(async () => { durableFailure.path = null; durableFailure.syncs = 0; for (const cleanup of cleanups.splice(0)) await cleanup(); vi.restoreAllMocks()
+ if (process.env.AMX_TARGET_PROOF) await writeFile(process.env.AMX_TARGET_PROOF, JSON.stringify({ userRuntimeTouched: false, privateFixtures: fixtureReceipts, cleanup: { remaining: fixtureReceipts.filter(item => !item.exited || !item.recordsRemoved) } }, null, 2) + '\n')
+})
 
 async function succeeds<T>(operation: Promise<T>): Promise<T> {
   const outcome: { value?: T; error?: unknown } = await operation.then(value => ({ value }), error => ({ error }))
@@ -38,6 +54,7 @@ async function fixture(provider?: AgentProvider, contents?: Array<{ source: unkn
   const holder = spawn(process.execPath, ['-e', `const fs=require('fs'); for(const p of process.argv.slice(1)) fs.openSync(p,'r'); console.log(process.pid);setInterval(()=>{},1000);`, ...files], { detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
   await once(holder.stdout!, 'data')
   const processId = holder.pid!
+  const receipt = { processId, root, exited: false, recordsRemoved: false }; fixtureReceipts.push(receipt)
   const nativeProvider = provider ?? new AgentProviderRegistry().get('codex')
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: SID, providerId: nativeProvider.id,
@@ -68,7 +85,8 @@ const data=${JSON.stringify(nativeInput)};createInterface({input:process.stdin})
   cleanups.push(async () => {
     await client.dispose(); if (holder.exitCode === null && holder.signalCode === null) { const end = once(holder, 'exit'); holder.kill('SIGTERM'); await end }
     for (const control of controls) expect(control).not.toHaveBeenCalled()
-    await rm(root, { recursive: true, force: true })
+    receipt.exited = holder.exitCode !== null || holder.signalCode !== null
+    await rm(root, { recursive: true, force: true }); receipt.recordsRemoved = true
   })
   return { root, files, oldFile, holder, processId, store, client, kernel, status, run, session, events, options, nativeInput,
     read: () => client.sessionHistoryPage(SID, options) }
@@ -83,6 +101,7 @@ it('reconciles an existing different retained locator with the original Run curr
  expect(page.source).toEqual(observe.source)
  expect(page.items[2]).toMatchObject({id:'final-1',kind:'assistant-message',messagePhase:'final',contentParts:[{kind:'text',text:BODY}]})
  expect((await loadAgentSessions(f.store))[0]!.nativeHandle?.sessionId).toBe(NATIVE)
+ expect(parseRpcAgentSession(f.client.agentSession(SID)).nativeBinding).toMatchObject({source:'process-witness',run:f.session.run})
  observe.dispose()
 })
 
@@ -168,6 +187,39 @@ it('carries a borrowed strict current read and its cancellation through the exac
  } finally { await borrowed.dispose(); await service.dispose() }
 })
 
+it('retains explicit resume targets across current native history refresh and observation',async()=>{
+ for(const provenance of ['semantic-resume-target','reopenedFrom'] as const){
+  const f=await fixture(),old=(await loadAgentSessions(f.store))[0]!
+  const target:AgentMuxStoredAgentSession={...old,...(provenance==='semantic-resume-target'
+   ? {nativeBinding:{source:'semantic-resume-target' as const,run:{...old.run},observedAt:1}}
+   : {reopenedFrom:{run:{runId:'retired-target-run'},source:'user' as const,observedAt:1}})}
+  await f.store.compareAndSwap(old,target);await f.client.refreshAgentSession(SID,target.run)
+  const before=parseRpcAgentSession(f.client.agentSession(SID))
+  const page=await succeeds(f.client.sessionHistoryPage(SID,{...f.options,refreshNativeSource:true}))
+  expect(page.source.nativeSessionId).toBe('retained-old');expect(page.items[0]?.id).toBe('old-final')
+  const after=parseRpcAgentSession(f.client.agentSession(SID))
+  expect(after.nativeHandle).toEqual(before.nativeHandle)
+  expect(after.nativeBinding).toEqual(before.nativeBinding)
+  expect(after.reopenedFrom).toEqual(before.reopenedFrom)
+  expect(after.pendingInteraction).toEqual(before.pendingInteraction)
+  expect(after.observedNativeHandle).toEqual({kind:'provider',providerId:'codex',sessionId:NATIVE,transcriptPath:f.files[0]})
+  expect((await loadAgentSessions(f.store))[0]!.observedNativeHandle).toEqual(after.observedNativeHandle)
+  const observer=await succeeds(f.client.observeSessionHistory(SID,()=>{},f.options))
+  expect(observer.source).toEqual(page.source)
+  expect((await succeeds(f.read())).source).toEqual(page.source)
+  observer.dispose()
+  expect(f.events.some(event=>event.type==='agent-error' && event.code==='AGENT_NATIVE_SOURCE_UNCONFIRMED' &&
+   event.message.includes('confirmed current source differs from the explicit semantic resume target'))).toBe(true)
+  vi.spyOn(f.kernel,'identity').mockReturnValue({daemonInstanceId:'private-history-fixture'} as ReturnType<CtxmuxRunAdapter['identity']>)
+  const input=vi.spyOn(f.kernel,'input').mockResolvedValue({run:{...f.run,acceptedInputBytes:1},appliedByteRange:{startByte:0,endByte:1}} as Awaited<ReturnType<CtxmuxRunAdapter['input']>>)
+  await expect(f.client.writeAgent({agentSessionId:SID,expectedRun:target.run,source:'user',data:'x'})).resolves.toMatchObject({appliedByteRange:{startByte:0,endByte:1}})
+  expect(input).toHaveBeenCalledOnce()
+  const final=parseRpcAgentSession(f.client.agentSession(SID))
+  expect(final.run).toEqual(before.run);expect(final.nativeHandle).toEqual(before.nativeHandle)
+  expect(final.nativeBinding).toEqual(before.nativeBinding);expect(final.pendingInteraction).toEqual(before.pendingInteraction)
+ }
+})
+
 it('borrows the existing observation witness across save-only failure, invalidation and Pages without faking durable identity',async()=>{
  const f=await fixture(), before=await readFile(join(f.root,'sessions.json'))
  vi.spyOn(f.store,'compareAndSwap').mockRejectedValue(Object.assign(new Error('owned save-only failure'),{code:'ENOSPC'}))
@@ -200,6 +252,33 @@ it('keeps no-observer explicit-current read available through operation-local wi
  const os=vi.spyOn(runner,'runProcess')
  expect((await succeeds(f.read())).source.nativeSessionId).toBe('retained-old')
  expect(os).not.toHaveBeenCalled()
+})
+
+it('keeps a confirmed source readable after real durable pre-replacement EIO without publishing its locator', async () => {
+ const f = await fixture(), statePath = join(f.root, 'sessions.json'), before = await readFile(statePath)
+ const actualSave = f.store.compareAndSwap.bind(f.store), failures: unknown[] = []
+ vi.spyOn(f.store, 'compareAndSwap').mockImplementation(async (...args) => {
+  try { return await actualSave(...args) } catch (error) { failures.push(error); throw error }
+ })
+ durableFailure.path = statePath
+ const page = await succeeds(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
+ expect(page.source.nativeSessionId).toBe(NATIVE)
+ expect(page.items[2]?.id).toBe('final-1')
+ expect(durableFailure.syncs).toBe(1)
+ expect(failures).toHaveLength(1)
+ expect(failures[0]).toBeInstanceOf(DurableWriteError)
+ expect(failures[0]).toMatchObject({ phase: 'before-replace', cause: { code: 'EIO' } })
+ expect(await readFile(statePath)).toEqual(before)
+ expect((await readdir(f.root)).filter(name => name.startsWith('sessions.json.') && name.endsWith('.tmp'))).toEqual([])
+ expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe('retained-old')
+ expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED')).toBe(true)
+ durableFailure.path = null
+ expect((await f.read()).source.nativeSessionId).toBe('retained-old')
+ vi.spyOn(f.kernel, 'identity').mockReturnValue({ daemonInstanceId: 'private-durable-reader' } as ReturnType<CtxmuxRunAdapter['identity']>)
+ const input = vi.spyOn(f.kernel, 'input').mockResolvedValue({ run: { ...f.run, acceptedInputBytes: 1 }, appliedByteRange: { startByte: 0, endByte: 1 } } as Awaited<ReturnType<CtxmuxRunAdapter['input']>>)
+ await expect(f.client.writeAgent({ agentSessionId: SID, expectedRun: f.session.run, source: 'user', data: 'x' })).resolves.toMatchObject({ appliedByteRange: { startByte: 0, endByte: 1 } })
+ expect(input).toHaveBeenCalledOnce()
+ expect(await readFile(statePath)).toEqual(before)
 })
 
 it('never discovers again on ordinary current Pages or opaque earlier pages after durable acquisition',async()=>{
@@ -429,6 +508,43 @@ async function sharedFixture(provider?: AgentProvider) {
   const writes = vi.spyOn(f.store, 'compareAndSwap')
   return { ...f, owner, registry, bytes, actualSave, writes }
 }
+
+it('preserves an explicit target when the observed source already belongs to another Session', async () => {
+ for (const provenance of ['semantic-resume-target', 'reopenedFrom'] as const) {
+  const f = await sharedFixture(), old = (await loadAgentSessions(f.store)).find(value => value.agentSessionId === SID)!
+  const target: AgentMuxStoredAgentSession = { ...old, ...(provenance === 'semantic-resume-target'
+   ? { nativeBinding: { source: 'semantic-resume-target' as const, run: { ...old.run }, observedAt: 1 } }
+   : { reopenedFrom: { run: { runId: 'retired-explicit-target' }, source: 'user' as const, observedAt: 1 } }) }
+  await f.actualSave(old, target); await f.client.refreshAgentSession(SID, target.run)
+  const before = parseRpcAgentSession(f.client.agentSession(SID)), ownerBefore = f.client.agentSession(f.owner.agentSessionId)
+  const ownerStoredBefore = (await loadAgentSessions(f.store)).find(value => value.agentSessionId === f.owner.agentSessionId)!
+  const page = await succeeds(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true }))
+  expect(page.source.nativeSessionId).toBe('retained-old')
+  expect(page.items.map(item => item.id)).toEqual(['old-final'])
+  await expect(f.client.sessionHistoryPage(SID, { ...f.options, refreshNativeSource: true, requireCurrentSource: true }))
+   .rejects.toMatchObject({ code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' })
+  const observer = await succeeds(f.client.observeSessionHistory(SID, () => {}, f.options))
+  expect(observer.source).toEqual(page.source)
+  expect((await f.read()).source).toEqual(page.source); observer.dispose()
+  const after = parseRpcAgentSession(f.client.agentSession(SID))
+  expect(after.nativeHandle).toEqual(before.nativeHandle)
+  expect(after.nativeBinding).toEqual(before.nativeBinding)
+  expect(after.reopenedFrom).toEqual(before.reopenedFrom)
+  expect(after.pendingInteraction).toEqual(before.pendingInteraction)
+  expect(after.observedNativeHandle).toEqual(f.owner.nativeHandle)
+  expect(f.client.agentSession(f.owner.agentSessionId)).toEqual(ownerBefore)
+  const stored = await loadAgentSessions(f.store)
+  expect(stored.find(value => value.agentSessionId === SID)?.observedNativeHandle).toEqual(f.owner.nativeHandle)
+  expect(stored.find(value => value.agentSessionId === f.owner.agentSessionId)).toEqual(ownerStoredBefore)
+  expect(f.events.some(event => event.type === 'agent-error' && event.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED' && event.message.includes('explicit semantic resume target'))).toBe(true)
+  vi.spyOn(f.kernel, 'identity').mockReturnValue({ daemonInstanceId: 'private-shared-target' } as ReturnType<CtxmuxRunAdapter['identity']>)
+  const input = vi.spyOn(f.kernel, 'input').mockResolvedValue({ run: { ...f.run, acceptedInputBytes: 1 }, appliedByteRange: { startByte: 0, endByte: 1 } } as Awaited<ReturnType<CtxmuxRunAdapter['input']>>)
+  await expect(f.client.writeAgent({ agentSessionId: SID, expectedRun: target.run, source: 'user', data: 'x' })).resolves.toMatchObject({ appliedByteRange: { startByte: 0, endByte: 1 } })
+  expect(input).toHaveBeenCalledOnce()
+  expect(f.client.agentSession(SID).run).toEqual(before.run)
+  expect(f.client.agentSession(SID).nativeHandle).toEqual(before.nativeHandle)
+ }
+})
 
 it('reads shared current native records through the existing observation without taking either durable identity', async () => {
   const f = await sharedFixture(), changes: Array<{ kind: string }> = []

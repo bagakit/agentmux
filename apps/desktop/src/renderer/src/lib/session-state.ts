@@ -14,7 +14,7 @@ import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAt
 import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
 import { agentPromptPredecessor } from '@agentmux/core/prompt-condition'
 import { applyAgentTimelineMutation } from '@agentmux/core/timeline'
-import { agentDisplayState, isAgentActivityStatusSource } from '@agentmux/core/agent-status'
+import { agentDisplayState, isAgentActivityStatusSource, currentAgentSemanticStatus } from '@agentmux/core/agent-status'
 // 进程事实的投影走 node-free 子路径，与主进程侧 import 的是同一个模块（包根那条链拖 node:crypto，
 // renderer 引不动）。
 import { projectRunProcessStatus, runExitFacts } from '@agentmux/core/run-status'
@@ -106,6 +106,8 @@ function acceptsAgentSessionTransition(
   incoming: AgentMuxAgentSession
 ): boolean {
   if (session.id !== incoming.agentSessionId) return false
+  if (sameRun(session.control.run, incoming.run) &&
+    (incoming.semanticStatus?.currentActivityRevision ?? 0) < (session.semanticStatus?.currentActivityRevision ?? 0)) return false
   if (incoming.updatedAt < session.agentSessionUpdatedAt) return false
   if (incoming.updatedAt === session.agentSessionUpdatedAt) return sameRun(session.control.run, incoming.run)
   if (sameRun(session.control.run, incoming.run)) return true
@@ -770,6 +772,9 @@ export function projectRuntimeEvent(
       nativeSessionId: _nativeSessionId,
       ...current
     } = item
+    const semantic = currentAgentSemanticStatus(core.session.semanticStatus)
+    const currentActivityAdvanced = sameRun(item.control.run, core.session.run) &&
+      (core.session.semanticStatus?.currentActivityRevision ?? 0) > (item.semanticStatus?.currentActivityRevision ?? 0)
     const reason = core.session.pendingInteraction ? agentInteractionResponseUnavailableReason(core.session.pendingInteraction) : undefined
     const next = {
       ...current,
@@ -809,14 +814,16 @@ export function projectRuntimeEvent(
       // running（衰减刻意保留 observedAt）的状态会被这类陈旧重发按原 observedAt 又贴回 working，
       // 闪一帧再被重新衰减；一条滞后的旧快照也会盖掉更新的状态。要求严格新于当前观测才套用：
       // 真正的新证据 observedAt 一定更大、照常点亮，同 observedAt 的重发一律跳过。
+      // Core 的 currentActivityRevision 独立排序已证子活动与输入消费。消费可以撤回较新的子活动投影，
+      // 而不移动历史主轮/原生 observedAt；只认更大的 owner revision，重复快照不能再次点亮旧 working。
       // 同样不许洗掉 `disconnected`（见上面 agent-status arm 的完整论证）：掉线不改 processState，
       // 所以 running 这个条件挡不住它——一条随会话快照重发的 semanticStatus 会把 disconnected 洗成
       // 正常态。`disconnected` 只由 process-state 清，语义状态不是它的解除手。
-      ...(core.session.semanticStatus &&
+      ...(semantic &&
         item.processState === 'running' &&
         item.status.state !== 'disconnected' &&
-        core.session.semanticStatus.observedAt > item.status.observedAt
-        ? { status: structuredClone(core.session.semanticStatus) }
+        (semantic.observedAt > item.status.observedAt || currentActivityAdvanced)
+        ? { status: structuredClone(semantic) }
         : {}),
       ...(core.session.pendingInteraction
         ? { pendingInteraction: structuredClone(core.session.pendingInteraction.request) }

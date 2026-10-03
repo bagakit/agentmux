@@ -2,6 +2,7 @@ import { Buffer } from 'node:buffer'
 import type { AgentProviderHookNormalizationContext } from './agent-provider.js'
 import type {
   AgentTimelineItem,
+  AgentHookSubject,
   AgentTimelineItemKind,
   AgentTimelineMutation,
   AgentHookLifecycleEvent,
@@ -72,6 +73,9 @@ export type AgentNativeHookSpecification = {
     context: AgentProviderHookNormalizationContext,
     mainSubject: boolean
   ) => AgentHookToolInvocation | undefined
+  /** Provider requires an exact Run process-native witness before promoting its native subject. */
+  processNativeIdentity?: boolean
+  resolveSubject?: (payload: Readonly<Record<string, unknown>>, context: AgentProviderHookNormalizationContext) => AgentHookSubject
   /** Pure native Session membership/transition evidence; false preserves only observation. */
   matchesNativeSession?: (
     eventName: string,
@@ -581,9 +585,35 @@ export function normalizeNativeHook(
   // 归一化到 Core canonical 生命周期事件。认不出就是 `undefined`——语义状态照旧只由 Provider 的
   // `rules` 给出，绝不因为归一化失败而伪造 working/done。
   const nativeLifecycleEvent = canonicalHookLifecycleEvent(eventName, rule?.lifecycleEvent)
-  const nativeSessionMatches = specification.matchesNativeSession?.(eventName, rawPayload, context) ?? true
-  const childSubject = nativeHookHasSubagentSubject(specification, eventName, payload)
+  const declaredSubject = specification.resolveSubject?.(payload, context)
+  const childSubject = declaredSubject ? declaredSubject.kind === 'child' : nativeHookHasSubagentSubject(specification, eventName, payload)
+  const incomingId = sessionIdField(payload, specification.nativeHandle?.sessionIdKeys ?? [])
+  const incomingPath = transcriptPathField(payload, specification.nativeHandle?.transcriptPathKeys ?? [])
+  const currentHandle = context.nativeHandle
+  const knownLocatorChanged = currentHandle !== undefined && (
+    currentHandle.kind !== 'provider' || currentHandle.providerId !== envelope.providerId ||
+    (incomingId !== undefined && incomingId !== currentHandle.sessionId) ||
+    (incomingPath !== undefined && currentHandle.transcriptPath !== undefined && incomingPath !== currentHandle.transcriptPath)
+  )
+  // Authentication binds the Core Session/Run. A different native identity still needs an
+  // explicit Provider membership/transition rule; absence of a witness never grants one.
+  const protectedTargetMismatch = context.protectedNativeTarget === true && knownLocatorChanged && !childSubject
+  const nativeSessionMatches = !protectedTargetMismatch && (declaredSubject
+    ? declaredSubject.kind === 'main' || declaredSubject.kind === 'child'
+    : specification.matchesNativeSession?.(eventName, rawPayload, context) ?? !knownLocatorChanged)
   const mainSubject = nativeSessionMatches && !childSubject
+  const subject: AgentHookSubject = protectedTargetMismatch ? {
+    kind: 'unknown', basis: 'provider-protocol', reason: 'resume-target-mismatch',
+    ...(incomingId ? { nativeSessionId: incomingId } : {})
+  } : declaredSubject ?? {
+    kind: !nativeSessionMatches ? 'foreign' : childSubject ? 'child' : 'main',
+    basis: 'provider-protocol', reason: !nativeSessionMatches ? 'native-session-mismatch' : childSubject ? 'declared-child-subject' :
+      specification.matchesNativeSession ? 'provider-native-membership' : !incomingId ? 'run-bound-protocol' :
+        currentHandle ? 'native-session-match' : 'native-session-first-observation',
+    ...(incomingId ? { nativeSessionId: incomingId } : {})
+  }
+  const childActivity = childSubject && nativeSessionMatches && specification.resolveSubject !== undefined && rule?.state === 'working' &&
+    !specification.subagentTracking?.stopEvents.includes(eventName)
   // Main contributions share the same subject boundary as locator and interaction promotion.
   // Native lifecycle is retained separately for child tool results and trace; it cannot open or
   // end the main turn. The existing roster can settle only an observed pending parent end.
@@ -613,7 +643,8 @@ export function normalizeNativeHook(
   // usage 由 hook 命令进程读 transcript 后并进 payload；normalizer 只把它校验回结构化用量，绝不自己读文件。
   // 缺席（Provider 不报 usage、非收尾事件、读失败）时它就是 undefined，一路缺席到 UI。
   const turnUsage = mainSubject ? parseTurnUsage(payload[HOOK_PAYLOAD_USAGE_KEY]) ?? undefined : undefined
-  const toolSubject = resolveNativeToolSubject(
+  const toolSubject = declaredSubject?.kind === 'child' && declaredSubject.nativeSessionId
+    ? { kind: 'child' as const, nativeSessionId: declaredSubject.nativeSessionId } : resolveNativeToolSubject(
     envelope.providerId,
     specification,
     payload,
@@ -633,6 +664,8 @@ export function normalizeNativeHook(
       const value = mainSubject ? specification.nativeTurnIdKeys?.map(key => payload[key]).find(value => typeof value === 'string' && value.trim()) : undefined
       return typeof value === 'string' ? { nativeTurnId: value } : {}
     })(),
+    subject,
+    ...(childActivity ? { childActivity: true } : {}),
     ...(lifecycleEvent !== undefined ? { lifecycleEvent } : {}),
     ...(() => {
       const nativeToolCallId = nativeHookToolCallId(payload)

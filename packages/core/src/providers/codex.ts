@@ -2,6 +2,7 @@ import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVe
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution } from './codex-prompt-execution.js'
 import { createCodexInteractionResponsePreparation } from './codex-interaction-target.js'
+import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
@@ -87,6 +88,18 @@ export const CODEX_HOOK_EVENTS = [
 ] as const
 
 export const CODEX_HOOKS: AgentNativeHookSpecification = {
+  processNativeIdentity: true,
+  resolveSubject(payload, context) {
+    const main = context.processNativeHandle
+    const nativeId = normalizeNativeSessionId(payload.session_id)
+    const childId = normalizeNativeSessionId(payload.agent_id ?? payload.agentId)
+    if (!main) return { kind: 'unknown', basis: 'process-native-record', reason: context.nativeIdentityReason ?? 'native-witness-unavailable' }
+    if (nativeId !== main.sessionId) return { kind: 'foreign', basis: 'process-native-record', reason: 'native-parent-mismatch', ...(nativeId ? { nativeSessionId: nativeId } : {}) }
+    // Codex root session_id is shared by descendants; agent_id is the spawned thread ID.
+    if (childId) return { kind: childId !== main.sessionId && context.processNativeChildSessionIds?.includes(childId) ? 'child' : 'unknown', basis: 'process-native-record', nativeSessionId: childId,
+      reason: childId === main.sessionId ? 'conflicting-codex-subject' : context.processNativeChildSessionIds?.includes(childId) ? 'codex-child-of-confirmed-main' : 'native-child-membership-unconfirmed' }
+    return { kind: 'main', basis: 'process-native-record', nativeSessionId: main.sessionId, reason: 'codex-confirmed-main' }
+  },
   // 事件名随负载到达：与 Claude 同族，stdin 负载带 `hook_event_name`。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   nativeTurnIdKeys: ['turn_id'],

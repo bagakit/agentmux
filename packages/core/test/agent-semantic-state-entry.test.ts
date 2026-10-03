@@ -1,4 +1,5 @@
-import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
+import { fixturePath } from './helpers/fixture-values.js'
+import { BUILT_IN_AGENT_PROVIDERS } from '../src/agent-provider.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -23,7 +24,7 @@ afterEach(async () => {
 function session(status?: AgentStatus): AgentMuxStoredAgentSession {
   return {
     kind: 'agent', agentSessionId: 'entry-agent', providerId: 'codex', executorId: 'codex',
-    hostId: 'local', workspacePath: upstreamFixturePath("repo"), run: { runId: 'entry-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("repo"), run: { runId: 'entry-run' }, retiredRuns: [],
     hookBindingId: 'entry-binding', hookToken: 'entry-token',
     createdAt: 1, updatedAt: Math.max(1, status?.observedAt ?? 0), ...(status ? { semanticStatus: status } : {})
   }
@@ -54,7 +55,12 @@ type Internals = {
 
 async function harness(initial = session(), store: AgentMuxAgentSessionStore = new AgentMuxMemoryAgentSessionStore(), seed = true) {
   if (seed) await store.compareAndSwap(null, initial)
-  const client = new AgentMuxClient({ store })
+  const client = new AgentMuxClient({ store, providers: BUILT_IN_AGENT_PROVIDERS.map(provider => provider.id !== 'codex' ? provider : {
+    ...provider,
+    // The fake Runtime PID has no OS record. This unit seam supplies the Provider's
+    // exact discovery witness; session-status-authority separately exercises real OS discovery.
+    discoverNativeSession: async () => ({ handle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'native-entry' }, assertCurrent: async () => {} })
+  }) })
   clients.push(client)
   const inner = client as unknown as Internals
   await inner.registry.load('local')
@@ -65,7 +71,7 @@ async function harness(initial = session(), store: AgentMuxAgentSessionStore = n
   let beforeAck: (() => Promise<void>) | undefined
   const run = (): CtxmuxAdapterRun => ({
     nativeService: null,
-    runId: 'entry-run', lifecycleOperationId: null, program: 'codex', args: [], workspacePath: upstreamFixturePath("repo"),
+    runId: 'entry-run', lifecycleOperationId: null, program: 'codex', args: [], workspacePath: fixturePath("repo"),
     pid: 123, state: { type: 'running' }, cols: 80, rows: 24,
     latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor
   })
@@ -87,7 +93,7 @@ async function harness(initial = session(), store: AgentMuxAgentSessionStore = n
   client.onEvent((event) => { events.push(event) })
   const feed = async (eventName: string, receiptId = `receipt-${events.length}`) => inner.acceptHookEvent({
     receiptId, agentSessionId: 'entry-agent', runId: 'entry-run', providerId: 'codex',
-    eventName, payload: { hook_event_name: eventName }
+    eventName, payload: { hook_event_name: eventName, session_id: 'native-entry' }
   }, AbortSignal.timeout(5_000))
   const stored = async () => (await loadAgentSessions(store))[0]!
   return { client, inner, store, writes, events, feed, stored,
@@ -110,7 +116,7 @@ it('public Hook state keeps its first entry time across repeated native receipts
   })
   h.inner.acceptKernelEvent({ type: 'data', runId: 'entry-run', startByte: 0, endByte: 3, dataBytes: Buffer.from('out'), data: 'out' })
   await expect(h.client.sessionHistoryPage('entry-agent', { limit: 10 }))
-    .rejects.toThrow('The main native Session identity has not been established.')
+    .rejects.toThrow('The configured native read helper could not start.')
   expect((await h.stored()).semanticStatus?.stateEnteredAt).toBe(1_000)
   expect(h.events.filter((event) => event.type === 'terminal-output').map((event) => event.data)).toEqual(['out'])
   expect(h.writes).toEqual([])
@@ -174,7 +180,7 @@ it('the file owner and a fresh public client preserve known and unknown entry fa
   await second.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: second.client.agentSession('entry-agent').run, data: '\u001b[0n', source: 'user' })
   const third = await harness(session(), new AgentMuxFileAgentSessionStore(path), false)
   expect(third.client.agentSession('entry-agent').semanticStatus).toEqual({
-    state: 'done', source: 'native-hook', observedAt: 2_000, detail: 'Stop'
+    state: 'done', source: 'native-hook', observedAt: 2_000, detail: 'Stop', idleEvidenceConsumed: true, currentActivityRevision: 1
   })
   expect(second.writes.map((input) => input.data)).toEqual(['\u001b[0n'])
 })
@@ -206,12 +212,12 @@ it('a failed typed input leaves unknown idle evidence without claiming working o
   const h = await harness(session(done(100)))
   h.inner.kernel.input = async () => { throw new Error('input unavailable') }
   await expect(h.submit('failed-execution')).rejects.toThrow('input unavailable')
-  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual(done())
+  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual({ ...done(), idleEvidenceConsumed: true, currentActivityRevision: 1 })
   expect((await h.stored()).promptCompletionAdmission?.submissionId).toBe('failed-execution')
   expect(h.writes).toEqual([])
 })
 
-it('empty raw input preserves idle evidence while acknowledged protocol bytes invalidate it only once', async () => {
+it('empty raw input preserves idle evidence while acknowledged user bytes invalidate it only once', async () => {
   const h = await harness(session(done(100)))
   const save = vi.spyOn(h.store, 'compareAndSwap')
   await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: '', source: 'user' })
@@ -220,7 +226,7 @@ it('empty raw input preserves idle evidence while acknowledged protocol bytes in
   expect(save).not.toHaveBeenCalled()
   expect(h.writes).toEqual([])
   await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: '\u001b[0n', source: 'user' })
-  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual(done())
+  expect(h.client.agentSession('entry-agent').semanticStatus).toEqual({ ...done(), idleEvidenceConsumed: true, currentActivityRevision: 1 })
   expect(save).toHaveBeenCalledTimes(1)
   await h.client.writeAgent({ agentSessionId: 'entry-agent', expectedRun: h.client.agentSession('entry-agent').run, data: 'next', source: 'user' })
   expect(save).toHaveBeenCalledTimes(1)
@@ -299,10 +305,24 @@ it('failed idle persistence after accepted input preserves ACK and cursor with a
 it('native interaction first claim invalidates idle but replay preserves the newly completed epoch', async () => {
   const h = await harness({
     ...session(done(100)), pendingInteraction: { request: {
-      kind: 'permission', id: 'permission-one', agentSessionId: 'entry-agent', title: 'Allow action?',
+      kind: 'permission', id: 'permission-one', nativeToolCallId: 'entry-tool-call', agentSessionId: 'entry-agent', title: 'Allow action?',
       options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }],
       evidence: { source: 'native-hook', observedAt: 100, run: { runId: 'entry-run' }, hookReceiptId: 'permission-one' }
     } }
+  })
+  // This state-entry test contributes an explicit synthetic Provider target.
+  // Exact native target admission is independently covered by interaction-input-target.
+  const provider = h.client.providers.get('codex')
+  provider.prepareInteractionResponse = async (context, request, response) => ({
+    plan: provider.planInteractionResponse(request, response),
+    target: { agentSessionId: context.agentSessionId, run: context.run, requestId: request.id,
+      nativeToolCallId: request.nativeToolCallId!, nativeSourceId: 'native-entry', inputByte: context.inputByte,
+      frame: { run: context.run, outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0 } },
+    inspectCurrentTarget: () => true, verifyCurrentTarget: async () => true
+  })
+  h.inner.screenEvidence.currentCompleteFrame = () => ({
+    snapshot: { cols: 80, rows: 24, cursor: { row: 0, column: 0 }, lines: [] },
+    outputThroughByte: 0, geometryRevision: 0, evidenceGeneration: 0
   })
   const failAckSave = vi.spyOn(h.store, 'compareAndSwap')
   h.beforeAck(async () => {
@@ -321,6 +341,8 @@ it('native interaction first claim invalidates idle but replay preserves the new
   await h.feed('Stop')
   await respond()
   expect(h.client.agentSession('entry-agent').semanticStatus?.stateEnteredAt).toBe(3_000)
-  expect(h.client.agentSession('entry-agent').pendingInteraction).toBeUndefined()
+  expect(h.client.agentSession('entry-agent').pendingInteraction).toMatchObject({
+    request: { nativeToolCallId: 'entry-tool-call' }, response: { acknowledged: true }
+  })
   expect(h.writes.map((input) => input.data)).toEqual(['1'])
 })

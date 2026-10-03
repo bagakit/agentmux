@@ -619,7 +619,7 @@ type AppState = {
     source?: DemandRecord['source']
     decisionLog?: readonly AgentMuxDemandDecision[]
   }): Promise<string>
-  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }): Promise<void>
+  updateDemand(id: string, patch: Partial<Pick<DemandRecord, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds' | 'decisionLog'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }, controlRequestId?: string): Promise<void>
   deleteDemand(id: string): void
   projectRailOpen: boolean
   /**
@@ -2471,11 +2471,16 @@ function applyNameAcknowledgement(saved: import('@agentmux/core/spatial-graph').
 async function commitDisplayName(target: AgentMuxNameTarget, value: string | null,
   source: 'manual' | 'launch', expectedNameRevision = currentDisplayNameRevision(target.kind, target.id)):
   Promise<AgentMuxDisplayLabelResult> {
-  // Capture the name revision before awaiting a layout save; a later edit wins.
+  // A new target needs registration; an existing name does not depend on unrelated layout writes.
   const operationId = crypto.randomUUID()
   try {
     if (!coreSpatialPersistence) throw new Error('Name storage is unconfirmed. Original names and the running Agent are retained; restore storage and retry the edit.')
-    await coreSpatialPersistence.flush()
+    const graph = coreSpatialPersistence.current?.graph
+    const registered = currentDisplayNameRevision(target.kind, target.id) > 0 ||
+      (target.kind === 'tab' && graph?.tabs.some(tab => tab.tabId === target.id)) ||
+      (target.kind === 'zone' && graph?.zones.some(zone => zone.zoneId === target.id)) ||
+      (target.kind === 'agent-session' && graph?.regions.some(region => region.agentSessionId === target.id))
+    if (!registered) await coreSpatialPersistence.flush()
     const result = await api.spatial.renameLabel({ operationId, target,
       value: value?.trim() || null, source, expectedNameRevision })
     coreSpatialPersistence.acceptNames(result.state)
@@ -4177,7 +4182,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const projectId = request.patch.projectId === undefined ? current.projectId : request.patch.projectId
       const project = projectId ? controlProject(projectId) : undefined
       if (projectId && !project) throw controlFailure('UNKNOWN_WORKSPACE', `Project is not available: ${projectId}`)
-      await get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) })
+      await get().updateDemand(request.demandId, { ...request.patch, ...(request.patch.projectId !== undefined ? { projectName: project?.name ?? null } : {}), ...(request.decision ? { decisionLog: [...(current.decisionLog ?? []), request.decision] } : {}) }, request.requestId)
       const demand = demandRecord(request.demandId)
       return { operation: request.operation, demand, receipt: { demandId: demand.id, updatedAt: demand.updatedAt } }
     }
@@ -5573,7 +5578,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     return id
   },
-  async updateDemand(id, patch) {
+  async updateDemand(id, patch, controlRequestId) {
     const current = get().demands[id]
     if (!current) throw new Error(`Goal ${id} is unavailable`)
     const decisionLog = [...(current.decisionLog ?? [])]
@@ -5592,7 +5597,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ...(patch.phaseIndex === undefined ? {} : { phaseIndex: patch.phaseIndex }),
       ...(patch.alignment === undefined ? {} : { alignment: patch.alignment }),
       ...(patch.grounding === undefined ? {} : { grounding: patch.grounding })
-    })
+    }, controlRequestId)
     const publish = (): void => {
       const record = { ...demandRecordFromFilesystem(receipt.demand), source: current.source, decisionLog: [...decisionLog] }
       set(state => ({ demands: { ...state.demands, [id]: record } }))

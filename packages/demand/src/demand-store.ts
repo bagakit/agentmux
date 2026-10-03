@@ -13,15 +13,35 @@ import {
   type DemandStoreSnapshot,
   type DemandStatus,
   type DemandPriority,
+  type DemandNameChangePage,
+  type DemandNameChangeRecord,
+  type DemandTitleMutationOptions,
   type UpdateDemandInput,
   isDemandPriority,
   isDemandStatus,
 } from './demand-types.js'
 import { DemandStoreError } from './errors.js'
+import { demandNameContext, parseDemandNameChange } from './demand-name-change.js'
 import { alignmentConfirmationIssue, groundingAcceptanceIssue, parseAlignment, parseAlignmentProposal, parseGrounding, parseGroundingProposal, type DemandAlignmentProposal, type DemandGroundingProposal } from './goals.js'
 
 const INITIAL_REVISION = 0
 const queues = new Map<string, Promise<void>>()
+
+/** A rejected attempt can have a committed failure record; a write failure cannot claim an ACK. */
+export class DemandNameChangeError extends DemandStoreError {
+  constructor(error: DemandStoreError, readonly nameChange: DemandNameChangeRecord, readonly commitStatus: 'confirmed' | 'not_applied' | 'unknown') {
+    super(error.code, error.phase, error.path,
+      `${error.message} ${commitStatus === 'not_applied' ? 'Title change was not applied; its record was not committed.' : commitStatus === 'unknown' ? 'Title snapshot was replaced, but its durable commit is unconfirmed. The operation was not resent.' : 'The failed title attempt was recorded; the previous title is retained.'}`, error)
+  }
+}
+
+class SnapshotWriteError extends DemandStoreError {
+  constructor(storePath: string, cause: unknown, readonly replacementApplied: boolean) {
+    super('WRITE_FAILED', 'write', storePath, `Could not atomically write Demand snapshot at ${storePath}`, cause)
+  }
+}
+
+type TitleAttempt = DemandTitleMutationOptions & { targetId: string; requested: string | null }
 
 export type OpenDemandStoreOptions = {
   root: string
@@ -81,13 +101,15 @@ function stringArray(value: unknown, label: string): string[] {
 
 function parseActivity(value: unknown, label: string): DemandActivity {
   const record = object(value, label)
-  exactKeys(record, ['id', 'kind', 'message', 'createdAt', 'actorId'], label)
+  exactKeys(record, ['id', 'kind', 'message', 'createdAt', 'actorId', 'nameChangeId'], label, ['nameChangeId'])
+  if (record.nameChangeId !== undefined && record.kind !== 'name-change') throw new Error(`${label}.nameChangeId requires the owner activity kind`)
   return {
     id: nonEmptyString(record.id, `${label}.id`),
     kind: nonEmptyString(record.kind, `${label}.kind`),
     message: nonEmptyString(record.message, `${label}.message`),
     createdAt: timestamp(record.createdAt, `${label}.createdAt`),
     actorId: nullableString(record.actorId, `${label}.actorId`),
+    ...(record.nameChangeId === undefined ? {} : { nameChangeId: nonEmptyString(record.nameChangeId, `${label}.nameChangeId`) }),
   }
 }
 
@@ -137,6 +159,7 @@ function parseDemand(value: unknown, label: string): Demand {
   const targetAt = record.targetAt === undefined || record.targetAt === null ? null : timestamp(record.targetAt, `${label}.targetAt`)
   const parentDemandId = record.parentDemandId === undefined ? null : nullableString(record.parentDemandId, `${label}.parentDemandId`)
   const phaseIndex = record.phaseIndex === undefined || record.phaseIndex === null ? null : (typeof record.phaseIndex === 'number' && Number.isSafeInteger(record.phaseIndex) && record.phaseIndex >= 0 ? record.phaseIndex : (() => { throw new Error(`${label}.phaseIndex must be a non-negative integer`) })())
+  const activities = record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`))
   return {
     id: nonEmptyString(record.id, `${label}.id`),
     title: nonEmptyString(record.title, `${label}.title`),
@@ -152,7 +175,7 @@ function parseDemand(value: unknown, label: string): Demand {
     parentDemandId,
     phaseIndex,
     sessionIds: stringArray(record.sessionIds, `${label}.sessionIds`),
-    activities: record.activities.map((entry, index) => parseActivity(entry, `${label}.activities[${index}]`)),
+    activities,
     decisions: record.decisions.map((entry, index) => parseDecision(entry, `${label}.decisions[${index}]`)),
     ...(record.alignment === undefined ? {} : { alignment: parseAlignment(record.alignment) }),
     ...(record.grounding === undefined ? {} : { grounding: parseGrounding(record.grounding) }),
@@ -164,7 +187,7 @@ function parseDemand(value: unknown, label: string): Demand {
 function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
   try {
     const record = object(value, 'snapshot')
-    exactKeys(record, ['schema', 'revision', 'updatedAt', 'demands'], 'snapshot')
+    exactKeys(record, ['schema', 'revision', 'updatedAt', 'demands', 'nameHistory'], 'snapshot', ['nameHistory'])
     if (record.schema !== DEMAND_STORE_SCHEMA) throw new Error('snapshot.schema is invalid')
     if (typeof record.revision !== 'number' || !Number.isSafeInteger(record.revision) || record.revision < 0) {
       throw new Error('snapshot.revision must be a non-negative integer')
@@ -174,11 +197,20 @@ function parseSnapshot(value: unknown, storePath: string): DemandStoreSnapshot {
     if (new Set(demands.map((demand) => demand.id)).size !== demands.length) {
       throw new Error('snapshot.demands contains duplicate IDs')
     }
+    if (record.nameHistory !== undefined && !Array.isArray(record.nameHistory)) throw new Error('snapshot.nameHistory must be an array')
+    const nameHistory = (record.nameHistory ?? [] as unknown[]).map(parseDemandNameChange)
+    const names = new Map(nameHistory.map(change => [change.id, change]))
+    if (names.size !== nameHistory.length) throw new Error('snapshot.nameHistory contains duplicate operation IDs')
+    for (const demand of demands) for (const activity of demand.activities) {
+      if (activity.nameChangeId !== undefined && names.get(activity.nameChangeId)?.target.id !== demand.id)
+        throw new Error('snapshot activity references an absent or different name target')
+    }
     return {
       schema: DEMAND_STORE_SCHEMA,
       revision: record.revision,
       updatedAt: timestamp(record.updatedAt, 'snapshot.updatedAt'),
       demands,
+      nameHistory,
     }
   } catch (error) {
     throw new DemandStoreError('INVALID_SNAPSHOT', 'validate', storePath, `Invalid Demand snapshot at ${storePath}: ${error instanceof Error ? error.message : String(error)}`, error)
@@ -231,9 +263,13 @@ export class DemandStore {
   }
 
   async snapshot(): Promise<DemandStoreSnapshot> {
+    return projectNameHistory(await this.readSnapshot())
+  }
+
+  private async readSnapshot(): Promise<DemandStoreSnapshot> {
     try {
       const raw = await fs.readFile(this.storePath, 'utf8')
-      return clone(parseSnapshot(JSON.parse(raw) as unknown, this.storePath))
+      return parseSnapshot(JSON.parse(raw) as unknown, this.storePath)
     } catch (error) {
       if (error instanceof DemandStoreError) throw error
       if (isNodeError(error, 'ENOENT')) return emptySnapshot()
@@ -255,6 +291,17 @@ export class DemandStore {
 
   async read(id: string): Promise<Demand | null> {
     return this.get(id)
+  }
+
+  async listNameChanges(id: string, options: { offset?: number; limit?: number } = {}): Promise<DemandNameChangePage> {
+    const offset = options.offset ?? 0
+    const limit = options.limit ?? 50
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Name history requires a non-negative offset and a limit from 1 to 100.')
+    }
+    const snapshot = await this.readSnapshot()
+    const records = snapshot.nameHistory.filter(change => change.target.id === id)
+    return { revision: snapshot.revision, records: records.slice(offset, offset + limit), nextOffset: offset + limit < records.length ? offset + limit : null }
   }
 
   async create(input: CreateDemandInput): Promise<DemandReceipt> {
@@ -293,7 +340,8 @@ export class DemandStore {
     })
   }
 
-  async update(id: string, patch: UpdateDemandInput): Promise<DemandReceipt> {
+  async update(id: string, patch: UpdateDemandInput, options: DemandTitleMutationOptions = {}): Promise<DemandReceipt> {
+    patch = structuredClone(patch)
     return this.mutate('update', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
       if ('confirmedAt' in patch || 'acceptedAt' in patch || 'revision' in patch || 'submissionId' in patch) {
@@ -338,7 +386,7 @@ export class DemandStore {
       demand.updatedAt = Date.now()
       validateNewDemand(demand, this.storePath)
       return demand
-    })
+    }, patch.title === undefined ? undefined : { ...options, targetId: id, requested: typeof patch.title === 'string' ? patch.title : null })
   }
 
   async proposeAlignment(id: string, proposal: DemandAlignmentProposal): Promise<DemandReceipt> {
@@ -426,6 +474,9 @@ export class DemandStore {
   }
 
   async addActivity(id: string, input: Omit<DemandActivity, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
+    if (input.kind === 'name-change' || input.nameChange !== undefined || input.nameChangeId !== undefined) {
+      throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Name change activities are created only by the title owner.')
+    }
     return this.mutate('activity', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
       const activity: DemandActivity = {
@@ -468,19 +519,86 @@ export class DemandStore {
     return this.addDecision(id, input)
   }
 
-  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand): Promise<DemandReceipt> {
+  private async mutate(operation: string, fn: (snapshot: DemandStoreSnapshot) => Demand, titleAttempt?: TitleAttempt): Promise<DemandReceipt> {
+    let context: DemandNameChangeRecord['context'] | undefined
+    if (titleAttempt) {
+      try { context = demandNameContext(titleAttempt.context) } catch (error) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, error instanceof Error ? error.message : String(error), error)
+      }
+      context.location.demandRoot = this.root
+      if (titleAttempt.operationId !== undefined && (typeof titleAttempt.operationId !== 'string' || !titleAttempt.operationId.trim() || titleAttempt.operationId.length > 4096 || titleAttempt.operationId.includes('\0'))) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'A title operation ID must be a non-empty string.')
+      }
+      if (titleAttempt.expectedRevision !== undefined && (!Number.isSafeInteger(titleAttempt.expectedRevision) || titleAttempt.expectedRevision < 0)) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'Expected Demand revision must be a non-negative integer.')
+      }
+    }
     return enqueue(this.root, async () => {
       await fs.mkdir(this.root, { recursive: true })
       const release = await this.acquireLock()
       try {
-        const snapshot = await this.snapshot()
-        const demand = fn(snapshot)
+        let snapshot = await this.readSnapshot()
+        const operationId = titleAttempt?.operationId ?? `demand-op-${snapshot.revision + 1}-${randomUUID()}`
+        const original = titleAttempt ? findDemand(snapshot, titleAttempt.targetId, this.storePath) : undefined
+        const previous = titleAttempt ? snapshot.nameHistory.find(change => change.operationId === operationId) : undefined
+        if (previous) {
+          if (previous.target.id !== titleAttempt!.targetId || previous.requested !== titleAttempt!.requested || previous.context.source !== context!.source ||
+              previous.context.actor.kind !== context!.actor.kind || previous.context.actor.id !== context!.actor.id || previous.context.actor.verified !== context!.actor.verified) {
+            throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The title operation ID already belongs to a different request or caller.')
+          }
+          try { await this.confirmSnapshot() } catch (error) {
+            const failure = new DemandStoreError('WRITE_FAILED', 'write', this.storePath,
+              'Could not confirm the current Demand snapshot without replaying the title operation.', error)
+            throw new DemandNameChangeError(failure, { ...clone(previous), status: 'unknown', actual: original!.title,
+              ownerRevision: null, reason: failure.message }, 'unknown')
+          }
+          if (previous.status === 'failed') throw new DemandNameChangeError(new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, previous.reason ?? 'The original title attempt failed.'), clone(previous), 'confirmed')
+          return { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: previous.ownerRevision!, demand: clone(original!), nameChange: clone(previous), replayed: true }
+        }
+        const startedAt = Date.now()
+        let failure: DemandStoreError | undefined
+        let demand: Demand
+        if (titleAttempt) {
+          const candidate = clone(snapshot)
+          try {
+            if (titleAttempt.expectedRevision !== undefined && titleAttempt.expectedRevision !== snapshot.revision) {
+              throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, `Demand revision conflict: expected ${titleAttempt.expectedRevision}, actual ${snapshot.revision}.`)
+            }
+            demand = fn(candidate)
+            snapshot = candidate
+          } catch (error) {
+            if (!(error instanceof DemandStoreError)) throw error
+            failure = error
+            demand = original!
+          }
+        } else demand = fn(snapshot)
         snapshot.revision += 1
         snapshot.updatedAt = Date.now()
-        await this.writeSnapshot(snapshot)
-        const result = { schema: 'agentmux.demand-receipt.v1' as const, operation, operationId: `demand-op-${snapshot.revision}-${randomUUID()}`, revision: snapshot.revision, demand: clone(demand) }
-        const published = clone(snapshot)
-        for (const listener of this.listeners) listener(published)
+        let nameChange: DemandNameChangeRecord | undefined
+        if (titleAttempt) {
+          nameChange = { id: operationId, operationId, target: { kind: 'demand', id: demand.id }, before: original!.title,
+            requested: titleAttempt.requested, actual: demand.title, context: context!, ownerRevision: snapshot.revision,
+            status: failure ? 'failed' : 'applied', startedAt, settledAt: Math.max(startedAt, Date.now()),
+            reason: failure?.message ?? (original!.title === demand.title ? 'unchanged' : null) }
+          snapshot.nameHistory.push(nameChange)
+          demand.activities.push({ id: `activity_${randomUUID()}`, kind: 'name-change', message: failure ? 'Title change failed.' : nameChange.reason === 'unchanged' ? 'Title unchanged.' : 'Title changed.',
+            createdAt: nameChange.settledAt, actorId: context!.actor.verified ? context!.actor.id : null, nameChangeId: nameChange.id })
+          demand.updatedAt = snapshot.updatedAt
+        }
+        try { await this.writeSnapshot(snapshot) } catch (error) {
+          if (!nameChange || !(error instanceof SnapshotWriteError)) throw error
+          const applied = error.replacementApplied
+          throw new DemandNameChangeError(error, { ...nameChange, ownerRevision: null, status: applied ? 'unknown' : 'failed', actual: applied ? demand.title : original!.title, reason: error.message }, applied ? 'unknown' : 'not_applied')
+        }
+        const published = projectNameHistory(snapshot)
+        const result: DemandReceipt = { schema: DEMAND_RECEIPT_SCHEMA, operation, operationId, revision: snapshot.revision,
+          demand: { ...clone(demand), activities: projectActivities(demand.activities, new Map(snapshot.nameHistory.map(change => [change.id, change]))) }, ...(nameChange ? { nameChange: clone(nameChange) } : {}) }
+        for (const listener of this.listeners) {
+          try { listener(published) } catch {
+            console.warn(`Demand snapshot observer failed after confirmed revision ${snapshot.revision}, operation ${operationId}.`)
+          }
+        }
+        if (failure) throw new DemandNameChangeError(failure, clone(nameChange!), 'confirmed')
         return result
       } finally {
         await release()
@@ -514,24 +632,30 @@ export class DemandStore {
   private async writeSnapshot(snapshot: DemandStoreSnapshot): Promise<void> {
     const tempPath = `${this.storePath}.tmp-${process.pid}-${randomUUID()}`
     const data = `${JSON.stringify(snapshot, null, 2)}\n`
+    let replacementApplied = false
     try {
       const handle = await fs.open(tempPath, 'wx', 0o600)
-      await handle.writeFile(data, 'utf8')
-      await handle.sync()
-      await handle.close()
-      await fs.rename(tempPath, this.storePath)
       try {
-        const directory = await fs.open(this.root, 'r')
-        await directory.sync()
-        await directory.close()
-      } catch (error) {
-        if (!isNodeError(error, 'EINVAL') && !isNodeError(error, 'ENOTSUP')) throw error
-      }
+        await handle.writeFile(data, 'utf8')
+        await handle.sync()
+      } finally { await handle.close() }
+      await fs.rename(tempPath, this.storePath)
+      replacementApplied = true
+      const directory = await fs.open(this.root, 'r')
+      try { await directory.sync() } finally { await directory.close() }
     } catch (error) {
       await fs.rm(tempPath, { force: true }).catch(() => undefined)
       if (error instanceof DemandStoreError) throw error
-      throw new DemandStoreError('WRITE_FAILED', 'write', this.storePath, `Could not atomically write Demand snapshot at ${this.storePath}`, error)
+      throw new SnapshotWriteError(this.storePath, error, replacementApplied)
     }
+  }
+
+  /** Called under the original writer lock: confirm current facts, never reapply a past title. */
+  private async confirmSnapshot(): Promise<void> {
+    const file = await fs.open(this.storePath, 'r')
+    try { await file.sync() } finally { await file.close() }
+    const directory = await fs.open(this.root, 'r')
+    try { await directory.sync() } finally { await directory.close() }
   }
 }
 
@@ -540,7 +664,18 @@ export function openDemandStore(options: OpenDemandStoreOptions): DemandStore {
 }
 
 function emptySnapshot(): DemandStoreSnapshot {
-  return { schema: DEMAND_STORE_SCHEMA, revision: INITIAL_REVISION, updatedAt: Date.now(), demands: [] }
+  return { schema: DEMAND_STORE_SCHEMA, revision: INITIAL_REVISION, updatedAt: Date.now(), demands: [], nameHistory: [] }
+}
+
+function projectActivities(activities: readonly DemandActivity[], names: ReadonlyMap<string, DemandNameChangeRecord>): DemandActivity[] {
+  return activities.map(({ nameChange: _projection, ...activity }) => ({ ...clone(activity),
+    ...(activity.nameChangeId === undefined ? {} : { nameChange: clone(names.get(activity.nameChangeId)!) }) }))
+}
+
+function projectNameHistory(snapshot: DemandStoreSnapshot): DemandStoreSnapshot {
+  const names = new Map(snapshot.nameHistory.map(change => [change.id, change]))
+  return { ...clone(snapshot), demands: snapshot.demands.map(demand => ({ ...clone(demand),
+    activities: projectActivities(demand.activities, names) })) }
 }
 
 function findDemand(snapshot: DemandStoreSnapshot, id: string, storePath: string): Demand {

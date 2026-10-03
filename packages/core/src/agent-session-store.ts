@@ -8,7 +8,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
-import { durableWriteFile, DurableWriteConfirmationError } from './durable-write.js'
+import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
@@ -385,6 +385,8 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
   const source = record(value, 'Session history metadata')
   const providerId = string(source.providerId, 'history.providerId')
   const handle = source.nativeHandle === undefined ? undefined : nativeHandle(source.nativeHandle)
+  const observed = source.observedNativeHandle === undefined ? undefined : nativeHandle(source.observedNativeHandle)
+  if (observed?.kind === 'provider' && observed.providerId !== providerId) throw new AgentMuxError('Observed history identity belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
   if (handle?.kind === 'provider' && handle.providerId !== providerId) {
     throw new AgentMuxError('History locator belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
   }
@@ -393,7 +395,8 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
     executorId: string(source.executorId, 'history.executorId'),
     workspacePath: string(source.workspacePath, 'history.workspacePath', MAX_PATH_BYTES),
     createdAt: timestamp(source.createdAt, 'history.createdAt'),
-    ...(handle === undefined ? {} : { nativeHandle: handle })
+    ...(handle === undefined ? {} : { nativeHandle: handle }),
+    ...(observed === undefined ? {} : { observedNativeHandle: observed })
   }
 }
 
@@ -587,6 +590,19 @@ function hookReceipt(value: unknown): AgentHookReceipt {
     } } : {}),
     ...(source.lifecycleEvent === null ? { lifecycleEvent: null } : lifecycleEvent ? { lifecycleEvent } : {}),
     observedAt: timestamp(source.observedAt, 'hookReceipt.observedAt'),
+    ...(source.subject === undefined ? {} : { subject: (() => {
+      const subject = record(source.subject, 'hookReceipt.subject')
+      if (!['main', 'child', 'foreign', 'unknown'].includes(String(subject.kind)) ||
+        !['provider-protocol', 'process-native-record'].includes(String(subject.basis))) throw new AgentMuxError('Invalid Hook subject.', 'INVALID_AGENT_SESSION_STORE')
+      return { kind: subject.kind as NonNullable<AgentHookReceipt['subject']>['kind'],
+        basis: subject.basis as NonNullable<AgentHookReceipt['subject']>['basis'], reason: string(subject.reason, 'hookReceipt.subject.reason'),
+        ...(subject.nativeSessionId === undefined ? {} : { nativeSessionId: string(subject.nativeSessionId, 'hookReceipt.subject.nativeSessionId') }) }
+    })() }),
+    ...(source.decision === undefined ? {} : { decision: (() => {
+      const decision = record(source.decision, 'hookReceipt.decision')
+      if (typeof decision.activityApplied !== 'boolean' || typeof decision.lifecycleApplied !== 'boolean') throw new AgentMuxError('Invalid Hook decision.', 'INVALID_AGENT_SESSION_STORE')
+      return { activityApplied: decision.activityApplied, lifecycleApplied: decision.lifecycleApplied, reason: string(decision.reason, 'hookReceipt.decision.reason') }
+    })() }),
     ...(outputCursorBytes === undefined ? {} : { outputCursorBytes })
   }
 }
@@ -607,10 +623,16 @@ function semanticStatus(value: unknown): AgentStatus {
     state: source.state as AgentStatus['state'],
     source: source.source,
     observedAt: timestamp(source.observedAt, 'semanticStatus.observedAt'),
+    ...(source.currentActivityRevision === undefined ? {} : { currentActivityRevision: positiveInteger(source.currentActivityRevision, 'semanticStatus.currentActivityRevision') }),
     ...(source.stateEnteredAt === undefined ? {} : {
       stateEnteredAt: timestamp(source.stateEnteredAt, 'semanticStatus.stateEnteredAt')
     }),
-    ...(detail ? { detail } : {})
+    ...(detail ? { detail } : {}),
+    ...(source.idleEvidenceConsumed === undefined ? {} : { idleEvidenceConsumed: (() => {
+      if (source.idleEvidenceConsumed !== true || source.state !== 'done') throw new AgentMuxError('Invalid consumed completion.', 'INVALID_AGENT_SESSION_STORE')
+      return true as const
+    })() }),
+    ...(source.aggregateActivityAt === undefined ? {} : { aggregateActivityAt: timestamp(source.aggregateActivityAt, 'semanticStatus.aggregateActivityAt') })
   }
 }
 
@@ -1307,6 +1329,12 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       ? {}
       : { pendingInteraction: pendingInteraction(source.pendingInteraction) }),
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
+    ...(source.observedNativeHandle === undefined ? {} : { observedNativeHandle: nativeHandle(source.observedNativeHandle) }),
+    ...(source.nativeBinding === undefined ? {} : { nativeBinding: (() => {
+      const binding = record(source.nativeBinding, 'nativeBinding')
+      if (!['native-hook', 'process-witness', 'semantic-resume-target'].includes(String(binding.source))) throw new AgentMuxError('Invalid native binding source.', 'INVALID_AGENT_SESSION_STORE')
+      return { source: binding.source as 'native-hook' | 'process-witness' | 'semantic-resume-target', run: runRef(binding.run), observedAt: timestamp(binding.observedAt, 'nativeBinding.observedAt') }
+    })() }),
     ...(source.nativePromptPredecessor === undefined ? {} : { nativePromptPredecessor: (() => {
       const fact = record(source.nativePromptPredecessor, 'nativePromptPredecessor')
       const run = runRef(fact.run), previousRun = runRef(fact.previousRun)
@@ -1324,7 +1352,12 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     session.terminalPromptReadiness.observedAt !== undefined && session.terminalPromptReadiness.observedAt > session.updatedAt) {
     throw new AgentMuxError('Native turn end observation exceeds the Session time.', 'INVALID_AGENT_SESSION_STORE')
   }
-  if (session.nativeHandle?.kind === 'provider' && session.nativeHandle.providerId !== session.providerId) {
+  if ((session.nativeBinding && (!session.nativeHandle || session.nativeBinding.run.runId !== session.run.runId || session.nativeBinding.observedAt > session.updatedAt)) ||
+    (session.observedNativeHandle?.kind === 'provider' && session.observedNativeHandle.providerId !== session.providerId) ||
+    (session.semanticStatus?.aggregateActivityAt !== undefined && session.semanticStatus.aggregateActivityAt > session.updatedAt)) {
+    throw new AgentMuxError('Native/activity facts do not match this Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (session.nativeHandle?.kind === 'provider'  && session.nativeHandle.providerId !== session.providerId) {
     throw new AgentMuxError('Native session handle provider does not match the Agent.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (
@@ -2098,7 +2131,7 @@ const requireNative = createRequire(import.meta.url)
 /** Only the post-replacement phase carries this receipt. It is not a success acknowledgement. */
 export class AgentMuxSessionDurabilityError extends AgentMuxError {
   readonly replacementApplied = true
-  constructor(cause: DurableWriteConfirmationError) {
+  constructor(cause: DurableWriteError) {
     super('The Session is readable, but its durable save is not confirmed. Its Run is retained; retry save confirmation.',
       'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED', cause.cause instanceof Error ? cause.cause.message : String(cause.cause))
   }
@@ -2719,7 +2752,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     try {
       await durableWriteFile(this.path, content, { mode: 0o600, requireDirectorySync: true, ...(signal ? { signal } : {}) })
     } catch (error) {
-      if (error instanceof DurableWriteConfirmationError) throw new AgentMuxSessionDurabilityError(error)
+      if (error instanceof DurableWriteError && error.phase === 'after-replace') throw new AgentMuxSessionDurabilityError(error)
       throw error
     }
     if (pruneTimelines || retained !== document) await this.maintainTimelineFiles(retained)

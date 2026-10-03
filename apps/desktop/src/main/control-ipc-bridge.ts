@@ -11,8 +11,11 @@ import type {
   DesktopControlResponse
 } from '../shared/contracts.js'
 import type { ContinuousProgressInputRequest, ContinuousProgressInputResult } from '../shared/continuous-progress.js'
+import { nameChangeRequests } from './name-change-audit.js'
 
 type PendingControl = {
+  request: DesktopControlRequest
+  nameRequest: ReturnType<typeof nameChangeRequests.getStore>
   resolve(value: DesktopControlResult): void
   reject(error: Error): void
   timeout: NodeJS.Timeout
@@ -66,7 +69,8 @@ export class DesktopControlIpcBridge {
           bridgeError('CONTROL_TIMEOUT', 'Desktop Control request timed out.')
         )
       }, agentMuxControlTimeoutMs(request.operation === 'continuous-progress.observeInput' ? 'inspect.region' : request.operation === 'metrics.renderer' ? 'metrics.get' : request.operation))
-      this.pending.set(request.requestId, { resolve, reject, timeout })
+      this.pending.set(request.requestId, { request: structuredClone(request),
+        nameRequest: nameChangeRequests.getStore(), resolve, reject, timeout })
       signal?.addEventListener('abort', abort, { once: true })
       try {
         this.transport.sendRequest(request)
@@ -79,6 +83,15 @@ export class DesktopControlIpcBridge {
         ))
       }
     }) } finally { signal?.removeEventListener('abort', abort) }
+  }
+
+  /** An IPC relay may refer to an admitted host request, but cannot supply its actor. */
+  nameRequest(requestId: string, matches: (request: DesktopControlRequest) => boolean):
+    NonNullable<ReturnType<typeof nameChangeRequests.getStore>> {
+    const pending = this.pending.get(requestId)
+    if (!pending?.nameRequest || !matches(pending.request)) throw bridgeError('CONTROL_REQUEST_CONFLICT',
+      'The name change does not match an active admitted Control operation. Retry the exact original request.')
+    return structuredClone(pending.nameRequest)
   }
 
   accept(response: DesktopControlResponse): boolean {
