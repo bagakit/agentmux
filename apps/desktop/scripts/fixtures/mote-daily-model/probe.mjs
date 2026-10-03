@@ -163,7 +163,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
         Buffer, structuredClone, AbortController, AbortSignal, setTimeout: timer, clearTimeout, console }, { filename: ownerFile })
       if (scenario === 'spent-six-refuses-next-input' || scenario === 'trusted-terminal-protocol-zero-model-budget') releaseManager()
       const passed = await module.exports.runModelOwner({ root, evidence: output, html: 'source-counter', preload: 'source-counter',
-        command: 'source-counter', codexArgs: [], cli: 'source-counter', hook: 'source-counter', decisionFile: 'source-counter' })
+        command: 'source-counter', codexArgs: [], nativeReadArgs: [], cli: 'source-counter', hook: 'source-counter', decisionFile: 'source-counter' })
       assert.equal(passed, false, 'A source counter cannot qualify a model journey')
       const raw = JSON.parse(await readFile(join(output, 'owner.json'), 'utf8')), budget = JSON.parse(await readFile(join(output, 'model-budget.json'), 'utf8'))
       assert.equal(budget.gateClosed, true); assert.equal(raw.completedModelTurns, 0)
@@ -465,7 +465,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       const args = [...fixture.privateCodexConfigArgs, '--dangerously-bypass-hook-trust', '--no-alt-screen', '--ask-for-approval', 'never',
         '--sandbox', 'workspace-write', '--config', 'model_reasoning_effort="low"']
       const parameters = { html: join(buildRoot, 'renderer/index.html'), preload, root: runtimeRoot, evidence,
-        command: executable, codexArgs: args, cli: join(source, 'packages/core/bin/agentmux'),
+        command: executable, codexArgs: args, nativeReadArgs: [...fixture.privateCodexConfigArgs], cli: join(source, 'packages/core/bin/agentmux'),
         hook: join(source, 'packages/core/bin/agentmux-hook.js'), decisionFile: permission.grant.decisionFile }
       const main = ("const{app}=require('electron');const input=" + (JSON.stringify(parameters)) + (";app.setPath('userData',input.root+'/desktop');app.setPath('sessionData',input.root+'/desktop-session');app.setPath('home',input.root+'" + _hygiene_fixturePath("home") + "');app.whenReady().then(async()=>{const{runModelOwner}=await import(") + (JSON.stringify(pathToFileURL(owner).href)) + ");const passed=await runModelOwner(input);app.exit(passed?0:1)}).catch(error=>{console.error(error);app.exit(1)});")
       const mainFile = join(buildRoot, 'main.cjs'); await writeFile(mainFile, main); receipt.compiledOutputs.generatedMain = hash(main)
