@@ -30,9 +30,19 @@
 .toolkit-result__identity > small { display: block; margin-bottom: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
 .toolkit-result__identity > h2 { overflow-wrap: anywhere; }
 
-.toolkit-result__document h3 { margin: 0 0 12px; font-size: 16px; }
-.toolkit-result__document dl { margin: 12px 0; }
-.toolkit-result__document dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; }
-.toolkit-result__document dt { overflow-wrap: anywhere; }
-.toolkit-result__document dd { margin: 0; white-space: nowrap; }
-.toolkit-result__document .settings-input { width: 100%; margin: 8px 0; }
+/* Data-only documents use the same compact result surface as other Toolkits. */
+.toolkit-result__document { display: grid; gap: var(--sp-4); margin-bottom: var(--sp-4); }
+.toolkit-result__document h3 { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.toolkit-result__document .settings-hint { margin: 0; line-height: 1.6; }
+.toolkit-result__document dl { margin: 0; }
+.toolkit-result__document dl:empty { display: none; }
+.toolkit-result__document dl > div { display: flex; justify-content: space-between; gap: var(--sp-4); padding-block: var(--sp-2); font-size: var(--fs-meta); }
+.toolkit-result__document dt { min-width: 0; color: var(--text-2); overflow-wrap: anywhere; }
+.toolkit-result__document dd { margin: 0; color: var(--text); white-space: nowrap; }
+.toolkit-result__link { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); }
+.toolkit-result__link details { min-width: 0; flex: 1; color: var(--text-3); font-size: var(--fs-meta); }
+.toolkit-result__link summary { cursor: pointer; }
+.toolkit-result__link .settings-input { width: 100%; min-width: 0; margin-top: var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-meta); }
+.toolkit-result__spinner { animation: toolkit-result-spin 1s linear infinite; }
+@keyframes toolkit-result-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .toolkit-result__spinner { animation: none; } }
