@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { TopicNavigationPanel } from './TopicNavigationPanel'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
@@ -268,7 +269,8 @@ export function WorkspaceAgentsTool({
   sessions: readonly SessionSnapshot[]
   onOpen(sessionId: string): void
 }) {
-  const groups = workspaceAgentGroups(sessions, workspace)
+  const topics = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
+  const groups = workspaceAgentGroups(sessions, workspace, topics)
   const count = groups.reduce((total, group) => total + group.sessions.length, 0)
 
   return (

@@ -1336,6 +1336,12 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    scratch: { ...preload.scratch, listTopics: async workspaceId => {
+      const result = await preload.scratch.listTopics(workspaceId)
+      // Normalize only after the real bridge. Array custom fields are dropped
+      // by contextBridge, so the transport carries them in an explicit envelope.
+      return Object.assign(result.topics, result.issues.length ? { issues: result.issues } : {})
+    } },
     control: createRendererControlApi(preload.control),
     sessions: {
       ...preload.sessions,

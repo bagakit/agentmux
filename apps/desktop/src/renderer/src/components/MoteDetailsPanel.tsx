@@ -32,8 +32,9 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
   const [avatar, setAvatar] = useState<SpaceIconTarget | null>(null)
   const renameInvoker = useRef<{ node: HTMLButtonElement; key: string } | null>(null)
   const avatarInvoker = useRef<{ node: HTMLButtonElement; key: string } | null>(null)
-  const iconTarget = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic), [scope.workspace, scope.topic])
-  const icon = useAppStore(state => state.spaceObjectIcons[iconTarget.key] ?? null)
+  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const iconTarget = useMemo(() => topicSpaceIconTarget(scope.workspace, scope.topic, bindings), [scope.workspace, scope.topic, bindings])
+  const icon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const sessionId = useAppStore(state => {
     const layout = state.layouts[scope.workspace.id], group = layout?.groups.find(item => item.id === layout.activeGroupId)
     const tab = state.tabs[reference ? reference.tabId : reference === null ? '' : group?.activeTabId ?? '']
@@ -42,19 +43,20 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
   })
   const session = useAppStore(state => sessionId ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
   const returnFocus = (invoker: { node: HTMLButtonElement; key: string } | null) =>
-    invoker?.key === iconTarget.key && invoker.node.isConnected ? invoker.node : null
+    iconTarget && invoker?.key === iconTarget.key && invoker.node.isConnected ? invoker.node : null
   const identity = <>
     <div className="mote-details__identity">
           <button type="button" className="icon-button mote-details__avatar" aria-label="Change Mote avatar" title="Change Mote avatar" onClick={event => {
+            if (!iconTarget) { useAppStore.getState().reportError(new Error('The original avatar identity is unconfirmed. Its existing appearance and workface are kept; repair the same directory record.')); return }
             avatarInvoker.current = { node: event.currentTarget, key: iconTarget.key }
             setAvatar({ ...iconTarget, name: scope.topic.title })
           }}>
-            <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget.key}
+            <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
               avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} moteSessionId={sessionId}
               moteHostId={scope.workspace.hostId} moteAvailability={sessionId ? 'restoring' : reference === null ? 'restoring' : 'no-agent'} />
           </button>
           <div><div className="mote-details__name"><strong>{scope.topic.title}</strong><button type="button" className="icon-button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
-            renameInvoker.current = { node: event.currentTarget, key: iconTarget.key }
+            renameInvoker.current = { node: event.currentTarget, key: scope.topic.id }
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
           }}><Pencil size={12} /></button></div><span className="mote-details__status">{session ? <><StatusDot status={session.status} />{session.status.state}</> : sessionId || reference === null ? 'Status not confirmed' : 'No Agent selected'}</span></div>
         </div>
@@ -74,7 +76,7 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
       onClick={() => setSection(id)}>{id === 'profile' ? 'Profile' : 'Ideas'}</button>)}</div>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
       scope={scope} reference={reference} section={section} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
-    <MoteRenameDialog target={rename} onClose={() => setRename(null)} returnFocus={() => returnFocus(renameInvoker.current)} />
+    <MoteRenameDialog target={rename} onClose={() => setRename(null)} returnFocus={() => renameInvoker.current?.key === scope.topic.id && renameInvoker.current.node.isConnected ? renameInvoker.current.node : null} />
     <SpaceIconPicker target={avatar} onClose={() => setAvatar(null)} returnFocus={() => returnFocus(avatarInvoker.current)} />
   </section>
 }

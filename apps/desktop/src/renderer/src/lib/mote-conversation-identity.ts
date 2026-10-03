@@ -10,7 +10,7 @@ export type MoteConversationIdentity = {
   workspaceId: string; topicId: string; objectKey: string; name: string; icon: SpaceIconChoice | null
 }
 export type MoteConversationOwner = MoteConversationIdentity & {
-  hostId: string; identityDirectoryPath: string; physicalDirectoryPath: string
+  hostId: string; identityDirectoryPath: string; physicalDirectoryPath: string; confirmedDirectoryPaths?: readonly string[]
 }
 
 /** Original Tab/Topic facts work even when the retained View paints in another portal. */
@@ -19,7 +19,8 @@ export function useMoteConversationOwner(workspaceId: string, tabId: string | un
     topicId: visible && tabId ? state.tabs[tabId]?.topicId : undefined,
     tabWorkspaceId: visible && tabId ? state.tabs[tabId]?.workspaceId : undefined,
     config: visible ? state.config : null,
-    snapshot: visible ? state.scratchTopicSnapshots[workspaceId] : undefined
+    snapshot: visible ? state.scratchTopicSnapshots[workspaceId] : undefined,
+    bindings: state.spaceZoneBindings
   })))
   const owner = useMemo(() => {
     const workspace = facts.config?.workspaces.find(item => item.id === workspaceId)
@@ -27,10 +28,11 @@ export function useMoteConversationOwner(workspaceId: string, tabId: string | un
     const topic = topics?.find(item => item.id === facts.topicId)
     if (facts.tabWorkspaceId !== workspaceId || !workspace || !topic || !topics || scratchTopicKind(topic.id, topics) !== 'mote' ||
       scratchTopicLogicalPath(workspace, topic) === null) return null
-    const identityDirectoryPath = scratchTopicIdentityPath(workspace, topic), physicalDirectoryPath = scratchTopicPhysicalPath(workspace, topic)
-    const target = topicSpaceIconTarget(workspace, topic)
+    const target = topicSpaceIconTarget(workspace, topic, facts.bindings)
+    if (!target) return null
+    const identityDirectoryPath: string = JSON.parse(target.key)[1], physicalDirectoryPath = scratchTopicPhysicalPath(workspace, topic)
     return { workspaceId, topicId: topic.id, objectKey: target.key, name: topic.title,
-      hostId: workspace.hostId, identityDirectoryPath, physicalDirectoryPath }
+      hostId: workspace.hostId, identityDirectoryPath, physicalDirectoryPath, ...(topic.confirmedDirectoryPaths ? { confirmedDirectoryPaths: topic.confirmedDirectoryPaths } : {}) }
   }, [facts, workspaceId])
   const icon = useAppStore(state => owner ? state.spaceObjectIcons[owner.objectKey] ?? null : null)
   return useMemo(() => owner ? { ...owner, icon } : null, [owner, icon])
@@ -39,6 +41,6 @@ export function useMoteConversationOwner(workspaceId: string, tabId: string | un
 /** Display identity never changes the recorded Session author or its details. */
 export function moteConversationIdentity(owner: MoteConversationOwner | null, session: SessionSnapshot | undefined): MoteConversationIdentity | undefined {
   if (!owner || session?.kind !== 'agent' || session.hostId !== owner.hostId ||
-    (session.workspacePath !== owner.identityDirectoryPath && session.workspacePath !== owner.physicalDirectoryPath)) return undefined
+    (session.workspacePath !== owner.identityDirectoryPath && session.workspacePath !== owner.physicalDirectoryPath && !owner.confirmedDirectoryPaths?.includes(session.workspacePath))) return undefined
   return owner
 }

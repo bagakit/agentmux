@@ -624,7 +624,7 @@ export async function registerIpc(args: {
   handle('files:list', async (workspaceId: string, path?: string, limit?: number) =>
     await files.listFiles(workspace(config, workspaceId), path, limit)
   )
-  const publicFiles = new FileReadOwner({ files, workspace: id => config.workspaces.find(item => item.id === id),
+  const publicFiles = new FileReadOwner({ files, topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory), workspace: id => config.workspaces.find(item => item.id === id),
     catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
     requireTrustedSender('files:readPublic', event)
@@ -681,9 +681,10 @@ export async function registerIpc(args: {
   handle('scratch:readTopic', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.read(workspace(config, workspaceId), topicId)
   )
-  handle('scratch:listTopics', async (workspaceId: string) =>
-    await args.scratchTopics.list(workspace(config, workspaceId))
-  )
+  handle('scratch:listTopics', async (workspaceId: string) => {
+    const topics = await args.scratchTopics.list(workspace(config, workspaceId))
+    return { topics, issues: topics.issues ?? [] }
+  })
   handle('scratch:ensureTopic', async (workspaceId: string, topicId: string) =>
     await args.scratchTopics.ensure(workspace(config, workspaceId), topicId)
   )

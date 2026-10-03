@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from './lib/scratch-topic-snapshots'
 import { conversationReplySourceKey, type ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import type { AgentMuxPendingMessage } from '@agentmux/core/control'
 import type { AgentPromptExecution } from '@agentmux/core'
@@ -1046,13 +1047,13 @@ function focusSessionContext(
   if (sessionId === null) return focusExecution(state.agentFocus, null)
   const session = observedSession ?? state.sessions.find((candidate) => candidate.id === sessionId)
   if (!session) return state.agentFocus
-  const lane = session ? focusLaneForSession(topicIdForSession(state.config, session),
-    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session))) : 'execution'
+  const lane = session ? focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
+    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))) : 'execution'
   if (lane === null) return state.agentFocus
   return lane === 'pmo'
     ? focusPmo(state.agentFocus, sessionId)
     : focusExecution(state.agentFocus, sessionId, Date.now(), session
-      ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id])
+      ? observeFocusHistoryIdentity(session, state.config, state.agentNames[session.id], state.timelines[session.id], scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
       : undefined, reference && confirmedFocusReference(state, sessionId, reference) ? reference : undefined)
 }
 
@@ -2792,8 +2793,8 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     const surface = tab?.regions[tab.layout.activeRegionId]
     if (surface?.kind !== 'agent') return
     const session = get().sessions.find((candidate) => candidate.id === surface.sessionId)
-    if (session && focusLaneForSession(topicIdForSession(get().config, session),
-      scratchTopicsForWorkspace(get().scratchTopicSnapshots, workspaceForSession(get().config, session))) === 'pmo') {
+    if (session && focusLaneForSession(topicIdForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)),
+      scratchTopicsForWorkspace(get().scratchTopicSnapshots, workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)))) === 'pmo') {
       get().focusPmoSession(session.id)
     }
   }
@@ -3275,6 +3276,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           }, candidate.workspacePath)
           if (recovery.kind === 'reattachable' || recovery.kind === 'resumed') {
             recovered = true
+            if (recovery.advisory && recovery.session.id === candidate.agentSessionId && recovery.session.control.hostId === candidate.hostId)
+              startupWarnings.push(recovery.advisory)
           } else if (recovery.kind === 'unavailable' || recovery.kind === 'conflict') {
             recoveryFailures.push(projected ? {
               ...projected,
@@ -3370,8 +3373,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
-        (session) => focusLaneForSession(topicIdForSession(config, session),
-          scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspaceForSession(config, session))),
+        (session) => focusLaneForSession(topicIdForSession(config, session, scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)),
+          scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspaceForSession(config, session, scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)))),
         new Set([...persistedSessionIds].filter((id) => (
           !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
         )))
@@ -4748,7 +4751,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return
     }
     const session = get().sessions.find((candidate) => candidate.id === id)
-    const workspace = session ? workspaceForSession(get().config, session) : null
+    const workspace = session ? workspaceForSession(get().config, session, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots)) : null
     if (!session || !workspace) return
     const tabId = sessionTabId(id)
     const layout = get().layouts[workspace.id] ?? createWorkspaceLayout(newTabGroupId())
@@ -4763,7 +4766,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       sessionId: id
     }
     const createdTab = createWorkbenchTab(tabId, surface)
-    const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
+    const sessionTopicId = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, scratchTopicsForConfig(get().config, get().scratchTopicSnapshots))
     const tab = sessionTopicId ? { ...createdTab, topicId: sessionTopicId } : createdTab
     // Tab 已在某个分组里就只需激活；新建时必须真的挂上。挂不上（`preferredTabGroupId` 指向一个
     // 已不存在的分组）原先静默回落成原 layout：Tab 记录进了 state.tabs 而不在任何 tabOrder 里。
@@ -5490,8 +5493,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const session = id ? state.sessions.find((candidate) => candidate.id === id) : undefined
       if (id && !session) return state
       if (session) {
-        const lane = focusLaneForSession(topicIdForSession(state.config, session),
-          scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session)))
+        const lane = focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
+          scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))))
         if (lane === null) return state
         if (lane === 'execution') return { agentFocus: focusSessionContext(state, id) }
       }
@@ -6209,8 +6212,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const job = api.scratch.listTopics(workspaceId).then(topics => {
       if (!stillCurrent()) return
       const retained = get().scratchTopicSnapshots[workspaceId]?.topics
-      const errors = topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] :
-        topic.moteArchive?.state === 'unknown' ? [`${topic.title}: Archive state unconfirmed · ${topic.moteArchive.issue}`] : [])
+      const errors = [...topics.issues ?? [], ...topics.flatMap(topic => topic.readError ? [`${topic.title}: ${topic.readError}`] :
+        topic.moteArchive?.state === 'unknown' ? [`${topic.title}: Archive state unconfirmed · ${topic.moteArchive.issue}`] : [])]
       const facts = topics.map(topic => {
         const previousTopic = retained?.find(candidate => candidate.id === topic.id)
         // A failed file read is no new identity fact. Keep the last complete object,
@@ -6220,6 +6223,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return topic.moteArchive?.state === 'unknown' && previousTopic?.moteArchive?.state !== 'unknown' && previousTopic?.moteArchive
           ? { ...topic, moteArchive: previousTopic.moteArchive } : topic
       })
+      // An unclaimed directory has no ID to attach a failure to. Its discovery gap
+      // cannot erase previously confirmed objects; keep their original facts until
+      // this same scope can be completely observed again.
+      if (topics.issues?.length) for (const original of retained ?? []) {
+        if (!facts.some(topic => topic.id === original.id)) facts.push(original)
+      }
       set(current => ({ scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspaceId]: {
         scope, revision, topics: facts, error: errors.length ? errors.join(' · ') : null, reading: false
       } } }))
@@ -6242,7 +6251,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const topic = snapshot?.scope === scope ? snapshot.topics?.find(item => item.id === topicId) : undefined
     const identityPath = workspace && topic ? scratchTopicIdentityPath(workspace, topic) : null
     if (!workspace || !topic?.moteArchive || topic.moteArchive.state === 'unknown' || topic.moteArchive.version !== expectedVersion ||
-      identityPath === null || scratchTopicIdFromWorkspacePath(workspace.path, identityPath) !== topicId ||
+      identityPath === null || scratchTopicIdFromWorkspacePath(workspace.path, identityPath, snapshot?.topics) !== topicId ||
       // Historical snapshots identify only their configured home; sibling roots
       // require the identity field confirmed by Main.
       (!topic.identityDirectoryPath && identityPath !== scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) })) ||
@@ -6280,7 +6289,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // not the identity from which the Topic is derived.
     const topicId = `launcher:${crypto.randomUUID()}`
     const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
-    const targetTab = { ...newLauncherTab(workspace.id, topicId), space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) },
+    const targetTab = { ...newLauncherTab(workspace.id, topicId), ...(preset === 'mote' ? {} : { space: { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) } }),
       ...(initialRequest && preset === 'mote' ? { topicPreparation: 'mote' as const } : {}) }
     const regionId = targetTab.layout.activeRegionId
     const initialSurface = targetTab.regions[regionId]
@@ -6301,7 +6310,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
         return {
           ...(reveal ? { activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const,
-            workbenchSpaceSelection: { ...nextTab.space, workspaceId: workspace.id, topicId,
+            workbenchSpaceSelection: { spaceId: nextTab.space?.spaceId ?? null, zoneId: nextTab.space?.zoneId ?? null, workspaceId: workspace.id, topicId,
               tabId: nextTab.id, groupId: layout.activeGroupId, regionId },
             retainedSpatialFocus: null, regionCaretFocus: null, workbenchNavigationInputPolicy: null } : {}),
           tabs: { ...current.tabs, [nextTab.id]: nextTab },
@@ -6340,7 +6349,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw cause
     }
     const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
-    if (!address || address.zoneId !== targetTab.space.zoneId) throw new Error('The created Topic original identity is unconfirmed. Its Tab, Region and draft are kept.')
+    if (snapshot.id !== topicId || snapshot.readError || !address || preset !== 'mote' && address.zoneId !== targetTab.space?.zoneId) throw new Error('The created Topic original identity is unconfirmed. Its Tab, Region and draft are kept.')
     const mayReveal = fileNavigationSelection(get()) === bornSelection
     if (!initialRequest) placeLauncher(mayReveal)
     else set(current => {
@@ -6353,7 +6362,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const previous = current.scratchTopicSnapshots[workspace.id], scope = scratchTopicsScope(workspace)
       const topics = previous?.scope === scope ? previous.topics ?? [] : []
       const live = current.tabs[targetTab.id]
-      if (!live) return current
+      if (!live || live.topicId !== topicId || live.regions[regionId] !== initialSurface) return current
       const groupId = tabGroupForTab(current.layouts[workspace.id], live.id)
       return { tabs: { ...current.tabs, [live.id]: { ...live, space: address } },
         scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: { scope, revision: previous?.revision ?? 0,
@@ -6387,6 +6396,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       isScratchTopicId(topicId) ? SCRATCH_WORKSPACE_ID : state.activeWorkspaceId
     )
     const reveal = options?.reveal ?? true
+    const pendingOwners = Object.values(state.tabs).filter(tab => tab.workspaceId === workspaceId && tab.topicId === topicId && tab.topicPreparation && !tab.space)
+    const pendingBorn = options?.tabId ? pendingOwners.find(tab => tab.id === options.tabId) : pendingOwners.length === 1 ? pendingOwners[0] : undefined
+    const pendingRegion = pendingBorn?.regions[pendingBorn.layout.activeRegionId]
     const workspace = state.config?.workspaces.find((item) => item.id === workspaceId)
     if (!workspace || !isScratchWorkspaceId(workspace.id)) {
       throw new Error('Scratch workspace is unavailable')
@@ -6427,9 +6439,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const known = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(topic => topic.id === topicId)
       const bornSpaceId = directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, { directoryPath: scratchTopicDirectoryName(topicId) }))
       const address = known ? topicSpatialAddress(state.config, known, state.spaceZoneBindings, state.topicCategories)
-        : { spaceId: bornSpaceId, zoneId: homeZoneId(bornSpaceId) }
+        : { spaceId: null, zoneId: null }
       if (!address) throw new Error('The Topic Category relationship is unconfirmed. Original workface is kept.')
-      const tab = { ...newLauncherTab(workspace.id, topicId), space: address, ...(request ? { topicPreparation: 'mote' as const } : {}) }
+      const tab = { ...newLauncherTab(workspace.id, topicId), ...(address.spaceId && address.zoneId ? { space: { spaceId: address.spaceId, zoneId: address.zoneId } } : {}), ...(request ? { topicPreparation: 'mote' as const } : {}) }
       const regionId = tab.layout.activeRegionId, initialSurface = tab.regions[regionId]
       let groupId: string | undefined
       set(current => {
@@ -6465,8 +6477,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         remember(snapshot)
         const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
         if (!address) throw new Error('The born Topic relationship is unconfirmed. Its Tab, Region and draft are retained.')
-        if (address.zoneId !== tab.space.zoneId) throw new Error('The confirmed Topic identity differs from its born owner. Its original Tab, Region and draft are retained.')
-        set(current => ({ tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: address } } }))
+        if (snapshot.id !== topicId || snapshot.readError || tab.space && address.zoneId !== tab.space.zoneId) throw new Error('The confirmed Topic identity differs from its born owner. Its original Tab, Region and draft are retained.')
+        set(current => current.tabs[tab.id]?.topicId === topicId && current.tabs[tab.id]?.regions[regionId] === initialSurface
+          ? { tabs: { ...current.tabs, [tab.id]: { ...current.tabs[tab.id]!, space: address } } } : current)
         if (reveal && !options.signal?.aborted && fileNavigationSelection(get()) === bornSelection && get().tabs[tab.id]?.regions[regionId] === initialSurface) {
           const choice = selectObject(get(), snapshot, tab.id)
           set({ workbenchSpaceSelection: choice, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null })
@@ -6555,6 +6568,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     finally { release() }
     if (!snapshot) throw new Error('Scratch Topic no longer exists')
     remember(snapshot)
+    if (pendingBorn && snapshot.id === topicId && !snapshot.readError) {
+      const address = topicSpatialAddress(get().config, snapshot, get().spaceZoneBindings, get().topicCategories)
+      if (address) set(current => {
+        const live = current.tabs[pendingBorn.id]
+        if (!live?.topicPreparation || live.space || live.topicId !== topicId || live.regions[pendingBorn.layout.activeRegionId] !== pendingRegion) return current
+        const { topicPreparation: _prepared, ...prepared } = live
+        return { tabs: { ...current.tabs, [live.id]: { ...prepared, space: address } } }
+      })
+    }
     const mayReveal = reveal && !options?.signal?.aborted && !laterIntent
     if (reveal && !mayReveal) return false
     // The click already opened its durable Zone, optionally with an exact Chat.
@@ -8412,6 +8434,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         if (priorFailure && get().errorNoticeContext === priorFailure) {
           set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
         }
+        if ((recovery.kind === 'reattachable' || recovery.kind === 'resumed') && recovery.advisory &&
+          get().sessions.some(item => item.id === sessionId && sessionOwnsControl(item, session.control)))
+          get().reportError(new Error(recovery.advisory), { kind: 'indeterminate' })
         return session
       }
       // Agent continuity belongs to its durable Core Session. A closed view does not own or

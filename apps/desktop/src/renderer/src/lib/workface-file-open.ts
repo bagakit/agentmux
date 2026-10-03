@@ -38,7 +38,7 @@ export async function executeWorkfaceFileOpen(ports: WorkfaceFileOpenPorts,
     if (selected.zones.length !== 1 || !zone) throw new Error('Choose one exact existing Zone.')
     const workspace = state.config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
     if (!workspace) throw new Error('The original Files Workspace is unconfirmed.')
-    const mapped = zoneFileResource(workspace, zone, request.path)
+    const mapped = zoneFileResource(workspace, zone, request.path, topics)
     report.resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path,
       zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path }
     const tabId = fileTabId(workspace.id, mapped.path), regionId = initialWorkbenchRegionId(tabId)

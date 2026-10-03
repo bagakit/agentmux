@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { isNeedsYouState } from './attention-vocabulary'
 import { focusLaneForSession } from './agent-focus'
@@ -31,8 +32,8 @@ export function effectiveSessionViewMode(state: {
   const explicit = storedSessionViewMode(state.viewModes, sessionId)
   if (explicit !== null) return explicit
   const session = sessionPresentationById(state.sessions).get(sessionId)
-  return session && focusLaneForSession(topicIdForSession(state.config, session),
-    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session))) === 'pmo'
+  return session && focusLaneForSession(topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)),
+    scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)))) === 'pmo'
     ? 'activity' : 'terminal'
 }
 

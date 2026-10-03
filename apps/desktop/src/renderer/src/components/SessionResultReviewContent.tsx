@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import type { ReactNode } from 'react'
 import { CheckCircle2, ExternalLink, FileDiff, Globe2, ListChecks, MessageCircle } from 'lucide-react'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -63,8 +64,9 @@ export function SessionResultReviewContent({ sessionId, items, origin, controls,
   const openHttpLink = useAppStore((state) => state.openHttpLink)
   const reportError = useAppStore((state) => state.reportError)
   const selectSession = useAppStore((state) => state.selectSession)
+  const topicFacts = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
   const config = useAppStore((state) => state.config)
-  const workspace = session ? workspaceForSession(config, session) : undefined
+  const workspace = session ? workspaceForSession(config, session, topicFacts) : undefined
   const git = useGitStatus(workspace?.id ?? null)
   if (!session || session.kind !== 'agent' || session.status.state !== 'done') return null
   const { diffPath, previewUrls } = resultTargets(items)

@@ -413,7 +413,7 @@ export function WorkspaceTopicsPanel({
               onEditWiki: () => withLogicalPath(path => void openFile(`${path}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)),
               onToggleWiki: topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined,
               onResetWiki: topic.wiki ? () => void resetTopicWiki(topic) : undefined,
-              onChangeIcon: () => { iconReturnKey.current = target.key; setIconTarget(target) },
+              onChangeIcon: () => { if (!target) { reportError(new Error('The original object identity is unconfirmed. Repair its directory record before changing its icon.')); return } iconReturnKey.current = target.key; setIconTarget(target) },
               onMove: () => setMoveTarget({ topicId: topic.id, title: topic.title }),
               wikiEnabled: topic.wiki?.enabled
             }
@@ -449,7 +449,7 @@ export function WorkspaceTopicsPanel({
                   <div
                     className="workspace-topic-entry"
                     data-topic-id={topic.id}
-                    data-space-icon-target={target.key}
+                    data-space-icon-target={target?.key}
                     {...(isCurrent ? { 'data-current': 'true' } : {})}
                     role="button"
                     aria-current={isCurrent ? 'page' : undefined}
@@ -465,7 +465,7 @@ export function WorkspaceTopicsPanel({
                         spinner「只在有话说时才占用」的规矩。 */}
                     <SelectorRow
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
-                        : <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={manualIcons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />}
+                        : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */

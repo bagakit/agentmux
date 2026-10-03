@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { executorDetectionKey, type useAppStore } from '../store'
 import { createPmoTeamsTopicTargetSelector } from './pmo-teams-topic-floating'
@@ -8,7 +9,7 @@ import { currentExecutorDetection } from './executor-detection'
 import { useLauncherState } from './launcher-state'
 
 const selectPrimaryTab = createPmoTeamsTopicTargetSelector({ open: false, preview: false, targetTopicId: PMO_TEAMS_TOPIC_ID })
-type PrimaryMoteState = Pick<ReturnType<typeof useAppStore.getState>, 'config' | 'tabs' | 'layouts' | 'agentFocus' | 'sessions' | 'executorDetections'>
+type PrimaryMoteState = Pick<ReturnType<typeof useAppStore.getState>, 'config' | 'tabs' | 'layouts' | 'agentFocus' | 'sessions' | 'executorDetections'> & Partial<Pick<ReturnType<typeof useAppStore.getState>, 'scratchTopicSnapshots'>>
 let knownTabs: PrimaryMoteState['tabs'] | undefined, hasBot = false
 export function primaryMoteHasBot(state: Pick<PrimaryMoteState, 'tabs'>): boolean {
   if (state.tabs !== knownTabs) {
@@ -39,7 +40,7 @@ export function primaryMoteExecutorId(state: PrimaryMoteState, savedExecutorId =
   const region = tab.regions[tab.layout.activeRegionId]
   if (region?.kind !== 'agent') return undefined
   const session = sessionPresentationById(state.sessions).get(region.sessionId)
-  if (session?.kind !== 'agent' || topicIdForSession(state.config, session) !== PMO_TEAMS_TOPIC_ID) return undefined
+  if (session?.kind !== 'agent' || topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)) !== PMO_TEAMS_TOPIC_ID) return undefined
   const executor = state.config?.executors[session.executorId]
   return executor?.providerId === session.providerId ? session.executorId : undefined
 }

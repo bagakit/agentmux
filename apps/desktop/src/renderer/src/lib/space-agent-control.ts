@@ -78,7 +78,8 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
   for (const tab of Object.values(state.tabs)) {
     const workspace = state.config?.workspaces.find(workspace => workspace.id === tab.workspaceId)
     const topic = tab.topicId ? topics.find(topic => topic.id === tab.topicId) : undefined
-    const source = topic ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : undefined
+    const source = topic && !(tab.topicPreparation && !tab.space && topic.readError)
+      ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : undefined
     const referencedZoneId = tab.space?.zoneId ?? (workspace ? tab.topicId
       ? source?.zoneId ?? null
       : tab.workspaceId === SCRATCH_WORKSPACE_ID ? homeZoneId(directoryIdentity(workspace.hostId, workspace.path))

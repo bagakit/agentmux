@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { AlertCircle, ArrowUpRight, Check, ChevronDown, Inbox, MessageCircle, MoreHorizontal, PanelRightClose, Pencil, Square } from 'lucide-react'
@@ -119,7 +120,7 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     const region = moteTab?.regions[moteTab.layout.activeRegionId]
     const session = region?.kind === 'agent' ? state.sessions.find(item => item.id === region.sessionId) : undefined
     const executorId = topicId === PMO_TEAMS_TOPIC_ID ? primaryMoteExecutorId(state)
-      : session?.kind === 'agent' && topicIdForSession(state.config, session) === topicId &&
+      : session?.kind === 'agent' && topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)) === topicId &&
         state.config?.executors[session.executorId]?.providerId === session.providerId ? session.executorId : undefined
     const prompt = `Discuss this Tab with me. Inspect this exact complete work surface before suggesting or making changes.\n\n${formatTabAddress(target.tabId)}`
     discussionFlight.current = true; setDiscussionPending(true)

@@ -31,6 +31,7 @@ export async function observeClientRpcSnapshot(config: AppConfig, scratchTopics:
   }
   try {
     const snapshots = await scratchTopics.list(workspace)
+    for (const message of snapshots.issues ?? []) for (const source of ['topics', 'motes'] as const) if (wanted(source)) result.unavailable!.push({ source, code: 'TOPIC_FILESYSTEM_UNAVAILABLE', message, recovery: 'Inspect the original directory record and retry its original repair.' })
     const spaces = spatialSources(config, snapshots).spaces
     const topics: AgentMuxRpcTopic[] = snapshots.filter(snapshot => !params.topicId || snapshot.id === params.topicId).map(snapshot => {
       const matches = spaces.filter(space => space.topicId === snapshot.id)

@@ -40,7 +40,7 @@ export function useSpaceObjectMenu() {
 
 /** A real object menu for Space Motes/Topics; registered Folder menus reuse the same entry. */
 export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuOpen, moteArchive, moteActions, container }: {
-  target: SpaceIconTarget; onChangeIcon?(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
+  target: SpaceIconTarget | null; onChangeIcon?(target: SpaceIconTarget): void; children: ReactNode; onMenuOpen?(): void
   moteArchive?: { archived: boolean; disabled?: boolean; reason?: string; onChange(): Promise<boolean>; returnFocus?(): HTMLElement | null }
   moteActions?: { pinned: boolean; onTogglePin(): void; onEdit(): void; onRename?(): void; onNewDiscussion?(): void; onMaterials?(): void; onOpenSpace?(): void }
   container?: () => HTMLElement | null
@@ -59,7 +59,7 @@ export function SpaceObjectContextMenu({ target, onChangeIcon, children, onMenuO
         menu.onCloseAutoFocus(event); archiveReturnFocus.current?.()
       }}>
         {moteActions?.onRename ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(moteActions.onRename!)}><Pencil size={14} /><span>Rename Mote…</span></ContextMenu.Item> : null}
-        {onChangeIcon ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => onChangeIcon(target))}>
+        {onChangeIcon && target ? <ContextMenu.Item className="tab-context-menu__item" onSelect={() => menu.changeIcon(() => target && onChangeIcon(target))}>
           <Shapes size={14} /><span>{target.avatarTarget ? 'Change avatar…' : 'Change icon…'}</span>
         </ContextMenu.Item> : null}
         {moteActions ? <>

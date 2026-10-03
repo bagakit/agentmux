@@ -1682,9 +1682,19 @@ export class RuntimeController {
     const scratch = config.workspaces.find((workspace) => (
       workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
     ))
-    const scratchTopicId = scratch
-      ? scratchTopicIdFromWorkspacePath(scratch.path, stored.workspacePath)
-      : null
+    let scratchTopicId: string | null = null, advisory: string | undefined
+    const name = stored.workspacePath.split('/').at(-1) ?? ''
+    if (scratch && /^(?:topic--(?:launcher|session|view)--|[0-9a-f]{16}$)/.test(name)) {
+      let timer: ReturnType<typeof setTimeout> | undefined
+      try {
+        const topic = await Promise.race([this.scratchTopics.readForDirectory(scratch, stored.workspacePath),
+          new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('The optional Wiki directory check timed out.')), 100) })])
+        if (topic?.readError) throw new Error(topic.readError)
+        scratchTopicId = topic?.id ?? null
+      } catch (error) {
+        advisory = `Wiki directory association is unconfirmed: ${error instanceof Error ? error.message : String(error)} Agent continuity and input remain available. Retry the original directory repair before the next resume.`
+      } finally { clearTimeout(timer) }
+    }
     const result = await client.ensureAgentContinuity({
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
@@ -1701,11 +1711,12 @@ export class RuntimeController {
       const session = await this.sessionByTarget(client,
         { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
       if (session.kind === 'agent' && session.processState === 'running' &&
-        session.control.run.runId === result.currentRun.runId) return { kind: 'reattachable', session }
+        session.control.run.runId === result.currentRun.runId) return { kind: 'reattachable', session, ...(advisory ? { advisory } : {}) }
     }
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
     return {
       kind: result.kind,
+      ...(advisory ? { advisory } : {}),
       session: await this.sessionByTarget(
         client,
         { kind: 'agent-session', agentSessionId: control.agentSessionId },

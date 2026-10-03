@@ -85,6 +85,6 @@ export function noteCreationTarget(state: Parameters<typeof spatialCatalog>[0], 
   const zone = catalog.zones.find(item => item.zoneId === (zoneId ?? defaultZoneId))
   if (!zone || zone.kind === 'unknown' || zone.workspaceId !== workspace.id || zone.hostId !== workspace.hostId || !zone.directoryPath) throw new Error('The Note Zone birth directory is unknown. Its draft and original target are retained.')
   const sourceSpaceId = zoneContext(state, topics, zone)
-  const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone)
+  const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone, '', topics)
   return { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath, relativeDirectory, zoneId: zone.zoneId, sourceSpaceId, displayWorkspaceId, groupId: input.groupId }
 }
