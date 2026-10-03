@@ -306,11 +306,12 @@ async function headerScenes(layoutOnly = false) {
   }
   const scaleFactor = screen.getDisplayMatching(win.getBounds()).scaleFactor
   result.displayScaleFactor = scaleFactor
-  async function scene(mode, width, height, appearance = 'dark') {
+  async function scene(mode, width, height, appearance = 'dark', suffix = '') {
     result.stage = { mode, width, height, appearance, step: 'header-scene' }
     await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width, height, deviceScaleFactor: scaleFactor, mobile: false })
     await evaluate(`document.documentElement.dataset.appearance=${JSON.stringify(appearance)};qualityProbe.header(${JSON.stringify(mode)})`)
     await waitFor(`Boolean(qualityProbe.terminal()) && !(${terminal}).classList.contains('terminal-view__xterm--hydrating')`)
+    await waitFor(`qualityProbe.terminal().visibleLines.some(line=>line.includes('OUTPUT'))`)
     await painted()
     let firstLine
     if (mode === 'full') {
@@ -323,18 +324,32 @@ async function headerScenes(layoutOnly = false) {
       const rect=e=>{if(!e)return null;const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}};
       const hit=e=>{if(!e)return null;const r=e.getBoundingClientRect();return [[.1,.1],[.5,.5],[.9,.9]].map(([x,y])=>document.elementFromPoint(r.x+r.width*x,r.y+r.height*y)?.closest('button')===e)};
       const p={x:s.getBoundingClientRect().x+8,y:s.getBoundingClientRect().y+17},at=document.elementFromPoint(p.x,p.y);
+      const hb=h.querySelector('.agent-region-header__execution'),ring=parseFloat(getComputedStyle(owner??s).getPropertyValue('--region-focus-ring-width'));
       return{...(${measure}),blankCornerHit:{...p,target:at?.className,intercepted:!!at?.closest('.agent-region-header-home')},header:{rect:rect(h),name:rect(n),nameText:n.innerText,title:n.title,aria:h.getAttribute('aria-label'),font:getComputedStyle(n).fontSize,weight:getComputedStyle(n).fontWeight,ellipsis:getComputedStyle(n).textOverflow,
         more:rect(m),moreHits:hit(m),close:rect(x),closeHits:hit(x),rightInset:parseFloat(getComputedStyle(h).paddingRight),readOnly:!!h.querySelector('.agent-region-header__mode'),meta:h.querySelectorAll('.agent-region-header__meta').length,
-        quietBacking:{height:getComputedStyle(h,'::before').height,background:getComputedStyle(h,'::before').backgroundColor}},
+        ring,paddingTop:parseFloat(getComputedStyle(h).paddingTop),paddingLeft:parseFloat(getComputedStyle(h).paddingLeft),host:hb?{name:hb.innerText,kind:hb.dataset.hostKind,svg:!!hb.querySelector('svg'),aria:hb.getAttribute('aria-label'),text:rect(hb.querySelector('span'))}:null,
+        quietBacking:{height:getComputedStyle(h,'::before').height,background:getComputedStyle(h,'::before').backgroundColor},paneBackground:getComputedStyle(s).backgroundColor},
         terminalReadingInset:getComputedStyle(s.querySelector('.terminal-view__xterm')).marginTop,body:rect(s.querySelector('.agent-body')),owner:rect(owner),firstLine:${JSON.stringify(firstLine ?? null)}}
     })()`)
-    await capture(`${width}x${height}-header-${mode}-${appearance}`, facts)
+    await capture(`${width}x${height}-header-${mode}-${appearance}${suffix}`, facts)
     assert.equal(facts.header.meta, 0)
     assert.equal(facts.header.title, facts.header.nameText, 'The full semantic name must remain available to mouse disclosure')
     assert.ok(facts.header.aria.includes(facts.header.nameText))
     assert.equal(facts.header.font, '11px'); assert.equal(facts.header.weight, '400')
     assert.equal(facts.header.more.width, 22); assert.equal(facts.header.more.height, 22)
     assert.equal(facts.header.moreHits.length, 3); assert.ok(facts.header.moreHits.every(Boolean))
+    const owner = facts.owner ?? facts.pane, ownerRight = owner.x + owner.width
+    assert.ok(facts.header.rect.y >= owner.y + facts.header.ring, 'Corner backing must clear the original top focus edge')
+    assert.ok(Math.abs(facts.header.rect.right - (ownerRight - facts.header.ring)) < 1, 'Corner must meet the right inner focus edge')
+    assert.ok(facts.header.paddingTop > 0 && facts.header.paddingLeft >= 6, 'Corner glyphs must have visible top and left breathing room')
+    assert.notEqual(facts.header.quietBacking.background, facts.header.paneBackground, 'Corner surface must remain distinct from the work surface')
+    assert.notEqual(facts.header.quietBacking.background, 'rgba(0, 0, 0, 0)', 'Corner surface must have visible local backing')
+    if (mode.startsWith('remote')) {
+      assert.equal(facts.header.host?.kind, 'ssh'); assert.equal(facts.header.host?.svg, true)
+      assert.ok(facts.header.host.name.startsWith('Build machine'))
+      assert.ok(facts.header.host.aria.includes(facts.header.host.name))
+      assert.ok(facts.header.host.text.width >= 36, 'The remote machine short name must remain readable beside a long Agent name')
+    } else assert.equal(facts.header.host, null, 'Confirmed local execution must have no persistent machine marker')
     assert.ok(Math.abs(facts.header.more.right - (facts.header.rect.right - facts.header.rightInset)) < 1, 'Header action row must align to its right inset')
     if (mode !== 'notice') assert.ok(Math.abs(facts.body.y - facts.pane.y) < 1, 'Adaptive corner identity must not reserve a full Header row')
     if (mode === 'long' || mode === 'full') assert.equal(facts.blankCornerHit.intercepted, false, 'Quiet corner host must not intercept the original left reading area')
@@ -343,6 +358,8 @@ async function headerScenes(layoutOnly = false) {
       assert.equal(facts.header.closeHits.length, 3); assert.ok(facts.header.closeHits.every(Boolean))
       assert.ok(facts.header.close.bottom <= facts.header.rect.bottom + 1, 'Original X must remain alongside this corner group')
       assert.ok(facts.header.more.right <= facts.header.close.x)
+      assert.ok(facts.header.close.x >= owner.x + facts.header.ring && facts.header.close.y >= owner.y + facts.header.ring)
+      assert.ok(facts.header.close.right <= ownerRight - facts.header.ring, 'Original X must clear the right focus edge')
     }
     if (mode === 'readonly') { assert.equal(facts.header.readOnly, true); assert.equal(facts.composer, null) }
     if (width === 641) assert.ok(Math.abs(facts.owner.width - 320) < 1, 'Actual narrow split Region must be 320px')
@@ -377,8 +394,8 @@ async function headerScenes(layoutOnly = false) {
   }
   await scene(layoutOnly ? 'long' : 'normal', 1281, 600)
   if (layoutOnly) { assert.equal(result.frames.length, 1); return }
-  for (const args of [['long',1281,600,'dark'],['long',641,600,'dark'],['readonly',320,400,'dark'],['notice',641,600,'dark'],['long',641,600,'light'],['normal',1281,600,'light'],['full',641,600,'dark'],['full',1281,600,'light']]) await scene(...args)
-  await scene('long', 641, 600)
+  for (const args of [['long',1281,600,'dark'],['long',641,600,'dark'],['readonly',320,400,'dark'],['notice',641,600,'dark'],['long',641,600,'light'],['normal',1281,600,'light'],['full',641,600,'dark'],['full',1281,600,'light'],['remote',1281,600,'dark'],['remote-long',641,600,'light']]) await scene(...args)
+  await scene('long', 641, 600, 'dark', '-interactions')
   const before = await evaluate('qualityProbe.terminal()'), origin = await evaluate('qualityProbe.facts()')
   const semanticName = await evaluate(`(${pane}).querySelector('.agent-region-header__name').title`)
   await click(terminal); await key('h','KeyH',72,'h')
@@ -427,10 +444,14 @@ async function headerScenes(layoutOnly = false) {
   assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
   await click(terminal); await key('v','KeyV',86,'v'); await waitFor(`qualityProbe.facts().writes.some(args=>args[1]==='v')`)
   assert.equal((await evaluate('qualityProbe.terminal()')).id, before.id)
-  // The original Composer gives ordinary trusted Tab traversal; Terminal retains its literal CLI Tab.
-  await click(`(${pane}).querySelector('.tiptap')`)
+  // Reverse traversal from the adjacent corner avoids the Terminal's literal CLI Tab
+  // and the Composer avatar's separate keyboard disclosure.
+  const neighborMore = `document.querySelector('[data-workbench-region-id="quality-neighbor"] .agent-region-header__more')`
+  await evaluate('qualityProbe.focusNeighbor()'); await painted()
+  await tap(neighborMore); await waitFor(`Boolean(document.querySelector('.agent-region-menu'))`)
+  await key('Escape','Escape',27); await waitFor(`!document.querySelector('.agent-region-menu') && document.activeElement===${neighborMore}`)
   const close = `document.querySelector('[data-workbench-region-id="quality-target"] > .workbench-region__close')`
-  await keyboardReach(close)
+  const closeTabs = await keyboardReach(close, true)
   await waitFor(`!document.querySelector('.agent-identity-popover')`)
   await painted()
   const closeFocus = await evaluate(`(()=>{const e=${close},s=getComputedStyle(e);return{visible:e.matches(':focus-visible'),width:s.outlineWidth,offset:s.outlineOffset}})()`)
@@ -442,9 +463,8 @@ async function headerScenes(layoutOnly = false) {
   assert.deepEqual(Object.keys(closed.tab.regions), ['quality-neighbor'])
   assert.deepEqual(closed.session, origin.session); assert.equal(closed.draft, origin.draft)
   await capture('320-header-original-close-keeps-neighbor', { closed })
-  result.headerInteractions = { before, origin, copied, focus, closeFocus, closed, context,
+  result.headerInteractions = { before, origin, copied, focus, closeFocus, closeTabs, closed, context,
     qualification: 'Trusted input/menu/Escape/Region copy/original X in actual WorkspaceWorkbench; clipboard API controlled, no user clipboard or Core process touched' }
-  await auxiliaryDetails()
   assert.ok(result.frames.length >= 12 && result.headerInteractions, 'Header-only must not sign an empty or old notice matrix')
 }
 app.whenReady().then(async () => {

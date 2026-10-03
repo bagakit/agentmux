@@ -53,7 +53,7 @@ async function terminalScene(width) {
     const target=selector.startsWith(':scope')?`${surface}.closest('.workbench-region').querySelector(${JSON.stringify(selector)})`:`${surface}.querySelector(${JSON.stringify(selector)})`
     await pointer(target,'left',true);const hovered=await terminalFacts();stable(before,hovered)
     assert.deepEqual(hovered.buttons.map(b=>b.box),before.buttons.map(b=>b.box),'Hover retains each control hitbox')
-    for(const button of hovered.buttons) {assert.equal(button.background,'rgba(0, 0, 0, 0)','Hover preserves the transparent hitbox');assert.equal(button.paintHeight,'13px','Hover paint remains inside the quiet glyph band')}
+    for(const button of hovered.buttons) {assert.equal(button.background,'rgba(0, 0, 0, 0)','Hover preserves the transparent hitbox');assert.equal(button.paintHeight,'16px','Hover paint remains inside the quiet glyph band')}
   }
   await evaluate('terminalNotice.observed(true)');await wait(`Boolean(${surface}.querySelector('.terminal-service-window'))`);await paint()
   const notified=await terminalFacts();stable(before,notified)

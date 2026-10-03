@@ -3,26 +3,28 @@
 .agent-surface:has(> .agent-region-header-home) > .agent-body { flex: 1 1 0; }
 .agent-surface:has(> .agent-region-header-home) > :not(.agent-body) { flex-shrink: 0; }
 .agent-surface:has(> .agent-region-header-home) > .agent-launch-notice { flex: 0 1 auto; max-height: 35%; overflow-y: auto; }
-.agent-region-header-home { position: absolute; top: 0; right: 0; z-index: 41; width: max-content; max-width: 100%; pointer-events: none; }
+.agent-region-header-home { position: absolute; top: var(--region-focus-ring-width); right: var(--region-focus-ring-width); z-index: 41; width: max-content; max-width: calc(100% - 2 * var(--region-focus-ring-width)); pointer-events: none; }
 .agent-region-header-home > .agent-region-header-host { pointer-events: none; }
 .agent-region-header-host { min-width: 0; max-width: 100%; }
-.agent-region-header { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-1); min-width: 0; min-height: 0; padding: 0 var(--region-close-clearance, var(--sp-3)) 0 var(--sp-3); background: transparent; }
-.agent-region-header-home .agent-region-header { position: relative; align-items: flex-start; pointer-events: none; }
+.agent-region-header { display: flex; align-items: center; justify-content: flex-end; gap: var(--sp-2); min-width: 0; min-height: 0; padding: 0 var(--agent-region-close-clearance, var(--sp-2)) 0 var(--sp-4); background: transparent; }
+.workbench-region:has(> .workbench-region__close) { --agent-region-close-clearance: calc(var(--region-close-size) + 2 * var(--sp-2)); }
+.agent-region-header-home .agent-region-header { position: relative; align-items: flex-start; padding-top: var(--sp-1); pointer-events: none; }
 /* The independently themed Terminal need not match the UI palette: back only the quiet glyph band. */
-.agent-region-header-home .agent-region-header::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 13px; background: var(--surface-0); pointer-events: none; }
+.agent-region-header-home .agent-region-header::before { content: ''; position: absolute; z-index: -1; inset: 0 0 auto; height: 18px; border-bottom-left-radius: var(--radius-sm); background: var(--surface-2); pointer-events: none; }
 .agent-region-header-home :is(.agent-region-header__name, .agent-region-header__execution, .agent-region-header__mode, .agent-region-header__more, .session-result-review__trigger) { pointer-events: auto; }
 .agent-region-header-home .agent-region-header__name, .agent-region-header-home .agent-region-header__mode { line-height: 14px; }
 .agent-region-header-home .agent-region-header__more { align-items: flex-start; }
 .agent-region-header .session-result-review-slot { height: 22px; }
 .agent-region-header-home .session-result-review__trigger { align-items: flex-start; }
-/* Keep actual first-row glyphs below the quiet 14px icons without losing columns or reserving a row. */
-.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .terminal-view__xterm { margin-top: var(--sp-5); height: calc(100% - var(--sp-5)); }
-.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .session-history__toolbar { padding-top: var(--sp-5); }
+/* A reading inset clears the padded local paint; moving controls to Focus releases it. */
+.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) { --agent-region-reading-inset: calc(var(--sp-6) + var(--sp-2)); }
+.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .terminal-view__xterm { margin-top: var(--agent-region-reading-inset); height: calc(100% - var(--agent-region-reading-inset)); }
+.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) .session-history__toolbar { padding-top: var(--agent-region-reading-inset); }
 .agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-launch-notice > .service-window,
-.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .service-window { padding-top: var(--sp-5); }
-.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-body[data-observation-surface='workflow'] { box-sizing: border-box; padding-top: var(--sp-5); }
+.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .service-window { padding-top: var(--agent-region-reading-inset); }
+.agent-surface:has(> .agent-region-header-home > .agent-region-header-host) > .agent-body[data-observation-surface='workflow'] { box-sizing: border-box; padding-top: var(--agent-region-reading-inset); }
 .agent-region-header__name { flex: 0 1 auto; min-width: 0; max-width: 40ch; overflow: hidden; color: var(--text-2); font-size: var(--fs-meta); font-weight: 400; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-.agent-region-header__execution { display: inline-flex; align-items: center; gap: var(--sp-1); flex: 0 1 auto; min-width: 0; max-width: 18ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 14px; white-space: nowrap; }
+.agent-region-header__execution { display: inline-flex; align-items: center; gap: var(--sp-1); flex: none; min-width: 0; max-width: 18ch; color: var(--text-3); font-size: var(--fs-meta); line-height: 14px; white-space: nowrap; }
 .agent-region-header__execution > svg { flex: none; }
 .agent-region-header__execution > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .agent-region-header__mode { flex: none; color: var(--text-3); font-size: var(--fs-micro); }
@@ -30,7 +32,7 @@
 .agent-region-header__more:hover, .agent-region-header__more[data-state='open'] { color: var(--text); background: var(--surface-3); }
 /* The reading-safe glyph band is identical in every state; the larger hitbox stays transparent. */
 .agent-region-header-home .agent-region-header__more::before,
-:where(.workbench-region:has(.agent-region-header-home)) > .workbench-region__close::before { content: ''; position: absolute; z-index: -1; top: 0; left: 0; width: 100%; height: 13px; border-radius: var(--radius-sm); background: transparent; pointer-events: none; }
+:where(.workbench-region:has(.agent-region-header-home)) > .workbench-region__close::before { content: ''; position: absolute; z-index: -1; top: 0; left: 0; width: 100%; height: 16px; border-radius: var(--radius-sm); background: transparent; pointer-events: none; }
 .agent-region-header-home .agent-region-header__more:hover,
 .agent-region-header-home .agent-region-header__more[data-state='open'],
 :where(.workbench-region):has(.agent-region-header-home) > .workbench-region__close:hover { background: transparent; }
@@ -39,5 +41,5 @@
 .agent-region-menu { max-height: calc(100vh - 2 * var(--sp-4)); overflow-y: auto; }
 .agent-region-menu__context { display: grid; gap: var(--sp-1); padding: var(--sp-3) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .agent-region-menu, .region-context-menu { max-width: min(40ch, calc(100vw - 2 * var(--sp-4))); }
-:where(.workbench-region:has(.agent-region-header)) > .workbench-region__close { isolation: isolate; top: 1px; align-items: flex-start; border: 0; background: transparent; box-shadow: none; opacity: 1; }
+:where(.workbench-region:has(.agent-region-header)) > .workbench-region__close { isolation: isolate; top: calc(var(--region-focus-ring-width) + var(--sp-1)); right: calc(var(--region-focus-ring-width) + var(--sp-2)); align-items: flex-start; border: 0; background: transparent; box-shadow: none; opacity: 1; }
 .agent-region-header__more:focus-visible, :where(.workbench-region:has(.agent-region-header)) > .workbench-region__close:focus-visible { outline-offset: -2px; }

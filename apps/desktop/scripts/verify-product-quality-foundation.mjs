@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { listProbeProcesses, runProbeProcess, stopProbeProcesses } from './probe-process.mjs'
 
@@ -97,7 +97,7 @@ async function fixedSourceCopy(root) {
   }
   for (const entry of await readdir(repo, { withFileTypes: true })) if (entry.isFile() && /^(package\.json|pnpm-|vitest\.|tsconfig|\.npmrc)/.test(entry.name)) await writeFile(join(copy, entry.name), await readFile(join(repo, entry.name)))
   // Each external dependency is shared read-only; local workspace package links point into the private exact source copy.
-  for (const modulePath of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/layout/node_modules']) {
+  for (const modulePath of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules', 'packages/layout/node_modules', 'packages/client-ui/node_modules']) {
     const source = join(repo, modulePath), target = join(copy, modulePath)
     await mkdir(target, { recursive: true })
     for (const entry of await readdir(source)) {
@@ -138,7 +138,7 @@ let privateRoot
 try {
   result.callers = await callers()
   if (mode === 'source') {
-    privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-product-quality-source-"))
+    privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-product-quality-source-")))
     const copy = await fixedSourceCopy(privateRoot)
     const green = runTests(headerOnly ? focused.filter(name => ['agent-region-identity-menu.test.tsx', 'session-pane-composer.test.tsx', 'product-quality-foundation.test.tsx', 'focus-preview-header.test.tsx'].includes(name)) : focused, copy)
     result.green = { ...green, log: await artifact('current-focused-green.log', green.log) }
@@ -243,7 +243,7 @@ try {
     }
     if (headerOnly) assert.equal(result.cases.length, 3, 'Header-only must execute its own finite bearing points')
   } else {
-    privateRoot = await mkdtemp(_hygiene_fixturePath("tmp/amx-product-quality-ui-"))
+    privateRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amx-product-quality-ui-")))
     const nativeRepo = headerOnly ? await fixedSourceCopy(privateRoot) : repo
     const fixture = join(nativeRepo, 'apps/desktop/scripts/fixtures/product-quality-foundation'), loaded = new Map()
     const { build } = await import('vite')

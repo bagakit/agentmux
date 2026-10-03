@@ -111,15 +111,37 @@ it('the actual plain Terminal shows its execution Host without manufacturing an 
   expect(badge().dataset.executionHostId).toBe(remoteId)
 })
 
-it('two actual Regions with the same Agent name distinguish their own local and remote machines without changing either Session', async () => {
+it('two actual Regions with the same Agent name keep only the remote machine marker without changing either Session', async () => {
   const local = { ...agent, id: 'private-local', hostId: 'local', control: { ...agent.control, agentSessionId: 'private-local', hostId: 'local' } }
   useAppStore.setState({ sessions: [agent, local], agentNames: { [agent.id]: 'Same name', [local.id]: 'Same name' }, viewModes: { [agent.id]: 'terminal', [local.id]: 'terminal' } })
   const before = structuredClone(useAppStore.getState().sessions)
   await act(async () => root.render(<>{pane(agent, null, 'remote-region')}{pane(local, null, 'local-region')}</>))
   const badges = [...document.querySelectorAll<HTMLElement>('.agent-region-header__execution')]
-  expect(badges).toHaveLength(2)
-  expect(badges.map(item => item.textContent)).toEqual(['Build machine', 'This Mac'])
-  expect(badges.map(item => item.dataset.executionHostId)).toEqual([remoteId, 'local'])
+  expect(badges).toHaveLength(1)
+  expect(badges.map(item => item.textContent)).toEqual(['Build machine'])
+  expect(badges.map(item => item.dataset.executionHostId)).toEqual([remoteId])
+  const headers = [...document.querySelectorAll<HTMLElement>('.agent-region-header')]
+  expect(headers).toHaveLength(2)
+  expect(headers[1]!.querySelector('.agent-region-header__execution')).toBeNull()
+  expect(headers[1]!.getAttribute('aria-label')).toContain('Host This Mac')
+  expect(useAppStore.getState().sessions).toEqual(before)
+})
+
+it('a confirmed local Host stays quiet while More retains its complete execution identity, and missing configuration becomes explicit', async () => {
+  agent = { ...agent, control: { ...agent.control, hostId: 'local' } }
+  useAppStore.setState({ sessions: [agent] })
+  const header = await mount(), before = structuredClone(useAppStore.getState().sessions)
+  expect(header.querySelector('.agent-region-header__execution')).toBeNull()
+  expect(header.textContent).not.toContain('This Mac')
+  const context = await details()
+  expect(context.textContent).toContain('Host: This Mac')
+  expect(context.textContent).toContain('Host ID: local')
+  expect(context.textContent).toContain(`Directory: ${directory}`)
+  await act(async () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await act(async () => useAppStore.setState({ config: null }))
+  expect(document.querySelector('.agent-region-header')).toBe(header)
+  expect(badge().dataset.hostKind).toBe('unknown')
+  expect(badge().getAttribute('aria-label')).toContain('Not configured')
   expect(useAppStore.getState().sessions).toEqual(before)
 })
 
@@ -221,7 +243,8 @@ it('an accepted Core receipt without the original endpoint stays unknown instead
   useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: { [agent.id]: {
     events: [], overflowed: false, request: { executorId: agent.executorId }, created: createdReceipt(), projectionFailures: [] } } })
   await withoutSnapshot()
-  expect(container.textContent).toContain('Agent created')
+  expect(container.querySelector('.agent-surface')).not.toBeNull()
+  expect(useAppStore.getState().pendingAgentLaunches[agent.id]?.created).toEqual(createdReceipt())
   expect(badge().textContent).toBe('Host unknown')
   expect(badge().dataset.executionHostId).toBe('')
   expect((await details()).textContent).toContain('Host ID: Unknown')
@@ -284,7 +307,8 @@ it('the actual Workbench X closes only its unknown-snapshot Region and leaves th
   const workspaceId = 'private-unknown-workspace', tabId = 'private-unknown-tab', left = 'unknown-left', right = 'unknown-right'
   let tab = createWorkbenchTab(tabId, { kind: 'agent', regionId: left, workspaceId, sessionId: agent.id, phase: 'attached' })
   tab = addWorkbenchRegion(tab, left, 'right', { kind: 'terminal', regionId: right, workspaceId, sessionId: 'original-unknown-shell', phase: 'attached' })
-  useAppStore.setState({ sessions: [], recoveryCandidates: [], pendingAgentLaunches: {},
+  useAppStore.setState({ config: { ...config, workspaces: [{ id: workspaceId, name: 'Private', hostId: 'local', path: _hygiene_fixturePath("private/original-workspace"), kind: 'folder' }] },
+    sessions: [], recoveryCandidates: [], pendingAgentLaunches: {},
     tabs: { [tabId]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('private-group', [tabId]) },
     activeWorkspaceId: workspaceId, agentComposerDrafts: { [right]: 'Original neighbor draft' } })
   vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
