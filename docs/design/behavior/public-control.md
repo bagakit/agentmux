@@ -199,7 +199,7 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 - **内容修订与空间提交各有原 revision。** 分类描述与知识正文保存沿原文件／内容修订，主归属转移沿 Core 的 exact-revision 空间提交；回执分别表达实际目标、应用事实、持久确认与局部未知。陈旧目标或 revision 明确拒绝该次动作，原内容与健康工作继续；部分读取保已确认结果，歧义保真实候选。创建／迁移的未知回执沿同一原对象与操作核读，不因失去回执盲建或重放。普通知识读写不隐式启动、发送、续跑 Agent，也不默认注入整库内容。
 - **承接预演是实际数据的准确差异。** 公共预演说明受影响的旧空间节点、保留内容身份与原 Zone/Tab/Region、目标分类及原图 revision；应用沿同一 owner，返回备份、预演与实际保存事实。较新数据或原目标变化后重新核对，不以旧预演覆盖用户后来工作；未知结果保原引用与恢复入口。完整迁移的保全约束仍由知识库合同持有。
 
-以上是正在实现的新 Topics 公共能力合同，不声称当前已安装 CLI 已具备完整知识库、分类转移或迁移接口。准确 method、参数、codec、命令与 help／skill 从[公共能力来源](../../specs/public-capabilities.md)及实际候选取得；当前 `space` 导航或 `file view` 不能代签完整 CUI，协议／help 存在也不代签真实 Host、GUI／CLI 消费、保存或迁移验收。
+本节定义 Topics 的公共接入约束；准确 method、参数、codec、命令与 help／skill 从[公共能力来源](../../specs/public-capabilities.md)及对应源码版本取得。源码接线、真实 Host／GUI／CLI 消费、内容保存、迁移验收与当前安装能力分别核对，不能互相代签；当前 `space` 导航或 `file view` 也不能代签完整知识 CUI。
 
 ## Agent-first 的 Space 工作入口
 

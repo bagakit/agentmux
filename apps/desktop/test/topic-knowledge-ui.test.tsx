@@ -31,6 +31,15 @@ import { resolveDesktopSpaceSelection, workbenchSelectionCatalog } from '../src/
 import { api } from '../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
+const dragBoundary = vi.hoisted(() => ({ end: undefined as ((event: import('@dnd-kit/core').DragEndEvent) => void) | undefined }))
+// Observe the real component's registered drag callback; all Dnd rendering and Topic owners remain original.
+vi.mock('@dnd-kit/core', async load => {
+  const original = await load<typeof import('@dnd-kit/core')>()
+  return { ...original, DndContext: (props: import('@dnd-kit/core').DndContextProps) => {
+    dragBoundary.end = props.onDragEnd
+    return createElement(original.DndContext, props)
+  } }
+})
 // Native PTY painting is outside this happy-dom navigation boundary; Electron proves the real workface.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => createElement('div', { 'data-native-pty-paint-isolated': '' }) }))
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('No avatar writes in this proof') } } }))
@@ -78,6 +87,119 @@ async function entry(owner: TopicKnowledgeOwner, topicId: string, title: string,
   return (await owner.call('topic.knowledge.write', { topicId, entryId: crypto.randomUUID(), title, content: 'Useful original conclusion', form: sources.length ? 'reference' : 'derived', certainty: 'decision', sources, expectedRevision: null })).entry
 }
 describe('Topic knowledge UI consumes the real Host content and Core graph owners', () => {
+  it('clears the search and detail without a late global result reclaiming the panel', async () => {
+    const f = await fixture(), saved = await entry(f.owner, f.first.topicId, 'Original decision'), before = useAppStore.getState()
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topics: f.topics }))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search all Topics"]')!
+    await input(field, saved.title); await click(button('Search'))
+    await settle(() => !!host.querySelector('.topic-knowledge-row'))
+    await click(host.querySelector('.topic-knowledge-row')!)
+    expect(host.querySelector('.topic-knowledge-entry')).not.toBeNull()
+    let release!: () => void
+    vi.mocked(api.topics.call).mockImplementation(async (method, request) => {
+      if (method === 'topic.knowledge.search') await new Promise<void>(resolve => { release = resolve })
+      return f.owner.call(method, request)
+    })
+    await input(field, 'Later result'); await click(button('Search')); await settle(() => !!release)
+    await click(button('Clear search'))
+    expect(field.value).toBe(''); expect(document.activeElement).toBe(field)
+    expect(host.querySelector('.topic-knowledge-entry')).toBeNull(); expect(host.querySelector('.topic-knowledge-row')).toBeNull()
+    await act(async () => release())
+    expect(host.querySelector('.topic-knowledge-row')).toBeNull()
+    expect(host.textContent).toContain('Search across all Topics to find saved knowledge.')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  })
+  it('closes the reader back to its original result and keeps the exact query and sources', async () => {
+    const f = await fixture(), saved = await entry(f.owner, f.first.topicId, 'Original reference', [{ kind: 'url', url: 'https://example.com/original' }])
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!
+    await input(field, saved.title); await click(button('Search')); await settle(() => !!host.querySelector('.topic-knowledge-row'))
+    const row = host.querySelector<HTMLButtonElement>('.topic-knowledge-row')!
+    await click(row); expect(host.querySelector('.topic-knowledge-source')?.textContent).toContain('https://example.com/original')
+    await click(button('Close knowledge detail'))
+    expect(host.querySelector('.topic-knowledge-entry')).toBeNull(); expect(field.value).toBe(saved.title)
+    expect(document.activeElement).toBe(row); expect(host.querySelector('.topic-knowledge-row')).toBe(row)
+    await click(row)
+    expect(host.querySelector('.topic-knowledge-source')?.textContent).toContain('https://example.com/original')
+    await click(button('Clear search')); await settle(() => !!host.querySelector('.topic-knowledge-row'))
+    expect(field.value).toBe(''); expect(host.querySelector('.topic-knowledge-entry')).toBeNull()
+    expect(api.topics.call).toHaveBeenLastCalledWith('topic.knowledge.ls', { topicId: f.first.topicId, limit: 100 })
+  })
+  it('closes a retained detail to the search input when a partial read removes its result row', async () => {
+    const f = await fixture(), saved = await entry(f.owner, f.first.topicId, 'Original reference'), before = useAppStore.getState()
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    await settle(() => !!host.querySelector('.topic-knowledge-row')); await click(host.querySelector('.topic-knowledge-row')!)
+    vi.mocked(api.topics.call).mockImplementation(async (method, request) => {
+      if (method === 'topic.knowledge.ls') return { entries: [], unavailable: [{ code: 'read-unavailable', message: 'Knowledge read is temporarily unavailable', recovery: 'Refresh knowledge' }] }
+      return f.owner.call(method, request)
+    })
+    await click(button('Refresh knowledge')); await settle(() => !host.querySelector('.topic-knowledge-row'))
+    expect(host.querySelector('.topic-knowledge-entry')?.textContent).toContain(saved.title)
+    const close = button('Close knowledge detail'); close.focus(); await click(close)
+    expect(host.querySelector('.topic-knowledge-entry')).toBeNull()
+    expect(document.activeElement).toBe(host.querySelector('[aria-label="Search this Topic"]'))
+    expect(host.textContent).toContain('Knowledge read is temporarily unavailable')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  })
+  it('keeps the search and detail when Escape cancels IME composition, then clears on ordinary Escape', async () => {
+    const f = await fixture(), saved = await entry(f.owner, f.first.topicId, 'Original reference')
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!
+    await input(field, saved.title); await click(button('Search')); await settle(() => !!host.querySelector('.topic-knowledge-row'))
+    await click(host.querySelector('.topic-knowledge-row')!)
+    field.focus()
+    for (const composition of [{ isComposing: true }, { keyCode: 229 }]) {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...composition })
+      await act(async () => { field.dispatchEvent(event) })
+      expect(event.defaultPrevented).toBe(false); expect(field.value).toBe(saved.title)
+      expect(host.querySelector('.topic-knowledge-entry')).not.toBeNull(); expect(document.activeElement).toBe(field)
+    }
+    await act(async () => { field.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
+    expect(field.value).toBe(''); expect(host.querySelector('.topic-knowledge-entry')).toBeNull()
+    expect(document.activeElement).toBe(field)
+  })
+  it('reorders only the shown Category without erasing another Category user order', async () => {
+    const f = await fixture(), extra = (await f.owner.call('topic.create', { topicId: 'view:neighbor', title: '工作里的邻居' })).topic
+    await moveKnowledgeTopic((await f.owner.call('topic.inspect', { topicId: f.first.topicId })).topic!, CATEGORY)
+    await moveKnowledgeTopic((await f.owner.call('topic.inspect', { topicId: extra.topicId })).topic!, CATEGORY)
+    await useAppStore.getState().refreshScratchTopics(f.workspace.id, true)
+    useAppStore.setState({ pinnedItems: {}, scratchTopicOrder: [f.second.topicId, 'unshown-original-id', f.first.topicId, extra.topicId] })
+    const original = useAppStore.getState()
+    await mount(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.category.spaceId, onRevealDirectory: () => {} }))
+    await settle(() => host.querySelectorAll('[data-topic-id]').length === 2)
+    expect([...host.querySelectorAll('[data-topic-id]')].map(row => row.getAttribute('data-topic-id'))).toEqual([f.first.topicId, extra.topicId])
+    await act(async () => dragBoundary.end!({ active: { id: extra.topicId }, over: { id: f.first.topicId } } as import('@dnd-kit/core').DragEndEvent))
+    expect(useAppStore.getState().scratchTopicOrder).toEqual([f.second.topicId, 'unshown-original-id', extra.topicId, f.first.topicId])
+    expect([...host.querySelectorAll('[data-topic-id]')].map(row => row.getAttribute('data-topic-id'))).toEqual([extra.topicId, f.first.topicId])
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(original.workbenchSpaceSelection)
+    expect(useAppStore.getState().tabs).toBe(original.tabs); expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
+  })
+  it('opens an exact discussion source once without waiting for a default Chat metadata jump', async () => {
+    const f = await fixture(), chat = { ...createWorkbenchTab('source-chat', { kind: 'agent', phase: 'attached', regionId: 'source-thread', workspaceId: f.workspace.id, sessionId: 'source-agent' }), topicId: f.first.topicId, space: f.tabs[0]!.space }
+    const graph = (await f.state.read())!.graph, layout = { ...f.layout, groups: f.layout.groups.map(group => ({ ...group, tabOrder: [...group.tabOrder, chat.id] })) }
+    graph.tabs.push({ tabId: chat.id, zoneId: f.first.zoneId, workspaceId: f.workspace.id, name: null, regionIds: ['source-thread'] })
+    graph.regions.push({ tabId: chat.id, regionId: 'source-thread', kind: 'agent', agentSessionId: 'source-agent', runId: 'source-run', execution: { hostId: 'local', cwd: f.first.directoryPath } })
+    graph.layouts[f.workspace.id] = layout
+    await f.state.commit({ expectedRevision: (await f.state.read())!.revision, graph })
+    useAppStore.setState(state => ({ tabs: { ...state.tabs, [chat.id]: chat }, layouts: { ...state.layouts, [f.workspace.id]: layout } }))
+    const before = useAppStore.getState(), source = { kind: 'topic' as const, topicId: f.first.topicId, chatId: chat.id, threadId: 'source-thread' }
+    await entry(f.owner, f.first.topicId, 'Discussion reference', [source])
+    vi.mocked(api.scratch.readTopic).mockImplementation(() => new Promise(() => {}))
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    await settle(() => !!host.querySelector('.topic-knowledge-row')); await click(host.querySelector('.topic-knowledge-row')!)
+    const positions: string[] = []
+    const unsubscribe = useAppStore.subscribe((next, previous) => { if (next.workbenchSpaceSelection?.tabId !== previous.workbenchSpaceSelection?.tabId) positions.push(next.workbenchSpaceSelection?.tabId ?? 'none') })
+    try {
+      await click(host.querySelector('.topic-knowledge-source')!)
+      await settle(() => useAppStore.getState().workbenchSpaceSelection?.tabId === chat.id)
+      expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ topicId: f.first.topicId, zoneId: f.first.zoneId, tabId: chat.id, regionId: 'source-thread' })
+      expect(positions).toEqual([chat.id]); expect(api.scratch.readTopic).not.toHaveBeenCalled()
+      expect(useAppStore.getState().tabs).toEqual(before.tabs); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+      expect(api.sessions.stop).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+  })
   it('creates a Category in its original owner and cancel does not rename or write', async () => {
     const f = await fixture(), close = vi.fn()
     await mount(createElement(TopicCategoryDialog, { target: 'create', onClose: close }))

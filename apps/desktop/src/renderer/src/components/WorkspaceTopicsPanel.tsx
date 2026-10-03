@@ -378,7 +378,7 @@ export function WorkspaceTopicsPanel({
           onDragEnd={(event) => {
             const movedId = String(event.active.id)
             const targetId = event.over ? String(event.over.id) : movedId
-            setTopicOrder(reorderTopics(projected.map((entry) => entry.id), movedId, targetId))
+            setTopicOrder(reorderTopics(projected.map((entry) => entry.id), movedId, targetId, topicOrder))
           }}
         >
         <SortableContext

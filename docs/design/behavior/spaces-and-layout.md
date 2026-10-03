@@ -259,13 +259,11 @@ Space 是共同的外层产品概念，Project 表达可选项目来源，不能
 - Topic 类围绕一件事情组织工作，保留独立 Wiki、资料、产出与 Agent 铭牌。它为日常临时讨论提供低门槛起点，让相似讨论在同一 Topic 持续聚集，并从交流中积累可长期使用的知识。Topic 的存在与耐久内容不依赖 Agent 或 Tab 是否仍打开。
 - Folder、Topic 与 Mote 的共同工作能力遵守[《Space 的统一工作面框架》](#space-的统一工作面框架)及同一重启恢复与健康 Session 保留合同。Space 不复制 Core 的 Session/Agent 状态或 ctxmux 的 Run 事实，启动继续恢复用户上次工作面。
 
-用户进一步要求：「在 space 树里他们显示不太一样，比如 topic 会自动根据规则去读 topic.md 来显示，且 topic 会自动识别和显示，不用手动绑定」，树上的 `+` 提供 `Open Folder As a Project` 与 `Create Another Topic` 两类入口。
-
 - Space 树对 Folder/Project 与知识分类使用各自适合的内容来源。Folder/Project 表达打开的目录与实际项目事实；Category 沿原分类描述 owner 呈现名称，具体 Topic 在分类页或总览按识别规则自动发现，从其 `topic.md` 读取人类可读标题、摘要等显示信息。Topic 不要求用户手动注册或绑定，发现与显示不依赖当前 Tab、Region 或 Session。
 - Space 树保留用特殊图标识别的 Topics 总入口与已 polish 的总览列表；树内按知识库合同只显示 Category，具体 Topic 在所选分类页或总览中访问；树与列表使用同一分类、Topic 集合、选中与工作面事实。分类层不改变 Topic 的自动发现，不把每个 Topic 的二级内容恢复成全局列表。总览页的视觉与控件约束只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 - 用户要求优化 Space 左侧树的交互体验。Mote、Topics 与 Folders 在同一导航滚动区内保持可达，顶部创建与侧栏动作共用一层固定控制行，密度动作紧邻就地查找；展开与收起只改变树的显示，不启动、停止或替换 Session。长标题可通过 hover 信息和可访问名称读全；名称打开对象，折叠动作与 Mote 人格编辑各自有完整命中区，键盘操作能清楚看到当前焦点。窄栏与短窗口继续保留原对象、选中、折叠和工作面事实。对齐、缩进及视觉节奏只定义在 surface-density[《Project Rail 与 Topic 行密度》](../presentation/spaces-and-layout.md#project-rail-与-topic-行密度)。
 - 用户继续反馈：「现在继续优化左边树结构，当下显然没有达到顶尖水准」。树需要承担快速找 Space、辨认当前位置和继续操作的完整导航职责。就地查找只筛选已知的 Mote、Category、Topic 和 Folder 名称、摘要、路径及 Host，不扫描磁盘、不启动 Agent；Topic 命中定位其原 Category，再从分类页访问，不把具体 Topic 恢复成树子项。匹配项的祖先临时可见，清除查找后还原用户原有折叠与滚动位置。无结果必须明确可恢复，不能表现为对象被删除。键盘可沿当前可见对象连续移动、到达首尾、展开或收起分组，Enter 打开明确聚焦的对象；移动焦点本身不改变工作面。Topic 的 pin 等既有事实、原总览入口和 Folder 导航身份继续共用原 owner。状态摘要优先展示需要用户处理的情况，完整分类与准确数量仍在同一入口的提示、无障碍名称与展开面中可读；收敛常驻信息不能把未知当作正常，或隐藏待回答与错误。视觉层级与信息预算只定义在密度 SSOT 同节。
-- 创建入口必须明确区分打开已有目录、创建分类与创建新 Topic。打开目录进入 Folder/Project；Topics 分区的原创建槽用于创建 Category，分类页内的创建动作在该准确 Category 中创建 Topic；创建 Topic 形成独立的持久目录与 Wiki、资料、产出、Agent 铭牌结构，创建后自动可见可进入。
+- 创建入口必须明确区分打开已有目录、创建分类、创建新 Topic 与创建 Mote。顶部通用 `+` 保留跨类型菜单：打开目录进入 Folder/Project，创建 Topic/Mote 使用各自的持久目录，不要求先切到默认 Topics。Topics 分区的原创建槽只创建 Category；分类页的创建动作在该准确 Category 中创建 Topic。新 Topic 保有独立的持久目录与 Wiki、资料、产出、Agent 铭牌结构，创建后自动可见可进入。Mote 的人格与创建要求仍遵守本节的独立内容规则，普通 Topic 不继承人格。
 - 显示信息读取失败属于流程状态：保留已有 Space 与工作面，在对应条目或服务窗明确说明问题。一个 Topic 的读取失败不能隐藏其他健康 Topic，也不能清空其已有 Tab/Region 或停止健康 Agent。
 
 用户继续反馈：「现在树的最左边有个 padding 浪费空间，而且有很土的箭头和线，没有妥善的分区、热度、标记系统，而且缩进也有点看不出来，顶部 icon 位置也奇怪有两层，有多余的标题，目录和功能区没有 `+` 等」，要求理解底层模型后重新设计交互并优化。Space 导航必须同时回答「这是什么、在哪里、是否需要我、怎样继续」，顶栏、分区和对象动作各有明确作用域。
@@ -317,15 +315,14 @@ PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Top
 
 用户要求补强 Mote 的默认人格与知识维护习惯：新建或补缺失的 Mote SOUL 默认先读相关已有资料，记录有来源、时间和作用域的确认偏好与决定，区分事实、推测、提案、承诺和完成；更正只更新相关耐久知识，保存后读回才声称记住。换 Session 通过原资料接续，不假称继承未见对话或运行工具；不知道、未读、写入未确认都如实说明。知识组织继续自主，不规定 MEMORY 文件集、统一分类、scheduler 或第二份 Goal/Task 状态。详细执行协调沿 app-owned MOTE_COORDINATION_ROLE 单一职责；主 Mote 的新默认或用户明确恢复默认 Wiki 只提供短知识／协作指南，不重复整段角色流程，非主 Mote／普通 Topic 的默认 Wiki 不改。已有磁盘 SOUL、Wiki 与用户资料原样保留，不做 migration、自动清洗或截取用户文本去重；仅新的 Session 按原人格加载合同生效，恢复不热替换。实际模板交付与模型是否执行、读写成功分别验证，不能用提示词内容承诺每轮遵守或自动长期记忆。
 
-用户要求：「创建一个 feature-tracker 专门来做这个迭代吧，包括现在左下角的 PMO Teams 头像的交互，也可以借这次想的更加明白一些」。本轮迭代覆盖 Space 的统一组织、Topic 自动发现与创建、带 `SOUL.md` 的特殊预制，以及左下角现有 PMO Teams 头像与同一 Space 的交互关系。头像快捷入口、Space 树条目和完整工作面必须指向同一持久对象；讨论要明确点击、展开、收起、切换与原工作面焦点的关系。用户随后确认「现在可以始终指向 PMO」：本轮底部入口固定指向现有协调对象，不随当前 Space 自动换对象。快捷面、人格编辑入口与完整 Space 的往返遵守本节下文的确认；现行职责、焦点隔离与恢复约束继续成立。
+Mote 的头像快捷入口、Space 树条目与完整工作面指向同一个已选持久对象；切换背景 Space 不自动更换对象。全部 Mote 的选择、开合、人格编辑与原焦点恢复统一遵守[《Mote 快捷入口与当前协调上下文》](motes-and-coordination.md#mote-快捷入口与当前协调上下文)。
 
-用户进一步要求：「这个 Agent 在我们项目里最好有个不容易重复的名字」，并强调「Agent 毕竟太通用了」，随后明确「PMO 这名字也不好，得换一个，只是在初始化这类 Agent 的时候，默认角色中包含 PMO」。在比较并撤回 Giu 后，用户最终明确：「就用 mote 吧？」。这类有稳定身份、SOUL.md 和全局负责能力的持久产品对象统一叫 **Mote**，Space 树、创建入口和固定快捷入口采用同一含义；PMO 是初始化默认角色之一。命名不改变耐久目录、持久对象、Core Session 或 ctxmux Run 身份。候选历史只保留在 brainstorm 记录中，不作为当前产品文案。
+这类具有稳定身份、`SOUL.md` 和全局工作能力的持久对象统一称为 **Mote**；PMO 是初始化默认角色之一。名称不改变耐久目录、持久对象、Core Session 或 ctxmux Run 身份，也不使普通 Topic 继承人格或并入 Mote。Space 树、创建入口与快捷入口使用同一对象含义。
 
-用户要求「继续，彻底完成推进」。本次按以上确认落实完整迭代，不再停在提案：Space 树把默认 Topics 节点与 Folder/Project、Mote 放在同一导航面；Topics 分类页和现有总览中的 Topic 同源，Mote 使用独立的预制身份标识。默认 Topic 收纳目录仍是既有目录，文件和工作面身份保持连续；Topic 的发现规则只读取该目录的直接 Topic 子目录，不扫描无关项目或全盘。
+Topic 的自动发现只读取既有收纳目录的直接 Topic 子目录，不扫描无关项目或全盘。分类页与总览消费同一 Topic 来源，已有目录内容和工作面身份保持连续；Mote 的预制身份与导航独立表达。
 
-- Space 的 `+` 提供 Open Folder As a Project、Create Another Topic 和 Create Mote；从任意当前 Space 创建 Topic/Mote 都进入其持久目录，不要求先切到默认 Topics。
 - Mote 创建时提供可编辑的 SOUL.md 和默认 PMO 角色；普通 Topic 不继承人格。一个目录中的 SOUL.md 是该目录具有持久人格的文件事实，和有没有运行 Session 分开。Topic 的知识基础继续保留，Mote 自行组织后续知识。
-- 左下角默认 Mote 仍打开已有协调对象的快捷面；入口的展开状态独立于 Working / Needs you 等真实 Session 状态，无障碍名称与描述可辨；树条目进入该对象的完整工作面。快捷面可打开完整 Space，完整面可编辑同一 SOUL.md。两条入口复用既有 Tab/Region/Session，不因面板开合新建对象；关闭快捷面恢复原执行上下文，进入完整 Space 则保留明确选择的新目标。同一 Mote 有多个会话时，快捷面与重启恢复保留已有目标 Tab 和 Mote 焦点，不能仅因它排在列表前面就换到另一个会话；浮层的目标选择不改写原主工作面的选中。
+- 左下角 Mote 入口打开当前已选 Mote 的快捷面；入口的展开状态独立于 Working / Needs you 等真实 Session 状态，无障碍名称与描述可辨；树条目进入该对象的完整工作面。快捷面可打开完整 Space，完整面可编辑同一 SOUL.md。两条入口复用既有 Tab/Region/Session，不因面板开合新建对象；关闭快捷面恢复原执行上下文，进入完整 Space 则保留明确选择的新目标。同一 Mote 有多个会话时，快捷面与重启恢复保留已有目标 Tab 和 Mote 焦点，不能仅因它排在列表前面就换到另一个会话；浮层的目标选择不改写原主工作面的选中。
 - 新 Mote 从没有运行 Session 的可用启动面开始，不凭打开或创建预制启动额外 Terminal。普通 Topic 的首次 Terminal 规则继续成立。
 - SOUL.md 的内容在新执行会话启动时作为该 Mote 的人格上下文实际传入 Core；恢复已有会话保留其原上下文和持久目录。正在运行的会话不因文件保存而声称已热更新；文件编辑入口明确说明新会话使用更新后的内容。读取失败应给出可见原因，原目录、工作面和健康 Session 保留。
 - Topic 升级成角色和复制是此前 Agent 提出的额外设想，不是本轮已确认需求；Mote 归档与恢复按本次用户反馈见[《Mote 归档与恢复》](motes-and-coordination.md#mote-归档与恢复)。
@@ -602,7 +599,7 @@ Region 的右键菜单必须提供“移位”入口，允许在当前工作面�
 - 没有品牌图标的节点使用低对比、低饱和的 monogram；字母只是识别辅助，不能用高饱和背景抢过项目名。
 - 右侧运行/错误通知默认只显示语义 icon 和数量；hover、focus 或明确交互时再展开文案，展开不能遮挡项目名或改变列表跳动。
 - Pinned item 必须是可点击的导航入口；Topic 的 pin 标记贴近标题并保持在标题行的视觉轨道内，不漂浮到整行中央。
-- Scratch Topic 只展示当前打开的 Agent，顺序沿用真实 Tab 顺序；Agent 图标、状态和对应 Tab/Region 信息必须在同一行内成组表达。
+- Topic 行的 Tab/Region 摘要按真实成员和 Tab 顺序呈现，Region 内的 Agent 图标、状态与对应位置成组表达；不按全部 Scratch Tab 或执行 cwd 猜成员。没有打开 Region 的后台健康 Agent 仍通过原独立身份入口可见可达，范围与终局判据见[《Topic 行的 Region 与 Agent 在场状态》](#topic-行的-region-与-agent-在场状态)。
 - Project Rail 的密度由用户在 Projects 标题行就地切换（加号旁），不进设置页；提供默认、紧凑、更紧凑三档，按同一个入口循环。切换只改变行高、行图标尺寸与每层缩进，**不改变树结构、归属、选中项或滚动位置**——密度是看法，不是数据。默认档的树缩进也要保持克制，避免切换后仍把项目标题推得太远；该选择重启后仍然有效（视觉档位见 DEN「Project Rail 与 Topic 行密度」）。
 - running 与 working 必须**同时**在字形与动势上可分：`running`（进程活着、未在产出）保持静态 glyph，`working`（正在产出）带节奏动势。只换提示文字、只换颜色、或两者都静态都不满足这条；reduced-motion 下动势退化为静态但**字形差异必须保留**（约束原文见 DEN「Agents、队列与语义 token 密度」，此处只补「哪一个是哪一个」）。
 
