@@ -13,6 +13,7 @@ import { runInNewContext } from 'node:vm'
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const exec = promisify(execFile)
 export const modelHarnessPaths = [
+  'apps/desktop/scripts/verify-mote-daily-autonomy.mjs',
   'apps/desktop/scripts/verify-mote-daily-model.mjs',
   ...['probe.mjs', 'owner.ts', 'entry.mjs'].map(name => 'apps/desktop/scripts/fixtures/mote-daily-model/' + name)
 ]
@@ -48,7 +49,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
     { module: writeModule, exports: writeModule.exports, sameRun: identityModule.exports.sameRun, AgentMuxError: errorModule.exports.AgentMuxError }, { filename: clientFile })
   const originalCoreWriteSource = { [clientFile]: hash(clientSource), [identityFile]: hash(identitySource), [errorFile]: hash(errorSource) }
   const counters = []
-  const scenarios = ['held-action-manager-drain-late-ack', 'failed-ack-stops-immediately', 'spent-six-refuses-next-input', 'trusted-terminal-protocol-zero-model-budget']
+  const scenarios = ['held-action-manager-drain-late-ack', 'failed-ack-stops-immediately', 'spent-five-refuses-next-input', 'trusted-terminal-protocol-zero-model-budget']
   if (selectedScenario) assert.ok(scenarios.includes(selectedScenario), 'Unknown Source-only counter')
   for (const scenario of selectedScenario ? [selectedScenario] : scenarios) {
     const root = await mkdtemp(_hygiene_fixturePath("tmp/amm-model-guard-")), output = join(evidence, scenario)
@@ -152,8 +153,8 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
       '../../../src/main/continuous-progress-delivery': { deliverContinuousProgress() {} },
       '../../../../../packages/core/src/durable-write': durableModule.exports
     }
-    const instrumentation = scenario === 'spent-six-refuses-next-input'
-      ? { anchor: 'attemptedModelRequests: 0, admittedModelRequests: 0, completedModelTurns: 0', replacement: 'attemptedModelRequests: 6, admittedModelRequests: 0, completedModelTurns: 0' } : null
+    const instrumentation = scenario === 'spent-five-refuses-next-input'
+      ? { anchor: 'attemptedModelRequests: 0, admittedModelRequests: 0, completedModelTurns: 0', replacement: 'attemptedModelRequests: 5, admittedModelRequests: 0, completedModelTurns: 0' } : null
     let loaded = owner
     if (instrumentation) { assert.equal(loaded.split(instrumentation.anchor).length, 2); loaded = loaded.replace(instrumentation.anchor, instrumentation.replacement) }
     const module = { exports: {} }
@@ -161,7 +162,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
       runInNewContext(compile(loaded), { module, exports: module.exports, require: name => name in modules ? modules[name] : require(name),
         process: { pid: process.pid, env: { AGENTMUX_RUNTIME_DIRECTORY: root + '/runtime', CODEX_HOME: root + '/codex-home' } },
         Buffer, structuredClone, AbortController, AbortSignal, setTimeout: timer, clearTimeout, console }, { filename: ownerFile })
-      if (scenario === 'spent-six-refuses-next-input' || scenario === 'trusted-terminal-protocol-zero-model-budget') releaseManager()
+      if (scenario === 'spent-five-refuses-next-input' || scenario === 'trusted-terminal-protocol-zero-model-budget') releaseManager()
       const passed = await module.exports.runModelOwner({ root, evidence: output, html: 'source-counter', preload: 'source-counter',
         command: 'source-counter', codexArgs: [], nativeReadArgs: [], cli: 'source-counter', hook: 'source-counter', decisionFile: 'source-counter' })
       assert.equal(passed, false, 'A source counter cannot qualify a model journey')
@@ -178,7 +179,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
         assert.equal(raw.rejectedInputs.length, 2); assert.ok(raw.rejectedInputs.every(one => one.method === 'writeAgent'))
         assert.ok(calls.indexOf('manager.stop.requested') < calls.indexOf('protocol.ack.released'))
         assert.ok(calls.indexOf('protocol.ack.released') < calls.indexOf('ipc.dispose'), 'Entire protocol observation must settle before owner cleanup')
-      } else if (instrumentation) { assert.equal(originalCalls, 0); assert.equal(budget.attemptedModelRequests, 6); assert.equal(raw.rejectedInputs.length, 1) }
+      } else if (instrumentation) { assert.equal(originalCalls, 0); assert.equal(budget.attemptedModelRequests, 5); assert.equal(raw.rejectedInputs.length, 1) }
       else {
         assert.equal(originalCalls, 1); assert.equal(raw.modelTurns, 1); assert.equal(nativeStopped, true)
         assert.ok(calls.indexOf('native.stop') < calls.indexOf('manager.stop.drained'))
@@ -190,7 +191,7 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
         budgetSha256: hash(await readFile(join(output, 'model-budget.json'))), qualification: 'Source closure counter with explicit doubles; no Native/model' })
     } finally { for (const id of timers) clearTimeout(id); await rm(root, { recursive: true, force: true }) }
   }
-  const receipt = { schema: 'agentmux.mote.model-source-guards.v1', taskId: 'T-006', passed: true,
+  const receipt = { schema: 'agentmux.mote.model-source-guards.v1', taskId: 'T-008', passed: true,
     ownerSource: { path: ownerFile, sha256: hash(owner) }, originalEvidenceWriter: { path: durableFile, sha256: hash(durableSource) },
     originalCoreWriteSource, originalCoreExtraction: 'Original writeAgent/sameRun/error definitions; explicit connected/session/writeAgentInput ports, no Native process',
     counters, acceleratedDeadlineMs: 40, productionDeadlineMs: 120000, authFilesRead: false, authCopied: false,
@@ -202,12 +203,12 @@ export async function checkModelSourceGuards({ repository, evidence, scenario: s
 /** Only the Root-issued grant is read here. No seed/auth file or process is touched. */
 export async function readModelAuthorization(file, expectedSha256) {
   assert.ok(file && /^[a-f0-9]{64}$/.test(expectedSha256 ?? ''),
-    'T-006 is pending: Root must provide its explicit private authorization artifact and exact SHA before auth reads or model launch')
+    'T-008 is pending: Root must provide its explicit private authorization artifact and exact SHA before auth reads or model launch')
   const bytes = await readFile(file)
   assert.equal(hash(bytes), expectedSha256, 'Root private authorization bytes changed')
   const grant = JSON.parse(bytes)
   assert.equal(grant.schema, 'agentmux.mote.real-model-run-trigger.v1')
-  assert.equal(grant.taskId, 'T-006'); assert.equal(grant.rootApproved, true); assert.equal(grant.runTriggerIssued, true)
+  assert.equal(grant.taskId, 'T-008'); assert.equal(grant.rootApproved, true); assert.equal(grant.runTriggerIssued, true)
   const bound = async locator => {
     assert.ok(locator?.path && /^[a-f0-9]{64}$/.test(locator.sha256 ?? ''), 'Root trigger needs exact user/source/review locators')
     const bytes = await readFile(locator.path); assert.equal(hash(bytes), locator.sha256, 'Root trigger evidence changed')
@@ -217,14 +218,17 @@ export async function readModelAuthorization(file, expectedSha256) {
   assert.equal(user.schema, 'agentmux.mote-real-model-user-authorization.v1')
   assert.equal(user.status, 'user-authorized-execution-awaits-source-review'); assert.equal(user.runTriggerIssued, false)
   assert.equal(user.maxModelTurns, 6); assert.equal(user.maxTurnMs, 120000)
-  assert.equal(review.status, 'approved'); assert.ok(review.taskIds?.includes('T-006'))
+  assert.equal(review.status, 'approved'); assert.ok(review.taskIds?.includes('T-008'))
   assert.equal(review.sourceManifestSha256, grant.sourceManifest.sha256)
   assert.equal(review.sourceGate?.sha256, manifest.sourcePreparation.sha256)
   const prepared = await bound(manifest.sourcePreparation)
   assert.equal(prepared.sourcePreparation?.passed, true); assert.equal(prepared.passed, false)
   assert.equal(prepared.modelTurns, 0); assert.equal(prepared.authFilesRead, false); assert.equal(prepared.authCopied, false)
   assert.deepEqual(manifest.harnessSource, prepared.harnessSource); assert.deepEqual(manifest.source, prepared.source)
-  assert.equal(grant.providerId, 'codex'); assert.equal(grant.maxModelTurns, 6); assert.equal(grant.turnTimeoutMs, 120000)
+  assert.equal(grant.providerId, 'codex'); assert.equal(grant.maxModelTurns, 5); assert.equal(grant.turnTimeoutMs, 120000)
+  assert.equal(grant.priorActualModelTurns, 2)
+  assert.equal(user.supplementalAuthorization?.maxActualModelTurnsTotal, 7)
+  assert.ok(grant.priorActualModelTurns + grant.maxModelTurns <= user.supplementalAuthorization.maxActualModelTurnsTotal)
   assert.deepEqual(grant.credentialFiles, ['auth.json', 'config.toml'])
   assert.equal(grant.copyIsolatedSeed, true)
   assert.ok(typeof grant.seedPath === 'string' && grant.seedPath.startsWith('/'))
@@ -244,11 +248,11 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
   await mkdir(evidence, { recursive: true })
   const disk = await statfs(evidence); assert.ok(disk.bavail * disk.bsize > 150 * 1024 * 1024, 'Private Source preparation needs 150 MiB; nothing has launched')
   const buildRoot = await realpath(await mkdtemp(_hygiene_fixturePath("tmp/amm-source-"))), source = join(buildRoot, 'source')
-  const receipt = { schema: 'agentmux.mote.real-model.v1', taskId: 'T-006', passed: false, status: 'pending',
+  const receipt = { schema: 'agentmux.mote.real-model.v1', taskId: 'T-008', passed: false, status: 'pending',
     sourcePinnedMain: mainRef, source: {}, sourceOrigins: {}, harnessSource: {}, compiledImports: {}, compiledOutputs: {}, generatedInputs: {},
     authFilesRead: false, authCopied: false, userRunTouched: false, modelTurns: 0,
     authorization: permission ? { sha256: permission.sha256, userAuthorization: permission.grant.userAuthorization,
-      maxModelTurns: 6, turnTimeoutMs: 120000, credentialFiles: permission.grant.credentialFiles } : null,
+      maxModelTurns: 5, turnTimeoutMs: 120000, credentialFiles: permission.grant.credentialFiles } : null,
     limitations: ['Only original synthetic private Mote files and owned Runs are in scope.',
       'Source preparation is not model cooperation, memory, proposal value, Runtime, or Native qualification.',
       'Actual model evidence requires original native history/tools, file readback and independent usefulness approval.',
@@ -411,7 +415,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       assert.deepEqual(receipt.source, permission.manifest.source, 'Actual compiled Source differs from Root-approved model graph')
       // A trigger is consumed before the first seed stat/read. A failed attempt never silently spends another budget.
       await writeFile(join(repositoryRoot, '.tmp/mote-daily-model', 'run-trigger-' + permission.sha256 + '.used.json'),
-        JSON.stringify({ sha256: permission.sha256, taskId: 'T-006', consumedAt: Date.now(), evidence }), { flag: 'wx', mode: 0o600 })
+        JSON.stringify({ sha256: permission.sha256, taskId: 'T-008', consumedAt: Date.now(), evidence }), { flag: 'wx', mode: 0o600 })
       receipt.authAccessAttempted = true
       // A partial original copy failure is unknown until the original private destinations are observed.
       receipt.authFilesRead = null; receipt.authCopied = null
@@ -481,7 +485,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
           const budget = await readBudget()
           if (!budget) return
           const expired = budget.attempts?.find(one => one.phase !== 'completed' && one.deadlineAt && Date.now() >= one.deadlineAt)
-          if (!expired && budget.attemptedModelRequests <= 6) return
+          if (!expired && budget.attemptedModelRequests <= 5) return
           // A sealed input gate alone does not prove the Native Run ended. Stop and
           // confirm it before allowing the owner time to retain its original result.
           if (expired && budget.gateClosed && Date.now() < expired.deadlineAt + 45000) {
@@ -498,14 +502,14 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
         })().catch(error => { receipt.guardianError = error.message }).finally(() => { guardianBusy = false })
       }, 50)
       receipt.process = await processProbe.runProbeProcess(require('electron'), [mainFile], { temporaryRoot: buildRoot, cwd: source,
-        env, timeoutMs: 6 * 120000 + 600000 + 180000, onLine: line => lines.push(line) })
+        env, timeoutMs: 5 * 120000 + 600000 + 180000, onLine: line => lines.push(line) })
       clearInterval(guardianTimer); await guardianWork
       await writeFile(join(evidence, 'private-electron.log'), lines.join('\n'))
       await readBudget()
       receipt.owner = JSON.parse(await readFile(join(evidence, 'owner.json'), 'utf8'))
       assert.equal(receipt.process.timedOut, false); assert.equal(receipt.process.exitCode, 0, receipt.owner.error?.message)
       assert.equal(receipt.guardian, undefined, 'Parent watchdog stopped an unconfirmed/expired private request')
-      assert.equal(receipt.owner.passed, true); assert.equal(receipt.modelTurns, 6)
+      assert.equal(receipt.owner.passed, true); assert.equal(receipt.modelTurns, 5)
       receipt.passed = true; receipt.status = 'awaiting-independent-review'
     }
   } catch (error) { receipt.error = { message: error.message, stack: error.stack }; receipt.status = prepared ? 'failed' : 'pending' }

@@ -8,7 +8,7 @@ const gates = {
   'T-004': 'verify-mote-daily-ideas.mjs',
   'T-005': 'verify-mote-daily-connected.mjs',
   'T-007': 'verify-mote-daily-cooperation.mjs',
-  'T-006': 'verify-mote-daily-model.mjs'
+  'T-008': 'verify-mote-daily-model.mjs'
 }
 if (!gates[task]) throw new Error('Choose an explicit Mote daily-autonomy Task.')
 const childArgs = task === 'T-001' ? ['--task', task] : []
