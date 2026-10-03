@@ -1,0 +1,125 @@
+{
+  "extends": "../tsconfig.json",
+  "include": [
+    "../src/renderer/src/global.d.ts",
+    "device-operation-conversation.integration.test.tsx",
+    "helpers/reaction-public-client-fixture.ts",
+    "../../../packages/core/test/helpers/hosted-runtime-port.ts"
+  ],
+  "compilerOptions": {
+    "baseUrl": "../../..",
+    "paths": {
+      "@agentmux/core/sharing": [
+        "packages/core/src/sharing.ts"
+      ],
+      "@agentmux/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@agentmux/core/runtime": [
+        "packages/core/src/runtime.ts"
+      ],
+      "@agentmux/core/control": [
+        "packages/core/src/control.ts"
+      ],
+      "@agentmux/core/files": [
+        "packages/core/src/public-rpc-files.ts"
+      ],
+      "@agentmux/core/schedule": [
+        "packages/core/src/agent-schedule.ts"
+      ],
+      "@agentmux/core/timeline": [
+        "packages/core/src/session-timeline.ts"
+      ],
+      "@agentmux/core/session-user-messages": [
+        "packages/core/src/session-user-messages.ts"
+      ],
+      "@agentmux/core/launch-option": [
+        "packages/core/src/agent-launch-option.ts"
+      ],
+      "@agentmux/core/agent-status": [
+        "packages/core/src/agent-status-freshness.ts"
+      ],
+      "@agentmux/core/agent-message-render": [
+        "packages/core/src/agent-message-render.ts"
+      ],
+      "@agentmux/core/agent-outbound-message": [
+        "packages/core/src/agent-outbound-message.ts"
+      ],
+      "@agentmux/core/agent-session-id": [
+        "packages/core/src/agent-session-id.ts"
+      ],
+      "@agentmux/core/provider-id": [
+        "packages/core/src/agent-provider-id.ts"
+      ],
+      "@agentmux/core/risk-tier": [
+        "packages/core/src/risk-tier.ts"
+      ],
+      "@agentmux/core/run-status": [
+        "packages/core/src/agent-run-status.ts"
+      ],
+      "@agentmux/core/terminal-continuation": [
+        "packages/core/src/terminal-continuation.ts"
+      ],
+      "@agentmux/core/agent-prompt-budget": [
+        "packages/core/src/agent-prompt-budget.ts"
+      ],
+      "@agentmux/core/prompt-condition": [
+        "packages/core/src/agent-prompt-condition.ts"
+      ],
+      "@agentmux/core/workbench-layout-preset": [
+        "packages/core/src/workbench-layout-preset.ts"
+      ],
+      "@agentmux/core/bracketed-paste": [
+        "packages/core/src/bracketed-paste.ts"
+      ],
+      "@agentmux/core/continuous-progress": [
+        "packages/core/src/continuous-progress.ts"
+      ],
+      "@agentmux/core/continuous-progress-scheduler": [
+        "packages/core/src/continuous-progress-scheduler.ts"
+      ],
+      "@agentmux/core/agent-interaction-state": [
+        "packages/core/src/agent-interaction-state.ts"
+      ],
+      "@agentmux/core/public-rpc-http": [
+        "packages/core/src/public-rpc-http.ts"
+      ],
+      "@agentmux/core/hosted": [
+        "packages/core/src/hosted.ts"
+      ],
+      "@agentmux/core/spatial-layout": [
+        "packages/core/src/spatial-layout.ts"
+      ],
+      "@agentmux/core/spatial-state": [
+        "packages/core/src/spatial-state.ts"
+      ],
+      "@agentmux/core/spatial-graph": [
+        "packages/core/src/spatial-graph.ts"
+      ],
+      "@agentmux/core/headless-runtime": [
+        "packages/core/src/headless-runtime.ts"
+      ],
+      "@agentmux/core/runtime-client": [
+        "packages/core/src/runtime-client.ts"
+      ],
+      "@agentmux/core/notebook-catalog": [
+        "packages/core/src/notebook-catalog.ts"
+      ],
+      "@agentmux/core/notebook-store": [
+        "packages/core/src/notebook-store.ts"
+      ],
+      "@agentmux/core/prompt-reaction": [
+        "packages/core/src/prompt-reaction.ts"
+      ],
+      "@agentmux/core/public-rpc-relay": [
+        "packages/core/src/public-rpc-relay.ts"
+      ],
+      "@agentmux/core/relay-identity": [
+        "packages/core/src/rpc-relay-keypair.ts"
+      ],
+      "@agentmux/core/relay-hosted": [
+        "packages/core/src/relay-hosted.ts"
+      ]
+    }
+  }
+}
