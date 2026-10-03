@@ -60,6 +60,7 @@ export function ConversationSpeakerAvatar({
   name,
   providerId,
   mote,
+  humanAvatar,
   size = 16
 }: {
   /** 身份：唯一的身份输入，来自 `speakerOf(item)`。role 选画法，id 派生颜色。 */
@@ -69,6 +70,8 @@ export function ConversationSpeakerAvatar({
   /** 这个 agent 怎么画；由调用方用 `speaker.id` 去 store 查得。human 不需要。 */
   providerId?: AgentProviderId
   mote?: MoteConversationIdentity | undefined
+  /** Local human presentation only; it never changes the recorded speaker identity. */
+  humanAvatar?: string | undefined
   /** 边长。轴上取 16、对话正文取 20，两者都有生产调用者，所以两条尺寸路径都要可用。 */
   size?: number
 }) {
@@ -100,7 +103,8 @@ export function ConversationSpeakerAvatar({
         // `undefined` 不能喂给 optional 属性，故按缺席传，而不是退回 `?? ''` 那种假值。
         <AgentProviderIcon {...(providerId === undefined ? {} : { providerId })} size={glyphSize} />
       ) : speaker.role === 'human' ? (
-        <UserRound size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
+        humanAvatar ? <img src={humanAvatar} alt="" aria-hidden="true" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 'inherit' }} />
+          : <UserRound size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       ) : speaker.role === 'system' ? (
         <SquareTerminal size={glyphSize} strokeWidth={1.9} aria-hidden="true" />
       ) : (

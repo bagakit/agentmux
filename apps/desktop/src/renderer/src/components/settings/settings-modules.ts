@@ -6,22 +6,24 @@ import { generalSettingsModule } from './modules/general'
 import { keyboardShortcutsSettingsModule } from './modules/keyboard-shortcuts'
 import { agentsSettingsModule } from './modules/agents'
 import { promptsSettingsModule } from './modules/prompts'
-import { workspacesSettingsModule } from './modules/workspaces'
+import { profileSettingsModule } from './modules/profile'
+import { focusSettingsModule } from './modules/focus'
 import { hostsSettingsModule } from './modules/hosts'
 import { devicesSettingsModule } from './modules/devices'
 import { toolkitSettingsModule } from './modules/toolkit'
 
 /** The only Renderer composition point. Order is the product's navigation order. */
 export const settingsModules = [
+  profileSettingsModule,
   appearanceSettingsModule,
   notificationsSettingsModule,
   browserSettingsModule,
+  focusSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,
   toolkitSettingsModule,
   agentsSettingsModule,
   promptsSettingsModule,
-  workspacesSettingsModule,
   hostsSettingsModule,
   devicesSettingsModule
 ] as const

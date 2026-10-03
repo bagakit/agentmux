@@ -1,9 +1,9 @@
 import { Keyboard, Settings2 } from 'lucide-react'
-import type { SettingsSectionId } from './SettingsPanel'
+import type { SettingsPageId } from './SettingsPanel'
 
 type ProjectRailToolbarProps = {
   collapsed?: boolean
-  onOpenSettings: (section: SettingsSectionId) => void
+  onOpenSettings: (section: SettingsPageId) => void
 }
 
 // One gear, labelled "Settings". The two buttons this replaced (Settings + Hosts) opened the SAME
@@ -14,7 +14,7 @@ type ProjectRailToolbarProps = {
 function SettingsButton({
   onOpenSettings
 }: {
-  onOpenSettings: (section: SettingsSectionId) => void
+  onOpenSettings: (section: SettingsPageId) => void
 }) {
   return (
     <button
@@ -22,15 +22,15 @@ function SettingsButton({
       type="button"
       aria-label="Settings"
       title="Settings"
-      data-settings-section="workspaces"
-      onClick={() => onOpenSettings('workspaces')}
+      data-settings-section="overview"
+      onClick={() => onOpenSettings('overview')}
     >
       <Settings2 size={13} />
     </button>
   )
 }
 
-function ShortcutHelpButton({ onOpenSettings }: { onOpenSettings: (section: SettingsSectionId) => void }) {
+function ShortcutHelpButton({ onOpenSettings }: { onOpenSettings: (section: SettingsPageId) => void }) {
   return <button type="button" className="icon-button project-rail-toolbar__button"
     aria-label="Keyboard shortcuts" title="Keyboard shortcuts" data-shortcut-help-open
     onClick={() => onOpenSettings('keyboard-shortcuts')}><Keyboard size={13} /></button>

@@ -27,6 +27,8 @@ import { DEFAULT_NOTIFICATION_MODE_ID, NOTIFICATION_TIERS } from '../shared/noti
 import { PERFORMANCE_STATUS_BAR_IDS, TOOLKIT_ICON_IDS } from '../shared/toolkit-preferences.js'
 import { INITIAL_TOOLKIT_PACKAGES } from '../../resources/toolkit/initial-packages.js'
 import { bootstrapToolkitPackages } from './toolkit-package-bootstrap.js'
+import { USER_PROFILE_NAME_LIMIT, USER_PROFILE_ABOUT_LIMIT, USER_PROFILE_AVATAR_LIMIT, validProfileAvatar } from '../shared/user-profile.js'
+import { FOCUS_RECENT_ACTIVITY_HOURS } from '../shared/focus-preferences.js'
 
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
@@ -240,6 +242,13 @@ const configSchema = z
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
     browser: browserSchema,
+    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)) }).strict().optional(),
+    profile: z.object({
+      displayName: z.string().max(USER_PROFILE_NAME_LIMIT).refine(value => !/[\r\n\x00-\x1f]/.test(value)),
+      about: z.string().max(USER_PROFILE_ABOUT_LIMIT),
+      avatar: z.string().max(USER_PROFILE_AVATAR_LIMIT).refine(validProfileAvatar),
+      shareWithAgents: z.boolean()
+    }).strict().optional(),
     toolkit: z.object({
       performance: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),
       mobileConnection: z.object({ enabled: z.boolean().optional(), statusBar: z.enum(PERFORMANCE_STATUS_BAR_IDS).optional() }).strict().optional(),

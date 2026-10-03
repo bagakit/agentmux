@@ -344,7 +344,7 @@ export function NewTabSurface({
       style={regionHeight === null ? undefined : { '--launcher-region-height': `${regionHeight}px` } as CSSProperties}>
       <LauncherEnvironment workspace={workspace} host={host} check={hostCheck} displayPath={displayPath} active={motionActive}
         hosts={config?.hosts ?? []} workspaces={config?.workspaces ?? []} onSelectWorkspace={chooseExecutionWorkspace}
-        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('workspaces')} />
+        selectionDisabled={busy !== null} onManageProjects={() => settings?.open('hosts')} />
 
       {primaryBotUnconfirmed ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
         step: 'Primary Mote Agent is unconfirmed',

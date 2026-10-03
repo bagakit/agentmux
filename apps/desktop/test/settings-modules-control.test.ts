@@ -12,14 +12,14 @@ it('composes every durable scalar once, groups the public list and keeps the ori
   const result = await executeSettingsControl({ ...envelope, operation: 'settings.get' }, owner)
   if (result.operation !== 'settings.get') throw new Error('Expected settings.get')
   const keys = result.entries.map(entry => entry.key)
-  expect(keys).toHaveLength(17)
+  expect(keys).toHaveLength(24)
   expect(new Set(keys).size).toBe(keys.length)
   expect([...keys].sort()).toEqual((await scalarSettingsSchemaKeys()).sort())
-  expect(keys.map(key => key.startsWith('appearance.') ? 'appearance'
+  expect(keys.map(key => key.startsWith('profile.') ? 'profile' : key.startsWith('focus.') ? 'focus' : key.startsWith('appearance.') ? 'appearance'
     : key.startsWith('notifications.') ? 'notifications'
     : key.startsWith('browser.') ? 'browser' : key.startsWith('toolkit.') ? 'toolkit' : 'general'))
-    .toEqual(['appearance', 'appearance', 'appearance', 'appearance', 'general', 'general',
-      'notifications', 'notifications', 'browser', 'browser', 'browser', 'browser', 'browser', 'browser', 'browser', 'toolkit', 'toolkit'])
+    .toEqual(['profile', 'profile', 'profile', 'profile', 'focus', 'appearance', 'appearance', 'appearance', 'appearance', 'general', 'general',
+      'notifications', 'notifications', 'browser', 'browser', 'browser', 'browser', 'browser', 'browser', 'browser', 'toolkit', 'toolkit', 'toolkit', 'toolkit'])
   for (const target of ['appearance', 'notifications', 'browser', 'browser.toolbar']) {
     const expected = result.entries.filter(entry => entry.key.startsWith(`${target}.`))
     expect(expected.length).toBeGreaterThan(0)

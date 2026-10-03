@@ -131,6 +131,8 @@ Performance 是首个内置工具，按钮与浮窗统一层级、间距、数�
 
 ### 本地 Toolkit 包的呈现
 
+My Profile 用清楚的头像/称呼区和紧凑的协作背景编辑区表达本人身份；头像、文字与分享范围分层，不做账号登录面板或空洞品牌名片。Environments 中的 Projects 子页以该机器的项目和目录为主体，项目内区分 Folder 与 worktree；登记、Open 和可选启动的主次明确，避免重复跨页管理入口。Focus 的活动窗口以有限选择表达，默认与已保存值可辨；不把各概念的局部对象配置复制成成排全局开关。所有新页沿原输入、保存栏、宽窄导航与静止动效成本语言。
+
 设置中的 Mods 是与 Preferences 平级的独立分组，位于 Preferences 之后、Resources 之前；组内入口为 Toolkit Library，页眉沿 Mods / Toolkit Library 层级呈现，避免重复的组名与页面名。各尺寸导航沿同一目录呈现。
 
 包与普通用户工具沿同一 Toolkit 列表及来源分组呈现，名称和图标来自本地 manifest。详情明确本地包目录、可编辑文件入口和用户配置，不能把固定账号 pattern 或 Example 身份硬编码到 Renderer。脚本/动作显示本地实际源码和文件来源，启用/参数/显示是用户配置；不能用复制源码进配置伪装“安装扩展”。Auth 和 Performance 同层，前者可编辑本地包，后者系统维护。

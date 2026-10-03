@@ -3,19 +3,21 @@ import { HostIcon } from '../HostBadge'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useResourceDrafts } from './use-resource-drafts'
 import { HostConnectionLibrary, type HostConnectionPanel } from './HostConnectionLibrary'
-import { HostLinkedProjects } from './HostLinkedProjects'
+import { HostProjectsPane } from './HostProjectsPane'
 import type { AppConfig, HostConfig, SessionSnapshot, SshHostConfig, WorkspaceRecord } from '../../../../shared/contracts'
 import { useAppStore, type HostCheckState } from '../../store'
 import { currentHostCheck, hostCheckLabel } from '../../lib/host-check'
+import { projectRailNavigation } from '../../lib/workspace-projects'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 
 const NO_SESSIONS: SessionSnapshot[] = []
 const NO_HOST_CHECKS: Record<string, HostCheckState> = {}
 
-export function HostSettingsPane({ config, onSave, active }: {
+export function HostSettingsPane({ config, onSave, active, onClose }: {
   config: AppConfig
   active: boolean
+  onClose?: (() => void) | undefined
   onSave: (hosts: HostConfig[], workspaces: WorkspaceRecord[], expected: Pick<AppConfig, 'hosts' | 'workspaces'>) => Promise<void>
 }) {
   const resource = useResourceDrafts(Object.fromEntries(config.hosts.map((host) => [host.id, host])))
@@ -29,6 +31,7 @@ export function HostSettingsPane({ config, onSave, active }: {
     Object.fromEntries(update(orderedHosts(current)).map((host) => [host.id, host])))
   const [selectedId, setSelectedId] = useState<string | null>(() => config.hosts[0]?.id ?? null)
   const [panel, setPanel] = useState<HostConnectionPanel>('connection')
+  const [projectHosts, setProjectHosts] = useState<string[]>([])
   const [view, setView] = useState<'library' | 'editor'>('library')
   const [filter, setFilter] = useState({ query: '', snapshot: [] as string[] })
   const [pendingEdit, setPendingEdit] = useState<{ id: string; select: boolean } | null>(null)
@@ -42,12 +45,10 @@ export function HostSettingsPane({ config, onSave, active }: {
   const checks = useAppStore((state) => active ? state.hostChecks : NO_HOST_CHECKS)
   const checkHost = useAppStore((state) => state.checkHost)
   const sessions = useAppStore((state) => active ? state.sessions : NO_SESSIONS)
-  const projectsByHost = useMemo(() => {
-    const grouped = new Map<string, WorkspaceRecord[]>()
-    for (const workspace of config.workspaces) {
-      const projects = grouped.get(workspace.hostId)
-      if (projects) projects.push(workspace)
-      else grouped.set(workspace.hostId, [workspace])
+  const projectCounts = useMemo(() => {
+    const grouped = new Map<string, number>()
+    for (const project of projectRailNavigation(config.workspaces).projects) {
+      grouped.set(project.hostId, (grouped.get(project.hostId) ?? 0) + 1)
     }
     return grouped
   }, [config.workspaces])
@@ -75,6 +76,7 @@ export function HostSettingsPane({ config, onSave, active }: {
     setPendingEdit({ id, select: false })
   }
   function selectHostPanel(id: string, panel: HostConnectionPanel): void {
+    if (panel === 'projects') setProjectHosts(current => current.includes(id) ? current : [...current, id])
     setPanel(panel)
     selectHost(id)
   }
@@ -153,11 +155,11 @@ export function HostSettingsPane({ config, onSave, active }: {
         <HostConnectionLibrary selectedId={selectedId} panel={panel} query={filter.query} onQuery={filterHosts} onSelect={selectHostPanel} focusRequest={returnFocus}
           items={hosts.filter((host) => matches(host.id)).map((host) => {
             const check = currentHostCheck(checks[host.id], host)
-            const workspaces = projectsByHost.get(host.id)?.length ?? 0
+            const projects = projectCounts.get(host.id) ?? 0
             return {
               id: host.id, name: host.label,
-              projectCount: workspaces,
-              detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local machine'}${workspaces ? ` · ${workspaces} ${workspaces === 1 ? 'project' : 'projects'}` : ''}`,
+              projectCount: projects,
+              detail: `${host.kind === 'ssh' ? host.hostname || 'SSH · Host required' : 'Local machine'}${projects ? ` · ${projects} ${projects === 1 ? 'project' : 'projects'}` : ''}`,
               mark: <HostIcon kind={host.kind} size={18} />,
               status: <span className={`settings-resource-row__check check-pill--${check?.state ?? 'idle'}`} role="img" aria-label={hostCheckLabel(check ?? { state: 'idle' })} title={hostCheckLabel(check ?? { state: 'idle' })}>{check?.state === 'checking' ? <LoaderCircle className="spin" size={13} /> : check?.state === 'ready' ? <CheckCircle2 size={13} /> : <Info size={13} />}<span>{hostCheckLabel(check ?? { state: 'idle' })}</span></span>
             }
@@ -179,7 +181,7 @@ export function HostSettingsPane({ config, onSave, active }: {
                     {hostCheckLabel(check)}
                   </span>
                 ) : null}
-                <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button>
+                {panel === 'connection' ? <button className="small-button" disabled={check?.state === 'checking' || (host.kind === 'ssh' && !host.hostname.trim())} onClick={() => void checkHost(host)}>Test</button> : null}
                 {host.kind === 'ssh' ? <button className="icon-button icon-button--danger" aria-label={`Remove ${host.label}`} title={`Remove ${host.label}`} disabled={sessionCount > 0} onClick={() => setRemoveRequest(host)}><Trash2 size={14} /></button> : null}
               </header>
               {panel === 'connection' && check?.detail && check.state !== 'checking' ? check.state === 'ready' ? (
@@ -188,7 +190,7 @@ export function HostSettingsPane({ config, onSave, active }: {
                   <p className="host-check-detail">{check.detail}</p>
                 </details>
               ) : <p className="host-check-detail">{check.detail}</p> : null}
-              {panel === 'projects' ? <HostLinkedProjects host={host} projects={projectsByHost.get(host.id) ?? []} /> : host.kind === 'ssh' ? (
+              {panel === 'connection' ? host.kind === 'ssh' ? (
                 <HostConnectionFields
                   host={host}
                   open={advancedOpen[host.id] ?? false}
@@ -196,11 +198,18 @@ export function HostSettingsPane({ config, onSave, active }: {
                   onChange={(patch) => update(host.id, patch)}
                   onClear={(field) => clear(host.id, field)}
                 />
-              ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div>}
+              ) : <div className="settings-local-host"><strong>Your local environment</strong><p>Uses this computer’s installed agents and registered projects. No SSH configuration needed.</p></div> : null}
               {sessionCount > 0 ? <p className="field-hint">{sessionCount} Session reference{sessionCount === 1 ? '' : 's'}. Removal is protected while this connection is referenced.</p> : null}
             </section>
           )
         })}
+          {projectHosts.filter(id => hosts.some(host => host.id === id)).map(id => {
+            const draft = hosts.find(host => host.id === id)
+            const committed = config.hosts.find(host => host.id === id)
+            return <HostProjectsPane key={id} config={config} hostId={id}
+              connectionChanged={JSON.stringify(draft) !== JSON.stringify(committed)}
+              active={active && selectedId === id && panel === 'projects'} hidden={selectedId !== id || panel !== 'projects'} onClose={onClose} />
+          })}
           {!hosts.some((host) => host.id === selectedId) ? <div className="settings-resource-editor__empty"><RadioTower size={28} aria-hidden="true" /><strong>Connect your environments</strong><p>Choose a connection, or add an SSH host to reuse across your projects.</p></div> : null}
         </div>
       </div>
