@@ -61,3 +61,20 @@ describe('Mobile consumes the original Desktop owners', () => {
   })
 
 })
+
+
+import { executeSpatialControl } from '../../desktop/src/renderer/src/lib/space-agent-control'
+it.each(['missing', 'failed'])('keeps original Survey and Agent presentation when appearance is %s', async availability => {
+  const row = { agentSessionId: 'healthy', name: '原Agent', project: '原项目', detail: '', group: 'working', state: 'working', providerId: 'codex', recap: null }
+  const survey = { items: [{ zoneId: 'original-survey', name: '原研究' }], selection: null }
+  const state = { config: { workspaces: [{ id: 'repo', hostId: 'local', name: 'Repo', path: fixturePath("repo"), kind: 'folder' }], executors: {}, hosts: [{ id: 'local', kind: 'local' }] }, sessions: [], tabs: {}, layouts: {}, spaceZoneBindings: {}, spatialRequests: {} }
+  const result = await executeSpatialControl({ get: () => state, topics: async () => [],
+    ...(availability === 'failed' ? { appearance: async () => { throw new Error('avatar service unavailable') } } : {}),
+    agentPresentation: () => [row], surveyPresentation: () => survey } as any,
+    { schemaVersion: 5, requestId: 'read-original', operation: 'space.ls', target: {}, presentation: true })
+  expect(result.operation).toBe('space.ls')
+  if (result.operation !== 'space.ls') throw new Error('The original read must return')
+  expect(result.catalog.agentPresentation).toEqual([row]); expect(result.catalog.survey).toEqual(survey)
+  expect(result.catalog.spaces).toHaveLength(1)
+  if (availability === 'failed') expect(result.catalog.spaces[0]?.issue).toContain('avatar service unavailable')
+})

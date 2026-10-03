@@ -1,9 +1,8 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type Ref } from 'react'
 import { Decoration, Extension, type Editor, type JSONContent } from '@tiptap/core'
-import UniqueID from '@tiptap/extension-unique-id'
 import { EditorContent, NodeViewWrapper, ReactNodeViewRenderer, useEditor, useEditorState, type NodeViewProps } from '@tiptap/react'
 import { ChevronDown, CornerDownRight, Heading1, Link2, List, IndentDecrease, IndentIncrease, Quote } from 'lucide-react'
-import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, noteContentExtensions } from '../../../shared/note-content-schema'
+import { NOTE_BLOCK_TYPES, NoteBlockReferenceNode, noteContentExtensions, noteIdentityExtensions } from '../../../shared/note-content-schema'
 import { readNoteDocument, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 
@@ -19,8 +18,7 @@ function referenceExtension() {
 export function noteEditorExtensions(folded: () => ReadonlySet<string> = () => new Set()) {
   return [
     ...noteContentExtensions().map(extension => extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension),
-    UniqueID.extend({ name: 'noteBlockUniqueId' }).configure({ attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES] }),
-    UniqueID.extend({ name: 'noteReferenceUniqueId' }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name] }),
+    ...noteIdentityExtensions(),
     Extension.create({
       name: 'noteBlockFold',
       addDecorations() { return { shouldUpdate: ({ tr }) => tr.docChanged || Boolean(tr.getMeta('noteFold')), create: ({ state }) => {

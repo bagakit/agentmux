@@ -218,18 +218,20 @@ function address(value: unknown, code: Code): AgentMuxSpaceAddress {
     tabId: spaceControlId(source.tabId, 'Tab', code, true), regionId: spaceControlId(source.regionId, 'Region', code, true) }
 }
 function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
-    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution'], code)
+    const item = fields(value, ['tabId', 'regionId', 'kind', 'agentSessionId', 'runId', 'execution', 'browserId', 'file'], code)
     const execution = item.execution === null ? null : (() => {
       const location = fields(item.execution, ['hostId', 'cwd'], code)
       return { hostId: spaceControlId(location.hostId, 'Execution Host', code), cwd: string(location.cwd, 'Execution cwd', code) }
     })()
     return { tabId: spaceControlId(item.tabId, 'Tab', code, true), regionId: spaceControlId(item.regionId, 'Region', code, true),
       kind: member(item.kind, ['agent', 'terminal', 'browser', 'file', 'git-diff', 'launcher'], 'Region kind', code),
-      agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution }
+      agentSessionId: nullableId(item.agentSessionId, 'Agent Session', code), runId: nullableId(item.runId, 'Run', code), execution,
+      ...(Object.hasOwn(item, 'browserId') ? { browserId: spaceControlId(item.browserId, 'Browser', code, true) } : {}),
+      ...(Object.hasOwn(item, 'file') ? { file: (() => { const file = fields(item.file, ['workspaceId', 'path', 'zoneRelativePath', 'issue'], code); return { workspaceId: spaceControlId(file.workspaceId, 'File Workspace', code), path: string(file.path, 'File path', code), ...(Object.hasOwn(file, 'zoneRelativePath') ? { zoneRelativePath: string(file.zoneRelativePath, 'Zone-relative file path', code) } : {}), ...(Object.hasOwn(file, 'issue') ? { issue: string(file.issue, 'File resource issue', code) } : {}) } })() } : {}) }
 
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
-  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance', 'agentPresentation'], code)
+  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance', 'agentPresentation', 'survey'], code)
   const projectGroups = Object.hasOwn(source, 'projectGroups') ? unique(list(source.projectGroups, value => {
     const item = fields(value, ['groupId', 'name', 'projectIds'], code)
     const name = string(item.name, 'Project group name', code)
@@ -305,7 +307,26 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       recap: recap ? { text: string(recap.text, 'Recap excerpt', code), source: string(recap.source, 'Recap source', code) } : null,
       ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code) } : {}) } } : {}) }
   }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
-  return { ...(agentPresentation ? { agentPresentation } : {}), ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
+  const survey = Object.hasOwn(source, 'survey') ? (() => {
+    const raw = fields(source.survey, ['items', 'selection', 'issue'], code)
+    const reference = (value: unknown) => {
+      const item = fields(value, ['tabId', 'regionId'], code)
+      return { tabId: spaceControlId(item.tabId, 'Survey Tab', code, true), regionId: spaceControlId(item.regionId, 'Survey Region', code, true) }
+    }
+    const selected = raw.selection === null ? null : fields(raw.selection, ['zoneId', 'selection', 'active'], code)
+    return {
+      items: unique(list(raw.items, value => {
+        const item = fields(value, ['zoneId', 'name', 'issue'], code)
+        return { zoneId: spaceControlId(item.zoneId, 'Survey Zone', code, true), name: string(item.name, 'Survey name', code),
+          ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Survey item issue', code) } : {}) }
+      }, 'Survey items', code), item => item.zoneId, 'Survey items', code),
+      selection: selected ? { zoneId: spaceControlId(selected.zoneId, 'Survey selected Zone', code, true),
+        selection: unique(list(selected.selection, reference, 'Survey references', code), item => JSON.stringify(item), 'Survey references', code),
+        active: selected.active === null ? null : reference(selected.active) } : null,
+      ...(Object.hasOwn(raw, 'issue') ? { issue: string(raw.issue, 'Survey issue', code) } : {})
+    }
+  })() : undefined
+  return { ...(survey ? { survey } : {}), ...(agentPresentation ? { agentPresentation } : {}), ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
 }
 function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
   return list(value, value => {

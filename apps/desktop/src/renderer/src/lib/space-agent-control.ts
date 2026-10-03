@@ -1,6 +1,7 @@
+import { zoneFileResource } from '../../../shared/zone-file-resource'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import type {
-  AgentMuxSpaceAddress, AgentMuxSpaceAgentFact, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest,
+  AgentMuxSpaceAddress, AgentMuxSpaceAgentFact, AgentMuxSpaceRegionFact, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest,
   AgentMuxSpaceControlResult, AgentMuxSpaceDestination, AgentMuxSpaceMutationReport,
   AgentMuxSpaceSelector, AgentMuxSpatialIssue, AgentMuxSpatialSave, AgentMuxZoneFact, AgentMuxSpaceBindingReport, AgentMuxSpaceBindingTarget, TopicCategory
 } from '@agentmux/core/control'
@@ -34,6 +35,7 @@ export type SpatialControlPorts = {
   topics(): Promise<readonly ScratchTopicSnapshot[]>
   appearance?(catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[]): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>>
   agentPresentation?(): NonNullable<AgentMuxSpaceCatalog['agentPresentation']>
+  surveyPresentation?(catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']>
   createResource(input: SpaceZoneResourceInput): Promise<SpaceZoneResourceResult>
   launch(input: AgentLaunchInput & { agentSessionId: string; createOperationId: string }): Promise<AgentLaunchResult>
   creation(hostId: string, sessionId: string): Promise<AgentMuxAgentSession>
@@ -96,10 +98,24 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
     for (const id of ids) {
       const surface = tab.regions[id]!
       const session = isSessionSurface(surface) ? sessions.get(surface.sessionId) : undefined
+      let file: AgentMuxSpaceRegionFact['file']
+      if (surface.kind === 'file') {
+        file = { workspaceId: surface.workspaceId, path: surface.path }
+        const resource = state.config?.workspaces.find(value => value.id === surface.workspaceId)
+        try {
+          if (!resource || !resolvedZone) throw new Error('原文件的 Zone 资源尚未确认。')
+          const { relativeDirectory } = zoneFileResource(resource, resolvedZone, '', topics)
+          const relativePath = !relativeDirectory ? surface.path : surface.path === relativeDirectory ? '.'
+            : surface.path.startsWith(relativeDirectory + '/') ? surface.path.slice(relativeDirectory.length + 1) : undefined
+          if (relativePath === undefined) throw new Error('原文件不在此 Zone 的读取范围中。')
+          file.zoneRelativePath = relativePath
+        } catch (error) { file.issue = error instanceof Error ? error.message : String(error) }
+      }
       catalog.regions.push({ tabId: tab.id, regionId: id, kind: surface.kind,
         agentSessionId: surface.kind === 'agent' ? surface.sessionId : null,
         runId: session?.control.run.runId ?? null,
-        execution: session ? { hostId: session.hostId, cwd: session.workspacePath } : null })
+        execution: session ? { hostId: session.hostId, cwd: session.workspacePath } : null,
+        ...(surface.kind === 'browser' ? { browserId: surface.browserId } : {}), ...(file ? { file } : {}) })
     }
   }
   const locationIds = new Set<string>()
@@ -415,12 +431,20 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   try { topics = await ports.topics() } catch { /* durable bindings remain discoverable with an explicit issue */ }
   let catalog = spatialCatalog(ports.get(), topics)
   if (request.operation === 'space.bind' || request.operation === 'space.unbind') return await executeBinding(ports, topics, request)
-  if ((request.operation === 'space.ls' || request.operation === 'space.inspect') && request.presentation && ports.appearance) {
+  if ((request.operation === 'space.ls' || request.operation === 'space.inspect') && request.presentation) {
     const target = request.target && !('requestId' in request.target) ? request.target : undefined
     const selected = selectSpatialCatalog(catalog, target ?? {})
     const imageSpaceId = request.operation === 'space.inspect' ? target?.spaceId : undefined
-    catalog = { ...selected, appearance: await ports.appearance(selected, imageSpaceId, topics),
-      ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation() } : {}) }
+    catalog = { ...selected,
+      ...(ports.agentPresentation && request.operation === 'space.ls' ? { agentPresentation: ports.agentPresentation() } : {}),
+      ...(ports.surveyPresentation && request.operation === 'space.ls' && !Object.values(target ?? {}).some(Boolean) ? { survey: ports.surveyPresentation(selected) } : {}) }
+    if (ports.appearance) {
+      try { catalog.appearance = await ports.appearance(selected, imageSpaceId, topics) }
+      catch (error) {
+        const message = `Appearance observation unavailable: ${error instanceof Error ? error.message : String(error)}. Original resources remain available; retry presentation.`
+        catalog.spaces = catalog.spaces.map(space => ({ ...space, issue: [space.issue, message].filter(Boolean).join('\n') }))
+      }
+    }
   }
   if (request.operation === 'space.ls') return { operation: request.operation, catalog: selectSpatialCatalog(catalog, request.target) }
   if (request.operation === 'space.inspect') {

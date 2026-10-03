@@ -1,3 +1,6 @@
+import { surveyExplorationName } from './survey-exploration-name'
+import type { SurveyZoneSelection } from './survey-workface'
+import type { WorkbenchTab } from './workbench-tabs'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import type { MoteAvatarImage, MoteAvatarRef, MoteAvatarTarget } from '../../../shared/mote-avatars'
@@ -47,4 +50,31 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
     }
     return { spaceId: space.spaceId, ...(space.topicId === PMO_TEAMS_TOPIC_ID ? { preset: 'primary-mote' } : {}), ...motion }
   }))
+}
+
+/** Preserve the original explicit research references, including temporarily missing topology. */
+export function readSurveyPresentation(state: {
+  surveyCollectedZones: Record<string, true>
+  surveyExplorationNames: Record<string, string>
+  surveyZoneSelection: SurveyZoneSelection | null
+  tabs: Record<string, WorkbenchTab>
+}, catalog: AgentMuxSpaceCatalog): NonNullable<AgentMuxSpaceCatalog['survey']> {
+  const zones = new Set(catalog.zones.map(zone => zone.zoneId))
+  const tabsByZone = new Map<string, WorkbenchTab[]>()
+  for (const tab of catalog.tabs) {
+    const original = state.tabs[tab.tabId]
+    if (original && tab.zoneId !== null) { if (!tabsByZone.has(tab.zoneId)) tabsByZone.set(tab.zoneId, []); tabsByZone.get(tab.zoneId)!.push(original) }
+  }
+  return {
+    items: Object.keys(state.surveyCollectedZones).filter(id => state.surveyCollectedZones[id] === true).map(zoneId => {
+      const tabs = tabsByZone.get(zoneId) ?? []
+      return { zoneId, name: surveyExplorationName(state.surveyExplorationNames[zoneId], tabs),
+        ...(!zones.has(zoneId) ? { issue: '研究工作面暂未确认，原引用保留。' } : {}) }
+    }),
+    selection: state.surveyZoneSelection ? {
+      zoneId: state.surveyZoneSelection.zoneId,
+      selection: state.surveyZoneSelection.selection.map(({ tabId, regionId }) => ({ tabId, regionId })),
+      active: state.surveyZoneSelection.active ? { ...state.surveyZoneSelection.active } : null
+    } : null
+  }
 }

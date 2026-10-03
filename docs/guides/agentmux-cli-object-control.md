@@ -89,6 +89,14 @@ agentmux file read --zone '<zone-id>' --path 'saved.md' --host '<host-id>' --wor
 
 先从 `space ls`／`space inspect` 的原 Zone 资源确认 Host、Workspace 与目录；这些是文件资源，不是当前显示 Workspace。`--path` 相对该 Zone；可加 `--space` 核对原绑定，多处合法绑定不会改变文件身份。结果的 `resource` 与 `result` 分别表达准确来源和原 Files 的读取事实：文本保留完整 `sha256` revision，二进制、已删除、目录和原错误保持原状态。`unknown` 表示这次观察未确认，保留原引用并重新发现／读取；不解释为文件已删除，也不影响原文件编辑或健康 Agent。
 
+保存已经读过的原文本文件，正文从 stdin 原样输入：
+
+```sh
+agentmux file write --zone '<zone-id>' --path 'saved.md' --resource '<原 file read 回执的完整 resource JSON>' --expected-revision 'sha256:<完整原修订>' < draft.md
+```
+
+它委托原 Files 的 revision-aware 保存，不创建新文件或新 Note 身份。`written` 返回新修订，`conflict` 保留观察到的修订；`error` 与 `unknown` 不冒保存成功。未知回执先读取同一资源核对，保留草稿，不自动重复写入。
+
 日历提醒使用显式 JSON，沿原 Session／调度 owner 执行：
 
 ```sh

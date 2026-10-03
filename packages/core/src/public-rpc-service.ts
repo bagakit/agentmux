@@ -3,7 +3,7 @@ import { normalizeMessageChannel } from './message-origin.js'
 import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
-import { isFileMethod, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
+import { isFileMethod, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult, type AgentMuxRpcFilesOwner } from './public-rpc-files.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
@@ -311,6 +311,14 @@ export class AgentMuxRpcService {
     }
     const caller = await this.authenticated(context)
     if (isFileMethod(method)) {
+      if (method === 'file.write') {
+        const input = parseFileWriteParams(params)
+        context.signal?.throwIfAborted()
+        if (!this.ports.files && !this.ports.forwardControl) throw new AgentMuxError('The original Host file owner is unavailable. Original files and Agents are retained.', 'CONTROL_UNAVAILABLE')
+        const result = this.ports.files ? await this.ports.files.write(input) : await this.ports.forwardControl!('file.write', input, context)
+        return parseFileWriteResult(result, input) as AgentMuxRpcResult<M>
+      }
+
       if (method === 'file.list') {
         const input = parseFileListParams(params)
         context.signal?.throwIfAborted()

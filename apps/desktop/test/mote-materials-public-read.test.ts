@@ -36,12 +36,13 @@ async function fixture() {
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanups.push(() => client.dispose())
   return { root, workspace, catalog, files, read, owner, params, observe, server, client }
 }
-async function cli(root: string, args: string[]) {
+async function cli(root: string, args: string[], content = '') {
   const path = join(root, 'cli.mjs')
   await build({ entryPoints: [resolve(import.meta.dirname, '../../../packages/core/src/agentmux.ts')], outfile: path, bundle: true, platform: 'node', format: 'esm', packages: 'external', logLevel: 'silent' })
   const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
   return await new Promise<{ code: number | null; stdout: string; stderr: string }>((done, reject) => {
-    const child = spawn(process.execPath, [path, ...args], { env: { ...env, AGENTMUX_STATE_DIRECTORY: join(root, 'private-state') }, stdio: ['ignore', 'pipe', 'pipe'] })
+    const child = spawn(process.execPath, [path, ...args], { env: { ...env, AGENTMUX_STATE_DIRECTORY: join(root, 'private-state') }, stdio: ['pipe', 'pipe', 'pipe'] })
+    child.stdin.end(content)
     let stdout = '', stderr = ''; child.stdout.on('data', data => { stdout += data }); child.stderr.on('data', data => { stderr += data })
     child.once('error', reject); child.once('close', code => done({ code, stdout, stderr }))
   })
@@ -178,4 +179,57 @@ describe('project filename discovery through original Files and public CLI', () 
     expect(await files.listFiles(workspace, 'zone')).toMatchObject({ complete: false, partialReason: 'budget' })
     expect(read.mock.calls.length).toBeGreaterThan(1); expect(read.mock.calls.length).toBeLessThanOrEqual(128)
   })
+})
+
+describe('public file.write to the original Files owner', () => {
+  it('writes an existing file through public Unix RPC and the real stdin CLI with exact revision and resource', async () => {
+    const f = await fixture(), read = await f.client.call('file.read', f.params)
+    if (read.result.status !== 'read') throw new Error('Original fixture file must be read')
+    const written = await f.client.call('file.write', { ...f.params, expectedResource: read.resource!, expectedRevision: read.result.document.revision, content: '原Note正文😀\n' })
+    expect(written).toMatchObject({ resource: read.resource, result: { status: 'written' } })
+    expect(await readFile(join(f.root, 'mote/saved.md'), 'utf8')).toBe('原Note正文😀\n')
+    expect((await f.client.call('file.write', { ...f.params, expectedResource: read.resource!, expectedRevision: read.result.document.revision, content: 'stale replacement' })).result).toMatchObject({ status: 'conflict' })
+    if (written.result.status !== 'written') throw new Error('Original write must confirm its revision')
+    const args = ['--endpoint', 'unix:' + f.server.path, 'file', 'write', '--zone', 'original-zone', '--path', 'saved.md', '--resource', JSON.stringify(read.resource), '--expected-revision', written.result.revision]
+    const output = await cli(f.root, args, 'CLI原样保存\n😀')
+    expect(output.code, output.stderr).toBe(0)
+    expect(JSON.parse(output.stdout)).toMatchObject({ operation: 'file.write', result: { resource: read.resource, result: { status: 'written' } } })
+    expect(await readFile(join(f.root, 'mote/saved.md'), 'utf8')).toBe('CLI原样保存\n😀')
+    const conflict = await cli(f.root, args, 'stale CLI')
+    expect(conflict.code).toBe(1); expect(JSON.parse(conflict.stdout).result.result.status).toBe('conflict')
+    expect(await readFile(join(f.root, 'mote/saved.md'), 'utf8')).toBe('CLI原样保存\n😀')
+  })
+  it('preserves original owner unknown and rejects a foreign resource before write', async () => {
+    const f = await fixture(), read = await f.client.call('file.read', f.params)
+    if (read.result.status !== 'read') throw new Error('Original file required')
+    const write = vi.spyOn(f.files, 'write')
+    await expect(f.client.call('file.write', { ...f.params, expectedResource: { ...read.resource!, workspacePath: f.root + '-wrong', zonePath: f.root + '-wrong/mote' }, expectedRevision: read.result.document.revision, content: 'wrong' })).rejects.toMatchObject({ code: 'FILE_RESOURCE_MISMATCH' })
+    expect(write).not.toHaveBeenCalled()
+    write.mockResolvedValueOnce({ status: 'unknown', code: 'ORIGINAL_WRITE_UNKNOWN', message: 'Original atomic publication unconfirmed' })
+    expect((await f.client.call('file.write', { ...f.params, expectedResource: read.resource!, expectedRevision: read.result.document.revision, content: 'pending' })).result).toEqual({ status: 'unknown', code: 'ORIGINAL_WRITE_UNKNOWN', message: 'Original atomic publication unconfirmed' })
+    expect(write).toHaveBeenCalledTimes(1)
+  })
+})
+
+it('refuses an identical-content file after the same original Zone maps to another directory', async () => {
+  const f = await fixture(), original = await f.client.call('file.read', f.params)
+  if (original.result.status !== 'read') throw new Error('Read required')
+  await mkdir(join(f.root, 'other')); await writeFile(join(f.root, 'other/saved.md'), original.result.document.content)
+  f.catalog.zones[0]!.directoryPath = join(f.root, 'other')
+  const write = vi.spyOn(f.files, 'write')
+  await expect(f.client.call('file.write', { ...f.params, expectedResource: original.resource!, expectedRevision: original.result.document.revision, content: 'wrong file' })).rejects.toMatchObject({ code: 'FILE_RESOURCE_MISMATCH' })
+  expect(write).not.toHaveBeenCalled(); expect(await readFile(join(f.root, 'other/saved.md'), 'utf8')).toBe(original.result.document.content)
+})
+
+it('discovers file.write in actual CLI help and refuses unauthorized HTTP before the Files write side effect', async () => {
+  const f = await fixture(), write = vi.spyOn(f.files, 'write')
+  const http = new AgentMuxControlServer({ socketPath: join(f.root, 'http.sock'), files: f.owner, coreClients: () => [], http: { host: '127.0.0.1', port: 0, token: 'private-fixture-token' } })
+  await http.start(); cleanups.push(() => http.stop())
+  const read = await f.client.call('file.read', f.params)
+  if (read.result.status !== 'read') throw Error('Original read required')
+  const response = await fetch('http://127.0.0.1:' + http.httpAddress!.port, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 'no-auth', method: 'file.write', params: { ...f.params, expectedResource: read.resource, content: 'not authorized', expectedRevision: read.result.document.revision } }) })
+  expect(response.status).toBe(401); expect(write).not.toHaveBeenCalled()
+  const help = await cli(f.root, ['--help', 'file', 'write'])
+  expect(help.code).toBe(0); expect(help.stdout).toContain('--resource JSON'); expect(help.stdout).toContain('zonePath')
+  const skill = await cli(f.root, ['--skill']); expect(skill.code).toBe(0); expect(skill.stdout).toContain('file write')
 })

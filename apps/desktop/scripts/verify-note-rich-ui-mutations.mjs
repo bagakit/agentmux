@@ -3,14 +3,14 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 
 const renderer = 'apps/desktop/src/renderer/src/'
 const editor = `${renderer}components/NoteBlockEditor.tsx`, surface = `${renderer}components/NoteFileSurfaceView.tsx`
-const fileSurface = `${renderer}components/FileSurfaceView.tsx`, knowledge = `${renderer}lib/note-knowledge.ts`
-const schema = 'apps/desktop/src/shared/note-content-schema.ts'
-const document = 'apps/desktop/src/shared/note-document.ts'
+const fileSurface = `${renderer}components/FileSurfaceView.tsx`, knowledge = 'packages/client-ui/src/note/note-knowledge.ts'
+const schema = 'packages/client-ui/src/note/note-content-schema.ts'
+const document = 'packages/client-ui/src/note/note-document.ts'
 const view = `${renderer}components/NoteFileView.tsx`
 const tests = ['apps/desktop/test/survey-note-block-knowledge.test.tsx', 'apps/desktop/test/note-file-surface.test.tsx']
 const mutations = [
-  { label: 'split-loses-semantic-identities', file: editor, before: "attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES]", after: "attributeName: 'blockId', types: []" },
-  { label: 'paste-reuses-reference-occurrence', file: editor, before: "attributeName: 'referenceId', types: [NoteBlockReferenceNode.name]", after: "attributeName: 'referenceId', types: []" },
+  { label: 'split-loses-semantic-identities', file: schema, before: "attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES]", after: "attributeName: 'blockId', types: []" },
+  { label: 'paste-reuses-reference-occurrence', file: schema, before: "attributeName: 'referenceId', types: [NoteBlockReferenceNode.name]", after: "attributeName: 'referenceId', types: []" },
   { label: 'embed-becomes-editable-copy', file: editor, before: 'content: doc, editable: false,', after: 'content: doc, editable: true,' },
   { label: 'duplicate-note-identity-first-wins', file: knowledge, before: 'if (sources.length > 1)', after: 'if (sources.length > 100)' },
   { label: 'unread-target-called-missing', file: knowledge, before: "knowledge.scope === 'complete' && knowledge.invalid.length === 0", after: 'knowledge.invalid.length === 0' },
@@ -28,7 +28,7 @@ const mutations = [
   { label: 'directory-refresh-uses-wrong-region', file: surface, before: 'refreshNoteDirectorySources(tabId, surface.regionId)', after: "refreshNoteDirectorySources(tabId, '')" },
   { label: 'directory-confirmed-claims-global-knowledge', file: surface, before: "noteKnowledge(loadedNoteFiles(notes), 'partial')", after: "noteKnowledge(loadedNoteFiles(notes), 'complete')" },
   { label: 'directory-failure-notice-disappears', file: surface, before: 'directoryFacts?.issues.length ?', after: 'false ?' },
-  { label: 'unrelated-session-enumerates-all-documents', file: knowledge, before: 'if (noteFiles) return noteFiles', after: 'if (false) return noteFiles' },
+  { label: 'unrelated-session-enumerates-all-documents', file: `${renderer}lib/note-knowledge.ts`, before: 'if (noteFiles) return noteFiles', after: 'if (false) return noteFiles' },
   { label: 'foreign-revision-rederives-this-directory', file: surface, before: 'state.workspaceFileRevisions[surface.workspaceId] ?? 0', after: 'Object.values(state.workspaceFileRevisions).reduce((sum, revision) => sum + revision, 0)' },
   { label: 'new-block-selection-before-canonical-write-only', file: editor, before: 'if (editor.view.hasFocus()) {', after: 'if (false) {' },
   { label: 'semantic-restore-rewinds-live-typing', file: view, before: 'if (selected === restoredBlock.blockId)', after: 'if (false)' },
@@ -44,6 +44,6 @@ const selected = requested ? mutations.filter(mutation => requested.includes(mut
 assert.ok(selected.length > 0, 'The requested mutation selection must not be empty.')
 if (requested) assert.deepEqual([...new Set(requested)].sort(), selected.map(mutation => mutation.label).sort(), 'Every requested mutation must exist in the actual descriptor.')
 await verifyRendererSourceMutations({ name: ("note-rich-ui-mutations-" + (globalThis.crypto.randomUUID()) + ""), tests, mutations: selected,
-  sources: [editor, surface, fileSurface, knowledge, schema, document, `${renderer}components/NoteFileView.tsx`, `${renderer}components/EditorPane.tsx`,
-    'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/scripts/verify-note-rich-ui-mutations.mjs',
+  sources: [editor, surface, fileSurface, knowledge, schema, document, `${renderer}lib/note-knowledge.ts`, `${renderer}components/NoteFileView.tsx`, `${renderer}components/EditorPane.tsx`,
+    'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx', 'apps/desktop/scripts/verify-note-rich-ui-mutations.mjs',
     'apps/desktop/scripts/lib/verify-renderer-source-mutations.mjs'] })

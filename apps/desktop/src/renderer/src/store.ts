@@ -1,4 +1,4 @@
-import { readAgentPresentation, readSpatialAppearance } from './lib/mobile-presentation'
+import { readAgentPresentation, readSpatialAppearance, readSurveyPresentation } from './lib/mobile-presentation'
 import { scratchTopicsForConfig } from './lib/scratch-topic-snapshots'
 import { conversationReplySourceKey, type ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import type { AgentMuxPendingMessage } from '@agentmux/core/control'
@@ -3854,6 +3854,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return await executeSpatialControl({
         get,
         agentPresentation: () => readAgentPresentation(get()),
+        surveyPresentation: catalog => readSurveyPresentation(get(), catalog),
         appearance: (catalog, imageSpaceId, topics) => readSpatialAppearance(get(), catalog, imageSpaceId, topics,
           (target, choice) => api.scratch.readMoteAvatar(target.workspaceId, target.topicId, choice, target.objectKey)),
         patch: patch => set(state => {

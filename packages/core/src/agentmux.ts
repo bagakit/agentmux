@@ -31,6 +31,7 @@ function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
   if (['space.focus', 'goal.focus', 'app.focus'].includes(method) && body.partial === true) return true
+  if (method === 'file.write' && (body.result as { status?: string } | undefined)?.status !== 'written') return true
   if (body.outcome === 'partial' || body.outcome === 'unknown' || body.outcome === 'refused') return true
   if (method === 'space.inspect' && Object.hasOwn(body, 'request')) {
     const request = body.request as { known?: boolean; report?: { outcome?: string } | null } | null
@@ -145,6 +146,7 @@ async function main(): Promise<number> {
       catch { throw new AgentMuxError('A spatial graph JSON object is required on stdin.', 'INVALID_CLI_ARGUMENT') }
     }
     if (method === 'browser.run') invocation.params.code = await readStdin()
+    if (method === 'file.write') invocation.params.content = await readStdin()
     if (method === 'browser.task.run') {
       const text = await readStdin(65_536)
       try { invocation.params.parameters = text.trim() ? JSON.parse(text) : {} }
