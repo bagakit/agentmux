@@ -1,9 +1,10 @@
 import { Fragment, type ReactNode } from 'react'
-import { looksLikeMarkdown, parseAgentMarkdown, type BlockNode, type InlineNode } from '../lib/agent-markdown.js'
+import { looksLikeMarkdown, parseAgentMarkdown, parseAgentMarkdownDocument, type BlockNode, type InlineNode } from '../lib/agent-markdown.js'
 import { classifyMarkdownLinkHref, referenceRevealLocation, splitMarkdownFileReferences, type MarkdownFileReference } from '../lib/markdown-file-reference.js'
 import { splitPastedImageReferences } from '../lib/pasted-image-reference.js'
 import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { parseHttpLinkUrl } from '../lib/link-url.js'
+import { MarkdownOutline } from './MarkdownOutline.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -139,7 +140,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
 
 /** Shared safe content renderer. Document mode retains document semantics; the Host retains IO. */
 export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
-  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, readOnly = false, renderWorkspaceImage }: {
+  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, readOnly = false, renderWorkspaceImage, outline = false }: {
   content: string
   className?: string
   openHttpLink?: OpenHttpLink
@@ -149,6 +150,8 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   homeDir?: string
   sourcePath?: string
   documentMode?: boolean
+  /** File document navigation. Conversations and inert previews never mount an outline. */
+  outline?: boolean
   /** Selectable preview prose without link actions, resource reads or document navigation. */
   readOnly?: boolean
   /** Root-confined path resolved against the document. A linked image must return noninteractive phrasing content. */
@@ -158,9 +161,11 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}) }
   if (!documentMode && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
-  const blocks = parseAgentMarkdown(content)
+  const document = documentMode && outline && !readOnly ? parseAgentMarkdownDocument(content) : null
+  const blocks = document?.blocks ?? parseAgentMarkdown(content)
   if (!blocks.length && !documentMode) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
   return <div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : ''}`}>
+    {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
     {blocks.map((block, index) => <Block key={index} node={block} context={context} />)}
   </div>
 }
