@@ -291,11 +291,11 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     const recap = item.recap === null ? null : fields(item.recap, ['text', 'source'], code)
     const avatar = Object.hasOwn(item, 'avatar') ? fields(item.avatar, ['tint', 'badge'], code) : undefined
     return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent presentation', code),
-      name: string(item.name, 'Agent name', code, 256), project: string(item.project, 'Project name', code, 256),
-      detail: string(item.detail, 'Activity detail', code, 512), group: string(item.group, 'Presentation group', code, 64),
-      state: string(item.state, 'Presentation state', code, 64), providerId: string(item.providerId, 'Provider', code, 64),
-      recap: recap ? { text: string(recap.text, 'Recap excerpt', code, 512), source: string(recap.source, 'Recap source', code, 128) } : null,
-      ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code, 64) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code, 64) } : {}) } } : {}) }
+      name: string(item.name, 'Agent name', code), project: string(item.project, 'Project name', code),
+      detail: string(item.detail, 'Activity detail', code), group: string(item.group, 'Presentation group', code),
+      state: string(item.state, 'Presentation state', code), providerId: string(item.providerId, 'Provider', code),
+      recap: recap ? { text: string(recap.text, 'Recap excerpt', code), source: string(recap.source, 'Recap source', code) } : null,
+      ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code) } : {}) } } : {}) }
   }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
   return { ...(agentPresentation ? { agentPresentation } : {}), ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
 }

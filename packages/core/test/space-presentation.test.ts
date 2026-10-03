@@ -24,10 +24,13 @@ const boundedCatalog = { spaces: [{ spaceId, kind: 'mote', name: 'Mote', hostId:
   appearance: [{ spaceId, expression: 'identity', activities: [{ agentSessionId: 'original', runId: 'original-run', expression: 'tool' }] }],
   agentPresentation: [{ agentSessionId: 'original', name: 'Actual name', project: 'Actual Project', group: 'working', state: 'working', providerId: 'provider', detail: 'Observed', recap: { text: 'Original recap', source: 'Last assistant message' }, avatar: { tint: '#aabbcc', badge: 'spark' } }] }
 function receipt(value: unknown) { return parseSpaceControlSuccessReceipt({ schemaVersion: 5, requestId: 'read', ok: true, operation: 'space.ls', result: { catalog: value } }) }
-describe('public bounded owner presentation', () => {
+describe('public original owner presentation', () => {
   it('carries original Session/Run and presentation through the same public receipt', () => { expect(receipt(boundedCatalog).result).toMatchObject({ catalog: boundedCatalog }) })
-  it('rejects oversized names and duplicate activity identities', () => {
-    expect(() => receipt({ ...boundedCatalog, agentPresentation: [{ ...boundedCatalog.agentPresentation[0], name: 'a'.repeat(257) }] })).toThrow()
+  it('preserves long original display fields including UTF-8 recaps', () => {
+    const original = { ...boundedCatalog.agentPresentation[0], name: '中文名字😀'.repeat(100), project: '中文项目🧑‍💻'.repeat(100), detail: '原状态'.repeat(200), recap: { text: '中文回复🧑‍💻'.repeat(200), source: 'Last assistant message' } }
+    expect(receipt({ ...boundedCatalog, agentPresentation: [original] }).result).toMatchObject({ catalog: { agentPresentation: [original] } })
+  })
+  it('rejects duplicate activity identities', () => {
     expect(() => receipt({ ...boundedCatalog, appearance: [{ ...boundedCatalog.appearance[0], activities: [boundedCatalog.appearance[0]!.activities[0], boundedCatalog.appearance[0]!.activities[0]] }] })).toThrow()
   })
   it('rejects appearance attributed to a different original Space', () => { expect(() => receipt({ ...boundedCatalog, appearance: [{ ...boundedCatalog.appearance[0], spaceId: JSON.stringify(['other', upstreamFixturePath("wrong")]) }] })).toThrow() })
