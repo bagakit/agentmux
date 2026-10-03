@@ -266,6 +266,7 @@ export async function copyRuntimeApplication(appPath, source) {
     join(demandRuntime, 'node_modules')
   )
   await materializeDependency(desktopRoot, 'tldts', join(appResources, 'node_modules', 'tldts'))
+  await materializeDependency(desktopRoot, 'luxon', join(appResources, 'node_modules', 'luxon'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
   await materializeDependency(desktopRoot, 'ws', join(appResources, 'node_modules', 'ws'))
   const outBin = join(appResources, 'out', 'bin')
