@@ -1,7 +1,8 @@
+import { activityReadingProps } from '../../../test/helpers/activity-reading-props'
 import { useState } from 'react';
 import { createClientUiRoot } from '../../../test/helpers/client-ui-render';
 import { ActivityView } from '../../../src/renderer/src/components/ActivityView';
-import { SessionHistoryView } from '../../../src/renderer/src/components/SessionHistoryView';
+
 import { replyConversationQuestion } from '../../../src/renderer/src/lib/conversation-question';
 import { api } from '../../../src/renderer/src/lib/api';
 import { useAppStore } from '../../../src/renderer/src/store';
@@ -87,18 +88,7 @@ function Scene() {
         style={{
         display: history ? 'flex' : 'none'
       }}
-      ><SessionHistoryView
-        control={control}
-        readingKey="original-run"
-        label={session.label}
-        visible={history}
-        returnLabel="Conversation"
-        workspaceRoot=""
-        openWorkspaceFile={async () => {}}
-        openHttpLink={() => {}}
-        onClose={() => setHistory(false)}
-        onReplyQuestion={input => replyConversationQuestion(control, input)}
-      /></div></div><footer><textarea
+      ><ActivityView {...activityReadingProps({ control: control, readingKey: "original-run", label: session.label, visible: history, returnLabel: "Conversation", workspaceRoot: "", openWorkspaceFile: async () => {}, openHttpLink: () => {}, onClose: () => setHistory(false), onReplyQuestion: input => replyConversationQuestion(control, input) })} /></div></div><footer><textarea
         aria-label="Original draft"
         value={draft}
         onChange={event => setDraft(event.target.value)}

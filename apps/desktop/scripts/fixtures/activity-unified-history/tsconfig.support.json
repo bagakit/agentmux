@@ -1,0 +1,33 @@
+{
+  "extends": "../../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": [
+      "vitest/globals",
+      "node",
+      "vite/client"
+    ]
+  },
+  "include": [
+    "../../../../../apps/desktop/scripts/fixtures/conversation-async-question/entry.tsx",
+    "../../../../../apps/desktop/scripts/fixtures/conversation-chat-identity/entry.tsx",
+    "../../../../../apps/desktop/scripts/fixtures/conversation-input-cards/entry.tsx",
+    "../../../../../apps/desktop/test/conversation-chat-identity.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-input-cards.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-input-origin.test.tsx",
+    "../../../../../apps/desktop/test/conversation-leading-amux-context.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-message-wrapper.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-native-first-window.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-native-user-messages.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-reading-state.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-reading-ui.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-sender-context.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-shared-native-reading.integration.test.tsx",
+    "../../../../../apps/desktop/test/conversation-shared-surface.integration.test.tsx",
+    "../../../../../apps/desktop/test/session-pane-native-user-messages.test.tsx",
+    "../../../../../apps/desktop/test/session-pane-project-file-links.test.tsx",
+    "../../../../../apps/desktop/test/helpers/activity-reading-props.ts",
+    "../../../src/**/*.ts",
+    "../../../src/**/*.tsx"
+  ]
+}

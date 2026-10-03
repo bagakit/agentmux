@@ -1,3 +1,4 @@
+import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -11,7 +12,7 @@ import { composeAgentLaunchPrompt, composeOutboundMessage } from '@agentmux/core
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
@@ -105,7 +106,7 @@ async function draw(f: Awaited<ReturnType<typeof fixture>>, state: 'done' | 'wor
   if (!fixtures.includes(f)) fixtures.push(f)
   await act(async () => root.render(<ActivityView sessionId={f.page.agentSessionId} capability="complete-events" displayState={state} items={[]}
     nativeHistoryPage={f.page} userMessages={f.messages} describeSpeaker={f.describeSpeaker} />))
-  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
+  expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
 }
 function turn(id: string) { const found = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"] .log-turn`); expect(found).not.toBeNull(); return found! }
 function disclosures(row: HTMLElement) { return [...row.querySelectorAll<HTMLDetailsElement>('details.log-turn__declared-context')] }
@@ -201,9 +202,8 @@ it('actual Activity and History share original reader records while disclosure, 
       provenance: 'Existing public producer → private FileStore → built-in Claude reader → public projector; unknown authors and original IDs/parts/times preserved.' }, null, 2))
   }
   const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(control => { expect(control.agentSessionId).toBe(f.session.agentSessionId); return f.client.sessionHistoryPage(control.agentSessionId) })
-  await act(async () => root.render(<SessionHistoryView control={{ kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }} visible
-    label="Original reader" workspaceRoot={f.root} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} describeSpeaker={f.describeSpeaker} />))
-  await vi.waitFor(() => { expect(host.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(3) })
-  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(item => item.dataset.nativeRecordId)).toEqual(f.ids)
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: { kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }, visible: true, label: "Original reader", workspaceRoot: f.root, openWorkspaceFile: vi.fn(), openHttpLink: vi.fn(), describeSpeaker: f.describeSpeaker })} />))
+  await vi.waitFor(() => { expect(host.querySelectorAll('.activity-feed [data-native-record-id]')).toHaveLength(3) })
+  expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(item => item.dataset.nativeRecordId)).toEqual(f.ids)
   expect(host.querySelectorAll('.log-turn__declared-context')).toHaveLength(4); expect(host.querySelector('strong')?.textContent).toBe('Read the original tail'); expect(history).toHaveBeenCalledOnce()
 })

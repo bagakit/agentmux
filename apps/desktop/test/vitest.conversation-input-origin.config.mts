@@ -10,7 +10,7 @@ const changes={
  'receiver-as-sender':['packages/client-ui/src/components/ConversationInputDetails.tsx',"origin!.device?.hostId ?? '未记录'","executionHostId ?? '未记录'"],
  'lose-device-id':['packages/client-ui/src/components/ConversationInputDetails.tsx',"origin!.device?.deviceId ?? '未记录'","'未记录'"],
  'drop-current-channel':['apps/desktop/src/renderer/src/components/ActivityView.tsx',"...(entry.item.sourceChannel ? { channel: entry.item.sourceChannel } : {}), ",""],
- 'lose-history-host':['apps/desktop/src/renderer/src/components/SessionHistoryView.tsx',' executionHostId={control.hostId}',''],
+ 'lose-history-host':['apps/desktop/src/renderer/src/components/ActivityView.tsx',' executionHostId={control.hostId}',''],
  'lose-focus-host':['apps/desktop/src/renderer/src/components/FocusMessagePreview.tsx',"{...(recipient?.hostId ? { executionHostId: recipient.hostId } : {})}",""],
  'hide-other-agent-origin':['packages/client-ui/src/components/ConversationMessage.tsx','inputOrigin && !isSystemContext',"inputOrigin && !isSystemContext && speaker?.role !== 'agent'"]
 }as const
