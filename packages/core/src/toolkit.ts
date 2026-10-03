@@ -53,7 +53,7 @@ export type ToolkitScriptSnapshot = {
 export type ToolkitSnapshot = ToolkitMetricsSnapshot | ToolkitScriptSnapshot
 export type ToolkitDescriptor =
   | { kind: 'metrics'; toolId: 'performance'; name: string; readonly: true }
-  | { kind: 'script'; toolId: string; name: string; readonly: false; revision: string
+  | { kind: 'script'; toolId: string; name: string; readonly: boolean; revision: string
       icon: string; enabled: boolean; statusBar: 'icon' | 'label' }
 export type ToolkitScript = { toolId: string; path: string | null; sha256: string; text: string }
 export const TOOLKIT_OPERATIONS = ['toolkit.list', 'toolkit.get', 'toolkit.script', 'toolkit.run',
@@ -227,7 +227,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
 export function parseToolkitResult(operation: ToolkitOperation, value: unknown): ToolkitResult {
   if (operation === 'toolkit.list') {
     const r = record(value, ['tools'])
-    if (!Array.isArray(r.tools) || r.tools.length < 1 || r.tools.length > TOOLKIT_MAX_USER_TOOLS + 1) invalid()
+    if (!Array.isArray(r.tools) || r.tools.length < 1 || r.tools.length > TOOLKIT_MAX_USER_TOOLS + 16) invalid()
     const ids = new Set<string>(); let builtin = 0
     for (const value of r.tools) {
       const tool = record(value, ['kind', 'toolId', 'name', 'readonly'], ['revision', 'icon', 'enabled', 'statusBar'])
@@ -237,7 +237,7 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
         if (tool.toolId !== 'performance' || tool.readonly !== true || Object.keys(tool).length !== 4) invalid()
         builtin++
       } else if (tool.kind === 'script') {
-        if (tool.toolId === 'performance' || tool.readonly !== false || Object.keys(tool).length !== 8) invalid()
+        if (tool.toolId === 'performance' || typeof tool.readonly !== 'boolean' || Object.keys(tool).length !== 8) invalid()
         identity(tool.revision); field('icon', tool.icon, 'CONTROL_PROTOCOL_ERROR'); field('enabled', tool.enabled, 'CONTROL_PROTOCOL_ERROR'); field('statusBar', tool.statusBar, 'CONTROL_PROTOCOL_ERROR')
       } else invalid()
     }

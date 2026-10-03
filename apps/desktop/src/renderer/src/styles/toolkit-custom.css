@@ -29,3 +29,10 @@
 .toolkit-result__identity { min-width: 0; }
 .toolkit-result__identity > small { display: block; margin-bottom: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
 .toolkit-result__identity > h2 { overflow-wrap: anywhere; }
+
+.toolkit-result__document h3 { margin: 0 0 12px; font-size: 16px; }
+.toolkit-result__document dl { margin: 12px 0; }
+.toolkit-result__document dl > div { display: flex; justify-content: space-between; gap: 16px; padding: 6px 0; }
+.toolkit-result__document dt { overflow-wrap: anywhere; }
+.toolkit-result__document dd { margin: 0; white-space: nowrap; }
+.toolkit-result__document .settings-input { width: 100%; margin: 8px 0; }

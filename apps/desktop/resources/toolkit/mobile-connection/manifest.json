@@ -1,0 +1,19 @@
+{
+  "id": "builtin:mobile-connection",
+  "name": "手机连接",
+  "icon": "smartphone",
+  "entry": "query.mjs",
+  "args": [
+    "status"
+  ],
+  "actions": [
+    {
+      "id": "link",
+      "label": "生成连接链接",
+      "entry": "query.mjs",
+      "args": [
+        "link"
+      ]
+    }
+  ]
+}

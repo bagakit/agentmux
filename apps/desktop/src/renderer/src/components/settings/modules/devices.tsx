@@ -5,11 +5,11 @@ import type { SettingsModule } from '../settings-catalog'
 export const devicesSettingsModule = {
   id: 'devices',
   group: 'connections',
-  title: 'Phones & devices',
-  description: 'Connect devices to this Mac and manage their access.',
+  title: '手机与设备',
+  description: '复制链接连接手机，查看设备和最近操作。',
   icon: Smartphone,
   keywords: 'phone mobile device connection relay access network 手机 设备 连接 局域网',
-  savedSummary: () => 'Connection & devices',
+  savedSummary: () => '连接手机与管理设备',
   Pane({ active }) {
     return <div className="settings-pane-stack settings-devices-pane"><DeviceManagementSettings active={active} /></div>
   }
