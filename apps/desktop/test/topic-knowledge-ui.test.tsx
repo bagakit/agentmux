@@ -150,13 +150,26 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
   })
   it('keeps a captured target through later navigation and writes original revision/source metadata', async () => {
     const f = await fixture(), source: TopicKnowledgeSource = { kind: 'file', hostId: 'local', path: f.first.directoryPath + '/outcome/original.md', revision: 'original-source' }, saved = vi.fn()
-    await mount(createElement(TopicKnowledgeEditor, { target: { topicId: f.first.topicId, title: 'Selected source', sources: [source] }, onClose: () => {}, onSaved: saved }))
+    const notebookId = 'source:' + crypto.randomUUID(), library = await api.notebooks.read()
+    const registered = await api.notebooks.apply({ expectedRevision: library.revision, operationId: crypto.randomUUID(), change: { kind: 'create', notebookId, name: 'Original notebook' } })
+    const notebook: TopicKnowledgeSource = { kind: 'notebook', notebookId }
+    await mount(createElement(TopicKnowledgeEditor, { target: { topicId: f.first.topicId, title: 'Selected source', sources: [source, notebook] }, onClose: () => {}, onSaved: saved }))
     await settle(() => !!document.querySelector('textarea'))
     await input(document.querySelector<HTMLTextAreaElement>('textarea')!, 'Bounded derived conclusion')
     useAppStore.setState(state => ({ workbenchSpaceSelection: { ...state.workbenchSpaceSelection!, topicId: f.second.topicId, zoneId: f.second.zoneId } }))
     await click(button('Save knowledge')); await settle(() => saved.mock.calls.length > 0)
-    expect(saved.mock.calls[0]![0]).toMatchObject({ topicId: f.first.topicId, sources: [source], content: 'Bounded derived conclusion' })
+    expect(saved.mock.calls[0]![0]).toMatchObject({ topicId: f.first.topicId, sources: [source, notebook], content: 'Bounded derived conclusion' })
     expect((await f.owner.call('topic.knowledge.ls', { topicId: f.second.topicId })).entries).toEqual([])
+    await expect(openKnowledgeSource({ kind: 'notebook', notebookId: 'missing-original' })).rejects.toThrow('not confirmed')
+    const before = useAppStore.getState(), read = vi.spyOn(api.notebooks, 'read')
+    let release!: (value: typeof registered) => void
+    read.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    const opening = openKnowledgeSource(notebook)
+    useAppStore.setState({ mainSurface: 'focus' }); release(registered); await opening
+    expect(useAppStore.getState().mainSurface).toBe('focus')
+    await openKnowledgeSource(notebook)
+    expect(useAppStore.getState()).toMatchObject({ mainSurface: 'survey', surveyNotebookId: notebookId })
+    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
   })
   it('rejects a source Chat claim pointing to another Topic before navigation and uses general Space provenance for unknown objects', async () => {
     const f = await fixture(), navigation = vi.spyOn(useAppStore.getState(), 'openScratchTopic')

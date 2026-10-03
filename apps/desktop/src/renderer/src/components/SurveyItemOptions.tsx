@@ -7,7 +7,8 @@ import { resolveOverlayContainer } from './WindowOverlayHost'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
 /** The selected Item's actions read the original owners; Radix owns disclosure and focus. */
-export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false }: {
+export function SurveyItemOptions({ visible, title, zone, workspace, collected, relatedSpaces, relatedSpacesUnconfirmed = false, activityDetails, onRename, onCollectedChange, onManageBrowsers, onOpenWorkspace, onSaveToTopic, currentPanelAvailable = false, compact }: {
+  compact?: boolean
   visible: boolean
   title: string
   zone: AgentMuxZoneFact | null
@@ -20,7 +21,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
   onSaveToTopic?: (scope: 'research' | 'panel') => void
   currentPanelAvailable?: boolean
   onCollectedChange(collected: boolean): void
-  onManageBrowsers(): void
+  onManageBrowsers?: (() => void) | undefined
   onOpenWorkspace(workspaceId: string): void
 }) {
   const displayPath = usePathDisplay()
@@ -28,7 +29,7 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
   useEffect(() => { if (!visible) setOpen(false) }, [visible])
   useEffect(() => setOpen(false), [zone?.zoneId])
   return <Menu.Root modal={false} open={visible && open} onOpenChange={setOpen}>
-    <Menu.Trigger asChild><button type="button" className={`survey-item-options ${zone ? 'survey-tab-view' : 'survey-icon-button'}`} aria-label="Exploration options" title="Exploration options"><MoreHorizontal size={16} aria-hidden="true" />{zone ? <span>Organize</span> : null}</button></Menu.Trigger>
+    <Menu.Trigger asChild><button type="button" className={`survey-item-options ${zone ? 'survey-tab-view' : 'survey-icon-button'}`} data-compact={compact || undefined} aria-label="Exploration options" title="Exploration options"><MoreHorizontal size={16} aria-hidden="true" />{zone && !compact ? <span>Organize</span> : null}</button></Menu.Trigger>
     <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu survey-topic-menu survey-item-menu" align="start" sideOffset={4} collisionPadding={8}
       onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
       <Menu.Label className="survey-topic-menu__label">{title}</Menu.Label>
@@ -38,12 +39,12 @@ export function SurveyItemOptions({ visible, title, zone, workspace, collected, 
         <span className="survey-topic-menu__indicator"><Menu.ItemIndicator><Check size={13} aria-hidden="true" /></Menu.ItemIndicator></span><span>Keep in Survey</span>
       </Menu.CheckboxItem> : null}
 
-      {zone && collected && onSaveToTopic ? <>
+      {collected && onSaveToTopic ? <>
         <Menu.Item className="tab-context-menu__item" onSelect={() => onSaveToTopic('research')}><ArrowUpRight size={14} /><span>Save research to Topic…</span></Menu.Item>
         {currentPanelAvailable ? <Menu.Item className="tab-context-menu__item" onSelect={() => onSaveToTopic('panel')}><ArrowUpRight size={14} /><span>Save current panel to Topic…</span></Menu.Item> : null}
       </> : null}
       <Menu.Separator className="tab-context-menu__separator" />
-      <Menu.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={onManageBrowsers}><SlidersHorizontal size={14} /><span>Browser tools</span></Menu.Item>
+      {onManageBrowsers ? <Menu.Item className="tab-context-menu__item" aria-label="Browser management" disabled={!workspace} onSelect={onManageBrowsers}><SlidersHorizontal size={14} /><span>Browser tools</span></Menu.Item> : null}
       {workspace ? <Menu.Item className="tab-context-menu__item" aria-label={`Open resource Workspace: ${workspace.name}, ${workspace.hostId}, ${displayPath(workspace.path, workspace.hostId)}`}
         onSelect={() => onOpenWorkspace(workspace.id)}><ArrowUpRight size={14} /><span>Open resource in Space</span></Menu.Item> : null}
       <Menu.Sub><Menu.SubTrigger className="tab-context-menu__item" aria-label="Item details"><span className="survey-topic-menu__indicator" aria-hidden="true" /><span>Details</span><ChevronRight size={12} /></Menu.SubTrigger>

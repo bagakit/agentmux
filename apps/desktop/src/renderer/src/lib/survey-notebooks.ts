@@ -7,7 +7,7 @@ import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { surveyInitialZoneSelection, surveySelectReference } from './survey-workface'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { readNoteDocument } from '../../../shared/note-document'
-import type { WorkbenchProjection } from './workbench-projection'
+import type { WorkbenchProjection, WorkbenchProjectionSelection } from './workbench-projection'
 
 function catalogNow() {
   const state = useAppStore.getState()
@@ -23,7 +23,7 @@ export async function prepareNotebookWorkface(notebook: Notebook, workspaceId: s
   return workface
 }
 /** Closing a page never loses this resource. Reopening uses the same file and original workbench. */
-export async function openNotebookPage(page: NotebookPage): Promise<boolean> {
+export async function openNotebookPage(page: NotebookPage, onSelectReference?: (reference: WorkbenchProjectionSelection) => void): Promise<boolean> {
   const before = useAppStore.getState()
   if (!notebookPageResourceMatches(page, before.config)) throw new Error('The Note’s original Host or folder is unavailable. Its page and history are kept; reconnect this resource.')
   const catalog = catalogNow(), zone = catalog.zones.find(z => z.zoneId === page.workface?.zoneId)
@@ -43,9 +43,9 @@ export async function openNotebookPage(page: NotebookPage): Promise<boolean> {
     displayWorkspaceId: page.resource.workspaceId, catalog: catalogNow(), selection: [], onSelect(reference) {
       const now = useAppStore.getState()
       if (now.mainSurface === 'survey' && now.surveyNotebookId === heldBook && now.surveyNoteId === heldNote && now.surveyZoneSelection === heldSelection)
-        now.setSurveyZoneSelection(surveySelectReference(initial, reference))
+        { now.setSurveyZoneSelection(surveySelectReference(initial, reference)); onSelectReference?.(reference) }
     } }
   return current.openFile(page.resource.path, groupId, undefined, page.resource.workspaceId, true,
-    { displayWorkspaceId: page.resource.workspaceId, space: { zoneId: zone.zoneId, spaceId: zoneContext(current, [], zone) },
+    { displayWorkspaceId: page.resource.workspaceId, space: { zoneId: zone.zoneId, spaceId: zoneContext(current, scratchTopicsForWorkspace(current.scratchTopicSnapshots, current.config?.workspaces.find(w => w.id === SCRATCH_WORKSPACE_ID)) ?? [], zone) },
       resource: { hostId: page.resource.hostId, path: page.resource.workspacePath }, projection })
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpRight, ChevronRight, FolderInput, History, Link, Save } from 'lucide-react'
 import { notebookFingerprint, type NotebookChange, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { changeNotebook, useNotebookLibrary } from '../lib/notebook-library'
@@ -6,6 +6,9 @@ import { notebookDescendants, notebookPageRows } from '../lib/notebook-page-tree
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
+import { spatialSources } from '../../../shared/space-addresses'
+import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 
 /** Retain the exact metadata operation until its original owner confirms the result. */
 export function useNotebookOperation() {
@@ -28,6 +31,9 @@ export function NotebookOperationIssue({ operation }: { operation: ReturnType<ty
 
 export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const library = useNotebookLibrary(state => state.state), book = library?.notebooks[page.notebookId]
+  const config = useAppStore(state => state.config), snapshots = useAppStore(state => state.scratchTopicSnapshots)
+  const topicNames = useMemo(() => new Map(spatialSources(config, scratchTopicsForWorkspace(snapshots,
+    config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []).spaces.map(space => [space.spaceId, space.name])), [config, snapshots])
   const operation = useNotebookOperation(), [title, setTitle] = useState(page.title), [editing, setEditing] = useState(false)
   const [panel, setPanel] = useState<'move' | 'sources' | 'history' | null>(null)
   const [destination, setDestination] = useState(page.notebookId), [parentId, setParentId] = useState(page.parentNoteId ?? '')
@@ -91,7 +97,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
         {event.before && (event.before.notebookId !== event.after.notebookId || event.before.parentNoteId !== event.after.parentNoteId) ? <p>{library?.notebooks[event.before.notebookId]?.name ?? event.before.notebookId} / {event.before.parentNoteId ? library?.pages[event.before.parentNoteId]?.title ?? event.before.parentNoteId : 'Root'} → {library?.notebooks[event.after.notebookId]?.name ?? event.after.notebookId} / {event.after.parentNoteId ? library?.pages[event.after.parentNoteId]?.title ?? event.after.parentNoteId : 'Root'}</p> : null}
         {event.before && event.before.title !== event.after.title ? <p>{event.before.title} → {event.after.title}</p> : null}
         {event.before && notebookFingerprint(event.before.resource) !== notebookFingerprint(event.after.resource) ? <p>{event.before.resource.hostId} · {event.before.resource.path} → {event.after.resource.hostId} · {event.after.resource.path}</p> : null}
-        {event.source ? <p>{event.source.url}</p> : null}{event.topic ? <p>{event.topic.spaceId}</p> : null}
+        {event.source ? <p>{event.source.url}</p> : null}{event.topic ? <p title={event.topic.spaceId}>{topicNames.get(event.topic.spaceId) ?? 'Recorded Topic'}</p> : null}
       </div></div>)}</section> : null}
   </header>
 }

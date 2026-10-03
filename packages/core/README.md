@@ -232,3 +232,5 @@ amux notebook apply --revision CURRENT_REVISION --operation-id NEW_OPERATION_ID 
 丢回执时查询原 `operationId`，再以同一个 ID、原 payload 和同一操作者重试；成功不会重复。
 新意图使用新 ID 和最新 revision；并发冲突先读目录。损坏或未确认读取保原字节与页面，
 不创建空知识库覆盖它。与当前事实相同的改名、位置或资源操作不添加虚假的变化事件。
+
+For a confirmed file move, `relocate` accepts optional `from: NoteResource`. The catalog rejects a stale original resource rather than replacing a later location; the same operation ID still replays exactly. Desktop records only confirmed File/Zone outcomes and retains unresolved history writes in its existing presentation recovery receipts. These receipts contain no Note body and do not replace this Core catalog.

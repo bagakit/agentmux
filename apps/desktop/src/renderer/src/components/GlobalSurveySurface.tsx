@@ -1,6 +1,6 @@
 import { DEFAULT_NOTEBOOK_ID, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NotebookHome, NotebookNavigation } from './SurveyNotebook'
-import { changeNotebook, refreshNotebookLibrary, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
+import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
 import { openNotebookPage, prepareNotebookWorkface } from '../lib/survey-notebooks'
 import { surveyExplorationName } from '../lib/survey-exploration-name'
 import { spatialCatalog } from '../lib/space-agent-control'
@@ -30,19 +30,24 @@ import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { surveySidebarBounds } from '../lib/survey-sidebar-width'
 import { clampSidebarResizeWidth, useSidebarResize } from '../hooks/useSidebarResize'
 import { isMacPlatform } from '../lib/host-platform'
+import { api } from '../lib/api'
+import { directoryIdentity } from '../../../shared/space-addresses'
 
-export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, viewTargets }: {
+export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible = true, controlsCoverPage = false, unconfirmedBrowserRegionIds, catalog, projection, selection, viewTargets, onSelectReference }: {
   visible?: boolean
   controlsCoverPage?: boolean
   unconfirmedBrowserRegionIds?: ReadonlySet<string> | undefined
   catalog: AgentMuxSpaceCatalog | null
   projection: WorkbenchProjection | null
   selection: ResolvedSurveyZoneSelection | null
+  onSelectReference?: (reference: WorkbenchProjectionSelection) => void
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
   const [pageQuery, setPageQuery] = useState('')
   const library = useNotebookLibrary(state => state.state)
   const libraryIssue = useNotebookLibrary(state => state.issue)
+  const notebookRecoveries = useAppStore(state => state.notebookRecoveries)
+  const [recoveringHistory, setRecoveringHistory] = useState(false)
   const notebookId = useAppStore(state => state.surveyNotebookId)
   useEffect(() => setPageQuery(''), [notebookId])
   const noteId = useAppStore(state => state.surveyNoteId)
@@ -74,7 +79,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const layouts = useStore(store, state => state.layouts)
   const sessions = useStore(store, state => state.sessions)
   const resourceWorkspaces = useMemo(() => new Map(config?.workspaces.map(workspace => [workspace.id, workspace]) ?? []), [config?.workspaces])
-  const currentZone = catalog?.zones.find(zone => zone.zoneId === selection?.zoneId)
+  const currentZone = catalog?.zones.find(zone => zone.zoneId === (selection?.zoneId ?? activeNotebook?.workface?.zoneId))
   const resourceWorkspaceId = currentZone?.workspaceId ?? (!selection ? SCRATCH_WORKSPACE_ID : null)
   const workspace = resourceWorkspaceId ? resourceWorkspaces.get(resourceWorkspaceId) : undefined
   const items = useMemo(() => catalog ? surveyZoneItems(catalog, collected) : [], [catalog, collected])
@@ -100,7 +105,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   const [opening, setOpening] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [creationNotice, setCreationNotice] = useState<string | null>(null)
-  const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[] } | null>(null)
+  const [capture, setCapture] = useState<{ title: string; sources: TopicKnowledgeSource[]; noteIds: string[] } | null>(null)
   const [toolsVisited, setToolsVisited] = useState(toolsOpen)
   const surfaceRef = useRef<HTMLElement>(null)
   const managementRef = useRef<HTMLElement>(null)
@@ -245,7 +250,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
     intent.current += 1
     useAppStore.getState().setSurveyNotebook(page.notebookId, page.noteId)
     setError(null)
-    try { await openNotebookPage(page) } catch (cause) { setError(presentError(cause)) }
+    try { await openNotebookPage(page, onSelectReference) } catch (cause) { setError(presentError(cause)) }
   }
 
   async function openBrowser(input = 'about:blank', newItem = false): Promise<void> {
@@ -345,7 +350,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
           if (latest.mainSurface !== 'survey' || latest.surveyZoneSelection !== heldSelection) return
           const facts = spatialCatalog(latest, scratchTopicsForWorkspace(latest.scratchTopicSnapshots, topicsWorkspace) ?? [])
           const original = heldSelection?.zoneId === zoneId ? heldSelection : surveyInitialZoneSelection(facts, zoneId, latest.layouts, latest.tabs, next.displayWorkspaceId)
-          displayed = true; setSelection(surveySelectReference(original, next))
+          displayed = true; setSelection(surveySelectReference(original, next)); onSelectReference?.(next)
         } }
       const launcherId = `region:${reference.regionId}`
       const retained = useLauncherState.getState().drafts[launcherId]?.noteCreation
@@ -366,20 +371,33 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   }
 
   function saveToTopic(scope: 'research' | 'panel'): void {
+    if (activeNotebook && !selection) {
+      setCapture({ title: activeNotebook.name, sources: [{ kind: 'notebook', notebookId: activeNotebook.notebookId }],
+        noteIds: pages.filter(page => page.notebookId === activeNotebook.notebookId).map(page => page.noteId) })
+      return
+    }
     if (!currentZone || !collected[currentZone.zoneId] || (scope === 'panel' && !currentPanel)) return
+    const panel = currentPanel ? tabs[currentPanel.tabId]?.regions[currentPanel.regionId] : null
     // Capture original durable references once; later navigation cannot retarget this draft.
     setCapture({ title: `${scope === 'panel' ? 'Current panel' : 'Research'}: ${itemTitle(currentZone)}`,
       sources: [{ kind: 'survey', zoneId: currentZone.zoneId,
-        ...(scope === 'panel' && currentPanel ? { tabId: currentPanel.tabId, regionId: currentPanel.regionId } : {}) }] })
+        ...(scope === 'panel' && currentPanel ? { tabId: currentPanel.tabId, regionId: currentPanel.regionId } : {}) }],
+      noteIds: pages.filter(page => page.workface?.zoneId === currentZone.zoneId && (scope !== 'panel' || panel?.kind === 'file' && page.resource.workspaceId === panel.workspaceId && page.resource.path === panel.path)).map(page => page.noteId) })
   }
 
-  const options = <SurveyItemOptions key={String(sidebarCollapsed)} visible={visible && !controlsCoverPage} title={currentZone ? itemTitle(currentZone) : selection ? 'Retained exploration' : 'New exploration'}
-    zone={currentZone ?? null} workspace={workspace ?? null} collected={!!selection && collected[selection.zoneId] === true} relatedSpaces={related.spaces} relatedSpacesUnconfirmed={related.unconfirmed}
+  async function recoverHistory(): Promise<void> {
+    setRecoveringHistory(true)
+    try { await retryNotebookRecoveries() } catch (cause) { setError(presentError(cause)) }
+    finally { setRecoveringHistory(false) }
+  }
+
+  const options = <SurveyItemOptions compact={!!activeNotebook} key={String(sidebarCollapsed)} visible={visible && !controlsCoverPage} title={activeNotebook ? activeNotebook.name : currentZone ? itemTitle(currentZone) : selection ? 'Retained exploration' : 'New exploration'}
+    zone={currentZone ?? null} workspace={workspace ?? null} collected={activeNotebook && !selection ? true : !!selection && collected[selection.zoneId] === true} relatedSpaces={related.spaces} relatedSpacesUnconfirmed={related.unconfirmed}
     activityDetails={currentZone ? activity(currentZone).details : null}
     onSaveToTopic={saveToTopic} currentPanelAvailable={Boolean(currentPanel)}
-    {...(currentZone ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
+    {...(currentZone && !activeNotebook ? { onRename: () => { setSidebarCollapsed(false); setRenamingZoneId(currentZone.zoneId) } } : {})}
     onCollectedChange={value => { if (selection && !setCollected(selection.zoneId, value)) setError('The original Zone resource is unconfirmed. Its content and selection are kept.') }}
-    onManageBrowsers={() => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
+    onManageBrowsers={activeNotebook ? undefined : () => setToolsOpen(!toolsOpen)} onOpenWorkspace={workspaceId => { intent.current += 1; void selectWorkspace(workspaceId) }} />
   const windowControlsInset = isMacPlatform() ? <span className="survey-window-controls-inset" aria-hidden="true" /> : undefined
 
   return <section ref={surfaceRef} className="global-survey-surface" data-sidebar-collapsed={sidebarCollapsed} data-native-window-controls={isMacPlatform()}
@@ -408,6 +426,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
       </aside>
       <div className="survey-item-actions" role="group" aria-label="Current exploration actions">
         {activeNotebook ? <button className="survey-tab-view" onClick={() => chooseNotebook(activeNotebook.notebookId)}><NotebookPen size={14} /><span>Pages</span></button> : options}
+        {activeNotebook ? options : null}
         {activeNotebook ? <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, false, true)}><Plus size={14} /><span>New page</span></button> : selection && collected[selection.zoneId] ? <button type="button" className="survey-tab-view" aria-label="Add note to this exploration" title={selection.active ? 'Write a note alongside this page' : 'Choose the original location before adding a note'} disabled={opening || !selection.active || !workspace} onClick={() => void openNote(false)}><NotebookPen size={14} /><span>Add note</span></button> : null}
       </div>
       <div ref={resizeHandle} className="survey-width-handle" role="separator" tabIndex={0} aria-label="Resize Survey items" title="Resize Survey items"
@@ -424,6 +443,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         {error ? <p className="survey-error" role="alert">{error}{failedCreation.current ? <button type="button" disabled={opening} onClick={() => void openBrowser(query.trim() ? query : 'about:blank')}>Retry original item</button> : null}</p> : null}
         {noteRecovery && !creationNotice ? <p className="survey-relation-notice" role="status">The original Note target is kept. <button type="button" className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Recover same note</button></p> : null}
         {creationNotice ? <p className="survey-relation-notice" role="status">{creationNotice}{noteRecovery ? <button className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Retry Notebook registration</button> : null}</p> : null}
+        {notebookRecoveries.length ? <p className="survey-history-recovery" role="status"><span>History update pending. Your notes are saved.</span><button className="note-text-button" disabled={recoveringHistory} onClick={() => void recoverHistory()}>Retry history</button></p> : null}
         {libraryIssue && !creationNotice ? <p className="survey-relation-notice" role="status">Notebook directory is unconfirmed. Saved pages and browsing are kept. <button onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh</button><details><summary>Details</summary>{libraryIssue}</details></p> : null}
         {activeNotebook && !selection ? <NotebookHome query={pageQuery} onQuery={sidebarCollapsed ? setPageQuery : undefined} notebook={activeNotebook} pages={pages.filter(page => page.notebookId === activeNotebook.notebookId)} pending={opening} onCreate={() => void openNote(false, false, true)} onOpen={page => void showNotebookPage(page)} /> : !selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
           <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
@@ -442,6 +462,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <header><strong>Browser tools · {workspace.name}</strong><button type="button" aria-label="Close browser management" onClick={() => setToolsOpen(false)}><X size={14} /></button></header><BrowserToolsPanel workspace={workspace} visible={visible && toolsOpen} />
       </aside> : null}
     </div>
-    <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} />
+    <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} onSaved={entry => {
+      const noteIds = capture?.noteIds ?? []
+      if (!noteIds.length) return
+      void (async () => {
+        const result = await api.topics.call('topic.inspect', { topicId: entry.topicId })
+        if (!result.topic || result.topic.readError) throw new Error('Knowledge was saved. Its Topic content identity is unconfirmed; Note history is kept.')
+        const topic = result.topic
+        await recordNotebookChanges(noteIds.map(noteId => ({ kind: 'organize', noteId,
+          topic: { topicId: entry.topicId, spaceId: directoryIdentity(topic.hostId, topic.directoryPath) } })), 'topic-knowledge:' + entry.entryId)
+      })().catch(cause => setError(presentError(cause)))
+    }} />
   </section>
 })
