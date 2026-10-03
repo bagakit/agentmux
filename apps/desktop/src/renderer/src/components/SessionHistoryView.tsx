@@ -7,7 +7,7 @@ import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
 import { parseTraceDisclosureKey } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationNativeThread, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import { NativeProcessObservation } from './NativeProcessObservation'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
@@ -376,7 +376,7 @@ export function SessionHistoryView({
           {reading.loading ? <><LoaderCircle size={12} className="spin" /> Reading history…</> : reading.source && reading.nextCursor === null ? 'Beginning of the available native history' : null}
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
-        {page ? <ConversationNativeThread renderQuestionNotice={renderConversationQuestionNotice}
+        {page ? <ConversationView renderQuestionNotice={renderConversationQuestionNotice}
           {...(onReplyQuestion ? { onReplyQuestion } : {})} page={page} sessionId={control.agentSessionId} executionHostId={control.hostId}
           {...(renderMessageActions ? { renderMessageActions } : {})}
           describeSpeaker={resolveSpeaker} showSource={false} messageIdForRecord={rawMessageId}

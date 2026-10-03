@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { ArrowUpRight, Check, ChevronRight, File, Link2, List, MessageSquare, Monitor, Pencil, ShieldCheck, Smartphone, SquareTerminal, Wifi, X } from 'lucide-react'
+import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, MoreHorizontal, Smartphone, SquareTerminal, Wifi, X } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
@@ -11,6 +11,11 @@ import './mobile.css'
 import { getDeviceWorkface, type Navigation } from './recovery/device-workface'
 import { MobileRecoveryPanel } from './recovery/MobileRecoveryPanel'
 import { exportNativeWorkfaceFile } from './platform/native/workface-file'
+
+import brandIcon from './assets/agentmux.png'
+import { MoteMark } from './navigation/MoteMark'
+import { MobileSpatialNavigation } from './navigation/MobileSpatialNavigation'
+import { readMobileHome, saveMobileHome, type MobileHome } from './navigation/home-preference'
 
 type Workface = Navigation
 
@@ -30,11 +35,19 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   native?: boolean; focusComposer?: () => boolean
   connectionPanel?: ReactNode
 }) {
+  const [hasConnected, setHasConnected] = useState(connection.state === 'connected')
+  useEffect(() => { if (connection.state === 'connected') setHasConnected(true) }, [connection.state])
   const initial = useRef<ReturnType<typeof loadWorkface> | null>(null)
   initial.current ??= loadWorkface()
   const [workface, setWorkface] = useState<Workface>(initial.current.workface)
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)
-  const [sheet, setSheet] = useState<'connection' | 'attachments' | null>(null)
+  const initialHome = useRef(readMobileHome())
+  const [home, setHome] = useState<MobileHome>(initialHome.current.home)
+  const [defaultHome, setDefaultHome] = useState<MobileHome>(initialHome.current.home)
+  const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
+  const [showSession, setShowSession] = useState(false)
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null)
+  const [sheet, setSheet] = useState<'connection' | 'attachments' | 'settings' | null>(null)
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
   const [attachment, setAttachment] = useState<LocalAttachment | null>(null)
   const [choosingFile, setChoosingFile] = useState(false)
@@ -53,7 +66,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     if (!native) return
     const binding = bindNativeDevice({ root: document.documentElement, reportError,
       onForeground: () => { void client?.connect().catch(reportError) },
-      onBack: () => { setSheet(null); setWorkface(value => ({ ...value, panel: 'conversation' })) }
+      onBack: () => { setSheet(null); setShowSession(false) }
     })
     return () => { void binding.dispose().catch(reportError) }
   }, [client, native])
@@ -91,50 +104,60 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     finally { setChoosingFile(false) }
   }
   const connected = connection.state === 'connected'
+  const workspaceVisible = connected || hasConnected
   const label = connected ? '已连接' : connection.state === 'connecting' ? '连接中' : connection.state === 'disconnected' ? '连接中断' : '尚未连接'
 
   return <div className="mobile-app" data-connection={connection.state}>
     <header className="mobile-header">
-      <div className="mobile-brand"><span className="mobile-brand-mark"><SquareTerminal size={22} strokeWidth={1.6} /></span><span>AgentMux</span></div>
-      <button className="mobile-status" onClick={() => setSheet('connection')} aria-label={`连接状态：${label}`}><span className="mobile-status-dot" />{label}<ChevronRight size={13} /></button>
+      <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={28} height={28} alt="" /><span>AgentMux</span></div>
+      <div className="mobile-header-actions"><span className="mobile-status-dot" aria-label={label} />
+        <button className="mobile-icon-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><MoreHorizontal size={20} /></button></div>
     </header>
-    <div className="mobile-context"><span>{selected?.workspacePath.split('/').filter(Boolean).at(-1) ?? '你的 Mac'}</span><span className="mobile-context-divider">/</span><span>{workface.panel === 'sessions' ? '已有会话' : workface.panel === 'terminal' ? '终端阅读' : selected ? '对话' : '继续原会话'}</span>
-      {native && selected && workface.panel === 'conversation' && <button aria-label="撰写消息" onClick={() => {
-        if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿仍保留；可点按输入框继续编辑。')
-      }}><Pencil size={17} /></button>}
-    </div>
+    {workspaceVisible && showSession && <div className="mobile-session-toolbar">
+      <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'}</button>
+      <span>{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
+      <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' }))}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button>
+      {native && selected && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><Pencil size={17} /></button>}
+    </div>}
     <main className="mobile-main">
-      <section className="mobile-session-panel" hidden={workface.panel !== 'sessions'}>
-        <div className="mobile-section-heading"><h1>已有会话</h1><span>{connected && !projectionError ? `${sessions.length} 个` : '待核实'}</span></div>
-        {sessions.length ? <ul className="mobile-session-list">{sessions.map(session => <li key={session.agentSessionId}><button onClick={() => setWorkface(value => ({ ...value, selectedSessionId: session.agentSessionId, panel: 'conversation' }))}>
-          <span className="mobile-session-icon"><MessageSquare size={19} /></span><span><strong>{session.workspacePath.split('/').filter(Boolean).at(-1) ?? session.providerId}</strong><small>{session.providerId} · {session.agentSessionId.slice(0, 8)}</small></span><ChevronRight size={16} />
-        </button></li>)}</ul> : <div className="mobile-list-empty"><List size={28} strokeWidth={1.4} /><h2>会话由 Mac 管理</h2><p>设备授权后，这里会显示同一个 Host 的已有会话。连接未知时不会创建替代会话。</p><button className="mobile-text-button" onClick={() => setSheet('connection')}>查看连接<ArrowUpRight size={15} /></button></div>}
-      </section><section className="mobile-conversation-panel" hidden={workface.panel !== 'conversation'}>
-        {!workface.selectedSessionId && <section className="mobile-welcome">
-          <div className="mobile-connection-illustration" aria-hidden="true"><span><Monitor size={34} strokeWidth={1.25} /></span><i /><span><Smartphone size={30} strokeWidth={1.25} /></span></div>
-          <span className="mobile-eyebrow">AGENTMUX · 随身继续</span>
-          <h1>让对话继续</h1><p>连接你的 Mac，查看会话。<br />Agent 与会话由 Mac 管理。</p>
-          <button className="mobile-primary" onClick={() => setSheet('connection')}><Link2 size={17} />查看连接状态<ArrowUpRight size={17} /></button>
-          <div className="mobile-onboarding-steps"><div><span>01</span><p><strong>Mac 保持在线</strong><small>手机与 Mac 在同一局域网</small></p></div><div><span>02</span><p><strong>打开连接链接</strong><small>复制 Mac 上的链接，在手机打开</small></p></div><div><span>03</span><p><strong>继续原会话</strong><small>阅读、撰写与回应请求</small></p></div></div>
-        </section>}
+      {!workspaceVisible && <section className="mobile-connect-page"><span className="mobile-connect-mark"><Smartphone size={28} /></span><h1>连接你的 Mac</h1>
+        <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
+        <p className="mobile-spatial-notice" role="status">{connection.message}</p>{connectionPanel}
+        <button className="mobile-secondary" onClick={() => setSheet('connection')}><Link2 size={16} />连接详情</button>
+      </section>}
+      {workspaceVisible && !showSession && <MobileSpatialNavigation home={home} client={client} connected={connected} sessions={sessions} openSession={(id, title) => {
+        setSessionTitle(title)
+        setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' })); setShowSession(true)
+      }} />}
+      <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || workface.panel === 'terminal'}>
+        {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'} 选择已有 Agent。</p>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
-          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} openHttpLink={openBrowserHttpLink} onAttach={() => { void chooseAttachment() }} />
+          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && workface.panel !== 'terminal'} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} onAttach={() => { void chooseAttachment() }} />
         </div>
-      </section><section className="mobile-terminal-panel" hidden={workface.panel !== 'terminal'}>
-        <MobileTerminalViewer client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} visible={workface.panel === 'terminal'} />
+      </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || workface.panel !== 'terminal'}>
+        <MobileTerminalViewer client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && workface.panel === 'terminal'} />
       </section>
     </main>
-    <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ShieldCheck size={15} /></span><div><p>{notice ?? projectionError ?? connection.message}</p>{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>
-    <nav className="mobile-navigation" aria-label="手机导航">
-      <button aria-current={workface.panel === 'conversation' ? 'page' : undefined} onClick={() => setWorkface(value => ({ ...value, panel: 'conversation' }))}><MessageSquare size={20} /><span>对话</span></button>
-      <button aria-current={workface.panel === 'sessions' ? 'page' : undefined} onClick={() => setWorkface(value => ({ ...value, panel: 'sessions' }))}><List size={21} /><span>会话</span></button>
-      <button aria-current={workface.panel === 'terminal' ? 'page' : undefined} onClick={() => setWorkface(value => ({ ...value, panel: 'terminal' }))}><SquareTerminal size={20} /><span>终端</span></button>
-      <button onClick={() => setSheet('connection')}><Wifi size={20} /><span>连接</span></button>
-    </nav>
+    {(notice || projectionError || connection.issue || hasConnected && !connected || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ShieldCheck size={15} /></span><div><p>{notice ?? projectionError ?? connection.issue ?? connection.message}</p>{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
+    {workspaceVisible && <nav className="mobile-navigation" aria-label="手机导航">
+      <button aria-current={!showSession && home === 'mote' ? 'page' : undefined} onClick={() => { setHome('mote'); setShowSession(false) }}><MoteMark size={20} /><span>Mote</span></button>
+      <button aria-current={!showSession && home === 'focus' ? 'page' : undefined} onClick={() => { setHome('focus'); setShowSession(false) }}><List size={20} /><span>Focus</span></button>
+      <button aria-current={!showSession && home === 'space' ? 'page' : undefined} onClick={() => { setHome('space'); setShowSession(false) }}><Layers size={20} /><span>Space</span></button>
+    </nav>}
     <Dialog.Root open={sheet !== null} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet" aria-describedby="mobile-sheet-description">
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'attachments' ? '本地附件' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><X size={19} /></Dialog.Close></div>
-        {sheet === 'attachments' ? <>
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'attachments' ? '本地附件' : sheet === 'settings' ? '手机设置' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><X size={19} /></Dialog.Close></div>
+        {sheet === 'settings' ? <>
+          <Dialog.Description id="mobile-sheet-description">这台手机的显示偏好</Dialog.Description>
+          <fieldset className="mobile-home-settings"><legend>连接后的默认主页</legend>
+            {(['mote', 'focus', 'space'] as const).map(value => <label key={value}><span><strong>{value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'}</strong><small>{value === 'mote' ? '协调与长期讨论' : value === 'focus' ? '执行状态与待处理事项' : '工作空间与已有 Agent'}</small></span><input type="radio" name="mobile-default-home" value={value} aria-label={value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'} checked={defaultHome === value} onChange={() => {
+              try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
+              catch { setHomeIssue('默认主页未保存。当前会话和草稿保留，请稍后重试。') }
+            }} /></label>)}
+          </fieldset>
+          {homeIssue && <p className="mobile-spatial-notice" role="status">{homeIssue}</p>}
+          <button className="mobile-menu-row" onClick={() => setSheet('connection')}><Wifi size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ChevronRight size={16} /></button>
+        </> : sheet === 'attachments' ? <>
           <Dialog.Description id="mobile-sheet-description">系统已选中附件，文件仍在这台设备上。</Dialog.Description>
           {attachment && <div className="mobile-selected-file"><File size={22} /><div><strong>{attachment.name}</strong><small>{attachment.mimeType} · {(attachment.size / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB</small></div><Check size={17} /></div>}
           <p className="mobile-sheet-note">尚未上传至 Mac，发送消息不会附带这个本地文件。文件传输能力未确认前，原草稿和会话保持不变。</p>

@@ -11,7 +11,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 
 // Actual public Client/Claude reader/FileStore, hook, Store, SessionPane, Activity,
 // History, Message and ReasoningTrace. Only PTY/composer/chrome are controlled leaves.
@@ -72,7 +72,7 @@ describe('Provider reasoning from the already observed native page',()=>{
   expect(read.mock.calls.map(([c,o])=>[c,o])).toEqual([[control,{limit:30}]])
   expect(observed.hook!.nativeHistoryPage!.items.map(x=>x.id)).toEqual(['u','r','a','text-only'])
   expect(observed.hook!.messages.map(x=>x.rawId)).toEqual(['u'])
-  expect(nativeRegion().getAttribute('aria-label')).toBe('Native conversation')
+  expect(nativeRegion().getAttribute('aria-label')).toBe('Conversation')
   expect([...nativeRegion().querySelectorAll('[data-native-record-id]')].map(x=>x.getAttribute('data-native-record-id'))).toEqual(['u','r','a','text-only'])
   expect(host.textContent).toContain('A legitimate native prompt.');expect(nativeRegion().textContent).toContain('Text-only record stays in full History.')
   expect(host.querySelectorAll('.log-turn__text')).toHaveLength(4)
@@ -91,7 +91,7 @@ describe('Provider reasoning from the already observed native page',()=>{
  })
  it('keeps real empty/redacted summaries readable without signatures or concealed text',async()=>{
   const page=typedPage(control,[{id:'empty',kind:'activity',contentParts:[{kind:'reasoning',text:'',signature:'opaque-signature'}]},{id:'redacted',kind:'activity',contentParts:[{kind:'reasoning',text:'concealed-thought',redacted:true,signature:'opaque-signature'}]}])
-  await render(<ConversationNativeThread page={page} sessionId={ID} />)
+  await render(<ConversationView page={page} sessionId={ID} />)
   expect(host.querySelectorAll('details')).toHaveLength(2)
   await open(detail('empty'));await open(detail('redacted'))
   expect(host.textContent).toContain('No reasoning text recorded.');expect(host.textContent).toContain('Reasoning content redacted.')
@@ -100,7 +100,7 @@ describe('Provider reasoning from the already observed native page',()=>{
  })
  it('preserves equal reasoning with distinct raw IDs and all repeated parts without body/time deduplication',async()=>{
   const part={kind:'reasoning' as const,text:'Identical observed thought.'};const page=typedPage(control,[{id:'one',kind:'activity',contentParts:[part,part]},{id:'two',kind:'activity',contentParts:[part]}])
-  await render(<ConversationNativeThread page={page} sessionId={ID} />)
+  await render(<ConversationView page={page} sessionId={ID} />)
   const traces=[...host.querySelectorAll<HTMLDetailsElement>('details')];expect(traces).toHaveLength(3)
   expect(new Set(traces.map(x=>x.dataset.traceId)).size).toBe(3)
   await open(traces[1]!);expect(traces.map(x=>x.open)).toEqual([false,true,false])
@@ -115,8 +115,8 @@ describe('Provider reasoning from the already observed native page',()=>{
   const page=typedPage(control,[{id:'plain',kind:'assistant-message',contentParts:[{kind:'text',text:'Text-only native answer.'}]}])
   await render(<ActivityView sessionId={ID} items={timeline().items} nativeHistoryPage={page} capability="complete-events" displayState="done" />)
   expect(nativeRegion().textContent).toContain('Text-only native answer.');expect(host.querySelectorAll('.log-turn')).toHaveLength(2)
-  await render(<ConversationNativeThread page={typedPage(control)} sessionId={ID} />);expect(host.textContent).toBe('')
-  await render(<ConversationNativeThread page={typedPage({...control,agentSessionId:'other'},[{id:'foreign',kind:'activity',contentParts:[{kind:'reasoning',text:'Foreign thought'}]}])} sessionId={ID} />)
+  await render(<ConversationView page={typedPage(control)} sessionId={ID} />);expect(host.textContent).toBe('')
+  await render(<ConversationView page={typedPage({...control,agentSessionId:'other'},[{id:'foreign',kind:'activity',contentParts:[{kind:'reasoning',text:'Foreign thought'}]}])} sessionId={ID} />)
   expect(host.textContent).toBe('')
  })
  it('preserves expanded reasoning nodes, Range, scroll and draft under actual History cover and Return',async()=>{

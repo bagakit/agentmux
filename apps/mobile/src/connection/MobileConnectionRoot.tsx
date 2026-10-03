@@ -41,11 +41,11 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         owned = value; setClient(value); attempt = 0
         try { getDeviceWorkface().confirmHost({ origin: location.origin, hostId: selected!.serverId }) }
         catch { bindingNotice = '设备工作面保存尚未确认，当前连接可继续使用；请保全工作面或恢复设备存储。' }
-        setConnection({ state: 'connected', message: ['已连接 Mac', bindingNotice].filter(Boolean).join(' ') })
+        setConnection({ state: 'connected', message: '已连接 Mac', ...(bindingNotice ? { issue: bindingNotice } : {}) })
         release = value.onEvent(event => {
           if (event.type !== 'connection-state') return
           const state = (event as { state: string }).state
-          setConnection({ state: state === 'restored' ? 'connected' : 'disconnected', message: [state === 'restored' ? '已连接 Mac' : '连接中断，自动重连中；原会话与草稿保留。', bindingNotice].filter(Boolean).join(' ') })
+          setConnection({ state: state === 'restored' ? 'connected' : 'disconnected', message: state === 'restored' ? '已连接 Mac' : '连接中断，自动重连中；原会话与草稿保留。', ...(bindingNotice ? { issue: bindingNotice } : {}) })
         })
       } catch (error) {
         if (controller.signal.aborted) return

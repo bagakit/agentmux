@@ -6,7 +6,7 @@ import { conversationFiles } from '../src/lib/conversation-files.js'
 import { ConversationMessage } from '../src/components/ConversationMessage.js'
 import type { ConversationMessageProps } from '../src/components/ConversationMessage.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform.js'
-import { ConversationNativeThread } from '../src/components/ConversationNativeThread.js'
+import { ConversationView } from '../src/components/ConversationView.js'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 const roots: ReturnType<typeof createRoot>[] = []
@@ -75,7 +75,7 @@ it('actual native reader indexes final Provider replies while unknown/progress/u
   const container = document.createElement('div'); document.body.append(container)
   const root = createRoot(container); roots.push(root)
   const open = vi.fn()
-  await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationNativeThread sessionId="same"
+  await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationView sessionId="same"
     workspaceRoot={fixturePath("project")} openWorkspaceFile={open} page={{ agentSessionId: 'same', source: { providerId: 'codex', nativeSessionId: 'original-native' }, nextCursor: null, items: [
       { id: 'final', kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: '[report](out/final.pdf)' }] },
       { id: 'unknown', kind: 'assistant-message', contentParts: [{ kind: 'text', text: '[unknown](out/unknown.pdf)' }] },

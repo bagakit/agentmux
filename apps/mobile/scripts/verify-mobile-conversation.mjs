@@ -53,7 +53,7 @@ async function callers(base) {
   const result = { MobileConversationSurface: count(app, jsx('MobileConversationSurface')),
     createBrowserPlatform: count(main, node => ts.isCallExpression(node) && node.expression.getText() === 'createBrowserPlatform'),
     deliveryOutcome: count(surface, node => ts.isCallExpression(node) && node.expression.getText() === 'deliveryOutcome') }
-  for (const name of ['ClientUiProvider', 'ConversationNativeThread', 'ConversationMessage', 'AgentInteractionCard', 'AgentComposer']) {
+  for (const name of ['ClientUiProvider', 'ConversationView', 'ConversationMessage', 'AgentInteractionCard', 'AgentComposer']) {
     result[name] = count(surface, jsx(name))
   }
   for (const [name, source] of [['submitAgentPrompt', surface], ['respondAgentInteraction', surface], ['sessionTimeline', hook], ['sessionHistoryPage', hook], ['observeSessionHistory', hook]]) {
@@ -154,7 +154,7 @@ try {
   assert(declaredTests > 0, 'Declared mounted/browser behavior collection is nonempty')
   assert.equal(baseline.value.numPassedTests, declaredTests, 'Every declared mounted and browser behavior actually collected')
   const actualSource = JSON.parse(await readFile(sourceProof, 'utf8'))
-  for (const path of ['packages/client-ui/src/components/AgentComposer.tsx', 'packages/client-ui/src/components/ConversationNativeThread.tsx',
+  for (const path of ['packages/client-ui/src/components/AgentComposer.tsx', 'packages/client-ui/src/components/ConversationView.tsx',
     'packages/client-ui/src/lib/composer-semantic-reference.ts', 'packages/core/src/agent-prompt-condition.ts',
     'packages/core/src/session-user-messages.ts', 'apps/mobile/src/conversation/MobileConversationSurface.tsx',
     'apps/mobile/src/conversation/delivery.ts']) {
@@ -177,7 +177,7 @@ try {
         mutate: (path, bytes) => functionBody(path, bytes, 'deliveryOutcome', "{ return 'rejected' }") },
       { name: 'late-receipt-original-draft', path: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', pattern: 'binds a late receipt',
         mutate: (_path, bytes) => replaceOne(bytes, "if (drafts.current.get(key) === original.draft) drafts.current.set(key, '')", "drafts.current.set(JSON.stringify(['draft', current.current.agentSessionId]), '')") },
-      { name: 'native-window-nonempty', path: 'packages/client-ui/src/components/ConversationNativeThread.tsx', pattern: 'retains native source order',
+      { name: 'native-window-nonempty', path: 'packages/client-ui/src/components/ConversationView.tsx', pattern: 'retains native source order',
         mutate: (_path, bytes) => replaceOne(bytes, `const records = page.items.filter((item) => {\n    if (seen.has(item.id)) return false\n    seen.add(item.id)\n    return true\n  })`, 'const records = page.items.filter(() => false)') },
       { name: 'semantic-reference-source-leaf', path: 'packages/client-ui/src/lib/composer-semantic-reference.ts', pattern: 'sends one captured condition',
         mutate: (path, bytes) => functionBody(path, bytes, 'expandSemanticReferences', '{ return draft }') },

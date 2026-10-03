@@ -5,13 +5,14 @@ import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
-  AgentComposer, AgentInteractionCard, ClientUiProvider, ConversationMessage, ConversationNativeThread,
+  AgentComposer, AgentInteractionCard, ClientUiProvider, ConversationMessage, ConversationView,
   createSpeakerResolver, expandSemanticReferences, speakerOfUserMessage,
   type ClientUiPlatform, type ConversationMessageProps
 } from '@agentmux/client-ui'
 import { deliveryOutcome, errorMessage } from './delivery'
 import { createLocalDrafts, type PromptAttempt, type ResponseAttempt } from './local-drafts'
 import { useHostedConversation, type MobileConnection } from './use-hosted-conversation'
+import { MobileMessageTools } from './MobileMessageTools'
 import './conversation.css'
 
 export type { MobileConnection } from './use-hosted-conversation'
@@ -22,11 +23,14 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   connection: MobileConnection
   platform: ClientUiPlatform
   onAttach?: () => void
+  onShowTerminal?: () => void
+  visible?: boolean
+  displayName?: string
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach,
+export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
-  const reading = useHostedConversation(client, agentSessionId, connection.state === 'connected')
+  const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected')
   const draftKey = JSON.stringify(['draft', agentSessionId])
   const [local] = useState(createLocalDrafts)
   const drafts = useRef(local.drafts)
@@ -139,11 +143,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     lookupAgent: id => {
       try {
         const author = client?.agentSessions().find(value => value.agentSessionId === id)
-        return author ? { label: author.agentSessionId, providerId: author.providerId } : undefined
+        return author ? { label: author.agentSessionId === agentSessionId && displayName ? displayName : `${author.providerId} Agent`, providerId: author.providerId } : undefined
       } catch { return undefined }
     },
-    ...(session ? { currentSession: { id: session.agentSessionId, providerId: session.providerId } } : {})
-  }), [client, session])
+    ...(session ? { currentSession: { id: session.agentSessionId, label: displayName ?? `${session.providerId} Agent`, providerId: session.providerId } } : {})
+  }), [client, session, agentSessionId, displayName])
   const captured = useMemo(() => agentSessionId && reading.timeline
     ? projectSessionUserMessages({ agentSessionId, timeline: reading.timeline }) : [], [agentSessionId, reading.timeline])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
@@ -157,13 +161,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const blocked = attempt?.phase === 'sending' || attempt?.phase === 'unknown'
   return <ClientUiProvider platform={platform}>
     <section className="mobile-conversation" aria-label="会话" data-agent-session-id={agentSessionId ?? ''}>
-      <header className="mobile-conversation__heading">
-        <div><strong>{session?.providerId ?? 'Agent'}</strong><span>{agentSessionId ?? '尚未选择会话'}</span></div>
-        <button type="button" disabled={!client || connection.state !== 'connected' || reading.reading}
-          onClick={() => void reading.refresh()}>刷新</button>
-      </header>
-      <p className="mobile-conversation__connection" role="status">{connection.message}
-        {!available ? ' 当前不能发送；草稿与引用保留。' : ''}</p>
+      {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前不能发送；草稿与阅读保留。' : ''}</p> : null}
       {reading.notice ? <p className="mobile-conversation__notice" role="status">{reading.notice}</p> : null}
       {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
         {local.canSave ? <button type="button" onClick={() => { local.save(); redraw(value => value + 1) }}>重试保存</button> : null}
@@ -175,17 +173,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       </aside> : null}
       <div className="mobile-conversation__reading">
         {reading.page && agentSessionId ? <>
-          <nav className="mobile-conversation__window" aria-label="历史窗口">
-            <button type="button" disabled={!available || reading.reading || !reading.page.nextCursor}
-              onClick={() => void reading.older()}>更早记录</button>
-            {reading.olderWindow ? <button type="button" disabled={!available || reading.reading}
-              onClick={() => void reading.refresh()}>最新记录{reading.newerAvailable ? ' · 有更新' : ''}</button> : null}
-          </nav>
-          <ConversationNativeThread page={reading.page} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
-            onContinue={appendQuote} {...readingProps} />
-        </> : !reading.reading ? <p className="mobile-conversation__empty">尚无可读取的原生历史。选择原会话并连接 Host 后可刷新。</p> : null}
-        {captured.length > 0 ? <section aria-label="Core 记录的输入" className="mobile-conversation__captured">
-          <p className="mobile-conversation__source">Core 记录的输入 · 与原生历史分别保留来源</p>
+          <ConversationView page={reading.page} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+            {...readingProps} />
+        </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
+        {captured.length > 0 ? <section aria-label="已发送消息" className="mobile-conversation__captured">
           {captured.map(message => <ConversationMessage key={message.id} messageId={message.id}
             conversationSessionId={agentSessionId!} content={message.contentParts} inputSource={message.source}
             speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
@@ -205,7 +196,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {responseAttempt ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
       <div className="mobile-conversation__composer">
-        <AgentComposer value={draft} disabled={false} placeholder="写给原会话；未连接时保留草稿"
+        <AgentComposer identity={<MobileMessageTools session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
+          refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder="写给原会话；未连接时保留草稿"
           onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit() } : {})}
           {...(onAttach ? { onAttach } : {})} {...(readPastedImage ? { readPastedImage } : {})}
           feedback={attempt ? <span role="status">{attempt.message}</span> : undefined} />

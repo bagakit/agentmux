@@ -18,7 +18,7 @@ try {
     alias: { '@agentmux/core/agent-message-render': path.join(root, 'packages/core/src/agent-message-render.ts'), '@agentmux/core/session-user-messages': path.join(root, 'packages/core/src/session-user-messages.ts') },
     define: { 'process.env.NODE_ENV': '"production"' } })
   for (const file of Object.keys(built.metafile.inputs)) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
-  for (const file of ['packages/client-ui/src/lib/conversation-files.ts', 'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/ConversationNativeThread.tsx', 'packages/client-ui/src/styles/conversation-message.css']) assert.ok(receipt.source[file], 'Nonempty actual product input')
+  for (const file of ['packages/client-ui/src/lib/conversation-files.ts', 'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/components/ConversationView.tsx', 'packages/client-ui/src/styles/conversation-message.css']) assert.ok(receipt.source[file], 'Nonempty actual product input')
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="outputs-entry.css"></head><body><div id="root"></div><script type="module" src="outputs-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []

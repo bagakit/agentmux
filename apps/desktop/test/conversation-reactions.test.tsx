@@ -8,7 +8,7 @@ import { promptReactionDefinitions, promptReactionMessage, PROMPT_REACTION_START
 import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationReactionActions } from '@agentmux/client-ui/components/ConversationReactionActions'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { ShortcutSettingsPane } from '../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { executeSettingsResourcesControl } from '../src/main/settings-resources-control'
 import { reactionPublicClientFixture } from './helpers/reaction-public-client-fixture'
@@ -224,7 +224,7 @@ describe('Saved Prompt → explicit lookup → exact reply card → original use
    {id:'a',kind:'assistant-message',contentParts:[{kind:'text',text:'Final answer'}]}
   ],nextCursor:null}
   const sources:ConversationReplySource[]=[]
-  await dom.render(<ConversationNativeThread page={page} sessionId="agent-1" renderMessageActions={source=>{sources.push(source);return <span data-real-reply-actions />}} />)
+  await dom.render(<ConversationView page={page} sessionId="agent-1" renderMessageActions={source=>{sources.push(source);return <span data-real-reply-actions />}} />)
   expect(sources).toEqual([{...reply,recordId:'a'}]);expect(dom.container.querySelectorAll('[data-real-reply-actions]')).toHaveLength(1)
  })
 })

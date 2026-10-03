@@ -14,7 +14,7 @@ pnpm --filter @agentmux/client-ui build
 pnpm --filter @agentmux/mobile build
 ```
 
-网页产物在 `apps/mobile/dist`。Mac Host 通过显式配置的 `mobileBuildDirectory` 提供这份产物，不能把 Vite 开发服务当作已授权的私网入口。Host 的启动与配置来源见 [Host 入口](../host/src/index.ts)；证书准备入口见 [prepare-private-access.ts](../host/src/prepare-private-access.ts)。
+网页产物在 `apps/mobile/dist`。Mac Host 从应用资源提供这份网页和局域网 Relay，不能把 Vite 开发服务当作产品接入。Host 的启动来源见 [Host 入口](../host/src/index.ts)。
 
 原生工程需要先同步这份网页产物：
 
@@ -23,14 +23,14 @@ pnpm --filter @agentmux/mobile native:sync
 open apps/mobile/ios/App/App.xcodeproj
 ```
 
-用完整 Xcode 选择签名团队和实际 iPhone 后构建、安装。Android 工程位于 `apps/mobile/android`，用 Android Studio 构建。原生工程采用系统 TLS 校验与设备安全存储；网页构建成功不证明原生安装或手机系统信任已完成。
+用完整 Xcode 选择签名团队和实际 iPhone 后构建、安装。Android 工程位于 `apps/mobile/android`，用 Android Studio 构建。原生包装需要独立的设备验证；网页构建成功不证明原生安装与设备交互已完成。
 
 ## 连接
 
-1. 在 Mac 的 Hosts 设置查看实际私网 HTTPS 地址、证书指纹和配置状态。未配置时，按页面提供的真实证书准备入口创建显式 IP / TLS 配置，再由 Host 加载；页面复制的模板需要先填写自己的 IP 和目录。
-2. 在手机系统中确认该 Mac 证书的信任，打开手机 App，填写同一 HTTPS 地址并核对 Host 信息。
-3. 从 Mac 创建设备邀请；手机提交加入请求后，在 Mac 核对设备与确认码，并通过本次系统确认批准。邀请和凭证不会进入工作面导出文件。
-4. 选择已有会话。终端默认为观看；进入控制才发送输入，尺寸调整需要明确提交。发送回执不确定时先核对实际结果，不自动重发。
+1. 手机和 Mac 连接同一 Wi-Fi。在 Mac 的 Phone & Devices 设置或官方 Phone connection Toolkit 生成并复制完整链接。
+2. 手机浏览器打开链接，沿 Paseo E2EE offer 接入；无需填写地址、证书、配对码或返回 Mac 批准。
+3. 连通后进入 Mote / Focus / Space。菜单里的手机设置可选择本设备默认主页；连接管理也在菜单中。
+4. 按原空间绑定选择已有 Agent。对话和终端为对象的下钻工作面；终端默认观看，控制和尺寸改变均需明确操作。回执不确定时先核对，不自动重发。
 
 工作面导出保存会话引用、布局、阅读位置和本机草稿；重新打开时先保留工作面，再核实 Host 与原 Session / Run。文件导入、手机前后台切换、键盘输入和系统信任需要在实际设备上验收。
 

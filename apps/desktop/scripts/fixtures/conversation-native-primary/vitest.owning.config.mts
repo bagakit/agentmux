@@ -11,7 +11,7 @@ export default defineConfig({
  const file=id.split('?')[0]!;if(!file.startsWith(root+'/apps/desktop/src/')&&!(file.startsWith(root+'/packages/core/src/')||file.startsWith(root+'/packages/client-ui/src/')))return
  const before=code, mutation=process.env.AGENTMUX_NATIVE_PRIMARY_MUTATION
  if (file===resolve(root,'apps/desktop/src/renderer/src/components/ActivityView.tsx') && mutation==='reading-tail-front') {
-   const start=code.indexOf('      {nativeHistoryPage ? <ConversationNativeThread'),end=code.indexOf('      {showWorkingIndicator',start)
+   const start=code.indexOf('      {nativeHistoryPage ? <ConversationView'),end=code.indexOf('      {showWorkingIndicator',start)
    if(start<0||end<0)throw Error('Missing exact NativeThread tail')
    const block=code.slice(start,end);code=code.slice(0,start)+code.slice(end)
    const insert=code.indexOf('      {placed.length > 0 ?');if(insert<0)throw Error('Missing source boundary');code=code.slice(0,insert)+block+code.slice(insert)

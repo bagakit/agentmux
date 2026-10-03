@@ -11,8 +11,8 @@ export default defineConfig({
  const file=id.split('?')[0]!;if(!file.startsWith(root+'/apps/desktop/src/')&&!(file.startsWith(root+'/packages/core/src/')||file.startsWith(root+'/packages/client-ui/src/')))return
  const before=code, mutation=process.env.AGENTMUX_HISTORY_MUTATION
  const replacements:Record<string,[string,string,string]>={
-  'drop-shared-history':['apps/desktop/src/renderer/src/components/SessionHistoryView.tsx','{page ? <ConversationNativeThread','{false ? <ConversationNativeThread'],
-  'lose-raw-identity':['packages/client-ui/src/components/ConversationNativeThread.tsx','messageIdForRecord?.(item) ?? user?.id ?? recordId','user?.id ?? recordId'],
+  'drop-shared-history':['apps/desktop/src/renderer/src/components/SessionHistoryView.tsx','{page ? <ConversationView','{false ? <ConversationView'],
+  'lose-raw-identity':['packages/client-ui/src/components/ConversationView.tsx','messageIdForRecord?.(item) ?? user?.id ?? recordId','user?.id ?? recordId'],
   'drop-anchor':['apps/desktop/src/renderer/src/components/SessionHistoryView.tsx','viewport.scrollTop += rect.top - bounds.top - anchor.offset','viewport.scrollTop += 0'],
   'hidden-read':['apps/desktop/src/renderer/src/components/SessionHistoryView.tsx','if (!visibleRef.current) return','if (false) return'],
   'drop-range-fence':['apps/desktop/src/renderer/src/components/SessionHistoryView.tsx','if (anchorInNewest || selectionInNewest)','if (anchorInNewest)'],

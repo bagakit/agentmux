@@ -11,14 +11,14 @@ export default defineConfig({
  const file=id.split('?')[0]!;if(!file.startsWith(root+'/apps/desktop/src/')&&!(file.startsWith(root+'/packages/core/src/')||file.startsWith(root+'/packages/client-ui/src/')))return
  const before=code, mutation=process.env.AGENTMUX_NATIVE_ORDER_MUTATION
  const replacements:Record<string,[string,string,string]>={
-  'drop-native-thread':['apps/desktop/src/renderer/src/components/ActivityView.tsx','{nativeHistoryPage ? <ConversationNativeThread','{false ? <ConversationNativeThread'],
-  'timestamp-native-order':['packages/client-ui/src/components/ConversationNativeThread.tsx','const records = page.items.filter((item) => {','const records = [...page.items].sort((a,b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)).filter((item) => {'],
-  'drop-native-user':['packages/client-ui/src/components/ConversationNativeThread.tsx','if (seen.has(item.id)) return false',"if (item.kind === 'user-message' || seen.has(item.id)) return false"],
-  'reverse-native-parts':['packages/client-ui/src/components/ConversationNativeThread.tsx','content={item.contentParts}','content={[...item.contentParts].reverse()}'],
+  'drop-native-thread':['apps/desktop/src/renderer/src/components/ActivityView.tsx','{nativeHistoryPage ? <ConversationView','{false ? <ConversationView'],
+  'timestamp-native-order':['packages/client-ui/src/components/ConversationView.tsx','const records = page.items.filter((item) => {','const records = [...page.items].sort((a,b) => (a.startedAt ?? 0) - (b.startedAt ?? 0)).filter((item) => {'],
+  'drop-native-user':['packages/client-ui/src/components/ConversationView.tsx','if (seen.has(item.id)) return false',"if (item.kind === 'user-message' || seen.has(item.id)) return false"],
+  'reverse-native-parts':['packages/client-ui/src/components/ConversationView.tsx','content={item.contentParts}','content={[...item.contentParts].reverse()}'],
   'empty-observation-axis':['apps/desktop/src/renderer/src/components/ActivityView.tsx','unifiedItems.length > 0 ? <Ruler','true ? <Ruler'],
-  'drop-native-continue':['packages/client-ui/src/components/ConversationNativeThread.tsx','user && onContinue ?','false ?'],
+  'drop-native-continue':['packages/client-ui/src/components/ConversationView.tsx','user && onContinue ?','false ?'],
   'leak-future-prefix':['packages/client-ui/src/lib/native-continuation.ts','page.items.slice(0, index + 1)','page.items.slice(0)'],
-  'repeat-native-id':['packages/client-ui/src/components/ConversationNativeThread.tsx','if (seen.has(item.id)) return false','if (false) return false']
+  'repeat-native-id':['packages/client-ui/src/components/ConversationView.tsx','if (seen.has(item.id)) return false','if (false) return false']
  }
  const r=mutation?replacements[mutation]:undefined
  if(r&&file===resolve(root,r[0])){if(code.split(r[1]).length!==2)throw Error('Missing unique mutation '+mutation);code=code.replace(r[1],r[2])}

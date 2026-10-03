@@ -448,3 +448,8 @@ Provider 保留原生问题的稳定记录身份、题目、选项与异步投�
 ## 消息渠道与发送设备
 
 渠道与设备是两个独立来源事实：Terminal、Message Tool、问题卡回复、CLI／API及reaction沿各自实际输入owner记录；发送设备取真实接入身份，与执行Host分别标注。本机输入不能借目标remote Host冒成remote设备；设备身份缺失不按Host、正文、显示名或IP猜。Provider有明确原生来源才投影渠道，应用提交沿原accepted输入事实保存渠道和设备，不建第二账本、不以正文／时间与原生记录去重。已有记录缺事实明确“未记录”，用户默认外观不升级recorded author。共同消息详情与紧凑来源标记复用同一事实。
+
+
+## 手机对话与 Message Tools
+
+手机沿共享对话呈现和 AgentComposer 继续原 Session，Message Tools 承接原 Session 状态与通信记录，Terminal 为明确选择的另一视图。手机正常工作面不展示独立历史记录页、原生历史标题、历史窗口切换或 Session ID 调试栏；原历史仍作为权威数据源，与 Core 已确认输入的来源分别保留，不因改呈现丢弃对话。隐藏内容释放对应观察需求，保留原正文、输入草稿与未知投递事实；网络恢复不自动重放写入。一级手机导航与默认主页只见[《手机版 Relay 连接》](public-control.md#手机版-relay-连接)。

@@ -8,7 +8,7 @@ import { AgentMuxClient, AgentMuxFileAgentSessionStore, agentPromptCondition, ty
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { FocusMessagePreview } from '../src/renderer/src/components/FocusMessagePreview'
@@ -75,7 +75,7 @@ describe('One recorded input origin across common reading surfaces',()=>{
  it('does not manufacture Terminal or device facts from a production native user record',async()=>{
   const message=projectSessionUserMessages({agentSessionId:'native-agent',historyPage:native.page})[0]!
   expect(message.author).toEqual({kind:'unknown'});expect(message.source.kind).toBe('native')
-  await dom.render(<ConversationNativeThread page={native.page} sessionId="native-agent" executionHostId={receivingHost}/>)
+  await dom.render(<ConversationView page={native.page} sessionId="native-agent" executionHostId={receivingHost}/>)
   expect(dom.container.querySelector('.log-turn__input-source')!.textContent).toBe('原生记录 · 来源未记录')
   await openInfo();expect(fact(dom.container,'输入渠道')).toBe('渠道未记录');expect(fact(dom.container,'发送设备')).toBe('未记录');expect(fact(dom.container,'来源 Host')).toBe('未记录');expect(fact(dom.container,'当前执行 Host')).toBe(receivingHost)
  })

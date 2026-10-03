@@ -6,6 +6,7 @@ import { errorMessage } from './delivery'
 export type MobileConnection = {
   state: 'unavailable' | 'connecting' | 'connected' | 'disconnected'
   message: string
+  issue?: string
 }
 
 type Projection = {

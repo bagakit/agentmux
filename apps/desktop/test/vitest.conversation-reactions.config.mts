@@ -15,7 +15,7 @@ const changes = {
  'skip-permission-gate': ['apps/desktop/src/renderer/src/lib/agent-steer-queue-drain.ts', '&& !session.pendingInteraction',''],
  'drop-marker': ['packages/core/dist/prompt-reaction.js','`<amux:reaction ${definition.keyword} />`',"'User feedback'"],
  'drop-reference': ['packages/core/dist/prompt-reaction.js','JSON.stringify(source)',"JSON.stringify({kind:source.kind,agentSessionId:source.agentSessionId,recordId:source.recordId})"],
- 'progress-actions': ['packages/client-ui/src/components/ConversationNativeThread.tsx',"item.kind === 'assistant-message' && item.messagePhase !== 'progress'", "item.kind === 'assistant-message'"],
+ 'progress-actions': ['packages/client-ui/src/components/ConversationView.tsx',"item.kind === 'assistant-message' && item.messagePhase !== 'progress'", "item.kind === 'assistant-message'"],
  'forget-reply-identity': ['apps/desktop/src/renderer/src/store.ts','reaction: structuredClone(options.reaction)','reaction: { code: options.reaction.code, replySource: {kind: \'captured\', agentSessionId: sessionId, recordId: \'wrong\'} }'],
  'auto-repeat': ['apps/desktop/src/renderer/src/store.ts','if (!explicitAttempt && entry.promptCondition !== null)', 'if (false)']
 } as const
