@@ -29,7 +29,6 @@ import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
 import { useComposerFeedback } from './ComposerFeedback'
-import { errorIdentity } from '@agentmux/client-ui/error-presentation'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
 import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
@@ -285,7 +284,7 @@ export function AgentSessionComposer({
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
-          ...(entry.error ? { error: errorIdentity(entry.error) } : {}),
+          ...(entry.error ? { error: entry.error } : {}),
         }))}
         {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
           await feedback.run(async () => { await archiveAgentSteer(sessionId, operationId, expectedText, archived) })
