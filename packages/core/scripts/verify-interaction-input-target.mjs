@@ -56,7 +56,8 @@ async function qualifyNativeBinding(proof, productSource) {
   assert.equal(review.schema, 'agentmux.interaction-input-native-review.v1')
   assert.equal(review.status, 'approved', 'Native review must be approved')
   assert.deepEqual(review.productSource, productSource)
-  const bindings = proof.cases.map(({ protocol, path, sha256, build }) => ({ protocol, path, sha256, build }))
+  const bindings = proof.cases.map(({ protocol, path, sha256, build, sourceJoin }) =>
+    ({ protocol, path, sha256, build, ...(sourceJoin ? { sourceJoin } : {}) }))
   assert.deepEqual(review.cases, bindings, 'Review must bind these exact cases and actual build documents')
   const seen = new Set()
   for (const entry of bindings) {
@@ -66,7 +67,28 @@ async function qualifyNativeBinding(proof, productSource) {
     assert(typeof actual.qualifiedScope === 'string' && actual.qualifiedScope.length > 0, 'Missing actual Native scope')
     assert.equal(actual.userRunTouched, false)
     const build = buildDocument.schema === 'agentmux.private-question-native.v1' ? buildDocument.build : buildDocument
-    assert.deepEqual(Object.fromEntries(Object.entries(build.sources).filter(([path]) => path.startsWith('packages/core/src/'))), productSource, 'Actual compiled Native source differs')
+    const buildSource = Object.fromEntries(Object.entries(build.sources).filter(([path]) => path.startsWith('packages/core/src/')))
+    if (entry.sourceJoin) {
+      const sourceJoin = await document(entry.sourceJoin)
+      assert.equal(sourceJoin.schema, 'agentmux.interaction-input-native-source-join.v1', 'Wrong Native Source join schema')
+      assert.equal(sourceJoin.status, 'approved', 'Native Source join must be approved')
+      const { sourceJoin: _join, ...originalCase } = entry
+      assert.deepEqual(sourceJoin.case, originalCase, 'Native Source join binds a different case or build')
+      assert.deepEqual(sourceJoin.oldSource, buildSource, 'Native Source join old Source differs from actual build')
+      assert.deepEqual(sourceJoin.newSource, productSource, 'Native Source join new Source differs from current product')
+      const oldReview = await document(sourceJoin.oldNativeReview)
+      assert.equal(oldReview.schema, 'agentmux.interaction-input-native-review.v1', 'Wrong original Native review schema')
+      assert.equal(oldReview.status, 'approved', 'Original Native review must be approved')
+      assert.deepEqual(oldReview.productSource, buildSource, 'Original Native review Source differs from actual build')
+      const matching = oldReview.cases?.filter(value => value.protocol === entry.protocol && value.path === entry.path && value.sha256 === entry.sha256)
+      assert.equal(matching?.length, 1, 'Original Native review must bind this exact case')
+      assert.deepEqual(matching[0], originalCase, 'Original Native review must bind this exact case and build')
+      const newManifest = await document(sourceJoin.newSourceManifest)
+      assert(['agentmux.typed-input-source.v1', 'agentmux.typed-input-full-main-actual-source.v1', 'agentmux.prompt-preparation-stage-actual-main-source.v1'].includes(newManifest.schema),
+        'Wrong current Native Source manifest schema')
+      assert.deepEqual(Object.fromEntries(Object.entries(newManifest.sourceInputs).filter(([path]) => path.startsWith('packages/core/src/'))),
+        productSource, 'Current Native Source manifest differs from current product')
+    } else assert.deepEqual(buildSource, productSource, 'Actual compiled Native source differs')
     assert(!seen.has(actual.schema), 'Two protocols require distinct actual Native cases'); seen.add(actual.schema)
     if (actual.schema === 'agentmux.typed-response-first-hook-native.v1') {
       assert.equal(buildDocument.schema, 'agentmux.pending-edit-restart-build.v1')
