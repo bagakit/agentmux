@@ -853,6 +853,7 @@ export function SessionPane({
   const hasAgentComposer = projectionPolicy.allowsRecovery && surfaceKind === 'agent' && session.kind === 'agent'
   const activityProps: ComponentProps<typeof ActivityView> = {
     sessionId: session.id, items: timeline, userMessages, nativeHistoryPage,
+    ...(session.kind === 'agent' ? { executionHostId: session.control.hostId } : {}),
     userMessageRead: { loading: userMessagesLoading, error: userMessagesError,
       observationError: userMessagesObservationError, windowFrozen: userMessagesWindowFrozen,
       windowIncomplete: userMessagesWindowIncomplete,
