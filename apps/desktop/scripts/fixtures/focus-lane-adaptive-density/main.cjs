@@ -22,7 +22,7 @@ app.whenReady().then(async () => { try {
   await until('original Focus projection', () => read('document.querySelector(".focused-tab-workspace")?.dataset.focusTabId==="original"'))
   await click('[aria-label="Close Focus workspace"]'); await until('projection closed only', () => read('!document.querySelector(".global-session-workspace")'))
   await read('window.laneProof.remember()'); result.before = await read('window.laneProof.facts()')
-  const laneSelector = '.focus-project-board > .focus-project-lanes [data-project-id="alpha"]'
+  const laneSelector = '.focus-project-board__live > .focus-project-lanes [data-project-id="alpha"]'
   const geometry = () => read(`(()=>{const lane=document.querySelector(${JSON.stringify(laneSelector)}),groups=lane.querySelector('.focus-project-lanes__groups');const measure=e=>{const r=e.getBoundingClientRect();return{left:r.left,right:r.right,top:r.top,bottom:r.bottom,width:r.width,height:r.height}};return{viewport:innerWidth,laneId:lane.dataset.laneId,groups:measure(groups),overflow:groups.scrollWidth>groups.clientWidth+1,states:[...groups.children].map(section=>{const header=section.querySelector('.focus-context-group__header'),bucket=header.querySelector('.focus-context-group__bucket'),icon=header.querySelector('svg'),count=section.dataset.bucket==='disconnected'?header.querySelector('button span'):bucket?.querySelector('span'),entry=header.querySelector('button');return{state:section.dataset.bucket,empty:section.dataset.empty==='true',rect:measure(section),header:measure(header),label:header.getAttribute('aria-label'),icon:icon&&measure(icon),count:count&&{text:count.textContent,rect:measure(count)},entry:entry&&{rect:measure(entry),disabled:entry.disabled,label:entry.getAttribute('aria-label')},cards:[...section.querySelectorAll('.focus-context')].map(card=>({id:card.dataset.sessionId,rect:measure(card)}))}})}})()`)
   const qualify = (g, state) => {
     assert.deepEqual(g.states.map(s => s.state), ['attention', 'working', 'results', 'idle', 'disconnected'])
@@ -33,16 +33,17 @@ app.whenReady().then(async () => { try {
       assert.ok(item.icon && item.label, 'State icon and accessible label nonempty')
       assert.ok(Math.abs(item.rect.top - g.states[0].rect.top) <= 1, 'Single nonempty state must not turn five states into vertical list')
       if (item.state === 'disconnected') { assert.ok(item.rect.width <= 32.5); assert.equal(item.cards.length, 0) }
-      else if (item.empty) { assert.ok(item.rect.width <= 24.5); assert.equal(item.count.text, '0'); assert.ok(item.count.rect.top >= item.icon.bottom - .5, 'Zero counter below state icon') }
+      else if (item.empty) { assert.ok(item.rect.width <= 24.5); assert.equal(item.count, null, 'Empty states retain only the icon'); assert.ok(item.header.height <= 24.5, 'Empty state does not add a number row') }
+      else { assert.ok(item.count, 'Nonempty state has a count badge'); assert.ok(item.count.rect.top < item.icon.top, 'Positive count sits above the text baseline'); assert.ok(item.header.height <= 24.5, 'Count stays within the existing header height') }
       for (const card of item.cards) { assert.ok(card.rect.width >= 179 && card.rect.width <= 320.5, 'Readable bounded card width') }
     }
   }
   const frame = async (file, label, state) => { await move('[aria-label="Search contexts"]'); await pause(240); if (await read('!!document.querySelector(".focus-filter-menu")')) await key('Escape'); await until('unrelated menus actually closed', () => read('!document.querySelector(".focus-navigation-preview,.focus-filter-menu")')); await settle(); const g = await geometry(); result.currentGeometry = g; qualify(g, state); result.scenes.push({ label, actual: g }); await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label, viewport: g.viewport }) }
-  await read('window.laneProof.mode("results")'); await until('one actual Results', () => read('document.querySelectorAll(".focus-project-board > .focus-project-lanes [data-bucket=results] .focus-context").length===1'))
+  await read('window.laneProof.mode("results")'); await until('one actual Results', () => read('document.querySelectorAll(".focus-project-board__live > .focus-project-lanes [data-bucket=results] .focus-context").length===1'))
   const widths = process.env.AGENTMUX_FOCUS_LANE_ADAPTIVE_CSS_MUTATION ? [640] : [320, 640, 799, 801, 1440]
   for (const width of widths) { win.setContentSize(width, 800); await settle(); await frame('results-' + width + '.png', 'single-results-four-empty-' + width, 'results') }
   win.setContentSize(640, 800); await read('window.laneProof.mode("offline")')
-  await until('Idle and five confirmed offline', () => read('document.querySelector(".focus-project-board > .focus-project-lanes .focus-disconnected-entry")?.textContent==="5"'))
+  await until('Idle and five confirmed offline', () => read('document.querySelector(".focus-project-board__live > .focus-project-lanes .focus-disconnected-entry")?.textContent==="5"'))
   await frame('idle-offline-640.png', 'idle-five-offline-640', 'idle')
   win.setContentSize(320, 800); await settle(); await frame('idle-offline-320.png', 'idle-five-offline-320', 'idle')
   const entry = laneSelector + ' .focus-disconnected-entry'
@@ -53,11 +54,11 @@ app.whenReady().then(async () => { try {
   assert.deepEqual(result.hover.facts.reads, hoverBefore.reads); assert.deepEqual(result.hover.facts.calls, hoverBefore.calls); assert.equal(result.hover.facts.sameFocus, true)
   await fs.writeFile(path.join(evidence, 'offline-summary-320.png'), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file: 'offline-summary-320.png', label: 'bounded-five-offline-hover', viewport: 320 })
   await click(entry); await until('one offline retained view', () => read('document.querySelectorAll(".focus-disconnected-projects .focus-context").length===5'))
-  result.reveal = await read('(()=>{const view=document.querySelector(".focus-disconnected-projects");return{ids:[...view.querySelectorAll(".focus-context")].map(e=>e.dataset.sessionId),active:document.activeElement?.dataset.sessionId,localRows:document.querySelectorAll(".focus-project-board > .focus-project-lanes [data-bucket=disconnected] .focus-context").length,facts:window.laneProof.facts()}})()')
+  result.reveal = await read('(()=>{const view=document.querySelector(".focus-disconnected-projects");return{ids:[...view.querySelectorAll(".focus-context")].map(e=>e.dataset.sessionId),active:document.activeElement?.dataset.sessionId,localRows:document.querySelectorAll(".focus-project-board__live > .focus-project-lanes [data-bucket=disconnected] .focus-context").length,facts:window.laneProof.facts()}})()')
   assert.deepEqual(result.reveal.ids, Array.from({ length: 5 }, (_, i) => 'archived-' + i)); assert.equal(result.reveal.localRows, 0); assert.equal(result.reveal.facts.sameFocus, true)
   await key('Escape'); await until('Return closes exact view', () => read('document.querySelectorAll(".focus-disconnected-projects .focus-context").length===0')); assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry) + ')'), true)
   await read('window.laneProof.mode("multiple")')
-  await until('three Working cards and three other live states', () => read('document.querySelectorAll(".focus-project-board > .focus-project-lanes [data-bucket=working] .focus-context").length===3'))
+  await until('three Working cards and three other live states', () => read('document.querySelectorAll(".focus-project-board__live > .focus-project-lanes [data-bucket=working] .focus-context").length===3'))
   result.multiple = []
   for (const width of [640, 1440]) {
     win.setContentSize(width, 800); await move('[aria-label="Search contexts"]'); await settle()
@@ -70,13 +71,13 @@ app.whenReady().then(async () => { try {
     if (width === 1440) assert.ok(new Set(working.cards.map(card => Math.round(card.rect.left))).size > 1, 'Wide lanes arrange more Working cards across')
     const file = 'multiple-' + width + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: 'populated-state-width-' + width, viewport: width })
   }
-  const scratchSelector = '.focus-project-board > .focus-project-lanes [data-project-id=' + JSON.stringify(await read('window.laneProof.scratchProjectId')) + ']'
+  const scratchSelector = '.focus-project-board__live > .focus-project-lanes [data-project-id=' + JSON.stringify(await read('window.laneProof.scratchProjectId')) + ']'
   win.setContentSize(640, 800); await read('window.laneProof.mode("topics")'); await until('two exact Topic lanes', () => read(`document.querySelectorAll(${JSON.stringify(scratchSelector)}).length===2`))
   result.topics = await read(`(()=>{const lanes=[...document.querySelectorAll(${JSON.stringify(scratchSelector)})];return lanes.map(e=>({laneId:e.dataset.laneId,name:e.querySelector('.focus-project-lanes__heading').textContent,entry:e.querySelector('.focus-disconnected-entry').getAttribute('aria-label')}))})()`)
   assert.equal(new Set(result.topics.map(lane => lane.laneId)).size, 2)
   await move('[aria-label="Search contexts"]'); await settle(); await fs.writeFile(path.join(evidence, 'two-topics-640.png'), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file: 'two-topics-640.png', label: 'two-precise-topics-one-project', viewport: 640 })
   const desired = result.topics.find(lane => lane.name.includes('Another precise Topic')); assert.ok(desired)
-  const exact = '.focus-project-board > .focus-project-lanes [data-lane-id=' + JSON.stringify(desired.laneId) + '] .focus-disconnected-entry'
+  const exact = '.focus-project-board__live > .focus-project-lanes [data-lane-id=' + JSON.stringify(desired.laneId) + '] .focus-disconnected-entry'
   await click(exact); await until('precise Topic reveal', () => read('document.activeElement?.dataset.sessionId==="topic-off-1"'))
   result.topicReveal = await read('({active:document.activeElement?.dataset.sessionId,lane:document.activeElement?.closest("[data-lane-id]")?.dataset.laneId,ids:[...document.querySelectorAll(".focus-disconnected-projects .focus-context")].map(e=>e.dataset.sessionId),facts:window.laneProof.facts()})')
   assert.equal(result.topicReveal.lane, desired.laneId); assert.deepEqual(result.topicReveal.ids, ['topic-off-0', 'topic-off-1']); assert.equal(result.topicReveal.facts.sameFocus, true)

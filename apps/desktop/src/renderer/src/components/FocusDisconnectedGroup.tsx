@@ -30,7 +30,7 @@ export function FocusDisconnectedGroup({ contexts, laneId, onReveal }: {
       title={`Disconnected · ${contexts.length}`} onMouseEnter={() => { if (contexts.length) setOpen(true) }} onMouseLeave={() => setOpen(false)} onFocus={() => { if (contexts.length) setOpen(true) }} onBlur={() => setOpen(false)}
       onKeyDown={event => { if (event.key === 'Escape' && open) { event.preventDefault(); event.stopPropagation(); setOpen(false) } }}
       onClick={event => { setOpen(false); onReveal(laneId, event.currentTarget) }}>
-      <Unplug size={12} aria-hidden="true" /><span>{contexts.length}</span>
+      <Unplug size={12} aria-hidden="true" />{contexts.length > 0 ? <span className="focus-context-group__count" aria-hidden="true">{contexts.length > 99 ? '99+' : contexts.length}</span> : null}
     </button>
     {open ? <WindowOverlayPortal layer="tooltip"><div ref={surface} id={summaryId} className="focus-disconnected-summary" role="tooltip">
       <strong>Disconnected · {contexts.length}</strong>

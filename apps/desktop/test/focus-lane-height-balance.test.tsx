@@ -66,7 +66,7 @@ beforeEach(async () => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); stylesheet.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const mount = () => act(async () => root.render(createElement(GlobalFocusSurface)))
-const groups = () => container.querySelector<HTMLElement>('.focus-project-board > .focus-project-lanes .focus-project-lanes__groups')!
+const groups = () => container.querySelector<HTMLElement>('.focus-project-board__live > .focus-project-lanes .focus-project-lanes__groups')!
 const section = (bucket: string) => groups().querySelector<HTMLElement>(`[data-bucket="${bucket}"]`)!
 const columns = () => ['attention', 'working', 'results', 'idle'].map(bucket => Number(section(bucket).style.getPropertyValue('--focus-card-columns')))
 const card = (id: string) => container.querySelector<HTMLButtonElement>(`.focus-context[data-session-id="${id}"]`)!
@@ -150,7 +150,7 @@ it('actual App Settings pauses the retained Focus lane width observer without re
   await act(async () => useAppStore.setState({ loading: false, initialize: async () => () => {}, activeWorkspaceId: 'repo', layouts: {} }))
   await seed(2, 1, 1)
   await act(async () => root.render(createElement(App)))
-  const list = container.querySelector<HTMLElement>('.focus-project-board > .focus-project-lanes .focus-project-lanes__rows')!
+  const list = container.querySelector<HTMLElement>('.focus-project-board__live > .focus-project-lanes .focus-project-lanes__rows')!
   const originalCard = card('work-0'), originalSessions = useAppStore.getState().sessions, originalDrafts = useAppStore.getState().agentComposerDrafts
   expect(list).not.toBeNull(); expect(originalCard).not.toBeNull()
   expect(groups().querySelectorAll('.focus-context')).toHaveLength(4)
