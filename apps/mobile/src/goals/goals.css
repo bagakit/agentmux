@@ -23,3 +23,6 @@
 .mobile-goals [role=status] { white-space: pre-wrap; border-left: 2px solid var(--mobile-accent, #8de3ae); padding-left: 10px; line-height: 1.5; }
 
 .mobile-goals pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-mono, monospace); font-size: 13px; }
+.mobile-goal-discussion-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-block: 12px; }
+.mobile-goal-create { margin-block: 12px; }
+.mobile-goal-create > button:first-child { border-style: dashed; width: 100%; text-align: left; }

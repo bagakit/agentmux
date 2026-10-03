@@ -13,12 +13,31 @@ export type MobileGoalOperation = GoalWorkSelection & { operationId: string } & 
   | { kind: 'action'; loopId: string; action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number }
 )
 export type GoalWorkface = { selection: GoalWorkSelection | null; pending: MobileGoalOperation[] }
+export type GoalIntentScope = Pick<GoalWorkSelection, 'runtimeId' | 'deviceHostId'>
+export type GoalCreationInput = { goalId: string; operationId: string; title: string; description: string; status: 'backlog'; risk: 'low'; confirmation: 'user'; projectId?: string }
+export type GoalIntent = GoalIntentScope & { goalId: string; operationId: string; phase: 'sending' | 'unknown' | 'saved' } & (
+  | { kind: 'create'; input: GoalCreationInput }
+  | { kind: 'confirm'; expectedRevision: number }
+  | { kind: 'accept'; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean }
+)
+export function sameGoalIntentScope(a: GoalIntentScope, b: GoalIntentScope): boolean {
+  return a.runtimeId === b.runtimeId && a.deviceHostId === b.deviceHostId
+}
+function sameGoalIntent(a: GoalIntent, b: GoalIntent): boolean {
+  if (!sameGoalIntentScope(a, b) || a.goalId !== b.goalId || a.operationId !== b.operationId) return false
+  if (a.kind === 'create' && b.kind === 'create') {
+    const keys = Object.keys(a.input) as Array<keyof GoalCreationInput>
+    return keys.length === Object.keys(b.input).length && keys.every(key => a.input[key] === b.input[key])
+  }
+  if (a.kind === 'confirm' && b.kind === 'confirm') return a.expectedRevision === b.expectedRevision
+  return a.kind === 'accept' && b.kind === 'accept' && a.expectedAlignmentRevision === b.expectedAlignmentRevision && a.expectedSubmissionId === b.expectedSubmissionId && a.acceptGaps === b.acceptGaps
+}
 function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): boolean {
   const keys = Object.keys(a) as Array<keyof MobileGoalOperation>
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  host: { origin: string; hostId: string } | null; conversation: DraftRecord; goalWork?: GoalWorkface }
+  host: { origin: string; hostId: string } | null; conversation: DraftRecord; goalWork?: GoalWorkface; goalIntents?: GoalIntent[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -71,6 +90,7 @@ export function parseDraftRecord(value: unknown): DraftRecord {
 export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   const keys = ['version', 'selectedSessionId', 'hostUrl', 'panel', 'host', 'conversation']
   if (value && typeof value === 'object' && Object.hasOwn(value, 'goalWork')) keys.push('goalWork')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'goalIntents')) keys.push('goalIntents')
   const v = record(value, keys)
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
     || !(v.hostUrl === '' || origin(v.hostUrl))
@@ -81,7 +101,29 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   }
   parseDraftRecord(v.conversation)
   if (Object.hasOwn(v, 'goalWork')) parseGoalWorkface(v.goalWork)
+  if (Object.hasOwn(v, 'goalIntents')) {
+    if (!Array.isArray(v.goalIntents)) throw invalid()
+    const found = new Set<string>()
+    for (const intent of v.goalIntents) {
+      parseGoalIntent(intent)
+      if (found.has(intent.operationId)) throw invalid()
+      found.add(intent.operationId)
+    }
+  }
   return structuredClone(value) as DeviceWorkface
+}
+
+function parseGoalIntent(value: unknown): GoalIntent {
+  const kind = (value as GoalIntent)?.kind
+  const v = record(value, ['runtimeId', 'deviceHostId', 'goalId', 'operationId', 'phase', 'kind', ...(kind === 'create' ? ['input'] : kind === 'confirm' ? ['expectedRevision'] : ['expectedAlignmentRevision', 'expectedSubmissionId', 'acceptGaps'])])
+  if (!id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || !id(v.goalId) || !id(v.operationId) || !['sending', 'unknown', 'saved'].includes(String(v.phase))) throw invalid()
+  if (kind === 'create') {
+    const input = record(v.input, ['goalId', 'operationId', 'title', 'description', 'status', 'risk', 'confirmation', ...(Object.hasOwn(v.input ?? {}, 'projectId') ? ['projectId'] : [])])
+    if (input.goalId !== v.goalId || input.operationId !== v.operationId || !body(input.title) || !input.title || !body(input.description) || input.status !== 'backlog' || input.risk !== 'low' || input.confirmation !== 'user' || input.projectId !== undefined && (typeof input.projectId !== 'string' || !input.projectId)) throw invalid()
+  } else if (kind === 'confirm') {
+    if (!Number.isSafeInteger(v.expectedRevision) || Number(v.expectedRevision) < 1 || v.phase === 'saved') throw invalid()
+  } else if (kind !== 'accept' || !Number.isSafeInteger(v.expectedAlignmentRevision) || Number(v.expectedAlignmentRevision) < 1 || !id(v.expectedSubmissionId) || typeof v.acceptGaps !== 'boolean' || v.phase === 'saved') throw invalid()
+  return structuredClone(value) as GoalIntent
 }
 
 function selection(value: unknown): GoalWorkSelection {
@@ -110,6 +152,13 @@ export function parseGoalWorkface(value: unknown): GoalWorkface {
 
 /** One device record owns navigation, drafts and intent guards. A single setItem is the commit. */
 export class DeviceWorkfaceStore {
+  private goalIntentFlights = new Set<string>()
+  private goalIntentListeners = new Set<() => void>()
+  private goalIntentVersion = 0
+  subscribeGoalIntents = (listener: () => void): (() => void) => { this.goalIntentListeners.add(listener); return () => this.goalIntentListeners.delete(listener) }
+  goalIntentRevision = (): number => this.goalIntentVersion
+  private notifyGoalIntents(): void { this.goalIntentVersion += 1; for (const listener of this.goalIntentListeners) listener() }
+  goalIntentRunning(operationId: string): boolean { return this.goalIntentFlights.has(operationId) }
   private value = emptyDeviceWorkface()
   private lastRaw: string | null | undefined
   private issue: string | null = null
@@ -172,6 +221,31 @@ export class DeviceWorkfaceStore {
     if (!existing || !sameGoalOperation(existing, operation)) return
     this.update({ ...this.value, goalWork: { ...current, pending: current.pending.filter(op => op !== existing) } })
   }
+  private updateGoalIntents(intents: GoalIntent[]): void {
+    // Schema/identity remain strict. Device I/O cannot gate an authorized healthy Goal owner.
+    this.value = parseDeviceWorkface({ ...this.value, goalIntents: intents })
+    this.temporary = true
+    try { if (this.issue) throw new Error(this.issue); this.save() }
+    catch { this.issue = '设备意图尚未持久保存；原字节和当前内存记录保留，原 Goal 操作仍可继续。刷新保障不足，请在设备工作面中导出备份，存储恢复后明确采用当前工作面。' }
+    this.notifyGoalIntents()
+  }
+  retainGoalIntent(intent: GoalIntent): void {
+    this.refresh()
+    const value = parseGoalIntent(intent), current = this.value.goalIntents ?? []
+    const existing = current.find(item => item.operationId === value.operationId)
+    if (existing || current.some(item => sameGoalIntentScope(item, value) && (value.kind === 'create' ? item.kind === 'create' : item.kind !== 'create' && item.goalId === value.goalId))) throw new Error('原 Goal 已有待核对的操作意图；先读原目标，不替换或重复提交。')
+    this.updateGoalIntents([...current, value])
+    this.goalIntentFlights.add(value.operationId)
+  }
+  releaseGoalIntent(intent: GoalIntent): void { this.goalIntentFlights.delete(intent.operationId); this.notifyGoalIntents() }
+  settleGoalIntent(intent: GoalIntent, phase: 'unknown' | 'saved' | 'confirmed'): void {
+    this.refresh()
+    const current = this.value.goalIntents ?? [], existing = current.find(item => item.operationId === intent.operationId)
+    if (!existing || !sameGoalIntent(existing, intent)) return
+    if (this.goalIntentRunning(intent.operationId)) throw new Error('原操作仍在等待回执，当前读取不能代签它。')
+    const next = phase === 'confirmed' ? current.filter(item => item !== existing) : current.map(item => item === existing ? { ...item, phase } : item)
+    this.updateGoalIntents(next)
+  }
   confirmHost(host: NonNullable<DeviceWorkface['host']>): void {
     this.refresh()
     if (!origin(host.origin) || !id(host.hostId)) throw invalid()
@@ -196,10 +270,12 @@ export class DeviceWorkfaceStore {
     if (new TextEncoder().encode(bytes).byteLength > MAX_BYTES) throw invalid()
     this.storage().setItem(DEVICE_WORKFACE_KEY, bytes)
     this.value = parsed; this.lastRaw = bytes; this.issue = null; this.temporary = false
+    this.notifyGoalIntents()
   }
   replaceUnreadableWithCurrent(navigation?: Navigation): void {
     if (navigation) this.value = parseDeviceWorkface({ ...this.value, ...navigation })
     this.save()
+    this.notifyGoalIntents()
   }
 }
 

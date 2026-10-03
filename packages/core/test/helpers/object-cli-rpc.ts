@@ -115,6 +115,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'goal.ls': [], 'goal.inspect': ['--goal', ids.goal], 'goal.create': ['--title', 'Task', '--project', 'P', '--risk', 'low', '--confirm', 'user'],
     'goal.update': ['--goal', ids.goal, '--description', '--help'], 'goal.delete': ['--goal', ids.goal, '--confirm', 'delete'],
     'goal.assign': ['--goal', ids.goal, '--executor', 'E'], 'goal.start': ['--goal', ids.goal], 'goal.handoff': ['--goal', ids.goal],
+    'goal.discuss': ['--goal', ids.goal, '--mode', 'open'], 'goal.confirm': ['--goal', ids.goal, '--revision', '1'], 'goal.accept': ['--goal', ids.goal, '--revision', '1', '--submission', 'report'],
     'goal.focus': ['--goal', ids.goal], 'goal.link-session': ['--goal', ids.goal, '--session', ids.agent],
     'goal.link-project': ['--goal', ids.goal, '--project', 'P'], 'goal.decisions': ['--goal', ids.goal], 'goal.activity': [],
     'message.inbox.check': ['--limit', '5'], 'message.inbox.ack': ['--generation', '3', '--reader-run', 'RUN'],

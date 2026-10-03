@@ -309,6 +309,11 @@ export class AgentMuxRpcService {
         throw new AgentMuxError('Editing or submitting a human pending draft requires a transport-approved user or device. A managed Agent can use agent.send with its authenticated message envelope; the original draft and Agent remain available.', 'AGENT_CAPABILITY_INVALID')
       }
     }
+    if (method === 'goal.confirm' || method === 'goal.accept') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || typeof context.principal.id !== 'string' || !context.principal.id.trim() || context.principal.id.includes('\0')) {
+        throw new AgentMuxError('Goal confirmation and result acceptance require a transport-approved person or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+    }
     const caller = await this.authenticated(context)
     if (isFileMethod(method)) {
       if (method === 'file.write') {

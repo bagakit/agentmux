@@ -4163,6 +4163,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const { sessions: _sessions, workspacePath: _workspacePath, ...record } = demand
       return { operation: request.operation, demand: record, goalContinuations: await api.continuousProgress.goals(request.demandId) }
     }
+    if (request.operation === 'demand.discuss') {
+      await get().refreshDemand(request.demandId)
+      const tabId = request.mode === 'open' ? await get().openDemandPmo(request.demandId) : await get().requestDemandPmoTask(request.demandId, request.mode)
+      const tab = get().tabs[tabId], region = tab?.regions[tab.layout.activeRegionId]
+      return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, requestId: request.requestId, mode: request.mode, tabId, agentSessionId: region?.kind === 'agent' ? region.sessionId : null } }
+    }
+    if (request.operation === 'demand.confirm') {
+      await get().confirmDemandGoal(request.demandId, request.expectedRevision)
+      const demand = demandRecord(request.demandId)
+      return { operation: request.operation, demand, receipt: { demandId: demand.id, confirmedRevision: demand.alignment!.revision, confirmedAt: demand.alignment!.confirmedAt! } }
+    }
+    if (request.operation === 'demand.accept') {
+      await get().acceptDemandResult(request.demandId, request.expectedAlignmentRevision, request.expectedSubmissionId, request.acceptGaps)
+      const demand = demandRecord(request.demandId)
+      return { operation: request.operation, demand, receipt: { demandId: demand.id, alignmentRevision: demand.grounding!.alignmentRevision, submissionId: demand.grounding!.submissionId, acceptedAt: demand.grounding!.acceptedAt!, acceptedWithGaps: demand.grounding!.checks.some(check => check.outcome === 'gap') } }
+    }
     if (request.operation === 'demand.continuation-action') {
       const continuation = await api.continuousProgress.goalAction(request.demandId, request.loopId, request.action, request.expectedRevision, request.requestId, request.caller)
       return { operation: request.operation, demandId: request.demandId, continuation, diskDurability: 'confirmed' }
@@ -4173,11 +4189,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const policy = demandWriteDecision({
         mode: 'risk-confirm',
         risk: request.decision?.risk ?? 'unknown',
-        projectKnown: Boolean(project),
+        projectKnown: request.projectId === undefined || Boolean(project),
         hasConfirmation: request.decision?.confirmation === 'user' || request.decision?.confirmation === 'automatic'
       })
       if (policy !== 'automatic') throw controlFailure('CONTROL_FAILED', policy === 'blocked' ? 'Demand routing is unresolved; choose a Project before writing.' : 'Demand write requires explicit confirmation.')
       const id = await get().createDemand({
+        ...(request.demandId === undefined ? {} : { id: request.demandId }),
         title: request.title,
         ...(request.description === undefined ? {} : { description: request.description }),
         projectId: request.projectId ?? null,

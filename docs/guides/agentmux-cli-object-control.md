@@ -110,7 +110,7 @@ agentmux schedule cancel --data request.json
 
 `--data` 接受文件或 `-` 标准输入。创建包含 `target: {hostId, agentSessionId, providerId, workspacePath}`、非空 `prompt`、`operationId` 和 `calendar`。日历显式给出 IANA `timezone`、本地 `time`、`kind`（`once|daily|weekly|monthly|yearly`）及 `policies: {gap:'skip', fold:'earlier'|'later', monthEnd:'clamp', overdue:'latest'}`；各周期的日期字段以公共类型为准。检查在 `scheduleId` 与原 `operationId` 中选一个；暂停／恢复／取消包含 `scheduleId`、已读 `expectedRevision` 与本次 `operationId`。每次变更核真实 caller，不允许用 timer 冒人类作者。未知回执先检查原 operation；不自动重发。保存不等于已投递，投递不等于 Agent 完成；断开宿主时不会假装仍在云端执行。
 
-用户可在同一创建 JSON 中显式加入 `checkIn: {silenceMs:64800000, minIntervalMs:72000000, dailyBudget:1, quiet:{start:'<quiet-start-HH:mm>', end:'<quiet-end-HH:mm>'}}` 开启安静跟进；其中安静时段的两个占位符须替换为实际策略时刻，JSON 文件需使用双引号。省略即关闭，已鉴权 Agent 不能开启。两个间隔可明确设置为 5 分钟至 30 天，预算为每个保存时区的日历日 1–3 次；安静时段使用该时区的 `HH:mm`，开始与结束须不同。`inspect` 显示保存策略、已认领预算、未答状态与未知原因，暂停／继续／取消仍用上面的原操作。跟进要求可确认的本会话人工上下文；较晚未知输入或当前来源未确认时保原到期安排。问候内容由真实 Agent 依据保存主题生成，不能把 timer、Native 文本或 Agent 消息当人类答复。
+用户可在同一创建 JSON 中显式加入 `checkIn: {silenceMs:64800000, minIntervalMs:72000000, dailyBudget:1, quiet:{start:'<quiet-start-HH:mm>', end:'<quiet-end-HH:mm>'}}` 开启安静跟进；其中安静时段的两个占位符须替换为实际策略时刻，其中安静时段的两个占位符须替换为实际策略时刻，JSON 文件需使用双引号。省略即关闭，已鉴权 Agent 不能开启。两个间隔可明确设置为 5 分钟至 30 天，预算为每个保存时区的日历日 1–3 次；安静时段使用该时区的 `HH:mm`，开始与结束须不同。`inspect` 显示保存策略、已认领预算、未答状态与未知原因，暂停／继续／取消仍用上面的原操作。跟进要求可确认的本会话人工上下文；较晚未知输入或当前来源未确认时保原到期安排。问候内容由真实 Agent 依据保存主题生成，不能把 timer、Native 文本或 Agent 消息当人类答复。
 
 ## 改显示名，再读取当前值
 
@@ -183,3 +183,24 @@ Project／Zone 的真实资源决定 `agent open` 的执行机器；展示 Space
 Read original records with `agent history --host <host-id> --session <session-id> --source native`. Question IDs are opaque Provider values; never construct them. A missing answer means unknown, not proof that the Agent is waiting. `agent question reply --input FILE|-` answers through the same public business owner; its `--help` and [public types](../../packages/core/src/public-rpc.ts) define the input and original Run condition. A trusted user or device is required; managed Agents cannot impersonate human confirmation.
 
 A `submitted` receipt confirms ordinary input submission. Read native history by the exact question ID to observe the answer. A changed source, Run or operation rejects only that input; the original Agent and ordinary manual input remain available. When a receipt is lost or the outcome is unknown, keep the original operation ID and inspect original session records before deciding; do not blindly resend. Synchronous permissions and Hook waiting retain their existing interaction response entry.
+
+## 创建 Goal、打开原讨论与人认可
+
+新建先持有准确 Goal ID，明确保存一个待定义目标，再打开同一 Goal 在原主 Mote 的专属 Tab。省略 `--project` 表示未分配，不代替 Goal 定义或开始执行：
+
+```sh
+agentmux goal create --goal '<held-goal-id>' --title 'Untitled goal' --risk low --confirm user --operation-id '<create-operation-id>'
+agentmux goal inspect --goal '<held-goal-id>'
+agentmux goal discuss --goal '<held-goal-id>' --mode open --operation-id '<discussion-operation-id>'
+```
+
+创建回执未知时先 inspect 这个准确 ID；不能按标题猜实例或另建 Goal。讨论的 `open|grill|grounding` 复用原 PMO 工作面与输入 owner；Tab、导航或队列回执不证明 Prompt 已应用、接受或完成。已保存但讨论失败的 Goal 保留，只明确重开同一个 Goal。
+
+确认提案与接受结果仅允许经运输层认证的人或设备。先读当前内容，再使用原版本与准确提交 ID：
+
+```sh
+agentmux goal confirm --goal '<goal-id>' --revision 3 --operation-id '<human-confirm-operation-id>'
+agentmux goal accept --goal '<goal-id>' --revision 3 --submission '<submission-id>' --operation-id '<human-accept-operation-id>'
+```
+
+接受报告中的差距须明确加 `--accept-gaps`；原差距不会被抹掉。Agent 可以讨论、提出提案和报告，不能凭业务字段自称人来确认或接受。认可回执未知时保留准确意图，先读取原 Goal 当前事实，不能自动重复提交。完整行为见 [Goals 与 Demand](../design/behavior/goals-and-demand.md)。

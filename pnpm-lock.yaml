@@ -355,6 +355,9 @@ importers:
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentmux/demand':
+        specifier: workspace:*
+        version: link:../../packages/demand
       '@agentmux/relay':
         specifier: workspace:*
         version: link:../../packages/relay
