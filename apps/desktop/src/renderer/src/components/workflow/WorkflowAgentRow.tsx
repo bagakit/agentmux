@@ -1,3 +1,4 @@
+import { RecordedAgentRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { useId, useState } from 'react'
 import { ChevronRight } from 'lucide-react'
 import { SemanticIcon } from '../semantic-icons'
@@ -99,38 +100,4 @@ function WorkflowSnapshotAgentRow({ agent, phaseLabel, compact, defaultExpanded 
       ) : null}
     </>
   )
-}
-
-function RecordedAgentRow({ observation }: {
-  observation: {
-    id: string
-    label: string
-    source: string
-    state?: 'pending' | 'running' | 'completed' | 'failed' | 'interrupted' | 'stopped' | 'not-found'
-    message?: string
-  }
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const detailId = useId()
-  const state = observation.state
-  const glyph = state === 'running' ? 'running' : state === 'completed' ? 'completed'
-    : state === 'failed' ? 'failed' : state === 'interrupted' || state === 'stopped' ? 'killed'
-    : state === 'pending' ? 'queued' : 'paused'
-  return <>
-    <li className="wf-agent wf-agent--observation" data-recorded-agent-id={observation.id}>
-      <button type="button" className="wf-agent__button" aria-expanded={expanded}
-        aria-controls={detailId} onClick={() => setExpanded(value => !value)}>
-        <span className="wf-agent__state">{state === undefined || state === 'not-found' ? <SemanticIcon name="neutral" size={12} /> : <WorkflowStatusGlyph status={glyph} recorded />}</span>
-        <span className="wf-agent__label"><span className="wf-agent__name" title={observation.label}>{observation.label}</span></span>
-        <span className="wf-agent__meta" title="Last recorded target state">
-          <span>{state ?? 'State not recorded'}</span><ChevronRight className="wf-chev" size={12} aria-hidden="true" />
-        </span>
-      </button>
-    </li>
-    <li id={detailId} className="wf-detail" data-for-recorded-agent={observation.id} hidden={!expanded} inert={!expanded}>
-      <dl><div><dt>Native reference</dt><dd>{observation.source}</dd></div>
-        {state ? <div><dt>Last recorded state</dt><dd>{state}</dd></div> : null}</dl>
-      {observation.message === undefined ? null : <pre className="wf-native-process__text">{observation.message}</pre>}
-    </li>
-  </>
 }

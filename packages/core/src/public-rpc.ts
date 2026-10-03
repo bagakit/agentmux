@@ -77,7 +77,7 @@ type OperationKeys<T> = T extends object ? {
   [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' ? OperationKeys<T[K]> : T[K]
 } : T
 type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
-  ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string } }
+  ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: boolean }
   : M extends 'goal.ls' ? AgentMuxRpcGoalFilters
   : M extends 'goal.create' ? Omit<BusinessParams<M>, 'decision'> & {
       risk?: import('./control.js').AgentMuxDemandDecision['risk'];

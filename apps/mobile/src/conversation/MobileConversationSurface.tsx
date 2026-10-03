@@ -5,7 +5,7 @@ import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
-  AgentComposer, AgentInteractionCard, ClientUiProvider, ConversationMessage, ConversationView,
+  AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationMessage, ConversationView,
   createSpeakerResolver, expandSemanticReferences, speakerOfUserMessage,
   type ClientUiPlatform, type ConversationMessageProps
 } from '@agentmux/client-ui'
@@ -160,7 +160,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }
   const blocked = attempt?.phase === 'sending' || attempt?.phase === 'unknown'
   return <ClientUiProvider platform={platform}>
-    <section className="mobile-conversation" aria-label="会话" data-agent-session-id={agentSessionId ?? ''}>
+    <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前不能发送；草稿与阅读保留。' : ''}</p> : null}
       {reading.notice ? <p className="mobile-conversation__notice" role="status">{reading.notice}</p> : null}
       {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
@@ -172,8 +172,15 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {copyNotice ? <span>{copyNotice}</span> : null}
       </aside> : null}
       <div className="mobile-conversation__reading">
+        {session?.semanticStatus?.state === 'working' ? <p className="mobile-active-state" role="status"><span />正在执行</p> : null}
         {reading.page && agentSessionId ? <>
-          <ConversationView page={reading.page} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+          <ConversationView page={reading.page} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+            renderProcess={props => <NativeProcessObservation {...props} compact />}
+            {...(available && client?.forwardRpc ? { onReplyQuestion: async input => {
+              const condition = agentPromptCondition(client.agentSession(agentSessionId))
+              if (condition.expectedRun.runId !== session?.run.runId) throw new Error('原问题的 Run 已改变；对话与终端仍保留。')
+              return client.forwardRpc!('agent.question.reply', { ...input, ...condition, agentSessionId, sourceChannel: 'api' })
+            } } : {})}
             {...readingProps} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
         {captured.length > 0 ? <section aria-label="已发送消息" className="mobile-conversation__captured">
@@ -197,7 +204,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       </div> : null}
       <div className="mobile-conversation__composer">
         <AgentComposer identity={<MobileMessageTools session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
-          refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder="写给原会话；未连接时保留草稿"
+          refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit() } : {})}
           {...(onAttach ? { onAttach } : {})} {...(readPastedImage ? { readPastedImage } : {})}
           feedback={attempt ? <span role="status">{attempt.message}</span> : undefined} />

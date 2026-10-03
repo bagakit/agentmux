@@ -213,3 +213,8 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 观看与控制可辨。手机终端默认沿原 Run 已确认网格显示，旋转或 viewport 变化不自动改变 PTY；用户明确进入控制并主动调整尺寸，才向原 owner 请求。被动阅读不 resize，不发鼠标输入或 DA/DSR/颜色查询回写，checkpoint/replay 不触发输入、通知或剪贴板，不伪造 ctxmux 排他 lease。
 
 设备工作面采用明确的持久来源和可导出保全记录；重启与卸载后的存储条件分别说明，不假定密钥跨卸载必存。身份丢失后打开原 Mac 链接登记新设备，不创建替代 Host Session。iPhone 与 Android 保留同能力范围，未执行真机验收不得据构建成功宣称两类设备验收通过。
+
+### 手机对象身份与工作面
+手机 Focus 行同时展示已确认的项目、Agent 名称与语义状态。项目关系消费公共事实，不以 cwd 猜空间归属；未知名字明确未命名，不伪装 provider 为名字。Mote 使用原保存头像，连接后以头像、名字、状态组织对话。左上入口揭示侧栏并保留工作面；连接与设备设置位于侧栏。
+
+`space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间 PNG。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。

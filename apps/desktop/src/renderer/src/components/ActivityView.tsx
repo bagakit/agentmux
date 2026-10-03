@@ -41,7 +41,7 @@ import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conver
 import { SemanticIcon } from './semantic-icons'
 import { WorkflowCard } from './workflow/WorkflowCard'
 import { WorkflowToolRow } from './workflow/WorkflowToolRow'
-import { NativeProcessObservation } from './NativeProcessObservation'
+import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest } from '../lib/mailbox-message-navigation'

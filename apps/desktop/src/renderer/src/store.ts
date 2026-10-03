@@ -3852,6 +3852,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     if (request.operation === 'space.ls' || request.operation === 'space.inspect' || request.operation === 'agent.open' || request.operation === 'space.mv' || request.operation === 'space.bind' || request.operation === 'space.unbind') {
       return await executeSpatialControl({
         get,
+        appearance: async (catalog, imageSpaceId) => Promise.all(catalog.spaces.map(async space => {
+          const key = JSON.stringify([space.hostId, space.directoryPath])
+          const choice = get().spaceObjectIcons[key]
+          if (typeof choice === 'string') return { spaceId: space.spaceId, glyph: choice }
+          if (choice?.kind === 'face') return { spaceId: space.spaceId, parts: { ...choice } }
+          if (choice?.kind === 'image') {
+            if (space.spaceId !== imageSpaceId) return { spaceId: space.spaceId, image: { dataUrl: null, revision: choice.fileName } }
+            const workspace = get().config?.workspaces.find(value => value.hostId === space.hostId && value.id === catalog.zones.find(zone => catalog.bindings.some(binding => binding.spaceId === space.spaceId && binding.zoneId === zone.zoneId))?.workspaceId)
+            try {
+              if (!workspace || !space.topicId) throw new Error('The original Mote avatar target is unavailable.')
+              const image = await api.scratch.readMoteAvatar(workspace.id, space.topicId, choice, key)
+              return { spaceId: space.spaceId, image: { dataUrl: image.dataUrl, revision: choice.fileName } }
+            } catch (error) { return { spaceId: space.spaceId, image: { dataUrl: null, revision: choice.fileName }, issue: presentError(error) } }
+          }
+          return { spaceId: space.spaceId }
+        })),
         patch: patch => set(state => {
           const choice = state.workbenchSpaceSelection, held = state.retainedSpatialFocus
           if (!patch.tabs || !choice || !held || choice.workspaceId !== held.displayWorkspaceId ||

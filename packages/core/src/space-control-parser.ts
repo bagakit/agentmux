@@ -109,7 +109,7 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
@@ -144,7 +144,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
     fields(source, ['schemaVersion', 'requestId', 'operation', 'agentSessionId'], code)
     request = { ...base, operation, agentSessionId: spaceControlId(source.agentSessionId, 'Agent Session', code) }
   } else if (operation === 'space.ls' || operation === 'space.inspect') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'target'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation'], code)
     if (operation === 'space.inspect' && source.target && typeof source.target === 'object' && Object.hasOwn(source.target, 'requestId')) {
       const target = fields(source.target, ['requestId'], code)
       request = { ...base, operation, target: { requestId: spaceControlId(target.requestId, 'Inspected Request ID', code) } }
@@ -152,7 +152,7 @@ export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_C
       const target = selector(source.target, code)
       if (operation === 'space.inspect' && !['spaceId', 'zoneId', 'tabId', 'regionId'].some(key => Object.hasOwn(target, key))) fail('Space inspect requires one exact Space, Zone, Tab, Region, or Request.', code)
       if (operation === 'space.ls' && (target.tabId || target.regionId || Object.keys(target).length > 1)) fail('Space ls accepts one Space or Zone filter.', code)
-      request = { ...base, operation, target }
+      request = { ...base, operation, target, ...(Object.hasOwn(source, 'presentation') ? { presentation: bool(source.presentation, 'presentation', code) } : {}) }
     }
   } else if (operation === 'space.bind' || operation === 'space.unbind') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'binding'], code)
@@ -221,7 +221,7 @@ function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
 
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
-  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations'], code)
+  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance'], code)
   const projectGroups = Object.hasOwn(source, 'projectGroups') ? unique(list(source.projectGroups, value => {
     const item = fields(value, ['groupId', 'name', 'projectIds'], code)
     const name = string(item.name, 'Project group name', code)
@@ -258,7 +258,29 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
     return { zoneId: spaceControlId(item.zoneId, 'Zone', code, true), spaceId: spaceControlId(item.spaceId, 'Space', code, true) }
   }, 'Bindings', code), item => JSON.stringify([item.zoneId, item.spaceId]), 'Bindings', code)
   const locations = unique(list(source.locations, value => address(value, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
-  return { ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
+  const appearance = Object.hasOwn(source, 'appearance') ? unique(list(source.appearance, value => {
+    const item = fields(value, ['spaceId', 'glyph', 'parts', 'image', 'issue'], code)
+    const spaceId = spaceControlId(item.spaceId, 'Space appearance', code, true)
+    if (!spaces.some(space => space.spaceId === spaceId)) fail('Appearance belongs to an unknown Space.', code)
+    let parts: Record<string, string> | undefined
+    if (Object.hasOwn(item, 'parts')) {
+      const keys = item.parts && typeof item.parts === 'object' ? Object.keys(item.parts) : []
+      if (keys.length > 16 || keys.some(key => !/^[a-zA-Z][a-zA-Z0-9]*$/.test(key) || key.length > 64)) fail('Appearance parts are invalid.', code)
+      const raw = fields(item.parts, keys, code)
+      parts = Object.fromEntries(Object.entries(raw).map(([key, value]) => [key, string(value, 'Appearance part', code, 64)]))
+    }
+    let image: { dataUrl: string | null; revision?: string } | undefined
+    if (Object.hasOwn(item, 'image')) {
+      const raw = fields(item.image, ['dataUrl', 'revision'], code)
+      const dataUrl = nullableString(raw.dataUrl, 'Appearance image', code)
+      if (dataUrl !== null && (!/^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(dataUrl) || dataUrl.length > 700000)) fail('Appearance image is invalid.', code)
+      image = { dataUrl, ...(Object.hasOwn(raw, 'revision') ? { revision: string(raw.revision, 'Image revision', code, 128) } : {}) }
+    }
+    return { spaceId, ...(parts ? { parts } : {}), ...(image ? { image } : {}),
+      ...(Object.hasOwn(item, 'glyph') ? { glyph: string(item.glyph, 'Appearance glyph', code, 64) } : {}),
+      ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Appearance issue', code) } : {}) }
+  }, 'Appearance', code), item => item.spaceId, 'Appearance', code) : undefined
+  return { ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
 }
 function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
   return list(value, value => {

@@ -1,13 +1,10 @@
 import type { AgentSessionHistoryItem, AgentSessionHistorySource } from '@agentmux/core'
-import type { ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
-import { describeActivityRecordTime } from '../lib/activity-ruler'
-import { stepTitle } from '@agentmux/client-ui/activity-step-summary'
+import type { ConversationProcessProps } from './ConversationRecordSequence.js'
+import { describeActivityRecordTime } from '../lib/activity-record-time.js'
+import { stepTitle } from '../lib/activity-step-summary.js'
 import { useId, useState, type ReactNode } from 'react'
 import { GitBranch, Terminal } from 'lucide-react'
-import { WorkflowCard } from './workflow/WorkflowCard'
-import { WorkflowToolRow } from './workflow/WorkflowToolRow'
-import { WorkflowAgentRow } from './workflow/WorkflowAgentRow'
-import type { WorkflowObservationStatus, WorkflowRecordedTime } from './workflow/types'
+import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 
 function recordedStatus(item: AgentSessionHistoryItem): WorkflowObservationStatus | undefined {
   const collaboration = item.collaboration
@@ -34,8 +31,8 @@ function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRec
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, items, renderRecord }: ConversationProcessProps) {
-  const [expanded, setExpanded] = useState(false)
+export function NativeProcessObservation({ id, items, renderRecord, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+  const [expanded, setExpanded] = useState(!compact)
   const states = items.map(recordedStatus)
   const status = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
@@ -45,12 +42,12 @@ export function NativeProcessObservation({ id, items, renderRecord }: Conversati
   const recordedTime = items.every(item => item.startedAt !== undefined) ? recordTime({
     ...first, completedAt: last.completedAt ?? last.startedAt!
   }) : undefined
-  return <WorkflowCard observation={{ id, label: 'Process', stepCount: items.length,
+  return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: compact ? '执行过程' : 'Process', stepCount: items.length,
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
     expanded={expanded} onExpandedChange={setExpanded}>
     {items.map(item => renderRecord(item, body =>
       <NativeProcessStep item={item} {...(first.startedAt === undefined ? {} : { origin: first.startedAt })}>{body}</NativeProcessStep>))}
-  </WorkflowCard>
+  </WorkflowCard></div>
 }
 
 function NativeProcessStep({ item, origin, children }: {
