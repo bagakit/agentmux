@@ -159,7 +159,7 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
                     <span className="quick-switch__row-title">{item.title}</span>
                     <span className="quick-switch__row-subtitle">{item.subtitle}</span>
                   </span>
-                  {item.state && !item.providerId ? <StatusDot status={{ state: item.state, source: 'native-hook', observedAt: item.observedAt }} /> : null}
+                  {item.state && !item.providerId ? <StatusDot status={{ state: item.state, source: 'native-hook' }} /> : null}
                 </button>
               ))
             )}

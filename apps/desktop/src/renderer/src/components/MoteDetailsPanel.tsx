@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowRight, FileText, Pencil, Plus } from 'lucide-react'
+import { useShallow } from 'zustand/react/shallow'
+import type { SessionSnapshot } from '../../../shared/contracts'
 import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
@@ -25,8 +27,8 @@ const NO_EXPANDED_PATHS: ReadonlySet<string> = new Set()
 type MoteSection = 'profile' | 'ideas'
 
 /** Object content in the shared tools frame. Files and conversations keep their original owners. */
-export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }: {
-  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
+export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, active = true }: {
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active?: boolean
   onOpenPath(path: string): Promise<unknown>; onCreateNote(): void
 }) {
   const [section, setSection] = useState<MoteSection>('profile')
@@ -43,7 +45,18 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
     const region = tab?.topicId === scope.topic.id ? tab.regions[reference?.regionId ?? tab.layout.activeRegionId] : undefined
     return region?.kind === 'agent' ? region.sessionId : undefined
   })
-  const session = useAppStore(state => sessionId ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
+  const heldStatus = useRef<{ sessionId: string | undefined; status: Pick<SessionSnapshot['status'], 'state' | 'source'> | undefined } | null>(null)
+  const observedStatus = useAppStore(useShallow(state => {
+    if (!active || section !== 'profile') return null
+    const session = sessionId ? sessionPresentationById(state.sessions).get(sessionId) : undefined
+    return session ? { state: session.status.state, source: session.status.source } : undefined
+  }))
+  if (observedStatus !== null) heldStatus.current = { sessionId, status: observedStatus }
+  if (!heldStatus.current || heldStatus.current.sessionId !== sessionId) {
+    const session = sessionId ? sessionPresentationById(useAppStore.getState().sessions).get(sessionId) : undefined
+    heldStatus.current = { sessionId, status: session ? { state: session.status.state, source: session.status.source } : undefined }
+  }
+  const status = heldStatus.current.status
   const returnFocus = (invoker: { node: HTMLButtonElement; key: string } | null) =>
     iconTarget && invoker?.key === iconTarget.key && invoker.node.isConnected ? invoker.node : null
   const identity = <>
@@ -55,12 +68,12 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
           }}>
             <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={iconTarget?.key}
               avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} moteSessionId={sessionId}
-              moteHostId={scope.workspace.hostId} moteAvailability={sessionId ? 'restoring' : reference === null ? 'restoring' : 'no-agent'} />
+              visible={active} moteHostId={scope.workspace.hostId} moteAvailability={sessionId ? 'restoring' : reference === null ? 'restoring' : 'no-agent'} />
           </button>
           <div><div className="mote-details__name"><strong>{scope.topic.title}</strong><button type="button" className="icon-button" aria-label="Rename Mote" title="Rename Mote" onClick={event => {
             renameInvoker.current = { node: event.currentTarget, key: scope.topic.id }
             setRename({ topic: { ...scope.topic }, workspace: { ...scope.workspace } })
-          }}><Pencil size={12} /></button></div><span className="mote-details__status">{session ? <><StatusDot status={session.status} />{session.status.state}</> : sessionId || reference === null ? 'Status not confirmed' : 'No Agent selected'}</span></div>
+          }}><Pencil size={12} /></button></div><span className="mote-details__status">{status ? <><StatusDot status={status} />{status.state}</> : sessionId || reference === null ? 'Status not confirmed' : 'No Agent selected'}</span></div>
         </div>
         {scope.topic.summary ? <p>{scope.topic.summary}</p> : null}
   </>
@@ -77,41 +90,51 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote }:
       aria-selected={section === id} tabIndex={section === id ? 0 : -1} className={section === id ? 'selected' : ''}
       onClick={() => setSection(id)}>{id === 'profile' ? 'Profile' : 'Ideas'}</button>)}</div>
     <MoteContent key={JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.topic.directoryPath, scope.rootPath])}
-      scope={scope} reference={reference} section={section} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
+      scope={scope} reference={reference} active={active} section={section} profile={identity} onShowIdeas={() => setSection('ideas')} onOpenPath={onOpenPath} onCreateNote={onCreateNote} />
     <MoteRenameDialog target={rename} onClose={() => setRename(null)} returnFocus={() => renameInvoker.current?.key === scope.topic.id && renameInvoker.current.node.isConnected ? renameInvoker.current.node : null} />
     <SpaceIconPicker target={avatar} onClose={() => setAvatar(null)} returnFocus={() => returnFocus(avatarInvoker.current)} />
   </section>
 }
 
-function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPath, onCreateNote }: {
-  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: MoteSection; profile: ReactNode; onShowIdeas(): void
+function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPath, onCreateNote, active }: {
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; section: MoteSection; profile: ReactNode; active: boolean; onShowIdeas(): void
   onOpenPath(path: string): Promise<unknown>; onCreateNote(): void
 }) {
-  const tree = useWorkspaceFileTree(scope.workspace.id, NO_EXPANDED_PATHS, scope.rootPath)
-  const revision = useAppStore(state => state.workspaceFileRevisions[scope.workspace.id] ?? 0)
+  const tree = useWorkspaceFileTree(scope.workspace.id, NO_EXPANDED_PATHS, scope.rootPath, active)
+  const revision = useMoteFileRevision(scope.workspace.id, active)
   const refresh = useRef(tree.refreshTree); refresh.current = tree.refreshTree
   const observedRevision = useRef(revision)
-  useEffect(() => { if (observedRevision.current !== revision) { observedRevision.current = revision; void refresh.current() } }, [revision])
+  useEffect(() => {
+    if (!active || observedRevision.current === revision || tree.rootCache?.loading) return
+    observedRevision.current = revision
+    // An absent cache is already admitted by the original tree's initial auto read.
+    if (tree.rootCache) void refresh.current()
+  }, [active, revision, tree.rootCache?.loading])
   const [selected, setSelected] = useState<string | null>(null)
   const [note, setNote] = useState<{ path: string; content: string; revision: string } | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(false), [attempt, setAttempt] = useState(0)
   const [behaviorOpen, setBehaviorOpen] = useState(false)
   const behaviorInvoker = useRef<HTMLElement | null>(null)
   useEffect(() => { setBehaviorOpen(false) }, [section])
+  const noteRequest = useMemo(() => ({}), [scope.workspace.id, section, selected, attempt, revision])
+  const currentNote = useRef<object | null>(noteRequest); currentNote.current = noteRequest
+  const admittedNote = useRef<object | null>(null)
+  useEffect(() => () => { currentNote.current = null }, [])
   useEffect(() => {
-    if (!selected || section !== 'ideas') return
-    let current = true; setLoading(true); setIssue(null)
+    currentNote.current = noteRequest
+    if (!active || !selected || section !== 'ideas' || admittedNote.current === noteRequest) return
+    admittedNote.current = noteRequest; setLoading(true); setIssue(null)
     void readMoteMaterial(scope, selected).then(observation => {
-      if (!current) return
+      if (currentNote.current !== noteRequest) return
       const result = observation.result
       if (result.status === 'read') setNote({ path: selected, content: result.document.content, revision: result.document.revision })
       else setIssue(result.status === 'unknown' || result.status === 'error' ? result.message : result.status === 'deleted'
         ? 'The original file is no longer present. Any last confirmed content is kept below; inspect its folder.'
         : result.status === 'directory' ? 'This is a directory. Inspect it in the original file tree.'
         : 'The original file contains binary data. Open its file to inspect it.')
-    }).catch(error => { if (current) setIssue(presentError(error)) }).finally(() => { if (current) setLoading(false) })
-    return () => { current = false }
-  }, [scope.workspace.id, section, selected, attempt, revision])
+    }).catch(error => { if (currentNote.current === noteRequest) setIssue(presentError(error)) })
+      .finally(() => { if (currentNote.current === noteRequest) setLoading(false) })
+  }, [active, noteRequest])
   const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && !['SOUL.md', 'topic.md'].includes(entry.name))
   const recent = notes.filter(entry => typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs))
     .sort((a, b) => b.mtimeMs! - a.mtimeMs!).slice(0, 3)
@@ -123,8 +146,8 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
       <MoteFirstCooperation scope={scope} reference={reference} />
-      <MoteCurrentWork scope={scope} reference={reference} />
-      <MoteBehaviorSummary scope={scope} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      <MoteCurrentWork scope={scope} reference={reference} active={active} />
+      <MoteBehaviorSummary scope={scope} active={active} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}
       <div className="mote-details__recent">
@@ -147,7 +170,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
         <p className="mote-details__hint">Source and scope are available when recorded in this file. Agent use is not confirmed.</p>
         {loading ? <p role="status">Reading note…</p> : null}
         {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry</button></div> : null}
-        {note?.path === selected ? <><p className="mote-details__hint" title={note.revision}>{issue || loading ? 'Last confirmed saved content' : 'Read from the saved file'}</p><AgentMarkdown content={note.content} className="mote-details__prose" workspaceRoot={scope.workspace.path}
+        {active && note?.path === selected ? <><p className="mote-details__hint" title={note.revision}>{issue || loading ? 'Last confirmed saved content' : 'Read from the saved file'}</p><AgentMarkdown content={note.content} className="mote-details__prose" workspaceRoot={scope.workspace.path}
           sourcePath={selected} openWorkspaceFile={path => { void onOpenPath(path) }} /></> : null}
         <button type="button" className="small-button" onClick={() => void onOpenPath(selected)}>Correct or remove a detail in editor</button>
         <p className="mote-details__hint">Edit only what should change, then Save. File changes keep the original conversations and existing Session context.</p>
@@ -158,38 +181,61 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
 }
 
 /** Confirmed summary is derived only from the current original saved file, never a local form. */
-function MoteBehaviorSummary({ scope, onEdit, onOpenPath }: {
-  scope: MoteWorkfaceScope; onEdit(): void; onOpenPath(path: string): Promise<unknown>
+function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
+  scope: MoteWorkfaceScope; active: boolean; onEdit(): void; onOpenPath(path: string): Promise<unknown>
 }) {
-  const revision = useAppStore(state => state.workspaceFileRevisions[scope.workspace.id] ?? 0)
-  const documentIssue = useAppStore(state => state.documentIssues[documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)])
-  const savedRevision = useAppStore(state => state.documents[documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)]?.revision)
+  const key = documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)
+  const snapshot = () => {
+    const state = useAppStore.getState()
+    return { revision: state.workspaceFileRevisions[scope.workspace.id] ?? 0,
+      documentIssue: state.documentIssues[key]?.kind, savedRevision: state.documents[key]?.revision }
+  }
+  const observed = useAppStore(useShallow(state => active ? {
+    revision: state.workspaceFileRevisions[scope.workspace.id] ?? 0,
+    documentIssue: state.documentIssues[key]?.kind, savedRevision: state.documents[key]?.revision
+  } : null))
+  const retained = useRef(observed ?? snapshot())
+  if (observed !== null) retained.current = observed
+  const { revision, documentIssue, savedRevision } = retained.current
   const [saved, setSaved] = useState<{ content: string; revision: string } | null>(null)
-  const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(true), [attempt, setAttempt] = useState(0)
-  const epoch = useRef<object>({})
+  const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(false), [attempt, setAttempt] = useState(0)
+  const [soulOpen, setSoulOpen] = useState(false)
+  const request = useMemo(() => ({}), [revision, attempt, documentIssue, savedRevision])
+  const current = useRef<object | null>(request); current.current = request
+  const admitted = useRef<object | null>(null)
+  useEffect(() => () => { current.current = null }, [])
   useEffect(() => {
-    const request = {}; epoch.current = request; setLoading(true); setIssue(null)
+    current.current = request
+    if (!active || admitted.current === request) return
+    admitted.current = request; setLoading(true); setIssue(null)
     void readMoteMaterial(scope, scope.rootPath + '/' + MOTE_SOUL_PATH).then(observation => {
-      if (epoch.current !== request) return
+      if (current.current !== request) return
       const result = observation.result
       if (result.status === 'read') setSaved(result.document)
       else setIssue('Saved behavior is unconfirmed. ' + (result.status === 'unknown' || result.status === 'error' ? result.message : result.status))
-    }).catch(cause => { if (epoch.current === request) setIssue(presentError(cause)) })
-      .finally(() => { if (epoch.current === request) setLoading(false) })
-    return () => { epoch.current = {} }
-  }, [revision, attempt, documentIssue?.kind, savedRevision])
-  const parsed = saved ? parseMoteBehaviorBlock(saved.content) : null
+    }).catch(cause => { if (current.current === request) setIssue(presentError(cause)) })
+      .finally(() => { if (current.current === request) setLoading(false) })
+  }, [active, request])
+  const parsed = useMemo(() => saved ? parseMoteBehaviorBlock(saved.content) : null, [saved?.content])
   const confirmed = !loading && !issue && !documentIssue && parsed?.status === 'valid' ? parsed : null
   const summary = confirmed ? MOTE_BEHAVIOR_AXES.map(axis => axis.choices.find(choice => choice.value === confirmed.preferences[axis.id])!.title).join(' · ') : null
   return <div className="mote-details__self mote-behavior-summary">
     <div className="mote-details__section-actions"><span>Behavior</span><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><Pencil size={14} /></MoteBehaviorAction></div>
-    {confirmed ? <><span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span><p className="mote-behavior-summary__rules" title={summary!}>{summary}</p></> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : issue || documentIssue ? 'Saved behavior is unconfirmed.' : parsed?.status === 'unconfirmed' ? 'Original behavior needs review.' : 'Not set yet.'}</p>}
+    {confirmed ? <><span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span><p className="mote-behavior-summary__rules" title={summary!}>{summary}</p></> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : issue || documentIssue ? 'Saved behavior is unconfirmed.' : parsed?.status === 'unconfirmed' ? 'Original behavior needs review.' : 'Not set yet.'}</p>}
     {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry settings</button></div> : null}
-    <details className="mote-details__soul"><summary>Original SOUL</summary>
-      {saved || scope.topic.soul ? <AgentMarkdown content={saved?.content ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
-        workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : <p className="mote-details__hint">Open the original file to inspect it.</p>}
+    <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary>Original SOUL</summary>
+      {active && soulOpen && (saved || scope.topic.soul) ? <AgentMarkdown content={saved?.content ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
+        workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : soulOpen && !saved && !scope.topic.soul ? <p className="mote-details__hint">Open the original file to inspect it.</p> : null}
       <p className="mote-details__hint">Saved changes apply to new Sessions. Current discussions keep their context; your current directions take priority.</p>
       <button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}>Open original SOUL</button>
     </details>
   </div>
+}
+
+/** Pause only automatic observation; the last displayed original revision remains honest. */
+function useMoteFileRevision(workspaceId: string, active: boolean): number {
+  const observed = useAppStore(state => active ? state.workspaceFileRevisions[workspaceId] ?? 0 : null)
+  const held = useRef(observed ?? useAppStore.getState().workspaceFileRevisions[workspaceId] ?? 0)
+  if (observed !== null) held.current = observed
+  return held.current
 }

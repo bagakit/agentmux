@@ -12,28 +12,47 @@ import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { GoalContinuationControl } from './GoalContinuationControl'
 
 /** A reading surface over the original Goal owner; it has no timer or execution state. */
-export function MoteCurrentWork({ scope, reference }: {
-  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
+export function MoteCurrentWork({ scope, reference, active = true }: {
+  scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active?: boolean
 }) {
-  const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: state.tabs, layouts: state.layouts,
+  const facts = useAppStore(useShallow(state => active ? ({ config: state.config, tabs: state.tabs, layouts: state.layouts,
     scratchTopicSnapshots: state.scratchTopicSnapshots, spaceZoneBindings: state.spaceZoneBindings,
-    topicCategories: state.topicCategories, workbenchSpaceSelection: state.workbenchSpaceSelection, activeWorkspaceId: state.activeWorkspaceId })))
-  const demands = useAppStore(state => state.demands)
-  const context = useMemo(() => moteGoalContext(useAppStore.getState(), scope, reference), [facts, scope, reference])
+    topicCategories: state.topicCategories, workbenchSpaceSelection: state.workbenchSpaceSelection, activeWorkspaceId: state.activeWorkspaceId }) : null))
+  const observedDemands = useAppStore(state => active ? state.demands : null)
+  const retainedDemands = useRef(observedDemands ?? useAppStore.getState().demands)
+  if (observedDemands !== null) retainedDemands.current = observedDemands
+  const demands = retainedDemands.current
+  const currentContext = useRef<{ identity: string; value: ReturnType<typeof moteGoalContext> } | null>(null)
+  const identity = JSON.stringify([scope.workspace.id, scope.workspace.hostId, scope.workspace.path, scope.topic.id, scope.rootPath, reference])
+  const context = useMemo(() => {
+    if (!active && currentContext.current?.identity === identity) return currentContext.current.value
+    const value = moteGoalContext(useAppStore.getState(), scope, reference)
+    currentContext.current = { identity, value }; return value
+  }, [active, facts, scope, reference, identity])
   const retainedContext = useRef(context)
   if (!context.issue || context.sessionIds.length) retainedContext.current = context
   const visibleSessionIds = context.issue ? retainedContext.current.sessionIds : context.sessionIds
-  const labels = useAppStore(useShallow(state => {
+  const observedLabels = useAppStore(useShallow(state => {
+    if (!active) return null
     const byId = sessionPresentationById(state.sessions)
     return Object.fromEntries(visibleSessionIds.flatMap(id => {
       const session = byId.get(id)
       return session ? [[id, session.label]] : []
     }))
   }))
+  const retainedLabels = useRef<{ identity: string; value: Record<string, string> } | null>(null)
+  const labelIdentity = JSON.stringify([identity, visibleSessionIds])
+  if (observedLabels !== null) retainedLabels.current = { identity: labelIdentity, value: observedLabels }
+  if (retainedLabels.current?.identity !== labelIdentity) {
+    const byId = sessionPresentationById(useAppStore.getState().sessions)
+    retainedLabels.current = { identity: labelIdentity, value: Object.fromEntries(visibleSessionIds.flatMap(id => { const session = byId.get(id); return session ? [[id, session.label]] : [] })) }
+  }
+  const labels = retainedLabels.current.value
   const goals = useMemo(() => goalsForMote(demands, visibleSessionIds), [demands, visibleSessionIds])
   const [expanded, setExpanded] = useState<string | null>(null), [chooser, setChooser] = useState(false)
   const [selectedGoal, setSelectedGoal] = useState(''), [sessionId, setSessionId] = useState('')
   const [loading, setLoading] = useState(false), [issue, setIssue] = useState<string | null>(null)
+  const inspected = useRef<object | null>(null)
   const flight = useRef<object | null>(null), lifetime = useRef<object>({})
   const associationIntent = useRef<object>({})
   const navigationRequest = useRef<AbortController | null>(null)
@@ -42,11 +61,13 @@ export function MoteCurrentWork({ scope, reference }: {
   useEffect(() => {
     const owner = {}; lifetime.current = owner
     flight.current = null
-    void refresh(owner)
+    inspected.current = null
     return () => { lifetime.current = {}; navigationRequest.current?.abort() }
   }, [scope.workspace.hostId, scope.workspace.id, scope.workspace.path, scope.topic.id, scope.rootPath])
+  useEffect(() => { if (active && inspected.current !== lifetime.current) void refresh() }, [active, scope.workspace.hostId, scope.workspace.id, scope.workspace.path, scope.topic.id, scope.rootPath])
   async function refresh(owner = lifetime.current) {
     if (flight.current) return
+    inspected.current = owner
     const token = {}; flight.current = token; setLoading(true)
     try {
       await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -106,7 +127,7 @@ export function MoteCurrentWork({ scope, reference }: {
         </div>
         {summary.detail ? <p className="mote-current-work__detail">{summary.detail}</p> : null}
         {unloaded.length ? <p className="mote-details__hint">{unloaded.length} linked discussion{unloaded.length > 1 ? 's' : ''} not loaded. Original references retained.</p> : null}
-        {open ? <GoalContinuationControl demand={goal} {...(context.selectedSessionId ? { initialSessionId: context.selectedSessionId } : {})} onRefresh={() => void refresh()} /> : null}
+        {open ? <GoalContinuationControl demand={goal} active={active} {...(context.selectedSessionId ? { initialSessionId: context.selectedSessionId } : {})} onRefresh={() => void refresh()} /> : null}
       </div>
     })}
     {chooser ? <div className="mote-current-work__chooser">

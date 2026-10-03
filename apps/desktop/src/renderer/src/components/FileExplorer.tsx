@@ -394,8 +394,9 @@ function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disable
 }
 
 export function FileExplorer({
-  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal
+  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal, active = true
 }: {
+  active?: boolean
   onCreateRequestHandled?: (() => void) | undefined
   createRequest?: { requestId: number; parentPath: string } | undefined
   workspaceId?: string | undefined
@@ -436,7 +437,7 @@ export function FileExplorer({
   // Source-control status projected straight onto the tree — no second copy of "what changed" in the
   // store, it consumes the same git:status the Changes panel does. The mapping from porcelain to a
   // per-node status is a pure function (lib/file-tree-git-status); this component only asks it.
-  const { status: gitStatus, refresh: refreshGitStatus } = useGitStatus(workspaceId ?? null)
+  const { status: gitStatus, refresh: refreshGitStatus } = useGitStatus(workspaceId ?? null, active)
   const gitStatusIndex = useMemo(() => {
     if (gitStatus?.kind !== 'git-repository') return buildFileTreeGitStatusIndex([])
     // The prefix comes from main, which asked git for it (`rev-parse --show-prefix`). It is NOT
@@ -446,9 +447,11 @@ export function FileExplorer({
     // filtering and paint one file's status onto a different, clean file.
     return buildFileTreeGitStatusIndex(gitStatus.changes, gitStatus.repoRelativePrefix)
   }, [gitStatus])
-  const workspaceFileRevision = useAppStore((state) => (
-    workspaceId ? (state.workspaceFileRevisions[workspaceId] ?? 0) : 0
-  ))
+  const observedRevision = useAppStore(state => active && workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : null)
+  const heldRevision = useRef({ workspaceId, value: observedRevision ?? (workspaceId ? useAppStore.getState().workspaceFileRevisions[workspaceId] ?? 0 : 0) })
+  if (observedRevision !== null) heldRevision.current = { workspaceId, value: observedRevision }
+  else if (heldRevision.current.workspaceId !== workspaceId) heldRevision.current = { workspaceId, value: workspaceId ? useAppStore.getState().workspaceFileRevisions[workspaceId] ?? 0 : 0 }
+  const workspaceFileRevision = heldRevision.current.value
   const explorerState = useAppStore((state) => (
     workspaceId ? state.fileExplorerStates[workspaceId] : undefined
   )) ?? EMPTY_EXPLORER_STATE
@@ -490,7 +493,7 @@ export function FileExplorer({
   const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => fileExplorerContains(rootPath, path))), [explorerState.expandedPaths, rootPath])
   const selection = useMemo(() => updateFileExplorerSelectionPaths(explorerState.selection, path => fileExplorerContains(rootPath, path) ? path : null), [explorerState.selection, rootPath])
   const selectedPath = selection.activePath
-  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath)
+  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath, active)
   const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
@@ -531,6 +534,7 @@ export function FileExplorer({
 
   useEffect(() => {
     clearHoverExpand()
+    observedFileRevisionRef.current = workspaceFileRevision
     setActiveDrag(null)
     dragVisibilityRef.current = null
     activeDragScopeRef.current = null
@@ -549,15 +553,15 @@ export function FileExplorer({
   }, [workspaceId, workspacePath, rootPath])
 
   useEffect(() => {
-    if (observedFileRevisionRef.current === workspaceFileRevision) return
+    if (!active || observedFileRevisionRef.current === workspaceFileRevision || tree.rootCache?.loading) return
     observedFileRevisionRef.current = workspaceFileRevision
-    void refreshExplorer()
-  }, [refreshExplorer, workspaceFileRevision])
+    if (tree.rootCache) void refreshExplorer()
+  }, [active, refreshExplorer, workspaceFileRevision, tree.rootCache?.loading])
 
   // Expand each relative Workspace ancestor without replacing an existing
   // multi-selection, then scroll after async reads project the target row.
   useEffect(() => {
-    if (!activePath || activePath === lastRevealedPathRef.current) return
+    if (!active || !activePath || activePath === lastRevealedPathRef.current) return
     lastRevealedPathRef.current = activePath
     const nextExplorerState = revealFileExplorerPath(explorerState, activePath)
     if (workspaceId && nextExplorerState !== explorerState) {
@@ -569,11 +573,11 @@ export function FileExplorer({
       requestId: autoRevealRequestIdRef.current,
       focus: false
     })
-  }, [activePath, explorerState, updateExplorerState, workspaceId])
+  }, [active, activePath, explorerState, updateExplorerState, workspaceId])
 
   useEffect(() => {
     if (
-      !revealRequest ||
+      !active || !revealRequest ||
       revealRequest.workspaceId !== workspaceId ||
       !fileExplorerContains(rootPath, revealRequest.path) ||
       revealRequest.requestId === lastRevealRequestIdRef.current
@@ -592,7 +596,7 @@ export function FileExplorer({
       requestId: revealRequest.requestId,
       focus: true
     })
-  }, [revealRequest, workspaceId, rootPath])
+  }, [active, revealRequest, workspaceId, rootPath])
 
   // Continuous filesystem watch would need a cross-host owner. Until the mux
   // decision, refresh on application focus through the same Local/SSH IPC
@@ -600,10 +604,11 @@ export function FileExplorer({
   // 重获焦点这条路尤其要连 git 一起刷：用户切到终端里跑了 agent 或 git 命令，回到 AgentMux 时
   // 期待看到的正是"哪些文件被改了"，而那是 git 那半边的事。
   useEffect(() => {
+    if (!active) return
     const refreshOnFocus = () => void refreshExplorer()
     window.addEventListener('focus', refreshOnFocus)
     return () => window.removeEventListener('focus', refreshOnFocus)
-  }, [refreshExplorer])
+  }, [active, refreshExplorer])
 
   const rows = useMemo(
     () => flattenFileTree(tree.rootCache?.children ?? [], tree.dirCache, expanded),
@@ -624,7 +629,7 @@ export function FileExplorer({
   const viewport = useFileTreeViewport(rowProjection, treeRootRef, retainedPaths,
     `${workspaceId}\0${workspacePath}\0${rootPath}`)
   useEffect(() => {
-    if (!scrollTarget || !rowProjection.hasPath(scrollTarget.path)) return
+    if (!active || !scrollTarget || !rowProjection.hasPath(scrollTarget.path)) return
     viewport.scrollToPath(scrollTarget.path)
     if (!scrollTarget.focus) return
     const frame = requestAnimationFrame(() => {
@@ -638,10 +643,10 @@ export function FileExplorer({
       }
     })
     return () => cancelAnimationFrame(frame)
-  }, [scrollTarget, rowProjection, viewport.scrollToPath])
+  }, [active, scrollTarget, rowProjection, viewport.scrollToPath])
   useEffect(() => {
-    if (editPath !== undefined) viewport.scrollToPath(editPath)
-  }, [editPath, viewport.scrollToPath])
+    if (active && editPath !== undefined) viewport.scrollToPath(editPath)
+  }, [active, editPath, viewport.scrollToPath])
   const selectedNode = selectedPath ? rowProjection.getRowByPath(selectedPath) : null
   const createParent = selectedNode?.isDirectory
     ? selectedNode.path
@@ -776,10 +781,10 @@ export function FileExplorer({
   }
 
   useEffect(() => {
-    if (createRequest && fileExplorerContains(rootPath, createRequest.parentPath)) {
+    if (active && createRequest && fileExplorerContains(rootPath, createRequest.parentPath)) {
       beginCreate('create-file', createRequest.parentPath); onCreateRequestHandled?.()
     }
-  }, [createRequest, workspaceId, rootPath])
+  }, [active, createRequest, workspaceId, rootPath])
 
   function pathsForContext(node: TreeNode): string[] {
     return selection.selectedPaths.has(node.path)
