@@ -11,8 +11,8 @@ import { recoveryOperationId, createRecoveryAgent, analyzeWithRecoveryMote, insp
   type RecoveryMode, type RecoverySource, type RecoveryActionResult } from '../lib/session-recovery-actions'
 
 /** Explicit choices share the existing spatial/queue correlation across dialog and Renderer mounts. */
-export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', workingLabel = 'Restoring…', onRestore }: {
-  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; workingLabel?: string; onRestore: () => void
+export function SessionRecoveryActions({ source, restoring, restoreDisabled = false, restoreLabel = 'Restore original', workingLabel = 'Restoring…', onRestore, onTakeOver }: {
+  source: RecoverySource; restoring: boolean; restoreDisabled?: boolean; restoreLabel?: string; workingLabel?: string; onRestore: () => void; onTakeOver?: () => void
 }) {
   const [mode, setMode] = useState<RecoveryMode | null>(null), [destination, setDestination] = useState<'agent' | 'mote'>('agent')
   const config = useAppStore(state => mode ? state.config : null)
@@ -73,13 +73,12 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
     } catch (failure) { if (current()) setError(presentError(failure)) }
     finally { submitting.current = false; if (active.current) setBusy(false) }
   }
-  const title = mode === 'takeover' ? 'Take over the original work' : 'Analyze the original work'
   const canSubmit = existing || (destination === 'agent' ? Boolean(executorId && config?.executors[executorId]) : Boolean(target))
   return <div className="session-recovery-actions">
     <button type="button" className="small-button" disabled={restoreDisabled || restoring} title={source.diagnostic} onClick={onRestore}>
       <RotateCcw size={12} /> {restoring ? workingLabel : restoreLabel}
     </button>
-    <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMode('takeover') }}><ArrowRight size={12} /> Take over…</button>
+    {onTakeOver ? <button type="button" className="small-button" data-takeover-session-id={source.agentSessionId} data-takeover-region-id={source.regionId} onClick={onTakeOver}><ArrowRight size={12} /> Take over</button> : null}
     <button type="button" className="small-button" onClick={() => { setDestination('agent'); setExecutorId(''); setMoteKey(''); setMode('analyze') }}><Search size={12} /> Analyze…</button>
     <Dialog.Root open={mode !== null} onOpenChange={next => { if (!next) close() }}>
       <Dialog.Portal container={resolveOverlayContainer()}>
@@ -89,13 +88,13 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
           onCloseAutoFocus={event => { event.preventDefault(); const originalFocus = previousFocus.current, focused = document.activeElement
             if (originalFocus?.isConnected && (focused === document.body || focused === originalFocus || !focused?.isConnected || openedContent.current?.contains(focused))) originalFocus.focus({ preventScroll: true }) }}
           onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
-          <Dialog.Title>{title}</Dialog.Title>
-          <Dialog.Description>{mode === 'takeover' ? 'Create an independent Agent. It will read the original record first, then continue the unfinished task.' : 'Choose a new Agent or a Mote to read and assess the original work. Analysis does not execute the task.'} The original Session and drafts stay available.</Dialog.Description>
+          <Dialog.Title>Analyze the original work</Dialog.Title>
+          <Dialog.Description>Choose a new Agent or a Mote to read and assess the original work. Analysis does not execute the task. The original Session and drafts stay available.</Dialog.Description>
           <div className="session-recovery-dialog__source"><span>Original Session</span><strong>{source.agentSessionId}</strong><span>Host · {source.hostId}</span></div>
-          {mode === 'analyze' ? <fieldset disabled={busy || existing}><legend>Send analysis to</legend>
+          <fieldset disabled={busy || existing}><legend>Send analysis to</legend>
             <label><input type="radio" name="recovery-destination" checked={destination === 'agent'} onChange={() => setDestination('agent')} /> New Agent</label>
             <label><input type="radio" name="recovery-destination" checked={destination === 'mote'} onChange={() => setDestination('mote')} /> Chosen Mote</label>
-          </fieldset> : null}
+          </fieldset>
           {destination === 'agent' ? <label className="session-recovery-dialog__field">Executor
             <select aria-label="Recovery Executor" value={executorId} disabled={busy || existing} onChange={event => { setExecutorId(event.target.value); setResult(null) }}>
               <option value="">Choose an Executor…</option>{Object.entries(config?.executors ?? {}).map(([id, executor]) => <option key={id} value={id}>{executor.label} · {id}</option>)}
@@ -112,7 +111,7 @@ export function SessionRecoveryActions({ source, restoring, restoreDisabled = fa
           {result?.kind === 'confirmed' && !error ? <p role="status">{result.message}</p> : result || error ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: { step: 'Request unconfirmed', mode: error ?? result!.message, restore: 'Check the original request.' } }} /> : null}
           <footer><button ref={cancel} type="button" className="small-button" disabled={busy} onClick={close}>{result?.kind === 'confirmed' ? 'Done' : 'Cancel'}</button>
             <button type="button" className="small-button session-recovery-dialog__confirm" disabled={busy || !canSubmit} onClick={() => void submit()}>
-              {busy ? 'Checking…' : existing || result ? 'Check original request' : destination === 'mote' ? 'Send analysis' : mode === 'takeover' ? 'Create takeover Agent' : 'Create analysis Agent'}
+              {busy ? 'Checking…' : existing || result ? 'Check original request' : destination === 'mote' ? 'Send analysis' : 'Create analysis Agent'}
             </button></footer>
         </Dialog.Content>
       </Dialog.Portal>

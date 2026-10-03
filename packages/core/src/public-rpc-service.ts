@@ -1,3 +1,4 @@
+import { parseAgentContextParams, readAgentContext, forwardAgentContextParams, forwardAgentContextPage } from './agent-context.js'
 import { inspectNotebook } from './notebook-catalog.js'
 import { AgentMuxNotebookStore } from './notebook-store.js'
 import { isTopicMethod, parseTopicParams, parseTopicResult, type AgentMuxRpcTopicsOwner, type TopicMethod } from './public-rpc-topics.js'
@@ -90,6 +91,7 @@ const NATIVE_FIELDS = {
   'space.resolve': ['tabId','regionId','direction'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
+  'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.history': ['hostId', 'agentSessionId', 'source', 'limit', 'cursor', 'maxBytes'],
   'agent.reopen': ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows'], 'agent.reopen.check': ['agentSessionId', 'expectedRetiredAt', 'operationId'], 'agent.role.ls': ['workspacePath'],
   'agent.role.register': ['role', 'providerId'], 'agent.role.resolve': ['role', 'workspacePath'],
@@ -457,6 +459,25 @@ export class AgentMuxRpcService {
         result = await diagnoseAgentMux({ client, ...(workspacePath === undefined ? {} : { workspacePath }) }); break
       }
       case 'agent.ls': result = await this.sessions(p); break
+      case 'agent.context': {
+        const input = parseAgentContextParams(p)
+        const scopes = (await this.clients()).filter(scope => scope.hostId === input.hostId)
+        if (scopes.length !== 1) throw new AgentMuxError('Context requires one exact original Host owner.', scopes.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
+        const scope = scopes[0]!
+        if (scope.client.forwardRpc) {
+          // Configured Host names are routes on this client. The remote Core owns
+          // its local namespace; never pass a Desktop route as native identity.
+          const forwarded = forwardAgentContextParams(input)
+          const page = await scope.client.forwardRpc('agent.context', forwarded.params, context)
+          result = forwardAgentContextPage(page, input, forwarded.sourceHostId)
+          break
+        }
+        const descriptor = (await scope.client.sessionHistorySources()).find(source => source.agentSessionId === input.agentSessionId && source.hostId === input.hostId)
+        if (!descriptor) throw new AgentMuxError('The exact original Session is not retained on this Host.', 'UNKNOWN_AGENT_SESSION')
+        context.signal?.throwIfAborted()
+        result = await readAgentContext(scope.client, input, descriptor)
+        break
+      }
       case 'agent.inspect': {
         const target = rpcRecord(p.target)
         if (target.kind === 'self') { this.requireCaller(caller); rpcRecord(target, ['kind']) }

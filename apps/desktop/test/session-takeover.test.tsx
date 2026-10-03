@@ -1,0 +1,267 @@
+import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+// @vitest-environment happy-dom
+import { webcrypto } from 'node:crypto'
+import { act } from 'react'
+import type { Root } from 'react-dom/client'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { api } from '../src/renderer/src/lib/api'
+import { useAppStore, executorDetectionKey } from '../src/renderer/src/store'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { inspectTakeover, takeOverSession, takeoverExecution, takeoverPrompt, type TakeoverSource } from '../src/renderer/src/lib/session-takeover'
+import { SessionPane } from '../src/renderer/src/components/SessionPane'
+import { SessionTakeoverSurface } from '../src/renderer/src/components/SessionTakeoverSurface'
+import { NewTabSurface } from '../src/renderer/src/components/NewTabSurface'
+import { createClientUiRoot } from './helpers/client-ui-render'
+import { agentCreationFixture } from './helpers/agent-creation-fixture'
+import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/shared/contracts'
+
+const initial = useAppStore.getState()
+let container: HTMLDivElement, root: Root, dispose: (() => void) | undefined
+let config: AppConfig, original: Extract<SessionSnapshot, { kind: 'agent' }>, source: TakeoverSource
+const diagnostic = 'Original diagnostic ' + 'all retained details; '.repeat(100)
+beforeEach(async () => {
+  vi.stubGlobal('crypto', webcrypto)
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  localStorage.clear()
+  config = { ...await api.config.get(), hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }],
+    executors: { fixture: { label: 'Fixture', providerId: 'codex', command: 'fixture', args: [], env: {}, injectAgentMuxGuide: false } },
+    workspaces: [{ id: 'repo', hostId: 'local', name: 'Repo', path: _hygiene_fixturePath("repo"), kind: 'folder' }] }
+  const seed = (await api.sessions.snapshot()).sessions.find(item => item.kind === 'agent')
+  if (!seed || seed.kind !== 'agent') throw new Error('A nonempty Agent fixture is required')
+  original = { ...seed, id: 'original', executorId: 'fixture', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
+    label: 'Original Agent', control: { ...seed.control, hostId: 'local', agentSessionId: 'original' }, status: { ...seed.status, detail: diagnostic } }
+  vi.spyOn(api.config, 'get').mockResolvedValue(config)
+  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [original], timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  // Each scenario has a fresh external Core spatial store. The Desktop's real
+  // persistence and spatial orchestrator consume it; prior preview cases cannot
+  // reintroduce another case's durable creation intent.
+  let spatial: Awaited<ReturnType<typeof api.spatial.read>> = null
+  vi.spyOn(api.spatial, 'read').mockImplementation(async () => structuredClone(spatial))
+  vi.spyOn(api.spatial, 'commit').mockImplementation(async input => {
+    spatial = { schemaVersion: 1, revision: input.expectedRevision + 1, graph: structuredClone(input.graph) }
+    return structuredClone(spatial)
+  })
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(() => () => {})
+  useAppStore.setState({ ...initial, config: null, restoredWorkbench: null, tabs: {}, layouts: {}, spatialRequests: {}, spaceZoneBindings: {} }, true)
+  dispose = await useAppStore.getState().initialize()
+  const tab = createWorkbenchTab('source-tab', { regionId: 'source-region', kind: 'agent', phase: 'attached', workspaceId: 'repo', sessionId: original.id })
+  useAppStore.setState({ config, sessions: [original], tabs: { [tab.id]: tab }, layouts: { repo: createWorkspaceLayout('source-group', [tab.id]) },
+    activeWorkspaceId: 'repo', mainSurface: 'workbench', viewModes: { original: 'terminal' },
+    agentComposerDrafts: { original: 'Unsent draft stays with the original.' },
+    executorDetections: { [executorDetectionKey('local', 'fixture')]: { state: 'error', error: 'Discovery unavailable' } } })
+  source = { agentSessionId: original.id, hostId: 'local', cwd: _hygiene_fixturePath("repo"), label: original.label, executorId: 'fixture', diagnostic,
+    origin: { workspaceId: 'repo', tabGroupId: 'source-group', tabId: tab.id, regionId: 'source-region' } }
+  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
+})
+afterEach(async () => {
+  await act(async () => root.unmount())
+  dispose?.(); dispose = undefined; document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
+})
+function launched(id: string, operationId: string): AgentLaunchResult {
+  const session = { ...original, id, label: 'Successor', control: { ...original.control, agentSessionId: id, run: { runId: `new:${id}` } } }
+  return { created: { ...agentCreationFixture(session), creation: { createOperationId: operationId, initialPrompt: 'confirmed' } },
+    creation: { createOperationId: operationId, initialPrompt: 'confirmed' }, session,
+    timeline: { agentSessionId: id, revision: 0, items: [] }, projectionFailures: [] }
+}
+function launchBoundary() {
+  return vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launched(input.agentSessionId!, input.createOperationId!))
+}
+async function mountPicker(onClose = vi.fn()) {
+  await act(async () => root.render(<SessionTakeoverSurface source={source} active onClose={onClose} />))
+  return onClose
+}
+
+it('the real Agent Region exposes Take over and opening/cancelling keeps its draft without launching', async () => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  await act(async () => root.render(<SessionPane sessionId={original.id} surfaceKind="agent" visible parked interactiveResize={false} linkOrigin={source.origin} />))
+  const trigger = document.querySelector<HTMLButtonElement>('.agent-region-header__more')!
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('.agent-region-menu')).not.toBeNull()) })
+  const entry = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Take over')
+  expect(entry, 'The actual Region production entry must be reachable').toBeDefined()
+  await act(async () => entry!.click())
+  expect(document.querySelector('.session-takeover')).not.toBeNull()
+  expect(document.querySelector('[role="dialog"]')).toBeNull()
+  await act(async () => document.querySelector('.session-takeover')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  expect(document.querySelector('.session-takeover')!.hasAttribute('inert')).toBe(true)
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover')).toBeNull() })
+  expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('the shared Launcher picker retains unknown choices and has no warm-terminal side effect in takeover', async () => {
+  const prewarm = vi.spyOn(useAppStore.getState(), 'prewarmTerminal'), launch = launchBoundary()
+  const tab = createWorkbenchTab('launcher-tab', { regionId: 'launcher-region', kind: 'launcher', workspaceId: 'repo' })
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [tab.id]: tab } }))
+  await act(async () => root.render(<NewTabSurface tabGroupId="source-group" tabId={tab.id} regionId="launcher-region" visible={false} />))
+  expect(document.querySelector('.agent-catalog .agent-pick[data-executor-id="fixture"]')).not.toBeNull()
+  await mountPicker()
+  expect(document.querySelector('.agent-catalog .agent-pick[data-executor-id="fixture"]')).not.toBeNull()
+  expect(document.querySelector('.agent-pick')!.hasAttribute('disabled')).toBe(false)
+  expect(document.querySelectorAll('select')).toHaveLength(0)
+  expect(document.querySelector('.session-takeover')!.textContent).not.toMatch(/history source/i)
+  expect(prewarm).not.toHaveBeenCalled(); expect(launch).not.toHaveBeenCalled()
+})
+
+it('one choice reaches the real spatial owner, hands over complete context and preserves the original', async () => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  const beforeTab = structuredClone(useAppStore.getState().tabs['source-tab']), beforeAgent = structuredClone(original)
+  const onClose = await mountPicker()
+  const pick = document.querySelector<HTMLButtonElement>('.agent-pick[data-executor-id="fixture"]')!
+  await act(async () => { pick.click(); pick.click(); await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(1)) })
+  await act(async () => { await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1)) })
+  const input = launch.mock.calls[0]![0]
+  expect(input.hostId).toBe('local'); expect(input.workspacePath).toBe(_hygiene_fixturePath("repo"))
+  expect(input.prompt).toContain(diagnostic)
+  expect(input.prompt).toContain('agent context --host local --session \'original\'')
+  expect(input.prompt).toContain('saved Core work record and Provider conversation')
+  expect(input.prompt).toContain('nextCursor')
+  expect(useAppStore.getState().tabs['source-tab']).toEqual(beforeTab)
+  expect(useAppStore.getState().sessions.find(item => item.id === 'original')).toEqual(beforeAgent)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+  expect(Object.keys(useAppStore.getState().tabs)).toHaveLength(2)
+  expect(stop).not.toHaveBeenCalled()
+  const repeated = await takeOverSession(source, 'fixture', () => true)
+  expect(repeated.agent?.agentSessionId).toBe(input.agentSessionId)
+  expect(launch).toHaveBeenCalledTimes(1)
+})
+
+it('a moved display uses the exact original execution Zone instead of the display Host', async () => {
+  config = { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Build', hostname: 'private.invalid' }],
+    workspaces: [...config.workspaces, { id: 'execution', hostId: 'remote', path: _hygiene_fixturePath("srv/repo"), name: 'Remote', kind: 'folder' }] }
+  original = { ...original, workspacePath: _hygiene_fixturePath("srv/repo"), control: { ...original.control, hostId: 'remote' } }
+  source = { ...source, hostId: 'remote', cwd: _hygiene_fixturePath("srv/repo") }
+  useAppStore.setState({ config, sessions: [original] })
+  const launch = launchBoundary()
+  const report = await takeOverSession(source, 'fixture', () => true)
+  expect(report.outcome).toBe('opened')
+  expect(launch.mock.calls[0]![0]).toMatchObject({ hostId: 'remote', workspacePath: _hygiene_fixturePath("srv/repo") })
+  expect(launch.mock.calls[0]![0].prompt).toContain('"hostId":"remote"')
+  expect(launch.mock.calls[0]![0].prompt).toContain('agent context --host local')
+  expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
+})
+
+it('a failed creation keeps its correlation and visible feedback; Check again never resends', async () => {
+  const launch = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(new Error('Original Host temporarily unavailable'))
+  await mountPicker()
+  await act(async () => document.querySelector<HTMLButtonElement>('.agent-pick')!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.session-takeover__issue')).not.toBeNull() })
+  expect(document.querySelector('.session-takeover__issue')!.textContent).toContain('Original Host temporarily unavailable')
+  expect(useAppStore.getState().layouts.repo!.groups[0]!.activeTabId).toBe('source-tab')
+  await act(async () => document.querySelector<HTMLButtonElement>('.session-takeover__issue button')!.click())
+  await inspectTakeover(source)
+  expect(launch).toHaveBeenCalledTimes(1)
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('a changed source and a cancelled admission cannot target a replacement Agent', async () => {
+  const launch = launchBoundary()
+  await expect(takeOverSession(source, 'fixture', () => false)).rejects.toThrow('original Region or Session changed')
+  useAppStore.setState({ tabs: { 'source-tab': createWorkbenchTab('source-tab', { regionId: 'source-region', kind: 'agent', phase: 'attached', workspaceId: 'repo', sessionId: 'replacement' }) } })
+  await expect(takeOverSession(source, 'fixture', () => true)).rejects.toThrow('original Region or Session changed')
+  expect(launch).not.toHaveBeenCalled()
+})
+
+it('an absent source Host is explicit and never borrows the display Host', async () => {
+  const launch = launchBoundary()
+  useAppStore.setState({ sessions: [] })
+  vi.mocked(api.spatial.read).mockResolvedValue(null)
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  await expect(takeOverSession({ ...source, hostId: undefined, cwd: undefined }, 'fixture', () => true)).rejects.toThrow()
+  expect(launch).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
+})
+
+it('the complete retained first task and diagnostic are provided without frontend clipping', () => {
+  const prompt = 'Original task '.repeat(200) + 'TASK-END'
+  useAppStore.setState({ pendingAgentLaunches: { original: { events: [], overflowed: false, request: { hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), executorId: 'fixture', prompt } } } })
+  expect(takeoverPrompt(source)).toContain(prompt)
+  expect(takeoverPrompt(source)).toContain(diagnostic)
+})
+
+it('a retired original source is re-read from Core metadata independently of the display Host', async () => {
+  config = { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Build', hostname: 'private.invalid' }],
+    workspaces: [...config.workspaces, { id: 'execution', hostId: 'remote', path: _hygiene_fixturePath("srv/repo"), name: 'Remote', kind: 'folder' }] }
+  original = { ...original, workspacePath: _hygiene_fixturePath("srv/repo"), control: { ...original.control, hostId: 'remote' } }
+  useAppStore.setState({ config, sessions: [] })
+  const histories = [{ agentSessionId: 'original', hostId: 'remote', state: 'retired' as const, retiredAt: 10,
+    history: { providerId: 'codex', executorId: 'fixture', workspacePath: _hygiene_fixturePath("srv/repo"), createdAt: 1 } }]
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue(histories)
+  const read = vi.mocked(api.spatial.read).getMockImplementation()!
+  vi.mocked(api.spatial.read).mockImplementation(async () => {
+    const snapshot = await read()
+    // The external Core has the same original remote binding; the Desktop
+    // display deliberately remains on local. Preserve the actual write boundary.
+    snapshot?.graph.regions.forEach(region => {
+      if (region.agentSessionId === 'original') region.execution = { hostId: 'remote', cwd: _hygiene_fixturePath("srv/repo") }
+    })
+    return snapshot
+  })
+  expect(takeoverExecution('original', histories)).toEqual({ hostId: 'remote', cwd: _hygiene_fixturePath("srv/repo"), executorId: 'fixture' })
+  const launch = launchBoundary()
+  const report = await takeOverSession({ ...source, hostId: 'remote', cwd: _hygiene_fixturePath("srv/repo") }, 'fixture', () => true)
+  expect(report.outcome).toBe('opened')
+  expect(launch.mock.calls[0]![0]).toMatchObject({ hostId: 'remote', workspacePath: _hygiene_fixturePath("srv/repo") })
+  expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
+})
+
+it('conflicting retained source Hosts stay unknown and a stale Host cannot be substituted', async () => {
+  useAppStore.setState({ sessions: [] })
+  const histories = ['local', 'other'].map(hostId => ({ hostId, agentSessionId: 'original', state: 'retired' as const, retiredAt: 10,
+    history: { providerId: 'codex', executorId: 'fixture', workspacePath: _hygiene_fixturePath("repo"), createdAt: 1 } }))
+  expect(takeoverExecution('original', histories)).toBeNull()
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue(histories)
+  vi.mocked(api.spatial.read).mockResolvedValue(null)
+  const launch = launchBoundary()
+  await expect(takeOverSession(source, 'fixture', () => true)).rejects.toThrow('unconfirmed or ambiguous')
+  vi.mocked(api.sessions.historySources).mockResolvedValue([histories[1]!])
+  await expect(takeOverSession(source, 'fixture', () => true)).rejects.toThrow('execution identity changed')
+  expect(launch).not.toHaveBeenCalled()
+})
+
+it('a fresh Core Region replacement refuses the stale Desktop source without touching either Session', async () => {
+  const graph = desktopSpatialGraph(useAppStore.getState(), [])
+  graph.regions.find(region => region.regionId === 'source-region')!.agentSessionId = 'replacement'
+  useAppStore.setState({ sessions: [] })
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([{ hostId: 'local', agentSessionId: 'original', state: 'retired', retiredAt: 10,
+    history: { providerId: 'codex', executorId: 'fixture', workspacePath: _hygiene_fixturePath("repo"), createdAt: 1 } }])
+  vi.mocked(api.spatial.read).mockResolvedValue({ schemaVersion: 1, revision: 2, graph })
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  await expect(takeOverSession(source, 'fixture', () => true)).rejects.toThrow('Core confirms the original Region')
+  expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
+it('a confirmed Core execution binding keeps takeover usable when history observation fails', async () => {
+  config = { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Build', hostname: 'private.invalid' }],
+    workspaces: [...config.workspaces, { id: 'execution', hostId: 'remote', path: _hygiene_fixturePath("srv/repo"), name: 'Remote', kind: 'folder' }] }
+  original = { ...original, hostId: 'remote', workspacePath: _hygiene_fixturePath("srv/repo"), control: { ...original.control, hostId: 'remote' } }
+  useAppStore.setState({ config, sessions: [original] })
+  // Let the real Desktop persistence ACK this binding before withholding the
+  // next Runtime observation. An external write racing an older fixture ACK
+  // would substitute a different source instead of testing an observation gap.
+  await vi.waitFor(async () => {
+    const spatial = await api.spatial.read()
+    expect(spatial?.graph.regions.find(region => region.regionId === 'source-region')?.execution)
+      .toEqual({ hostId: 'remote', cwd: _hygiene_fixturePath("srv/repo") })
+  })
+  vi.mocked(api.sessions.snapshot).mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  useAppStore.setState({ sessions: [] })
+  const failure = 'History probe failed; '.repeat(100) + 'FULL-FAILURE-END'
+  vi.spyOn(api.sessions, 'historySources').mockRejectedValue(new Error(failure))
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  const report = await takeOverSession({ ...source, hostId: undefined, cwd: undefined }, 'fixture', () => true)
+  expect(report.outcome).toBe('opened')
+  expect(launch.mock.calls[0]![0]).toMatchObject({ hostId: 'remote', workspacePath: _hygiene_fixturePath("srv/repo") })
+  expect(launch.mock.calls[0]![0].prompt).toContain(failure)
+  expect(launch.mock.calls[0]![0].prompt).toContain('agent context --host local')
+  expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+  expect(stop).not.toHaveBeenCalled()
+})

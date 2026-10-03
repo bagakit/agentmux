@@ -55,6 +55,7 @@
 @import './session-connecting.css';
 @import '@agentmux/client-ui/styles/composer.css';
 @import './launcher.css';
+@import './session-takeover.css';
 @import './resume.css';
 @import './activity.css';
 @import '@agentmux/client-ui/styles/conversation-message.css';

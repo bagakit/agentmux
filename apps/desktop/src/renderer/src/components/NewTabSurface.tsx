@@ -1,6 +1,6 @@
 import { AgentAvatar } from './AgentAvatar'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
-import { Check, ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
+import { ChevronRight, ChevronDown, LoaderCircle, Minus, Play, RefreshCw, X } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import { executorDetectionKey, useAppStore, warmTerminalKey } from '../store'
@@ -17,7 +17,6 @@ import { expandSemanticReferences } from '@agentmux/client-ui/composer-semantic-
 import { launcherCanLaunch, launcherKeydownLaunches } from '../lib/launcher-submit'
 import { resolveLauncherWorkspaceId } from '../lib/launcher-workspace'
 import { warmLauncherId, warmTerminalPreview } from '../lib/warm-terminal-preview'
-import { agentProviderLabel } from './AgentProviderIcon'
 import { InlineComposer } from '@agentmux/client-ui/components/InlineComposer'
 import { LaunchRefine } from './LaunchOptionControls'
 import { isMacPlatform } from '../lib/host-platform'
@@ -33,7 +32,7 @@ import { LauncherMoteAction } from './LauncherMoteAction'
 import { LauncherResumePicker } from './LauncherResumePicker'
 import { LauncherEnvironment } from './LauncherEnvironment'
 import { LauncherFileReferences } from './LauncherFileReferences'
-import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
+import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { DEFAULT_LAUNCHER_SECTIONS, useLauncherState, type LauncherSection, type LauncherSectionMode } from '../lib/launcher-state'
 import { PMO_TEAMS_TOPIC_ID } from '../../../shared/scratch-topics'
 import { primaryMoteExecutorId, primaryMoteHasBot } from '../lib/primary-mote-executor'
@@ -93,7 +92,6 @@ export function NewTabSurface({
   useEffect(() => { if (!motionActive) setOptionsExpanded(false) }, [motionActive])
   const [busy, setBusy] = useState<'agent' | 'terminal' | 'browser' | 'note' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [showUnavailable, setShowUnavailable] = useState(false)
   const config = useAppStore((state) => state.config)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
@@ -163,7 +161,6 @@ export function NewTabSurface({
   )
   // An unconfirmed discovery check is not evidence that the configured Agent cannot work.
   const installedExecutors = executors.filter(executor => executor.detection?.state !== 'missing').sort((a, b) => Number(b.detection?.state === 'ready') - Number(a.detection?.state === 'ready'))
-  const unavailableExecutors = executors.filter(executor => executor.detection?.state === 'missing')
   const detecting = executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
   const sections = { ...DEFAULT_LAUNCHER_SECTIONS,
@@ -376,21 +373,8 @@ export function NewTabSurface({
       </div> : null}
 
       {sections.agents === 'expanded' ? <>
-        <div className="agent-catalog" aria-label="Agent executors">
-          <div className="agent-picks">
-            <LiquidSelectionSurface selected={displayedExecutorId || null} active={visible && presentationActive} targetAttribute="data-executor-id" />
-            {installedExecutors.map(executor => <button type="button" key={executor.id} data-executor-id={executor.id} aria-pressed={executor.id === displayedExecutorId}
-              className={`agent-pick ${executor.id === displayedExecutorId ? 'agent-pick--selected' : ''}`}
-              title={`${agentProviderLabel(executor.providerId)} · ${executorDetectionLabel(executor.detection)}`} onClick={() => chooseExecutor(executor.id)}>
-              <AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={16} /><strong>{executor.label}</strong>
-              {executor.detection?.state !== 'ready' ? <span className="agent-pick__unconfirmed" aria-label={executorDetectionLabel(executor.detection)}>?</span> : null}
-              {executor.id === displayedExecutorId ? <Check size={12} className="agent-pick__check" /> : null}
-            </button>)}
-            {unavailableExecutors.length ? <button type="button" className="launcher-other-agents" aria-expanded={showUnavailable} onClick={() => setShowUnavailable(value => !value)}>{showUnavailable ? 'Hide unavailable' : `Unavailable · ${unavailableExecutors.length}`}<ChevronDown size={12} /></button> : null}
-            {!executors.length ? <div className="agent-catalog__empty">No Agent is configured.{settings ? <button type="button" className="small-button" onClick={() => settings.open('agents')}>Configure an Agent</button> : ' Add one in Settings to launch here.'}</div> : !installedExecutors.length ? <div className="agent-catalog__empty">Configured Agent commands were not found on this host. Recheck after installation.</div> : null}
-          </div>
-          {showUnavailable ? <div className="launcher-unavailable-agents">{unavailableExecutors.map(executor => <span key={executor.id} title={executor.detection?.detail}><AgentAvatar executorId={executor.id} label={executor.label} providerId={executor.providerId} size={14} /><strong>{executor.label}</strong><small>{executorDetectionLabel(executor.detection)}</small></span>)}</div> : null}
-        </div>
+        <AgentExecutorPicker executors={executors} selected={displayedExecutorId || null}
+          active={visible && presentationActive} onSelect={chooseExecutor} />
         <div className="launcher-composer composer"><InlineComposer aria-label="Agent prompt" disabled={false} readPastedImage={path => api.ui.readPastedImage(path)} insertionRef={insertionRef}
           onPasteImage={(file, insert) => { void feedback.run(async () => {
             if (host?.kind !== 'local') throw new Error('This image has not been sent to the selected machine. Your draft is kept; use Files to reference an image in that project, or paste it after choosing this Mac.')

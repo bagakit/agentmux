@@ -162,6 +162,7 @@ type NativeParams = TopicParameterMap & FileParameterMap & ScheduleParamsMap & A
   whoami: Record<string, never>
   'agent.ls': { agentSessionId?: string; executorId?: string; status?: string; since?: number; limit?: number }
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
+  'agent.context': import('./agent-context.js').AgentContextParams
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadInput
   'agent.reopen': Parameters<AgentMuxClient['reopenAgent']>[0]
   'agent.reopen.check': Parameters<AgentMuxClient['reconcileAgentReopen']>[0]
@@ -199,6 +200,7 @@ type NativeResult = TopicResultMap & FileResultMap & ScheduleResultMap & AgentMu
   'agent.ls': { sessions: Awaited<ReturnType<AgentMuxClient['statusAgent']>>[];
     errors: Array<{ agentSessionId: string | null; hostId?: string; code: string; message: string }> }
   'agent.inspect': AgentMuxRpcAgentInspection
+  'agent.context': import('./agent-context.js').AgentContextPage
   'agent.history': import('./session-history-reader.js').AgentSessionHistoryReadPage
   'agent.reopen': { session: Awaited<ReturnType<AgentMuxClient['reopenAgent']>> }
   'agent.reopen.check': { session: Awaited<ReturnType<AgentMuxClient['reconcileAgentReopen']>> }
@@ -245,7 +247,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'notebook.ls': 'short', 'notebook.inspect': 'short', 'notebook.apply': 'long',
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short',
-  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.history': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
+  whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.context': 'long', 'agent.history': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',
   'agent.role.ls': 'short', 'agent.role.register': 'long', 'agent.role.resolve': 'short',
   'agent.send': 'long', 'agent.discuss': 'long', 'agent.handoff': 'short',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
