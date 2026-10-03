@@ -31,6 +31,7 @@ import type {
 import type { AgentMuxControlErrorCode } from '@agentmux/core/control'
 import type { BrowserOperation, BrowserOperationStep, BrowserReplayPlan, BrowserReplayStep } from '../shared/browser-operation.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
+import { resolveBrowserAddress } from '../shared/browser-address.js'
 import type { BrowserInputHistoryScope } from '../shared/browser-input-history.js'
 import { showBrowserOperationFeedback, type BrowserOperationFeedback } from './browser-operation-feedback.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
@@ -297,13 +298,7 @@ export function normalizeBrowserUrl(value: string): string {
     const fileUrl = input.startsWith('file://') ? input : pathToFileURL(input).toString()
     return assertAllowedBrowserUrl(fileUrl)
   }
-  if (/\s/.test(input) && !/^[A-Za-z][A-Za-z\d+.-]*:\/\//.test(input)) {
-    return `https://www.google.com/search?q=${encodeURIComponent(input)}`
-  }
-  const localAddress = /^(localhost|127(?:\.\d{1,3}){3}|\[::1\])(?::|\/|$)/i.test(input)
-  const hasProtocol = /^[A-Za-z][A-Za-z\d+.-]*:/.test(input)
-  const withProtocol = localAddress ? `http://${input}` : hasProtocol ? input : `https://${input}`
-  return assertAllowedBrowserUrl(withProtocol)
+  return assertAllowedBrowserUrl(resolveBrowserAddress(input))
 }
 
 export class BrowserViewManager {
