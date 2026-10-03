@@ -5,6 +5,8 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts'
 import type { SettingsModule, SettingsPaneProps } from '../src/renderer/src/components/settings/settings-catalog'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
+// This shell test owns navigation and drafts; the browser-only Monaco leaf has its own gates.
+vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ default: () => <textarea data-inline-editor /> }))
 const registration = vi.hoisted(() => ({ originalIds: [] as string[] }))
 
 // Extend only the real compile-time composition. Panel has no fixture prop and the generic
@@ -191,8 +193,8 @@ it('finds the saved local Auth tool through ordinary auth and usage settings sea
   for (const query of ['auth', 'account', '用量']) {
     await input('[aria-label="Search settings"]', query)
     expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')]
-      .map(node => node.textContent)).toEqual(['Toolkit'])
-    expect(connected('.settings-content__header h2').textContent).toBe('Toolkit')
+      .map(node => node.textContent)).toEqual(['Tool library'])
+    expect(connected('.settings-content__header h2').textContent).toBe('Tool library')
     expect(connected<HTMLElement>('[data-settings-pane="toolkit"]').hidden).toBe(false)
   }
   const local = connected<HTMLButtonElement>('[data-tool-id="auth"]')
@@ -201,6 +203,37 @@ it('finds the saved local Auth tool through ordinary auth and usage settings sea
   await act(async () => local.click())
   expect(connected<HTMLInputElement>('.toolkit-editor__name input').value).toBe('Auth')
   expect(dom.container.querySelector('[data-tool-template]')).toBeNull()
+  expect(save).not.toHaveBeenCalled()
+  expect(add).not.toHaveBeenCalled()
+  expect(run).not.toHaveBeenCalled()
+})
+
+it('presents Toolkit beside Preferences through the actual shell and preserves the authored tool draft across pages', async () => {
+  useAppStore.setState({ config: { ...composerConfig, toolkit: { tools: [{ id: 'custom-summary', name: 'My summary', icon: 'terminal', enabled: true, statusBar: 'icon', script: 'console.log(1)', args: [], revision: 'saved-local', workspacePath: _hygiene_fixturePath("fixed") }] } } })
+  const save = vi.spyOn(api.config, 'save').mockResolvedValue(undefined)
+  const add = vi.spyOn(api.toolkit, 'add')
+  const run = vi.spyOn(api.toolkit, 'run')
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  const overview = connected('[aria-labelledby="settings-overview-toolkit"]')
+  expect(connected('h3', overview).textContent).toBe('Toolkit')
+  expect(connected('[data-settings-section="toolkit"]', overview).textContent).toContain('Tool library')
+  const nav = connected('nav[aria-label="Settings sections"]')
+  const row = connected('[data-settings-target="toolkit"]', nav)
+  expect(row.previousElementSibling!.textContent).toBe('Toolkit')
+  const groups = settingsNavGroups('')
+  expect(groups.map(group => group.title)).toEqual(['Preferences', 'Toolkit', 'Resources', 'Connections'])
+  expect(groups.find(group => group.title === 'Toolkit')!.items.map(item => item.id)).toEqual(['toolkit'])
+  expect(groups.find(group => group.title === 'Preferences')!.items.map(item => item.id)).not.toContain('toolkit')
+  await section('Tool library')
+  expect(connected('.settings-content__breadcrumb').textContent).toBe('Toolkit')
+  await dom.click('[data-tool-id="custom-summary"]')
+  await input('.toolkit-editor__name input', 'Keep my custom draft')
+  const pane = connected('[data-settings-pane="toolkit"]')
+  await section('General')
+  expect(pane.hidden).toBe(true)
+  await section('Tool library')
+  expect(connected('[data-settings-pane="toolkit"]')).toBe(pane)
+  expect(connected<HTMLInputElement>('.toolkit-editor__name input').value).toBe('Keep my custom draft')
   expect(save).not.toHaveBeenCalled()
   expect(add).not.toHaveBeenCalled()
   expect(run).not.toHaveBeenCalled()
