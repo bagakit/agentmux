@@ -39,6 +39,7 @@ export function editorPaneStoreState(): Record<string, unknown> {
     // 复制路径的用例在替身里走上生产里要等快照才走的那条分支。
     localHome: '',
     editorWordWrap: false,
+    editorMinimap: false,
     editorRegionModes: {},
     editorRegionDiffs: {},
     updateDocument: vi.fn(),
@@ -50,6 +51,7 @@ export function editorPaneStoreState(): Record<string, unknown> {
     attachPersistedFileDocument: vi.fn(),
     reportError: vi.fn(),
     toggleEditorWordWrap: vi.fn(),
+    toggleEditorMinimap: vi.fn(),
     setEditorRegionMode: vi.fn(),
     reloadRegionDiff: vi.fn()
   }

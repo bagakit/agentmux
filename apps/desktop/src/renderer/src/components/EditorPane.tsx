@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react'
-import { AlertTriangle, Check, Code, Eye, FolderOpen, GitCompare, MoreHorizontal, RefreshCw, Save, WrapText } from 'lucide-react'
+import { AlertTriangle, Check, Code, Eye, FolderOpen, GitCompare, Map, MoreHorizontal, RefreshCw, Save, WrapText } from 'lucide-react'
 import { api } from '../lib/api'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
@@ -105,6 +105,8 @@ export function EditorPane({
   // controlled/reactive rather than a mount-time constant.
   const wordWrap = useAppStore((state) => state.editorWordWrap)
   const toggleWordWrap = useAppStore((state) => state.toggleEditorWordWrap)
+  const minimap = useAppStore((state) => state.editorMinimap)
+  const toggleMinimap = useAppStore((state) => state.toggleEditorMinimap)
   // Diff is a display MODE of this same file Region, not a separate surface kind: it carries no
   // identity beyond the file it compares, so it lives as per-Region ephemeral state keyed by regionId
   // (never persisted — a diff depends on git HEAD and is transient; reopening returns to edit).
@@ -164,9 +166,10 @@ export function EditorPane({
                   : dirty ? <button className="small-button" title="Save file" aria-label="Save file" onClick={() => void save(tabId, surface.regionId)}><Save size={13} /><span className="editor-header__label">Save</span></button>
                     : <span className="editor-header__status" role="status" aria-label="File saved">Saved</span>}
           <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
-            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu editor-options-menu" align="end" sideOffset={6} collisionPadding={8}>
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="editor-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
-              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="editor-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+            <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+              {regionMode === 'edit' ? <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={minimap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleMinimap()}><Map size={13} /><span>Minimap</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem> : null}
+              <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
               {conflict ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving} onSelect={() => void reload(tabId, surface.regionId)}><RefreshCw size={13} />Reload from disk</DropdownMenu.Item> : null}
               {extraActions ? <><DropdownMenu.Separator className="tab-context-menu__separator" />{extraActions}</> : null}
             </DropdownMenu.Content></DropdownMenu.Portal>

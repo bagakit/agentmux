@@ -688,6 +688,10 @@ type AppState = {
    * 与 toolsOpen 等表面偏好同一档：重开要还在。默认关（off），与 Monaco 默认一致，长行仍可横向滚。
    */
   editorWordWrap: boolean
+  /** Shared viewing preferences; they never alter a document or the Explorer cache. */
+  editorMinimap: boolean
+  explorerShowHidden: boolean
+  explorerShowIgnored: boolean
   /**
    * 每个文件 Region 当前是「编辑」还是「diff」显示模式，按 regionId 存。
    *
@@ -828,6 +832,9 @@ type AppState = {
   setViewMode(sessionId: string, mode: ViewMode, options?: { focus?: boolean }): void
   /** 翻转编辑器换行的全局位。 */
   toggleEditorWordWrap(): void
+  toggleEditorMinimap(): void
+  toggleExplorerShowHidden(): void
+  toggleExplorerShowIgnored(): void
   /**
    * 把一个文件 Region 切到 diff 模式并（若还没有）加载它的 diff；再次调用（mode 'edit'）切回编辑。
    * diff 两侧走既有 git.diff 桥，不新开 shell-out。regionId 承载模式，workspaceId+path 定位文件。
@@ -2176,6 +2183,9 @@ type PersistedAppState = {
   projectRailWidth?: number
   toolDockWidth?: number
   editorWordWrap?: boolean
+  editorMinimap?: boolean
+  explorerShowHidden?: boolean
+  explorerShowIgnored?: boolean
 }
 
 export type RestoredUiState = Pick<
@@ -2205,6 +2215,9 @@ export type RestoredUiState = Pick<
   | 'focusTimelineHeight'
   | 'focusTimelineRuler'
   | 'editorWordWrap'
+  | 'editorMinimap'
+  | 'explorerShowHidden'
+  | 'explorerShowIgnored'
 >
 
 /**
@@ -2290,6 +2303,9 @@ export function restorePersistedUiState(
   | 'focusTimelineHeight'
   | 'focusTimelineRuler'
     | 'editorWordWrap'
+    | 'editorMinimap'
+    | 'explorerShowHidden'
+    | 'explorerShowIgnored'
   >
 ): RestoredUiState {
   return {
@@ -2321,7 +2337,10 @@ export function restorePersistedUiState(
         ? persisted.toolDockWidth
         : TOOL_DOCK_DEFAULT_WIDTH
     ),
-    editorWordWrap: restoredBoolean(persisted.editorWordWrap, false)
+    editorWordWrap: restoredBoolean(persisted.editorWordWrap, false),
+    editorMinimap: restoredBoolean(persisted.editorMinimap, false),
+    explorerShowHidden: restoredBoolean(persisted.explorerShowHidden, true),
+    explorerShowIgnored: restoredBoolean(persisted.explorerShowIgnored, true)
   }
 }
 
@@ -2391,7 +2410,10 @@ function selectPersistedInputs(state: AppState) {
     projectRailWidth: state.projectRailWidth,
     toolDockWidth: state.toolDockWidth,
     // 换行开关是一种查看偏好（像主题），重开要还在——与上面这些表面偏好同一档。
-    editorWordWrap: state.editorWordWrap
+    editorWordWrap: state.editorWordWrap,
+    editorMinimap: state.editorMinimap,
+    explorerShowHidden: state.explorerShowHidden,
+    explorerShowIgnored: state.explorerShowIgnored
   }
 }
 
@@ -2907,6 +2929,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   fileExplorerStates: {},
   viewModes: {},
   editorWordWrap: false,
+  editorMinimap: false,
+  explorerShowHidden: true,
+  explorerShowIgnored: true,
   editorRegionModes: {},
   editorRegionDiffs: {},
   executorDetections: {},
@@ -5276,6 +5301,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   toggleEditorWordWrap() {
     set((state) => ({ editorWordWrap: !state.editorWordWrap }))
+  },
+  toggleEditorMinimap() {
+    set((state) => ({ editorMinimap: !state.editorMinimap }))
+  },
+  toggleExplorerShowHidden() {
+    set((state) => ({ explorerShowHidden: !state.explorerShowHidden }))
+  },
+  toggleExplorerShowIgnored() {
+    set((state) => ({ explorerShowIgnored: !state.explorerShowIgnored }))
   },
   async setEditorRegionMode(regionId, workspaceId, path, mode) {
     set((state) => ({ editorRegionModes: { ...state.editorRegionModes, [regionId]: mode } }))
