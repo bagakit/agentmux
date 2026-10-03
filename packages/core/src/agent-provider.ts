@@ -84,7 +84,15 @@ export type AgentProviderPromptExecutionContext = {
   nativeHandle?: Readonly<AgentNativeSessionHandle>
   /** Only the exact current Core Run can consume its pre-resume native evidence. */
   nativePromptPredecessor?: Readonly<AgentNativePromptPredecessor>
+  /** Cancellation abandons only this read-only observation, never the Agent. */
+  signal?: AbortSignal
 }
+
+export type AgentProviderPreparedPromptTransport = Readonly<{
+  nativeSourceId: string
+  /** A fresh check of the original native writer/source, never cached input authorization. */
+  verifyCurrentTransport(context: AgentProviderPromptExecutionContext): Promise<boolean>
+}>
 
 export type AgentProvider = {
   readonly id: AgentProviderId
@@ -116,6 +124,7 @@ export type AgentProvider = {
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */
   inspectPromptExecution?(screen: AgentTerminalScreenSnapshot): AgentPromptExecutionContext
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
+  preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
@@ -152,6 +161,7 @@ export type AgentProviderDefinition = {
   planPromptInput?: (prompt: string, context?: { execution?: AgentPromptExecution; intent?: 'question-reply'; terminalScreen?: AgentTerminalScreenSnapshot }) => AgentPromptInputPlan
   inspectPromptExecution?: (screen: AgentTerminalScreenSnapshot) => AgentPromptExecutionContext
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
+  preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
@@ -285,6 +295,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.terminalPromptRender ? { terminalPromptRender: { ...definition.terminalPromptRender } } : {}),
     ...(definition.inspectPromptExecution ? { inspectPromptExecution: definition.inspectPromptExecution } : {}),
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
+    ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
