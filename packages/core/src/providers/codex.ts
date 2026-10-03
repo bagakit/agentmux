@@ -1,6 +1,7 @@
 import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from './codex-prompt-execution-evidence.js'
 import { createCodexPromptTransportPreparation } from './codex-prompt-transport-preparation.js'
 import { inspectCodexPromptExecution } from './codex-prompt-execution.js'
+import { createCodexInteractionResponsePreparation } from './codex-interaction-target.js'
 import { inspectCodexHookActivation } from './codex-hook-activation.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
@@ -12,11 +13,66 @@ import { discoverCodexNativeSession } from './codex-native-session.js'
 import { codexQuestionAnswers, codexQuestionComposerNavigation } from './codex-question.js'
 import { readCodexSessionHistoryPage, prepareCodexSessionQuestionReply } from './codex-native-history.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
-import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
+import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
+import { nativeHookToolCallId } from '../hook-normalizer.js'
+import type { AgentHookToolInvocation } from '../types.js'
 import { buildPromptInputPayload, catalog, managedHookCommand, sanitizeBracketedPasteText, hookCommandTimeout } from './shared.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
+
+function openToolInvocation(eventName: string, payload: Readonly<Record<string, unknown>>,
+  context: AgentProviderHookNormalizationContext, mainSubject: boolean): AgentHookToolInvocation | undefined {
+  const previous = context.previousHookReceipt?.toolInvocation
+  if (!mainSubject) return previous
+  const sid = typeof payload.session_id === 'string' && payload.session_id ? payload.session_id : undefined
+  const turn = typeof payload.turn_id === 'string' && payload.turn_id ? payload.turn_id : undefined
+  const path = typeof payload.transcript_path === 'string' && isAbsolute(payload.transcript_path) ? payload.transcript_path : undefined
+  const id = nativeHookToolCallId(payload as Record<string, unknown>)
+  const sameSource = previous && (sid ? sid === previous.nativeSessionId :
+    context.nativeHandle?.kind === 'provider' && context.nativeHandle.sessionId === previous.nativeSessionId) &&
+    (payload.transcript_path === undefined ? context.nativeHandle?.kind === 'provider' &&
+      context.nativeHandle.transcriptPath === previous.nativeTranscriptPath : path === previous.nativeTranscriptPath)
+  const sameTurn = sameSource && (!turn || turn === previous.nativeTurnId)
+  if (eventName === 'Stop' || eventName === 'Interrupt' || eventName === 'SessionStart') return undefined
+  if (eventName === 'PreToolUse' && sid && turn && path && id && typeof payload.tool_name === 'string' && payload.tool_name && payload.tool_input !== undefined) {
+    const toolInput = typeof payload.tool_input === 'string' ? payload.tool_input : JSON.stringify(payload.tool_input)
+    return { nativeSessionId: sid, nativeTurnId: turn, nativeTranscriptPath: path, nativeToolCallId: id, toolName: payload.tool_name, toolInput,
+      ...(sameTurn && (previous.ambiguous || previous.nativeToolCallId !== id) ? { ambiguous: true as const } : {}) }
+  }
+  if (!sameTurn) return undefined
+  // A single exact completion can close its known Pre. One Post cannot prove that
+  // every observed ambiguous candidate has completed; retain ambiguity to turn end.
+  if (eventName === 'PostToolUse' && !previous.ambiguous && id === previous.nativeToolCallId) return undefined
+  return previous
+}
+
+function permissionToolCallId(eventName: string, payload: Readonly<Record<string, unknown>>,
+  context: AgentProviderHookNormalizationContext): string | undefined {
+  const previous = context.previousHookReceipt, invocation = previous?.toolInvocation
+  const native = context.nativeHandle
+  // PermissionRequest omits tool_use_id in the native protocol. Only the exact
+  // immediately preceding authenticated PreToolUse supplies that missing identity.
+  if (eventName !== 'PermissionRequest' || previous?.eventName !== 'PreToolUse' ||
+      previous.providerId !== 'codex' || previous.lifecycleEvent !== 'tool-use-start' ||
+      !previous.nativeTurnId || typeof payload.turn_id !== 'string' || !payload.turn_id || previous.nativeTurnId !== payload.turn_id ||
+      !invocation || invocation.ambiguous || !invocation.nativeTurnId || invocation.nativeTurnId !== payload.turn_id || native?.kind !== 'provider' || native.providerId !== 'codex' ||
+      typeof payload.session_id !== 'string' || !payload.session_id ||
+      invocation.nativeSessionId !== payload.session_id || native.sessionId !== payload.session_id ||
+      !invocation.nativeTranscriptPath || invocation.nativeTranscriptPath !== payload.transcript_path || native.transcriptPath !== payload.transcript_path ||
+      invocation.toolName !== 'Bash' || payload.tool_name !== 'Bash') return undefined
+  try {
+    const before = JSON.parse(invocation.toolInput) as Record<string, unknown>
+    const after = payload.tool_input as Record<string, unknown> | undefined
+    if (!after || Array.isArray(after) || typeof after !== 'object' ||
+        Object.keys(before).some(key => !['command', 'description'].includes(key)) ||
+        Object.keys(after).some(key => !['command', 'description'].includes(key)) ||
+        typeof before.command !== 'string' || !before.command || before.command !== after.command ||
+        before.description !== undefined && before.description !== after.description ||
+        after.description !== undefined && typeof after.description !== 'string') return undefined
+    return invocation.nativeToolCallId
+  } catch { return undefined }
+}
 
 export const CODEX_HOOK_EVENTS = [
   'SessionStart',
@@ -34,6 +90,8 @@ export const CODEX_HOOKS: AgentNativeHookSpecification = {
   // 事件名随负载到达：与 Claude 同族，stdin 负载带 `hook_event_name`。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
   nativeTurnIdKeys: ['turn_id'],
+  toolInvocation: openToolInvocation,
+  resolveInteractionToolCallId: permissionToolCallId,
   rules: [
     { events: ['Interrupt'], state: 'unknown', lifecycleEvent: 'turn-end' },
     { events: ['PermissionRequest'], state: 'waiting' },
@@ -84,6 +142,10 @@ export function createCodexManagedHookPlan(workspacePath: string): AgentManagedH
 }
 
 export function createCodexProvider(defineAgentProvider: ProviderFactory): AgentProvider {
+  const interaction = createNumberedTerminalInteractionProtocol({
+    questionEvents: ['PreToolUse'], questionTools: ['request_user_input', 'askuserquestion'],
+    questionCompletionEvents: ['PostToolUse'], permissionCompletionEvents: ['PostToolUse'], permissionOptions: CODEX_PERMISSION_OPTIONS
+  })
   const verifyPromptExecutionTransport = createCodexPromptExecutionTransportVerifier()
   return defineAgentProvider({
     planManagedHooks: ({ workspacePath }) => createCodexManagedHookPlan(workspacePath),
@@ -121,13 +183,8 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
       submit: '\r',
       ...(context?.execution === 'immediate' ? { prepare: { refresh: '\u001b[I', interrupt: '\u001b', endEvent: 'Interrupt' } } : {})
     }),
-    interaction: createNumberedTerminalInteractionProtocol({
-      questionEvents: ['PreToolUse'],
-      questionTools: ['request_user_input', 'askuserquestion'],
-      questionCompletionEvents: ['PostToolUse'],
-      permissionCompletionEvents: ['PostToolUse'],
-      permissionOptions: CODEX_PERMISSION_OPTIONS
-    }),
+    interaction,
+    prepareInteractionResponse: createCodexInteractionResponsePreparation(interaction.planResponse),
     hook: CODEX_HOOKS,
     discoverNativeSession: discoverCodexNativeSession,
     readSessionHistoryPage: readCodexSessionHistoryPage,

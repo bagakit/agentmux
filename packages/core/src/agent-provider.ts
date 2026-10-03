@@ -26,6 +26,7 @@ import type {
   AgentMuxInteractionInputPlan,
   AgentMuxInteractionRequest,
   AgentMuxInteractionResponse,
+  AgentMuxRunRef,
   AgentNativeSessionHandle,
   AgentPostureInputPlan,
   AgentPromptInputPlan,
@@ -33,6 +34,7 @@ import type {
   AgentPromptExecutionContext,
   AgentPromptExecutionEvidence,
   AgentNativePromptPredecessor,
+  AgentHookReceipt,
   AgentTerminalScreenSnapshot,
   AgentProviderLaunchContext,
   AgentProviderResumeContext,
@@ -72,6 +74,8 @@ export type AgentProviderHookActivation = { active: boolean; code: string; actio
 
 export type AgentProviderHookNormalizationContext = Readonly<{
   nativeHandle?: Readonly<AgentNativeSessionHandle>
+  /** Only the existing durable receipt of this exact Core Run. */
+  previousHookReceipt?: Readonly<AgentHookReceipt>
 }>
 
 export type AgentProviderPromptExecutionContext = {
@@ -92,6 +96,38 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
   nativeSourceId: string
   /** A fresh check of the original native writer/source, never cached input authorization. */
   verifyCurrentTransport(context: AgentProviderPromptExecutionContext): Promise<boolean>
+}>
+
+/** Ephemeral qualification from the existing screen owner, never a second input journal. */
+export type AgentInteractionTargetFrame = Readonly<{
+  run: Readonly<AgentMuxRunRef>
+  outputThroughByte: number
+  geometryRevision: number
+  evidenceGeneration: number
+}>
+
+export type AgentProviderInteractionResponseContext = AgentProviderPromptExecutionContext & Readonly<{
+  agentSessionId: string
+  run: Readonly<AgentMuxRunRef>
+  inputByte: number
+  signal: AbortSignal
+  observeTarget(inspect: (screen: AgentTerminalScreenSnapshot) => boolean): Promise<AgentInteractionTargetFrame>
+}>
+
+export type AgentProviderPreparedInteractionResponse = Readonly<{
+  plan: AgentMuxInteractionInputPlan
+  target: Readonly<{
+    agentSessionId: string
+    run: Readonly<AgentMuxRunRef>
+    requestId: string
+    nativeToolCallId: string
+    nativeSourceId: string
+    inputByte: number
+    frame: AgentInteractionTargetFrame
+  }>
+  inspectCurrentTarget(screen: AgentTerminalScreenSnapshot): boolean
+  /** Re-read the same native invocation/source immediately before a new input claim. */
+  verifyCurrentTarget(context: AgentProviderPromptExecutionContext): Promise<boolean>
 }>
 
 export type AgentProvider = {
@@ -126,6 +162,11 @@ export type AgentProvider = {
   verifyPromptExecutionTransport?(context: AgentProviderPromptExecutionContext): Promise<boolean>
   preparePromptExecutionTransport?(context: AgentProviderPromptExecutionContext & { signal: AbortSignal }): Promise<AgentProviderPreparedPromptTransport | null>
   readPromptExecutionEvidence?(context: AgentProviderPromptExecutionContext): Promise<AgentPromptExecutionEvidence | null>
+  prepareInteractionResponse?(
+    context: AgentProviderInteractionResponseContext,
+    request: Readonly<AgentMuxInteractionRequest>,
+    response: Readonly<AgentMuxInteractionResponse>
+  ): Promise<AgentProviderPreparedInteractionResponse | null>
   planInteractionResponse(
     request: AgentMuxInteractionRequest,
     response: AgentMuxInteractionResponse
@@ -163,6 +204,7 @@ export type AgentProviderDefinition = {
   verifyPromptExecutionTransport?: (context: AgentProviderPromptExecutionContext) => Promise<boolean>
   preparePromptExecutionTransport?: AgentProvider['preparePromptExecutionTransport']
   readPromptExecutionEvidence?: (context: AgentProviderPromptExecutionContext) => Promise<AgentPromptExecutionEvidence | null>
+  prepareInteractionResponse?: AgentProvider['prepareInteractionResponse']
   interaction?: AgentTerminalInteractionProtocol
   posture?: PostureControlDeclaration
 }
@@ -297,6 +339,7 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
     ...(definition.verifyPromptExecutionTransport ? { verifyPromptExecutionTransport: definition.verifyPromptExecutionTransport } : {}),
     ...(definition.preparePromptExecutionTransport ? { preparePromptExecutionTransport: definition.preparePromptExecutionTransport } : {}),
     ...(definition.readPromptExecutionEvidence ? { readPromptExecutionEvidence: definition.readPromptExecutionEvidence } : {}),
+    ...(definition.prepareInteractionResponse ? { prepareInteractionResponse: definition.prepareInteractionResponse } : {}),
     ...(definition.discoverNativeSession ? { discoverNativeSession: definition.discoverNativeSession } : {}),
     ...(definition.readSessionHistoryPage ? { readSessionHistoryPage: definition.readSessionHistoryPage } : {}),
     ...(definition.prepareSessionQuestionReply ? { prepareSessionQuestionReply: definition.prepareSessionQuestionReply } : {}),
@@ -411,13 +454,18 @@ export function defineAgentProvider(definition: AgentProviderDefinition): AgentP
       if (envelope.providerId !== catalog.id) {
         throw new AgentMuxError('Hook event does not belong to this provider.', 'HOOK_PROVIDER_MISMATCH')
       }
-      const normalized = normalizeNativeHook(definition.hook, envelope, context)
+      const previous = context.previousHookReceipt
+      const correlationContext = previous && (previous.agentSessionId !== envelope.agentSessionId ||
+        previous.providerId !== envelope.providerId || previous.run.runId !== envelope.runId)
+        ? { ...(context.nativeHandle ? { nativeHandle: context.nativeHandle } : {}) } : context
+      const normalized = normalizeNativeHook(definition.hook, envelope, correlationContext)
       const resolvedEnvelope = envelope.eventName === normalized.eventName
         ? envelope
         : { ...envelope, eventName: normalized.eventName }
       const mainInteraction = normalized.mainSubject ? definition.interaction : undefined
       const interaction = mainInteraction
-        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction)
+        ? normalizeTerminalInteraction(resolvedEnvelope, normalized.status.observedAt, mainInteraction,
+          definition.hook.resolveInteractionToolCallId?.(normalized.eventName, resolvedEnvelope.payload ?? {}, correlationContext))
         : undefined
       const interactionCompletion = mainInteraction
         ? normalizeTerminalInteractionCompletion(resolvedEnvelope, normalized.status.observedAt, mainInteraction) : undefined

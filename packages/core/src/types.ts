@@ -631,11 +631,24 @@ export type AgentHookReceipt = {
   eventName: string
   /** Provider-proven native turn identity; never inferred from terminal text. */
   nativeTurnId?: string
+  /** Provider-proven open main-tool facts retained by this one durable Hook owner. */
+  toolInvocation?: AgentHookToolInvocation
   /** Provider-normalized lifecycle; unknown stays absent and the raw eventName is retained. */
   /** Null explicitly withholds lifecycle; undefined retains native-name semantics. */
   lifecycleEvent?: AgentHookLifecycleEvent | null
   observedAt: number
   outputCursorBytes?: number
+}
+
+export type AgentHookToolInvocation = {
+  nativeSessionId: string
+  nativeToolCallId: string
+  nativeTurnId?: string
+  nativeTranscriptPath?: string
+  toolName: string
+  toolInput: string
+  /** Consecutive different tool starts in the same native turn cannot identify an ID-less request. */
+  ambiguous?: true
 }
 
 /**
@@ -1610,6 +1623,7 @@ export type NormalizedHookEvent = {
   /** Direct main-subject contribution; false still permits proven roster-derived parent end. */
   mainSubject: boolean
   nativeTurnId?: string
+  toolInvocation?: AgentHookToolInvocation
   /**
    * 这条事件归一化后的 Core canonical 生命周期事件，**认不出时缺席**。
    *
