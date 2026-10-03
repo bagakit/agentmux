@@ -1,11 +1,12 @@
 import { directoryIdentity } from '../../../shared/space-addresses'
-import { scratchTopicIdentityPath, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdentityPath, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import type { useAppStore } from '../store'
 import type { MoteWorkfaceScope } from './mote-workface'
 import { sameWorkbenchProjectionSelection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { spatialCatalog } from './space-agent-control'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
 import { confirmedMoteReference } from './mote-materials-actions'
+import { workbenchSelectionCatalog } from './desktop-focus-navigation'
 import { goalNextStep } from './goal-presentation'
 import type { DemandRecord } from './global-demand-board'
 
@@ -15,7 +16,10 @@ export function moteGoalContext(state: ReturnType<typeof useAppStore.getState>, 
   const workspace = state.config?.workspaces.find(item => item.id === scope.workspace.id)
   if (workspace?.hostId !== scope.workspace.hostId || workspace.path !== scope.workspace.path || scratchTopicLogicalPath(workspace, scope.topic) !== scope.rootPath)
     return { sessionIds: [] as string[], selectedSessionId: undefined as string | undefined, issue: 'The original Mote resource is unconfirmed. Its work is retained.' }
-  const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, scope.workspace) ?? [scope.topic])
+  const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scope.workspace)
+  // Membership is structural; an unavailable directory retains the original scope.
+  const catalog = topics !== null && scope.workspace.id === SCRATCH_WORKSPACE_ID ? workbenchSelectionCatalog(state)
+    : spatialCatalog({ ...state, sessions: [] }, topics ?? [scope.topic])
   const spaceId = directoryIdentity(scope.workspace.hostId, scratchTopicIdentityPath(scope.workspace, scope.topic))
   const zoneIds = new Set(catalog.bindings.filter(binding => binding.spaceId === spaceId).map(binding => binding.zoneId))
   if (!zoneIds.size) return { sessionIds: [] as string[], selectedSessionId: undefined as string | undefined,

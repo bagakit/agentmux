@@ -6,6 +6,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { goalsForMote, moteGoalContext, moteGoalSummary } from '../lib/mote-goals'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
 import { GoalContinuationControl } from './GoalContinuationControl'
@@ -15,13 +16,20 @@ export function MoteCurrentWork({ scope, reference }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
 }) {
   const facts = useAppStore(useShallow(state => ({ config: state.config, tabs: state.tabs, layouts: state.layouts,
-    sessions: state.sessions, scratchTopicSnapshots: state.scratchTopicSnapshots, spaceZoneBindings: state.spaceZoneBindings,
+    scratchTopicSnapshots: state.scratchTopicSnapshots, spaceZoneBindings: state.spaceZoneBindings,
     topicCategories: state.topicCategories, workbenchSpaceSelection: state.workbenchSpaceSelection, activeWorkspaceId: state.activeWorkspaceId })))
   const demands = useAppStore(state => state.demands)
   const context = useMemo(() => moteGoalContext(useAppStore.getState(), scope, reference), [facts, scope, reference])
   const retainedContext = useRef(context)
   if (!context.issue || context.sessionIds.length) retainedContext.current = context
   const visibleSessionIds = context.issue ? retainedContext.current.sessionIds : context.sessionIds
+  const labels = useAppStore(useShallow(state => {
+    const byId = sessionPresentationById(state.sessions)
+    return Object.fromEntries(visibleSessionIds.flatMap(id => {
+      const session = byId.get(id)
+      return session ? [[id, session.label]] : []
+    }))
+  }))
   const goals = useMemo(() => goalsForMote(demands, visibleSessionIds), [demands, visibleSessionIds])
   const [expanded, setExpanded] = useState<string | null>(null), [chooser, setChooser] = useState(false)
   const [selectedGoal, setSelectedGoal] = useState(''), [sessionId, setSessionId] = useState('')
@@ -80,7 +88,6 @@ export function MoteCurrentWork({ scope, reference }: {
     } catch (error) { if (lifetime.current === owner && associationIntent.current === submittedIntent) setIssue(presentError(error)) }
     finally { unsubscribe(); if (flight.current === token) { flight.current = null; if (lifetime.current === owner) setLoading(false) } }
   }
-  const sessions = context.sessionIds.map(id => ({ id, session: facts.sessions.find(session => session.id === id) }))
   return <section className="mote-current-work" aria-label="This Mote’s work">
     <div className="mote-details__section-actions"><span>Current work</span><div className="mote-current-work__actions">
       <MoteBehaviorAction label="Refresh this Mote’s goals" onClick={() => void refresh()}><RefreshCw size={13} /></MoteBehaviorAction>
@@ -91,7 +98,7 @@ export function MoteCurrentWork({ scope, reference }: {
     {!goals.length ? <p className="mote-details__hint">No goal linked yet. A question can stay a conversation.</p> : null}
     {goals.map(goal => {
       const summary = moteGoalSummary(goal), open = expanded === goal.id
-      const unloaded = goal.sessionIds.filter(id => context.sessionIds.includes(id) && !facts.sessions.some(session => session.id === id))
+      const unloaded = goal.sessionIds.filter(id => context.sessionIds.includes(id) && !Object.hasOwn(labels, id))
       return <div className="mote-current-work__goal" key={goal.id} data-mote-goal={goal.id}>
         <div className="mote-current-work__row"><button type="button" className="mote-current-work__copy" aria-expanded={open}
           onClick={() => { associationIntent.current = {}; setExpanded(open ? null : goal.id) }}><strong>{goal.title}</strong><span>{summary.next}</span></button>
@@ -108,7 +115,7 @@ export function MoteCurrentWork({ scope, reference }: {
         <option value="">Choose an existing goal…</option>{Object.values(demands).map(goal => <option key={goal.id} value={goal.id}>{goal.title}</option>)}
       </select>
       <select aria-label="Mote discussion for the goal" value={sessionId} onChange={event => { associationIntent.current = {}; setSessionId(event.target.value) }}>
-        <option value="">Choose a discussion…</option>{sessions.map(({ id, session }) => <option key={id} value={id}>{session?.label ?? 'Retained discussion · ' + id}</option>)}
+        <option value="">Choose a discussion…</option>{context.sessionIds.map(id => <option key={id} value={id}>{labels[id] ?? 'Retained discussion · ' + id}</option>)}
       </select>
       <button type="button" className="mote-current-work__navigation" onClick={() => void link()} disabled={loading || !selectedGoal || !sessionId}>Link this discussion<ChevronDown size={12} /></button>
       <p className="mote-details__hint">Linking does not start work. Confirm the scope and choose its executing Agent before continuing.</p>
