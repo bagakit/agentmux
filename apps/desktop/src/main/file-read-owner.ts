@@ -4,6 +4,7 @@ import type { WorkspaceRecord } from '../shared/contracts'
 import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from '../shared/scratch-topics'
 import { zoneFileResource } from '../shared/zone-file-resource'
 import type { WorkspaceFiles } from './workspace-files'
+import type { WorkspaceFileReadBudget } from '../shared/workspace-file-bytes'
 
 /** Resolve once from original spatial/resource facts, then delegate to original Files. */
 export class FileReadOwner implements AgentMuxRpcFilesOwner {
@@ -13,20 +14,23 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     workspace(id: string): WorkspaceRecord | undefined
     files: Pick<WorkspaceFiles, 'read' | 'listFiles'>
   }) {}
-  async read(input: FileReadParams): Promise<FileReadResult> {
+  async read(input: FileReadParams, budget?: WorkspaceFileReadBudget): Promise<FileReadResult> {
+    budget?.signal?.throwIfAborted()
     const params = parseFileReadParams(input)
+    if (params.maxBytes !== undefined) budget = { ...budget, maxFileBytes: Math.min(params.maxBytes, budget?.maxFileBytes ?? params.maxBytes) }
     const resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: resolved.message } }
     const { resource, workspace } = resolved
-    try { return { resource, result: await this.ports.files.read(workspace, resource.path) } }
+    try { return { resource, result: await this.ports.files.read(workspace, resource.path, budget) } }
     catch (error) { return { resource, result: { status: 'unknown', code: 'FILE_READ_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } }
   }
-  async list(input: FileListParams): Promise<FileListResult> {
+  async list(input: FileListParams, options?: { signal?: AbortSignal }): Promise<FileListResult> {
+    options?.signal?.throwIfAborted()
     const params = parseFileListParams(input), resolved = await this.resolve(params)
     if ('message' in resolved) return { resource: null, result: { status: 'unknown', code: 'FILE_LIST_UNCONFIRMED', message: resolved.message } }
     const { resource, workspace } = resolved
     try {
-      const result = await this.ports.files.listFiles(workspace, resource.path, params.limit)
+      const result = await this.ports.files.listFiles(workspace, resource.path, params.limit, options)
       const current = this.ports.workspace(workspace.id)
       if (!current || current.hostId !== workspace.hostId || current.path !== workspace.path) throw new Error('The original File resource changed during discovery. Inspect it before retrying.')
       return { resource, result }

@@ -1,17 +1,19 @@
+const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { webcrypto } from 'node:crypto'
-import { mkdir, mkdtemp, realpath, readFile, rm } from 'node:fs/promises'
+import { mkdir, mkdtemp, realpath, readFile, rm, writeFile, access } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import type { ExecutionHost, TopicKnowledge, TopicKnowledgeSource } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
+import { FileReadOwner } from '../src/main/file-read-owner'
 import { TopicKnowledgeOwner } from '../src/main/topic-knowledge'
 import { TopicSpatialOwner } from '../src/main/topic-spatial-owner'
 import { TopicKnowledgePanel } from '../src/renderer/src/components/TopicKnowledgePanel'
@@ -21,7 +23,7 @@ import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
 import { WorkspaceFilesTool } from '../src/renderer/src/components/SurfaceToolDock'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { createWorkbenchTab, fileTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { selectedKnowledgeSources, moveKnowledgeTopic, openKnowledgeSource } from '../src/renderer/src/lib/topic-knowledge-actions'
 import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { categoriesFromSpatial } from '../src/shared/topic-categories'
@@ -42,6 +44,9 @@ vi.mock('@dnd-kit/core', async load => {
 })
 // Native PTY painting is outside this happy-dom navigation boundary; Electron proves the real workface.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => createElement('div', { 'data-native-pty-paint-isolated': '' }) }))
+// The production File action warms Monaco. This navigation fixture mounts no editor;
+// the private Electron proof checks the real canvas and one-click visible File.
+vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('No avatar writes in this proof') } } }))
 const initial = useAppStore.getState(), CATEGORY = '11111111-1111-4111-8111-111111111111'
 let directories: string[] = [], root: Root | null = null, host: HTMLDivElement
@@ -64,6 +69,10 @@ async function fixture() {
   const scratch = new ScratchTopics(), files = new WorkspaceFiles(() => ({ kind: 'local' } as ExecutionHost)), state = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
   const owner = new TopicKnowledgeOwner(scratch, files, () => workspace)
   owner.setSpatialPort(new TopicSpatialOwner({ state, workspace: () => workspace, topics: () => owner.listTopicSnapshots(), categories: () => owner.listCategories(), ensureDefaultCategory: () => owner.ensureDefaultCategoryContent() }))
+  const publicFiles = new FileReadOwner({ workspace: id => id === workspace.id ? workspace : undefined,
+    topicForDirectory: (candidate, directory) => scratch.readForDirectory(candidate, directory), files,
+    catalog: async () => { const current = await state.read(); return current ? spatialCatalog(current.graph) : null } })
+  owner.setFileReadPort(publicFiles)
   const first = (await owner.call('topic.create', { topicId: 'view:first', title: '工作方法' })).topic
   const second = (await owner.call('topic.create', { topicId: 'view:second', title: '学习资料' })).topic
   const category = (await owner.call('topic.category.create', { categoryId: CATEGORY, title: '工作' })).category
@@ -81,12 +90,130 @@ async function fixture() {
   vi.spyOn(api.scratch, 'listTopics').mockImplementation(() => scratch.list(workspace))
   vi.spyOn(api.scratch, 'readTopic').mockImplementation((_workspace, id) => scratch.read(workspace, id))
   vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
-  return { workspace, owner, state, first, second, category, topics, tabs, layout }
+  vi.spyOn(api.files, 'readPublic').mockImplementation(publicFiles.read.bind(publicFiles))
+  vi.spyOn(api.files, 'read').mockImplementation((_workspace, path) => files.read(workspace, path))
+  vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
+  vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
+  return { workspace, owner, state, first, second, category, topics, tabs, layout, publicFiles }
 }
 async function entry(owner: TopicKnowledgeOwner, topicId: string, title: string, sources: TopicKnowledgeSource[] = []): Promise<TopicKnowledge> {
   return (await owner.call('topic.knowledge.write', { topicId, entryId: crypto.randomUUID(), title, content: 'Useful original conclusion', form: sources.length ? 'reference' : 'derived', certainty: 'decision', sources, expectedRevision: null })).entry
 }
 describe('Topic knowledge UI consumes the real Host content and Core graph owners', () => {
+  it('finds Chinese body-only text in an existing original file and reads its exact public Files source without creating knowledge', async () => {
+    const f = await fixture(), body = '# 原文\n挂载磁盘权限与安全清理的原始讨论。\n'
+    await writeFile(join(f.first.directoryPath, 'outcome', 'report.md'), body)
+    await writeFile(join(f.second.directoryPath, 'outcome', 'report.md'), '另一个 Topic 的磁盘资料。')
+    const before = useAppStore.getState()
+    await expect(access(join(f.first.directoryPath, 'knowledge'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)!, topics: f.topics }))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!
+    await input(field, '磁盘'); await click(button('Search'))
+    await settle(() => host.querySelectorAll('[data-document-path="outcome/report.md"]').length === 1)
+    const row = host.querySelector<HTMLButtonElement>('[data-document-path="outcome/report.md"]')!
+    expect(row.dataset.documentTopicId).toBe(f.first.topicId)
+    expect(row.textContent).toContain('挂载磁盘权限')
+    expect(host.querySelector('[data-knowledge-topic-id]')).toBeNull()
+    await click(row)
+    await settle(() => !!host.querySelector('[aria-label="Original document detail"]')?.textContent?.includes('挂载磁盘权限'))
+    expect(api.files.readPublic).toHaveBeenCalledWith(expect.objectContaining({ zoneId: f.first.zoneId, path: 'outcome/report.md', maxBytes: 131072 }))
+    expect(host.querySelector('[aria-label="Original document detail"]')?.textContent).toContain('Original file · outcome/report.md')
+    const open = vi.spyOn(useAppStore.getState(), 'openFile').mockResolvedValue(true)
+    await click(button('Open original file'))
+    const original = await f.publicFiles.read((await f.owner.call('topic.knowledge.search', { topicId: f.first.topicId, query: '磁盘' })).documents[0]!.target)
+    expect(open).toHaveBeenCalledWith(original.resource!.path, expect.any(String), undefined, f.workspace.id, true,
+      expect.objectContaining({ focus: true, space: expect.objectContaining({ zoneId: f.first.zoneId }), selection: expect.objectContaining({ topicId: f.first.topicId }) }))
+    await click(button('Close document detail'))
+    expect(document.activeElement).toBe(row); expect(field.value).toBe('磁盘')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+    expect(await readFile(join(f.first.directoryPath, 'outcome', 'report.md'), 'utf8')).toBe(body)
+    await expect(access(join(f.first.directoryPath, 'knowledge'))).rejects.toMatchObject({ code: 'ENOENT' })
+  })
+  it('global file results retain their source Topic and late document reads cannot take over after clear', async () => {
+    const f = await fixture()
+    await writeFile(join(f.second.directoryPath, 'outcome', 'source.txt'), '正文里的磁盘资料。')
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topics: f.topics }))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search all Topics"]')!
+    await input(field, '磁盘'); await click(button('Search'))
+    await settle(() => !!host.querySelector('[data-document-path="outcome/source.txt"]'))
+    const row = host.querySelector('[data-document-path="outcome/source.txt"]')!
+    expect(row.textContent).toContain('学习资料'); expect(row.getAttribute('data-document-topic-id')).toBe(f.second.topicId)
+    let release!: () => void
+    vi.mocked(api.files.readPublic).mockImplementation(async request => { await new Promise<void>(resolve => { release = resolve }); return f.publicFiles.read(request) })
+    await click(row); await settle(() => !!release)
+    await click(button('Clear search')); await act(async () => { release(); await new Promise(resolve => setTimeout(resolve, 30)) })
+    expect(host.querySelector('[aria-label="Original document detail"]')).toBeNull()
+    expect(host.querySelector('.topic-knowledge-row')).toBeNull(); expect(document.activeElement).toBe(field)
+  })
+  it('keeps the confirmed body and exact file actions through an observation gap, and refuses both actions after the Workspace changes', async () => {
+    const f = await fixture(), body = '原始磁盘记录。\n[原参考](../refs/reference.txt)'
+    await writeFile(join(f.first.directoryPath, 'outcome', 'source.md'), body)
+    await writeFile(join(f.first.directoryPath, 'refs', 'reference.txt'), '原参考内容')
+    const before = useAppStore.getState()
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    await settle(() => !!host.querySelector('[data-document-path="outcome/source.md"]'))
+    await click(host.querySelector('[data-document-path="outcome/source.md"]')!)
+    await settle(() => !!host.querySelector('[aria-label="Original document detail"] .md-link--file'))
+    const open = vi.spyOn(useAppStore.getState(), 'openFile').mockResolvedValue(true)
+    const source = (await f.owner.call('topic.knowledge.ls', { topicId: f.first.topicId })).documents.find(document => document.target.path === 'outcome/source.md')!
+    const original = (await f.publicFiles.read(source.target)).resource!
+    const referencePath = host.querySelector('[aria-label="Original document detail"] .md-link--file')!.getAttribute('title')!
+    vi.mocked(api.files.readPublic).mockResolvedValue({ resource: null, result: { status: 'unknown', code: 'FILE_RESOURCE_UNCONFIRMED', message: 'Source temporarily unavailable' } })
+    await click(button('Refresh knowledge'))
+    await settle(() => !!host.textContent?.includes('Source temporarily unavailable'))
+    expect(host.querySelector('[aria-label="Original document detail"]')?.textContent).toContain('原始磁盘记录。')
+    await click(button('Open original file'))
+    expect(open).toHaveBeenLastCalledWith(original.path, expect.any(String), undefined, f.workspace.id, true, expect.objectContaining({ focus: true }))
+    await click(host.querySelector('[aria-label="Original document detail"] .md-link--file')!)
+    expect(open).toHaveBeenLastCalledWith(referencePath, expect.any(String), undefined, f.workspace.id, true, expect.objectContaining({ focus: true }))
+    open.mockClear()
+    useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [{ ...f.workspace, path: _hygiene_fixturePath("different-resource") }] } }))
+    await click(button('Open original file')); await click(host.querySelector('[aria-label="Original document detail"] .md-link--file')!)
+    expect(open).not.toHaveBeenCalled(); expect(host.textContent).toContain('original Workspace changed')
+    expect(host.querySelector('[aria-label="Original document detail"]')?.textContent).toContain('原始磁盘记录。')
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  })
+  it('reports a bounded read omission as incomplete instead of a complete empty search', async () => {
+    const f = await fixture()
+    await writeFile(join(f.first.directoryPath, 'outcome', 'large.txt'), 'x'.repeat(131073) + '磁盘')
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
+    const field = host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!
+    await input(field, '磁盘'); await click(button('Search'))
+    await settle(() => host.querySelector('.topic-knowledge-results__label')?.textContent === 'Search incomplete')
+    expect(host.textContent).toContain('Some sources could not be searched'); expect(host.textContent).not.toContain('No matches')
+    expect(host.textContent).not.toContain('No saved knowledge or text documents match this search.')
+    expect(await readFile(join(f.first.directoryPath, 'outcome', 'large.txt'), 'utf8')).toHaveLength(131075)
+  })
+  it('opens a global original-file result directly into its own visible Zone using the production store, keeping the original Chats and drafts', async () => {
+    const f = await fixture(), body = '原文磁盘资料。\n[来源](../refs/reference.txt)'
+    await writeFile(join(f.second.directoryPath, 'outcome', 'report.md'), body)
+    await writeFile(join(f.second.directoryPath, 'refs', 'reference.txt'), '原参考正文')
+    const before = useAppStore.getState()
+    await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topics: f.topics }))
+    await input(host.querySelector<HTMLInputElement>('[aria-label="Search all Topics"]')!, '磁盘'); await click(button('Search'))
+    await settle(() => !!host.querySelector('[data-document-path="outcome/report.md"]'))
+    await click(host.querySelector('[data-document-path="outcome/report.md"]')!)
+    await settle(() => !!host.querySelector('[aria-label="Original document detail"] .md-link--file'))
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    await click(button('Open original file'))
+    const resource = (await f.publicFiles.read((await f.owner.call('topic.knowledge.search', { query: '磁盘' })).documents[0]!.target)).resource!
+    const tabId = fileTabId(f.workspace.id, resource.path)
+    await settle(() => useAppStore.getState().workbenchSpaceSelection?.tabId === tabId)
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ zoneId: f.second.zoneId, topicId: f.second.topicId, tabId })
+    expect(useAppStore.getState().tabs[tabId]?.space?.zoneId).toBe(f.second.zoneId)
+    expect(useAppStore.getState().documents[documentKey(f.workspace.id, resource.path)]?.content).toBe(body)
+    const relative = host.querySelector('[aria-label="Original document detail"] .md-link--file')!
+    const referencePath = relative.getAttribute('title')!, referenceTab = fileTabId(f.workspace.id, referencePath)
+    await click(relative); await settle(() => useAppStore.getState().workbenchSpaceSelection?.tabId === referenceTab)
+    expect(useAppStore.getState().workbenchSpaceSelection?.zoneId).toBe(f.second.zoneId)
+    expect(useAppStore.getState().documents[documentKey(f.workspace.id, referencePath)]?.content).toBe('原参考正文')
+    for (const tab of f.tabs) expect(useAppStore.getState().tabs[tab.id]).toBe(before.tabs[tab.id])
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
   it('clears the search and detail without a late global result reclaiming the panel', async () => {
     const f = await fixture(), saved = await entry(f.owner, f.first.topicId, 'Original decision'), before = useAppStore.getState()
     await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topics: f.topics }))
@@ -106,7 +233,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     expect(host.querySelector('.topic-knowledge-entry')).toBeNull(); expect(host.querySelector('.topic-knowledge-row')).toBeNull()
     await act(async () => release())
     expect(host.querySelector('.topic-knowledge-row')).toBeNull()
-    expect(host.textContent).toContain('Search across all Topics to find saved knowledge.')
+    expect(host.textContent).toContain('Search across all Topics to find saved knowledge and original text documents.')
     expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
     expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   })
@@ -131,7 +258,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     await mount(createElement(TopicKnowledgePanel, { workspace: f.workspace, topic: f.topics.find(topic => topic.id === f.first.topicId)! }))
     await settle(() => !!host.querySelector('.topic-knowledge-row')); await click(host.querySelector('.topic-knowledge-row')!)
     vi.mocked(api.topics.call).mockImplementation(async (method, request) => {
-      if (method === 'topic.knowledge.ls') return { entries: [], unavailable: [{ code: 'read-unavailable', message: 'Knowledge read is temporarily unavailable', recovery: 'Refresh knowledge' }] }
+      if (method === 'topic.knowledge.ls') return { entries: [], documents: [], unavailable: [{ code: 'read-unavailable', message: 'Knowledge read is temporarily unavailable', recovery: 'Refresh knowledge' }] }
       return f.owner.call(method, request)
     })
     await click(button('Refresh knowledge')); await settle(() => !host.querySelector('.topic-knowledge-row'))
@@ -276,7 +403,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     expect(api.topics.call).toHaveBeenCalledWith('topic.knowledge.ls', { topicId: f.first.topicId, limit: 100 })
     await click(document.querySelector('.topic-knowledge-row')!)
     await input(document.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!, 'No match here')
-    await click(button('Search')); await settle(() => host.textContent!.includes('No knowledge matches this search.'))
+    await click(button('Search')); await settle(() => host.textContent!.includes('No saved knowledge or text documents match this search.'))
     expect(document.querySelector('.topic-knowledge-entry')).toBeNull()
     expect(api.topics.call).toHaveBeenCalledWith('topic.knowledge.search', { topicId: f.first.topicId, query: 'No match here', limit: 100 })
     await input(document.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!, '')
@@ -331,8 +458,8 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     let release!: (value: typeof registered) => void
     read.mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
     const opening = openKnowledgeSource(notebook)
-    useAppStore.setState({ mainSurface: 'focus' }); release(registered); await opening
-    expect(useAppStore.getState().mainSurface).toBe('focus')
+    useAppStore.setState({ mainSurface: 'agents' }); release(registered); await opening
+    expect(useAppStore.getState().mainSurface).toBe('agents')
     await openKnowledgeSource(notebook)
     expect(useAppStore.getState()).toMatchObject({ mainSurface: 'survey', surveyNotebookId: notebookId })
     expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
@@ -466,7 +593,7 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     const before = useAppStore.getState()
     await click(button('Show Knowledge'))
     await settle(() => host.querySelector('.topic-knowledge-row')?.textContent?.includes(original.title) === true)
-    expect(host.querySelectorAll('.topic-knowledge-row')).toHaveLength(1)
+    expect(host.querySelectorAll('[data-knowledge-topic-id]')).toHaveLength(1)
     await input(host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!, 'Original')
     await click(button('Search'))
     await settle(() => vi.mocked(api.topics.call).mock.calls.some(call => call[0] === 'topic.knowledge.search') && !host.textContent!.includes('Reading knowledge…'))

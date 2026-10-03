@@ -752,6 +752,7 @@ export async function registerIpc(args: {
     return notebookStore.apply(input, { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') })
   })
   const topicKnowledge = new TopicKnowledgeOwner(args.scratchTopics, files, () => workspace(config, SCRATCH_WORKSPACE_ID))
+  topicKnowledge.setFileReadPort(publicFiles)
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
     workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),
     categories: () => topicKnowledge.listCategories(), ensureDefaultCategory: () => topicKnowledge.ensureDefaultCategoryContent() }))
