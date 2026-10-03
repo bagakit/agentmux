@@ -82,7 +82,7 @@ export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MO
   return <div ref={host} className="settings-pane-stack toolkit-workbench" data-view={view} data-creation-empty={!entries.length && !templateOpen && selectedId === null} data-starting-point={templateOpen}>
     <header className="settings-pane-toolbar toolkit-workbench__toolbar">
       <p className="toolkit-workbench__intro">Your scripts. Your actions.</p>
-      <button type="button" className="small-button toolkit-workbench__starting" data-tool-template="account-usage" onClick={() => { setTemplateOpen(true); setView('editor') }}>Starting points</button>
+      <button type="button" className="small-button toolkit-workbench__starting" data-tool-template="account-usage" onClick={() => { setTemplateOpen(true); setView('editor') }} title="Review an editable starting point">Account usage example</button>
       <button type="button" className="primary-button toolkit-workbench__create" disabled={entries.length >= 128} onClick={() => add()}><Plus size={13} /> New custom tool</button>
     </header>
     <div className="toolkit-workbench__body">

@@ -179,3 +179,27 @@ it('Browser module saves its authored automation value against the original fiel
   )
   expect(useAppStore.getState().config).toBe(latest)
 })
+
+
+it('finds the editable account starting point through ordinary auth and usage settings search without creating or running', async () => {
+  const save = vi.spyOn(api.config, 'save').mockResolvedValue(undefined)
+  const add = vi.spyOn(api.toolkit, 'add')
+  const run = vi.spyOn(api.toolkit, 'run')
+  await dom.render(<SettingsPanel onClose={() => {}} />)
+  for (const query of ['auth', 'account', '用量']) {
+    await input('[aria-label="Search settings"]', query)
+    expect([...dom.container.querySelectorAll('nav[aria-label="Settings sections"] button')]
+      .map(node => node.textContent)).toEqual(['Toolkit'])
+    expect(connected('.settings-content__header h2').textContent).toBe('Toolkit')
+    expect(connected<HTMLElement>('[data-settings-pane="toolkit"]').hidden).toBe(false)
+  }
+  const start = connected<HTMLButtonElement>('[data-tool-template="account-usage"]')
+  expect(start.textContent).toBe('Account usage example')
+  expect(start.title).toBe('Review an editable starting point')
+  await act(async () => start.click())
+  expect(connected('[aria-label="Account usage template"] h3').textContent).toBe('Account usage')
+  expect(connected('.toolkit-template__source').textContent?.length).toBeGreaterThan(100)
+  expect(save).not.toHaveBeenCalled()
+  expect(add).not.toHaveBeenCalled()
+  expect(run).not.toHaveBeenCalled()
+})

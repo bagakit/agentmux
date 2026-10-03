@@ -57,6 +57,7 @@ async function input(selector: string, value: string) {
 describe('actual Toolkit Settings account template consumer', () => {
   it('previews and creates one disabled ordinary draft, then saves through the actual ConfigOwner without running', async () => {
     const m = await setup(); await dom.render(m.pane())
+    expect(dom.container.querySelector('[data-tool-template="account-usage"]')?.textContent).toBe('Account usage example')
     await dom.click('[data-tool-template="account-usage"]')
     expect(dom.container.querySelector('[aria-label="Account usage template"]')).not.toBeNull()
     expect(dom.container.querySelector('.toolkit-template__source')?.textContent).toBe(accountUsageScript)
