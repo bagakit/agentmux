@@ -606,6 +606,8 @@ export function ActivityView({
     el?.scrollIntoView({ block: 'nearest' })
   }
 
+  // Retain confirmed DOM visibility through observation handoff, never message bodies.
+  const visibleShells = useRef<{ feed: HTMLDivElement; sessionId: string; shells: Set<Element> } | null>(null)
   // Register committed shells once. Disclosure registers only added descendants, never a scroll-frame scan.
   useEffect(() => {
     if (!feedEl) return
@@ -618,25 +620,31 @@ export function ActivityView({
       if (key) { const ids = expected.get(key) ?? []; ids.push(record.id); expected.set(key, ids) }
     }
     const mapping = new Map<Element, readonly string[]>()
-    const onscreen = new Set<Element>()
-    const recompute = (): void => setVisible(new Set([...onscreen].flatMap(el => mapping.get(el) ?? [])))
+    const previous = visibleShells.current
+    const onscreen = previous?.feed === feedEl && previous.sessionId === sessionId ? previous.shells : new Set<Element>()
+    visibleShells.current = { feed: feedEl, sessionId, shells: onscreen }
+    let active = true
+    const recompute = (): void => {
+      if (!active) return
+      const next = new Set([...onscreen].flatMap(el => mapping.get(el) ?? []))
+      setVisible(current => current.size === next.size && [...current].every(id => next.has(id)) ? current : next)
+    }
     const ruler = feedEl.querySelector<HTMLElement>('.activity-ruler')
     let headerHeight = -1
     let observer: IntersectionObserver
     function observeViewport(): void {
+      if (!active) return
       const height = Math.ceil(ruler?.getBoundingClientRect().height ?? 0)
       if (height === headerHeight) return
       headerHeight = height
       observer?.disconnect()
-      onscreen.clear()
       const current = new IntersectionObserver(entries => {
-        if (observer !== current) return
+        if (!active || observer !== current) return
         for (const entry of entries) entry.isIntersecting ? onscreen.add(entry.target) : onscreen.delete(entry.target)
         recompute()
       }, { root: feedEl, rootMargin: `-${height}px 0px 0px 0px`, threshold: 0 })
       observer = current
       for (const node of mapping.keys()) observer.observe(node)
-      recompute()
     }
     observeViewport()
     const resize = new ResizeObserver(observeViewport)
@@ -661,7 +669,10 @@ export function ActivityView({
     }
     const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key], [data-native-record-ids] .wf-head'
     feedEl.querySelectorAll<HTMLElement>(selector).forEach(register)
+    for (const node of onscreen) if (!mapping.has(node) || !node.isConnected) onscreen.delete(node)
+    recompute()
     const mutations = new MutationObserver(entries => {
+      if (!active) return
       for (const entry of entries) {
         if (entry.type === 'attributes' && entry.target instanceof HTMLElement && entry.target.matches('[data-native-record-ids] .wf-head')) register(entry.target)
         for (const added of entry.addedNodes) if (added instanceof HTMLElement) {
@@ -676,8 +687,8 @@ export function ActivityView({
       recompute()
     })
     mutations.observe(feedEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['aria-expanded'] })
-    return () => { mutations.disconnect(); resize.disconnect(); observer.disconnect() }
-  }, [rulerRecords, placed, feedEl])
+    return () => { active = false; mutations.disconnect(); resize.disconnect(); observer.disconnect() }
+  }, [rulerRecords, placed, feedEl, sessionId])
 
   const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
   locateRef.current.source = nativeHistoryPage
