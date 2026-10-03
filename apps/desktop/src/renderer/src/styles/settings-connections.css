@@ -52,3 +52,27 @@
 @media (max-width: 640px) {
   .settings-devices-pane .host-edit-grid { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Device connection feedback belongs beside its action, before the device list. */
+.device-management__connection { display: grid; gap: var(--sp-4); }
+.device-management__connection > h3,
+.device-management__connection > p { margin: 0; }
+.device-management__connection > .settings-pane-toolbar { margin: 0; }
+.device-management__feedback { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.device-management__link { min-width: 0; color: var(--text-3); font-size: var(--fs-meta); }
+.device-management__link summary { cursor: pointer; padding-block: var(--sp-2); }
+.device-management__link summary:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+.device-management__link textarea {
+  display: block; box-sizing: border-box; width: 100%; min-width: 0; margin-top: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.6 var(--font-mono);
+  overflow-wrap: anywhere; resize: vertical;
+}
+.device-management__link textarea:focus { outline: 1px solid var(--focus-line); outline-offset: 1px; }
+.device-management__devices { margin-top: var(--sp-6); padding-top: var(--sp-5); border-top: 1px solid var(--line-soft); }
+.device-management__devices > .settings-pane-toolbar { flex-wrap: wrap; gap: var(--sp-3); }
+.device-management__devices > .settings-pane-toolbar h3 { margin: 0; }
+.device-management__updated { margin: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); font-variant-numeric: tabular-nums; }
+.device-management__spinner { animation: device-management-spin 1s linear infinite; }
+@keyframes device-management-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .device-management__spinner { animation: none; } }
