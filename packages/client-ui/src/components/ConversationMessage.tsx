@@ -19,6 +19,7 @@ import { ConversationFiles } from './ConversationFiles.js'
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationMessageProps = {
+  showInputSource?: boolean
   /** Original host record title, used only by an explicitly attributed system record. */
   recordTitle?: string
   /** A compact record face, without changing ordinary conversation defaults. */
@@ -110,7 +111,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationSessionId, inputSource, executionHostId, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, inputSource, showInputSource = true, executionHostId, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -257,7 +258,7 @@ export function ConversationMessage({
         {status === 'unverified' ? (
           <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
         ) : null}
-        {inputOrigin && !isSystemContext ? <span className="log-turn__input-source" title={inputOrigin.title}>
+        {inputOrigin && !isSystemContext && (showInputSource || inputSource?.kind === 'captured' && Boolean(inputSource.device)) ? <span className="log-turn__input-source" title={inputOrigin.title}>
           <CornerDownRight size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
           ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>

@@ -11,7 +11,7 @@ import { AgentAsyncQuestionCard, type QuestionNoticeRenderer } from './AgentAsyn
 import { completedNativeReply } from '../lib/conversation-files.js'
 
 type ReadingProps = Pick<ConversationMessageProps,
-  'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
+  'showInputSource' | 'executionHostId' | 'workspaceRoot' | 'homeDir' | 'openWorkspaceFile' | 'readPastedImage' | 'openHttpLink' | 'onSelectAnnotation' | 'expandedTraces' | 'onToggleTrace'>
 
 export type ConversationQuestionReply = (input: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'answers' | 'operationId'>) => Promise<AgentSessionQuestionReplyReceipt>
 

@@ -372,7 +372,7 @@ export async function registerIpc(args: {
     request: AgentMuxControlRequest
   ): Promise<AgentMuxControlResult> => {
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
-      if(!('requestId' in request.target)) {
+      if(!request.presentation && !('requestId' in request.target)) {
         const state=await spatialState.read()
         if(state) return {operation:request.operation,catalog:spatialCatalog(state.graph,request.target)}
       }

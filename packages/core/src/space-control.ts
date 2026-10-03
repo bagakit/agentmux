@@ -70,7 +70,16 @@ export type AgentMuxProjectGroupFact = {
   name: string
   projectIds: string[]
 }
+/** Read-only host appearance facts. They never own spatial or execution identity. */
+export type AgentMuxSpaceAppearance = {
+  spaceId: string
+  glyph?: string
+  parts?: Record<string, string>
+  image?: { dataUrl: string | null; revision?: string }
+  issue?: string
+}
 export type AgentMuxSpaceCatalog = {
+  appearance?: AgentMuxSpaceAppearance[]
   projectGroups?: AgentMuxProjectGroupFact[]
   spaces: AgentMuxSpaceFact[]
   zones: AgentMuxZoneFact[]
@@ -187,8 +196,8 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'agent.rename'; agentSessionId: string; name: string | null; expectedNameRevision: number }
   | { operation: 'agent.inspect'; agentSessionId: string }
   | { operation: 'space.rename'; tabId: string; name: string | null; expectedNameRevision: number }
-  | { operation: 'space.ls'; target: AgentMuxSpaceSelector }
-  | { operation: 'space.inspect'; target: AgentMuxSpaceSelector | { requestId: string } }
+  | { operation: 'space.ls'; target: AgentMuxSpaceSelector; presentation?: boolean }
+  | { operation: 'space.inspect'; presentation?: boolean; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:
       | { kind: 'new-agent'; executorId: string; prompt?: string }
       | { kind: 'agent-session'; agentSessionId: string };

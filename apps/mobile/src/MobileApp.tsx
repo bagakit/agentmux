@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, MoreHorizontal, Smartphone, SquareTerminal, Wifi, X } from 'lucide-react'
+import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, Settings2, SquareTerminal, Wifi, X } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
@@ -12,7 +12,8 @@ import { getDeviceWorkface, type Navigation } from './recovery/device-workface'
 import { MobileRecoveryPanel } from './recovery/MobileRecoveryPanel'
 import { exportNativeWorkfaceFile } from './platform/native/workface-file'
 
-import brandIcon from './assets/agentmux.png'
+import brandIcon from './assets/dragon.png'
+import { MobileIdentity, type MobileObjectIdentity } from './navigation/MobileIdentity'
 import { MoteMark } from './navigation/MoteMark'
 import { MobileSpatialNavigation } from './navigation/MobileSpatialNavigation'
 import { readMobileHome, saveMobileHome, type MobileHome } from './navigation/home-preference'
@@ -46,7 +47,8 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [defaultHome, setDefaultHome] = useState<MobileHome>(initialHome.current.home)
   const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
   const [showSession, setShowSession] = useState(false)
-  const [sessionTitle, setSessionTitle] = useState<string | null>(null)
+  const [objectIdentity, setObjectIdentity] = useState<MobileObjectIdentity | null>(null)
+  const sessionTitle = objectIdentity?.name ?? null
   const [sheet, setSheet] = useState<'connection' | 'attachments' | 'settings' | null>(null)
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
   const [attachment, setAttachment] = useState<LocalAttachment | null>(null)
@@ -107,11 +109,12 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const workspaceVisible = connected || hasConnected
   const label = connected ? '已连接' : connection.state === 'connecting' ? '连接中' : connection.state === 'disconnected' ? '连接中断' : '尚未连接'
 
-  return <div className="mobile-app" data-connection={connection.state}>
+  return <div className="mobile-app" data-connection={connection.state} data-drawer={sheet === 'settings' ? 'open' : 'closed'} data-mobile-workface={showSession && objectIdentity?.mote ? 'mote' : 'workspace'}>
     <header className="mobile-header">
-      <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={28} height={28} alt="" /><span>AgentMux</span></div>
-      <div className="mobile-header-actions"><span className="mobile-status-dot" aria-label={label} />
-        <button className="mobile-icon-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><MoreHorizontal size={20} /></button></div>
+      <button className="mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><Settings2 size={20} /><span className="mobile-status-dot" aria-label={label} /></button>
+      {showSession && objectIdentity?.mote ? <div className="mobile-mote-heading"><MobileIdentity identity={objectIdentity} {...(selected ? { session: selected } : {})} client={client} connected={connected} size={58} /><strong>{objectIdentity.name}</strong><small>{connected ? selected?.pendingInteraction ? '需要回应' : ({ working: '正在执行', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认' } as Record<string, string>)[selected?.semanticStatus?.state ?? ''] ?? '状态未确认' : label}</small></div>
+        : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
+      <span className="mobile-header-spacer" />
     </header>
     {workspaceVisible && showSession && <div className="mobile-session-toolbar">
       <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'}</button>
@@ -120,15 +123,15 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       {native && selected && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><Pencil size={17} /></button>}
     </div>}
     <main className="mobile-main">
-      {!workspaceVisible && <section className="mobile-connect-page"><span className="mobile-connect-mark"><Smartphone size={28} /></span><h1>连接你的 Mac</h1>
+      {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
         <p>在 Mac 的 Phone &amp; Devices 中复制连接链接，用手机打开。两台设备连接同一 Wi-Fi。</p>
         <p className="mobile-spatial-notice" role="status">{connection.message}</p>{connectionPanel}
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><Link2 size={16} />连接详情</button>
       </section>}
-      {workspaceVisible && !showSession && <MobileSpatialNavigation home={home} client={client} connected={connected} sessions={sessions} openSession={(id, title) => {
-        setSessionTitle(title)
+      {workspaceVisible && <div hidden={showSession}><MobileSpatialNavigation visible={!showSession} home={home} client={client} connected={connected} sessions={sessions} openSession={(id, title) => {
+        setObjectIdentity(title)
         setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' })); setShowSession(true)
-      }} />}
+      }} /></div>}
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || workface.panel === 'terminal'}>
         {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'} 选择已有 Agent。</p>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
@@ -145,10 +148,12 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       <button aria-current={!showSession && home === 'space' ? 'page' : undefined} onClick={() => { setHome('space'); setShowSession(false) }}><Layers size={20} /><span>Space</span></button>
     </nav>}
     <Dialog.Root open={sheet !== null} onOpenChange={open => { if (!open) setSheet(null) }}>
-      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet" aria-describedby="mobile-sheet-description">
-        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'attachments' ? '本地附件' : sheet === 'settings' ? '手机设置' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><X size={19} /></Dialog.Close></div>
+      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
+        <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'attachments' ? '本地附件' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><X size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>
-          <Dialog.Description id="mobile-sheet-description">这台手机的显示偏好</Dialog.Description>
+          <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
+          <nav className="mobile-drawer-navigation" aria-label="侧边导航">{(['mote', 'focus', 'space'] as const).map(value => <button key={value} aria-current={home === value ? 'page' : undefined} onClick={() => { setHome(value); setShowSession(false); setSheet(null) }}>{value === 'mote' ? <MoteMark size={24} /> : value === 'focus' ? <List size={24} /> : <Layers size={24} />}<span>{value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'}</span></button>)}</nav>
+          <div className="mobile-drawer-settings">
           <fieldset className="mobile-home-settings"><legend>连接后的默认主页</legend>
             {(['mote', 'focus', 'space'] as const).map(value => <label key={value}><span><strong>{value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'}</strong><small>{value === 'mote' ? '协调与长期讨论' : value === 'focus' ? '执行状态与待处理事项' : '工作空间与已有 Agent'}</small></span><input type="radio" name="mobile-default-home" value={value} aria-label={value === 'mote' ? 'Mote' : value === 'focus' ? 'Focus' : 'Space'} checked={defaultHome === value} onChange={() => {
               try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }
@@ -156,7 +161,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
             }} /></label>)}
           </fieldset>
           {homeIssue && <p className="mobile-spatial-notice" role="status">{homeIssue}</p>}
-          <button className="mobile-menu-row" onClick={() => setSheet('connection')}><Wifi size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ChevronRight size={16} /></button>
+          <button className="mobile-menu-row" onClick={() => setSheet('connection')}><Wifi size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ChevronRight size={16} /></button></div>
         </> : sheet === 'attachments' ? <>
           <Dialog.Description id="mobile-sheet-description">系统已选中附件，文件仍在这台设备上。</Dialog.Description>
           {attachment && <div className="mobile-selected-file"><File size={22} /><div><strong>{attachment.name}</strong><small>{attachment.mimeType} · {(attachment.size / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB</small></div><Check size={17} /></div>}

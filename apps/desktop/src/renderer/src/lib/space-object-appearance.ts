@@ -1,40 +1,12 @@
 import { isMoteAvatarRef, isMoteFace, type MoteAvatarRef, type MoteAvatarTarget, type MoteFace } from '../../../shared/mote-avatars'
-import {
-  Bot, BookOpen, Bookmark, Brain, Code, Compass, Database, FileText, FlaskConical,
-  Folder, Gem, Layers, Library, Lightbulb, NotebookText, Package, Puzzle,
-  Rocket, Shapes, SquareTerminal, Wrench
-} from 'lucide-react'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from '../../../shared/scratch-topics'
 import type { WorkspaceProject } from './workspace-projects'
 import { directoryIdentity, originalTopicAddress, type SpaceZoneBindings } from '../../../shared/space-addresses'
 
 /** One bounded, named source for the picker, renderer and persisted-value validation. */
-export const SPACE_ICON_CATALOG = {
-  bot: { label: 'Agent', Icon: Bot },
-  book: { label: 'Book', Icon: BookOpen },
-  bookmark: { label: 'Bookmark', Icon: Bookmark },
-  brain: { label: 'Brain', Icon: Brain },
-  code: { label: 'Code', Icon: Code },
-  compass: { label: 'Compass', Icon: Compass },
-  database: { label: 'Database', Icon: Database },
-  document: { label: 'Document', Icon: FileText },
-  flask: { label: 'Research', Icon: FlaskConical },
-  folder: { label: 'Folder', Icon: Folder },
-  gem: { label: 'Gem', Icon: Gem },
-  layers: { label: 'Layers', Icon: Layers },
-  library: { label: 'Library', Icon: Library },
-  lightbulb: { label: 'Idea', Icon: Lightbulb },
-  notebook: { label: 'Notebook', Icon: NotebookText },
-  package: { label: 'Package', Icon: Package },
-  puzzle: { label: 'Puzzle', Icon: Puzzle },
-  rocket: { label: 'Rocket', Icon: Rocket },
-  shapes: { label: 'Shapes', Icon: Shapes },
-  terminal: { label: 'Terminal', Icon: SquareTerminal },
-  wrench: { label: 'Tools', Icon: Wrench }
-} as const
-
-export type SpaceIconId = keyof typeof SPACE_ICON_CATALOG
+import { SPACE_ICON_CATALOG, type SpaceIconId } from '@agentmux/client-ui/space-icon-catalog'
+export { SPACE_ICON_CATALOG, type SpaceIconId } from '@agentmux/client-ui/space-icon-catalog'
 export type SpaceIconChoice = SpaceIconId | MoteAvatarRef | MoteFace
 export type SpaceIconOverrides = Record<string, SpaceIconChoice>
 export type SpaceIconTarget = { key: string; name: string; kind: 'folder' | 'topic' | 'mote'; avatarTarget?: MoteAvatarTarget }

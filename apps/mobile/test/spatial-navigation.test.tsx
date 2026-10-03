@@ -15,7 +15,7 @@ afterEach(async () => { for (const item of mounted.splice(0)) { await act(async 
 describe('mobile production workspace navigation', () => {
   it('opens the configured Space through actual bindings, keeps shared conversation mounted and removes history controls', async () => {
     localStorage.setItem('agentmux-mobile-home', 'space')
-    const f = fixture(); f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog })
+    const f = fixture(); f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => method === 'app.snapshot' ? { agents: [] } : method === 'agent.inspect' ? { session: f.client.agentSession('session-original'), displayName: { override: null, availability: 'observed' } } : { catalog })
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
     expect(view.element.querySelector('h1')?.textContent).toBe('Space')
     expect(view.element.querySelector('.mobile-connect-page')).toBeNull()
@@ -35,9 +35,39 @@ describe('mobile production workspace navigation', () => {
     expect(f.disposeHistory).toHaveBeenCalled()
     expect(f.submit).not.toHaveBeenCalled()
   })
+  it('shows authoritative project and Agent name separately from provider and opens the original Mote directly', async () => {
+    localStorage.setItem('agentmux-mobile-home', 'focus')
+    const f = fixture()
+    Object.assign(f.client.agentSession('session-original'), { semanticStatus: { state: 'working' } })
+    const originalCatalog = { ...catalog, spaces: [{ ...catalog.spaces[0], kind: 'mote', name: 'Original Mote' }],
+      appearance: [{ spaceId: 'space', parts: { kind: 'face', shape: 'soft', palette: 'mint', eyes: 'round', brows: 'soft', mouth: 'smile', accessory: 'tuft' } }] }
+    f.client.forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => method === 'app.snapshot'
+      ? { agents: [{ agentSessionId: 'session-original', projectName: 'Original Project' }] }
+      : method === 'agent.inspect' ? { session: f.client.agentSession(params.target.agentSessionId), displayName: { override: 'Chosen Agent', availability: 'observed' } }
+      : { catalog: originalCatalog })
+    const overlay = document.createElement('div'); document.body.append(overlay)
+    const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
+    const row = [...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(item => item.textContent?.includes('Original Project'))!
+    expect(row.textContent).toContain('Chosen Agent')
+    expect(row.textContent).toContain('执行中')
+    expect(row.textContent).toContain('codex')
+    expect(row.textContent).not.toContain(fixturePath("workspace"))
+    await click(view.element.querySelector<HTMLButtonElement>('.mobile-navigation button:first-child')!)
+    await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-panel > .mobile-session-list button')!)
+    expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
+    expect(view.element.querySelector('.mobile-mote-heading strong')?.textContent).toBe('Original Mote')
+    expect(view.element.querySelector('.mobile-mote-heading .mote-face')).not.toBeNull()
+    const input = editor(view.element)
+    await click(button(view.element, '手机设置与连接'))
+    expect(overlay.querySelector('.mobile-drawer')).not.toBeNull()
+    expect(editor(view.element)).toBe(input)
+    await click(button(overlay, '关闭面板'))
+    expect(editor(view.element)).toBe(input)
+    expect(f.submit).not.toHaveBeenCalled()
+  })
   it('does not claim or persist a new home when its preference write fails', async () => {
     localStorage.setItem('agentmux-mobile-home', 'space')
-    const f = fixture(); f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog })
+    const f = fixture(); f.client.forwardRpc = vi.fn().mockImplementation(async (method: string) => method === 'app.snapshot' ? { agents: [] } : method === 'agent.inspect' ? { session: f.client.agentSession('session-original'), displayName: { override: null, availability: 'observed' } } : { catalog })
     const overlay = document.createElement('div'); document.body.append(overlay)
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await click(button(view.element, '手机设置与连接'))
