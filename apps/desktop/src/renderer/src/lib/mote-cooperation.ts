@@ -8,8 +8,55 @@ import type { MoteWorkfaceScope } from './mote-workface'
 import type { WorkbenchProjectionSelection } from './workbench-projection'
 import { documentKey } from './workbench-tabs'
 import { fileNavigationSelection, useAppStore } from '../store'
-import { confirmedMoteReference, emptyMoteDestination } from './mote-materials-actions'
+import { confirmedMoteReference, emptyMoteDestination, openMoteDiscussionDraft } from './mote-materials-actions'
 import { replaceMoteBehaviorBlock, type MoteBehaviorPreferences } from './mote-behavior'
+
+export type MoteCooperationSource = { path: string; observation: FileReadResult }
+export type MoteCooperationDraft = { selection: WorkbenchProjectionSelection; sources: MoteCooperationSource[] }
+
+/** A real question, with only the saved SOUL and explicitly chosen original materials. */
+export async function prepareMoteCooperationDraft(scope: MoteWorkfaceScope,
+  reference: WorkbenchProjectionSelection | null | undefined,
+  input: { question: string; materialPaths?: readonly string[] }, stillCurrent: () => boolean): Promise<MoteCooperationDraft> {
+  if (!input.question.trim()) throw new Error('Write a question before preparing a discussion.')
+  const paths = [...new Set([scope.rootPath + '/' + MOTE_SOUL_PATH, ...(input.materialPaths ?? [])])]
+  if (paths.length > 4 || paths.some(path => !fileExplorerContains(scope.rootPath, path) || path === scope.rootPath))
+    throw new Error('Choose up to three original materials in this Mote. Your question is kept.')
+  const state = useAppStore.getState()
+  if (!stillCurrent() || !(confirmedMoteReference(state, scope, { reference }) ?? emptyMoteDestination(state, scope, { reference })))
+    throw new Error('The original Mote destination is unconfirmed. Your question and work are kept.')
+  const navigation = fileNavigationSelection(state), revision = state.workspaceFileRevisions[scope.workspace.id]
+  let changed = false
+  const unsubscribe = useAppStore.subscribe(current => {
+    const workspace = current.config?.workspaces.find(item => item.id === scope.workspace.id)
+    if (fileNavigationSelection(current) !== navigation || current.workspaceFileRevisions[scope.workspace.id] !== revision ||
+        workspace?.hostId !== scope.workspace.hostId || workspace.path !== scope.workspace.path) changed = true
+  })
+  let sources: MoteCooperationSource[]
+  try {
+    sources = await Promise.all(paths.map(async path => {
+      try { return { path, observation: await readMoteMaterial(scope, path) } }
+      catch (error) { return { path, observation: { resource: null, result: { status: 'unknown' as const,
+        code: 'MOTE_MATERIAL_READ_UNCONFIRMED', message: error instanceof Error ? error.message : String(error) } } } }
+    }))
+    if (changed || !stillCurrent()) throw new Error('Your selection, saved materials or later question changed during the read. Your inputs and work are kept; review them and retry.')
+  } finally { unsubscribe() }
+  const agentMuxNote = [
+    'Original Mote context: ' + JSON.stringify({ hostId: scope.workspace.hostId, workspaceId: scope.workspace.id,
+      workspacePath: scope.workspace.path, moteId: scope.topic.id, directory: scope.rootPath }),
+    'Saved materials read while preparing this question (not a claim that an Agent used them):\n' + sources.map(({ path, observation }) => {
+      const result = observation.result
+      return JSON.stringify(result.status === 'read'
+        ? { path, resource: observation.resource, revision: result.document.revision,
+            excerpt: result.document.content.length <= 6000 ? result.document.content : result.document.content.slice(0, 6000) + '\n[Excerpt; read the original file for the rest.]' }
+        : { path, status: result.status, ...('message' in result ? { message: result.message } : {}) })
+    }).join('\n'),
+    'Use relevant saved facts within their recorded scope, with my current question and instructions first. Read the original files when needed; say what is unknown. This is a new discussion, not inherited unseen conversation. Saved SOUL changes apply to a new Session; an existing Session keeps its context.'
+  ].join('\n\n')
+  const selection = openMoteDiscussionDraft(scope, input.question, { reference, agentMuxNote })
+  if (!selection) throw new Error('The exact new Launcher is unconfirmed. Your question and existing work are kept.')
+  return { selection, sources }
+}
 
 /** Only the explicitly inspected original material is read through the public typed file domain. */
 export function readMoteMaterial(scope: MoteWorkfaceScope, path: string): Promise<FileReadResult> {

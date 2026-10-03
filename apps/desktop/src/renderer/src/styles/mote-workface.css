@@ -50,6 +50,13 @@
 .mote-details__cooperation .mote-details__check { display: flex; flex-direction: row; align-items: flex-start; gap: 7px; line-height: 1.5; }
 .mote-details__check input { flex: 0 0 auto; margin-top: 3px; }
 .mote-details__source { overflow-wrap: anywhere; }
+.mote-cooperation-entry { margin: 0 0 18px; }
+.mote-cooperation-entry__question { display: flex; align-items: flex-end; gap: 6px; }
+.mote-cooperation-entry textarea { flex: 1; min-width: 0; width: 100%; resize: vertical; box-sizing: border-box; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text); padding: 9px 10px; font: inherit; line-height: 1.5; }
+.mote-cooperation-entry textarea:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.mote-cooperation-entry .mote-details__hint { margin: 6px 0; font-size: var(--fs-meta); }
+.mote-cooperation-entry__sources { margin-top: 8px; color: var(--text-3); font-size: var(--fs-meta); }
+.mote-cooperation-entry__sources summary { cursor: pointer; }
 .mote-details__soul summary { color: var(--text-2); cursor: pointer; padding: 3px 0; }
 .mote-details__section-actions { flex-wrap: wrap; }
 
