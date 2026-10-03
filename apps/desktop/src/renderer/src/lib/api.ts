@@ -1,3 +1,4 @@
+import { unwrapSessionInputWriteResult } from '../../../shared/session-input-result'
 import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
 import type {
   AgentExecutorConfig,
@@ -1345,6 +1346,9 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     control: createRendererControlApi(preload.control),
     sessions: {
       ...preload.sessions,
+      write: (...args) => preload.sessions.write(...args).then(unwrapSessionInputWriteResult),
+      paste: (...args) => preload.sessions.paste(...args).then(unwrapSessionInputWriteResult),
+      submitPrompt: (...args) => preload.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult),
       observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }

@@ -6,7 +6,6 @@ import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionLaunchResult } from '../shared/session-launch-result'
-import { unwrapSessionInputWriteResult } from '../shared/session-input-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -355,10 +354,10 @@ const api: AgentMuxPreloadApi = {
     replay: (attachmentId: string, afterByte: number) =>
       ipcRenderer.invoke('sessions:replay', attachmentId, afterByte),
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
-    write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source).then(unwrapSessionInputWriteResult),
-    paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData).then(unwrapSessionInputWriteResult),
+    write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
+    paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
     submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel).then(unwrapSessionInputWriteResult),
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>
