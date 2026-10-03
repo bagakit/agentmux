@@ -721,7 +721,7 @@ type AppState = {
     eligibility?: PrEligibilityInput
   }): Promise<CreatePullRequestResult>
   focusTabGroup(workspaceId: string, tabGroupId: string): void
-  activateTab(workspaceId: string, tabGroupId: string, tabId: string): void
+  activateTab(workspaceId: string, tabGroupId: string, tabId: string, intent?: 'local' | 'navigation'): void
   executeControl(
     request: AgentMuxControlRequest,
     signal?: AbortSignal,
@@ -3626,12 +3626,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       layouts: { ...state.layouts, [workspaceId]: focusGroup(layout, tabGroupId) }
     }))
   },
-  activateTab(workspaceId, tabGroupId, tabId) {
+  activateTab(workspaceId, tabGroupId, tabId, intent = 'navigation') {
     const current = get(), layout = current.layouts[workspaceId]
     if (!layout) return
     let choice: AgentMuxDesktopSpaceSelection
     try { choice = resolveWorkbenchOccurrenceSelection(current, workbenchSelectionCatalog(current),
-      { workspaceId, groupId: tabGroupId, tabId }, 'navigation') }
+      { workspaceId, groupId: tabGroupId, tabId }, intent) }
     catch (error) { current.reportError(error, { kind: 'indeterminate' }); return }
     const tab = current.tabs[tabId]
     const surface = tab ? titleWorkbenchSurface(tab) : null

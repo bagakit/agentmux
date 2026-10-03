@@ -415,7 +415,7 @@ function SortableWorkbenchTab({
               : surfaceTabTooltip(displayName, regionSummary)
           }
           aria-current={mote && group.activeTabId === tab.id ? 'page' : undefined}
-          onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : mote ? mote.selectTab(tab.id, group.id) : activateTab(workspaceId, group.id, tab.id)}
+          onClick={() => projection ? selectWorkbenchProjectionTab(projection, group.id, tab) : mote ? mote.selectTab(tab.id, group.id) : activateTab(workspaceId, group.id, tab.id, 'local')}
           {...attributes}
           {...listeners}
         >
