@@ -5100,10 +5100,6 @@ export class AgentMuxClient {
       )
     }
     const bytes = Buffer.byteLength(data)
-    const expectedByte = this.agentInputCursors.get(session.agentSessionId) ?? run.acceptedInputBytes
-    if (expectedByte === null) {
-      throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
-    }
     const assertResponse = (
       state: NonNullable<NonNullable<AgentMuxAgentSession['pendingInteraction']>['response']>
     ): void => {
@@ -5132,6 +5128,10 @@ export class AgentMuxClient {
         if (pending.response) {
           assertResponse(pending.response)
           return stored
+        }
+        const expectedByte = run.acceptedInputBytes
+        if (expectedByte === null) {
+          throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
         }
         return {
           ...invalidateAgentIdleEvidence(stored),

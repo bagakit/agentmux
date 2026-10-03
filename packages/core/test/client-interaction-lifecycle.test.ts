@@ -1,6 +1,7 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxMemoryAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
 import type {
@@ -19,12 +20,12 @@ import type {
 const RUN_ID = 'lifecycle-run'
 const AGENT_SESSION_ID = 'lifecycle-agent'
 
-function storedSession(pending?: AgentMuxInteractionRequest): AgentMuxStoredAgentSession {
+function storedSession(pending?: AgentMuxInteractionRequest, providerId: 'codex' | 'claude' = 'codex'): AgentMuxStoredAgentSession {
   return {
     kind: 'agent',
     agentSessionId: AGENT_SESSION_ID,
-    providerId: 'codex',
-    executorId: 'codex',
+    providerId,
+    executorId: providerId,
     hostId: 'local',
     workspacePath: upstreamFixturePath("tmp/lifecycle-agent"),
     run: { runId: RUN_ID },
@@ -53,7 +54,7 @@ function permission(id: string): AgentMuxInteractionRequest {
   } as AgentMuxInteractionRequest
 }
 
-function runProjection(acceptedInputBytes: number) {
+function runProjection(acceptedInputBytes: number | null) {
   return {
     nativeService: null,
     runId: RUN_ID,
@@ -78,14 +79,14 @@ type Internals = {
   registry: { load(hostId: string): Promise<void> }
 }
 
-async function connectedClient(pending?: AgentMuxInteractionRequest): Promise<{
+async function connectedClient(pending?: AgentMuxInteractionRequest, providerId: 'codex' | 'claude' = 'codex'): Promise<{
   client: AgentMuxClient
   writes: string[]
   store: AgentMuxMemoryAgentSessionStore
   state: Internals
 }> {
   const store = new AgentMuxMemoryAgentSessionStore()
-  await store.compareAndSwap(null, storedSession(pending))
+  await store.compareAndSwap(null, storedSession(pending, providerId))
   const client = new AgentMuxClient({ store })
   const state = client as unknown as Internals
   await state.registry.load('local')
@@ -445,5 +446,98 @@ describe('native takeover during typed recovery', () => {
       expect((await loadAgentSessions(h.store))[0]!.pendingInteraction).toEqual(pending)
       expect(h.writes).toEqual(['z'])
     } finally { h.state.kernel.input = originalInput; await h.client.dispose() }
+  })
+})
+
+// Prepared for the existing client-interaction-lifecycle.test.ts after approved Tracker admission.
+// This fixture uses two actual public Core Clients, one real supported Store and a strict
+// synthetic Runtime seam. It does not claim native Provider/PTY completion.
+async function twoCoreReplyFixture(providerId: 'codex' | 'claude' = 'codex') {
+  const h = await connectedClient(permission('cross-core-reply'), providerId)
+  const second = new AgentMuxClient({ store: h.store })
+  const inner = second as unknown as Internals
+  await inner.registry.load('local')
+  inner.kernel = h.state.kernel
+  ;(second as unknown as { connected: boolean }).connected = true
+  let cursor = 0
+  const calls: Array<{ operationId: string; expectedByte: number; data: string }> = []
+  const receipts = new Map<string, Awaited<ReturnType<typeof original>>>()
+  const original = h.state.kernel.input as (runId: string, input: { operationId: string; expectedByte: number; data: string }) =>
+    Promise<{ run: ReturnType<typeof runProjection>; appliedByteRange: { startByte: number; endByte: number } }>
+  h.state.kernel.status = async () => runProjection(cursor)
+  h.state.kernel.input = async (runId: string, input: typeof calls[number]) => {
+    calls.push(structuredClone(input))
+    if (receipts.has(input.operationId)) return structuredClone(receipts.get(input.operationId)!)
+    if (input.expectedByte !== cursor) {
+      throw new AgentMuxError('Strict Runtime input cursor mismatch.', 'CTXMUX_input_cursor_mismatch', 'not_applied')
+    }
+    const receipt = await original(runId, input)
+    expect(receipt.run.acceptedInputBytes).not.toBeNull()
+    cursor = receipt.run.acceptedInputBytes!
+    receipts.set(input.operationId, structuredClone(receipt))
+    return receipt
+  }
+  const protocol = (client: AgentMuxClient) => client.writeAgent({ agentSessionId: AGENT_SESSION_ID,
+    expectedRun: { runId: RUN_ID }, source: 'terminal-protocol', data: '\u001b[0n' })
+  await protocol(h.client) // The original owner has a legitimate local ACK cursor 4.
+  await protocol(second) // Another Core legally advances the same exact Run to 8.
+  return { ...h, second, calls, protocol, cursor: () => cursor,
+    input: { agentSessionId: AGENT_SESSION_ID, expectedRun: { runId: RUN_ID }, response: answer('cross-core-reply') },
+    dispose: async () => { await second.dispose(); await h.client.dispose() } }
+}
+
+describe('typed response claims after another Core legally advances the same Run', () => {
+  it.each(['codex', 'claude'] as const)('claims a new %s response at the fresh exact Run boundary', async providerId => {
+    const h = await twoCoreReplyFixture(providerId)
+    try {
+      const before = h.cursor()
+      const plan = new AgentProviderRegistry().get(providerId)
+        .planInteractionResponse(permission('cross-core-reply'), h.input.response)
+      await h.client.respondAgentInteraction(h.input)
+      expect(h.calls.map(call => call.expectedByte)).toEqual([0, 4, before])
+      expect(h.calls.at(-1)!.data).toBe(plan.data)
+      expect(h.cursor()).toBe(before + Buffer.byteLength(plan.data))
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    } finally { await h.dispose() }
+  })
+
+  it('keeps a missing authoritative cursor unknown even when a local ACK cursor exists', async () => {
+    const h = await twoCoreReplyFixture()
+    try {
+      h.state.kernel.status = async () => runProjection(null)
+      await expect(h.client.respondAgentInteraction(h.input)).rejects.toMatchObject({ code: 'CTXMUX_INPUT_CURSOR_MISSING' })
+      expect(h.calls).toHaveLength(2)
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toEqual({ request: permission('cross-core-reply') })
+      expect(h.cursor()).toBe(8)
+    } finally { await h.dispose() }
+  })
+
+  it.each([false, true])('reconciles the original frozen unknown claim after later input (missing fresh cursor=%s)', async missingCursor => {
+    const h = await twoCoreReplyFixture()
+    try {
+      const strict = h.state.kernel.input as (runId: string, input: typeof h.calls[number]) => Promise<unknown>
+      let loseResponse = true
+      h.state.kernel.input = async (runId: string, input: typeof h.calls[number]) => {
+        const receipt = await strict(runId, input)
+        if (loseResponse) { loseResponse = false; throw new AgentMuxError('Response receipt lost.', 'PRIVATE_INPUT_FAILURE', 'unknown') }
+        return receipt
+      }
+      await expect(h.client.respondAgentInteraction(h.input)).rejects.toMatchObject({ code: 'PRIVATE_INPUT_FAILURE', detail: 'unknown' })
+      const claim = structuredClone(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction!.response!)
+      expect(claim.inputByteRange).toEqual({ startByte: 8, endByte: 9 })
+      const originalCall = structuredClone(h.calls.at(-1)!)
+      await h.protocol(h.second)
+      expect((await loadAgentSessions(h.store))[0]!.pendingInteraction!.response).toEqual(claim)
+      if (missingCursor) h.state.kernel.status = async () => runProjection(null)
+      await expect(h.client.respondAgentInteraction({ ...h.input, response: answer('cross-core-reply', 'allow-once') }))
+        .rejects.toMatchObject({ code: 'AGENT_INTERACTION_RESPONSE_CONFLICT' })
+      expect(h.calls).toHaveLength(4)
+      await h.client.respondAgentInteraction(h.input)
+      expect(h.calls).toHaveLength(5)
+      expect(h.calls.at(-1)).toEqual(originalCall)
+      expect(h.cursor()).toBe(13)
+      expect(h.writes).toEqual(['\u001b[0n', '\u001b[0n', '\u001b', '\u001b[0n'])
+      expect(h.client.agentSession(AGENT_SESSION_ID).pendingInteraction).toBeUndefined()
+    } finally { await h.dispose() }
   })
 })
