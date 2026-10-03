@@ -5,9 +5,10 @@ import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
 import type { SessionSnapshot, ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
+import { useTopicSessions, useTopicSessionPaths } from '../lib/topic-session-subscriptions'
 import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
 import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import type { TopicCategory } from '@agentmux/core/control'
@@ -29,6 +30,8 @@ import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { MoteRenameDialog } from './MoteRenameDialog'
 
 /** Filesystem objects and existing Session facts; no separate Space or heat registry. */
+const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
+
 export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: {
   workspace: WorkspaceRecord; query?: string; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
 }) {
@@ -36,7 +39,6 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   const { topics, error } = useScratchTopics(workspace.id)
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
-  const sessions = useAppStore((state) => state.sessions)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const order = useAppStore((state) => state.scratchTopicOrder)
   const pinned = useAppStore((state) => state.pinnedItems[SCRATCH_WORKSPACE_ID])
@@ -61,20 +63,22 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   const current = selection?.workspaceId === workspace.id ? selection.topicId : layout ? activeTopicIdFromLayout(layout, tabs) : undefined
   const filtering = Boolean(query.trim())
   // One pass through Sessions, using the same host/path owner predicate as the Board.
+  const entries = useMemo(() => topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings)) ?? [], [topics, bindings])
+  const motes = useMemo(() => scratchMoteTopics(topics), [topics])
+  const sessionPaths = useTopicSessionPaths(workspace, topics ?? NO_TOPICS)
+  const motePaths = useMemo(() => motes.flatMap(topic => sessionPaths.get(topic.id) ?? []), [motes, sessionPaths])
+  const sessions = useTopicSessions(workspace.hostId, motePaths)
   const byTopic = useMemo(() => {
+    const topicByPath = new Map(motes.flatMap(topic => (sessionPaths.get(topic.id) ?? []).map(path => [path, topic.id] as const)))
     const index = new Map<string, SessionSnapshot[]>()
     for (const session of sessions) {
-      if (session.hostId !== workspace.hostId) continue
-      const id = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
+      const id = topicByPath.get(session.workspacePath)
       if (!id) continue
-      const bucket = index.get(id)
-      if (bucket) bucket.push(session)
-      else index.set(id, [session])
+      const bucket = index.get(id) ?? []
+      bucket.push(session); index.set(id, bucket)
     }
     return index
-  }, [sessions, workspace.hostId, workspace.path, topics])
-  const entries = topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings)) ?? []
-  const motes = scratchMoteTopics(topics)
+  }, [sessions, motes, sessionPaths])
   const archive = useMoteArchiveAction(workspace)
   const [showArchived, setShowArchived] = useState(false)
   const tree = useRef<HTMLDivElement>(null)
@@ -195,18 +199,17 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
       }) : null}
     </nav>
   }
-  const categoryTopics = new Map(categories.map(category => [category.spaceId, [] as ScratchTopicSnapshot[]]))
-  const uncategorized: ScratchTopicSnapshot[] = []
-  for (const topic of entries) {
-    const original = originalTopicAddress(workspace, topic, bindings)
-    let assigned = false
-    for (const category of categories) {
-      if (original && bindings[original.zoneId]?.relations?.[category.spaceId] === true) {
-        categoryTopics.get(category.spaceId)!.push(topic); assigned = true
-      }
+  const { categoryTopics, uncategorized } = useMemo(() => {
+    const categoryTopics = new Map(categories.map(category => [category.spaceId, [] as ScratchTopicSnapshot[]]))
+    const uncategorized: ScratchTopicSnapshot[] = []
+    for (const topic of entries) {
+      const original = originalTopicAddress(workspace, topic, bindings)
+      const members = original ? categories.filter(category => bindings[original.zoneId]?.relations?.[category.spaceId] === true) : []
+      if (!members.length) uncategorized.push(topic)
+      else for (const category of members) categoryTopics.get(category.spaceId)!.push(topic)
     }
-    if (!assigned) uncategorized.push(topic)
-  }
+    return { categoryTopics, uncategorized }
+  }, [categories, entries, workspace, bindings])
   const matchingCategories = categories.filter(category => matchesSpaceQuery(query, 'Topics', category.title, category.directoryPath, category.hostId) ||
     categoryTopics.get(category.spaceId)!.some(topic => matchesSpaceQuery(query, 'Topics', category.title, topic.title, topic.summary, scratchTopicPhysicalPath(workspace, topic), workspace.hostId)))
   return <div ref={tree} className="space-topics-tree">
