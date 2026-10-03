@@ -22,6 +22,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
   const [copyResult, setCopyResult] = useState<{ id: string; text: string; state: 'copied' | 'failed' } | null>(null)
   const copyActionRef = useRef(0)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -30,7 +31,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   const pointerRef = useRef<{ x: number; y: number } | null>(null)
   const listRef = useRef<HTMLOListElement>(null)
   const active = queued.find(entry => entry.preparing || entry.sending)
-  const selected = queued.find(entry => entry.id === (editingId ?? selectedId)) ?? active ?? queued.find(entry => entry.deliverable) ?? queued[0]
+  const selected = queued.find(entry => entry.id === (editingId ?? hoveredId ?? selectedId)) ?? active ?? queued.find(entry => entry.deliverable) ?? queued[0]
   const currentIndex = selected ? queued.indexOf(selected) : -1
 
   function paintPointer() {
@@ -64,8 +65,9 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   useLayoutEffect(() => {
     const list = listRef.current
     if (!list || suppressed) return
+    let bottomGutter = 0
     const updateScrollPivot = () => {
-      list.style.setProperty('--queue-pivot-y', list.scrollTop + list.offsetHeight + 'px')
+      list.style.setProperty('--queue-pivot-y', list.scrollTop + list.clientHeight - bottomGutter + 'px')
       list.style.setProperty('--queue-scroll-y', list.scrollTop + 'px')
     }
     const updateLayoutPivot = () => {
@@ -73,7 +75,9 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
         card: card as HTMLElement, x: (card as HTMLElement).offsetLeft, y: (card as HTMLElement).offsetTop,
         width: (card as HTMLElement).offsetWidth, height: (card as HTMLElement).offsetHeight
       }))
-      list.style.setProperty('--queue-pivot-x', list.offsetWidth + 'px')
+      const style = getComputedStyle(list)
+      bottomGutter = parseFloat(style.paddingBottom)
+      list.style.setProperty('--queue-pivot-x', list.clientWidth - parseFloat(style.paddingRight) + 'px')
       list.style.setProperty('--queue-viewport-height', list.offsetHeight + 'px')
       updateScrollPivot()
       for (const { card, x, y, width, height } of offsets) {
@@ -96,10 +100,11 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   }, [queued, currentIndex, editingId, suppressed])
 
   useLayoutEffect(() => {
-    if (suppressed || !selected) return
-    const card = Array.from(listRef.current?.children ?? []).find(node => (node as HTMLElement).dataset.operationId === selected.id)
+    const revealId = editingId ?? selectedId ?? active?.id
+    if (suppressed || !revealId) return
+    const card = Array.from(listRef.current?.children ?? []).find(node => (node as HTMLElement).dataset.operationId === revealId)
     card?.scrollIntoView({ block: 'nearest' })
-  }, [selected?.id, suppressed])
+  }, [editingId, selectedId, active?.id, suppressed])
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current, floating = surfaceRef.current
@@ -137,9 +142,16 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
         observedHelper = helper ?? null
         if (observedHelper) cursorObserver.observe(observedHelper, { attributes: true, attributeFilter: ['style'] })
       }
-      // Keep the right edge attached while content changes width before asynchronous placement settles.
-      floating.style.left = 'auto'; floating.style.right = document.documentElement.clientWidth - tool.right + 'px'
-      const reference = { contextElement: composer, getBoundingClientRect: () => new DOMRect(tool.right, tool.top, 0, 0) }
+      // The transparent gutter protects outlines and shadows; the painted card
+      // edge, rather than its scrollport, stays attached to the original Tool.
+      const cards = listRef.current!
+      const style = getComputedStyle(cards)
+      const rightGutter = parseFloat(style.paddingRight) + cards.offsetWidth - cards.clientWidth
+      const bottomGutter = parseFloat(style.paddingBottom)
+      const right = Math.min(document.documentElement.clientWidth, tool.right + rightGutter)
+      const gap = Math.max(0, 8 - bottomGutter)
+      floating.style.left = 'auto'; floating.style.right = document.documentElement.clientWidth - right + 'px'
+      const reference = { contextElement: composer, getBoundingClientRect: () => new DOMRect(right, tool.top, 0, 0) }
       const padding = { top: 8, left: 8, right: 0, bottom: 0 }
       const locate = (gap: number) => computePosition(reference, floating, {
         strategy: 'fixed', placement: 'top-end', middleware: [offset(gap), shift({ boundary: region, padding }),
@@ -149,10 +161,10 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
             floating.style.maxHeight = Math.max(0, Math.min(320, availableHeight)) + 'px'
           } })]
       })
-      let position = await locate(8)
+      let position = await locate(gap)
       const cursor = helper?.getBoundingClientRect()
       const width = floating.offsetWidth, height = floating.offsetHeight
-      const left = tool.right - width
+      const left = right - width
       // Read the actual current row, including text to the right of a moved caret.
       // The original mounted view owns cells and geometry; this surface keeps no input facts.
       let overlapTop = terminal && regionId
@@ -162,7 +174,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
           position.y < cursor.bottom && position.y + height > cursor.top) {
         overlapTop = overlapTop === undefined ? cursor.top : Math.min(overlapTop, cursor.top)
       }
-      if (overlapTop !== undefined) position = await locate(Math.max(8, tool.top - overlapTop + 2))
+      if (overlapTop !== undefined) position = await locate(Math.max(gap, tool.top - overlapTop + 2))
       if (disposed || request !== revision) return
       floating.style.top = position.y + 'px'
       floating.dataset.positioned = 'true'
@@ -189,6 +201,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     }
     const reset = () => {
       pointerRef.current = null
+      setHoveredId(null)
       floating.style.removeProperty('--queue-pointer-x')
       floating.style.removeProperty('--queue-pointer-y')
     }
@@ -224,6 +237,8 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   return <WindowOverlayPortal>
     <section ref={surfaceRef} className="composer-pending" aria-label="待发消息" hidden={suppressed} data-state={suppressed ? 'closed' : 'open'}
       data-operation-id={selected.id} data-count={queued.length}
+      onPointerLeave={() => setHoveredId(null)}
+      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget)) setSelectedId(null) }}
       onKeyDown={event => {
         if (editingId || isImeOwnedKeyboardEvent(event)) return
         if (event.key === 'Escape') { event.preventDefault(); anchorRef.current?.focus() }
@@ -243,7 +258,9 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
             const copied = copyResult?.id === entry.id && copyResult.text === entry.text ? copyResult.state : 'idle'
             return <li key={entry.id} className="composer-pending__card" data-operation-id={entry.id}
               data-queue-index={index} style={{ '--queue-depth': Math.min(4, Math.abs(index - currentIndex)) } as CSSProperties} data-selected={entry.id === selected.id} data-busy={state.busy} data-editing={editing}
-              tabIndex={0} aria-label={'待发 ' + (index + 1) + ': ' + entry.text} onPointerMove={() => { if (entry.id !== selected.id) select(entry.id) }} onFocus={() => select(entry.id)}>
+              tabIndex={0} aria-label={'待发 ' + (index + 1) + ': ' + entry.text}
+              onPointerMove={event => { if (!editingId && event.pointerType !== 'touch' && entry.id !== hoveredId) setHoveredId(entry.id) }}
+              onPointerLeave={() => setHoveredId(current => current === entry.id ? null : current)} onFocus={() => select(entry.id)}>
               <span className="composer-pending__state" aria-label={state.label} title={state.label}><Icon size={12} aria-hidden="true" /><span className="composer-pending__sr-only">{state.label}</span></span>
               {editing && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => {
                 setEditingId(null)
