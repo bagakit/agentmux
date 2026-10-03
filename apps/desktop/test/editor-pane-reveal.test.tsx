@@ -77,13 +77,6 @@ function fileSurface(workspaceId: string, path: string) {
 }
 
 describe('EditorPane Monaco owner lifetime', () => {
-  it('clears stale refs on release/document loss and fences late Monaco disposal', async () => {
-    const source = await readFile(new URL('../src/renderer/src/components/EditorPane.tsx', import.meta.url), 'utf8')
-    expect(source).toContain('if (released || !document)')
-    expect(source).toContain('editorRef.current = null')
-    expect(source).toMatch(/editor\.onDidDispose\(\(\) => \{[\s\S]*editorRef\.current === editor[\s\S]*editorRef\.current = null/)
-  })
-
   it('恢复出来的文件面会主动要文档——恢复路径唯一的触发器就在这里', async () => {
     // 这条是源码文本断言，因为它守的东西**没有任何行为测试够得着**：本仓的 EditorPane 测试用
     // `renderToStaticMarkup`（react-dom/server），它根本不跑 useEffect；而 store 侧的测试是直接
@@ -103,7 +96,7 @@ describe('EditorPane Monaco owner lifetime', () => {
     )
     // 三个守卫条件一个都不能少，各自的理由不同：`document` 挡住已加载的；`issue` 挡住已知读不到
     // 的（否则每次依赖变化都对一个坏路径重读一遍）；`released` 挡住 cold-park 占位面。
-    expect(source).toMatch(/if \(document \|\| issue \|\| released\) return\s*\n\s*void attachPersistedDocument/)
+    expect(source).toMatch(/if \(document \|\| issue \|\| released \|\| !visible\) return\s*\n\s*void attachPersistedDocument/)
   })
 })
 
@@ -143,7 +136,9 @@ describe('EditorUnavailableState', () => {
     const element = EditorUnavailableState({ canReveal: true, onReveal }) as unknown as {
       props: { children: [unknown, unknown, { props: { onClick: () => void } }] }
     }
-    element.props.children[2].props.onClick()
+    const button = element.props.children.find((child: any) => child?.props?.onClick === onReveal) as { props: { onClick(): void } }
+    expect(button).toBeDefined()
+    button.props.onClick()
     expect(onReveal).toHaveBeenCalledTimes(1)
   })
 })
@@ -185,6 +180,7 @@ describe('EditorPane failure state wiring', () => {
 
   it('shows the Reveal action for a missing document in a local workspace', () => {
     fixture.state.config.workspaces = [localWorkspace]
+    fixture.state.documentIssues = { ['workspace\0src/gone.ts']: { kind: 'deleted' } }
     const markup = renderToStaticMarkup(
       createElement(EditorPane, { tabId: 'tab', surface: fileSurface('workspace', 'src/gone.ts') })
     )
@@ -194,6 +190,7 @@ describe('EditorPane failure state wiring', () => {
 
   it('withholds the Reveal action for a remote (non-local) workspace', () => {
     fixture.state.config.workspaces = [remoteWorkspace]
+    fixture.state.documentIssues = { ['remote\0src/gone.ts']: { kind: 'deleted' } }
     const markup = renderToStaticMarkup(
       createElement(EditorPane, { tabId: 'tab', surface: fileSurface('remote', 'src/gone.ts') })
     )

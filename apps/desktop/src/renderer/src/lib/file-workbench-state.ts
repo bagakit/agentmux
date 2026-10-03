@@ -3,6 +3,7 @@ import { activateTab, addTab, addTabOccurrence, groupIds, removeTab, type Worksp
 import {
   createWorkbenchTab,
   addWorkbenchRegion,
+  focusWorkbenchTabRegion,
   documentKey,
   fileTabId,
   initialWorkbenchRegionId,
@@ -187,7 +188,7 @@ export function reduceFileSurfaceOpened(
   const existingFile = existingTab && workbenchSurfaces(existingTab).some(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
   const existingSpace = existingTab?.space ?? (confirmedExistingSpace?.tabId === existingTab?.id ? confirmedExistingSpace?.space : undefined)
   if (placement && existingTab && (existingSpace?.zoneId !== placement.space.zoneId || existingSpace.spaceId !== placement.space.spaceId)) throw new Error('The existing file Tab has another Zone context; its original placement is retained.')
-  const placedTab = original ? { ...original.tab, layout: { ...original.tab.layout, activeRegionId: original.surface.regionId } }
+  const placedTab = original ? focusWorkbenchTabRegion(original.tab, original.surface.regionId)
     : existingFile ? existingTab! : existingTab ? addWorkbenchRegion(existingTab, existingTab.layout.activeRegionId, 'right', {
       kind: 'file', workspaceId, path,
       regionId: existingTab.regions[initialWorkbenchRegionId(tabId)] ? `region:${crypto.randomUUID()}` : initialWorkbenchRegionId(tabId)
@@ -205,7 +206,7 @@ export function reduceFileSurfaceOpened(
     ? { ...placedTab, layout: { ...placedTab.layout, activeRegionId: existingTab.layout.activeRegionId } } : placedTab
   return {
     ...state,
-    tabs: { ...state.tabs, [tab.id]: tab },
+    tabs: state.tabs[tab.id] === tab ? state.tabs : { ...state.tabs, [tab.id]: tab },
     lastActiveFileByWorkspace: placement?.projection || placement?.focus === false ? state.lastActiveFileByWorkspace : { ...state.lastActiveFileByWorkspace, [workspaceId]: path },
     layouts: {
       ...state.layouts,
@@ -229,6 +230,7 @@ export function reduceFileOpened(
   if (opened === state && !placement?.reference) return state
   const key = documentKey(workspaceId, path)
   const alreadyOpen = Boolean(state.documents[key])
+  if (alreadyOpen) return opened
   return {
     ...opened,
     documents: { ...state.documents, [key]: alreadyOpen ? state.documents[key]! : document },

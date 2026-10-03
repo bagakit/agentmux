@@ -101,13 +101,14 @@ vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: { files: { reveal: vi.fn(async () => {}) }, ui: clipboard }
 }))
 
-import { EditorPane } from '../src/renderer/src/components/EditorPane.js'
+import { FileSourceEditor } from '../src/renderer/src/components/FileSourceEditor.js'
 
 function mount(): void {
   fixture.state.documents = { [KEY]: { path: PATH, content: 'hello', revision: 'r1' } }
   fixture.state.config.workspaces = [{ id: WORKSPACE, path: ROOT, hostId: 'local' }]
   renderToStaticMarkup(
-    createElement(EditorPane, {
+    createElement(FileSourceEditor, {
+      viewState: { current: null },
       tabId: 'tab',
       surface: { regionId: 'region', kind: 'file' as const, workspaceId: WORKSPACE, path: PATH }
     })

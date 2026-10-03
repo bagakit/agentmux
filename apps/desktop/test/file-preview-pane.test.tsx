@@ -196,6 +196,7 @@ async function chooseOption(label: string) {
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"],[role="menuitemcheckbox"]')].find(element => element.textContent?.includes(label))
   expect(item).toBeDefined()
   await act(async () => { item!.focus(); item!.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true})) })
+  await act(async () => { await vi.dynamicImportSettled(); await new Promise(resolve => setTimeout(resolve, 0)) })
 }
 it('keeps Wrap and Diff reachable by original keyboard menu without changing the File body or layout', async () => {
   const {file,id,key} = seed('compact.ts','const original = 1')

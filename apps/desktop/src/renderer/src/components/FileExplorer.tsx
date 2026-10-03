@@ -40,6 +40,7 @@ import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'
 import { documentKey } from '../lib/workbench-tabs'
 import { fileNavigationSelection, useAppStore } from '../store'
+import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { ConfirmationDialog } from './ConfirmationDialog'
 import {
   isNavigationKey,
@@ -400,9 +401,7 @@ export function FileExplorer({
   toolbarTarget?: HTMLElement | null | undefined
 }) {
   const workspaceId = useAppStore((state) => requestedWorkspaceId ?? state.activeWorkspaceId)
-  const workspace = useAppStore((state) =>
-    state.config?.workspaces.find((item) => item.id === workspaceId)
-  )
+  const workspace = useWorkspaceResource(workspaceId)
   const activePath = useAppStore((state) =>
     workspaceId && fileExplorerContains(rootPath, state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
   )

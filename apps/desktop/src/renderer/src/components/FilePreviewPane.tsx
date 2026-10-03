@@ -4,6 +4,7 @@ import { api } from '../lib/api'
 import { revealInFileManagerLabel } from '../lib/host-platform'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
 import { usePreviewObjectUrl, useWorkspaceFilePreview, type ReadyFilePreview } from '../lib/use-workspace-file-preview'
 import { FilePathLabel } from './FilePathLabel'
@@ -134,7 +135,7 @@ function MediaContent({ preview, name }: { preview: LoadedPreview; name: string 
 export function FilePreviewPane({ surface, visible = true, onRetryBinary }: { surface: FileWorkbenchSurface; visible?: boolean; onRetryBinary?: () => void }) {
   const key = documentKey(surface.workspaceId, surface.path)
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary' ? state.documentIssues[key] : null)
-  const canOpenExternally = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)?.hostId === 'local')
+  const canOpenExternally = useWorkspaceResource(surface.workspaceId)?.hostId === 'local'
   const reportError = useAppStore(state => state.reportError)
   const { preview, failure, reload } = useWorkspaceFilePreview(surface.workspaceId, surface.path, visible && !binary)
   const url = usePreviewObjectUrl(preview)
