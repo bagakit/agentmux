@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { Archive, ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search, X } from 'lucide-react'
 import { DEFAULT_NOTEBOOK_ID, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { notebookPageRows } from '../lib/notebook-page-tree'
-import { NotebookOperationIssue, useNotebookOperation } from './NotebookPageDetails'
+import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperation'
 
 export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onCreateChild, query, onQuery, onBack, onCreate, pending, actions, archived, onArchivedChange }: {
   notebooks: Notebook[]; pages: NotebookPage[]; selectedId: string | null; selectedNoteId: string | null

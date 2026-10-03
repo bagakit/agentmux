@@ -1,36 +1,18 @@
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Archive, ArchiveRestore, MoreHorizontal, ArrowUpRight, ChevronRight, FolderInput, History, Link, Save } from 'lucide-react'
-import { notebookFingerprint, notebookPageArchiveRoot, type NotebookChange, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { notebookFingerprint, notebookPageArchiveRoot, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
 import { resolveOverlayContainer } from './WindowOverlayHost'
-import { changeNotebook, useNotebookLibrary } from '../lib/notebook-library'
+import { useNotebookLibrary } from '../lib/notebook-library'
 import { notebookDescendants, notebookPageRows } from '../lib/notebook-page-tree'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { spatialSources } from '../../../shared/space-addresses'
+import { NotebookOperationIssue, useNotebookOperation } from './NotebookOperation'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
-
-/** Retain the exact metadata operation until its original owner confirms the result. */
-export function useNotebookOperation() {
-  const held = useRef<{ operationId: string; change: NotebookChange; complete?: () => void } | null>(null), running = useRef(false)
-  const [busy, setBusy] = useState(false), [issue, setIssue] = useState<string | null>(null)
-  async function run(change: NotebookChange, complete?: () => void): Promise<boolean> {
-    if (running.current) return false
-    if (held.current && notebookFingerprint(held.current.change) !== notebookFingerprint(change)) { setIssue('The previous change is unconfirmed. Retry it before changing this metadata again. Your Note is kept.'); return false }
-    const original = held.current ?? { operationId: crypto.randomUUID(), change, ...(complete ? { complete } : {}) }; held.current = original
-    running.current = true; setBusy(true); setIssue(null)
-    try { await changeNotebook(original.change, original.operationId); held.current = null; original.complete?.(); return true }
-    catch (error) { setIssue(presentError(error)); return false }
-    finally { running.current = false; setBusy(false) }
-  }
-  return { run, busy, issue, pending: held.current, retry: () => held.current ? run(held.current.change) : Promise.resolve(false) }
-}
-export function NotebookOperationIssue({ operation }: { operation: ReturnType<typeof useNotebookOperation> }) {
-  return operation.issue ? <div className="notebook-change-issue" role="status">{operation.issue}<button className="note-text-button" disabled={operation.busy} onClick={() => void operation.retry()}>Retry change</button></div> : null
-}
 
 export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const visible = useWorkbenchPresentationActive()
