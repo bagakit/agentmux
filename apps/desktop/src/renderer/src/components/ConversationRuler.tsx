@@ -226,11 +226,14 @@ export function Ruler({
   const selectedText =
     selectedIndex === null ? undefined : describeReadout(scale.readoutOf(selectedIndex), scale.count).summary
 
+  const participants = axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })
+
   return (
     <div className="activity-ruler">
       {/* Summary sits above one full-width coordinate box shared by axes and ticks. */}
       <div className="activity-ruler__stack">
-        {axes?.({ width: trackWidth, onPeek: showQuote, onPeekEnd: closeReadout })}
+        {/* Keep the existing coordinate structure stable as the time window changes. */}
+        {participants ? <div className="activity-ruler__participants">{participants}</div> : null}
         <div
           ref={trackRef}
           className="activity-ruler__track"

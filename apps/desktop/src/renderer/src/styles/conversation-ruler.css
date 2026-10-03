@@ -1,8 +1,10 @@
 /* Window controls and density refine the existing shared ruler. */
 .activity-ruler { grid-template-columns:minmax(0,1fr) auto 12px; row-gap:0; padding-block:3px 2px; }
 .activity-ruler__summary { align-items:center; gap:2px 8px; }
+.activity-ruler__span { display:inline-flex; }
 .activity-ruler__span-range { row-gap:0; }
 .activity-ruler__stack { gap:0; }
+.activity-ruler__participants { min-height:var(--sp-7); }
 .activity-ruler__track { height:14px; }
 .activity-ruler__band {
   height:14px; min-width:3px; border-radius:3px;
