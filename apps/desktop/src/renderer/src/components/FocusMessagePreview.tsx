@@ -4,6 +4,7 @@ import { ArrowUpRight, MessageSquare, X } from 'lucide-react'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { FocusContext } from '../lib/focus-context'
 import type { FocusHierarchyFacts, FocusProjectLane } from '../lib/focus-project-lanes'
+import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationSpeakerAvatar } from './ConversationSpeakerAvatar'
 import { speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
@@ -130,7 +131,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
         const itemIdentity = describeSpeaker(itemSpeaker)
         const authorLabel = itemSpeaker.role === 'human' ? 'Human message' : itemSpeaker.role === 'agent' ? `Agent message from ${itemIdentity.name}` : 'Input, sender not recorded'
         return <button type="button" key={item.id} data-input-message-id={item.id} data-input-source={item.source.kind} data-message-author={itemSpeaker.role} aria-label={`${authorLabel}: ${item.content || 'Input with resources'}`} aria-pressed={message?.id === item.id} onClick={() => reader.onMessage(item)}>
-          <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{item.content || 'Input with resources'}</span><small>{item.source.kind === 'native' ? 'Native' : 'Submission'} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
+          <ConversationSpeakerAvatar speaker={itemSpeaker} name={itemIdentity.name} mote={itemIdentity.mote} {...(itemIdentity.providerId ? { providerId: itemIdentity.providerId } : {})} size={12} /><span>{item.content || 'Input with resources'}</span><small title={describeConversationInputSource(item.source).title}>{describeConversationInputSource(item.source).caption} · {item.recordedAt === undefined || !Number.isFinite(item.recordedAt) ? 'Time unknown' : time.dateClock(item.recordedAt)}</small>
         </button>
       })}</div>
       {!reader.loading && reader.messages.length === 0 ? <p>No input records read in this view. Coverage may be incomplete.</p> : null}
@@ -138,7 +139,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
     {message ? !interactive ? <>
       <p className="recent-focus__message-caption">To {targetName}</p>
       <p className="recent-focus__message-excerpt">{message.content.trim() || (resources.length ? resources.join(' · ') : 'Input has no recorded text')}</p>
-      <footer className="recent-focus__message-meta"><span>{message.source.kind === 'native' ? 'Native record' : 'Submission record'}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
+      <footer className="recent-focus__message-meta"><span title={describeConversationInputSource(message.source).title}>{describeConversationInputSource(message.source).caption}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
       <span className="recent-focus__message-hint">Click or press Enter to keep reading</span>
     </> : <><p className="recent-focus__message-caption">To {targetName} · {roleName} · {message.source.kind === 'native' ? 'Native record' : 'Submission record'}{message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? ' · Record time unknown' : ''}</p>
     {agent ? <details className="recent-focus__sender-details"><summary>Sender Context · {sender?.name ?? 'Unavailable'}</summary><dl className="recent-focus__sender">
@@ -151,6 +152,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
     <div className="recent-focus__message-body" data-input-preview-id={message.id} data-input-source={message.source.kind}><ConversationMessage messageId={message.id}
       speaker={speaker!}
       describeSpeaker={describeSpeaker} inputSource={message.source} conversationSessionId={message.agentSessionId}
+      {...(recipient?.hostId ? { executionHostId: recipient.hostId } : {})}
       name={described!.name} content={message.contentParts}
       timeFormatter={time.clock}
       {...(message.recordedAt === undefined || !Number.isFinite(message.recordedAt) ? {} : { createdAt: message.recordedAt })}

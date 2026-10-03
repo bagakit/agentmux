@@ -1,10 +1,11 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
-import { ChevronRight, Copy } from 'lucide-react'
+import { ChevronRight, Copy, CornerDownRight } from 'lucide-react'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useClientUiPlatform } from '../platform.js'
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
+import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
 import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
@@ -38,6 +39,8 @@ export type ConversationMessageProps = {
   /** Current conversation identity, supplied by its host; never inferred from a name. */
   conversationSessionId?: string
   inputSource?: AgentSessionUserMessageSource
+  /** Current receiving session Host, independent of this message's sender. */
+  executionHostId?: string
   describeSpeaker?: DescribeSpeaker
   name?: string
   providerId?: AgentProviderId
@@ -107,7 +110,7 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
   compact = false, recordTitle, messagePhase, recordedIdentity = false, messageDetails, messageActions, located = false, copyText, onCopy,
-  speaker: recordedSpeaker, conversationSessionId, inputSource, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
+  speaker: recordedSpeaker, conversationSessionId, inputSource, executionHostId, describeSpeaker, name, providerId, content, status, createdAt, timeFormatter, origin, workspaceRoot = '', homeDir = '', messageId = '',
   openWorkspaceFile, readPastedImage, openHttpLink, onContinue, onSelectAnnotation, expandedTraces, onToggleTrace
 }: ConversationMessageProps) {
   const platform = useClientUiPlatform()
@@ -122,6 +125,7 @@ export function ConversationMessage({
   const speaker = recordedSpeaker ? recordedIdentity ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
+  const inputOrigin = inputSource ? describeConversationInputSource(inputSource) : undefined
   const isSystemContext = speaker?.role === 'system'
   const systemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
   const isIncoming = speaker?.role === 'human' || isPeerAgent
@@ -253,9 +257,8 @@ export function ConversationMessage({
         {status === 'unverified' ? (
           <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
         ) : null}
-        {inputSource && speaker?.role !== 'agent' && !isSystemContext ? <span className="log-turn__context"
-          title={inputSource.kind === 'captured' && inputSource.device ? `${inputSource.device.hostId} · ${inputSource.device.deviceId}` : '历史未记录设备来源'}>
-          来自 {(inputSource.kind === 'captured' ? inputSource.device?.name : undefined) ?? '未知设备'}</span> : null}
+        {inputOrigin && !isSystemContext ? <span className="log-turn__input-source" title={inputOrigin.title}>
+          <CornerDownRight size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
           ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {renderClock(createdAt)}
@@ -270,7 +273,7 @@ export function ConversationMessage({
             <Copy size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
           </button> : null}
         </span> : null}
-        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} speaker={recordedSpeaker}
+        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} executionHostId={executionHostId} speaker={recordedSpeaker}
           declaredAgentSessionId={prefix?.declaredAgentSessionId} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
         {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}

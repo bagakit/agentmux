@@ -374,7 +374,7 @@ export function SessionHistoryView({
           {reading.loading ? <><LoaderCircle size={12} className="spin" /> Reading history…</> : reading.source && reading.nextCursor === null ? 'Beginning of the available native history' : null}
           {!reading.loading && reading.nextCursor !== null ? <button type="button" className="small-button" onClick={() => void readPage('older')}>Load earlier records</button> : null}
         </div>
-        {page ? <ConversationNativeThread page={page} sessionId={control.agentSessionId}
+        {page ? <ConversationNativeThread page={page} sessionId={control.agentSessionId} executionHostId={control.hostId}
           {...(renderMessageActions ? { renderMessageActions } : {})}
           describeSpeaker={resolveSpeaker} showSource={false} messageIdForRecord={rawMessageId}
           workspaceRoot={workspaceRoot} openWorkspaceFile={openWorkspaceFile} openHttpLink={openHttpLink}
