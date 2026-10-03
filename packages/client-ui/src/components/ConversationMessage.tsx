@@ -12,6 +12,8 @@ import { ConversationToolTrace } from './ConversationToolTrace.js'
 import { ConversationReasoningTrace } from './ConversationReasoningTrace.js'
 import type { ConversationAnnotationSelection } from '../lib/conversation-annotation.js'
 import { conversationMessageSourceKey } from '../lib/conversation-message-location.js'
+import { conversationFiles } from '../lib/conversation-files.js'
+import { ConversationFiles } from './ConversationFiles.js'
 
 const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
@@ -120,6 +122,9 @@ export function ConversationMessage({
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
   const isSystemContext = speaker?.role === 'system'
   const isIncoming = speaker?.role === 'human' || isPeerAgent
+  const files = useMemo(() => speaker?.role === 'agent' && !isPeerAgent && !compact && messagePhase !== 'progress' && status === 'complete' && openWorkspaceFile
+    ? conversationFiles(parts, workspaceRoot, homeDir) : [],
+  [speaker?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
   const prefix = useMemo(() => (isIncoming || recordedIdentity && speaker?.role === 'unknown') && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
     [isIncoming, recordedIdentity, speaker?.role, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
   const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
@@ -312,6 +317,7 @@ export function ConversationMessage({
               <small>Resource reference; preview is not available here.</small>
             </div>
           })}
+          {files.length > 0 && openWorkspaceFile ? <ConversationFiles files={files} openFile={openWorkspaceFile} /> : null}
         </div>
       ) : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
