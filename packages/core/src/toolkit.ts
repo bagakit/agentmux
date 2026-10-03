@@ -15,6 +15,8 @@ export type ToolkitMetricsSnapshot = {
 export const TOOLKIT_SCRIPT_MAX_BYTES = 32 * 1024
 export const TOOLKIT_TEXT_MAX_BYTES = 32 * 1024
 export const TOOLKIT_MAX_USER_TOOLS = 128
+/** Shared budget for user tools and the existing bounded built-in catalog. */
+export const TOOLKIT_MAX_LISTED_TOOLS = TOOLKIT_MAX_USER_TOOLS + 16
 export const TOOLKIT_TOOL_FIELDS_MAX_BYTES = 39 * 1024
 export const TOOLKIT_DEFINITION_MAX_BYTES = 40 * 1024
 export const TOOLKIT_TEXT_MAX_JSON_BYTES = 48 * 1024
@@ -335,7 +337,7 @@ export function parseToolkitSnapshot(value: unknown): ToolkitSnapshot {
 export function parseToolkitResult(operation: ToolkitOperation, value: unknown): ToolkitResult {
   if (operation === 'toolkit.list') {
     const r = record(value, ['tools'])
-    if (!Array.isArray(r.tools) || r.tools.length < 1 || r.tools.length > TOOLKIT_MAX_USER_TOOLS + 16) invalid()
+    if (!Array.isArray(r.tools) || r.tools.length < 1 || r.tools.length > TOOLKIT_MAX_LISTED_TOOLS) invalid()
     const ids = new Set<string>(); let builtin = 0
     for (const value of r.tools) {
       const source = settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR')
