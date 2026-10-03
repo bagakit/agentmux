@@ -106,7 +106,8 @@ export class NativeOverlaySurfaces {
       let created = false
       if (!projection) {
         created = true
-        const view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false } })
+        // This paints existing Renderer chrome; loading it must not claim that input's focus.
+        const view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, focusOnNavigation: false } })
         view.setBackgroundColor('#00000000')
         view.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
         view.webContents.on('will-navigate', event => event.preventDefault())
