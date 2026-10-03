@@ -56,7 +56,7 @@ describe('original calendar control', () => {
   })
   it('shows full saved message, civil due and actual status and uses the original three mutations', async () => {
     await mount(saved())
-    expect(dom.container.querySelector('.calendar-schedules__message')!.textContent).toBe(saved().prompt)
+    expect(dom.container.querySelector('.calendar-schedules__context, .calendar-schedules__message')!.textContent).toBe(saved().prompt)
     expect(dom.container.textContent).toContain('America/New_York')
     expect(dom.container.querySelector('time')!.dateTime).toBe(new Date(saved().nextCheckAt).toISOString())
     expect(dom.container.textContent).not.toContain('Check now')
@@ -96,6 +96,33 @@ describe('original calendar control', () => {
     expect(create.mock.calls.map(call => call[0])).toEqual([original, original])
     expect(dom.draft()).toBe('Keep my draft')
   })
+  it('keeps the same creation when the connected Host has not found its operation', async () => {
+    await mount(); await openForm(); await edit('textarea', 'Original unsent request')
+    const create = vi.spyOn(api.schedule, 'create').mockRejectedValueOnce(new Error('Receipt unavailable')).mockImplementation(async params => receipt(saved({ prompt: params.prompt, creationOperationId: params.operationId })))
+    vi.spyOn(api.schedule, 'inspect').mockResolvedValue({ schedule: null, executionScope: 'connected-host' })
+    await clickText('Save arrangement'); await clickText('Check original operation')
+    expect(dom.container.querySelector('textarea')!.value).toBe('Original unsent request')
+    expect(dom.container.textContent).toContain('retry uses the same request')
+    expect([...dom.container.querySelectorAll('button')].find(button => button.textContent === 'Retry original operation')).toBeDefined()
+    await clickText('Retry original operation')
+    expect(create.mock.calls.map(call => call[0])).toEqual([create.mock.calls[0]![0], create.mock.calls[0]![0]])
+    expect(dom.draft()).toBe('Keep my draft')
+  })
+  it('does not confirm a creation with the same operation but a different saved message', async () => {
+    await mount(); await openForm(); await edit('textarea', 'My original idea direction')
+    const create = vi.spyOn(api.schedule, 'create').mockRejectedValue(new Error('Receipt unavailable'))
+    vi.spyOn(api.schedule, 'inspect').mockImplementation(async params => {
+      const operationId = create.mock.calls[0]![0].operationId
+      expect(params.operationId).toBe(operationId)
+      return receipt(saved({ prompt: 'Another saved instruction', creationOperationId: operationId }))
+    })
+    await clickText('Save arrangement'); await clickText('Check original operation')
+    expect(dom.container.querySelector('textarea')).not.toBeNull()
+    expect(dom.container.querySelector('textarea')!.value).toBe('My original idea direction')
+    expect(dom.container.textContent).toContain('original operation is still unconfirmed')
+    await clickText('Retry original operation')
+    expect(create.mock.calls[1]![0]).toEqual(create.mock.calls[0]![0])
+  })
   it('quiet follow-up controls require explicit opt-in and preserve the editable original topic', async () => {
     await mount(); await openForm()
     const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ ...params.target, calendar: params.calendar, prompt: params.prompt, ...(params.checkIn ? { checkIn: params.checkIn } : {}), creationOperationId: params.operationId })))
@@ -110,15 +137,16 @@ describe('original calendar control', () => {
   })
   it('quiet follow-up controls distinguish accepted, unconfirmed and skipped attempts using the saved policy', async () => {
     const checkInState = { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1, unanswered: { humanId: 'real-human', humanCreatedAt: 1, claimAt: 2 } }
+    let changed!: (schedule: ContinuousProgressLoop) => void
+    vi.mocked(api.schedule.onChanged).mockImplementation(listener => { changed = listener; return vi.fn() })
     await mount(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'unknown', status: 'paused' }))
     expect(dom.container.textContent).toContain('Previous follow-up is unconfirmed')
     expect(dom.container.textContent).not.toContain('Waiting for your next confirmed reply')
     await dom.render(<CalendarScheduleControl target={{ ...target }} />)
-    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'sent' })], executionScope: 'connected-host' })
-    await dom.render(<CalendarScheduleControl target={{ ...target }} />)
+    expect(api.schedule.list).toHaveBeenCalledTimes(1)
+    await act(async () => changed(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState, lastOutcome: 'sent', revision: 2 })))
     await vi.waitFor(() => expect(dom.container.textContent).toContain('Waiting for your next confirmed reply'))
-    vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState: { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1 }, lastOutcome: 'skipped', lastDecision: 'No new question was delivered' })], executionScope: 'connected-host' })
-    await dom.render(<CalendarScheduleControl target={{ ...target }} />)
+    await act(async () => changed(saved({ checkIn: DEFAULT_AGENT_SCHEDULE_CHECK_IN, checkInState: { budgetDate: _hygiene_fixtureCivil(10, 7), budgetUsed: 1 }, lastOutcome: 'skipped', lastDecision: 'No new question was delivered', revision: 3 })))
     await vi.waitFor(() => expect(dom.container.textContent).toContain('No new question was delivered'))
     expect(dom.container.textContent).not.toContain('Waiting for your next confirmed reply')
   })
@@ -173,6 +201,19 @@ describe('original calendar control', () => {
     expect(resume.mock.calls[1]![0]).toEqual(resume.mock.calls[0]![0])
     expect(dom.container.textContent).toContain('Manual messages remain available.')
   })
+  it('keeps a confirmed creation when the original empty list returns late', async () => {
+    let finish!: (value: Awaited<ReturnType<typeof api.schedule.list>>) => void
+    vi.mocked(api.schedule.list).mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    await dom.render(<CalendarScheduleControl target={target} initialMessage="A confirmed new idea" />)
+    const create = vi.spyOn(api.schedule, 'create').mockImplementation(async params => receipt(saved({ prompt: params.prompt, creationOperationId: params.operationId })))
+    await clickText('Save arrangement')
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(1)
+    await act(async () => finish({ schedules: [], executionScope: 'connected-host' }))
+    expect(dom.container.querySelectorAll('[data-schedule-id]')).toHaveLength(1)
+    expect(dom.container.querySelector('.calendar-schedules__message')!.textContent).toBe('A confirmed new idea')
+    expect(dom.draft()).toBe('Keep my draft')
+  })
   it('keeps fresher event facts when a list returns late and rejects a different target', async () => {
     let finish!: (value: Awaited<ReturnType<typeof api.schedule.list>>) => void
     vi.mocked(api.schedule.list).mockImplementation(() => new Promise(resolve => { finish = resolve }))
@@ -186,6 +227,6 @@ describe('original calendar control', () => {
     await clickText('Resume arrangement')
     expect(resume).toHaveBeenCalledTimes(1)
     expect(dom.container.textContent).toContain('another arrangement target')
-    expect(dom.container.querySelector('.calendar-schedules__message')!.textContent).toBe(saved().prompt)
+    expect(dom.container.querySelector('.calendar-schedules__context, .calendar-schedules__message')!.textContent).toBe(saved().prompt)
   })
 })
