@@ -1,27 +1,27 @@
-import { ArrowUp, Check, CircleHelp, Clock3, Copy, LoaderCircle, Mail, TriangleAlert, X } from 'lucide-react'
+import { ArrowUp, Check, CircleHelp, Clock3, Copy, LoaderCircle, TriangleAlert, X } from 'lucide-react'
 import { autoUpdate, computePosition, offset, shift, size } from '@floating-ui/dom'
 import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from 'react'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
-import { queuedMessageState, type ComposerQueuedMessage } from './ComposerOutbox'
+import { queuedMessageState, type ComposerQueuedMessage, type ArchiveQueuedMessage } from './ComposerOutbox'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../lib/terminal-view-observation'
 
 /** Original queue facts, viewed by operation identity; this surface owns no delivery state. */
-export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCopy, onEdit, sendImmediately = false, suppressed = false, onMore }: {
+export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCopy, onEdit, onArchive, sendImmediately = false, suppressed = false, onMore }: {
   queued: readonly ComposerQueuedMessage[]
   pendingInteraction: boolean
   anchorRef: RefObject<HTMLButtonElement | null>
   onSend?: ((id: string) => void) | undefined
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   onEdit?: EditQueuedMessage | undefined
+  onArchive?: ArchiveQueuedMessage | undefined
   sendImmediately?: boolean
   suppressed?: boolean
   onMore: (id: string) => void
 }) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
-  const [dismissed, setDismissed] = useState(false)
   const [copyResult, setCopyResult] = useState<{ id: string; text: string; state: 'copied' | 'failed' } | null>(null)
   const copyActionRef = useRef(0)
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -63,7 +63,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
 
   useLayoutEffect(() => {
     const list = listRef.current
-    if (!list || suppressed || dismissed) return
+    if (!list || suppressed) return
     const updateScrollPivot = () => {
       list.style.setProperty('--queue-pivot-y', list.scrollTop + list.offsetHeight + 'px')
       list.style.setProperty('--queue-scroll-y', list.scrollTop + 'px')
@@ -93,13 +93,13 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     resize.observe(list)
     for (const card of list.children) resize.observe(card)
     return () => { list.removeEventListener('scroll', updateScrollPivot); resize.disconnect() }
-  }, [queued, currentIndex, editingId, dismissed, suppressed])
+  }, [queued, currentIndex, editingId, suppressed])
 
   useLayoutEffect(() => {
-    if (suppressed || dismissed || !selected) return
+    if (suppressed || !selected) return
     const card = Array.from(listRef.current?.children ?? []).find(node => (node as HTMLElement).dataset.operationId === selected.id)
     card?.scrollIntoView({ block: 'nearest' })
-  }, [selected?.id, dismissed, suppressed])
+  }, [selected?.id, suppressed])
 
   useLayoutEffect(() => {
     const anchor = anchorRef.current, floating = surfaceRef.current
@@ -174,7 +174,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       disposed = true; stop(); resize.disconnect(); cursorObserver.disconnect(); terminalObserver.disconnect()
       stopInputGeometry(); cancelAnimationFrame(geometryFrame)
     }
-  }, [anchorRef, queued.length, dismissed, suppressed])
+  }, [anchorRef, queued.length, suppressed])
 
   useLayoutEffect(() => {
     const floating = surfaceRef.current
@@ -223,16 +223,16 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   }
   return <WindowOverlayPortal>
     <section ref={surfaceRef} className="composer-pending" aria-label="待发消息" hidden={suppressed} data-state={suppressed ? 'closed' : 'open'}
-      data-operation-id={selected.id} data-count={queued.length} data-dismissed={dismissed}
+      data-operation-id={selected.id} data-count={queued.length}
       onKeyDown={event => {
         if (editingId || isImeOwnedKeyboardEvent(event)) return
-        if (event.key === 'Escape') { event.preventDefault(); setDismissed(true); anchorRef.current?.focus() }
+        if (event.key === 'Escape') { event.preventDefault(); anchorRef.current?.focus() }
         else if (event.key === 'ArrowDown') { event.preventDefault(); move(currentIndex + 1) }
         else if (event.key === 'ArrowUp') { event.preventDefault(); move(currentIndex - 1) }
         else if (event.key === 'Home') { event.preventDefault(); move(0) }
         else if (event.key === 'End') { event.preventDefault(); move(queued.length - 1) }
       }}>
-      {dismissed ? <button type="button" className="composer-pending__restore" aria-label={'展开 ' + queued.length + ' 条待发消息'} onClick={() => setDismissed(false)}><Mail size={13} aria-hidden="true" />{queued.length}</button> : <>
+
         <ol ref={listRef} className="composer-pending__cards" aria-label="逐条待发消息">
           {queued.map((entry, index) => {
             const state = queuedMessageState(entry, pendingInteraction)
@@ -251,7 +251,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
               }} /> : <button type="button" className="composer-pending__preview" aria-label="编辑这条待发消息" disabled={!entry.editable || !onEdit || Boolean(editingId)}
                 onClick={() => { setSelectedId(entry.id); setEditingId(entry.id); setCopyResult(null) }}>{entry.text.replace(/\s+/g, ' ').trim()}</button>}
               <div className="composer-pending__actions">
-                {entry.id === selected.id ? <button key="dismiss" type="button" className="composer-tool composer-pending__dismiss" aria-label="收起待发卡片" disabled={Boolean(editingId)} onClick={() => setDismissed(true)}><X size={12} aria-hidden="true" /></button> : null}
+                {entry.id === selected.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><X size={12} aria-hidden="true" /></button> : null}
                 <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
                   disabled={!canSend} onClick={() => onSend?.(entry.id)}><ArrowUp size={14} aria-hidden="true" /></button>
                 <button key="copy" type="button" className="composer-tool composer-pending__copy" aria-label="复制这条待发消息" title={copied === 'copied' ? '已复制' : copied === 'failed' ? '复制未确认，请重试' : '复制全文'} data-copy-state={copied} disabled={!onCopy}
@@ -262,7 +262,6 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
           })}
         </ol>
         <span className="composer-pending__sr-only" role="status">{copyResult && queued.some(entry => entry.id === copyResult.id && entry.text === copyResult.text) ? copyResult.state === 'copied' ? '已复制待发消息' : '复制未确认，请重试' : ''}</span>
-      </>}
     </section>
   </WindowOverlayPortal>
 }

@@ -140,7 +140,7 @@ describe('actual SessionPane explicit recovery actions', () => {
   })
   it('a real Store queue removal before its drain dispatches nothing and cannot become a delivery receipt', async () => {
     const enqueue = useAppStore.getState().enqueueAgentSteer, submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
-    useAppStore.setState({ enqueueAgentSteer: (...args) => { const admitted = enqueue(...args); useAppStore.getState().removeAgentSteer(args[0], args[3]!); return admitted } })
+    useAppStore.setState({ enqueueAgentSteer: (...args) => { const admitted = enqueue(...args); useAppStore.setState(state => { const queue=(state.agentSteerQueues[args[0]] ?? []).filter(entry=>entry.operationId!==args[3]); const agentSteerQueues={...state.agentSteerQueues}; if(queue.length)agentSteerQueues[args[0]]=queue;else delete agentSteerQueues[args[0]];return {agentSteerQueues} }); return admitted } })
     try {
       await mount(); await button('Analyze…'); await choose('Original history source', 'native')
       await act(async () => [...document.querySelectorAll<HTMLInputElement>('input[type="radio"]')].find(input => input.parentElement?.textContent?.includes('Chosen Mote'))!.click())

@@ -7,7 +7,7 @@ import { useAppStore } from '../src/renderer/src/store'
 
 const initial = useAppStore.getState()
 const gates: Array<{ resolve(): void }> = []
-const drains: Promise<void>[] = []
+const drains: Promise<unknown>[] = []
 
 function agent(id = 'phase-session'): Extract<SessionSnapshot, { kind: 'agent' }> {
   return {
@@ -90,7 +90,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
       expect(useAppStore.getState().agentSteerInFlight[session.id]).toBe(selected.operationId)
       expect(useAppStore.getState().agentSteerInFlightPhase[session.id]).toBe('preparing')
       expect(submit).not.toHaveBeenCalled()
-      useAppStore.getState().removeAgentSteer(session.id, selected.operationId)
+      await expect(useAppStore.getState().archiveAgentSteer(session.id, selected.operationId, selected.text, true)).rejects.toThrow('preparing or submitting')
       useAppStore.getState().moveAgentSteer(session.id, selected.operationId, 'up')
       expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([head, { ...selected, execution: 'default' }])
       preparation.resolve()
@@ -265,7 +265,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
     const run = replacement === 'replacement Run' ? { runId: 'new-original-session-run' } : session.control.run
     const current = { ...useAppStore.getState().agentSteerQueues[session.id]![0]!, runId: run.runId,
-      promptCondition: replacement === 'replacement Host' ? useAppStore.getState().agentSteerQueues[session.id]![0]!.promptCondition : { expectedRun: run, afterSubmissionId: 'new-predecessor' }, error: 'Keep current reason', errorCode: 'CURRENT_OPERATION_CAUSE' }
+      ...(replacement === 'replacement Host' ? {} : {promptCondition:{expectedRun:run,afterSubmissionId:'new-predecessor'}}), error: 'Keep current reason', errorCode: 'CURRENT_OPERATION_CAUSE' }
     useAppStore.setState({ sessions: [{ ...session, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}),
       control: { ...session.control, run, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}) } }],
       agentSteerQueues: { [session.id]: [current] } })
@@ -285,7 +285,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     await vi.waitFor(() => expect(submit).toHaveBeenCalledOnce())
     const run = replacement === 'replacement Run' ? { runId: 'new-original-session-run' } : session.control.run
     const current = { ...useAppStore.getState().agentSteerQueues[session.id]![0]!, runId: run.runId,
-      promptCondition: replacement === 'replacement Host' ? useAppStore.getState().agentSteerQueues[session.id]![0]!.promptCondition : { expectedRun: run, afterSubmissionId: 'new-predecessor' }, error: 'Keep new row reason' }
+      ...(replacement === 'replacement Host' ? {} : {promptCondition:{expectedRun:run,afterSubmissionId:'new-predecessor'}}), error: 'Keep new row reason' }
     useAppStore.setState({ sessions: [{ ...session, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}),
       control: { ...session.control, run, ...(replacement === 'replacement Host' ? { hostId: 'other-host' } : {}) } }],
       agentSteerQueues: { [session.id]: [current] } })
@@ -301,8 +301,8 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     const entry = enqueue(session.id, 'retained-intent')
     const submit = vi.spyOn(api.sessions, 'submitPrompt').mockResolvedValue(undefined)
     useAppStore.setState({ sessions: [{ ...session, pendingInteraction: {
-      requestId: 'private-request', kind: 'permission', summary: 'Pending decision',
-      options: [{ id: 'allow', label: 'Allow' }], observedAt: 1
+      id: 'private-request', agentSessionId:session.id, kind: 'permission', title: 'Pending decision',
+      options: [{ id: 'allow', label: 'Allow',kind:'allow-once' }], evidence:{source:'native-hook',observedAt:1,run:session.control.run}
     } } as Extract<SessionSnapshot, { kind: 'agent' }>] })
     await send(session.id, entry.operationId)
     expect(submit).not.toHaveBeenCalled()
@@ -375,7 +375,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     const partialize = useAppStore.persist.getOptions().partialize
     expect(partialize).toBeTypeOf('function')
     const persisted = partialize!(useAppStore.getState())
-    expect(persisted.agentSteerQueues[session.id]?.map(item => item.operationId)).toEqual([entry.operationId])
+    expect(persisted.agentSteerQueues?.[session.id]?.map(item => item.operationId)).toEqual([entry.operationId])
     expect(persisted).not.toHaveProperty('agentSteerInFlight')
     expect(persisted).not.toHaveProperty('agentSteerInFlightPhase')
     submission.resolve()
