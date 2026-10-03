@@ -344,7 +344,15 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   }, true),
   goal('delete', '--goal ID --confirm delete', 'Delete one explicitly confirmed Goal.', { '--confirm': 'value' }, f => ({ confirmation: value(f, '--confirm', true) }), true),
   goal('assign', '--goal ID [--project ID] [--executor ID] [--start]', 'Assign an original Goal; optional start remains an explicit side effect.', { '--project': 'data', '--executor': 'data', '--start': 'boolean' }, f => ({ ...fields(f, { '--project': 'projectId', '--executor': 'assigneeExecutorId' }), start: f.booleans.has('--start') }), true),
-  goal('start', '--goal ID [--session ID]', 'Start work through the existing Goal and Session owners.', { '--session': 'data' }, f => fields(f, { '--session': 'sessionId' }), true),
+  goal('start', '--goal ID [--session ID] [--continue-ms MS --alignment-revision REV] [--operation-id OP]', 'Start finite execution or opt in to an exact confirmed Goal continuation.', { '--session': 'data', '--continue-ms': 'value', '--alignment-revision': 'value' }, f => {
+    const continuation = numbers(f, { '--continue-ms': 'intervalMs', '--alignment-revision': 'alignmentRevision' })
+    if (f.values.has('--continue-ms') !== f.values.has('--alignment-revision')) invalid('Continuation requires both --continue-ms and --alignment-revision.')
+    return { ...fields(f, { '--session': 'sessionId' }), ...(f.values.has('--continue-ms') ? { continuation } : {}) }
+  }, true),
+  goal('continuation-action', '--goal ID --loop ID --action pause|resume|stop|check --revision REV [--operation-id OP]', 'Control the exact original Goal loop; stopping a loop keeps the Agent Run.', { '--loop': 'data', '--action': 'value', '--revision': 'value' }, f => {
+    value(f, '--revision', true)
+    return { loopId: id(f, '--loop', true), action: value(f, '--action', true), ...numbers(f, { '--revision': 'expectedRevision' }) }
+  }, true),
   goal('handoff', '--goal ID [--executor ID] [--session ID]', 'Handoff the original Goal without changing its durable identity.', { '--executor': 'data', '--session': 'data' }, f => fields(f, { '--executor': 'assigneeExecutorId', '--session': 'sessionId' }), true),
   goal('focus', '--goal ID', 'Navigate a Goal while preserving eligible conversation input.', {}, () => ({ input: 'preserve' }), true),
   goal('link-session', '--goal ID --session ID', 'Link an actual Session to the original Goal.', { '--session': 'data' }, f => ({ sessionId: id(f, '--session') }), true),

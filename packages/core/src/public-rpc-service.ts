@@ -483,7 +483,9 @@ export class AgentMuxRpcService {
         request.target = { kind: 'agent-session', agentSessionId: (await this.owner(request.target.agentSessionId)).agentSessionId }
       }
       if (request.operation === 'demand.start' && request.sessionId !== undefined) {
-        request.sessionId = (await this.owner(request.sessionId)).agentSessionId
+        const exact = (await this.owner(request.sessionId)).agentSessionId
+        if (request.continuation && exact !== request.sessionId) throw new AgentMuxError('Goal continuation requires the complete original Session ID.', 'INVALID_CONTROL_REQUEST')
+        request.sessionId = exact
       }
       result = request.operation.startsWith('toolkit.') ? await this.toolkit(request, context.signal, nameContext)
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }

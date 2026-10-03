@@ -91,7 +91,7 @@ export function ContinuousProgressControl({ session, onStatusChange }: {
       <div className="continuous-progress-control__detail-body">
         <dl><dt>Check every</dt><dd>{displayed.intervalMs / 60_000} minutes</dd></dl>
         <div><h4>Continuation prompt</h4><p className="continuous-progress-control__prompt">{displayed.prompt}</p></div>
-        {displayed.taskSource ? <dl>
+        {displayed.taskSource?.kind === 'goal' ? <dl><dt>Goal</dt><dd>{displayed.taskSource.goalId}</dd><dt>Confirmed scope</dt><dd>r{displayed.taskSource.alignmentRevision}</dd></dl> : displayed.taskSource ? <dl>
           <dt>Feature ID</dt><dd>{displayed.taskSource.ownerId}</dd>
           <dt>Tracker root</dt><dd>{displayed.taskSource.root}</dd>
           <dt>Public Tracker script</dt><dd>{displayed.taskSource.readerPath}</dd>

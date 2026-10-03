@@ -1472,10 +1472,25 @@ export class RuntimeController {
         status.session.workspacePath !== loop.workspacePath) {
       throw new AgentMuxError('Continuous progress target identity changed. Review this loop before resuming.', 'STALE_AGENT_SESSION')
     }
+    if (status.run.acceptedInputBytes === null) throw new AgentMuxError('The original Native input cursor is unconfirmed. Automatic progress is paused; manual input and your Agent remain available.', 'CONTROL_UNAVAILABLE')
     const observer = this.progressInputObserver
     if (!observer) throw new Error('User input observation is unavailable. Automatic progress is paused; manual input remains available.')
     const inputOccupied = await observer({ kind: 'agent', hostId: loop.hostId, agentSessionId: loop.agentSessionId, run: status.session.run }, signal)
     return { session: status.session, observation: status.observation, inputByte: status.run.acceptedInputBytes, inputOccupied, tickId, now }
+  }
+
+  /** Read the original Core input transaction; absence is never a replacement admission. */
+  async inspectContinuousProgressInitial(loop: import('@agentmux/core').ContinuousProgressLoop): Promise<'confirmed' | 'pending' | 'unconfirmed'> {
+    const initial = loop.initialDelivery
+    if (!initial) return 'unconfirmed'
+    const status = await (await this.connectedClient(loop.hostId)).statusAgent(loop.agentSessionId)
+    const session = status.session, admission = session.promptCompletionAdmission
+    if (session.hostId !== loop.hostId || session.agentSessionId !== loop.agentSessionId || session.providerId !== loop.providerId || session.workspacePath !== loop.workspacePath ||
+        session.run.runId !== initial.condition.expectedRun.runId || admission?.submissionId !== initial.operationId ||
+        admission.intent?.run.runId !== initial.condition.expectedRun.runId || admission.intent.prompt !== initial.prompt ||
+        admission.intent.message?.userContent !== initial.prompt || admission.intent.message.systemContext !== undefined) return 'unconfirmed'
+    if (admission.acknowledged === true || session.terminalPromptSubmission?.submissionId === initial.operationId && session.terminalPromptSubmission.submit.acknowledged === true) return 'confirmed'
+    return 'pending'
   }
 
   async respondInteraction(

@@ -1,3 +1,4 @@
+import { openDemandStore } from '@agentmux/demand'
 import { readLoadedPackageIdentity } from './client-observation.js'
 import { randomUUID } from 'node:crypto'
 import { RendererUpdates } from './renderer-updates.js'
@@ -88,6 +89,7 @@ function startPrimaryInstance(): void {
     scratchTopics
   )
   const configStore = new ConfigStore()
+  const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const progressLoops = new ContinuousProgressLoopManager(
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
@@ -95,7 +97,8 @@ function startPrimaryInstance(): void {
     (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal),
     { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
       authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context),
-      observeCheckIn: async (target, now, signal) => runtime.observeCheckIn(target, now, signal, await configStore.get()) }
+      observeCheckIn: async (target, now, signal) => runtime.observeCheckIn(target, now, signal, await configStore.get()) },
+    { read: goalId => demands.get(goalId), subscribe: listener => demands.subscribe(snapshot => listener(snapshot.demands)), inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) }
   )
   void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
   const windowGeometryStore = new WindowGeometryStore()
@@ -249,7 +252,7 @@ function startPrimaryInstance(): void {
     let updateReady: { token: string; resolve: () => void } | null = null
     await disposeIpc?.()
     reportStartupStage('before-ipc')
-    disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, scratchTopics, workspaceFiles,
+    disposeIpc = await registerIpc({ window, configStore, runtime, progressLoops, demands, scratchTopics, workspaceFiles,
       loadedPackage: await loadedPackage, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) updateReady.resolve() }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')

@@ -286,6 +286,10 @@ const api: AgentMuxPreloadApi = {
     respond: (response: DesktopControlResponse) => ipcRenderer.send(CONTROL_RESPONSE_CHANNEL, response)
   },
   continuousProgress: {
+    goals: goalId => ipcRenderer.invoke('continuousProgress:goals', goalId),
+    prepareGoal: (input, caller) => ipcRenderer.invoke('continuousProgress:prepareGoal', input, caller),
+    initialGoalInput: (target, loopId, operationId, phase) => ipcRenderer.invoke('continuousProgress:initialGoalInput', target, loopId, operationId, phase),
+    goalAction: (goalId, loopId, action, revision, operationId, caller) => ipcRenderer.invoke('continuousProgress:goalAction', goalId, loopId, action, revision, operationId, caller),
     list: (target: ContinuousProgressTarget) => ipcRenderer.invoke('continuousProgress:list', target),
     create: (target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => ipcRenderer.invoke('continuousProgress:create', target, intervalMs, prompt, taskSource),
     action: (target: ContinuousProgressTarget, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check') => ipcRenderer.invoke('continuousProgress:action', target, loopId, action),
@@ -356,8 +360,8 @@ const api: AgentMuxPreloadApi = {
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
-    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel),
+    submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation) =>
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>

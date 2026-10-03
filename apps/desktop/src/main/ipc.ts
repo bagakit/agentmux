@@ -163,7 +163,7 @@ import { rebindLocalFolder } from './workspace-rebind.js'
 import { executeSettingsWorkspaceAddControl, registerWorkspace } from './settings-workspace-add-control.js'
 import { GitService } from './git-service.js'
 import { GhService } from './gh-service.js'
-import { openDemandStore } from '@agentmux/demand'
+import { openDemandStore, type DemandStore } from '@agentmux/demand'
 
 function workspace(config: AppConfig, id: string): WorkspaceRecord {
   const item = config.workspaces.find((entry) => entry.id === id)
@@ -185,6 +185,7 @@ export async function registerIpc(args: {
   configStore: ConfigStore
   runtime: RuntimeController
   progressLoops: ContinuousProgressLoopManager
+  demands?: DemandStore
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
   environmentWarning?: string
@@ -248,7 +249,7 @@ export async function registerIpc(args: {
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id), {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
-  const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
+  const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const git = new GitService((id) => args.runtime.executionHost(id))
   // `git` is handed in rather than let GhService build its own: the PR readiness read asks git and gh
@@ -996,6 +997,25 @@ export async function registerIpc(args: {
     await args.progressLoops.start()
     return args.progressLoops.list().filter(loop => !loop.calendar && progressTargetMatches(loop, target))
   })
+  handleWithEvent('continuousProgress:goals', async (event, goalId: string) => {
+    requireTrustedSender('continuousProgress:goals', event)
+    return args.progressLoops.listGoals(goalId)
+  })
+  handleWithEvent('continuousProgress:prepareGoal', async (event, input: import('./continuous-progress-loop-manager.js').GoalProgressStart, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
+    requireTrustedSender('continuousProgress:prepareGoal', event)
+    if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
+    return args.progressLoops.prepareGoal(input, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)
+  })
+  handleWithEvent('continuousProgress:initialGoalInput', async (event, target: ContinuousProgressTarget, loopId: string, operationId: string, phase: 'begin' | 'confirm') => {
+    requireTrustedSender('continuousProgress:initialGoalInput', event)
+    if (phase !== 'begin' && phase !== 'confirm') throw new Error('Unknown original Goal input phase.')
+    return args.progressLoops.initialGoalInput(target, loopId, operationId, phase)
+  })
+  handleWithEvent('continuousProgress:goalAction', async (event, goalId: string, loopId: string, action: 'pause' | 'resume' | 'stop' | 'check', revision: number, operationId: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
+    requireTrustedSender('continuousProgress:goalAction', event)
+    if (caller && !caller.capability) throw new Error('Original managed caller capability is unavailable.')
+    return args.progressLoops.goalAction(goalId, loopId, action, revision, operationId, caller?.capability ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : undefined)
+  })
   handleWithEvent('continuousProgress:create', async (event, target: ContinuousProgressTarget, intervalMs: number, prompt: string, taskSource?: ContinuousProgressTaskSource) => {
     requireTrustedSender('continuousProgress:create', event)
     const observed = await args.runtime.observeContinuousProgress(target, randomUUID(), Date.now())
@@ -1038,7 +1058,8 @@ export async function registerIpc(args: {
     choice?: Parameters<RuntimeController['submitPrompt']>[5],
     authorHuman?: boolean,
     agentMuxNote?: string,
-    sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8]
+    sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8],
+    goalContinuation?: { goalId: string; loopId: string }
   ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
     if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
@@ -1047,8 +1068,15 @@ export async function registerIpc(args: {
       effectiveAuthorHuman = true
     }
     if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
-    pauseUserProgress(session, 'Paused for your message.')
-    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
+    if (goalContinuation) {
+      assertManualPromptSenderTrusted(event.sender, args.window.webContents)
+      if (!args.progressLoops || typeof goalContinuation.goalId !== 'string' || typeof goalContinuation.loopId !== 'string') throw new AgentMuxError('The original Goal input owner is unavailable.', 'CONTROL_UNAVAILABLE')
+      await args.progressLoops.submitGoalInitial({ hostId: session.hostId, agentSessionId: session.agentSessionId }, goalContinuation.goalId, goalContinuation.loopId, operationId, prompt, condition,
+        (isCurrent, signal) => args.runtime.submitPrompt(session, prompt, operationId, condition, { isCurrent, signal }, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel))
+    } else {
+      pauseUserProgress(session, 'Paused for your message.')
+      await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
+    }
   }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
     input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
