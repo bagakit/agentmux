@@ -193,7 +193,8 @@ export class AgentMuxHostedRuntimeService {
     }
     } catch (error) { await recordActivity('unknown'); throw error }
     await recordActivity('confirmed')
-    if (source && modifying && sessionId && invocation.method !== 'submitAgentPrompt')
+    // Terminal geometry is already recorded by Runtime and Host activity, not conversational input.
+    if (source && modifying && sessionId && invocation.method !== 'submitAgentPrompt' && invocation.method !== 'resizeAgent')
       await this.client.recordDeviceOperation(sessionId, operationId, invocation.method, source, 'confirmed')
     return { value: encodeHostedValue(value) }
   }

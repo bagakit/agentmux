@@ -792,9 +792,10 @@ export function ActivityView({
                     !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
                     ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
                   conversationSessionId={sessionId}
-                  {...(entry.item.kind === 'user_message' || entry.item.sourceDevice ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
+                  {...(entry.item.kind === 'user_message' || speaker.role === 'system' || entry.item.sourceDevice ? { inputSource: { kind: 'captured' as const, submissionId: entry.item.id, ...(entry.item.sourceDevice ? { device: entry.item.sourceDevice } : {}) } } : {})}
                   located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
                   {...(describeSpeaker ? { describeSpeaker } : {})}
+                  {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
                   content={entry.item.content ?? ''}
                   status={entry.item.status}
                   createdAt={entry.item.createdAt}
