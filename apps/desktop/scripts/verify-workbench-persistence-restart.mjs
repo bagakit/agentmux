@@ -448,6 +448,20 @@ try {
       const original = core.graph.regions.find(region => region.regionId === agentRegionId)
       if (original?.agentSessionId !== session.agentSessionId || original.runId !== session.run.runId ||
           !isDeepStrictEqual(core.graph.tabLayouts, before.workbench.graph.tabLayouts)) return null
+      // Core ACK hydration enriches home bindings with their authoritative
+      // Topic identity and directory. Capture that normal publication before
+      // editing; a later layout action must not be compared to an earlier ACK.
+      let hasMoteHome = false
+      for (const zone of core.graph.zones.filter(zone => zone.kind === 'home')) {
+        const resource = core.graph.resources['zone:' + zone.zoneId]
+        if (!resource || typeof resource !== 'object' || Array.isArray(resource) || resource.directoryPath !== zone.directoryPath) return null
+        const owner = core.graph.spaces.find(space => space.spaceId === resource.spaceId)
+        if (!owner) return null
+        if ((owner.kind === 'topic' || owner.kind === 'mote') &&
+            (resource.topicId !== owner.topicId || resource.contentKind !== owner.kind)) return null
+        if (owner.kind === 'mote') hasMoteHome = true
+      }
+      if (!hasMoteHome) return null
       assert.deepEqual(projected.tabs, before.tabs); assert.deepEqual(projected.regions, before.regions)
       assert.equal(projected.draft, oldDraft); assert.deepEqual(projected.queued, before.queued)
       assert.deepEqual(projected.focus, before.focus); assert.deepEqual(projected.activeRegions, before.activeRegions)
@@ -741,7 +755,7 @@ setInterval(tick,100);
     result.pendingEdit = { passed: true, exactFlag: '--pending-edit', buildReceipt: pendingEditBuild,
       targetWasSecondOriginalEntry: true, original: before.queued[1], edited: queueBeforeMove[1],
       seededWorkbench: before.workbench, preEditHydratedWorkbench: pendingEditHydratedBaseline,
-      hydratedBaselineReason: 'Old seed omits the live Run/home projection. Actual native ArrowRight then ArrowLeft returned 70→80→70 before pending edit and triggered production publication; no fixture flush/commit. Actual original DOM surfaces, focus, draft, queue, Run and process birth were independently retained.',
+      hydratedBaselineReason: 'Old seed omits the live Run/home projection. Actual native ArrowRight then ArrowLeft returned 70→80→70 before pending edit and triggered production publication; Core ACK home-binding Topic identity and directory hydration completed before baseline capture, with a nonempty real Mote home. No fixture flush/commit. Actual original DOM surfaces, focus, draft, queue, Run and process birth were independently retained.',
       preEditNativeActions: [{ key: 'ArrowRight', splitPercent: 80 }, { key: 'ArrowLeft', splitPercent: 70 }],
       exactLayoutEdits: { tabId, ratio: { before: 0.7, after: 0.6 }, activeRegionId: { before: agentRegionId, after: fileRegionId } },
       publicBefore: pendingEditBefore, publicAccepted: pendingEditAccepted, publicAfter: pendingEditAfter, publicRestored,
