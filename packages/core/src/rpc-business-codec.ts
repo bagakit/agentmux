@@ -184,7 +184,14 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'send': if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail(); break
     case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key) fail(); break
     case 'settings.browser.links.forget': if (actual.scheme !== request.scheme) fail(); break
-    case 'settings.resource.get': case 'settings.resource.add': case 'settings.resource.update':
+    case 'settings.resource.get': {
+      const item = actual.item as Record<string, unknown>
+      if (actual.resource !== request.resource || (request.keyword === undefined
+        ? item.id !== request.id
+        : (item.value as Record<string, unknown>).keyword !== request.keyword)) fail()
+      break
+    }
+    case 'settings.resource.add': case 'settings.resource.update':
       if (actual.resource !== request.resource || (actual.item as Record<string, unknown>).id !== request.id) fail()
       break
     case 'settings.resource.remove': if (actual.resource !== request.resource || actual.id !== request.id) fail(); break

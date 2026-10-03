@@ -331,7 +331,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   settings('settings.set', '<key> <value>', 'Set one supported scalar value.', 2),
   ...(['executors', 'prompts'] as const).flatMap(resource => [
     settings(`settings.${resource}.ls`, '', `List configured ${resource}, not active Sessions.`),
-    settings(`settings.${resource}.inspect`, '<id>', 'Inspect an exact saved resource.', 1),
+    settings(`settings.${resource}.inspect`, resource === 'prompts' ? '<id>|--keyword <code>' : '<id>',
+      resource === 'prompts' ? 'Read an exact saved Prompt by ID or its explicit keyword; quick reply meaning is its saved body.' : 'Inspect an exact saved resource.', 1),
     settings(`settings.${resource}.create`, '<id> --input <file|->', 'Create a complete saved resource.', 1),
     settings(`settings.${resource}.update`, '<id> --input <file|->', 'Update using {changes, expected?}.', 1),
     settings(`settings.${resource}.delete`, '<id> [--input <file|->]', 'Delete using optional complete expected fields.', 1)

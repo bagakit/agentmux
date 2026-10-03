@@ -137,6 +137,10 @@
     "./notebook-store": {
       "types": "./dist/notebook-store.d.ts",
       "import": "./dist/notebook-store.js"
+    },
+    "./prompt-reaction": {
+      "types": "./dist/prompt-reaction.d.ts",
+      "import": "./dist/prompt-reaction.js"
     }
   },
   "bin": {

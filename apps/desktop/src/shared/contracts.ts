@@ -501,6 +501,8 @@ export type ComposerShortcut = {
   body: string
   providerId?: AgentProviderId
   states?: AgentDisplayState[]
+  /** Optional binding on this same saved Prompt; keyword remains the reaction code. */
+  reactionIcon?: import('@agentmux/core/prompt-reaction').PromptReactionIcon
 }
 
 /** The directory owns order and visibility; a custom instruction stays in ComposerShortcut. */

@@ -845,13 +845,17 @@ function settingsResourceRequest(source: Record<string, unknown>): AgentMuxContr
   const fields = operation === 'settings.resource.list' ? common : operation === 'settings.resource.add'
     ? [...common, 'id', 'value'] : operation === 'settings.resource.update'
       ? [...common, 'id', 'changes', 'expected'] : operation === 'settings.resource.remove'
-        ? [...common, 'id', 'expected'] : [...common, 'id']
+        ? [...common, 'id', 'expected'] : [...common, 'id', 'keyword']
   settingsResourceEnvelope(source, fields, code)
   const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     requestId: id(source.requestId, 'Control request ID is invalid.', code), resource: resourceKind(source.resource, code) }
   let request: AgentMuxControlSettingsResourceRequest
   if (operation === 'settings.resource.list') request = { ...base, operation }
-  else {
+  else if (operation === 'settings.resource.get' && Object.hasOwn(source, 'keyword')) {
+    if (base.resource !== 'prompts' || Object.hasOwn(source, 'id')) throw new AgentMuxError(
+      'A Prompt lookup requires either its exact ID or its keyword, never both.', code)
+    request = { ...base, resource: 'prompts', operation, keyword: id(source.keyword, 'Prompt keyword is invalid.', code) }
+  } else {
     const resourceId = id(source.id, 'Settings resource ID is invalid.', code)
     if (operation === 'settings.resource.get') request = { ...base, operation, id: resourceId }
     else if (operation === 'settings.resource.add') {

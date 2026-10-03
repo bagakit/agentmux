@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { BUILT_IN_AGENT_PROVIDERS, durableWriteFile } from '@agentmux/core'
 import { parseToolkitToolDefinition, TOOLKIT_MAX_USER_TOOLS } from '@agentmux/core/control'
 import type { AppConfig, ComposerShortcut, CreateWorkspaceInput, TerminalThemeId, WorkspaceKind, WorkspaceRecord } from '../shared/contracts.js'
+import { PROMPT_REACTION_ICONS, isPromptReactionCode } from '@agentmux/core/prompt-reaction'
 import { COMPOSER_PROMPT_STATES } from '../shared/composer-shortcut-library.js'
 import { workspaceLocationKey } from './workspace-location.js'
 import {
@@ -192,7 +193,8 @@ export const composerShortcutSchema = z
     label: z.string().min(1),
     body: z.string().min(1),
     providerId: z.string().min(1).optional(),
-    states: z.array(z.enum(COMPOSER_PROMPT_STATES)).optional()
+    states: z.array(z.enum(COMPOSER_PROMPT_STATES)).optional(),
+    reactionIcon: z.enum(PROMPT_REACTION_ICONS).optional()
   })
   .strict()
 
@@ -266,6 +268,12 @@ const configSchema = z
   })
   .strict()
   .superRefine((config, context) => {
+    for (const [index, prompt] of (config.composerShortcuts ?? []).entries()) {
+      if (prompt.reactionIcon && !isPromptReactionCode(prompt.keyword)) context.addIssue({
+        code: 'custom', path: ['composerShortcuts', index, 'keyword'],
+        message: 'Quick reply codes must start with a lowercase letter and contain up to 48 lowercase letters, digits or hyphens.'
+      })
+    }
     const hostIds = new Set(config.hosts.map((host) => host.id))
     if (hostIds.size !== config.hosts.length) {
       context.addIssue({ code: 'custom', path: ['hosts'], message: 'Host ids must be unique' })
