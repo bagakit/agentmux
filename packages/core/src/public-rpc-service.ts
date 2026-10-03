@@ -293,9 +293,11 @@ export class AgentMuxRpcService {
     const caller = await this.authenticated(context)
     if (isTopicMethod(method)) {
       const input = parseTopicParams(method, params)
-      if (!this.ports.topics) throw new AgentMuxError('The original Host Topic content owner is unavailable. Existing content and Agents remain available.', 'CONTROL_UNAVAILABLE')
+      if (!this.ports.topics && !this.ports.forwardControl) throw new AgentMuxError('The original Host Topic content owner is unavailable. Existing content and Agents remain available.', 'CONTROL_UNAVAILABLE')
       context.signal?.throwIfAborted()
-      return parseTopicResult(method, await this.ports.topics.call(method, input, context), input) as AgentMuxRpcResult<M>
+      const result = this.ports.topics ? await this.ports.topics.call(method, input, context)
+        : await this.ports.forwardControl!<TopicMethod>(method, input, context)
+      return parseTopicResult(method, result, input) as AgentMuxRpcResult<M>
     }
     const p = rpcRecord(params)
     if (method === 'agent.history') {

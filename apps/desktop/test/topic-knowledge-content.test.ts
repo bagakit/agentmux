@@ -2,8 +2,11 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 import { mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
+import { spawn } from 'node:child_process'
+import { createRequire } from 'node:module'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer, connectAgentMuxRpc, type ExecutionHost, type TopicKnowledgeWrite } from '@agentmux/core'
+import { AgentMuxControlServer, connectAgentMuxRpc, startHeadlessAgentMux, type ExecutionHost, type TopicKnowledgeWrite } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
@@ -12,6 +15,13 @@ import { TopicSpatialOwner } from '../src/main/topic-spatial-owner'
 import { MOTE_SOUL_PATH, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../src/shared/scratch-topics'
 import type { WorkspaceRecord } from '../src/shared/contracts'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
+import { AgentMuxControlServer as SourceControlServer } from '../../../packages/core/src/public-rpc-server'
+import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
+import { startAgentMuxHost } from '../../host/src/host'
+const { build } = await import(createRequire(fileURLToPath(new URL('../../../packages/core/package.json', import.meta.url))).resolve('esbuild'))
+const PrivateControlServer: typeof SourceControlServer = process.env.AGENTMUX_TEST_TOPIC_FORWARD_ENTRY
+  ? (await import(/* @vite-ignore */ pathToFileURL(process.env.AGENTMUX_TEST_TOPIC_FORWARD_ENTRY).href)).AgentMuxControlServer : SourceControlServer
+vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(), startHeadlessAgentMux: vi.fn() }))
 
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw new Error('This content test does not decode avatars.') } } }))
 const roots: string[] = [], servers: AgentMuxControlServer[] = []
@@ -155,3 +165,75 @@ describe('Knowledge entries retain exact source identity through original file C
     } finally { await client.dispose() }
   })
 })
+
+
+it('the default shipping CLI reaches the original Topic file owner through the production Host forward port', async () => {
+  const f = await fixture(), authority = await rpcOwnerFixture(['topic-original-source'])
+  const calls: Array<{ method: string; params: unknown; caller: unknown }> = []
+  const desktop = new PrivateControlServer({ socketPath: join(f.root, 'desktop.sock'), coreClients: authority.coreClients,
+    spatialState: f.state, topics: { async call(method, params, context) {
+      calls.push({ method, params: structuredClone(params), caller: structuredClone(context?.caller) })
+      return await f.owner.call(method, params)
+    } } })
+  let host: Awaited<ReturnType<typeof startAgentMuxHost>> | undefined
+  const original = authority.client.agentSession('topic-original-source')
+  const authorize = vi.spyOn(authority.client, 'authorizeRetainedAgentCaller')
+  try {
+    await desktop.start()
+    // Exercise the production Host's exact forwarding closure. Only its already-borrowed
+    // Runtime facade is injected: no actual Headless Runtime, Agent process or Native Run starts.
+    vi.mocked(startHeadlessAgentMux).mockImplementationOnce(async options => {
+      const server = new PrivateControlServer({ ...options?.service, socketPath: join(f.root, 'control.sock'), coreClients: authority.coreClients })
+      await server.start()
+      return { server, client: authority.client, hosted: null, socketPath: server.path, ownerIdentity: () => { throw new Error('No Runtime identity is claimed.') },
+        stop: async () => await server.stop() } as unknown as Awaited<ReturnType<typeof startHeadlessAgentMux>>
+    })
+    host = await startAgentMuxHost({ store: {} as never, socketPath: join(f.root, 'control.sock'), desktopSocketPath: desktop.path })
+    const cli = join(f.root, 'default-cli.mjs')
+    await symlink(fileURLToPath(new URL('../../../packages/core/node_modules', import.meta.url)), join(f.root, 'node_modules'), 'dir')
+    const compiled = await build({ entryPoints: [fileURLToPath(new URL('../../../packages/core/src/agentmux.ts', import.meta.url))], outfile: cli,
+      bundle: true, platform: 'node', format: 'esm', packages: 'external', metafile: true, logLevel: 'silent' })
+    expect(Object.keys(compiled.metafile!.inputs).some(path => path.endsWith('/src/public-rpc-topics.ts'))).toBe(true)
+    const env = objectCliEnvironment(f.root, { AGENTMUX_AGENT_SESSION_ID: authority.credentials.agentSessionId, AGENTMUX_AGENT_CAPABILITY: authority.credentials.capability })
+    expect(env.AGENTMUX_RPC_ENDPOINT).toBeUndefined()
+    async function run(args: string[], input = '', overrides: NodeJS.ProcessEnv = {}) {
+      return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        const child = spawn(process.execPath, [cli, ...args], { env: { ...env, ...overrides }, stdio: ['pipe', 'pipe', 'pipe'] })
+        let stdout = '', stderr = ''
+        const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Private two-hop Topic CLI exceeded its deadline.')) }, 10_000)
+        child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8'); child.stdout.on('data', text => { stdout += text }); child.stderr.on('data', text => { stderr += text })
+        child.once('error', error => { clearTimeout(timer); reject(error) }); child.once('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }) }); child.stdin.end(input)
+      })
+    }
+    const beforePreview = await f.state.read()
+    const preview = await run(['topic', 'migrate', 'preview'])
+    expect(preview.code, preview.stderr).toBe(0)
+    expect(JSON.parse(preview.stdout).result).toMatchObject({ required: false, category: { title: '未分类' }, spatialRevision: beforePreview!.revision })
+    expect(await f.state.read()).toEqual(beforePreview)
+    const saved = await run(['topic', 'knowledge', 'write', '--input', '-'], JSON.stringify(f.authored))
+    expect(saved.code, saved.stderr).toBe(0)
+    const entry = JSON.parse(saved.stdout).result.entry
+    expect(entry.sources).toEqual(f.authored.sources)
+    const read = await run(['topic', 'knowledge', 'read', '--topic', f.topic.topicId, '--entry', ENTRY])
+    expect(read.code, read.stderr).toBe(0)
+    expect(JSON.parse(read.stdout).result.entry).toEqual(entry)
+    const edited = { ...f.authored, content: 'Exact default Host CAS revision.', expectedRevision: entry.revision }
+    const revised = await run(['topic', 'knowledge', 'write', '--input', '-'], JSON.stringify(edited))
+    expect(revised.code, revised.stderr).toBe(0)
+    const current = JSON.parse(revised.stdout).result.entry
+    const stale = await run(['topic', 'knowledge', 'write', '--input', '-'], JSON.stringify({ ...edited, content: 'Do not replace original.' }))
+    expect(stale.code).toBe(1); expect(JSON.parse(stale.stderr).error.code).toBe('TOPIC_CONTENT_CONFLICT')
+    const originalFile = JSON.parse(await readFile(join(f.topic.directoryPath, 'knowledge', ENTRY + '.json'), 'utf8'))
+    expect(originalFile.content).toBe(edited.content)
+    expect((await f.owner.call('topic.knowledge.read', { topicId: f.topic.topicId, entryId: ENTRY })).entry).toEqual(current)
+    expect(calls.map(call => call.method)).toEqual(['topic.migrate.preview', 'topic.knowledge.write', 'topic.knowledge.read', 'topic.knowledge.write', 'topic.knowledge.write'])
+    expect(calls.map(call => call.caller)).toEqual(calls.map(() => authority.credentials))
+    expect(calls[1]?.params).toEqual(f.authored)
+    expect(authorize).toHaveBeenCalledTimes(10)
+    const denied = await run(['topic', 'migrate', 'preview'], '', { AGENTMUX_AGENT_CAPABILITY: 'invalid-capability' })
+    expect(denied.code).toBe(1); expect(JSON.parse(denied.stderr).error.code).toBe('AGENT_CAPABILITY_INVALID')
+    expect(calls).toHaveLength(5)
+    expect(authority.client.agentSession('topic-original-source')).toEqual(original)
+    expect(authority.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await host?.dispose(); await desktop.stop(); authorize.mockRestore(); await authority.close() }
+}, 25_000)
