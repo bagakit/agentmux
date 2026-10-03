@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, Settings2, SquareTerminal, Wifi, X } from 'lucide-react'
+import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, Settings2, SquareTerminal, Target, Wifi, X } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
@@ -17,6 +17,7 @@ import { MobileIdentity, type MobileObjectIdentity } from './navigation/MobileId
 import { MoteMark } from './navigation/MoteMark'
 import { MobileSpatialNavigation } from './navigation/MobileSpatialNavigation'
 import { readMobileHome, saveMobileHome, type MobileHome } from './navigation/home-preference'
+import { MobileGoalWork } from './navigation/MobileGoalWork'
 
 type Workface = Navigation
 
@@ -47,6 +48,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [defaultHome, setDefaultHome] = useState<MobileHome>(initialHome.current.home)
   const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
   const [showSession, setShowSession] = useState(false)
+  const [showGoalWork, setShowGoalWork] = useState(false)
   const [objectIdentity, setObjectIdentity] = useState<MobileObjectIdentity | null>(null)
   const sessionTitle = objectIdentity?.name ?? null
   const [sheet, setSheet] = useState<'connection' | 'attachments' | 'settings' | 'identity' | null>(null)
@@ -68,7 +70,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     if (!native) return
     const binding = bindNativeDevice({ root: document.documentElement, reportError,
       onForeground: () => { void client?.connect().catch(reportError) },
-      onBack: () => { setSheet(null); setShowSession(false) }
+      onBack: () => { setSheet(null); setShowGoalWork(false); setShowSession(false) }
     })
     return () => { void binding.dispose().catch(reportError) }
   }, [client, native])
@@ -114,13 +116,14 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       <button className="mobile-settings-button" onClick={() => setSheet(workspaceVisible ? 'settings' : 'connection')} aria-label={workspaceVisible ? '手机设置与连接' : '连接你的 Mac'}><Settings2 size={20} /><span className="mobile-status-dot" aria-label={label} /></button>
       {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => setSheet('identity')}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} /></button>
         : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
-      {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' }))}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button> : <span className="mobile-header-spacer" />}
+      {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button> : <span className="mobile-header-spacer" />}
     </header>
     {workspaceVisible && showSession && <div className="mobile-session-toolbar">
       <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'}</button>
       <span>{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
-      <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' }))}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button>
-      {native && selected && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><Pencil size={17} /></button>}
+      <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><Target size={18} /></button>
+      <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button>
+      {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><Pencil size={17} /></button>}
     </div>}
     <main className="mobile-main">
       {!workspaceVisible && <section className="mobile-connect-page"><img className="mobile-connect-dragon" src={brandIcon} alt="AgentMux 龙" /><h1>连接你的 Mac</h1>
@@ -129,16 +132,19 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><Link2 size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <div hidden={showSession}><MobileSpatialNavigation visible={!showSession} home={home} client={client} connected={connected} sessions={sessions} openSession={(id, title) => {
-        setObjectIdentity(title)
+        setObjectIdentity(title); setShowGoalWork(false)
         setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' })); setShowSession(true)
       }} /></div>}
-      <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || workface.panel === 'terminal'}>
+      <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>
+        <MobileGoalWork client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={workspaceVisible && showSession && showGoalWork} />
+      </section>
+      <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal'}>
         {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'} 选择已有 Agent。</p>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
-          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && workface.panel !== 'terminal'} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} onAttach={() => { void chooseAttachment() }} />
+          <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} onAttach={() => { void chooseAttachment() }} />
         </div>
-      </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || workface.panel !== 'terminal'}>
-        <MobileTerminalViewer client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && workface.panel === 'terminal'} />
+      </section><section className="mobile-terminal-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel !== 'terminal'}>
+        <MobileTerminalViewer client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && !showGoalWork && workface.panel === 'terminal'} />
       </section>
     </main>
     {(notice || projectionError || connection.issue || hasConnected && !connected || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ShieldCheck size={15} /></span><div><p>{notice ?? projectionError ?? connection.issue ?? connection.message}</p>{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}

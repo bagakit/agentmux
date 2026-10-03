@@ -7,8 +7,18 @@ export type Navigation = { selectedSessionId: string | null; hostUrl: string; pa
 export type DraftRecord = { version: 1; drafts: Array<[string, string]>;
   attempts: Array<[string, Omit<PromptAttempt, 'message'>]>;
   responses: Array<[string, Pick<ResponseAttempt, 'phase'>]> }
+export type GoalWorkSelection = { runtimeId: string; deviceHostId: string | null; sessionId: string; goalId: string }
+export type MobileGoalOperation = GoalWorkSelection & { operationId: string } & (
+  | { kind: 'start'; intervalMs: number; alignmentRevision: number }
+  | { kind: 'action'; loopId: string; action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number }
+)
+export type GoalWorkface = { selection: GoalWorkSelection | null; pending: MobileGoalOperation[] }
+function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): boolean {
+  const keys = Object.keys(a) as Array<keyof MobileGoalOperation>
+  return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
+}
 export type DeviceWorkface = Navigation & { version: 1;
-  host: { origin: string; hostId: string } | null; conversation: DraftRecord }
+  host: { origin: string; hostId: string } | null; conversation: DraftRecord; goalWork?: GoalWorkface }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
 const defaultStorage: StorageGetter = () => localStorage
@@ -59,7 +69,9 @@ export function parseDraftRecord(value: unknown): DraftRecord {
   return structuredClone(value) as DraftRecord
 }
 export function parseDeviceWorkface(value: unknown): DeviceWorkface {
-  const v = record(value, ['version', 'selectedSessionId', 'hostUrl', 'panel', 'host', 'conversation'])
+  const keys = ['version', 'selectedSessionId', 'hostUrl', 'panel', 'host', 'conversation']
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'goalWork')) keys.push('goalWork')
+  const v = record(value, keys)
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
     || !(v.hostUrl === '' || origin(v.hostUrl))
     || !(v.panel === 'conversation' || v.panel === 'sessions' || v.panel === 'terminal')) throw invalid()
@@ -68,7 +80,32 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
     if (!origin(host.origin) || !id(host.hostId)) throw invalid()
   }
   parseDraftRecord(v.conversation)
+  if (Object.hasOwn(v, 'goalWork')) parseGoalWorkface(v.goalWork)
   return structuredClone(value) as DeviceWorkface
+}
+
+function selection(value: unknown): GoalWorkSelection {
+  const v = record(value, ['runtimeId', 'deviceHostId', 'sessionId', 'goalId'])
+  if (!id(v.runtimeId) || !(v.deviceHostId === null || id(v.deviceHostId)) || !id(v.sessionId) || !id(v.goalId)) throw invalid()
+  return structuredClone(value) as GoalWorkSelection
+}
+export function parseGoalWorkface(value: unknown): GoalWorkface {
+  const v = record(value, ['selection', 'pending'])
+  if (v.selection !== null) selection(v.selection)
+  if (!Array.isArray(v.pending) || v.pending.length > MAX_ENTRIES) throw invalid()
+  const found = new Set<string>()
+  for (const item of v.pending) {
+    const keys = ['runtimeId', 'deviceHostId', 'sessionId', 'goalId', 'operationId', 'kind']
+    const op = record(item, [...keys, ...(item?.kind === 'start' ? ['intervalMs', 'alignmentRevision'] : ['loopId', 'action', 'expectedRevision'])])
+    selection({ runtimeId: op.runtimeId, deviceHostId: op.deviceHostId, sessionId: op.sessionId, goalId: op.goalId })
+    if (!id(op.operationId) || found.has(op.operationId)) throw invalid()
+    found.add(op.operationId)
+    if (op.kind === 'start') {
+      if (!Number.isSafeInteger(op.intervalMs) || Number(op.intervalMs) < 60000 || !Number.isSafeInteger(op.alignmentRevision) || Number(op.alignmentRevision) < 1) throw invalid()
+    } else if (op.kind !== 'action' || !id(op.loopId) || !['pause', 'resume', 'stop', 'check'].includes(String(op.action))
+      || !Number.isSafeInteger(op.expectedRevision) || Number(op.expectedRevision) < 1) throw invalid()
+  }
+  return structuredClone(value) as GoalWorkface
 }
 
 /** One device record owns navigation, drafts and intent guards. A single setItem is the commit. */
@@ -113,6 +150,27 @@ export class DeviceWorkfaceStore {
   }
   updateConversation(conversation: DraftRecord): void {
     this.refresh(); this.update({ ...this.value, conversation: parseDraftRecord(conversation) })
+  }
+  selectGoal(next: GoalWorkSelection | null): void {
+    this.refresh(); this.update({ ...this.value, goalWork: { selection: next === null ? null : selection(next), pending: this.value.goalWork?.pending ?? [] } })
+  }
+  retainGoalOperation(operation: MobileGoalOperation): void {
+    this.refresh()
+    const current = this.value.goalWork ?? { selection: null, pending: [] }
+    const existing = current.pending.find(op => op.operationId === operation.operationId)
+    if (existing && !sameGoalOperation(existing, operation)) throw new Error('原目标操作的内容不同；保留原操作，不能换目标重试。')
+    if (!existing && current.pending.some(op => op.runtimeId === operation.runtimeId && op.sessionId === operation.sessionId && op.goalId === operation.goalId
+      && (op.deviceHostId === null || operation.deviceHostId === null || op.deviceHostId === operation.deviceHostId))) throw new Error('这个原目标已有待确认操作；请先检查并重试原操作，不替换为新的操作。')
+    const pending = existing ? current.pending : [...current.pending, operation]
+    this.update({ ...this.value, goalWork: parseGoalWorkface({ ...current, pending }) })
+  }
+  confirmGoalOperation(operation: MobileGoalOperation): void {
+    this.refresh()
+    const current = this.value.goalWork
+    if (!current) return
+    const existing = current.pending.find(op => op.operationId === operation.operationId)
+    if (!existing || !sameGoalOperation(existing, operation)) return
+    this.update({ ...this.value, goalWork: { ...current, pending: current.pending.filter(op => op !== existing) } })
   }
   confirmHost(host: NonNullable<DeviceWorkface['host']>): void {
     this.refresh()
