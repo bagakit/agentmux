@@ -15,7 +15,7 @@ const strip = `document.querySelector('.composer-pending:not([hidden])')`;
 const selectedCard = `${strip}.querySelector('.composer-pending__card[data-selected="true"]')`;
 const panel = `${surface}.querySelector('.composer-mailbox')`;
 const send = `${selectedCard}.querySelector('.composer-pending__send')`;
-const more = `${selectedCard}.querySelector('[aria-label="在 Outbox 查看待发消息和操作"]')`;
+const more = `${strip}.querySelector('.composer-pending__count[aria-label="在 Outbox 查看待发消息和操作"]')`;
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 async function evaluate(expression) {
   const value = await win.webContents.executeJavaScript(`(async()=>{try{return await eval(${JSON.stringify(expression)})}catch(error){return{__probeError:true,name:error.name,message:error.message,stack:error.stack}}})()`);
@@ -51,11 +51,14 @@ async function geometry() {
     const owner=records.find(r=>r.terminal.element===original&&!r.disposed),other=records.find(r=>n.contains(r.terminal.element)&&!r.disposed);
     const terminal=pendingDelivery.terminal(),activeBuffer=owner.terminal.buffer.active,screen=rect(s.querySelector('.xterm-screen')),cursorRow=terminal.baseY+terminal.cursorY-terminal.viewportY;
     const cellHeight=screen.height/terminal.rows,b=${strip},e=${editor},composer=s.querySelector('.composer');
+    const helper=original.querySelector('.xterm-helper-textarea'),helperStyle=getComputedStyle(helper);
     const selected=b?.querySelector('.composer-pending__card[data-operation-id="'+b.dataset.operationId+'"]'),state=selected?.querySelector('.composer-pending__state'),preview=selected?.querySelector('.composer-pending__preview'),mailbox=composer.querySelector('.composer__mailbox');
     const editorSlot=e.closest('.composer__editor'),controls=mailbox.closest('.composer__toolbar > div');
     const range=node=>{if(!node)return[];const r=document.createRange();r.selectNodeContents(node);return[...r.getClientRects()].map(r=>({x:r.x,y:r.y,width:r.width,height:r.height,right:r.right,bottom:r.bottom}))};
     const buffer=other?.terminal.buffer.active;
-    return{terminal,buffer:{type:activeBuffer.type,stable:activeBuffer===window.pendingNative.buffer,repeatedReadStable:activeBuffer===owner.terminal.buffer.active},screen,cellHeight,cursorCell:{x:screen.x+terminal.cursorX*screen.width/terminal.cols,y:screen.y+cursorRow*cellHeight,width:screen.width/terminal.cols,height:cellHeight,right:screen.x+(terminal.cursorX+1)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorText:{x:screen.x,y:screen.y+cursorRow*cellHeight,right:screen.x+Math.min(terminal.cols,terminal.cursorLine.length)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorVisible:cursorRow>=0&&cursorRow<terminal.rows,
+    return{terminal,buffer:{type:activeBuffer.type,stable:activeBuffer===window.pendingNative.buffer,repeatedReadStable:activeBuffer===owner.terminal.buffer.active},screen,cellHeight,
+      helperTextarea:{rect:rect(helper),height:helperStyle.height,lineHeight:helperStyle.lineHeight,fontSize:helperStyle.fontSize,inlineStyle:helper.getAttribute('style')},
+      cursorCell:{x:screen.x+terminal.cursorX*screen.width/terminal.cols,y:screen.y+cursorRow*cellHeight,width:screen.width/terminal.cols,height:cellHeight,right:screen.x+(terminal.cursorX+1)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorText:{x:screen.x,y:screen.y+cursorRow*cellHeight,right:screen.x+Math.min(terminal.cols,terminal.cursorLine.length)*screen.width/terminal.cols,bottom:screen.y+(cursorRow+1)*cellHeight},cursorVisible:cursorRow>=0&&cursorRow<terminal.rows,
       cursorBottom:screen.y+(cursorRow+1)*cellHeight,ownerRect:rect(s),terminalRect:rect(original),
       originalConnected:Boolean(original?.isConnected),originalHidden:Boolean(original?.closest('[hidden]')),originalId:owner?.id,
       retainedNodes:{editor:e===window.pendingNative.editor,terminal:original===window.pendingNative.terminal,neighbor:n===window.pendingNative.neighbor},
@@ -73,12 +76,19 @@ async function geometry() {
         count:b.querySelector('.composer-pending__count')?.textContent,position:getComputedStyle(b).position,background:getComputedStyle(b).backgroundColor,
         hover:b.matches(':hover'),focused:b.matches(':focus-within'),focusedLabel:b.contains(document.activeElement)?document.activeElement.getAttribute('aria-label'):null,
         previewClipped:preview?preview.scrollWidth>preview.clientWidth:false,
+        heading:rect(b.querySelector('.composer-pending__heading')),announcers:[...b.querySelectorAll('[role="status"]')].map(node=>node.textContent),
         cards:[...b.querySelectorAll('.composer-pending__card')].map(node=>({id:node.dataset.operationId,index:Number(node.dataset.queueIndex),selected:node.dataset.selected,
           rect:rect(node),transform:getComputedStyle(node).transform,shadow:getComputedStyle(node).boxShadow,transition:getComputedStyle(node).transitionDuration,
-          preview:node.querySelector('.composer-pending__preview').textContent,actions:[...node.querySelectorAll('button')].map(button=>({rect:rect(button),label:button.getAttribute('aria-label')}))})),
-        reading:{id:b.querySelector('.composer-pending__reading')?.dataset.readingId,text:b.querySelector('.composer-pending__reading')?.textContent,rect:rect(b.querySelector('.composer-pending__reading'))},
+          layoutHeight:node.offsetHeight,preview:node.querySelector('.composer-pending__preview').textContent,
+          previewTitle:node.querySelector('.composer-pending__preview').getAttribute('title'),previewLines:range(node.querySelector('.composer-pending__preview')),
+          state:{label:node.querySelector('.composer-pending__state').getAttribute('aria-label'),icon:node.querySelector('.composer-pending__state svg')?.getAttribute('class'),rect:rect(node.querySelector('.composer-pending__state')),hiddenLabel:node.querySelector('.composer-pending__sr-only')?.textContent},
+          actions:[...node.querySelectorAll('button')].map(button=>({rect:rect(button),label:button.getAttribute('aria-label'),background:getComputedStyle(button).backgroundColor,
+            copyState:button.dataset.copyState,icon:button.querySelector('svg')?.getAttribute('class'),animation:button.querySelector('svg')?getComputedStyle(button.querySelector('svg')).animationName:null}))})),
+        reading:{id:b.querySelector('.composer-pending__reading')?.dataset.readingId,text:b.querySelector('.composer-pending__body')?.textContent,
+          state:b.querySelector('.composer-pending__reading-state')?.textContent,bodyCount:b.querySelectorAll('.composer-pending__body').length,readerCount:b.querySelectorAll('.composer-pending__reading').length,
+          editing:b.querySelectorAll('.composer-pending__reading textarea').length,rect:rect(b.querySelector('.composer-pending__reading'))},
         list:{rect:rect(b.querySelector('.composer-pending__cards')),scrollTop:b.querySelector('.composer-pending__cards')?.scrollTop,scrollHeight:b.querySelector('.composer-pending__cards')?.scrollHeight},
-        label:state?.textContent,stateRect:rect(state),stateLines:range(state?.querySelector('span')),preview:preview?.textContent,
+        label:state?.getAttribute('aria-label'),stateRect:rect(state?.querySelector('svg')),preview:preview?.textContent,
         previewRect:rect(preview),sendDisabled:selected?.querySelector('.composer-pending__send').disabled}:null,
       popover:s.querySelector('.composer-mailbox').matches(':popover-open'),facts:pendingDelivery.facts(),trustedActions:window.pendingNative.actions,trustedHoverActions:window.pendingNative.hoverActions,
       terminalEvents:window.pendingNative.terminalEvents}
@@ -152,12 +162,16 @@ function pendingGeometry(before, after, label, busy, disabled, attentionTransiti
   assert.ok(after.strip, 'Nonempty real queue has a visible pending summary');
   assert.equal(after.strip.outsideInput, true); assert.equal(after.strip.label, label);
   assert.equal(after.strip.busy, String(busy)); assert.equal(after.strip.sendDisabled, disabled);
+  const state = after.strip.cards.find(card => card.selected === 'true').state;
+  assert.equal(state.hiddenLabel,label);
+  assert.match(state.icon,busy?/lucide-loader-circle/:label==='投递未确认'?/lucide-circle-help/:/lucide-clock/,'The inline state has a distinct non-color semantic glyph');
   const r = after.strip.rect;
   assert.ok(r.width > 0 && r.height > 0 && after.strip.previewRect.width > 0);
   assert.ok(r.bottom <= after.composer.y + 1, 'Pending summary sits outside and above the input');
   assert.ok(r.x >= after.ownerRect.x - 1 && r.right <= after.ownerRect.right + 1, 'Pending controls fit the original owner width');
-  assert.ok(after.strip.stateLines.length > 0, 'Actual status text has a nonempty Range');
-  assert.ok(after.strip.stateLines.every(line => line.x >= r.x - 1 && line.right <= r.right + 1), 'Status text remains inside the visible pending surface');
+  const glyph = after.strip.stateRect;
+  assert.ok(glyph?.width > 0 && glyph.height > 0, 'Actual inline state has a painted glyph and an exact accessible label');
+  assert.ok(glyph.x >= r.x - 1 && glyph.right <= r.right + 1, 'Status glyph remains inside the visible pending surface');
   assert.ok(after.terminal.rows > 0);
   return noticeBoundary;
 }
@@ -194,14 +208,96 @@ function cardGeometry(facts, count) {
   assert.equal(new Set(card.cards.map(c=>c.id)).size,count,'Every real card has a distinct operation identity');
   assert.ok(card.rect.width<=360.1&&card.rect.height<=320.1,'Floating queue has bounded width and height');
   assert.ok(Math.abs(card.rect.right-facts.mailbox.rect.right)<=1,'Pending cards align with the actual Mailbox');
-  assert.ok(card.rect.bottom<=facts.composer.y-8,'The floating queue remains visibly detached from Message Tool');
+  // The live unfinished native input row is content, not an empty visual gap.
+  // Keep the original cursor/text footprint checks strict and measure compact
+  // distance from the protected last screen row rather than from its bottom.
+  const dock=Math.min(facts.composer.y,facts.screen.bottom-facts.cellHeight),list=card.list.rect;
+  const visible=card.cards.filter(c=>c.rect.y<list.bottom&&c.rect.bottom>list.y);
+  const paintedBottom=Math.max(...visible.map(c=>Math.min(c.rect.bottom,list.bottom))),gap=dock-paintedBottom;
+  assert.ok(gap>=6&&gap<=16,'Actual card lower edge stays close to the protected Message Tool with a short visible gap');
+  assert.equal(card.announcers.length,1,'Only one scoped live Copy feedback region exists, not a status announcer for every card');
+  for(const item of card.cards){
+    assert.equal(item.layoutHeight,28,'Every actual card has fixed single-line 28px layout height');
+    assert.equal(item.previewTitle,null,'The full body has no native title tooltip duplicating the unique reader');
+    assert.equal(item.actions.length,3,'Only three compact per-card Send/Copy/Edit actions remain');
+    assert.equal(item.state.hiddenLabel,item.state.label,'The hidden state label preserves exact accessible meaning');
+  }
+  const selected=card.cards.find(c=>c.selected==='true');
+  assert.equal(new Set(selected.previewLines.map(r=>Math.round(r.y*100)/100)).size,1,'Actual selected preview occupies only one text line');
+  const mid=r=>r.y+r.height/2;
+  assert.ok(Math.abs(mid(selected.state.rect)-mid(selected.actions[0].rect))<=1,'State and actions share the same actual card row');
+  for(const action of selected.actions){
+    assert.ok(action.rect.width>=23.9&&action.rect.height>=23.9,'Compact action retains a full actual 24px hit and focus area');
+    assert.ok(action.rect.x>=selected.rect.x-1&&action.rect.right<=selected.rect.right+1,'Every selected action fits inside its real card');
+    assert.ok(action.rect.y>=list.y-1&&action.rect.bottom<=list.bottom+1,'Every selected action has a complete visible hit area inside the bounded card list');
+  }
+  assert.equal(selected.actions[0].background,'rgba(0, 0, 0, 0)','Send remains a quiet action without a heavy button background');
+  if(card.reading.readerCount){
+    assert.equal(card.reading.readerCount,1,'Hover exposes only one custom reader');
+    assert.equal(card.reading.bodyCount,card.reading.editing?0:1,'Textarea replaces the full reader body while editing');
+  }
   if(count>1){
     assert.ok(card.cards.filter(c=>c.selected==='false').every(c=>c.transform.startsWith('matrix3d(')),'Real queued cards preserve depth while idle');
     const first=card.cards[0],second=card.cards[1];
     assert.ok(second.rect.y>first.rect.y+10&&second.rect.y<first.rect.bottom,'Real queued cards have visible vertical stacking height and overlap');
-    assert.notEqual(first.transform,second.transform,'Idle selected and queued cards occupy distinct depth planes');
+    const nearby=card.cards.find(c=>Math.abs(c.index-selected.index)===1);
+    assert.ok(nearby);
+    assert.notEqual(selected.transform,nearby.transform,'Actual selected and nearby queued cards occupy distinct depth planes');
   }
   visibleCursor(facts);
+}
+function uniqueReader(facts, id, text, label) {
+  assert.equal(facts.strip.reading.id,id);
+  assert.equal(facts.strip.reading.text,text,'Hover reads the one complete original body of this card');
+  assert.equal(facts.strip.reading.readerCount,1);
+  assert.equal(facts.strip.reading.bodyCount,1);
+  assert.ok(facts.strip.reading.state.includes(label)&&facts.strip.reading.state.length>label.length,'The same reader explains its exact state and full reason');
+}
+function copyFeedback(facts, id, state, reduced) {
+  const card=facts.strip.cards.find(card=>card.id===id),button=card.actions.find(action=>action.label==='复制这条待发消息');
+  assert.equal(button.copyState,state,state==='copied'?'Copy success requires the original clipboard true outcome':'Failed or late Copy must not report success');
+  if(state==='copied'){
+    assert.match(button.icon,/lucide-check/,'Real Copy success immediately displays Check');
+    assert.deepEqual(facts.strip.announcers,['已复制待发消息'],'One accessible status announces real copy success');
+    if(reduced)assert.equal(button.animation,'none','Reduced motion retains static visible Check without animation');
+    else assert.notEqual(button.animation,'none','Normal motion provides a short real Copy success animation');
+  }else{
+    assert.doesNotMatch(button.icon,/lucide-check/,'Failure or a stale copied body cannot display a success mark');
+    assert.ok(!facts.strip.announcers.includes('已复制待发消息'),'Failure or stale body cannot announce copy success');
+  }
+}
+async function copyOutcomeScenes(scene, baseline) {
+  await evaluate("pendingDelivery.queue('原复制消息 · 第二行完整保留\\n复制反馈不改变草稿或操作')");
+  await pointAt(`${selectedCard}.querySelector('.composer-pending__preview')`);
+  const before=await settled(),sid=await evaluate('resultReady.sessionId'),entry=before.facts.queues[sid][0];
+  cardGeometry(before,1);uniqueReader(before,entry.operationId,entry.text,'排队中');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
+  await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
+  const motion=await settled();retained(before,motion);copyFeedback(motion,entry.operationId,'copied',false);cardGeometry(motion,1);
+  assert.equal(motion.facts.copies.at(-1),entry.text);await frame(scene,'card-copy-success-motion');
+  await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+  await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
+  const reduced=await settled();retained(before,reduced);copyFeedback(reduced,entry.operationId,'copied',true);await frame(scene,'card-copy-success-reduced');
+  await waitFor(`${selectedCard}.querySelector('.composer-pending__copy').dataset.copyState==='idle'`);
+  const idle=await settled();retained(before,idle);copyFeedback(idle,entry.operationId,'idle',true);
+  await evaluate("pendingDelivery.nextCopy('reject')");await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
+  const failed=await settled();retained(before,failed,true);cardGeometry(failed,1);copyFeedback(failed,entry.operationId,'failed',true);
+  assert.match(failed.strip.cards[0].actions[1].icon,/lucide-triangle-alert/);
+  assert.equal(failed.facts.copyRequests.at(-1).state,'failed');assert.equal(failed.facts.copyRequests.at(-1).text,entry.text);
+  assert.deepEqual(failed.facts.queues[sid],before.facts.queues[sid]);assert.deepEqual(failed.facts.attempts,before.facts.attempts);
+  await frame(scene,'card-copy-failed');
+  await evaluate("pendingDelivery.nextCopy('hold')");await click(`${selectedCard}.querySelector('.composer-pending__copy')`);
+  const held=await settled();retained(failed,held,true);assert.equal(held.facts.copyPending,true);copyFeedback(held,entry.operationId,'idle',true);
+  const revised='保存的另一份正文 · 相同原ID\n晚到复制不能认证此新正文';
+  await evaluate(`pendingDelivery.revise(${JSON.stringify(entry.operationId)},${JSON.stringify(revised)})`);
+  const changed=await settled();retained(held,changed);assert.deepEqual(changed.facts.queues[sid],[{...entry,text:revised}]);
+  await evaluate('pendingDelivery.completeCopy()');await waitFor("pendingDelivery.facts().copyRequests.at(-1).state==='copied'");
+  const late=await settled();retained(changed,late);copyFeedback(late,entry.operationId,'idle',true);cardGeometry(late,1);
+  assert.equal(late.facts.copies.at(-1),entry.text,'The delayed original clipboard write contains only the captured original full body');
+  uniqueReader(late,entry.operationId,revised,'排队中');assert.deepEqual(late.facts.attempts,before.facts.attempts);
+  await frame(scene,'card-copy-late');
+  await evaluate('pendingDelivery.clear()');await click(editor);const end=await settled();retained(baseline,end);
+  result.checkpoints.push({scene,name:'original-copy-outcomes',before,motion,reduced,idle,failed,held,changed,late,end});
 }
 async function cardScenes(scene, baseline) {
   await pointAt(surface);await evaluate("pendingDelivery.queue('稍后复查')");
@@ -217,18 +313,32 @@ async function cardScenes(scene, baseline) {
     await pointAt(`${expr}.querySelector('.composer-pending__preview')`);
     const focused=await settled();retained(baseline,focused);
     assert.equal(focused.strip.operationId,entries[index].operationId,'Trusted hover targets the original head, middle or tail card');
-    assert.equal(focused.strip.reading.id,entries[index].operationId);assert.equal(focused.strip.reading.text,entries[index].text,'Hover reads the full original text of this card');
+    uniqueReader(focused,entries[index].operationId,entries[index].text,'排队中');cardGeometry(focused,100);
+    await delay(700);assert.equal((await geometry()).strip.cards[index].previewTitle,null,'A prolonged trusted hover has no native full-body tooltip');
     assert.ok(focused.trustedHoverActions.some(a=>a.trusted&&a.operationId===entries[index].operationId),'Actual pointer reaches this individual original card');
     await click(`${expr}.querySelector('[aria-label="复制这条待发消息"]')`);
     const copied=await settled();assert.equal(copied.facts.copies.at(-1),entries[index].text,'Each card copies its own complete original text');
     assert.equal(copied.strip.operationId,entries[index].operationId,'Pointer path from card to actions keeps the same operation');
     assert.deepEqual(copied.facts.attempts,stack.facts.attempts,'Hover and Copy send no prompt');
+    copyFeedback(copied,entries[index].operationId,'copied',true);cardGeometry(copied,100);
     visited.push({index,id:entries[index].operationId,facts:copied});await frame(scene,'card-hover-'+index);
+    await pointAt(more);assert.equal((await geometry()).strip.operationId,entries[index].operationId,'Moving to the header preserves the latest real selected original ID');
+    await click(more);await waitFor(`${panel}.matches(':popover-open')&&Boolean(${panel}.querySelector('[data-record-key="queue:${entries[index].operationId}"]'))`);
+    assert.equal(await evaluate(`${panel}.querySelector('.log-turn__body').textContent`),entries[index].text,'Header More opens that exact head, middle or tail original record');
+    assert.equal(await evaluate('pendingDelivery.facts().attempts.length'),stack.facts.attempts.length);
+    if(index===49)await frame(scene,'card-header-49');
+    await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);await waitFor(`!${panel}.matches(':popover-open')`);
   }
   // Trusted keyboard traversal remains in the same floating surface; IME is covered by mounted tests.
   await click(`${strip}.querySelector('[data-queue-index="99"]')`);await key('Home','Home',36);
   const focus=await settled();assert.equal(focus.strip.operationId,entries[0].operationId);retained(baseline,focus);
   assert.ok(focus.strip.cards.every(c=>c.transition==='0s'),'Reduced motion retains static depth without movement');await frame(scene,'card-keyboard-focus');
+  await key('Tab','Tab',9,undefined,8);await key('Tab','Tab',9,undefined,8);
+  assert.equal(await evaluate(`document.activeElement===${more}`),true,'Trusted Shift+Tab reaches the original header Outbox button');
+  await key('Enter','Enter',13,'\r');await waitFor(`${panel}.matches(':popover-open')&&Boolean(${panel}.querySelector('[data-record-key="queue:${entries[0].operationId}"]'))`);
+  assert.equal(await evaluate('pendingDelivery.facts().attempts.length'),stack.facts.attempts.length,'Keyboard header access does not submit');
+  await click(`${panel}.querySelector('[aria-label="Close mailbox"]')`);await waitFor(`!${panel}.matches(':popover-open')`);
+  await click(`${strip}.querySelector('[data-queue-index="0"]')`);
   await key('End','End',35);await click(send);await waitFor(`pendingDelivery.facts().phase[${JSON.stringify(sid)}]==='preparing'`);
   await evaluate('pendingDelivery.prepared()');await waitFor('pendingDelivery.facts().attempts.length===2');
   const attempt=await evaluate('pendingDelivery.facts().attempts.at(-1)');
@@ -243,7 +353,7 @@ async function cardScenes(scene, baseline) {
   const textarea=`${strip}.querySelector('textarea')`;
   await click(`${selectedCard}.querySelector('[aria-label="编辑这条待发消息"]')`);await waitFor(`Boolean(${textarea})`);
   await evaluate(`${textarea}.select()`);await win.webContents.debugger.sendCommand('Input.insertText',{text:editText});await painted();
-  const editing=await settled();retained(long,editing);assert.equal(editing.facts.queues[sid][0].text,originalLong.text,'Typing an edit has no queue write');await frame(scene,'card-editing');
+  const editing=await settled();retained(long,editing);cardGeometry(editing,1);assert.equal(await evaluate(`${more}.disabled`),true,'Editing locks header queue navigation without discarding the local draft');assert.equal(editing.facts.queues[sid][0].text,originalLong.text,'Typing an edit has no queue write');await frame(scene,'card-editing');
   await evaluate(`(window.pendingNativeEditNode=${textarea},true)`);
   await pointAt(`${surface}.querySelector('.composer__mailbox')`);await waitFor(`${panel}.matches(':popover-open')`);
   assert.equal(await evaluate(`Boolean(${strip})`),false,'Open Mailbox suppresses the floating projection');
@@ -274,7 +384,7 @@ async function cardScenes(scene, baseline) {
   assert.equal(await evaluate(`${textarea}.value`),'未保存的本地稿');assert.equal(locked.facts.queues[sid][0].text,'另一个调用者保存的原消息');
   assert.ok(locked.facts.queues[sid][0].promptCondition);assert.equal(locked.facts.attempts.length,3);await frame(scene,'card-edit-unknown-lock');
   await key('Escape','Escape',27);await waitFor(`!${textarea}`);await click(`${selectedCard}.querySelector('[aria-label="复制这条待发消息"]')`);
-  await evaluate('pendingDelivery.clear()');await click(editor);await pointAt(surface);await evaluate("pendingDelivery.queue('收起后仍可发现的原消息')");await painted();
+  await evaluate('pendingDelivery.clear()');await click(editor);await pointAt(surface);await copyOutcomeScenes(scene,baseline);await evaluate("pendingDelivery.queue('收起后仍可发现的原消息')");await painted();
   await click(`${strip}.querySelector('[aria-label="收起待发卡片"]')`);const collapsed=await settled();retained(baseline,collapsed);
   assert.ok(await evaluate(`Boolean(${strip}.querySelector('.composer-pending__restore'))`));await frame(scene,'card-collapsed');
   await click(`${strip}.querySelector('.composer-pending__restore')`);await evaluate('pendingDelivery.clear()');const end=await settled();retained(baseline,end);
@@ -286,7 +396,7 @@ async function scene(scene) {
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: scene.viewport, height: 750, deviceScaleFactor: 1, mobile: false });
   await evaluate(`pendingDelivery.seed(${JSON.stringify(scene.appearance)})`);
   await waitFor(`Boolean(${surface}.querySelector('.xterm-helper-textarea'))&&!${surface}.querySelector('.terminal-view__xterm--hydrating')&&pendingDelivery.terminal().cursorLine.includes('half typed prompt')`);
-  await evaluate(`(()=>{window.pendingNative={editor:${editor},terminal:${surface}.querySelector('.xterm'),neighbor:${neighbor},actions:[],hoverActions:[],terminalEvents:[],phase:'seed'};const log=window.pendingNative,record=resultReadyTerminals.find(r=>r.terminal.element===log.terminal&&!r.disposed);log.buffer=record.terminal.buffer.active;const observe=(kind,value)=>{const b=record.terminal.buffer.active;log.terminalEvents.push({kind,value,phase:log.phase,bufferType:b.type,bufferStable:b===log.buffer,repeatedReadStable:b===record.terminal.buffer.active,rows:record.terminal.rows,baseY:b.baseY,viewportY:b.viewportY,cursorY:b.cursorY,stack:kind==='scroll'?new Error('Private terminal scroll observation').stack:undefined})};record.terminal.onResize(value=>observe('resize',value));record.terminal.onScroll(value=>observe('scroll',value));if(!window.pendingNativeRecorder){window.pendingNativeRecorder=true;document.addEventListener('pointermove',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending__card'):null;if(target&&window.pendingNative)window.pendingNative.hoverActions.push({trusted:event.isTrusted,operationId:target.dataset.operationId})},true);document.addEventListener('click',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending button'):null;if(target&&window.pendingNative)window.pendingNative.actions.push({trusted:event.isTrusted,label:target.getAttribute('aria-label'),operationId:target.closest('.composer-pending__card')?.dataset.operationId})},true)}})()`);
+  await evaluate(`(()=>{window.pendingNative={editor:${editor},terminal:${surface}.querySelector('.xterm'),neighbor:${neighbor},actions:[],hoverActions:[],terminalEvents:[],phase:'seed'};const log=window.pendingNative,record=resultReadyTerminals.find(r=>r.terminal.element===log.terminal&&!r.disposed);log.buffer=record.terminal.buffer.active;const observe=(kind,value)=>{const b=record.terminal.buffer.active;log.terminalEvents.push({kind,value,phase:log.phase,bufferType:b.type,bufferStable:b===log.buffer,repeatedReadStable:b===record.terminal.buffer.active,rows:record.terminal.rows,baseY:b.baseY,viewportY:b.viewportY,cursorY:b.cursorY,stack:kind==='scroll'?new Error('Private terminal scroll observation').stack:undefined})};record.terminal.onResize(value=>observe('resize',value));record.terminal.onScroll(value=>observe('scroll',value));if(!window.pendingNativeRecorder){window.pendingNativeRecorder=true;document.addEventListener('pointermove',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending__card'):null;if(target&&window.pendingNative)window.pendingNative.hoverActions.push({trusted:event.isTrusted,operationId:target.dataset.operationId})},true);document.addEventListener('click',event=>{const target=event.target instanceof Element?event.target.closest('.composer-pending button'):null;if(target&&window.pendingNative)window.pendingNative.actions.push({trusted:event.isTrusted,label:target.getAttribute('aria-label'),operationId:target.closest('.composer-pending__card')?.dataset.operationId??target.closest('.composer-pending')?.dataset.operationId})},true)}})()`);
   // CDP typing exercises the maintained original editor, without an Enter or Runtime submit.
   await click(editor); await key('End', 'End', 35); await key('x', 'KeyX', 88, 'x');
   await waitFor(`pendingDelivery.facts().drafts[resultReady.sessionId].includes('x')`);
@@ -375,7 +485,8 @@ async function scene(scene) {
   await waitFor(`Boolean(${panel}.querySelector('.composer-outbox.composer-mailbox__detail'))`);
   assert.equal(await evaluate(`${panel}.querySelector('.log-turn__body').textContent`), pending.text, 'Original Outbox retains the exact full queued text');
   assert.equal(await evaluate(`${panel}.querySelector('.log-turn__actions .composer-mailbox__reveal').disabled`), true);
-  assert.ok(await evaluate(`${panel}.textContent.includes('尚未发送，暂无对话位置')`));
+  assert.equal(await evaluate(`${panel}.textContent.includes('尚未发送，暂无对话位置')`),false,'Unknown delivery is not falsely called not sent');
+  assert.ok(await evaluate(`${panel}.textContent.includes('投递未确认')&&${panel}.textContent.includes('对话位置')`),'Unknown delivery and missing position are explained independently');
   await click(`${panel}.querySelector('[aria-label="Copy message"]')`);
   await waitFor(`pendingDelivery.facts().copies.length===1`);
   assert.equal(await evaluate('pendingDelivery.facts().copies[0]'), pending.text, 'Real Copy sends the full original text to the private clipboard sink');
@@ -426,7 +537,7 @@ app.whenReady().then(async () => {
     for (const sceneConfig of [{ viewport: 1280, ownerWidth: 640, appearance: 'dark' }, { viewport: 1280, ownerWidth: 640, appearance: 'light' },
       { viewport: 640, ownerWidth: 320, appearance: 'dark' }, { viewport: 640, ownerWidth: 320, appearance: 'light' }]) await scene(sceneConfig);
     assert.equal(result.scenes.length, 4);
-    if (capture === 'capture') assert.equal(result.frames.length, 88, 'Every bounded scene captures the original flows and each real-card traversal state');
+    if (capture === 'capture') assert.equal(result.frames.length, 108, 'Every bounded scene captures the original flows and each real-card traversal state');
     result.rendererErrors = await evaluate('window.pendingNativeErrors');
     assert.deepEqual(result.rendererErrors, [], 'Successful actual Renderer scenes have no error or unhandled rejection');
     result.passed = true;

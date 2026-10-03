@@ -68,7 +68,7 @@ async function nativeMutation(label,red,expectedFailure=/actual original termina
  await cp(proofDirectory,join(evidence,label),{recursive:true})
  const rendered=JSON.parse(await readFile(join(proofDirectory,'candidate/render.json'),'utf8'))
  assert.equal(receipt.privateRootRemoved,true);assert.equal(receipt.userRunTouched,false);assert.ok(rendered.frames.length)
- if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,88);assert.deepEqual(rendered.rendererErrors,[])}
+ if(red){assert.equal(typeof code,'number');assert.notEqual(code,0);assert.equal(receipt.passed,false);assert.equal(rendered.failure?.name,'AssertionError');assert.match(rendered.failure.message,expectedFailure)}else{assert.equal(code,0);assert.equal(receipt.passed,true);assert.equal(rendered.passed,true);assert.equal(rendered.frames.length,108);assert.deepEqual(rendered.rendererErrors,[])}
  return{code,assertionRed:red,frames:rendered.frames.length,evidence:label,receipt}
 }
 async function cardMutations(){
@@ -83,6 +83,13 @@ async function cardMutations(){
   {name:'real-card-traversal-capped',file:typedPaths[3],from:'{queued.map((entry, index) => {',to:'{queued.slice(0, 4).map((entry, index) => {',failure:/Every queued operation has its own real card/},
   {name:'nonhead-send-borrows-head',file:typedPaths[3],from:'onSend?.(entry.id)',to:'onSend?.(queued[0]!.id)',failure:/Nonhead Send submits only that original card/},
   {name:'copy-borrows-head-text',file:typedPaths[3],from:'onCopy?.(entry.text)',to:'onCopy?.(queued[0]!.text)',failure:/Each card copies its own complete original text/},
+  {name:'single-line-card-height-regressed',from:'height: 28px; min-height: 28px;',to:'height: 40px; min-height: 40px;',failure:/fixed single-line 28px layout height/},
+  {name:'native-full-body-tooltip-restored',file:typedPaths[3],from:'className="composer-pending__preview">',to:'className="composer-pending__preview" title={entry.text}>',failure:/native title tooltip duplicating/},
+  {name:'large-floating-gap-restored',file:typedPaths[3],from:'[offset(8),',to:'[offset(28),',failure:/short visible gap/},
+  {name:'header-borrows-head-operation',file:typedPaths[3],from:'onMore(selected.id)',to:'onMore(queued[0]!.id)',failure:/Actual Renderer fact did not arrive/},
+  {name:'copy-false-reported-as-success',file:typedPaths[3],from:'accepted = (await onCopy?.(entry.text)) === true',to:'await onCopy?.(entry.text); accepted = true',failure:/Failed or late Copy must not report success/},
+  {name:'copy-late-body-certifies-current-text',edits:[{file:typedPaths[3],from:' || !queuedRef.current.some(current => current.id === entry.id && current.text === entry.text)',to:''},{file:typedPaths[3],from:'setCopyResult({ id: entry.id, text: entry.text, state:',to:'setCopyResult({ id: entry.id, text: queuedRef.current.find(current => current.id === entry.id)!.text, state:'}],failure:/Failed or late Copy must not report success/},
+  {name:'copy-reduced-motion-specificity-lost',from:".composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy[data-copy-state='copied'] > svg { animation: none; }",to:".composer-pending__card[data-busy='true'] .composer-pending__state > svg, .composer-pending__copy > svg { animation: none; }",failure:/Reduced motion retains static visible Check without animation/},
   {name:'edit-save-bypasses-owner',file:typedPaths[7],from:'await onSave(entry.id, original, text); onCancel()',to:'onCancel()',failure:/Save preserves original operation, Run, time and order/},
   {name:'edit-rejection-discards-draft',file:typedPaths[7],from:'catch (failure) { setError(presentError(failure)); textareaRef.current?.focus({ preventScroll: true }) }',to:'catch (failure) { onCancel() }',failure:/Actual Renderer fact did not arrive/}
  ]
@@ -95,7 +102,7 @@ async function cardMutations(){
   result.mutations.push({name:item.name,files,red,exactRestoration:true});console.log(JSON.stringify({mutation:item.name,assertionRed:true,exactRestoration:true}))
  }
  result.restored=await nativeMutation('card-original-restored',false)
- assert.equal(result.mutations.length,8)
+ assert.equal(result.mutations.length,cases.length)
 }
 async function mutations(){
  for(const dir of ['apps/desktop/src','apps/desktop/test','apps/desktop/scripts','apps/desktop/resources','apps/desktop/browser-extension','packages/core/src','packages/client-ui/src','packages/demand/src','packages/layout/src','patches'])await cp(join(root,dir),join(privateRoot,dir),{recursive:true})
@@ -172,6 +179,6 @@ async function native(){
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;const lines=[]
  const outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,'capture'],{temporaryRoot:processRoot,cwd:root,env,timeoutMs:90000,onLine:l=>lines.push(l)})
  await writeFile(join(directory,'process.log'),lines.join('\n'));const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'));assert.equal(outcome.timedOut,false);assert.equal(outcome.exitCode,0,rendered.failure?.message);assert.equal(rendered.passed,true);assert.ok(rendered.frames.length)
- assert.equal(rendered.frames.length,88);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
+ assert.equal(rendered.frames.length,108);assert.deepEqual(rendered.rendererErrors,[]);assert.equal((await listProbeProcesses(-1,processRoot)).length,0);result.candidate={directory:relative(root,directory),outcome,rendered}
 }
 try{if(mode==='--card-mutations')await cardMutations();else if(mode==='--mutations')await mutations();else if(mode==='--source')await source();else await native();result.passed=true}catch(e){result.failure={name:e.name,message:e.message,stack:e.stack};process.exitCode=1}finally{result.sharedSourceChangesDuringProof=[];for(const [p,b]of Object.entries(originals)){const current=hash(await readFile(join(root,p)));if(current!==hash(b))result.sharedSourceChangesDuringProof.push({path:p,capturedSha256:hash(b),currentSha256:current})}if(dependency)for(const [p,h]of Object.entries(dependency.cachedHashes))assert.equal(hash(await readFile(join(dependency.cached,p))),h,'Shared dependency unchanged during proof');await rm(privateRoot,{recursive:true,force:true});result.privateRootRemoved=true;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2));console.log(JSON.stringify({mode,passed:result.passed,evidence:relative(root,evidence),failure:result.failure?.message}))}
