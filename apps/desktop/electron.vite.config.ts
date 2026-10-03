@@ -1,6 +1,7 @@
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'node:path'
+import { pdfjsViewerAssets } from './scripts/pdfjs-viewer-assets'
 
 export default defineConfig({
   main: {
@@ -24,7 +25,7 @@ export default defineConfig({
   },
   renderer: {
     root: resolve(import.meta.dirname, 'src/renderer'),
-    plugins: [react()],
+    plugins: [react(), pdfjsViewerAssets()],
     define: { __AGENTMUX_WEB_PREVIEW__: 'false' }
   }
 })

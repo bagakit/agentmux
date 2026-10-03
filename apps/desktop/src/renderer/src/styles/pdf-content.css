@@ -1,0 +1,16 @@
+.pdf-content { flex:1; min-width:0; min-height:0; display:flex; flex-direction:column; }
+.pdf-content__body { position:relative; flex:1; min-width:0; min-height:0; overflow:hidden; background:var(--surface-2); }
+.pdf-content__viewport { position:absolute; inset:0; overflow:auto; overscroll-behavior:contain; }
+.pdf-content__viewport:focus-visible { outline:1px solid var(--focus-line); outline-offset:-1px; }
+.pdf-content__viewport .pdfViewer { padding:var(--sp-5) 0; }
+.pdf-content__viewport .pdfViewer .page { margin:0 auto var(--sp-5); border:0; box-shadow:0 0 0 1px var(--line-soft); }
+.pdf-content__state { position:absolute; inset:0; display:flex; background:var(--surface-0); }
+.pdf-content__tools { flex-shrink:0; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:var(--sp-2) var(--sp-5); padding:var(--sp-2) var(--sp-4); border-top:1px solid var(--line-soft); background:var(--surface-1); }
+.pdf-content__tools .small-button { min-height:24px; padding:0 var(--sp-2); font-size:var(--fs-micro); }
+.pdf-content__page { width:4ch; padding:var(--sp-1) var(--sp-2); border:1px solid var(--line-soft); border-radius:var(--radius-sm); background:var(--surface-0); color:var(--text); font-size:var(--fs-meta); text-align:center; font-variant-numeric:tabular-nums; appearance:textfield; }
+.pdf-content__page::-webkit-inner-spin-button { appearance:none; }
+.pdf-content__page:focus-visible { outline:1px solid var(--focus-line); }
+.pdf-content__percent { min-width:5ch; font-variant-numeric:tabular-nums; }
+.pdf-content__password { display:flex; flex-direction:column; align-items:center; gap:var(--sp-4); max-width:36ch; }
+.pdf-content__password label { width:100%; display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-2); font-size:var(--fs-meta); }
+.pdf-content__password input { width:100%; padding:var(--sp-3); border:1px solid var(--line); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--text); }

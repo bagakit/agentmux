@@ -18,6 +18,7 @@ import {
 } from '../lib/editor-copy-actions'
 import { editorSaveAction } from '../lib/editor-save-shortcut'
 import { detectLanguage } from '../lib/language-detect'
+import { FilePathLabel } from './FilePathLabel'
 import { useMonacoTheme } from '../hooks/useMonacoTheme'
 import { useEditorTypography } from '../hooks/useEditorTypography'
 import { bindingById, monacoKeybindingFor } from '../lib/shortcut-registry'
@@ -363,7 +364,7 @@ export function EditorPane({
       data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
     >
       <header className="editor-header">
-        <span className="editor-header__path" title={document.path}>{document.path}</span>
+        <FilePathLabel path={document.path} />
         <div className="editor-header__actions">
           {onTogglePreview ? <button className="small-button" aria-pressed={previewing} aria-label={previewing ? 'Show source' : 'Preview current content'} onClick={onTogglePreview} title={previewing ? 'Show source' : 'Preview current content'}>{previewing ? <Code size={13} /> : <Eye size={13} />}<span className="editor-header__label">{previewing ? 'Source' : 'Preview'}</span></button> : null}
           {regionMode === 'diff' ? <button className="small-button" disabled={Boolean(regionDiff?.loading)} title="Reload diff" aria-label="Reload diff" onClick={() => void reloadDiff(surface.regionId, surface.workspaceId, surface.path)}><RefreshCw size={13} /><span className="editor-header__label">{regionDiff?.loading ? 'Loading…' : 'Refresh'}</span></button>

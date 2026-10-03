@@ -1,8 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { Eye, Save } from 'lucide-react'
 import { WORKSPACE_FILE_MAX_BYTES } from '../../../shared/workspace-file-bytes'
-import { workspaceFilePreviewFormat } from '../../../shared/workspace-file-preview'
-import { NOTE_FILE_EXTENSION } from '../../../shared/note-document'
+import { workspaceFileFormat } from '../../../shared/workspace-file-format'
 import { documentKey, tabGroupForTab, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { joinWorkspacePath } from '../lib/workspace-paths'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
@@ -11,9 +10,11 @@ import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { FilePreviewPane, ImageContent } from './FilePreviewPane'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
+import { WorkspaceImage } from './WorkspaceImage'
 
 const EditorPane = lazy(async () => ({ default: (await import('./EditorPane')).EditorPane }))
 const NoteFileSurfaceView = lazy(async () => ({ default: (await import('./NoteFileSurfaceView')).NoteFileSurfaceView }))
+const FileDataPreview = lazy(async () => ({ default: (await import('./FileDataPreview')).FileDataPreview }))
 
 function SourceImage({ content, name, visible }: { content: string; name: string; visible: boolean }) {
   const [loaded, setLoaded] = useState<{ content: string; url: string } | null>(null)
@@ -42,12 +43,12 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const reportError = useAppStore(state => state.reportError)
   const openFile = useAppStore(state => state.openFile)
   const noteReveal = useAppStore(state => state.documentRevealTargets[key]?.noteBlock)
-  const format = workspaceFilePreviewFormat(surface.path)
-  const extension = surface.path.split('.').at(-1)?.toLowerCase()
-  const markdown = extension === 'md' || extension === 'markdown' || extension === 'mdown'
-  const svg = format?.sourceEditable === true
-  const html = extension === 'html' || extension === 'htm'
-  const note = surface.path.endsWith(NOTE_FILE_EXTENSION)
+  const format = workspaceFileFormat(surface.path)
+  const markdown = format.sourcePreview === 'markdown'
+  const svg = format.sourcePreview === 'svg'
+  const html = format.browserPreview
+  const note = format.sourcePreview === 'note'
+  const dataKind = format.sourcePreview === 'json' || format.sourcePreview === 'csv' || format.sourcePreview === 'tsv' ? format.sourcePreview : null
   const regionMode = useAppStore(state => effectiveFileRegionMode(state.editorRegionModes, surface.regionId, surface.path, binary))
   const setRegionMode = useAppStore(state => state.setEditorRegionMode)
   const previewing = regionMode === 'preview'
@@ -62,8 +63,8 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     return result.written > WORKSPACE_FILE_MAX_BYTES || result.read < doc.content.length
   }, [visible, released, previewing, doc?.content, markdown, svg, note])
 
-  if ((format && !format.sourceEditable) || (!doc && binary)) {
-    return <FilePreviewPane surface={surface} visible={visible} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
+  if (!format.sourceEditable || (!doc && binary)) {
+    return <FilePreviewPane surface={surface} visible={visible && !released} onRetryBinary={() => { void useAppStore.getState().reloadDocument(tabId, surface.regionId) }} />
   }
   const openReference = (path: string, location?: { line: number; column?: number }) => {
     const layout = useAppStore.getState().layouts[surface.workspaceId]
@@ -104,7 +105,10 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
     ? <NoteFileSurfaceView tabId={tabId} surface={surface} />
     : svg
     ? <SourceImage key={key} content={doc.content} name={surface.path} visible={visible} />
-    : <AgentMarkdown className="file-markdown-preview" content={doc.content} workspaceRoot={workspaceRoot} sourcePath={surface.path}
+    : dataKind
+    ? <FileDataPreview key={key} content={doc.content} kind={dataKind} comments={format.extension === 'jsonc'} />
+    : <AgentMarkdown documentMode className="file-markdown-preview" content={doc.content} workspaceRoot={workspaceRoot} sourcePath={surface.path}
+      renderWorkspaceImage={(path, alt, linked) => <WorkspaceImage key={`${surface.workspaceId}:${path}`} workspaceId={surface.workspaceId} path={path} alt={alt} linked={Boolean(linked)} openFile={() => openReference(path)} />}
       openWorkspaceFile={openReference}
       openHttpLink={(url) => {
         const state = useAppStore.getState(), layout = state.layouts[surface.workspaceId]
@@ -113,7 +117,7 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
       }} /> : null
   return <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" eyebrow="File" title="Loading file" detail="Loading file content" />}>
     <EditorPane tabId={tabId} surface={surface} released={released} visible={visible}
-      {...(markdown || svg || note ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
+      {...(format.sourcePreview ? { preview, onTogglePreview: () => { void setRegionMode(surface.regionId, surface.workspaceId, surface.path, previewing ? 'edit' : 'preview') } } : {})}
       {...(html ? { extraActions: <>
         <DropdownMenu.Item className="tab-context-menu__item" title="Open the saved file in Browser; keep the current source draft" disabled={!isLocal} onSelect={() => void previewSavedHtml(false)}><Eye size={13} />Preview saved file</DropdownMenu.Item>
         {dirty ? <DropdownMenu.Item className="tab-context-menu__item" disabled={saving || !isLocal} onSelect={() => void previewSavedHtml(true)}><Save size={13} />Save & Preview</DropdownMenu.Item> : null}

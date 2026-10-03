@@ -19,6 +19,8 @@
 @import './git-history.css';
 @import './workbench.css';
 @import './file-preview.css';
+@import './file-data-preview.css';
+@import './pdf-content.css';
 @import './note.css';
 @import './terminal.css';
 @import './surfaces.css';
@@ -73,4 +75,4 @@
 @import './session-recap.css';
 @import './session-recovery-actions.css';
 
-@import "./conversation-ruler.css";
+@import './conversation-ruler.css';

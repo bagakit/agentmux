@@ -1,0 +1,178 @@
+// @vitest-environment happy-dom
+import { act, useLayoutEffect, type ReactNode } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+
+const boundary = vi.hoisted(() => {
+  class EventBus {
+    listeners = new Map<string, Set<(event: any) => void>>()
+    on(type: string, listener: (event: any) => void) { const group = this.listeners.get(type) ?? new Set(); group.add(listener); this.listeners.set(type, group) }
+    off(type: string, listener: (event: any) => void) { this.listeners.get(type)?.delete(listener) }
+    dispatch(type: string, event: any = {}) { this.listeners.get(type)?.forEach(listener => listener(event)) }
+  }
+  class Viewer {
+    static instances: Viewer[] = []
+    page = 1; scale = 1; scaleValue = ''; pdfDocument: any
+    views = new Map<number, { renderingState: number }>()
+    getPageView(index: number) { return this.views.get(index + 1) }
+    setDocument = vi.fn((doc: any) => { this.pdfDocument = doc; if (doc) this.options.eventBus.dispatch('pagesinit') })
+    update = vi.fn()
+    constructor(public options: any) { Viewer.instances.push(this) }
+    get currentPageNumber() { return this.page }
+    set currentPageNumber(page: number) { this.page = page; this.options.eventBus.dispatch('pagechanging', { pageNumber: page }) }
+    get currentScale() { return this.scale }
+    set currentScale(scale: number) { this.scale = scale; this.options.eventBus.dispatch('scalechanging', { scale }) }
+    set currentScaleValue(value: string) { this.scaleValue = value; this.currentScale = value === 'page-width' ? 0.8 : value === 'page-fit' ? 0.6 : Number(value) }
+  }
+  const tasks: Array<{ promise: Promise<any>; resolve: (value: any) => void; reject: (error: Error) => void; destroy: ReturnType<typeof vi.fn>; onPassword?: (unlock: (value: string) => void, reason: number) => void }> = []
+  const getDocument = vi.fn((_options: Record<string, unknown>) => {
+    let resolve!: (value: any) => void, reject!: (error: Error) => void
+    const task = { promise: new Promise((yes, no) => { resolve = yes; reject = no }), resolve: (value: any) => resolve(value), reject: (error: Error) => reject(error), destroy: vi.fn(async () => {}) }
+    tasks.push(task); return task
+  })
+  return { EventBus, Viewer, tasks, getDocument }
+})
+// Only the third-party rendering engine is substituted; the reader and lifecycle below are production.
+vi.mock('pdfjs-dist', () => ({ getDocument: boundary.getDocument, GlobalWorkerOptions: {} }))
+vi.mock('pdfjs-dist/web/pdf_viewer.mjs', () => ({ EventBus: boundary.EventBus, PDFViewer: boundary.Viewer, RenderingStates: { FINISHED: 3 }, PDFLinkService: class { setViewer = vi.fn(); setDocument = vi.fn() } }))
+import { PdfContent } from '../src/renderer/src/components/PdfContent'
+
+let root: Root, container: HTMLDivElement
+const first = new Uint8Array([1, 2, 3]), second = new Uint8Array([4, 5, 6])
+const observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn>; resize: () => void }> = []
+async function render(node: ReactNode) { await act(async () => { root.render(node); await vi.dynamicImportSettled() }); await act(async () => { await vi.dynamicImportSettled() }) }
+async function event(type: string, value = {}) {
+  const reader = boundary.Viewer.instances.at(-1)!, facts = { pageNumber: reader.page, ...value }
+  if (type === 'pagerendered') reader.views.set(facts.pageNumber, { renderingState: 3 })
+  await act(async () => reader.options.eventBus.dispatch(type, facts))
+}
+async function loaded(index = 0, pages = 3) { await act(async () => { boundary.tasks[index]!.resolve({ numPages: pages, getPage: async () => ({}) }) }) }
+// Test-only React telemetry checks the actual retained hook state, not a second lifecycle model.
+function retainedSnapshot() {
+  let hook = (root as any)._internalRoot.current.child.memoizedState
+  while (hook) { if (hook.memoizedState?.owner instanceof Uint8Array) return hook.memoizedState.owner; hook = hook.next }
+  return null
+}
+async function click(label: string) {
+  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(item => item.textContent === label || item.getAttribute('aria-label') === label)
+  expect(button).toBeDefined(); await act(async () => button!.click())
+}
+beforeEach(() => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  boundary.tasks.length = 0; boundary.Viewer.instances.length = 0; boundary.getDocument.mockClear(); observers.length = 0
+  vi.stubGlobal('ResizeObserver', class { instance: typeof observers[number]; constructor(resize: () => void) { this.instance = { observe: vi.fn(), disconnect: vi.fn(), resize }; observers.push(this.instance) }; observe() { this.instance.observe() }; disconnect() { this.instance.disconnect() } })
+  container = document.createElement('div'); document.body.append(container); root = createRoot(container)
+})
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+
+describe('the actual File PDF reader', () => {
+  it('admits an immutable byte copy and local resources, reports parsed pages, and waits for actual page rendering before ready', async () => {
+    await render(<PdfContent data={first} name="report.pdf" />)
+    const options = boundary.getDocument.mock.calls[0]![0] as any
+    expect(options.data).toEqual(first); expect(options.data).not.toBe(first)
+    expect(options.cMapUrl).toBe(new URL('pdfjs/cmaps/', document.baseURI).href)
+    expect(options.standardFontDataUrl).toBe(new URL('pdfjs/standard_fonts/', document.baseURI).href)
+    expect(options.wasmUrl).toBe(new URL('pdfjs/wasm/', document.baseURI).href)
+    const reader = boundary.Viewer.instances[0]!
+    expect(reader.options).toMatchObject({ textLayerMode: 1, annotationMode: 1, maxCanvasPixels: 16777216, maxCanvasDim: 8192, capCanvasAreaFactor: 200 })
+    expect(reader.options.abortSignal.aborted).toBe(false)
+    await loaded(); expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('rendering')
+    expect(container.textContent).toContain('/ 3'); expect(container.textContent).toContain('Rendering PDF')
+    await event('pagerendered', { cssTransform: true }); expect(container.textContent).toContain('Rendering PDF')
+    await event('pagerendered', { error: null }); expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
+    expect(reader.scaleValue).toBe('page-width')
+  })
+  it('navigates actual pages and fit/zoom through the existing engine and keeps failed-page recovery reachable', async () => {
+    await render(<PdfContent data={first} name="report.pdf" />); await loaded(); await event('pagerendered')
+    const reader = boundary.Viewer.instances[0]!
+    await click('Next PDF page'); expect(reader.currentPageNumber).toBe(2)
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('rendering')
+    await click('Previous PDF page'); expect(reader.currentPageNumber).toBe(1)
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
+    await click('Fit page'); expect(reader.scaleValue).toBe('page-fit')
+    await click('PDF original size'); expect(reader.currentScale).toBe(1)
+    await click('Zoom PDF in'); expect(reader.currentScale).toBe(1.25)
+    await click('Zoom PDF out'); expect(reader.currentScale).toBe(1)
+    await click('Fit width'); expect(reader.scaleValue).toBe('page-width')
+    await event('pagerendered', { pageNumber: 2, error: new Error('background preload failure') })
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
+    const viewport = container.querySelector<HTMLElement>('.pdf-content__viewport')!
+    await act(async () => viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true }))); expect(reader.currentPageNumber).toBe(3)
+    await act(async () => viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true }))); expect(reader.currentPageNumber).toBe(1)
+    await event('pagerendered', { error: new Error('broken page') }); expect(container.textContent).toContain('could not render this page')
+    await click('Next PDF page'); expect(reader.currentPageNumber).toBe(2)
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('error')
+    await event('pagerendered'); expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
+  })
+  it('recovers a previously rendered healthy page from a failed page without requiring another render event', async () => {
+    await render(<PdfContent data={first} name="partial.pdf" />); await loaded(); await event('pagerendered')
+    await click('Next PDF page'); await event('pagerendered', { error: new Error('page 2 failed') })
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('error')
+    await click('Previous PDF page')
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('ready')
+    expect(container.querySelector('.pdf-content__viewport')?.getAttribute('aria-hidden')).toBe('false')
+    await click('Next PDF page')
+    expect(container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state')).toBe('error')
+  })
+  it('keeps password input local, handles incorrect password, and cancels the exact pending task', async () => {
+    await render(<PdfContent data={first} name="protected.pdf" />)
+    const unlock = vi.fn(), task = boundary.tasks[0]!
+    await act(async () => task.onPassword!(unlock, 1))
+    expect(container.textContent).toContain('Password protected PDF')
+    const input = container.querySelector<HTMLInputElement>('input[name="password"]')!; input.value = 'reader-only-password'
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(unlock).toHaveBeenCalledExactlyOnceWith('reader-only-password'); expect(input.value).toBe('')
+    await act(async () => task.onPassword!(unlock, 2)); expect(container.textContent).toContain('password was incorrect')
+    await click('Cancel'); expect(task.destroy).toHaveBeenCalledOnce(); expect(boundary.Viewer.instances[0]!.options.abortSignal.aborted).toBe(true)
+    expect(container.textContent).toContain('PDF loading cancelled')
+  })
+  it('fences A→B→A late loads, rejects old render events, and releases workers/readers/listeners on hide', async () => {
+    await render(<PdfContent data={first} name="a.pdf" />); const oldA = boundary.Viewer.instances[0]!
+    await render(<PdfContent data={second} name="b.pdf" />); const oldB = boundary.Viewer.instances[1]!
+    await render(<PdfContent data={first} name="a.pdf" />)
+    expect(boundary.tasks).toHaveLength(3)
+    await loaded(0, 90); await loaded(1, 80)
+    expect(oldA.setDocument).toHaveBeenCalledExactlyOnceWith(null); expect(oldB.setDocument).toHaveBeenCalledExactlyOnceWith(null)
+    expect(container.textContent).not.toContain('/ 90'); expect(container.textContent).not.toContain('/ 80')
+    await loaded(2, 7); await event('pagerendered'); expect(container.textContent).toContain('/ 7')
+    expect(retainedSnapshot()).toBe(first)
+    await act(async () => oldA.options.eventBus.dispatch('pagerendered', { error: new Error('old failure') })); expect(container.textContent).not.toContain('could not render')
+    const latest = boundary.Viewer.instances[2]!
+    await render(<PdfContent data={first} name="a.pdf" visible={false} />)
+    expect(boundary.tasks.map(task => task.destroy.mock.calls.length)).toEqual([1, 1, 1])
+    expect(boundary.Viewer.instances.map(reader => reader.options.abortSignal.aborted)).toEqual([true, true, true])
+    expect([...latest.options.eventBus.listeners.values()].map((listeners: any) => listeners.size)).toEqual([0, 0, 0, 0])
+    expect(observers.map(observer => observer.disconnect.mock.calls.length)).toEqual([1, 1, 1])
+    expect(container.textContent).toContain('Preview paused while hidden')
+    expect(retainedSnapshot()).toBeNull()
+    const count = boundary.getDocument.mock.calls.length
+    await render(<PdfContent data={second} name="b.pdf" visible={false} />); expect(boundary.getDocument).toHaveBeenCalledTimes(count)
+    expect(retainedSnapshot()).toBeNull()
+  })
+  it('never labels the previous reader as the new file before passive teardown, and releases decoder failures', async () => {
+    const seen: Array<{ name: string; phase: string | null; hidden: string | null }> = []
+    function Witness({ data, name }: { data: Uint8Array; name: string }) {
+      useLayoutEffect(() => { seen.push({ name, phase: container.querySelector('[data-decode-state]')?.getAttribute('data-decode-state') ?? null, hidden: container.querySelector('[aria-label^="PDF "]')?.getAttribute('aria-hidden') ?? null }) })
+      return <PdfContent data={data} name={name} />
+    }
+    await render(<Witness data={first} name="a.pdf" />); await loaded(); await event('pagerendered')
+    await render(<Witness data={second} name="b.pdf" />)
+    expect(seen.find(item => item.name === 'b.pdf')).toEqual({ name: 'b.pdf', phase: 'loading', hidden: 'true' })
+    await act(async () => boundary.tasks[1]!.reject(new Error('invalid bytes')))
+    expect(container.textContent).toContain('could not decode this file'); expect(boundary.tasks[1]!.destroy).toHaveBeenCalledOnce()
+    expect(boundary.Viewer.instances[1]!.options.abortSignal.aborted).toBe(true)
+  })
+  it('fences a pending first-page decode and surfaces a real first-page failure instead of waiting forever', async () => {
+    await render(<PdfContent data={first} name="slow.pdf" />)
+    let finish!: () => void
+    const getPage = vi.fn(() => new Promise<void>(resolve => { finish = resolve }))
+    await act(async () => boundary.tasks[0]!.resolve({ numPages: 3, getPage }))
+    expect(getPage).toHaveBeenCalledExactlyOnceWith(1)
+    await render(<PdfContent data={second} name="broken.pdf" />)
+    await act(async () => finish())
+    expect(boundary.Viewer.instances[0]!.setDocument).toHaveBeenCalledExactlyOnceWith(null)
+    await act(async () => boundary.tasks[1]!.resolve({ numPages: 5, getPage: async () => { throw new Error('first page invalid') } }))
+    expect(container.textContent).toContain('could not decode this file'); expect(container.textContent).not.toContain('/ 5')
+    expect(boundary.tasks[1]!.destroy).toHaveBeenCalledOnce()
+  })
+})
