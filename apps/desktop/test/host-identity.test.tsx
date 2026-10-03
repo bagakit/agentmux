@@ -45,12 +45,15 @@ it('suppresses only confirmed local Execution Host while Host and unknown identi
   expect(badges().map(b => b.dataset.hostId)).toEqual(['local', 'farm', 'orphan', ''])
   expect(badges()[0]!.textContent).toBe('This Mac')
   expect(badges()[0]!.getAttribute('aria-label')).toBe('Host: This Mac · local')
-  expect(badges()[0]!.querySelector('.lucide-square-terminal')).not.toBeNull()
   expect(badges()[1]!.textContent).toBe('')
   expect(badges()[1]!.getAttribute('aria-label')).toContain('Build machine · farm')
-  expect(badges()[1]!.querySelector('.lucide-radio-tower')).not.toBeNull()
   expect(badges()[2]!.dataset.hostKind).toBe('unknown')
-  expect(badges()[2]!.querySelector('.lucide-circle-help')).not.toBeNull()
+  const glyphs = badges().slice(0, 3).map(badge => {
+    const glyph = badge.querySelector('svg')
+    expect(glyph).not.toBeNull(); expect(glyph!.getAttribute('aria-hidden')).toBe('true')
+    return glyph!.innerHTML
+  })
+  expect(new Set(glyphs).size).toBe(3)
   expect(badges()[3]!.dataset.executionHostId).toBe('')
   expect(badges()[3]!.getAttribute('aria-label')).toBe('Execution Host: Host unknown')
 })
