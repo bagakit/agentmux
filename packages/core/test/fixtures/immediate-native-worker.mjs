@@ -1,33 +1,6 @@
-import { tmpdir as upstreamFixtureTmpdir } from 'node:os'
-import { join as upstreamFixtureJoin, parse as upstreamFixtureParse, sep as upstreamFixtureSep } from 'node:path'
-import { pathToFileURL as upstreamFixturePathToFileURL } from 'node:url'
-const upstreamFixtureRoot = upstreamFixtureJoin(upstreamFixtureTmpdir(), 'agentmux-fixtures');
-const upstreamFixtureDayMilliseconds = 24 * 60 * 60 * 1_000;
-/** Preserve lexical path cases while deriving the absolute root from this Host. */
-function upstreamFixturePath(relative) {
-    const temporary = relative.replace(/^(?:private\/)?tmp\//u, '');
-    const base = temporary === relative ? upstreamFixtureRoot : upstreamFixtureTmpdir();
-    return base + upstreamFixtureSep + temporary.replaceAll('/', upstreamFixtureSep);
-}
-/** Deterministic time from Unix zero and explicit relative units. */
-function upstreamFixtureEpoch(days, seconds = 0, milliseconds = 0) {
-    return days * upstreamFixtureDayMilliseconds + seconds * 1_000 + milliseconds;
-}
-function upstreamFixtureDay(days, separator = '-') {
-    return new Date(upstreamFixtureEpoch(days)).toISOString().slice(0, 10).replaceAll('-', separator);
-}
-function upstreamFixtureClock(hour, minute, second, milliseconds) {
-    const units = second === undefined ? [hour, minute] : [hour, minute, second];
-    const clock = units.map(value => String(value).padStart(2, '0')).upstreamFixtureJoin(':');
-    return milliseconds === undefined ? clock : clock + '.' + milliseconds;
-}
-function upstreamFixtureFileUrl(relative) {
-    return upstreamFixturePathToFileURL(upstreamFixturePath(relative)).href;
-}
-/** A short Host-rooted display path keeps captured terminal rows within their viewport. */
-function upstreamFixtureDisplayPath(relative) {
-    return upstreamFixtureJoin(upstreamFixtureParse(upstreamFixtureTmpdir()).root, relative);
-}
+import { tmpdir as fixtureTmpdir } from 'node:os'
+import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
+const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn, execFile } from 'node:child_process'
@@ -37,7 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { join } from 'node:path'
 import { promisify } from 'node:util'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, agentPromptCondition } from '../../dist/index.js'
-const execute=promisify(execFile),root=await realpath(await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-immediate-native-")))
+const execute=promisify(execFile),root=await realpath(await mkdtemp(fixturePath("tmp/amux-immediate-native-")))
 const evidenceDirectory=process.argv[2]
 await mkdir(evidenceDirectory,{recursive:true})
 const report={schema:'agentmux.immediate-native.v1',passed:false,root,protocol:'Codex 0.160.1 default embedded TUI/Responses',phases:[]}
@@ -78,6 +51,12 @@ try{
  // This Run loads the old hook definition. Later Core versions cannot hot-load it.
  const provider = {
    ...original,
+   async verifyPromptExecutionTransport(context) {
+     const started=performance.now()
+     try{return await original.verifyPromptExecutionTransport(context)}
+     catch(error){report.phases.push({phase:'private-transport-original-error',elapsedMs:performance.now()-started,
+       name:error.name,code:error.code,message:error.message});throw error}
+   },
    ...(remoteDaemon?{buildLaunch(context){const plan=original.buildLaunch(context);return {...plan,args:plan.args.filter(a=>a!=='--dangerously-bypass-hook-trust')}}}:{}),
    planManagedHooks(context) {
      const plan = original.planManagedHooks(context)

@@ -1178,6 +1178,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     throw new AgentMuxError('Only Agent Sessions may be persisted.', 'INVALID_AGENT_SESSION_STORE')
   }
   const currentRun = runRef(source.run)
+  const priorRuns = retiredRuns(source.retiredRuns, currentRun)
   const session: AgentMuxAgentSession = {
     kind: 'agent',
     agentSessionId: string(source.agentSessionId, 'agentSessionId'),
@@ -1186,7 +1187,7 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     hostId: string(source.hostId, 'hostId'),
     workspacePath: string(source.workspacePath, 'workspacePath', MAX_PATH_BYTES),
     run: currentRun,
-    retiredRuns: retiredRuns(source.retiredRuns, currentRun),
+    retiredRuns: priorRuns,
     createdAt: timestamp(source.createdAt, 'createdAt'),
     updatedAt: timestamp(source.updatedAt, 'updatedAt'),
     ...(source.launchOptions === undefined
@@ -1272,6 +1273,16 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       ? {}
       : { pendingInteraction: pendingInteraction(source.pendingInteraction) }),
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
+    ...(source.nativePromptPredecessor === undefined ? {} : { nativePromptPredecessor: (() => {
+      const fact = record(source.nativePromptPredecessor, 'nativePromptPredecessor')
+      const run = runRef(fact.run), previousRun = runRef(fact.previousRun)
+      if (Object.keys(fact).some(key => !['run', 'previousRun', 'sourceId', 'evidenceId'].includes(key)) ||
+        run.runId !== currentRun.runId || priorRuns.at(-1)?.runId !== previousRun.runId) {
+        throw new AgentMuxError('Native prompt predecessor does not match the exact resumed Run.', 'INVALID_AGENT_SESSION_STORE')
+      }
+      return { run, previousRun, sourceId: string(fact.sourceId, 'nativePromptPredecessor.sourceId'),
+        evidenceId: string(fact.evidenceId, 'nativePromptPredecessor.evidenceId') }
+    })() }),
     ...(source.hookReceipt === undefined ? {} : { hookReceipt: hookReceipt(source.hookReceipt) }),
     ...(source.turnUsage === undefined ? {} : { turnUsage: turnUsage(source.turnUsage) })
   }

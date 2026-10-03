@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { AgentProviderRegistry } from './agent-provider.js'
+import { AgentProviderRegistry, type AgentProviderPromptExecutionContext } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
@@ -392,9 +392,13 @@ export class AgentPromptSubmissionCoordinator {
       throw new AgentMuxError('Provider preparation does not match this single prompt execution authorization.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     }
     const provider = this.deps.providers.get(session.providerId)
-    const nativeContext = { args: run.args, workspacePath: session.workspacePath,
+    const nativeContext: AgentProviderPromptExecutionContext = { args: run.args, workspacePath: session.workspacePath,
       ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
+    if (session.nativePromptPredecessor?.run.runId === session.run.runId &&
+      session.retiredRuns.at(-1)?.runId === session.nativePromptPredecessor.previousRun.runId) {
+      Object.assign(nativeContext, { nativePromptPredecessor: session.nativePromptPredecessor })
+    }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
     let preparationGeneration: number | undefined
     if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {

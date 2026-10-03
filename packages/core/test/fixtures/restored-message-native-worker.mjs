@@ -1,33 +1,6 @@
-import { tmpdir as upstreamFixtureTmpdir } from 'node:os'
-import { join as upstreamFixtureJoin, parse as upstreamFixtureParse, sep as upstreamFixtureSep } from 'node:path'
-import { pathToFileURL as upstreamFixturePathToFileURL } from 'node:url'
-const upstreamFixtureRoot = upstreamFixtureJoin(upstreamFixtureTmpdir(), 'agentmux-fixtures');
-const upstreamFixtureDayMilliseconds = 24 * 60 * 60 * 1_000;
-/** Preserve lexical path cases while deriving the absolute root from this Host. */
-function upstreamFixturePath(relative) {
-    const temporary = relative.replace(/^(?:private\/)?tmp\//u, '');
-    const base = temporary === relative ? upstreamFixtureRoot : upstreamFixtureTmpdir();
-    return base + upstreamFixtureSep + temporary.replaceAll('/', upstreamFixtureSep);
-}
-/** Deterministic time from Unix zero and explicit relative units. */
-function upstreamFixtureEpoch(days, seconds = 0, milliseconds = 0) {
-    return days * upstreamFixtureDayMilliseconds + seconds * 1_000 + milliseconds;
-}
-function upstreamFixtureDay(days, separator = '-') {
-    return new Date(upstreamFixtureEpoch(days)).toISOString().slice(0, 10).replaceAll('-', separator);
-}
-function upstreamFixtureClock(hour, minute, second, milliseconds) {
-    const units = second === undefined ? [hour, minute] : [hour, minute, second];
-    const clock = units.map(value => String(value).padStart(2, '0')).upstreamFixtureJoin(':');
-    return milliseconds === undefined ? clock : clock + '.' + milliseconds;
-}
-function upstreamFixtureFileUrl(relative) {
-    return upstreamFixturePathToFileURL(upstreamFixturePath(relative)).href;
-}
-/** A short Host-rooted display path keeps captured terminal rows within their viewport. */
-function upstreamFixtureDisplayPath(relative) {
-    return upstreamFixtureJoin(upstreamFixtureParse(upstreamFixtureTmpdir()).root, relative);
-}
+import { tmpdir as fixtureTmpdir } from 'node:os'
+import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
+const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
 import assert from 'node:assert/strict'
 import { createServer } from 'node:http'
 import { spawn, execFile } from 'node:child_process'
@@ -41,7 +14,7 @@ import { AgentMuxControlServer } from '../../dist/public-rpc-server.js'
 import { readCodexPromptExecutionEvidence } from '../../dist/providers/codex-prompt-execution-evidence.js'
 const execute = promisify(execFile), evidence = process.argv[2]
 const resumeBoundary = process.argv.includes('--resume-boundary')
-const root = await realpath(await mkdtemp(upstreamFixtureDisplayPath("tmp/amux-restored-message-")))
+const root = await realpath(await mkdtemp(fixturePath("tmp/amux-restored-message-")))
 await mkdir(evidence, { recursive: true })
 for (const directory of ['runtime', 'durable', 'workspace', 'codex-home']) await mkdir(join(root, directory), { mode: 0o700 })
 const oldCommand = process.env.AGENTMUX_TEST_OLD_CODEX_COMMAND
@@ -91,7 +64,9 @@ const args = ['--no-alt-screen', '-s', 'read-only', '-a', 'never', '-c', 'model_
   '-c', 'model_providers.private_delivery.wire_api="responses"', '-c', 'model_providers.private_delivery.requires_openai_auth=false',
   '-c', 'model_providers.private_delivery.supports_websockets=false', '-c', 'features.plugins=false', '-c', 'features.plugin_hooks=false',
   '-c', 'features.memories=false', '-c', 'features.chronicle=false', '-c', 'features.hooks=true', '-c', `projects={"${join(root, 'workspace')}"={trust_level="trusted"}}`]
-const nativeContext = session => ({ processId: undefined, args, workspacePath: session.workspacePath, nativeHandle: session.nativeHandle })
+const nativeContext = session => ({ processId: undefined, args, workspacePath: session.workspacePath, nativeHandle: session.nativeHandle,
+  ...(session.nativePromptPredecessor?.run.runId === session.run.runId && session.nativePromptPredecessor.previousRun.runId === session.retiredRuns.at(-1)?.runId
+    ? { nativePromptPredecessor: session.nativePromptPredecessor } : {}) })
 const screenReady = async session => client.screenEvidence.wait(session, 0, false,
   screen => provider.inspectPromptExecution(screen.snapshot()) === 'idle', { timeoutMs: 20_000, timeoutMessage: 'private native idle composer', terminalMessage: 'private exit', requireCompleteFrame: true })
 const cli = async (session, body, execution, operation) => {
@@ -181,6 +156,9 @@ try {
       commandOverride: currentCommand, env: { CODEX_HOME: join(root, 'codex-home') }, args, cols: 120, rows: 40 })
     assert.equal(recovered.kind, 'resumed'); current = recovered.session
     assert.equal(current.agentSessionId, id); assert.equal(current.nativeHandle.sessionId, old.nativeHandle.sessionId); assert.notEqual(current.run.runId, old.run.runId)
+    if (kind === 'working') {
+      assert.deepEqual(current.nativePromptPredecessor, { run: current.run, previousRun: old.run, sourceId: oldEvidence.sourceId, evidenceId: oldEvidence.id })
+    }
     await screenReady(current)
     const currentRun = (await client.statusAgent(id)).run, context = { ...nativeContext(current), processId: currentRun.pid }
     const evidenceBefore = await readCodexPromptExecutionEvidence(context); context.nativeSourceId = evidenceBefore.sourceId
@@ -188,7 +166,11 @@ try {
     const firstProbeMs = performance.now() - started, steady = performance.now(); assert.equal(await provider.verifyPromptExecutionTransport(context), true)
     const steadyProbeMs = performance.now() - steady
     const body = 'PRIVATE_RESTORED_FIRST_' + kind.toUpperCase(), requestBefore = requests.length
-    const sent = await cli(current, body, 'immediate', 'restored-first-' + kind)
+    const sent = kind === 'working'
+      ? await execute(process.execPath, [fileURLToPath(new URL('./restored-message-native-submit.mjs', import.meta.url)), join(root, 'sessions.json'), id, body, 'restored-first-' + kind],
+        { env: process.env, timeout: 75_000, maxBuffer: 1024 * 1024 }).then(reply => ({ code: 0, ...reply, result: JSON.parse(reply.stdout).result, cold: JSON.parse(reply.stdout) }))
+      : await cli(current, body, 'immediate', 'restored-first-' + kind)
+    if (kind === 'working') { assert.notEqual(sent.cold.coldCoreProcess, process.pid); await client.refreshAgentSession(id, current.run) }
     report.phases.push({ phase: 'restored-first-' + kind, nativeEvidenceBefore: evidenceBefore, nativeCurrentScreen: 'idle',
       oldRun: old.run, newRun: current.run, nativeSessionId: current.nativeHandle.sessionId, pid: currentRun.pid, firstProbeMs, steadyProbeMs, reply: sent })
     assert.equal(sent.code, 0, sent.stderr)
@@ -204,6 +186,57 @@ try {
     const live = await cli(client.agentSession(id), liveBody, 'immediate', 'live-old-creator-' + kind); assert.equal(live.code, 0, live.stderr)
     await until('live supported current old-creator accepted', () => requests.length === liveCount + 1 && lastText(requests.at(-1)).includes(liveBody))
     report.phases.push({ phase: 'live-current-old-creator-' + kind, sameRun: (await client.statusAgent(id)).run.runId === current.run.runId, originalHeader: '0.159.0', nativeUserAccepted: true })
+    if (kind === 'working') {
+      await until('live restored end before new busy', async () => (await readCodexPromptExecutionEvidence(nativeContext(client.agentSession(id))))?.state === 'ended')
+      await screenReady(client.agentSession(id))
+      const newBusy = await cli(client.agentSession(id), 'PRIVATE_BUSY_AT_CRASH_NEW_CURRENT', 'default', 'restored-new-busy')
+      assert.equal(newBusy.code, 0, newBusy.stderr)
+      const newWorking = await until('genuine new writer working turn', async () => {
+        const e = await readCodexPromptExecutionEvidence(nativeContext(client.agentSession(id)))
+        return e?.state === 'working' && e.nativeTurnId !== oldEvidence.nativeTurnId ? e : false
+      })
+      await until('new busy native model request', () => lastText(requests.at(-1))?.includes('PRIVATE_BUSY_AT_CRASH_NEW_CURRENT'))
+      const newBody = 'PRIVATE_IMMEDIATE_CURRENT_AFTER_RESUME', newRequestBefore = requests.length
+      const immediate = await cli(client.agentSession(id), newBody, 'immediate', 'restored-new-working-immediate')
+      assert.equal(immediate.code, 0, immediate.stderr)
+      await until('new working interrupt native acceptance once', () => requests.length === newRequestBefore + 1 && lastText(requests.at(-1)).includes(newBody))
+      await until('new working immediate completed', async () => (await readCodexPromptExecutionEvidence(nativeContext(client.agentSession(id))))?.state === 'ended')
+      await screenReady(client.agentSession(id))
+      const prepared = client.agentSession(id).terminalPromptSubmission.prepare
+      assert.equal(prepared.context, 'interruptible'); assert.equal(prepared.nativeTurnId, newWorking.nativeTurnId)
+      assert.equal(prepared.interrupt.inputByteRange.endByte - prepared.interrupt.inputByteRange.startByte, 1)
+      const records = (await readFile(path, 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+      assert.equal(records.filter(r => r.type === 'event_msg' && r.payload?.type === 'turn_aborted' && r.payload.turn_id === newWorking.nativeTurnId && r.payload.reason === 'interrupted').length, 1)
+      assert.equal(records.filter(r => r.type === 'event_msg' && r.payload?.type === 'turn_aborted' && r.payload.turn_id === oldEvidence.nativeTurnId).length, 0)
+      assert.equal(client.screenEvidence.evidence.get(id).evidence.screen.composerText('›'), '')
+      report.phases.push({ phase: 'new-working-after-restoration', oldEvidence, newWorking, prepared, nativeUserAccepted: true, sameRun: current.run.runId, once: true })
+      const protectedBusy = await cli(client.agentSession(id), 'PRIVATE_BUSY_AT_CRASH_PROTECTED', 'default', 'restored-protected-busy')
+      assert.equal(protectedBusy.code, 0, protectedBusy.stderr)
+      await until('protected busy actual model request', () => lastText(requests.at(-1))?.includes('PRIVATE_BUSY_AT_CRASH_PROTECTED'))
+      const protectedCount = requests.length, nativePending = 'PRIVATE_NATIVE_PENDING_RESTORED'
+      await client.writeAgent({ agentSessionId: id, expectedRun: current.run, data: '\x1b[200~' + nativePending + '\x1b[201~', source: 'user' })
+      await client.screenEvidence.wait(client.agentSession(id), 0, false, screen => screen.composerText('›') === nativePending,
+        { timeoutMs: 10_000, timeoutMessage: 'restored private draft render', terminalMessage: 'private exit', requireCompleteFrame: true })
+      const draftCursor = (await client.statusAgent(id)).run.acceptedInputBytes
+      const blockedDraft = await cli(client.agentSession(id), 'PRIVATE_MUST_REMAIN_UNSENT', 'immediate', 'restored-draft-refused')
+      assert.equal(blockedDraft.code, 1); assert.equal(JSON.parse(blockedDraft.stderr).error.code, 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+      assert.equal((await client.statusAgent(id)).run.acceptedInputBytes, draftCursor + 3); assert.equal(requests.length, protectedCount)
+      await client.screenEvidence.wait(client.agentSession(id), 0, false, screen => screen.composerText('›') === nativePending,
+        { timeoutMs: 10_000, timeoutMessage: 'restored draft preserved', terminalMessage: 'private exit', requireCompleteFrame: true })
+      await client.writeAgent({ agentSessionId: id, expectedRun: current.run, data: '\r', source: 'user' })
+      await client.screenEvidence.wait(client.agentSession(id), 0, false, screen => screen.snapshot().lines.some(l => l.text.includes('Messages to be submitted after next tool call')),
+        { timeoutMs: 10_000, timeoutMessage: 'restored private native pending', terminalMessage: 'private exit', requireCompleteFrame: true })
+      const pendingCursor = (await client.statusAgent(id)).run.acceptedInputBytes
+      const blockedPending = await cli(client.agentSession(id), 'PRIVATE_MUST_REMAIN_UNSENT', 'immediate', 'restored-pending-refused')
+      assert.equal(blockedPending.code, 1); assert.equal(JSON.parse(blockedPending.stderr).error.code, 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+      assert.equal((await client.statusAgent(id)).run.acceptedInputBytes, pendingCursor + 3); assert.equal(requests.length, protectedCount)
+      await client.screenEvidence.wait(client.agentSession(id), 0, false, screen => screen.snapshot().lines.some(l => l.text.includes(nativePending)),
+        { timeoutMs: 10_000, timeoutMessage: 'restored native pending preserved', terminalMessage: 'private exit', requireCompleteFrame: true })
+      assert.equal(client.agentSession(id).run.runId, current.run.runId)
+      report.phases.push({ phase: 'restored-native-draft-and-pending-preserved', oldEvidence, draftOnlyFocusBytes: 3, pendingOnlyFocusBytes: 3,
+        blockedDraft, blockedPending, requestCount: protectedCount, nativePending, sameRun: current.run.runId })
+    }
+    await writeFile(join(evidence, kind + '-current-rollout.jsonl'), await readFile(path))
     await client.stopAgent(id, current.run)
   }
   report.passed = true

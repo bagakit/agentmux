@@ -1,5 +1,14 @@
-import { AgentMuxClient,AgentMuxFileAgentSessionStore } from '../../dist/index.js'
-const client=new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(process.argv[2])})
+import { AgentMuxClient,AgentMuxFileAgentSessionStore,AgentProviderRegistry } from '../../dist/index.js'
+const provider=new AgentProviderRegistry().get('codex')
+const client=new AgentMuxClient({store:new AgentMuxFileAgentSessionStore(process.argv[2]),providers:[{
+ ...provider,
+ async verifyPromptExecutionTransport(context){
+  const started=performance.now()
+  try{return await provider.verifyPromptExecutionTransport(context)}
+  catch(error){console.error(JSON.stringify({phase:'private-child-transport-original-error',elapsedMs:performance.now()-started,
+   name:error.name,code:error.code,message:error.message,stack:error.stack}));throw error}
+ }
+}]})
 try{
  await client.connect()
  if(['--exit-after-interrupt-ack','--exit-after-refresh-ack'].includes(process.argv[4])){

@@ -3160,6 +3160,8 @@ export class AgentMuxClient {
     const run = candidates[0]!, retirement = reservation.expectedRetirement
     const next: AgentMuxStoredAgentSession = { ...structuredClone(prepared), run: runRef(run.runId), retiredRuns: [retirement.run],
       reopenedFrom: { run: retirement.run, source: retirement.source, observedAt: retirement.observedAt }, updatedAt: Date.now() }
+    // A lost start ACK cannot reconstruct a pre-start Provider observation.
+    delete next.nativePromptPredecessor
     try { await this.registry.commitLifecycle(reservation, next) }
     catch (error) {
       const canonical = (await loadAgentSessions(this.store)).find(session => session.agentSessionId === prepared.agentSessionId)
@@ -3309,10 +3311,23 @@ export class AgentMuxClient {
         const preparedSession: AgentMuxStoredAgentSession = { ...current, kind: 'agent', run: current.run, retiredRuns: [],
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability), updatedAt: Date.now(), nativeHandle: structuredClone(current.nativeHandle) }
+        delete preparedSession.nativePromptPredecessor
         reservation = await this.registry.prepareReopen(reservation, preparedSession)
         this.pendingReopenBindings.set(lifecycleOperationId, hookBinding)
       }
       if (reopening && this.reopensDisposed) throw new AgentMuxError('Continue owner was disposed before dispatch.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      // The Provider's old turn belongs to the Run that just ended, even when its
+      // transcript has no native completion/abort. Freeze it before the new writer
+      // starts; an unknown observation never prevents healthy native restoration.
+      const nativePromptEvidence = provider.readPromptExecutionEvidence
+        ? await provider.readPromptExecutionEvidence({ args: oldRun?.args ?? [], workspacePath: current.workspacePath,
+          nativeHandle: current.nativeHandle }).catch(error => {
+          this.publisher.publish({ type: 'agent-error', agentSessionId: current.agentSessionId,
+            code: 'AGENT_NATIVE_SOURCE_UNCONFIRMED',
+            message: `The previous native turn could not be observed. Native restoration and ordinary input remain available; immediate input needs current source confirmation. ${error instanceof Error ? error.message : String(error)}`,
+            evidence: { source: 'agentmux', run: { ...current.run }, observedAt: Date.now() } })
+          return null
+        }) : null
       launchAttempted = true
       const run = await this.kernel.start({
         operationKey: lifecycleOperationId,
@@ -3351,6 +3366,11 @@ export class AgentMuxClient {
         capabilityHash: hashAgentCapability(invocationCapability),
         updatedAt: Date.now(),
         nativeHandle: structuredClone(current.nativeHandle)
+      }
+      delete next.nativePromptPredecessor
+      if (nativePromptEvidence) next.nativePromptPredecessor = {
+        run: runRef(run.runId), previousRun: { ...current.run },
+        sourceId: nativePromptEvidence.sourceId, evidenceId: nativePromptEvidence.id
       }
       delete next.hookReceipt
       delete next.terminalHandshake
@@ -3443,13 +3463,17 @@ export class AgentMuxClient {
         catch (cleanupError) { rollbackErrors.push(cleanupError) }
         if (persisted && previous) {
           try {
-            const restored = await this.registry.update(current.agentSessionId, next.run, failed => ({
+            const restored = await this.registry.update(current.agentSessionId, next.run, failed => {
+              const restored: AgentMuxStoredAgentSession = {
               ...previous,
               retiredRuns: [...previous.retiredRuns, next.run].slice(-16),
               // Renderer Run fences require a strictly newer canonical transition, even within
               // one clock tick or after a concurrent update of the failed binding.
               updatedAt: Math.max(Date.now(), failed.updatedAt + 1, next.updatedAt + 1)
-            }))
+              }
+              delete restored.nativePromptPredecessor
+              return restored
+            })
             this.publisher.publish({ type: 'agent-session', session: cloneSession(restored) })
             if (oldRun) this.publisher.publishRunState(this.projectRun(oldRun, restored), restored.agentSessionId)
             abandonedRun = null
