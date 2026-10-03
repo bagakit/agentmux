@@ -1,4 +1,6 @@
 import { AgentMuxError } from './errors.js';
+import { displayLabelDocument, nameTargetKey } from './display-label.js';
+export * from './display-label.js';
 import type { AgentMuxSpaceCatalog, AgentMuxSpaceSelector } from './space-control.js';
 export type { AgentMuxProjectGroupFact } from './space-control.js';
 import { regionIds, groupIds, regionInDirection, workbenchRegionBounds, leafIdsMatchRecords, type WorkspaceLayout, type WorkbenchViewLayout, type SplitDirection } from './spatial-layout.js';
@@ -15,6 +17,9 @@ export type AgentMuxSpatialState = {
   schemaVersion: 1;
   revision: number;
   graph: AgentMuxSpatialGraph;
+  /** Ephemeral producer ACK, never reconstructed from a read or stored in the graph. */
+  nameCommit?: { operationId: string; target: import('./display-label.js').AgentMuxNameTarget;
+    applied: boolean; diskDurability: 'confirmed' | 'unconfirmed'; issue: string | null };
 };
 export type AgentMuxSpatialCommit = {
   expectedRevision: number;
@@ -193,6 +198,8 @@ export function parseAgentMuxSpatialGraph(value: unknown): AgentMuxSpatialGraph 
   return decoded;
 }
 export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpaceSelector = {}): AgentMuxSpaceCatalog {
+  const labels = displayLabelDocument(graph).labels;
+  const namedTabs = graph.tabs.map(tab => ({ ...tab, nameRevision: labels[nameTargetKey({ kind: 'tab', id: tab.tabId })]?.nameRevision ?? 0 }));
   const locations: AgentMuxSpaceCatalog['locations'] = [];
   const tabs = new Map(graph.tabs.map(t => [t.tabId, t]));
   for (const [displayWorkspaceId, layout] of Object.entries(graph.layouts))
@@ -210,8 +217,8 @@ export function spatialCatalog(graph: AgentMuxSpatialGraph, target: AgentMuxSpac
       }
   const selected = locations.filter(location => Object.entries(target).every(([key, value]) => location[key as keyof typeof location] === value));
   if (!Object.keys(target).length)
-    return { ...(graph.projectGroups ? { projectGroups: graph.projectGroups } : {}), spaces: graph.spaces, zones: graph.zones, tabs: graph.tabs, regions: graph.regions, bindings: graph.bindings, locations };
-  const selectedTabs = graph.tabs.filter(t => (!target.tabId || t.tabId === target.tabId) &&
+    return { ...(graph.projectGroups ? { projectGroups: graph.projectGroups } : {}), spaces: graph.spaces, zones: graph.zones, tabs: namedTabs, regions: graph.regions, bindings: graph.bindings, locations };
+  const selectedTabs = namedTabs.filter(t => (!target.tabId || t.tabId === target.tabId) &&
     (!target.regionId || t.regionIds.includes(target.regionId)) &&
     (!target.zoneId || t.zoneId === target.zoneId) &&
     (!target.spaceId || graph.bindings.some(b => b.zoneId === t.zoneId && b.spaceId === target.spaceId)) &&

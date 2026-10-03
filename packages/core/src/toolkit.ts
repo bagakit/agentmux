@@ -105,7 +105,7 @@ export type ToolkitResult =
   | { operation: 'toolkit.remove'; toolId: string; removed: true }
   | { operation: 'toolkit.watch' }
 export interface AgentMuxToolkitPort {
-  execute(request: ToolkitRequest, signal: AbortSignal): Promise<ToolkitResult>
+  execute(request: ToolkitRequest, signal: AbortSignal, context?: import('./display-label.js').AgentMuxNameContext): Promise<ToolkitResult>
   subscribe(toolId: string, onSnapshot: (value: ToolkitSnapshot) => void,
     onEnd: (error?: Error) => void, signal: AbortSignal): Promise<{ dispose(): void }>
 }

@@ -10,6 +10,7 @@ import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-
 import { isFileMethod, parseFileReadParams, parseFileReadResult } from './public-rpc-files.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
 import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
+import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
 import { parseHostedRuntimeOwnerIdentity } from './hosted-value.js'
@@ -232,7 +233,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
             ('providerId' in handle ? handle.providerId !== target.providerId : handle.adapterId !== target.adapterId)) fail()
         }
         if (p.status !== null) status(p.status, session); issues(p.unavailable)
-        if (method === 'agent.inspect') { string(p.routeHostId); const name = record(p.displayName, ['override', 'availability']); if (name.override !== null) text(name.override); member(name.availability, ['observed', 'unavailable']) }
+        if (method === 'agent.inspect') { string(p.routeHostId); const name = record(p.displayName, ['override', 'nameRevision', 'availability']); if (name.override !== null) text(name.override); if (name.nameRevision !== null) count(name.nameRevision); member(name.availability, ['observed', 'unavailable']) }
         else { text(p.topic); const messaging = record(p.messaging, Object.keys(AGENTMUX_AGENT_MESSAGING_RULES))
           for (const [key, rule] of Object.entries(AGENTMUX_AGENT_MESSAGING_RULES)) if (messaging[key] !== rule) fail()
           const view = record(p.view); bool(view.attached)
@@ -321,13 +322,22 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'space.state':
+      case 'name.confirm':
       case 'space.commit': {
         record(p,['state'])
         if (p.state === null && method === 'space.state') break
-        const state = record(p.state,['schemaVersion','revision','graph'])
+        const state = record(p.state,['schemaVersion','revision','graph','nameCommit'])
         if (state.schemaVersion !== 1) fail(); count(state.revision)
         if ((state.revision as number) < 1) fail()
+        if (state.nameCommit !== undefined) {
+          const ack = record(state.nameCommit, ['operationId', 'target', 'applied', 'diskDurability', 'issue'])
+          string(ack.operationId); const target = record(ack.target, ['kind', 'id']); string(target.kind); string(target.id)
+          bool(ack.applied); member(ack.diskDurability, ['confirmed', 'unconfirmed']); if (ack.issue !== null) text(ack.issue)
+        }
         parseAgentMuxSpatialGraph(state.graph); break
+      }
+      case 'name.history': {
+        record(p, ['records', 'nextCursor', 'coverage', 'diskAcknowledgement']); array(p.records, item => parseNameChangeRecord(item)); string(p.nextCursor, true); member(p.coverage, ['spatial', 'host']); member(p.diskAcknowledgement, ['not-observed']); break
       }
       case 'space.resolve': {
         record(p,['region','locations'])

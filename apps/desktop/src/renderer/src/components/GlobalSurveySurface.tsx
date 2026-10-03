@@ -424,7 +424,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
             const status = activity(zone)
             return <SurveyZoneItem key={zone.zoneId} zone={zone} title={itemTitle(zone)} glyph={itemGlyph(zone)} selected={selection?.zoneId === zone.zoneId}
               activity={status.summary} editing={renamingZoneId === zone.zoneId} onEdit={editing => setRenamingZoneId(editing ? zone.zoneId : null)}
-              onRename={name => { const applied = useAppStore.getState().setSurveyExplorationName(zone.zoneId, name); if (!applied) setError('The exploration source is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
+              onRename={async (name, revision) => { const applied = await useAppStore.getState().setSurveyExplorationName(zone.zoneId, name, revision); if (!applied) setError('The exploration source or name revision is unconfirmed. Your name draft is kept here.'); return applied }} onSelect={chooseZone} />
           })}
           </> : null}
         </div>

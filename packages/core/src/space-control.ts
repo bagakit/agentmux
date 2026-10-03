@@ -48,6 +48,8 @@ export type AgentMuxSpaceTabFact = {
   zoneId: string | null
   workspaceId: string
   name: string | null
+  /** Current label owner revision; layout snapshots do not own this value. */
+  nameRevision?: number
   regionIds: string[]
   issue?: string
 }
@@ -122,6 +124,8 @@ export type AgentMuxDisplayNameReport = {
   changed: boolean
   outcome: 'renamed' | 'unchanged' | 'partial'
   save: AgentMuxSpatialSave
+  nameRevision: number
+  record: import('./display-label.js').AgentMuxNameChangeRecord
 }
 export type AgentMuxAgentViewMode = 'terminal' | 'activity'
 export type AgentMuxFileViewMode = 'source' | 'diff' | 'preview'
@@ -180,9 +184,9 @@ export type AgentMuxSpaceControlRequest = Base & (
   | { operation: 'space.view'; regionId: string; mode?: AgentMuxFileViewMode }
   | { operation: 'space.swap'; regionId: string; withRegionId: string }
   | { operation: 'open.file'; path: string; zoneId: string; spaceId?: string; displayWorkspaceId?: string; groupId?: string; focus: boolean }
-  | { operation: 'agent.rename'; agentSessionId: string; name: string | null }
+  | { operation: 'agent.rename'; agentSessionId: string; name: string | null; expectedNameRevision: number }
   | { operation: 'agent.inspect'; agentSessionId: string }
-  | { operation: 'space.rename'; tabId: string; name: string | null }
+  | { operation: 'space.rename'; tabId: string; name: string | null; expectedNameRevision: number }
   | { operation: 'space.ls'; target: AgentMuxSpaceSelector }
   | { operation: 'space.inspect'; target: AgentMuxSpaceSelector | { requestId: string } }
   | { operation: 'agent.open'; content:

@@ -28,6 +28,10 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const lifecycleMessage = useAppStore(state => state.error ?? state.lastError)
   const workbenchSaveWarning = useAppStore(state => state.workbenchSaveWarning)
   const retryWorkbenchSave = useAppStore(state => state.retryWorkbenchSave)
+  const nameSaveUnconfirmed = useAppStore(state => state.nameSaveUnconfirmed)
+  const confirmNameSave = useAppStore(state => state.confirmNameSave)
+  const nameEditFailure = useAppStore(state => state.nameEditFailure)
+  const reviewNameEdit = useAppStore(state => state.reviewNameEdit)
   const desktopNavigationNotice = useAppStore(state => state.desktopNavigationNotice)
   const id = useId()
   const [open, setOpen] = useState(false)
@@ -115,6 +119,16 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       restore: `${workbenchSaveWarning} Restore storage access, then retry saving before quitting or updating.`
     }
   }, action: { label: 'Retry saving', run: () => { void retryWorkbenchSave() } } }] : []
+  if (nameSaveUnconfirmed) storage.push({ id: `name-save:${nameSaveUnconfirmed.operationId}`, notice: {
+    kind: 'indeterminate', notice: { step: 'Name applied · disk confirmation unknown',
+      mode: 'The applied name and your running Agent remain available.',
+      restore: nameSaveUnconfirmed.message }
+  }, action: { label: 'Confirm saved name', run: () => { void confirmNameSave() } } })
+  if (nameEditFailure) storage.push({ id: `name-edit:${nameEditFailure.operationId}`, notice: {
+    kind: 'indeterminate', notice: { step: 'Name edit has no confirmed result',
+      mode: 'The current name and your running Agent remain available.',
+      restore: nameEditFailure.message }
+  }, action: { label: 'Review current name', run: () => { void reviewNameEdit() } } })
   const storageInbox = useServiceNotices('global:workbench-save', storage, true)
   const navigationInbox = useServiceNotices('global:desktop-navigation', desktopNavigationNotice ? [{
     id: 'desktop-navigation', notice: { kind: 'indeterminate', notice: {
@@ -162,7 +176,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       </div>
       {inboxes.map((inbox, index) => <div key={index}>
         {inbox.notices.map((item) => <div key={item.id} className="global-system-notices__item">
-          <ServiceWindowNotice notice={item.notice} {...(inbox === storageInbox ? { summary: {
+          <ServiceWindowNotice notice={item.notice} {...(inbox === storageInbox && item.id === 'workbench-save' ? { summary: {
             step: 'Saving the workbench is unconfirmed',
             mode: 'Your window was kept. Agent input was not disabled by this save request.',
             restore: 'Restore storage access, then retry saving before quitting or updating.'

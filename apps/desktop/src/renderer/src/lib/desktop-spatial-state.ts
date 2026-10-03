@@ -1,4 +1,4 @@
-import type { AgentMuxSpatialGraph, AgentMuxSpatialState, AgentMuxSpatialCommit, SpatialJson } from '@agentmux/core/spatial-graph';
+import { AGENTMUX_DISPLAY_LABEL_RESOURCE, type AgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from '@agentmux/core/spatial-graph';
 import { spatialSources, type SpaceZoneBindings } from '../../../shared/space-addresses';
 import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics';
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control';
@@ -154,7 +154,14 @@ export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentM
       }).spaceId]);
     const original = new Map((base[field] ?? []).map(v => [identity(v), v])), changed = new Map((local[field] ?? []).map(v => [identity(v), v])), current = new Map((remote[field] ?? []).map(v => [identity(v), v]));
     for (const id of new Set([...original.keys(), ...changed.keys()])) {
-      const before = original.get(id), after = changed.get(id);
+      let before = original.get(id), after = changed.get(id);
+      // Label edits use their own exact revision; bulk layout reconciliation
+      // always retains the acknowledged remote Tab name.
+      if (field === 'tabs' && current.has(id)) {
+        const name = (current.get(id) as AgentMuxSpatialGraph['tabs'][number]).name;
+        if (before) before = { ...before as AgentMuxSpatialGraph['tabs'][number], name };
+        if (after) after = { ...after as AgentMuxSpatialGraph['tabs'][number], name };
+      }
       if (same(before, after))
         continue;
       if (!same(current.get(id), before) && !same(current.get(id), after))
@@ -169,6 +176,7 @@ export function reconcileSpatialGraphs(base: AgentMuxSpatialGraph, local: AgentM
   }
   for (const field of ['layouts', 'tabLayouts', 'resources'] as const) {
     for (const id of new Set([...Object.keys(base[field]), ...Object.keys(local[field])])) {
+      if (field === 'resources' && id === AGENTMUX_DISPLAY_LABEL_RESOURCE) continue;
       const before = base[field][id], after = local[field][id];
       if (same(before, after))
         continue;
@@ -202,6 +210,12 @@ export class DesktopSpatialPersistence {
   constructor(private readonly port: DesktopSpatialPort, private readonly warn: (error: unknown) => void) { }
   get ready(): boolean { return this.state !== null && this.readConfirmed; }
   get current(): AgentMuxSpatialState | null { return this.state; }
+  acceptNames(state: AgentMuxSpatialState): void {
+    if (this.state && state.revision < this.state.revision) return;
+    if (this.pending) this.pending = { baseline: state,
+      graph: reconcileSpatialGraphs(this.pending.baseline.graph, this.pending.graph, state.graph) };
+    this.state = state;
+  }
   async read(): Promise<AgentMuxSpatialState | null> {
     const observed = await this.port.read();
     if (observed === null && this.state !== null)
@@ -240,9 +254,12 @@ export class DesktopSpatialPersistence {
       else this.pending = { baseline: next, graph: reconcileSpatialGraphs(graph, startup.graph, next.graph) };
     }
   }
-  connect(apply: (state: AgentMuxSpatialState) => void): () => void {
+  connect(apply: (state: AgentMuxSpatialState) => void, acknowledgeName?: (state: AgentMuxSpatialState) => void): () => void {
     this.apply = apply;
     this.unsubscribe = this.port.onChange(state => {
+      // A pure read can arrive first at the same revision; only the producer ACK
+      // carries name durability, and it must reach its consumer despite rebase.
+      if (state.nameCommit) acknowledgeName?.(state);
       if (this.state && state.revision <= this.state.revision)
         return;
       if (this.startup || this.pending || this.saving)

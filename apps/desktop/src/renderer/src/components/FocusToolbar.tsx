@@ -16,7 +16,7 @@ import { useScratchTopics } from '../hooks/useScratchTopics'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
-import { useAppStore } from '../store'
+import { currentDisplayNameRevision, useAppStore } from '../store'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useFocusStopAgent } from './FocusStopAgent'
@@ -56,6 +56,8 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
   const [draft, setDraft] = useState<string | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const renameRef = useRef<HTMLInputElement>(null)
+  const expectedNameRevision = useRef(0), savingName = useRef(false), editGeneration = useRef(0)
+  useEffect(() => () => { ++editGeneration.current }, [tab?.id])
   const identityRef = useRef<HTMLButtonElement>(null)
   const menuOriginRef = useRef<HTMLButtonElement | null>(null)
   const menuEscapeReturnRef = useRef<HTMLButtonElement | null>(null)
@@ -74,11 +76,14 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     menuEscapeReturnRef.current = null
     origin?.focus()
   }
-  function commitRename() {
+  async function commitRename() {
     if (draft === null) return
     const value = draft.trim() || null
-    if (tab) renameTab(tab.id, value)
-    setDraft(null)
+    if (!tab || savingName.current) return
+    savingName.current = true
+    const generation = editGeneration.current
+    try { if (await renameTab(tab.id, value, expectedNameRevision.current) && generation === editGeneration.current) { ++editGeneration.current; setDraft(null) } }
+    finally { savingName.current = false }
   }
   function currentReference(): WorkbenchProjectionSelection | null {
     const state = useAppStore.getState()
@@ -129,13 +134,13 @@ function FocusToolbarContext({ selectedId, selected, tab, reference, onReview, o
     }
   }
   const actions = [
-    ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: Pencil, run: () => setDraft(name) }] : []),
+    ...(tab ? [{ key: 'rename', label: 'Rename Tab', icon: Pencil, run: () => { ++editGeneration.current; expectedNameRevision.current = currentDisplayNameRevision('tab', tab.id); setDraft(name) } }] : []),
     ...(tab && onToggleRegion ? [{ key: 'level', label: regionOnly ? 'Show entire Tab' : 'Show only this Region', icon: Square, run: onToggleRegion }] : []),
     ...(selected?.actionable ? [{ key: 'review', label: 'Review request', icon: Inbox, run: onReview }] : []),
     ...(selected?.kind === 'agent' ? [{ key: 'stop', label: 'Stop Agent', icon: Square, run: () => stop.requestStop(selectedId, selected.name, menuOriginRef.current) }] : []),
   ]
   return <div className="focus-toolbar__context">
-    {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => setDraft(event.target.value)} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; setDraft(null) } }} /> : <ContextMenu.Root modal={false}>
+    {draft !== null ? <input ref={renameRef} className="focus-toolbar__rename" aria-label="Rename Tab" value={draft} onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onBlur={commitRename} onKeyDown={event => { event.stopPropagation(); if (event.key === 'Enter') { event.preventDefault(); commitRename() } if (event.key === 'Escape') { event.preventDefault(); renameCancelledRef.current = true; ++editGeneration.current; setDraft(null) } }} /> : <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild onContextMenu={() => { menuOriginRef.current = identityRef.current }}><button ref={identityRef} type="button" className="focus-toolbar__identity" aria-label={`Focus context: ${name}`} title={`${name} · ${statusLabel} · Right-click for Focus actions`} onKeyDown={event => { if ((event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') { event.preventDefault(); menuOriginRef.current = event.currentTarget; setMenuOpen(true) } }}><strong>{name}</strong><small>{selected?.stateLabel}</small></button></ContextMenu.Trigger>
       <ContextMenu.Portal container={resolveOverlayContainer() as HTMLElement | undefined}><ContextMenu.Content className="tab-context-menu" collisionPadding={8} onEscapeKeyDown={() => { menuEscapeReturnRef.current = identityRef.current }} onCloseAutoFocus={closeMenuFocus}>{actions.map(action => <ContextMenu.Item key={action.key} className="tab-context-menu__item" onSelect={action.run}><action.icon size={14} /><span>{action.label}</span></ContextMenu.Item>)}</ContextMenu.Content></ContextMenu.Portal>
     </ContextMenu.Root>}

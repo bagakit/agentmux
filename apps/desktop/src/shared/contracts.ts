@@ -1433,6 +1433,10 @@ export type AgentMuxDesktopApi = {
   spatial: {
     read(): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState | null>
     commit(input:import('@agentmux/core/spatial-graph').AgentMuxSpatialCommit): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
+    renameLabel(input:import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelMutation): Promise<import('@agentmux/core/spatial-graph').AgentMuxDisplayLabelResult>
+    retainLabels(values:{target:import('@agentmux/core/spatial-graph').AgentMuxNameTarget;value:string}[]): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
+    confirmNameCommit(operationId:string): Promise<import('@agentmux/core/spatial-graph').AgentMuxSpatialState>
+    nameHistory(input?:{target?:import('@agentmux/core/spatial-graph').AgentMuxNameTarget;afterId?:string;limit?:number}): Promise<{records:import('@agentmux/core/spatial-graph').AgentMuxNameChangeRecord[];nextCursor:string|null}>
     onChange(listener:(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void):()=>void
   }
   config: {
