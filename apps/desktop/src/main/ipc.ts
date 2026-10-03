@@ -141,6 +141,8 @@ import { ConfigStore } from './config-store.js'
 import { ConfigOwner } from './config-owner.js'
 import { executeSettingsControl } from './settings-control.js'
 import { checkSettingsHost, executeSettingsHostsControl } from './settings-hosts-control.js'
+import { SettingsHostsUpgradeOwner } from './settings-hosts-upgrade.js'
+import { RemoteCoreUpgradeManager, type RemoteCoreUpgradeExpected } from '@agentmux/core'
 import { executeSettingsExecutorRefreshControl, refreshSettingsExecutor } from './settings-executor-refresh-control.js'
 import { executeSettingsResourcesControl } from './settings-resources-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from './settings-browser-control.js'
@@ -248,6 +250,9 @@ export async function registerIpc(args: {
       if (!args.window.isDestroyed() && !args.window.webContents.isDestroyed()) args.window.webContents.send(CONFIG_CHANGED_CHANNEL, saved)
     }
   })
+  const hostUpgrades = new SettingsHostsUpgradeOwner(new RemoteCoreUpgradeManager({
+    stateDirectory: join(app.getPath('userData'), 'remote-core-upgrades')
+  }), configOwner, args.runtime)
   toolkit = new ToolkitOwner({ openRunPort: () => args.runtime.toolkitRunPort(), launch: performanceLaunch,
     config: configOwner, receiptPath: join(app.getPath('userData'), 'toolkit-receipts.json'),
     enabled: () => resolvePerformancePreferences(configOwner.current).enabled })
@@ -404,7 +409,7 @@ export async function registerIpc(args: {
     if (request.operation === 'diagnostics.crash-log.get' || request.operation === 'diagnostics.crash-log.reveal') return await executeCrashLogControl(request)
     if (request.operation === 'settings.get' || request.operation === 'settings.set') return await executeSettingsControl(request, configOwner)
     if (request.operation === 'settings.workspaces.add') return await executeSettingsWorkspaceAddControl(request, configOwner, id => args.runtime.executionHost(id))
-    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test') return await executeSettingsHostsControl(request, configOwner, args.runtime)
+    if (request.operation === 'settings.hosts.list' || request.operation === 'settings.hosts.test' || request.operation === 'settings.hosts.upgrade-check' || request.operation === 'settings.hosts.upgrade' || request.operation === 'settings.hosts.upgrade-inspect') return await executeSettingsHostsControl(request, configOwner, args.runtime, hostUpgrades)
     if (request.operation === 'settings.executors.refresh') return await executeSettingsExecutorRefreshControl(request, configOwner, args.runtime)
     if (request.operation === 'settings.browser.links.list' || request.operation === 'settings.browser.links.forget') {
       return await executeSettingsBrowserControl(request, configOwner)
@@ -479,6 +484,9 @@ export async function registerIpc(args: {
   handle('config:get', () => config)
   handle('config:save', async (next: AppConfig, expected: AppConfig) => await configOwner.edit(expected, next))
   handle('hosts:check', async (input: HostConfig) => await checkSettingsHost(input, args.runtime))
+  handle('hosts:upgradeCheck', async (input: HostConfig) => await hostUpgrades.check(input))
+  handle('hosts:upgrade', async (input: HostConfig, expected: RemoteCoreUpgradeExpected, operationId: string) => await hostUpgrades.upgrade(input, expected, operationId))
+  handle('hosts:upgradeInspect', async (input: HostConfig, operationId: string) => await hostUpgrades.inspect(input, operationId))
   // The renderer is sandboxed and cannot open a native dialog, so choosing files to reference is a
   // main-process capability. It returns paths only — reading the file is the Agent's own job.
   //

@@ -1,4 +1,10 @@
 /* Connections use the original resource draft owner; disclosure is navigation only. */
+.host-upgrade { margin-top: var(--sp-5); padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
+.host-upgrade__heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); }
+.host-upgrade__title { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.host-upgrade__title > svg { flex: none; color: var(--text-3); }
+.host-upgrade__title > strong { font-size: var(--fs-body); font-weight: 550; }
+.host-upgrade > .field-hint { overflow-wrap: anywhere; }
 .settings-host-branch { margin-bottom: var(--sp-2); }
 .settings-host-branch__summary {
   min-height: 52px; display: flex; align-items: center; gap: var(--sp-2);

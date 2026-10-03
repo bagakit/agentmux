@@ -74,3 +74,7 @@ export { AgentMuxNotebookStore } from './notebook-store.js'
 export * from './notebook-catalog.js'
 
 export type { AgentMuxRunStorageFacts, AgentMuxRunStorageObservation } from './run-storage-observation.js'
+export { RemoteCoreUpgradeManager, remoteCoreUpgradeTargetDigest } from './remote-core-upgrade.js'
+export type { RemoteCoreUpgradeHost, RemoteCoreUpgradeExpected, RemoteCoreUpgradeCandidate, RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt, RemoteCoreUpgradeOptions } from './remote-core-upgrade.js'
+export { createPortableCoreArtifact } from './portable-core-artifact.js'
+export type { PortableCoreArtifact } from './portable-core-artifact.js'

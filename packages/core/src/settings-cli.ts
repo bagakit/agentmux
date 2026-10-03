@@ -38,6 +38,16 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     if (action === 'ls' && args.length === 2) return { method: 'settings.hosts.ls', params: {} }
     if (action === 'test' && args.length === 3 && id?.length) return { method: 'settings.hosts.test', params: { id } }
     if (action === 'test' && args.length === 4 && id === '--input') return { method: 'settings.hosts.test', params: { input: await input(args[3]!) } }
+    if (action === 'upgrade-check' && args.length === 3 && id?.length) return { method: 'settings.hosts.upgrade-check', params: { id } }
+    if (action === 'upgrade-check' && args.length === 4 && id === '--input') return { method: 'settings.hosts.upgrade-check', params: { input: await input(args[3]!) } }
+    if (action === 'upgrade' && args.length === 5 && id?.length && args[3] === '--input') {
+      const body = await input(args[4]!)
+      if (!body || typeof body !== 'object' || Array.isArray(body)) invalid('Upgrade input requires expected and operationId.')
+      return { method: 'settings.hosts.upgrade', params: { ...body as Record<string, unknown>, id } }
+    }
+    if (action === 'upgrade-inspect' && args.length === 5 && id?.length && args[3] === '--operation-id' && args[4]?.length) {
+      return { method: 'settings.hosts.upgrade-inspect', params: { id, operationId: args[4] } }
+    }
   }
   if (resource === 'workspaces' && action === 'register' && args.length === 4 && id === '--input') {
     return { method: 'settings.workspaces.register', params: { input: await input(args[3]!) } }

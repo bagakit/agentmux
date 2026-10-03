@@ -15,6 +15,15 @@ Executor refresh takes exact Executor and Host IDs and only checks availability.
 means a regular executable was found; missing means no usable executable; check-failed
 retains cause.code/message. It does not launch, stop, resume, save configuration or imply
 Agent health. Use settings hosts test --input <file|-> for an unsaved connection draft.
+Host upgrade-check is a read-only maintenance probe, including for an incompatible
+ordinary handshake. It identifies the original headless Core, exact candidate and whether
+healthy Runs can be retained. upgrade requires the complete checked expected value and
+an explicit operationId in its JSON input. It only updates a saved exact Host; it never
+fetches npm latest or replaces an unqualified Native Runtime. An unknown result requires
+upgrade-inspect with the same operationId; neither inspect nor reconnect replays upgrade.
+Updates require an exact Linux x64 headless owner with verified leases and an explicit
+supported launch environment. Additional launch configuration is refused before stopping
+the owner; it is not copied into deployment receipts. Existing Runs remain available.
 Exit 0 means the Host diagnostic returned facts, including unsupported/check-failed; it
 does not prove the connection is healthy. Workspace register accepts {hostId,path,name?}; paths remain literal. It
 registers an existing directory, does not run Git/create a worktree, and returns Workspace

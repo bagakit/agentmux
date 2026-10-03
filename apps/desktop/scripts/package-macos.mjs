@@ -224,6 +224,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await cp(join(coreRoot, 'dist'), join(coreRuntime, 'dist'), { recursive: true })
   await cp(join(coreRoot, 'vendor'), join(coreRuntime, 'vendor'), { recursive: true })
   await cp(join(coreRoot, 'bin'), join(coreRuntime, 'bin'), { recursive: true })
+  await writeFile(join(coreRuntime, 'release.json'), JSON.stringify({ sourceCommit: source.commit, sourceTree: source.tree }) + '\n')
   await writeFile(join(coreRuntime, 'bin', 'agentmux'), [
     '#!/bin/sh',
     'set -eu',
