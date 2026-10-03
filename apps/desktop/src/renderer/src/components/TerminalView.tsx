@@ -744,12 +744,21 @@ export function TerminalView({
         const screen = element.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
         const buffer = terminal.buffer.active, lineIndex = buffer.baseY + buffer.cursorY
         const row = lineIndex - buffer.viewportY
-        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0 ||
-            row < 0 || row >= terminal.rows) return undefined
+        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0) return undefined
         const rowHeight = screen.height / terminal.rows
-        const rowRect = new DOMRect(screen.left, screen.top + row * rowHeight, screen.width, rowHeight)
-        const currentLine = { viewportY: lineIndex, getLine: (line: number) => buffer.getLine(line), getNullCell: () => buffer.getNullCell() }
-        return terminalLinkReadoutOverlapsText(currentLine, terminal.cols, 1, rowRect, popup) ? rowRect.top : undefined
+        // Protect the actual current input and occupied bottom status rows.
+        // This is text geometry, not a Provider-specific footer interpretation.
+        const protectedRows = new Set([Math.max(0, terminal.rows - 2), terminal.rows - 1])
+        if (row >= 0 && row < terminal.rows) protectedRows.add(row)
+        let overlapTop: number | undefined
+        for (const protectedRow of protectedRows) {
+          const rowRect = new DOMRect(screen.left, screen.top + protectedRow * rowHeight, screen.width, rowHeight)
+          const currentLine = { viewportY: buffer.viewportY + protectedRow, getLine: (line: number) => buffer.getLine(line), getNullCell: () => buffer.getNullCell() }
+          if (terminalLinkReadoutOverlapsText(currentLine, terminal.cols, 1, rowRect, popup)) {
+            overlapTop = overlapTop === undefined ? rowRect.top : Math.min(overlapTop, rowRect.top)
+          }
+        }
+        return overlapTop
       },
       subscribe(element, onChange) {
         if (!currentInputElement(element)) return () => {}

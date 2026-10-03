@@ -66,25 +66,34 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     if (!list || suppressed || dismissed) return
     const updateScrollPivot = () => {
       list.style.setProperty('--queue-pivot-y', list.scrollTop + list.offsetHeight + 'px')
+      list.style.setProperty('--queue-scroll-y', list.scrollTop + 'px')
     }
     const updateLayoutPivot = () => {
       const offsets = Array.from(list.children, card => ({
-        card: card as HTMLElement, x: (card as HTMLElement).offsetLeft, y: (card as HTMLElement).offsetTop
+        card: card as HTMLElement, x: (card as HTMLElement).offsetLeft, y: (card as HTMLElement).offsetTop,
+        width: (card as HTMLElement).offsetWidth, height: (card as HTMLElement).offsetHeight
       }))
       list.style.setProperty('--queue-pivot-x', list.offsetWidth + 'px')
+      list.style.setProperty('--queue-viewport-height', list.offsetHeight + 'px')
       updateScrollPivot()
-      for (const { card, x, y } of offsets) {
+      for (const { card, x, y, width, height } of offsets) {
         card.style.setProperty('--queue-offset-x', x + 'px')
         card.style.setProperty('--queue-offset-y', y + 'px')
+        card.style.setProperty('--queue-card-width', width + 'px')
+        card.style.setProperty('--queue-card-height', height + 'px')
       }
+      // Expanding the original editor changes its visible height without changing its ID.
+      // Keep its actions in the existing scrollport, including after a local error grows it.
+      if (editingId) offsets.find(({ card }) => card.dataset.operationId === editingId)?.card.scrollIntoView({ block: 'nearest' })
     }
     updateLayoutPivot()
     // Native scrolling changes only the shared pivot, not React or queue state.
     list.addEventListener('scroll', updateScrollPivot, { passive: true })
     const resize = new ResizeObserver(updateLayoutPivot)
     resize.observe(list)
+    for (const card of list.children) resize.observe(card)
     return () => { list.removeEventListener('scroll', updateScrollPivot); resize.disconnect() }
-  }, [queued, currentIndex, dismissed, suppressed])
+  }, [queued, currentIndex, editingId, dismissed, suppressed])
 
   useLayoutEffect(() => {
     if (suppressed || dismissed || !selected) return
