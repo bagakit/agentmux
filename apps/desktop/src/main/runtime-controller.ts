@@ -1,4 +1,6 @@
 import type { ToolkitRunPort } from './toolkit-run-port.js'
+import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
+import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
@@ -1409,14 +1411,30 @@ export class RuntimeController {
       senderAgentSessionId: sender.agentSessionId, senderSessionId: sender.agentSessionId, senderRunId: sender.run.runId,
       recipientSessionId: recipient.session.agentSessionId, recipientRunId: recipient.session.run.runId })
   }
-  async saveFutureIntent(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string; creationOperationId?: string; prompt: string }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void> {
+  async saveFutureIntent(loop: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string; futureIntentId?: string; creationOperationId?: string; prompt: string; checkIn?: AgentScheduleCheckInPolicy }, active: boolean, context?: AgentMuxRpcCallContext): Promise<void> {
     const client = await this.connectedClient(loop.hostId)
     const status = await client.statusAgent(loop.agentSessionId)
     if (status.session.hostId !== loop.hostId || status.session.providerId !== loop.providerId || status.session.workspacePath !== loop.workspacePath || !loop.futureIntentId || !loop.creationOperationId) {
       throw new AgentMuxError('The original future-message target or intent is unconfirmed. Manual input remains available.', 'STALE_AGENT_SESSION')
     }
     await client.saveAgentFuturePromptIntent({ agentSessionId: loop.agentSessionId, intentId: loop.futureIntentId, operationId: loop.creationOperationId,
-      prompt: loop.prompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE, active, ...(context?.caller ? { caller: context.caller } : {}) })
+      prompt: loop.prompt, agentMuxNote: AGENTMUX_AGENT_MESSAGING_GUIDANCE + (loop.checkIn ? '\n\n' + AGENT_SCHEDULE_CHECK_IN_GUIDANCE : ''), active, ...(context?.caller ? { caller: context.caller } : {}) })
+  }
+  async observeCheckIn(target: { hostId: string; agentSessionId: string; providerId: string; workspacePath: string }, now: number, signal: AbortSignal, config: AppConfig): Promise<CheckInObservation> {
+    signal.throwIfAborted()
+    const client = await this.connectedClient(target.hostId), before = await client.statusAgent(target.agentSessionId)
+    const matches = (session: typeof before.session) => session.agentSessionId === target.agentSessionId && session.hostId === target.hostId && session.providerId === target.providerId && session.workspacePath === target.workspacePath
+    if (!matches(before.session)) return { known: false, reason: 'The original quiet follow-up target is unconfirmed.' }
+    const executor = requireSessionExecutor(config, before.session)
+    const timeline = await client.sessionTimeline(target.agentSessionId)
+    const page = await client.sessionHistoryPage(target.agentSessionId, { limit: 100, refreshNativeSource: true, requireCurrentSource: true, signal, commandOverride: executor.command, args: executor.args, env: executor.env })
+    signal.throwIfAborted()
+    const after = await client.statusAgent(target.agentSessionId)
+    signal.throwIfAborted()
+    const handle = after.session.nativeHandle
+    if (!matches(after.session) || before.session.run.runId !== after.session.run.runId || JSON.stringify(before.session.nativeHandle) !== JSON.stringify(handle) ||
+        handle?.kind !== 'provider' || handle.providerId !== page.source.providerId || handle.sessionId !== page.source.nativeSessionId) return { known: false, reason: 'The original Run or current conversation source changed while reading; this occurrence remains due.' }
+    return checkInHumanObservation(target.agentSessionId, timeline, page, now)
   }
   setContinuousProgressInputObserver(observer: (control: AgentSessionControl, signal?: AbortSignal) => Promise<boolean>): () => void {
     this.progressInputObserver = observer

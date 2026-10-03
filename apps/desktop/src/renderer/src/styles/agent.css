@@ -293,6 +293,7 @@
 .calendar-schedules__list > li { display: grid; gap: var(--sp-3); min-width: 0; padding-top: var(--sp-4); border-top: 1px solid var(--line-soft); }
 .calendar-schedules__message, .calendar-schedules__notice { min-width: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .calendar-schedules__notice { color: var(--text-2); }
+.calendar-schedules__policy { display: grid; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
 .calendar-schedules__actions { display: flex; flex-wrap: wrap; gap: var(--sp-3); }
 .calendar-schedules__form { padding-top: var(--sp-4); }
 .calendar-schedules__fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }

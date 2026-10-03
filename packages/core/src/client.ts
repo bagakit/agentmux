@@ -1627,10 +1627,12 @@ export class AgentMuxClient {
     let original: AgentMuxStoredAgentSession | undefined
     let sharedOwner: AgentMuxStoredAgentSession | undefined
     let assertWitness: (() => Promise<void>) | undefined
+    let strictWitness: (() => Promise<void>) | undefined
     const retainedAvailable = retained?.kind === 'provider' && retained.providerId === session.providerId
     const wantsCurrent = handle === undefined || purpose === 'observe' || options.refreshNativeSource === true
     const canDiscover = descriptor.state === 'active' && descriptor.hostId === 'local' && this.connected &&
       this.kernel.isConnected() && provider.discoverNativeSession !== undefined
+    if (options.requireCurrentSource && !canDiscover) throw new AgentMuxError('This read cannot confirm the current native source. The retained history and healthy Agent input remain available.', 'AGENT_CURRENT_NATIVE_SOURCE_UNCONFIRMED')
     if (wantsCurrent && !canDiscover && handle === undefined) {
       throw new AgentMuxError('The native identity is not yet confirmed. Refresh can retry; the original Run is kept.',
         'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
@@ -1702,6 +1704,7 @@ export class AgentMuxClient {
         handle = { ...discovered.handle }
         assertWitness = async () => { await checkRun(); await discovered.assertCurrent(); await checkRun() }
         await assertWitness()
+        if (options.requireCurrentSource) strictWitness = assertWitness
         const current = await checkRun()
         if (!sameNativeHandle(current.nativeHandle, handle)) {
           await this.registry.refresh(agentSessionId, expected.run)
@@ -1760,6 +1763,7 @@ export class AgentMuxClient {
         else await assertWitness()
       } catch (error) {
         signal.throwIfAborted()
+        if (options.requireCurrentSource) { diagnose(error instanceof Error ? error.message : 'Current native source confirmation failed.'); throw error }
         const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
         // Only a failed observation can fall back to an unchanged retained source. Identity conflicts cannot.
         if (!retainedAvailable || code === 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' || code === 'STALE_AGENT_SESSION' || transient) throw error
@@ -1788,6 +1792,7 @@ export class AgentMuxClient {
     }
     const assertCurrent = async (): Promise<void> => {
       signal.throwIfAborted()
+      if (strictWitness) await strictWitness()
       const current = await this.historyDescriptor(agentSessionId)
       const sameMetadata = current.history && current.hostId === descriptor.hostId &&
         current.history.providerId === session.providerId && current.history.workspacePath === session.workspacePath
@@ -1809,6 +1814,7 @@ export class AgentMuxClient {
           'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
       }
       signal.throwIfAborted()
+      if (strictWitness) await strictWitness()
     }
     await assertCurrent()
     return { session, provider, handle: acceptedHandle, get transient() { return transient }, matches, assertCurrent }
@@ -1826,14 +1832,20 @@ export class AgentMuxClient {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100 ||
       (options.cursor !== undefined && (typeof options.cursor !== 'string' || !options.cursor || options.cursor.length > 16_384)) ||
       (options.refreshNativeSource !== undefined && typeof options.refreshNativeSource !== 'boolean') ||
+      (options.requireCurrentSource !== undefined && options.requireCurrentSource !== true) ||
+      (options.requireCurrentSource === true && options.refreshNativeSource !== true) ||
+      (options.signal !== undefined && !(options.signal instanceof AbortSignal)) ||
       (options.refreshNativeSource === true && options.cursor !== undefined)) {
       throw new AgentMuxError('History page requires a finite limit from 1 to 100 and an opaque cursor.', 'INVALID_AGENT_SESSION_HISTORY_OPTIONS')
     }
     if (this.providerReads.size >= PROVIDER_READ_MAX_CONCURRENT) {
       throw new AgentMuxError('History reading is busy; retry after the current page finishes.', 'AGENT_SESSION_HISTORY_BUSY')
     }
+    options.signal?.throwIfAborted()
     const lifetime = this.providerReadLifetime('history')
     const { controller, read } = lifetime
+    const cancelled = () => controller.abort(options.signal?.reason)
+    options.signal?.addEventListener('abort', cancelled, { once: true })
     try {
       const binding = await read(this.nativeHistoryBinding(agentSessionId, options, controller.signal, 'read'))
       const { session, provider, handle } = binding
@@ -1852,6 +1864,7 @@ export class AgentMuxClient {
       await read(binding.assertCurrent())
       return { agentSessionId, ...normalizeSessionHistoryPage(source, page, limit) }
     } finally {
+      options.signal?.removeEventListener('abort', cancelled)
       lifetime.close()
     }
   }

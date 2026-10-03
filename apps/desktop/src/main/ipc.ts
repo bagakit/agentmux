@@ -50,6 +50,7 @@ import {
 } from 'electron'
 import {
   AgentMuxControlServer,
+  connectAgentMuxRpc,
   agentMuxRpcHttpOptions,
   AgentMuxError,
   type AgentPromptCondition,
@@ -887,29 +888,36 @@ export async function registerIpc(args: {
   })
   const progressTargetMatches = (loop: ContinuousProgressTarget, target: ContinuousProgressTarget): boolean =>
     loop.hostId === target.hostId && loop.agentSessionId === target.agentSessionId && loop.providerId === target.providerId && loop.workspacePath === target.workspacePath
+  // The original Unix transport supplies the local user principal after the
+  // original trusted Renderer check; the request cannot assert human provenance.
+  const callSchedule = async <M extends import('@agentmux/core').ScheduleMethod>(method: M, input: import('@agentmux/core').ScheduleParamsMap[M]) => {
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } })
+    try { return await client.call(method, input) }
+    finally { await client.dispose() }
+  }
   handleWithEvent('schedule:list', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.list']) => {
     requireTrustedSender('schedule:list', event)
-    return args.progressLoops.call('schedule.list', input)
+    return callSchedule('schedule.list', input)
   })
   handleWithEvent('schedule:inspect', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.inspect']) => {
     requireTrustedSender('schedule:inspect', event)
-    return args.progressLoops.call('schedule.inspect', input)
+    return callSchedule('schedule.inspect', input)
   })
   handleWithEvent('schedule:create', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.create']) => {
     requireTrustedSender('schedule:create', event)
-    return args.progressLoops.call('schedule.create', input)
+    return callSchedule('schedule.create', input)
   })
   handleWithEvent('schedule:pause', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.pause']) => {
     requireTrustedSender('schedule:pause', event)
-    return args.progressLoops.call('schedule.pause', input)
+    return callSchedule('schedule.pause', input)
   })
   handleWithEvent('schedule:resume', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.resume']) => {
     requireTrustedSender('schedule:resume', event)
-    return args.progressLoops.call('schedule.resume', input)
+    return callSchedule('schedule.resume', input)
   })
   handleWithEvent('schedule:cancel', async (event, input: import('@agentmux/core').ScheduleParamsMap['schedule.cancel']) => {
     requireTrustedSender('schedule:cancel', event)
-    return args.progressLoops.call('schedule.cancel', input)
+    return callSchedule('schedule.cancel', input)
   })
   handleWithEvent('continuousProgress:list', async (event, target: ContinuousProgressTarget) => {
     requireTrustedSender('continuousProgress:list', event)

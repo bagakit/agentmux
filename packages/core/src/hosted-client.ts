@@ -115,6 +115,13 @@ export async function connectHostedAgentMux(options: {
         signal = cancellation; wireArgs = [value, ...args.slice(1)]
       }
     }
+    if (method === 'sessionHistoryPage') {
+      const input = args[1] as Parameters<AgentMuxHostedClient['sessionHistoryPage']>[1]
+      if (input && isAbortSignal(input.signal)) {
+        const { signal: cancellation, ...value } = input
+        signal = cancellation; wireArgs = [args[0], value, ...args.slice(2)]
+      }
+    }
     const response = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
       invocation: encodeHostedValue({ method, args: wireArgs }) as AgentMuxHostedInvocation }, signal ? { signal } : {})
     return decodeHostedValue(response.value)

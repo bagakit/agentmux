@@ -87,16 +87,17 @@ function startPrimaryInstance(): void {
     connectDesktopAgentMuxHost,
     scratchTopics
   )
+  const configStore = new ConfigStore()
   const progressLoops = new ContinuousProgressLoopManager(
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     undefined,
     (loop, tickId, now, signal) => runtime.observeContinuousProgress(loop, tickId, now, signal),
     { saveFutureIntent: (loop, active, context) => runtime.saveFutureIntent(loop, active, context),
-      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context) }
+      authorizeFutureIntent: (target, context) => runtime.authorizeFutureIntent(target, context),
+      observeCheckIn: async (target, now, signal) => runtime.observeCheckIn(target, now, signal, await configStore.get()) }
   )
   void progressLoops.start().catch((error) => process.stderr.write(`Continuous progress startup failed: ${String(error)}\n`))
-  const configStore = new ConfigStore()
   const windowGeometryStore = new WindowGeometryStore()
   let disposeIpc: (() => Promise<void>) | null = null
   let ownerDisposal: Promise<void> | null = null

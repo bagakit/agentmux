@@ -136,6 +136,8 @@ AgentMux 提供的对话与分享外框在此集中导航：平台说明、对�
 
 原生公开说明的阶段与协作结构只由 Provider 的正式记录解释，并沿同一公共 History item 保全；阶段缺失或未知不从正文、位置或时间猜。公开进度说明与正式回答可区分，但不等同隐藏推理、任务完成或作者认证。原生协作保原步骤 ID、sender／receiver native 引用、操作状态与目标最后已知状态，彼此不替代；native Agent 引用不能冒 AgentMux Session／Run 或当前 Runtime 状态。未知结构和附带内容仍完整可读、可复制，不增加另一套来源、身份 registry、记录缓存或轮询。阶段与协作的共同呈现只见[《可复用对话与 Workflow 表面组件》](conversation-input.md#可复用对话与-workflow-表面组件)。
 
+`sessionHistoryPage` 的 `refreshNativeSource: true` 仍可在当前来源核对失败时保留读取原耐久来源；这不证明当前会话已刷新。需要据当前来源作自动操作判断的调用者可同时指定 `requireCurrentSource: true`，由原 Provider discovery 与同 Run、进程、来源见证在读前和返回前核验。无法确认只拒绝这一次严格读，不阻断健康输入、普通 History 读取或原已保存安排。`signal` 取消本次有界读及其见证，不关闭 Run 或其他消费者；旧游标不能用于当前来源刷新。
+
 ## 注意力处理与结果审查闭环
 
 - 用户能以更少操作完成「发现需要我 → 做决定 → 检查结果 → 继续运行」，并保持原来的工作区和 Session 上下文。

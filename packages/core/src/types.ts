@@ -767,6 +767,10 @@ export type AgentSessionHistoryPageOptions = {
   limit?: number
   /** Explicitly confirm this healthy Run's current native source; never combines with an earlier cursor. */
   refreshNativeSource?: boolean
+  /** Require this read's current Run/Provider witness; an unchanged retained source cannot qualify it. */
+  requireCurrentSource?: true
+  /** Cancel this bounded read, independently of the healthy Run or other readers. */
+  signal?: AbortSignal
   /** The host supplies its configured Executor invocation, as for create/resume. */
   commandOverride?: string
   args?: readonly string[]

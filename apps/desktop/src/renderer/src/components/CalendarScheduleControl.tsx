@@ -1,7 +1,7 @@
 import { civilClock } from "../lib/civil-clock"
 import { useEffect, useRef, useState } from 'react'
 import type { ContinuousProgressLoop, ContinuousProgressTarget, ScheduleParamsMap } from '@agentmux/core'
-import { parseAgentScheduleCalendar, type AgentScheduleCalendar } from '@agentmux/core/schedule'
+import { parseAgentScheduleCalendar, DEFAULT_AGENT_SCHEDULE_CHECK_IN, type AgentScheduleCalendar } from '@agentmux/core/schedule'
 import { api } from '../lib/api'
 import { ComposerTextarea } from './ComposerTextarea'
 
@@ -37,6 +37,8 @@ export function CalendarScheduleControl({ target, onStatusChange }: { target: Co
   const [weekday, setWeekday] = useState('1'), [day, setDay] = useState('1'), [month, setMonth] = useState('1')
   const [fold, setFold] = useState<'earlier' | 'later'>('earlier')
   const [prompt, setPrompt] = useState('')
+  const [checkIn, setCheckIn] = useState(false)
+  const [formNotice, setFormNotice] = useState<string>()
   const current = useRef(target); current.current = target
   const locked = useRef(false), updates = useRef(0)
   const accept = (schedule: ContinuousProgressLoop, captured: ContinuousProgressTarget) => {
@@ -52,7 +54,7 @@ export function CalendarScheduleControl({ target, onStatusChange }: { target: Co
   }
   useEffect(() => {
     let alive = true
-    locked.current = false; setSchedules([]); setObserved(undefined); setError(undefined); setPending(undefined); setBusy(false); setOpen(false); setPrompt('')
+    locked.current = false; setSchedules([]); setObserved(undefined); setError(undefined); setPending(undefined); setBusy(false); setOpen(false); setPrompt(''); setCheckIn(false); setFormNotice(undefined)
     const before = updates.current
     const dispose = api.schedule.onChanged(schedule => {
       if (!alive || !matches(schedule, target)) return
@@ -99,9 +101,13 @@ export function CalendarScheduleControl({ target, onStatusChange }: { target: Co
   }
   function create() {
     if (locked.current || pending) return
+    if (checkIn && visible.some(schedule => schedule.checkIn && schedule.status !== 'stopped')) {
+      setFormNotice('A quiet follow-up is already saved for this Agent. Cancel it or turn off this option.'); return
+    }
+    setFormNotice(undefined)
     try {
       const calendar = parseAgentScheduleCalendar({ kind, timezone, time, ...(kind === 'once' ? { date } : {}), ...(kind === 'weekly' ? { weekday: Number(weekday) } : {}), ...(kind === 'monthly' || kind === 'yearly' ? { day: Number(day) } : {}), ...(kind === 'yearly' ? { month: Number(month) } : {}), policies: { gap: 'skip', fold, monthEnd: 'clamp', overdue: 'latest' } })
-      void perform({ action: 'create', params: { target, calendar, prompt, operationId: 'schedule-' + crypto.randomUUID() } })
+      void perform({ action: 'create', params: { target, calendar, prompt, operationId: 'schedule-' + crypto.randomUUID(), ...(checkIn ? { checkIn: structuredClone(DEFAULT_AGENT_SCHEDULE_CHECK_IN) } : {}) } })
     } catch (failure) { setError(errorMessage(failure)) }
   }
   function mutate(schedule: ContinuousProgressLoop, action: 'pause' | 'resume' | 'cancel') {
@@ -115,6 +121,7 @@ export function CalendarScheduleControl({ target, onStatusChange }: { target: Co
     {visible.length ? <ol className="calendar-schedules__list">{visible.map(schedule => <li key={schedule.loopId} data-schedule-id={schedule.loopId}>
       <div className="calendar-schedules__row"><p className="calendar-schedules__message">{schedule.prompt}</p><span>{schedule.lastOutcome === 'unknown' ? 'Unconfirmed' : schedule.status === 'stopped' ? 'Ended' : schedule.status === 'paused' ? 'Paused' : 'Active'}</span></div>
       <p className="continuous-progress-control__help">{civilLabel(schedule.calendar!)}</p>
+      {schedule.checkIn ? <div className="calendar-schedules__policy"><p>Quiet follow-up · {schedule.checkIn.quiet.start}–{schedule.checkIn.quiet.end} quiet · at least {schedule.checkIn.silenceMs / 3_600_000}h silence · {schedule.checkIn.minIntervalMs / 3_600_000}h between attempts · {schedule.checkIn.dailyBudget} per local day</p>{schedule.checkInState?.unanswered ? <p>{schedule.lastOutcome === 'sent' ? 'Waiting for your next confirmed reply.' : 'Previous follow-up is unconfirmed. Reconcile its original operation.'}</p> : null}{schedule.checkInState?.budgetDate ? <p>{schedule.checkInState.budgetUsed} attempt used on {schedule.checkInState.budgetDate}.</p> : null}</div> : null}
       <dl><dt>{schedule.status === 'active' && schedule.lastOutcome !== 'unknown' ? 'Next due' : 'Original due'}</dt><dd><time dateTime={new Date(schedule.nextCheckAt).toISOString()}>{dueLabel(schedule)}</time></dd></dl>
       {schedule.lastDecision ? <p className="calendar-schedules__notice">{schedule.lastDecision}</p> : null}
       {schedule.status !== 'stopped' ? <div className="calendar-schedules__actions"><button type="button" className="small-button" disabled={busy || !!pending} onClick={() => mutate(schedule, schedule.status === 'active' ? 'pause' : 'resume')}>{schedule.status === 'active' ? 'Pause arrangement' : 'Resume arrangement'}</button><button type="button" className="small-button" disabled={busy || !!pending} onClick={() => mutate(schedule, 'cancel')}>Cancel arrangement</button></div> : null}
@@ -132,6 +139,9 @@ export function CalendarScheduleControl({ target, onStatusChange }: { target: Co
         </div>
         <label>IANA time zone<input aria-label="Arrangement time zone" value={timezone} required disabled={busy || !!pending} onChange={event => setTimezone(event.target.value)} /></label>
         <label>Message to Agent<ComposerTextarea value={prompt} onValueChange={setPrompt} disabled={busy || !!pending} placeholder="A question or reminder for this Agent" /></label>
+        <label><input aria-label="Enable quiet follow-up" type="checkbox" checked={checkIn} disabled={busy || !!pending} onChange={event => { setCheckIn(event.target.checked); setFormNotice(undefined) }} />Enable quiet follow-up for this topic</label>
+        {formNotice ? <p className="calendar-schedules__notice" role="status">{formNotice}</p> : null}
+        {checkIn ? <p className="continuous-progress-control__help">The Agent asks one short question from this conversation’s confirmed context. Quiet from {civilClock(22)} to {civilClock(8)} in the saved time zone; at least 18h silence, 20h between attempts, and one attempt per local day. Another question waits for a confirmed human reply. Unconfirmed context keeps this occurrence due.</p> : null}
         <details className="calendar-schedules__rules" onToggle={event => event.stopPropagation()}><summary>Time rules</summary><label>Repeated DST time<select aria-label="Repeated DST time" value={fold} disabled={busy || !!pending} onChange={event => setFold(event.target.value as 'earlier' | 'later')}><option value="earlier">Earlier occurrence</option><option value="later">Later occurrence</option></select></label><p className="continuous-progress-control__help">Nonexistent DST times are skipped. Short months use their last day. After a delay, only the latest due occurrence is eligible.</p></details>
         <button type="submit" className="small-button" disabled={busy || !!pending || !prompt.trim()}>Save arrangement</button>
       </form> : null}
