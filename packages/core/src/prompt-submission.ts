@@ -48,6 +48,9 @@ export function promptPreparationFailure(error: unknown): AgentMuxError {
 export type AgentPromptProtocolInputBoundary = {
   acknowledged?: { startByte: number; endByte: number; processId: number | null }
   invalid: boolean
+  cancelled?: Error
+  /** Invocation-local lane release; closed before any claim may be persisted. */
+  preclaim?: { interruption: Error; claimStarted: boolean }
 }
 
 export type AgentPromptTransportQualification = Readonly<{
@@ -66,6 +69,7 @@ export type AgentPromptTransportQualification = Readonly<{
 /** Credit only this observation's contiguous, confirmed protocol bytes before its first claim. */
 function preparedInputByte(qualified: AgentPromptTransportQualification): number {
   const protocol = qualified.protocolInput
+  if (protocol?.cancelled) throw protocol.cancelled
   const range = protocol?.acknowledged
   if (protocol?.invalid || range && (range.processId !== qualified.processId ||
       range.endByte > qualified.inputByte && range.startByte > qualified.inputByte)) {
@@ -261,6 +265,7 @@ export class AgentPromptSubmissionCoordinator {
             // The old Core is excluded, but Native may still own its request. Join that exact
             // request; a fresh cursor or a changed Provider plan cannot replace it.
             try {
+              if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
               await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
                 previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession)
             } catch (error) {
@@ -357,6 +362,10 @@ export class AgentPromptSubmissionCoordinator {
     }
     const assertAdmission = (current: AgentMuxAgentSession): void => {
       if (signal?.aborted) throw new AgentMuxError('Prompt delivery was cancelled before admission.', 'AGENT_PROMPT_CANCELLED')
+      const preclaim = transportQualification?.protocolInput?.preclaim
+      if (preclaim && !preclaim.claimStarted && renderSignal?.aborted && renderSignal.reason === preclaim.interruption) {
+        throw preclaim.interruption
+      }
       if (transportQualification) {
         const firstInput = current.promptCompletionAdmission?.submissionId !== submissionId || !current.promptCompletionAdmission.frameRefresh
         if (renderSignal?.aborted || Date.now() >= transportQualification.deadline || run.pid !== transportQualification.processId ||
@@ -439,6 +448,9 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     const claimInput = (current: AgentMuxStoredAgentSession, operationId: string, startByte: number, endByte: number, uncertainTurn: boolean): AgentMuxStoredAgentSession => {
+      // The CAS callback may already be persisting this intent when protocol input arrives.
+      // From this point it must rejoin its frozen operation, never prepare anew.
+      if (transportQualification?.protocolInput?.preclaim) transportQualification.protocolInput.preclaim.claimStarted = true
       const completionId = agentTurnCompletionIdentity(current)
       const ended = agentTurnEndBoundary(current) !== undefined
       const observedAt = Date.now()
@@ -701,6 +713,8 @@ export class AgentPromptSubmissionCoordinator {
             observed.hookReceipt?.id ? { previousReceiptId: observed.hookReceipt.id } : {}),
           ...(context === 'idle' ? { readyThroughByte } : {}) }
       } catch (error) {
+        const preclaim = transportQualification?.protocolInput?.preclaim
+        if (!rejoiningOriginal && !inputAttempted && preclaim && !preclaim.claimStarted && error === preclaim.interruption) throw error
         await this.publishDeliveryDegrade(session, { state: 'unverified', mode: 'degraded',
           reason: 'immediate-context-unconfirmed', submissionId, run: { ...session.run }, observedAt: Date.now() })
         if (!rejoiningOriginal && !inputAttempted) throw promptPreparationFailure(error)
