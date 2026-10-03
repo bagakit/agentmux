@@ -7,16 +7,26 @@ import { sessionPresentationById } from '../lib/session-presentation'
 import { useAppStore } from '../store'
 
 /** A thin original Goal caller, shared by Goal details and the Mote current-work surface. */
-export function GoalContinuationControl({ demand, initialSessionId, onRefresh }: {
-  demand: DemandRecord; initialSessionId?: string; onRefresh?: () => void
+export function GoalContinuationControl({ demand, initialSessionId, onRefresh, active = true }: {
+  demand: DemandRecord; initialSessionId?: string; onRefresh?: () => void; active?: boolean
 }) {
-  const linked = useAppStore(useShallow(state => {
+  const observedLinked = useAppStore(useShallow(state => {
+    if (!active) return null
     const byId = sessionPresentationById(state.sessions)
     return Object.fromEntries(demand.sessionIds.flatMap(id => {
       const session = byId.get(id)
       return session?.kind === 'agent' && session.control.agentSessionId === id ? [[id, session.label]] : []
     }))
   }))
+  const retainedLinked = useRef<{ goalId: string; value: Record<string, string> } | null>(null)
+  if (observedLinked !== null) retainedLinked.current = { goalId: demand.id, value: observedLinked }
+  if (retainedLinked.current?.goalId !== demand.id) {
+    const byId = sessionPresentationById(useAppStore.getState().sessions)
+    retainedLinked.current = { goalId: demand.id, value: Object.fromEntries(demand.sessionIds.flatMap(id => {
+      const session = byId.get(id); return session?.kind === 'agent' && session.control.agentSessionId === id ? [[id, session.label]] : []
+    })) }
+  }
+  const linked = retainedLinked.current.value
   const execute = useAppStore(state => state.executeControl)
   const [loops, setLoops] = useState<ContinuousProgressLoop[]>([])
   const [selected, setSelected] = useState(initialSessionId ?? '')
@@ -26,10 +36,12 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh }:
   const [observedGoal, setObservedGoal] = useState<string>()
   const occurrence = useMemo(() => ({ goalId: demand.id }), [demand.id])
   const scope = useRef(occurrence); scope.current = occurrence
+  const inspected = useRef<object | null>(null)
   const flight = useRef<object | undefined>(undefined)
   const mutation = useRef<{ goalId: string; loopId: string; action: 'pause' | 'resume' | 'stop' | 'check'; expectedRevision: number; operationId: string } | undefined>(undefined)
   const attempt = useRef<{ goalId: string; sessionId: string; intervalMs: number; alignmentRevision: number; operationId: string } | undefined>(undefined)
   async function inspect(goalId = demand.id, owner = scope.current) {
+    inspected.current = owner
     const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(), operation: 'demand.show', demandId: goalId })
     if (scope.current !== owner || result.operation !== 'demand.show') return
     setLoops(result.goalContinuations); setObservedGoal(goalId)
@@ -37,9 +49,13 @@ export function GoalContinuationControl({ demand, initialSessionId, onRefresh }:
   useEffect(() => {
     setLoops([]); setObservedGoal(undefined); setError(undefined); setBusy(false)
     setSelected(initialSessionId ?? ''); attempt.current = undefined; mutation.current = undefined; flight.current = undefined
-    const owner = occurrence
-    void inspect(demand.id, owner).catch(failure => { if (scope.current === owner) setError(String(failure instanceof Error ? failure.message : failure)) })
+    inspected.current = null
   }, [demand.id])
+  useEffect(() => {
+    if (!active || inspected.current === occurrence) return
+    const owner = occurrence
+    void inspect(demand.id, owner).catch(failure => { if (scope.current === owner) setError(failure instanceof Error ? failure.message : String(failure)) })
+  }, [active, demand.id])
   async function run(action: () => Promise<unknown>) {
     if (flight.current) return
     const goalId = demand.id, owner = occurrence, token = {}

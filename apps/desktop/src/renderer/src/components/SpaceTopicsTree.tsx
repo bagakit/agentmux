@@ -36,7 +36,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   workspace: WorkspaceRecord; query?: string; visible?: boolean; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
 }) {
   const displayPath = usePathDisplay()
-  const { topics, error } = useScratchTopics(workspace.id)
+  const { topics, error } = useScratchTopics(workspace.id, visible)
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)

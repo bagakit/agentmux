@@ -79,10 +79,10 @@ export function WorkspaceFilesTool({
   onOpenPath?: ((path: string) => Promise<unknown>) | undefined
   onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
 }) {
-  const mote = useMoteWorkfaceScope(workspace.id, topicId)
+  const mote = useMoteWorkfaceScope(workspace.id, topicId, visible)
   const choice = useAppStore(state => state.workbenchSpaceSelection?.workspaceId === workspace.id ? state.workbenchSpaceSelection : null)
   const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
-  const { topics: knownTopics } = useScratchTopics(scratch?.id ?? null)
+  const { topics: knownTopics } = useScratchTopics(scratch?.id ?? null, visible)
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const selectedTopicId = topicId ?? choice?.topicId
   const knowledgeTopic = !mote && selectedTopicId ? knownTopics?.find(topic => topic.id === selectedTopicId && isKnowledgeTopicInBindings(topic, bindings)) : undefined
@@ -120,7 +120,7 @@ export function WorkspaceFilesTool({
     })
   }
 
-  const bottomHalf = mote ? <MoteDetailsPanel key={mote.topic.id} scope={mote} reference={reference}
+  const bottomHalf = mote ? <MoteDetailsPanel key={mote.topic.id} scope={mote} reference={reference} active={visible}
     onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
       setExplorerCollapsed(workspace.id, false)
       setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
@@ -225,7 +225,7 @@ export function WorkspaceFilesTool({
           <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
             {selectedTopicId && !mote && topicRoot === null ? <div className="surface-inline-error" role="status">The selected object's file root is not confirmed. Its original workface is kept.
               {scratch ? <button type="button" className="icon-button" aria-label="Retry directory discovery" title="Retry directory discovery" onClick={() => void useAppStore.getState().refreshScratchTopics(scratch.id, true)}><RefreshCw size={13} /></button> : null}</div> :
-              <FileExplorer key={workspace.id + (mote?.topic.id ?? '')} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
+              <FileExplorer active={visible} key={workspace.id + (mote?.topic.id ?? '')} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
                 workspaceId={workspace.id} rootPath={mote ? mote.rootPath : topicRoot ?? ''}
                 rootLabel={mote ? mote.topic.title : knowledgeTopic?.title ?? workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
                 onOpenPath={mote ? onOpenPath ?? materials.open : onOpenPath} onOpenTerminal={mote ? onOpenTerminal ?? materials.terminal : onOpenTerminal} />}

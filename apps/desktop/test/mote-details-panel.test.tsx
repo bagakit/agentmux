@@ -179,7 +179,10 @@ describe('Mote object content in the original secondary tools frame', () => {
     expect(details().querySelector('[aria-label="Change Mote avatar"] img')).not.toBeNull()
     expect(details().querySelector('.mote-details__status')?.textContent).toContain('running')
     expect(details().querySelector('.workspace-topics-panel')).toBeNull()
-    expect(details().textContent).toContain('Identity')
+    const soul = details().querySelector<HTMLDetailsElement>('.mote-details__soul')!
+    expect(soul.open).toBe(false); expect(soul.textContent).not.toContain('Identity')
+    await act(async () => { soul.open = true; soul.dispatchEvent(new Event('toggle')) })
+    expect(soul.textContent).toContain('Identity')
     const before = useAppStore.getState()
     await act(async () => useAppStore.getState().openScratchTopic(ordinaryTopicId, SCRATCH_WORKSPACE_ID, { tabId: ordinaryTab.id }))
     await settleMoteApp()
@@ -242,7 +245,10 @@ describe('Mote object content in the original secondary tools frame', () => {
     expect(details().dataset.moteDetails).toBe(PMO_TEAMS_TOPIC_ID)
     expect(app.container.querySelector('.surface-tool-dock .workspace-tool-explorer .file-explorer')).not.toBeNull()
     expect(app.container.querySelector('.mote-materials')).toBeNull()
-    expect(details().textContent).toContain('Identity')
+    const soul = details().querySelector<HTMLDetailsElement>('.mote-details__soul')!
+    expect(soul.open).toBe(false); expect(soul.textContent).not.toContain('Identity')
+    await act(async () => { soul.open = true; soul.dispatchEvent(new Event('toggle')) })
+    expect(soul.textContent).toContain('Identity')
     expect(useAppStore.getState().activeWorkspaceId).toBe(SCRATCH_WORKSPACE_ID)
     expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
   })

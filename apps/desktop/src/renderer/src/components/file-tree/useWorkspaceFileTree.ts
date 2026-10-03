@@ -38,7 +38,7 @@ export function flattenFileTree(
   return rows
 }
 
-export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '') {
+export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '', active = true) {
   const resource = useWorkspaceResource(workspaceId)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
@@ -110,10 +110,14 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
     // previous Workspace's loaded/loading entries.
     cacheRef.current = {}
     setDirCache({})
-    void loadDir(rootPath, { force: true })
   }, [loadDir, loadScope])
 
   useEffect(() => {
+    if (active && !cacheRef.current[rootPath]) void loadDir(rootPath, { force: true })
+  }, [active, loadDir, loadScope, rootPath])
+
+  useEffect(() => {
+    if (!active) return
     for (const path of expanded) {
       const decision = decideExpandedDirLoad(
         cacheRef.current[path],
@@ -123,7 +127,7 @@ export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<
         void loadDir(path, decision === 'reload' ? { force: true } : undefined)
       }
     }
-  }, [expanded, loadDir])
+  }, [active, expanded, loadDir])
 
   const refreshTree = useCallback(async () => {
     const admitted = loadTrackerRef.current.runIfActive(loadScope, () => {
