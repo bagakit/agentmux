@@ -8,7 +8,8 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { discoverCodexNativeSession } from './codex-native-session.js'
-import { readCodexSessionHistoryPage } from './codex-native-history.js'
+import { codexQuestionAnswers, codexQuestionComposerNavigation } from './codex-question.js'
+import { readCodexSessionHistoryPage, prepareCodexSessionQuestionReply } from './codex-native-history.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
@@ -110,7 +111,9 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     readPromptExecutionEvidence: readCodexPromptExecutionEvidence,
     planPromptInput: (prompt, context) => ({
       kind: 'render-then-submit',
-      payload: buildPromptInputPayload(prompt),
+      // Native async option editors treat a paste as an Other answer. Return to
+      // the original main composer only for an exact question reply on this visible editor.
+      payload: (context?.intent === 'question-reply' && codexQuestionAnswers([{ type: 'text', text: prompt }]) ? codexQuestionComposerNavigation(context.terminalScreen) : '') + buildPromptInputPayload(prompt),
       renderedText: sanitizeBracketedPasteText(prompt).replace(/\r\n?/gu, '\n'),
       submit: '\r',
       ...(context?.execution === 'immediate' ? { prepare: { refresh: '\u001b[I', interrupt: '\u001b', endEvent: 'Interrupt' } } : {})
@@ -125,6 +128,7 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     hook: CODEX_HOOKS,
     discoverNativeSession: discoverCodexNativeSession,
     readSessionHistoryPage: readCodexSessionHistoryPage,
+    prepareSessionQuestionReply: prepareCodexSessionQuestionReply,
     observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,

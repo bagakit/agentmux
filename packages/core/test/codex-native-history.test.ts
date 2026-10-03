@@ -1,5 +1,5 @@
 import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
-import { mkdtemp, mkdir, readFile, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, rm, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
@@ -151,7 +151,7 @@ describe('actual public Client to owned native stdio read protocol', () => {
       expect(calls[7]!.params).toEqual({threadId:nativeId,limit:3,sortDirection:'desc',cursor:'native-opaque-next'})
       const owners=await helpers()
       expect(owners).toHaveLength(2)
-      expect(owners[0]).toMatchObject({home,cwd:join(home,'workspace'),deletedEnv:true,
+      expect(owners[0]).toMatchObject({home,cwd:await realpath(join(home,'workspace')),deletedEnv:true,
         args:['configured-argument','-s','read-only','-a','never','app-server','--stdio']})
       expect(owners[0]!.pid).not.toBe(owners[1]!.pid)
       expect((await loadAgentSessions(store)).map(session=>session.run)).toEqual([{runId:'original-run'}])

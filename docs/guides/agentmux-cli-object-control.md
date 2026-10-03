@@ -136,3 +136,9 @@ agentmux --endpoint 'ssh://user@host/' app inspect
 HTTP 服务默认关闭，宿主必须显式配置监听地址与授权 token；HTTP client 从 `AGENTMUX_RPC_HTTP_TOKEN` 取得 token。Agent 的 Session capability 仍在同一服务里验证。SSH 需要远端已有服务和 `agentmux` 可执行文件；远端 `rpc-stdio` 只做转发。SSH endpoint 可以通过 `socket` 或 `command` 查询参数选择远端 socket 或可执行文件，值按 URI 编码。
 
 订阅取消只释放该 reader，保留原 Agent/Run。持续输出携带完整帧、原始 bytes 的 base64 与 cursor；丢失回执后读原操作号，不盲目再发送首任务。
+
+## Answer native asynchronous questions
+
+Read original records with `agent history --host <host-id> --session <session-id> --source native`. Question IDs are opaque Provider values; never construct them. A missing answer means unknown, not proof that the Agent is waiting. `agent question reply --input FILE|-` answers through the same public business owner; its `--help` and [public types](../../packages/core/src/public-rpc.ts) define the input and original Run condition. A trusted user or device is required; managed Agents cannot impersonate human confirmation.
+
+A `submitted` receipt confirms ordinary input submission. Read native history by the exact question ID to observe the answer. A changed source, Run or operation rejects only that input; the original Agent and ordinary manual input remain available. When a receipt is lost or the outcome is unknown, keep the original operation ID and inspect original session records before deciding; do not blindly resend. Synchronous permissions and Hook waiting retain their existing interaction response entry.

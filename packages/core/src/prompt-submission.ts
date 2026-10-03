@@ -119,7 +119,8 @@ export class AgentPromptSubmissionCoordinator {
     expectedInputByte?: number,
     message?: AgentPromptMessageContent,
     execution: AgentPromptExecution = 'default',
-    expectedFutureIntent?: AgentFuturePromptOccurrence
+    expectedFutureIntent?: AgentFuturePromptOccurrence,
+    assertSession?: (session: AgentMuxAgentSession) => void
   ): Promise<AgentPromptMessageContent | undefined> {
     try {
       return await this.deps.store.withPromptSubmission(session.agentSessionId, async () => {
@@ -160,7 +161,7 @@ export class AgentPromptSubmissionCoordinator {
             // request; a fresh cursor or a changed Provider plan cannot replace it.
             try {
               await this.submitOwnedInputPlan(current, currentRun, previous.submissionId,
-                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution)
+                previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution, undefined, assertSession)
             } catch (error) {
               const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
               const refreshOnlySettled = settled.promptCompletionAdmission?.submissionId === previous.submissionId &&
@@ -179,7 +180,7 @@ export class AgentPromptSubmissionCoordinator {
             this.deps.assertAgentRun(current, currentRun)
           }
           await this.submitOwnedInputPlan(current, currentRun, submissionId, prompt, plan,
-            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent)
+            expectedCompletionId, signal, allowUncertainTurn, renderSignal, expectedInputByte, message, execution, expectedFutureIntent, assertSession)
           return structuredClone(message)
         } catch (error) {
           if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_INPUT_UNCONFIRMED' &&
@@ -218,7 +219,8 @@ export class AgentPromptSubmissionCoordinator {
     expectedInputByte?: number,
     message?: AgentPromptMessageContent,
     execution: AgentPromptExecution = 'default',
-    expectedFutureIntent?: AgentFuturePromptOccurrence
+    expectedFutureIntent?: AgentFuturePromptOccurrence,
+    assertSession?: (session: AgentMuxAgentSession) => void
   ): Promise<void> {
     let confirmedFutureIdle = false
     if (expectedFutureIntent !== undefined && session.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(session)) {
@@ -242,6 +244,7 @@ export class AgentPromptSubmissionCoordinator {
       }
     }
     const assertInteraction = (current: AgentMuxAgentSession): void => {
+      assertSession?.(current)
       if (current.pendingInteraction) throw new AgentMuxError(
         'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     }
