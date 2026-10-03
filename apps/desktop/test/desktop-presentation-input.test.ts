@@ -26,6 +26,27 @@ afterEach(() => {
 })
 
 describe('original Desktop input preservation facts', () => {
+  it('observes the original generic EditContext text owner while ordinary focusable divs remain non-input', () => {
+    host.removeAttribute('data-pmo-teams-topic-floating')
+    composer.className = 'monaco-editor'
+    const contextHost = document.createElement('div'); contextHost.tabIndex = 0
+    composer.append(contextHost); contextHost.focus()
+    expect(captureDesktopInput({}).element).toBeNull()
+    vi.spyOn(contextHost, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 0, 0))
+    vi.spyOn(contextHost, 'getClientRects').mockReturnValue([new DOMRect(0, 0, 0, 0)] as unknown as DOMRectList)
+    Object.defineProperty(contextHost, 'editContext', { value: {}, configurable: true })
+    const before = captureDesktopInput({}), after = captureDesktopInput({})
+    expect(before.element).toBe(contextHost)
+    expect(before.fact).toMatchObject({ provenance: 'observed', scope: 'main', ownerKind: 'editor', connected: true, visible: true, inert: false })
+    expect(desktopInputPreserved(before, after)).toBe(true)
+    expect(document.activeElement).toBe(contextHost)
+    contextHost.style.display = 'none'
+    expect(captureDesktopInput({}).fact.visible).toBe(false)
+    contextHost.style.display = ''
+    host.setAttribute('inert', '')
+    expect(captureDesktopInput({}).fact.inert).toBe(true)
+    expect(captureDesktopInput({}).fact.visible).toBe(false)
+  })
   it.each(['main', 'floating', 'overlay'] as const)('confirms unchanged observed %s input without changing its draft or caret', scope => {
     host.removeAttribute('data-pmo-teams-topic-floating')
     if (scope === 'floating') host.setAttribute('data-pmo-teams-topic-floating', '')

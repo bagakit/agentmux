@@ -15,12 +15,16 @@ export type FileDocumentReadResult =
 export type FileReadUnknown = { status: 'unknown'; code: string; message: string }
 export type FileReadParams = { zoneId: string; spaceId?: string; path: string; expectedResource: FileResource }
 export type FileReadResult = { resource: FileReadResource | null; result: FileDocumentReadResult | FileReadUnknown }
-export type FileParameterMap = { 'file.read': FileReadParams }
-export type FileResultMap = { 'file.read': FileReadResult }
+export type FileListParams = FileReadParams & { limit?: number }
+/** Names only. A bounded observation does not claim to be a complete filesystem index. */
+export type FileNameListing = { status: 'listed'; files: string[]; complete: boolean; omitted: 'git-ignored' | 'none'; partialReason: 'limit' | 'budget' | 'unreadable' | null }
+export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileReadUnknown }
+export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams }
+export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short' } as const
-export function isFileMethod(value: unknown): value is FileMethod { return value === 'file.read' }
+export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult> }
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long' } as const
+export function isFileMethod(value: unknown): value is FileMethod { return value === 'file.read' || value === 'file.list' }
 
 function invalid(message: string, code: string): never { throw new AgentMuxError(message, code) }
 function string(value: unknown, code: string): asserts value is string {
@@ -42,6 +46,32 @@ export function parseFileReadParams(value: unknown): FileReadParams {
       (p.path as string).split('/').some(segment => segment === '..')) invalid('Choose a relative file path inside the original Zone.', code)
   resource(p.expectedResource, code)
   return p as FileReadParams
+}
+export function parseFileListParams(value: unknown): FileListParams {
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'limit'], code)
+  const { limit, ...read } = p
+  parseFileReadParams(read)
+  if (limit !== undefined && (!Number.isSafeInteger(limit) || (limit as number) < 1 || (limit as number) > 20000)) invalid('File discovery limit must be between 1 and 20000.', code)
+  return p as FileListParams
+}
+export function parseFileListResult(value: unknown, params: FileListParams): FileListResult {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code)
+  const r = rpcRecord(p.result, undefined, code)
+  // Reuse the exact Zone/root mapping validation, independently of the discovered child names.
+  parseFileReadResult({ resource: p.resource, result: r.status === 'unknown' ? r : { status: 'directory' } }, params)
+  if (r.status === 'unknown') return p as FileListResult
+  rpcRecord(r, ['status', 'files', 'complete', 'omitted', 'partialReason'], code)
+  if (r.status !== 'listed' || !Array.isArray(r.files) || r.files.length > (params.limit ?? 20000) ||
+      typeof r.complete !== 'boolean' || !['git-ignored', 'none'].includes(r.omitted as string) ||
+      ![null, 'limit', 'budget', 'unreadable'].includes(r.partialReason as null)) invalid('File discovery evidence is invalid.', code)
+  if (r.complete !== (r.partialReason === null)) invalid('A partial File listing requires its original reason.', code)
+  const names = new Set<string>()
+  for (const path of r.files) {
+    string(path, code)
+    if (path.startsWith('/') || path.includes('\\') || path.split('/').some(part => !part || part === '.' || part === '..') || names.has(path)) invalid('File discovery must retain distinct confined relative paths.', code)
+    names.add(path)
+  }
+  return p as FileListResult
 }
 export function parseFileReadResult(value: unknown, params: FileReadParams): FileReadResult {
   const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code)
