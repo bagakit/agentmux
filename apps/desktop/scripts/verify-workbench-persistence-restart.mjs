@@ -80,7 +80,7 @@ let pressureProducer, pressureFinal, pressureQualification, maximumPressureGap
 const swapPeers = []
 let swapFixture, swapBefore, swapSelection, goalsFixture, goalsAccepted, goalsRestored, goalsExpectedWorkbench, goalsExpectedFocus
 let goalsEntryFixture, goalsEntryRestored, messageBefore
-let pendingEditAccepted, pendingEditBefore, pendingEditAfter, pendingEditHydratedBaseline
+let pendingEditAccepted, pendingEditBefore, pendingEditAfter, pendingEditHydratedBaseline, pendingEditResizeAction
 const cleanup = { privateProcessesReaped: false, temporaryRootRemoved: false }
 
 async function focusOriginal() {
@@ -582,9 +582,62 @@ setInterval(tick,100);
   await first.cdp.call('Input.insertText', { text: newDraft })
   await waitFor('actual composer changed', async () => (await surface(first.cdp)).editorText === newDraft)
   // Existing react-resizable-panels defaults a native ArrowLeft to -10 percentage points.
-  await first.cdp.evaluate("document.querySelector('.workbench-region-resize-handle').focus()")
-  await key(first.cdp, 'ArrowLeft', 'ArrowLeft')
-  await waitFor('actual split changed', async () => (await surface(first.cdp)).splitPercent === 60)
+  if (pendingEditProof) {
+    const prepared = await first.cdp.evaluate(`(async () => {
+      const describe = element => element ? { tag: element.tagName, id: element.id, className: element.getAttribute('class'),
+        role: element.getAttribute('role'), tabId: element.closest('[data-workbench-tab-id]')?.dataset.workbenchTabId ?? null } : null
+      const candidates = Array.from(document.querySelectorAll('.workbench-region-resize-handle')).filter(handle => {
+        const rect = handle.getBoundingClientRect(), group = handle.closest('.workbench-region-split')
+        return handle.closest('[data-workbench-tab-id]')?.dataset.workbenchTabId === '${tabId}' &&
+          rect.width > 0 && rect.height > 0 && getComputedStyle(handle).visibility === 'visible' &&
+          !handle.closest('[hidden], [inert], [aria-hidden="true"]') && handle.getAttribute('data-panel-resize-handle-enabled') === 'true' &&
+          group?.querySelector('[data-workbench-region-id="${agentRegionId}"]') && group?.querySelector('[data-workbench-region-id="${fileRegionId}"]')
+      })
+      const handle = candidates.length === 1 ? candidates[0] : null
+      const group = handle?.closest('.workbench-region-split'), panel = group?.querySelector(':scope > [data-panel]')
+      const action = { key: 'ArrowLeft', expectedBefore: 70, expectedAfter: 60, candidates: candidates.length,
+        beforePanelSize: panel ? Number(panel.getAttribute('data-panel-size')) : null, beforeFocus: describe(document.activeElement),
+        handle: describe(handle), received: [], focused: false, sameNode: false }
+      window.__pendingEditResizeAction = action
+      if (!handle) return { ready: false, action }
+      handle.focus({ preventScroll: true })
+      // React focus rendering and the library's passive key subscription settle
+      // in actual frames. Focus once; any later replacement or theft is a failure.
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+      action.focused = document.activeElement === handle
+      action.sameNode = handle.isConnected && Array.from(group.children).includes(handle) && Boolean(panel?.isConnected)
+      action.afterFocus = describe(document.activeElement)
+      if (!action.focused || !action.sameNode) return { ready: false, action }
+      document.addEventListener('keydown', event => {
+        const delivery = { key: event.key, code: event.code, keyCode: event.keyCode, trusted: event.isTrusted,
+          targetIsExactHandle: event.target === handle, activeIsExactHandle: document.activeElement === handle,
+          target: describe(event.target), active: describe(document.activeElement), defaultPrevented: null }
+        action.received.push(delivery)
+        queueMicrotask(() => { delivery.defaultPrevented = event.defaultPrevented })
+      }, { capture: true, once: true })
+      return { ready: true, action }
+    })()`)
+    surfaceDiagnostic = { stage: 'pending-edit-native-resize-ready', prepared }
+    assert.equal(prepared.ready, true, 'The unique original visible split handle must retain exact keyboard focus and identity')
+    assert.equal(prepared.action.beforePanelSize, 70)
+    await key(first.cdp, 'ArrowLeft', 'ArrowLeft')
+    await waitFor('actual split changed', async () => {
+      const actual = await surface(first.cdp)
+      const action = await first.cdp.evaluate('window.__pendingEditResizeAction')
+      surfaceDiagnostic = { stage: 'pending-edit-native-resize-result', action, actual }
+      pendingEditResizeAction = action
+      if (actual.splitPercent !== 60) return false
+      assert.equal(action.received.length, 1)
+      assert.equal(action.received[0].key, 'ArrowLeft'); assert.equal(action.received[0].code, 'ArrowLeft')
+      assert.equal(action.received[0].trusted, true); assert.equal(action.received[0].targetIsExactHandle, true)
+      assert.equal(action.received[0].activeIsExactHandle, true)
+      return true
+    })
+  } else {
+    await first.cdp.evaluate("document.querySelector('.workbench-region-resize-handle').focus()")
+    await key(first.cdp, 'ArrowLeft', 'ArrowLeft')
+    await waitFor('actual split changed', async () => (await surface(first.cdp)).splitPercent === 60)
+  }
   const point = await first.cdp.evaluate(`(() => { const r = document.querySelector('[data-workbench-region-id="${fileRegionId}"]').getBoundingClientRect(); return { x: r.x+20, y: r.y+20 } })()`)
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', ...point, button: 'left', clickCount: 1 })
   await first.cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', ...point, button: 'left', clickCount: 1 })
@@ -757,6 +810,7 @@ setInterval(tick,100);
       seededWorkbench: before.workbench, preEditHydratedWorkbench: pendingEditHydratedBaseline,
       hydratedBaselineReason: 'Old seed omits the live Run/home projection. Actual native ArrowRight then ArrowLeft returned 70→80→70 before pending edit and triggered production publication; Core ACK home-binding Topic identity and directory hydration completed before baseline capture, with a nonempty real Mote home. No fixture flush/commit. Actual original DOM surfaces, focus, draft, queue, Run and process birth were independently retained.',
       preEditNativeActions: [{ key: 'ArrowRight', splitPercent: 80 }, { key: 'ArrowLeft', splitPercent: 70 }],
+      postEditNativeResizeAction: pendingEditResizeAction,
       exactLayoutEdits: { tabId, ratio: { before: 0.7, after: 0.6 }, activeRegionId: { before: agentRegionId, after: fileRegionId } },
       publicBefore: pendingEditBefore, publicAccepted: pendingEditAccepted, publicAfter: pendingEditAfter, publicRestored,
       expectedQueue, actualQueueBeforeCrash: immediatelyBeforeCrash.queued, actualQueueAfterRestart: restored.queued,
