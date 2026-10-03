@@ -75,7 +75,7 @@ import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './ag
 import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
-import { AgentPromptSubmissionCoordinator, promptPreparationFailure, type AgentPromptTransportQualification } from './prompt-submission.js'
+import { AgentPromptSubmissionCoordinator, promptPreparationFailure, type AgentPromptTransportQualification, type AgentPromptProtocolInputBoundary } from './prompt-submission.js'
 import {
   CTXMUX_COMMIT,
   CTXMUX_VERSION,
@@ -606,6 +606,12 @@ type AgentInteractionInputQualification = Readonly<{
   deadline: number
 }>
 
+type AgentInputObservation = {
+  run: AgentMuxRunRef
+  controller: AbortController
+  protocolInput?: AgentPromptProtocolInputBoundary
+}
+
 export class AgentMuxClient {
   readonly providers: AgentProviderRegistry
   private readonly kernel: CtxmuxRunAdapter
@@ -643,7 +649,7 @@ export class AgentMuxClient {
   private readonly agentInputCursors = new Map<string, number>()
   private readonly agentInputTails = new Map<string, {
     tail: Promise<void>
-    renderObservations: Set<{ run: AgentMuxRunRef; controller: AbortController }>
+    renderObservations: Set<AgentInputObservation>
   }>()
   private readonly agentContinuityTails = new Map<string, Promise<void>>()
   private readonly providerReads = new Set<AbortController>()
@@ -3963,6 +3969,7 @@ export class AgentMuxClient {
     const provider = this.providers.get(session.providerId)
     const ordinaryPlan = provider.planPromptInput(outbound, input.execution === undefined ? undefined : { execution: input.execution })
     const renderObservation = new AbortController()
+    const protocolInput: AgentPromptProtocolInputBoundary = { invalid: false }
     let preparationStarted = false
     let transportQualification: AgentPromptTransportQualification | undefined
     try {
@@ -3970,8 +3977,8 @@ export class AgentMuxClient {
         ? await this.observeAgentInputPreparation(session, 40_000, async signal => {
         const run = await this.requireCurrentAgentRun(session)
         return await this.promptSubmission.qualifyInputTransport(session, run, operationId, outbound, signal,
-          () => { preparationStarted = true })
-      }, input.signal) : undefined
+          () => { preparationStarted = true }, protocolInput)
+      }, input.signal, protocolInput) : undefined
     } catch (error) {
       if (preparationStarted) throw promptPreparationFailure(error)
       throw error
@@ -5586,9 +5593,13 @@ export class AgentMuxClient {
         }
       })
     }
-    // Raw input only cancels optional observations already admitted for this exact Run.
-    // Bytes still follow the same tail, after the prompt's contiguous payload and submit.
-    this.cancelPromptRenderObservation(requestedSession)
+    // Protocol replies are not human intent. Capture only observers present when this write
+    // entered; a late ACK cannot grant authority to a later preparation or another Run.
+    const protocolObservers = source === 'terminal-protocol'
+      ? [...(this.agentInputTails.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
+          .filter(observation => sameRun(observation.run, requestedSession.run) && observation.protocolInput)
+      : []
+    this.cancelPromptRenderObservation(requestedSession, source === 'terminal-protocol')
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
@@ -5635,10 +5646,25 @@ export class AgentMuxClient {
           ownerInstanceId: this.kernel.identity().daemonInstanceId, operationId, expectedByte, data
         })
       } catch (error) {
+        for (const observation of protocolObservers) observation.protocolInput!.invalid = true
         if (error instanceof AgentMuxError && error.detail === 'not_applied') await observeNativeInput('not_applied')
         throw error
       }
       await observeNativeInput('accepted')
+      for (const observation of protocolObservers) {
+        const protocol = observation.protocolInput!
+        const range = result.appliedByteRange
+        const previous = protocol.acknowledged
+        const endByte = expectedByte + Buffer.byteLength(data)
+        if (result.run.runId !== session.run.runId || result.run.pid !== run.pid ||
+            range.startByte !== expectedByte || range.endByte !== endByte || result.run.acceptedInputBytes !== endByte ||
+            previous && (previous.endByte !== range.startByte || previous.processId !== run.pid)) {
+          protocol.invalid = true
+        } else {
+          protocol.acknowledged = { startByte: previous?.startByte ?? range.startByte,
+            endByte: range.endByte, processId: run.pid }
+        }
+      }
       if (result.run.acceptedInputBytes === null) {
         throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
       }
@@ -5676,10 +5702,13 @@ export class AgentMuxClient {
     })
   }
 
-  private cancelPromptRenderObservation(session: AgentMuxAgentSession): void {
+  private cancelPromptRenderObservation(session: AgentMuxAgentSession, preserveProtocolPreparation = false): void {
     const lane = this.agentInputTails.get(session.agentSessionId)
     for (const observation of lane?.renderObservations ?? []) {
-      if (sameRun(observation.run, session.run)) observation.controller.abort()
+      // Only fresh read-only qualification can account for this reply's ACK. Serialized
+      // render observers must release the byte lane so the terminal can answer its query.
+      if (sameRun(observation.run, session.run) &&
+          !(preserveProtocolPreparation && observation.protocolInput)) observation.controller.abort()
     }
   }
 
@@ -5694,14 +5723,15 @@ export class AgentMuxClient {
 
   /** Read-only qualification shares cancellation with input observers, but never occupies the byte lane. */
   private async observeAgentInputPreparation<T>(session: AgentMuxAgentSession, timeoutMs: number,
-    read: (signal: AbortSignal) => Promise<T>, requestedSignal?: AbortSignal): Promise<T> {
+    read: (signal: AbortSignal) => Promise<T>, requestedSignal?: AbortSignal,
+    protocolInput?: AgentPromptProtocolInputBoundary): Promise<T> {
     const lane = this.agentInputTails.get(session.agentSessionId) ?? {
-      tail: Promise.resolve(), renderObservations: new Set<{ run: AgentMuxRunRef; controller: AbortController }>() }
+      tail: Promise.resolve(), renderObservations: new Set<AgentInputObservation>() }
     const controller = new AbortController()
     const cancelRequested = () => controller.abort(requestedSignal?.reason)
     if (requestedSignal?.aborted) cancelRequested()
     else requestedSignal?.addEventListener('abort', cancelRequested, { once: true })
-    const observation = { run: session.run, controller }
+    const observation = { run: session.run, controller, ...(protocolInput ? { protocolInput } : {}) }
     lane.renderObservations.add(observation)
     this.agentInputTails.set(session.agentSessionId, lane)
     const timeout = setTimeout(() => controller.abort(new AgentMuxError('Native input preparation timed out; the terminal remains available.', 'AGENT_INPUT_PREPARATION_UNCONFIRMED')), timeoutMs)
@@ -5734,7 +5764,7 @@ export class AgentMuxClient {
     const agentSessionId = requestedSession.agentSessionId
     const lane = this.agentInputTails.get(agentSessionId) ?? {
       tail: Promise.resolve(),
-      renderObservations: new Set<{ run: AgentMuxRunRef; controller: AbortController }>()
+      renderObservations: new Set<AgentInputObservation>()
     }
     const observation = renderObservation ? {
       run: { ...requestedSession.run }, controller: renderObservation

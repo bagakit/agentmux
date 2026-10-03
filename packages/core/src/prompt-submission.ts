@@ -45,6 +45,11 @@ export function promptPreparationFailure(error: unknown): AgentMuxError {
 }
 
 /** One original pre-input observation, not durable authorization or another submission owner. */
+export type AgentPromptProtocolInputBoundary = {
+  acknowledged?: { startByte: number; endByte: number; processId: number | null }
+  invalid: boolean
+}
+
 export type AgentPromptTransportQualification = Readonly<{
   agentSessionId: string
   run: AgentMuxRunRef
@@ -55,7 +60,19 @@ export type AgentPromptTransportQualification = Readonly<{
   inputByte: number
   deadline: number
   transport: AgentProviderPreparedPromptTransport
+  protocolInput?: AgentPromptProtocolInputBoundary
 }>
+
+/** Credit only this observation's contiguous, confirmed protocol bytes before its first claim. */
+function preparedInputByte(qualified: AgentPromptTransportQualification): number {
+  const protocol = qualified.protocolInput
+  const range = protocol?.acknowledged
+  if (protocol?.invalid || range && (range.processId !== qualified.processId ||
+      range.endByte > qualified.inputByte && range.startByte > qualified.inputByte)) {
+    throw new AgentMuxError('The original preparation input boundary is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+  }
+  return range ? Math.max(qualified.inputByte, range.endByte) : qualified.inputByte
+}
 
 /** Abandon only a read-only observation when its original preparation expires or is cancelled. */
 async function observePromptTransport<T>(signal: AbortSignal, read: () => Promise<T>): Promise<T> {
@@ -148,7 +165,8 @@ export class AgentPromptSubmissionCoordinator {
 
   /** Called outside the input lane. A claimed/unknown original operation is never prepared anew. */
   async qualifyInputTransport(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string,
-    prompt: string, signal: AbortSignal, onPreparationStarted?: () => void): Promise<AgentPromptTransportQualification | undefined> {
+    prompt: string, signal: AbortSignal, onPreparationStarted?: () => void,
+    protocolInput?: AgentPromptProtocolInputBoundary): Promise<AgentPromptTransportQualification | undefined> {
     const provider = this.deps.providers.get(session.providerId)
     if (!provider.preparePromptExecutionTransport) return undefined
     const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
@@ -179,7 +197,7 @@ export class AgentPromptSubmissionCoordinator {
       return { agentSessionId: current.agentSessionId, run: current.run, processId: run.pid,
         nativeHandleIdentity: JSON.stringify(current.nativeHandle ?? null), submissionId,
         promptDigest: createHash('sha256').update(prompt).digest('base64url'), inputByte: run.acceptedInputBytes,
-        deadline, transport }
+        deadline, transport, ...(protocolInput ? { protocolInput } : {}) }
     } catch (error) {
       await this.publishDeliveryDegrade(current, { state: 'unverified', mode: 'degraded',
         reason: 'immediate-context-unconfirmed', submissionId, run: current.run, observedAt: Date.now() })
@@ -342,7 +360,7 @@ export class AgentPromptSubmissionCoordinator {
       if (transportQualification) {
         const firstInput = current.promptCompletionAdmission?.submissionId !== submissionId || !current.promptCompletionAdmission.frameRefresh
         if (renderSignal?.aborted || Date.now() >= transportQualification.deadline || run.pid !== transportQualification.processId ||
-            firstInput && run.acceptedInputBytes !== transportQualification.inputByte) {
+            firstInput && run.acceptedInputBytes !== preparedInputByte(transportQualification)) {
           throw new AgentMuxError('The original input boundary changed before admission.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
         }
       }
@@ -561,7 +579,7 @@ export class AgentPromptSubmissionCoordinator {
         this.deps.assertAgentRun(session, fresh)
         context.signal.throwIfAborted()
         if (fresh.state.type !== 'running' || fresh.pid !== qualified.processId ||
-            firstInputFence && fresh.acceptedInputBytes !== qualified.inputByte) {
+            firstInputFence && fresh.acceptedInputBytes !== preparedInputByte(qualified)) {
           throw new AgentMuxError('Input or process identity changed during preparation.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
         }
         run = fresh
@@ -606,7 +624,7 @@ export class AgentPromptSubmissionCoordinator {
             if (run.acceptedInputBytes === null) throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
             const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'refresh',
               JSON.stringify([plan.prepare.refresh, transportEvidence.sourceId, resizeRevision]))
-            const startByte = transportQualification && frameRefresh === undefined ? transportQualification.inputByte : run.acceptedInputBytes
+            const startByte = transportQualification && frameRefresh === undefined ? preparedInputByte(transportQualification) : run.acceptedInputBytes
             const endByte = startByte + Buffer.byteLength(plan.prepare.refresh)
             const frozen = await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
               assertAdmission(stored)
