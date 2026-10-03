@@ -6357,7 +6357,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const groupId = tabGroupForTab(current.layouts[workspace.id], live.id)
       return { tabs: { ...current.tabs, [live.id]: { ...live, space: address } },
         scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: { scope, revision: previous?.revision ?? 0,
-          reading: false, error: null, topics: [...topics.filter(topic => topic.id !== topicId), snapshot] } },
+          reading: false, error: null, topics: topics.some(topic => topic.id === snapshot.id)
+            ? topics.map(topic => topic.id === snapshot.id ? snapshot : topic) : [...topics, snapshot] } },
         ...(mayReveal && groupId ? { workbenchSpaceSelection: { ...address, workspaceId: workspace.id, topicId,
           tabId: live.id, groupId, regionId: live.layout.activeRegionId } } : {}) }
     })
@@ -6395,7 +6396,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const topics = previous?.scope === scope ? previous.topics ?? [] : []
       return { scratchTopicSnapshots: { ...current.scratchTopicSnapshots, [workspace.id]: {
         scope, revision: previous?.revision ?? 0, reading: previous?.reading ?? false, error: previous?.error ?? null,
-        topics: [...topics.filter(topic => topic.id !== snapshot.id), snapshot] } } }
+        topics: topics.some(topic => topic.id === snapshot.id)
+            ? topics.map(topic => topic.id === snapshot.id ? snapshot : topic) : [...topics, snapshot] } } }
     })
     const selectObject = (current: AppState, snapshot: ScratchTopicSnapshot, targetTabId?: string): AgentMuxDesktopSpaceSelection => {
       const address = topicSpatialAddress(current.config, snapshot, current.spaceZoneBindings, current.topicCategories)

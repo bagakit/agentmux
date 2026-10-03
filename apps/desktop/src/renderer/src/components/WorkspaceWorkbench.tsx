@@ -1,6 +1,3 @@
-import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
-import { directoryIdentity } from '../../../shared/space-addresses'
-import { revealFileExplorerPath } from '../lib/file-explorer-selection'
 import { layoutForLogicalRegionFocus, logicalRegionId } from '../lib/region-focus'
 import { projectedNameRevision } from '../lib/name-authority'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
@@ -1601,7 +1598,6 @@ export function WorkspaceWorkbench({
   if (storedLayout) retainedLayout.current = storedLayout
   const residentLayout = storedLayout ?? retainedLayout.current
   const objectLayout = useWorkbenchObjectLayout(workspaceId, residentLayout, viewOwnership !== 'projection' && !projection)
-  const requestedCategorySpaceId = useAppStore(state => viewOwnership === 'owner' && state.workbenchSpaceSelection?.workspaceId === workspaceId && state.workbenchSpaceSelection.zoneId === null ? state.workbenchSpaceSelection.spaceId : null)
   const categoryWorkspace = useAppStore(state => viewOwnership === 'owner' && workspaceId === SCRATCH_WORKSPACE_ID && state.workbenchSpaceSelection?.workspaceId === workspaceId && state.workbenchSpaceSelection.zoneId === null && state.workbenchSpaceSelection.topicId === null ? state.config?.workspaces.find(workspace => workspace.id === workspaceId) : undefined)
   const projectedMemberIds = useMemo(() => projection ? workbenchProjectionTabIds(projection) : null, [projection?.entity, projection?.catalog])
   const tabs = useAppStore(useShallow((state) => projection
@@ -1830,7 +1826,7 @@ export function WorkspaceWorkbench({
 
   if (categoryWorkspace) return <div ref={workbenchRef} className="workspace-workbench topic-category-overview">
     {leadingChrome ? <header className="pane-tabbar pane-tabbar--root">{leadingChrome}</header> : null}
-    <WorkspaceTopicsPanel workspace={categoryWorkspace} categorySpaceId={requestedCategorySpaceId && requestedCategorySpaceId !== directoryIdentity(categoryWorkspace.hostId, categoryWorkspace.path) ? requestedCategorySpaceId : undefined} onRevealDirectory={path => { const state = useAppStore.getState(); state.updateFileExplorerState(workspaceId, current => { const revealed = revealFileExplorerPath(current, path); return { ...revealed, expandedPaths: new Set([...revealed.expandedPaths, path]) } }); state.setWorkspaceTool('files-branches'); state.setExplorerCollapsed(workspaceId, false); useAppStore.setState({ toolsOpen: true }) }} />
+    <div className="pane-state"><strong>Select a Topic</strong><span>Choose a Topic from the directory to open its discussions.</span></div>
   </div>
   if (viewOwnership === 'projection' && !retainedTabId && !projection) {
     return <div ref={workbenchRef} className="workspace-workbench" data-workbench-pending-owner>

@@ -1,8 +1,9 @@
-import { TopicChatsPanel } from './TopicChatsPanel'
+import { TopicNavigationPanel } from './TopicNavigationPanel'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
+import { directoryIdentity } from '../../../shared/space-addresses'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { MoteDetailsPanel } from './MoteDetailsPanel'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
@@ -47,7 +48,6 @@ import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useGitHistory } from '../hooks/useGitHistory'
 import { agentProviderLabel } from './AgentProviderIcon'
-import { WorkspaceTopicsPanel } from './WorkspaceTopicsPanel'
 import { BranchesPanel } from './BranchesPanel'
 import { ChangesPanel } from './ChangesPanel'
 import { GitHistoryPanel } from './GitHistoryPanel'
@@ -95,7 +95,9 @@ export function WorkspaceFilesTool({
   const topicRoot = knowledgeTopic && scratch ? scratchTopicLogicalPath(scratch, knowledgeTopic) : null
   const canCollectKnowledge = !mote && (!selectedTopicId || Boolean(knowledgeTopic && topicRoot !== null))
   const categories = useAppStore(state => state.topicCategories)
-  const category = !mote && !selectedTopicId ? categories.find(category => category.spaceId === choice?.spaceId && choice?.zoneId === null) : undefined
+  const category = !mote ? categories.find(category => category.spaceId === choice?.spaceId) : undefined
+  // Retain the requested Category even while its description is unavailable.
+  const categorySpaceId = !mote && choice?.spaceId && choice.spaceId !== directoryIdentity(workspace.hostId, workspace.path) ? choice.spaceId : undefined
   const [capture, setCapture] = useState<ReturnType<typeof selectedKnowledgeSources>>(null)
   const materials = useMoteMaterialsActions(mote)
   const [createFileRequest, setCreateFileRequest] = useState<{ requestId: number; parentPath: string }>()
@@ -128,12 +130,9 @@ export function WorkspaceFilesTool({
     onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
       setExplorerCollapsed(workspace.id, false)
       setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
-    }} /> : knowledgeTopic && scratch ? <TopicChatsPanel key={knowledgeTopic.id} workspace={scratch} topic={knowledgeTopic} visible={visible} /> : selectedTopicId ? <div className="surface-inline-error" role="status">The selected object's original content is still restoring. Its workface is retained; refresh its original directory to continue.</div> : presentation.showTopics ? (
-    <WorkspaceTopicsPanel
-      workspace={workspace}
-      categorySpaceId={category?.spaceId}
-      onRevealDirectory={revealDirectoryInExplorer}
-    />
+    }} /> : presentation.showTopics ? (
+    <TopicNavigationPanel workspace={workspace} topic={knowledgeTopic} selectedTopicId={selectedTopicId}
+      topics={knownTopics ?? []} categorySpaceId={categorySpaceId} visible={visible} onRevealDirectory={revealDirectoryInExplorer} />
   ) : (
     <div className="content-slot-source-control">
       <div className="source-control-switch" role="tablist" aria-label="Source control view" onKeyDown={(event) => {
@@ -207,8 +206,8 @@ export function WorkspaceFilesTool({
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
         <span title={displayPath(workspace.path, workspace.hostId)}>
-          <strong>{mote ? mote.topic.title : knowledgeTopic?.title ?? category?.title ?? workspace.name}</strong>
-          {!mote && (isScratch || workspace.branch) ? <small>{isScratch ? knowledgeTopic ? 'Topic' : 'Knowledge' : workspace.branch}</small> : null}
+          <strong>{mote ? mote.topic.title : category?.title ?? knowledgeTopic?.title ?? workspace.name}</strong>
+          {!mote && (isScratch || workspace.branch) ? <small>{isScratch ? 'Knowledge' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
