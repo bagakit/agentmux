@@ -2,7 +2,7 @@ import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
-import { registerTerminalViewObservation } from '../lib/terminal-view-observation'
+import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -203,6 +203,7 @@ export function TerminalView({
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
+  const inputGeometryRef = useRef<TerminalInputGeometry | null>(null)
   const refreshObservationRef = useRef<(() => Promise<void>) | null>(null)
   const onObservationRefreshRef = useRef(onObservationRefresh)
   onObservationRefreshRef.current = onObservationRefresh
@@ -734,6 +735,31 @@ export function TerminalView({
       }
     }
     observationReaderRef.current = readObservation
+    const currentInputElement = (element: HTMLElement) =>
+      !disposed && terminalRef.current === terminal && visibleRef.current &&
+      terminal.element === element && element.isConnected && !element.closest('[hidden], [inert]')
+    const inputGeometry: TerminalInputGeometry = {
+      readOverlapTop(element, popup) {
+        if (!currentInputElement(element)) return undefined
+        const screen = element.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
+        const buffer = terminal.buffer.active, lineIndex = buffer.baseY + buffer.cursorY
+        const row = lineIndex - buffer.viewportY
+        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0 ||
+            row < 0 || row >= terminal.rows) return undefined
+        const rowHeight = screen.height / terminal.rows
+        const rowRect = new DOMRect(screen.left, screen.top + row * rowHeight, screen.width, rowHeight)
+        const currentLine = { viewportY: lineIndex, getLine: (line: number) => buffer.getLine(line), getNullCell: () => buffer.getNullCell() }
+        return terminalLinkReadoutOverlapsText(currentLine, terminal.cols, 1, rowRect, popup) ? rowRect.top : undefined
+      },
+      subscribe(element, onChange) {
+        if (!currentInputElement(element)) return () => {}
+        const changed = () => { if (currentInputElement(element)) onChange() }
+        const events = [terminal.onRender(changed), terminal.onCursorMove(changed), terminal.onScroll(changed)]
+        const releaseListeners = resourceOwners.acquireListeners(events.length)
+        return () => { for (const event of events) event.dispose(); releaseListeners() }
+      }
+    }
+    inputGeometryRef.current = inputGeometry
     let cursor = 0
     let resizeRevision = 0
     let liveGapRedrawPending = false
@@ -1395,6 +1421,7 @@ export function TerminalView({
         onObservationRefreshRef.current?.(null)
       }
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
+      if (inputGeometryRef.current === inputGeometry) inputGeometryRef.current = null
       clearTimeout(revealDeadline)
       clearLinkPreview()
       setLinkRequest((current) => {
@@ -1437,7 +1464,10 @@ export function TerminalView({
       regionId,
       sessionId: session.id,
       runId: session.control.run.runId
-    }, () => observationReaderRef.current?.())
+    }, () => observationReaderRef.current?.(), {
+      readOverlapTop: (element, popup) => inputGeometryRef.current?.readOverlapTop(element, popup),
+      subscribe: (element, onChange) => inputGeometryRef.current?.subscribe(element, onChange) ?? (() => {})
+    })
   }, [linkOrigin.regionId, session.id, session.control.run.runId])
 
   async function redrawCurrentScreen(): Promise<boolean> {
