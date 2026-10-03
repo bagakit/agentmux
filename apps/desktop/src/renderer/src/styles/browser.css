@@ -94,7 +94,6 @@
 .browser-bookmark-result > svg { flex: none; color: var(--green); }
 .browser-bookmark-result > span, .browser-bookmark-result > button { flex: none; }
 .browser-bookmark-result > code { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: inherit; }
-.workbench-region:has(> .workbench-region__close) > .workbench-session-region-host > .browser-surface > .browser-toolbar { padding-right: var(--region-close-clearance); }
 .browser-toolbar > button { width: 27px; height: 27px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); color: var(--text-3); background: transparent; cursor: pointer; }
 .browser-toolbar > button:hover:not(:disabled) { color: var(--text); background: var(--surface-3); }
 .browser-toolbar > button:disabled { opacity: .3; cursor: default; }

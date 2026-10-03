@@ -1,4 +1,7 @@
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
+import type { SplitDirection } from '@agentmux/layout'
+import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
+import { workbenchSplitDirectionIcon } from './workbench-split-menu-icons'
 import * as DropdownMenu from './HoverDropdownMenu'
 import {
   AlertTriangle,
@@ -103,9 +106,16 @@ export function BrowserPane({
   onControlConfirmation,
   presentations = [],
   renderPresentationFrame,
-  onPresentationInputSelected
+  onPresentationInputSelected,
+  onRegionSplit,
+  regionSplitSurface,
+  onRegionClose
 }: {
   tab: BrowserWorkbenchSurface
+  /** Original Region actions; these never create or dispose the page directly. */
+  onRegionSplit?: ((direction: SplitDirection) => void) | undefined
+  regionSplitSurface?: WorkbenchViewTarget['surface'] | undefined
+  onRegionClose?: (() => void) | undefined
   presentations?: readonly WorkbenchBrowserPresentation[] | undefined
   renderPresentationFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onPresentationInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
@@ -785,32 +795,45 @@ export function BrowserPane({
     </DropdownMenu.RadioGroup>
   )
 
-  if (released || restoring) {
-    if (restoring) {
-      return (
-        <FullPageLoadingSurface
-          scope="region"
-          phase="recovering"
-          eyebrow="Browser recovery"
-          title="Restoring browser"
-          detail="Rebuilding the Main-owned page surface before live navigation returns."
-        />
-      )
-    }
-    return (
-      <section className="surface-memory-released" role="status" aria-live="polite">
-        <strong>Browser parked</strong>
-        <span>Switch back to this tab to restore the browser.</span>
-      </section>
-    )
-  }
+  const regionCloseButton = onRegionClose ? <button
+    type="button" className="browser-toolbar__close" title="Close split" aria-label="Close split"
+    onPointerDown={event => event.stopPropagation()}
+    onClick={event => { event.stopPropagation(); onRegionClose() }}
+  ><X size={12} /></button> : null
 
   const renderPane = (presentation?: WorkbenchBrowserPresentation): ReactNode => {
     const key = presentation?.occurrence.presentationId ?? tab.browserId
     let addressInput = addressInputs.current.get(key)
     if (!addressInput) { addressInput = createRef<BrowserAddressInputHandle>(); addressInputs.current.set(key, addressInput) }
     const visible = presentation?.visible ?? true
-    const inSurvey = presentation?.target.surface === 'survey'
+    const regionSurface = presentation?.target.surface ?? regionSplitSurface
+    const inSurvey = regionSurface === 'survey'
+    const regionSplitAllowed = regionSurface !== undefined && regionSurface !== 'survey'
+    const regionSplitItems = regionSplitAllowed && onRegionSplit ? <>
+      <DropdownMenu.Label className="browser-menu__label">New region</DropdownMenu.Label>
+      {WORKBENCH_TAB_SPLIT_ACTIONS.map(action => {
+        const Icon = workbenchSplitDirectionIcon(action.direction)
+        return <DropdownMenu.Item key={action.direction} className="browser-menu__item"
+          aria-label={`New region ${action.direction}`} onSelect={() => onRegionSplit(action.direction)}>
+          <Icon size={12} /><span>{action.label}</span>
+        </DropdownMenu.Item>
+      })}
+    </> : null
+    // Parked/recovering pages retain the same topology actions and close owner.
+    // Waiting for a native page never revokes an existing multi-Region close.
+    if (released || restoring) return <section className="browser-surface">
+      {regionSplitItems || regionCloseButton ? <header className="browser-toolbar">
+        <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tab.title || 'Browser'}</span>
+        {regionSplitItems ? <DropdownMenu.Root onOpenChange={setMenuOpen}>
+          <DropdownMenu.Trigger asChild><button type="button" aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button></DropdownMenu.Trigger>
+          <DropdownMenu.Portal><DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>{regionSplitItems}</DropdownMenu.Content></DropdownMenu.Portal>
+        </DropdownMenu.Root> : null}
+        {regionCloseButton}
+      </header> : null}
+      {restoring ? <FullPageLoadingSurface scope="region" phase="recovering" eyebrow="Browser recovery"
+        title="Restoring browser" detail="Rebuilding the Main-owned page surface before live navigation returns." />
+        : <section className="surface-memory-released" role="status" aria-live="polite"><strong>Browser parked</strong><span>Switch back to this tab to restore the browser.</span></section>}
+    </section>
     const blocked = released || restoring || elementSelection !== null || Boolean(tab.error) || tab.appLinkPrompt !== null || tab.url === 'about:blank' ||
       Boolean((presentation?.target.controlsOpen ?? toolsOpen) && window.innerWidth <= (inSurvey ? 1100 : 900))
     const stageContent = <>
@@ -1025,10 +1048,11 @@ export function BrowserPane({
         ) : null}
           <DropdownMenu.Root onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
-              <button type="button" className={toolbar?.more ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
+              <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><Ellipsis size={14} /></button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Portal>
               <DropdownMenu.Content className="browser-menu" align="end" sideOffset={5} collisionPadding={8}>
+                {regionSplitItems ? <>{regionSplitItems}<DropdownMenu.Separator className="browser-menu__separator" /></> : null}
                 <DropdownMenu.Label className="browser-menu__label">Page</DropdownMenu.Label>
                 <DropdownMenu.Item className="browser-menu__item" aria-label="Back" disabled={!tab.canGoBack || busy} onSelect={() => void run(() => api.browser.back(tab.browserId))}>
                   <ArrowLeft size={12} /><span>Back</span>
@@ -1068,6 +1092,7 @@ export function BrowserPane({
               </DropdownMenu.Content>
             </DropdownMenu.Portal>
           </DropdownMenu.Root>
+        {regionCloseButton}
       </form>
       {currentBookmark ? <p className="browser-bookmark-result" role="status">
         <Check size={12} aria-hidden="true" /><span>Saved</span>
