@@ -10,9 +10,9 @@ import { AgentMuxError } from '../errors.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import { CODEX_LAUNCH_OPTIONS } from '../agent-launch-option.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
-import { discoverCodexNativeSession } from './codex-native-session.js'
+import { discoverAppServerNativeSession } from './app-server-native-session.js'
 import { codexQuestionAnswers, codexQuestionComposerNavigation } from './codex-question.js'
-import { readCodexSessionHistoryPage, prepareCodexSessionQuestionReply } from './codex-native-history.js'
+import { readAppServerSessionHistoryPage, prepareAppServerSessionQuestionReply } from './app-server-native-history.js'
 import { createNumberedTerminalInteractionProtocol, type TerminalPermissionOption } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition, AgentProviderHookNormalizationContext } from '../agent-provider.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
@@ -199,9 +199,9 @@ export function createCodexProvider(defineAgentProvider: ProviderFactory): Agent
     interaction,
     prepareInteractionResponse: createCodexInteractionResponsePreparation(interaction.planResponse),
     hook: CODEX_HOOKS,
-    discoverNativeSession: discoverCodexNativeSession,
-    readSessionHistoryPage: readCodexSessionHistoryPage,
-    prepareSessionQuestionReply: prepareCodexSessionQuestionReply,
+    discoverNativeSession: context => discoverAppServerNativeSession(context, 'codex'),
+    readSessionHistoryPage: readAppServerSessionHistoryPage,
+    prepareSessionQuestionReply: prepareAppServerSessionQuestionReply,
     observeSessionHistory: observeNativeJsonlHistory,
     inspectHookActivation: inspectCodexHookActivation,
     launchOptions: CODEX_LAUNCH_OPTIONS,

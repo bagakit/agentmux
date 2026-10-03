@@ -3,7 +3,7 @@ import { basename } from 'node:path'
 import { AgentMuxError } from '../errors.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 import { nativeProcessFiles, type NativeProcessFile } from '../agent-native-process.js'
-import type { AgentProviderNativeSessionDiscovery, AgentProviderNativeSessionDiscoveryContext } from '../types.js'
+import type { AgentProviderId, AgentProviderNativeSessionDiscovery, AgentProviderNativeSessionDiscoveryContext } from '../types.js'
 
 function unavailable(message: string): AgentMuxError {
   return new AgentMuxError(message, 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE')
@@ -63,12 +63,12 @@ async function locate(context: AgentProviderNativeSessionDiscoveryContext): Prom
   return { ...original, childSessionIds: [...family].filter(id => id !== original.id).sort() }
 }
 
-export async function discoverCodexNativeSession(context: AgentProviderNativeSessionDiscoveryContext): Promise<AgentProviderNativeSessionDiscovery | null> {
+export async function discoverAppServerNativeSession(context: AgentProviderNativeSessionDiscoveryContext, providerId: AgentProviderId): Promise<AgentProviderNativeSessionDiscovery | null> {
   const original = await locate(context)
   if (!original) return null
   return {
     childSessionIds: original.childSessionIds,
-    handle: { kind: 'provider', providerId: 'codex', sessionId: original.id, transcriptPath: original.file.path },
+    handle: { kind: 'provider', providerId, sessionId: original.id, transcriptPath: original.file.path },
     async assertCurrent() {
       const current = await locate(context)
       if (!current || current.id !== original.id || current.file.path !== original.file.path ||

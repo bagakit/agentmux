@@ -67,14 +67,14 @@ const data=${JSON.stringify(nativeInput)};createInterface({input:process.stdin})
     read: () => client.sessionHistoryPage(SID, options) }
 }
 
-it('discovers the exact open main independently of Hook and uses registered Reader/observer thereafter', async () => {
-  const f = await fixture(), os = vi.spyOn(runner, 'runProcess')
+it.each(['codex', 'traex'])('%s discovers the exact open main independently of Hook and uses registered Reader/observer thereafter', async providerId => {
+  const f = await fixture(new AgentProviderRegistry().get(providerId)), os = vi.spyOn(runner, 'runProcess')
   const page = await succeeds(f.read())
   expect(page.items.map(item => item.id)).toEqual(['user-1', 'progress-1', 'final-1', 'user-2'])
   expect(page.items[2]).toMatchObject({ kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: BODY }] })
   expect(page.nextCursor).toBe('actual-opaque-earlier')
   const stored = (await loadAgentSessions(f.store))[0]!
-  expect(stored.nativeHandle).toEqual({ kind: 'provider', providerId: 'codex', sessionId: NATIVE, transcriptPath: f.files[0] })
+  expect(stored.nativeHandle).toEqual({ kind: 'provider', providerId, sessionId: NATIVE, transcriptPath: f.files[0] })
   expect(stored.semanticStatus).toBeUndefined(); expect(f.events.some(event => event.type === 'agent-session')).toBe(true)
   const discoveredCalls = os.mock.calls.length; expect(discoveredCalls).toBeGreaterThan(0)
   const changes: unknown[] = []
@@ -160,7 +160,7 @@ it('does not discover existing disconnected history or remote/retired missing lo
   await f.read(); os.mockClear(); vi.mocked(f.kernel.isConnected).mockReturnValue(false)
   expect((await f.read()).items[2]?.id).toBe('final-1'); expect(os).not.toHaveBeenCalled()
   const current = (await loadAgentSessions(f.store))[0]!
-  const { nativeHandle: _handle, ...missing } = current
+  const { nativeHandle: _handle, nativeBinding: _binding, ...missing } = current
   await f.store.compareAndSwap(current, { ...missing, hostId: 'remote' })
   await expect(f.read()).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_IDENTITY_UNAVAILABLE' }); expect(os).not.toHaveBeenCalled()
 })

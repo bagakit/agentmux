@@ -8,7 +8,7 @@ const changes: Record<string, [string, string, string]> = {
   'durable-needs-runtime': ['packages/core/src/client.ts', 'if (!transient) assertWitness = undefined', 'if (false) assertWitness = undefined'],
   'accept-truncated-frame': ['packages/core/src/agent-native-process.ts', " || !output.stdout.endsWith('\\0\\n')", ''],
   'skip-discovery': ['packages/core/src/client.ts', 'const discovered = await provider.discoverNativeSession({ processId: firstRun.pid,', 'const discovered = await (async () => null)({ processId: firstRun.pid,'],
-  'child-as-main': ['packages/core/src/providers/codex-native-session.ts', "if (payload!.source === 'cli') main.push({ file, id })", 'if (payload!.source) main.push({ file, id })'],
+  'child-as-main': ['packages/core/src/providers/app-server-native-session.ts', "if (payload!.source === 'cli') main.push({ file, id })", 'if (payload!.source) main.push({ file, id })'],
   'ignore-pid-change': ['packages/core/src/client.ts', 'run.pid !== firstRun.pid', 'false'],
   'ignore-run-change': ['packages/core/src/client.ts', '!sameRun(current.run, expected.run)', 'false'],
   'fail-save-read': ['packages/core/src/client.ts', 'await assertWitness()\n            transient = latest.nativeHandle === undefined', 'throw error\n            transient = latest.nativeHandle === undefined'],
