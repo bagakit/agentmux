@@ -3,7 +3,7 @@ import { AgentMuxError } from '../errors.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES, SESSION_HISTORY_TIMEOUT_MS } from '../session-history.js'
 import type { AgentProviderSessionHistoryContext } from '../types.js'
 
-export type CodexNativeReadContext = Pick<AgentProviderSessionHistoryContext, 'command' | 'args' | 'workspacePath' | 'env' | 'signal'>
+export type AppServerNativeReadContext = Pick<AgentProviderSessionHistoryContext, 'command' | 'args' | 'workspacePath' | 'env' | 'signal'>
 type ReadMethod = 'initialize' | 'thread/read' | 'thread/items/list' | 'hooks/list'
 type ReadPurpose = 'history' | 'hooks'
 
@@ -20,8 +20,8 @@ function code(purpose: ReadPurpose, suffix: string): string {
 }
 
 /** One bounded private native reader; the method union excludes thread/turn mutation and trust writes. */
-export async function withCodexNativeRead<T>(
-  context: CodexNativeReadContext,
+export async function withAppServerNativeRead<T>(
+  context: AppServerNativeReadContext,
   purpose: ReadPurpose,
   read: (request: (method: ReadMethod, params: unknown) => Promise<unknown>) => Promise<T>
 ): Promise<T> {

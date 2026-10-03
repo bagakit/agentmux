@@ -1,5 +1,5 @@
 import { codexQuestionRequest, codexQuestionAnswers, encodeCodexQuestionReply } from './codex-question.js'
-import { withCodexNativeRead } from './codex-native-read.js'
+import { withAppServerNativeRead } from './app-server-native-read.js'
 import { AgentMuxError } from '../errors.js'
 import type {
   AgentProviderSessionHistoryContext,
@@ -430,10 +430,10 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
 }
 
 /** History metadata and indexed items remain owned by this Provider reader. */
-export async function readCodexSessionHistoryPage(
+export async function readAppServerSessionHistoryPage(
   context: AgentProviderSessionHistoryContext
 ): Promise<AgentProviderSessionHistoryPage> {
-  return await withCodexNativeRead(context, 'history', async request => {
+  return await withAppServerNativeRead(context, 'history', async request => {
     const metadata = object(object(await request('thread/read', {
       threadId: context.source.nativeSessionId, includeTurns: false
     })).thread)
@@ -455,8 +455,8 @@ export async function readCodexSessionHistoryPage(
 }
 
 /** Resolve one exact indexed record with bounded anchors, then encode its Provider-owned reply. */
-export async function prepareCodexSessionQuestionReply(context: AgentProviderSessionQuestionReplyContext): Promise<string> {
-  return await withCodexNativeRead(context, 'history', async request => {
+export async function prepareAppServerSessionQuestionReply(context: AgentProviderSessionQuestionReplyContext): Promise<string> {
+  return await withAppServerNativeRead(context, 'history', async request => {
     const metadata = object(object(await request('thread/read', {
       threadId: context.source.nativeSessionId, includeTurns: false
     })).thread)
