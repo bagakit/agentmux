@@ -94,7 +94,7 @@ it('keeps exact status and failure content readable while the identity carries a
   await act(async () => useAppStore.setState({ sessions: [{ ...base, status: { ...base.status, state: 'error', detail: 'Run exited: code 7' } }] }))
   await mount()
   const glyph = row().querySelector('.focus-context__state'); expect(glyph).not.toBeNull()
-  expect(glyph!.classList.contains('status--error')).toBe(true)
+  expect(glyph!.querySelector('[data-focus-state-icon]')?.getAttribute('data-focus-state-icon')).toBe('error')
   expect(row().querySelector('.focus-context__state')!.getAttribute('title')).toBe('Failed')
   expect(row().querySelectorAll('.focus-context__state [tabindex]')).toHaveLength(0)
   expect(row().getAttribute('aria-label')).toContain('Failed'); expect(row().textContent).toContain('Run exited: code 7')
