@@ -21,7 +21,8 @@ import {
   History,
   NotebookText,
   Plus,
-  RadioTower
+  RadioTower,
+  RefreshCw
 } from 'lucide-react'
 import { useContext, useEffect, useRef, useState } from 'react'
 import type {
@@ -92,13 +93,12 @@ export function WorkspaceFilesTool({
   const selectedTopicId = topicId ?? choice?.topicId
   const knowledgeTopic = !mote && selectedTopicId ? knownTopics?.find(topic => topic.id === selectedTopicId && isKnowledgeTopicInBindings(topic, bindings)) : undefined
   const topicRoot = knowledgeTopic && scratch ? scratchTopicLogicalPath(scratch, knowledgeTopic) : null
+  const canCollectKnowledge = !mote && (!selectedTopicId || Boolean(knowledgeTopic && topicRoot !== null))
   const categories = useAppStore(state => state.topicCategories)
   const category = !mote && !selectedTopicId ? categories.find(category => category.spaceId === choice?.spaceId && choice?.zoneId === null) : undefined
   const [capture, setCapture] = useState<ReturnType<typeof selectedKnowledgeSources>>(null)
   const materials = useMoteMaterialsActions(mote)
   const [createFileRequest, setCreateFileRequest] = useState<{ requestId: number; parentPath: string }>()
-  const [allFiles, setAllFiles] = useState(false)
-  useEffect(() => setAllFiles(false), [mote?.topic.id, knowledgeTopic?.id])
   const presentation = contentSlotPresentation(isScratch)
   const displayPath = usePathDisplay()
   const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
@@ -126,7 +126,7 @@ export function WorkspaceFilesTool({
 
   const bottomHalf = mote ? <MoteDetailsPanel key={mote.topic.id} scope={mote} reference={reference}
     onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
-      setAllFiles(false); setExplorerCollapsed(workspace.id, false)
+      setExplorerCollapsed(workspace.id, false)
       setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
     }} /> : knowledgeTopic && scratch ? <TopicChatsPanel key={knowledgeTopic.id} workspace={scratch} topic={knowledgeTopic} visible={visible} /> : selectedTopicId ? <div className="surface-inline-error" role="status">The selected object's original content is still restoring. Its workface is retained; refresh its original directory to continue.</div> : presentation.showTopics ? (
     <WorkspaceTopicsPanel
@@ -207,15 +207,14 @@ export function WorkspaceFilesTool({
           {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
         </button>
         <span title={displayPath(workspace.path, workspace.hostId)}>
-          <strong>{mote ? allFiles ? workspace.name : mote.topic.title : knowledgeTopic?.title ?? category?.title ?? workspace.name}</strong>
-          {mote ? allFiles ? <small>All files</small> : null : isScratch || workspace.branch ? <small>{isScratch ? knowledgeTopic ? 'Topic' : 'Knowledge' : workspace.branch}</small> : null}
+          <strong>{mote ? mote.topic.title : knowledgeTopic?.title ?? category?.title ?? workspace.name}</strong>
+          {!mote && (isScratch || workspace.branch) ? <small>{isScratch ? knowledgeTopic ? 'Topic' : 'Knowledge' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>
         ) : null}
         <div className="workspace-tool-context__actions">
-          {mote ? <button type="button" className="workspace-files-scope" onClick={() => setAllFiles(value => !value)}>{allFiles ? 'Back to this Mote' : 'Show all files'}</button> : null}
-<button type="button" className="icon-button" aria-label="Save selected content to Topic" title="Save selected content to Topic" onClick={() => { try { const target = selectedKnowledgeSources(workspace.id); if (target) setCapture(target); else throw new Error('Choose the original file, page or discussion before saving knowledge.') } catch (error) { useAppStore.getState().reportError(error) } }}><NotebookText size={13} /></button>
+          {canCollectKnowledge ? <button type="button" className="icon-button" aria-label="Collect sources in a knowledge topic" title="Collect sources in a knowledge topic" onClick={() => { try { const target = selectedKnowledgeSources(workspace.id); if (target) setCapture(target); else throw new Error('Choose a file, page or discussion to collect its reference in a knowledge topic.') } catch (error) { useAppStore.getState().reportError(error) } }}><NotebookText size={13} /></button> : null}
           <div ref={setToolbarTarget} />
         </div>
       </div>
@@ -231,10 +230,12 @@ export function WorkspaceFilesTool({
           key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
         >
           <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
-            <FileExplorer key={workspace.id + (mote?.topic.id ?? '') + allFiles} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
-              workspaceId={workspace.id} rootPath={mote && !allFiles ? mote.rootPath : topicRoot ?? ''}
-              rootLabel={mote && !allFiles ? mote.topic.title : knowledgeTopic?.title ?? workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
-              onOpenPath={mote ? onOpenPath ?? materials.open : onOpenPath} onOpenTerminal={mote ? onOpenTerminal ?? materials.terminal : onOpenTerminal} />
+            {selectedTopicId && !mote && topicRoot === null ? <div className="surface-inline-error" role="status">The selected object's file root is not confirmed. Its original workface is kept.
+              {scratch ? <button type="button" className="icon-button" aria-label="Retry directory discovery" title="Retry directory discovery" onClick={() => void useAppStore.getState().refreshScratchTopics(scratch.id, true)}><RefreshCw size={13} /></button> : null}</div> :
+              <FileExplorer key={workspace.id + (mote?.topic.id ?? '')} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
+                workspaceId={workspace.id} rootPath={mote ? mote.rootPath : topicRoot ?? ''}
+                rootLabel={mote ? mote.topic.title : knowledgeTopic?.title ?? workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
+                onOpenPath={mote ? onOpenPath ?? materials.open : onOpenPath} onOpenTerminal={mote ? onOpenTerminal ?? materials.terminal : onOpenTerminal} />}
           </Panel>
           <PanelResizeHandle className="workspace-tools-resize-handle" />
           <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
