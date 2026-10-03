@@ -16,7 +16,7 @@ import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } fro
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
 export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel, executionHost,
-  activity, eligible, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion }: {
+  activity, eligible, recovery, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion }: {
   target: WorkbenchViewTarget
   regionId: string
   sourceKey: string
@@ -24,8 +24,9 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   name: string
   executorLabel: string
   executionHost: RegionExecutionHost
-  activity: ComponentProps<typeof ActivityView>
+  activity?: ComponentProps<typeof ActivityView>
   eligible: boolean
+  recovery?: ReactNode
   readOnly: boolean
   resourceOrigin: OpenHttpLinkOrigin
   composer?: ReactNode
@@ -57,7 +58,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   }, [selectRegion, sessionId])
   const presented = useRef<{ sourceKey: string; content: ReactElement<ComponentProps<typeof ActivityView>> | null }>({ sourceKey, content: null })
   if (presented.current.sourceKey !== sourceKey) presented.current = { sourceKey, content: null }
-  if (visible && eligible) {
+  if (visible && eligible && activity) {
     const { openWorkspaceFile: _primaryFile, onSelectAnnotation: _primaryAnnotation, ...facts } = activity
     presented.current.content = <ActivityView {...facts}
       workspaceRoot={fileContext.workspaceRoot} homeDir={fileContext.homeDir}
@@ -67,8 +68,9 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(onAnnotate ? { onSelectAnnotation: selectAnnotation } : {})}
       {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})} />
   }
-  const content = presented.current.content && activity.conversationReading
-    ? cloneElement(presented.current.content, { conversationReading: { ...activity.conversationReading,
+  const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
+  const content = presented.current.content && reading
+    ? cloneElement(presented.current.content, { conversationReading: { ...reading,
       enabled: visible && eligible, opened: false, onClose: undefined } }) : presented.current.content
   const hostId = workbenchSessionStageHostId(target, regionId)
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
@@ -80,7 +82,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
         <AgentRegionHeader name={name} executorLabel={executorLabel} sessionId={sessionId} sessionKind="agent" executionHost={executionHost}
           regionId={regionId} readOnly={readOnly} onHistory={undefined} {...(target.headerPortalTargetId ? { portalTargetId: target.headerPortalTargetId } : {})} />
         <div className="agent-body" data-observation-surface="workflow">
-          {!eligible ? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}
+          {!eligible ? recovery ?? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}
           {service && eligible ? <div role="status" className="activity-feed__read-notice">{service}</div> : null}
           <div className="agent-terminal-stage" hidden={!eligible} inert={!eligible}>{content}</div>
         </div>

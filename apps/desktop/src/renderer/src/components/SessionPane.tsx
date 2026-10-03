@@ -684,17 +684,35 @@ export function SessionPane({
         onClick={() => { void refresh() }}><RefreshCw size={12} /> Check again</button> : null} />
     </div>
   )
+  // Lifecycle, recovery and observation remain owned here. Each confirmed display
+  // receives the same original status surface even before Activity can be rendered.
+  const retainPresentations = (content: (target: WorkbenchViewTarget) => ReactNode, primary: ReactNode): ReactNode => <>
+    {surfaceKind === 'agent' && renderPresentationFrame ? presentations.map(target => <SessionActivityPresentation
+      key={JSON.stringify([activitySourceKey, target.hostId, target.reference!.displayWorkspaceId, target.reference!.groupId, target.reference!.tabId, linkOrigin.regionId])}
+      target={target} regionId={linkOrigin.regionId!} sourceKey={activitySourceKey}
+      sessionId={sessionId} name={agentInputIdentity ?? userName ?? tabName ?? sessionId}
+      executorLabel={agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown'}
+      executionHost={preSnapshotHost} eligible={false} recovery={content(target)}
+      readOnly={readOnly} resourceOrigin={linkOrigin} renderFrame={renderPresentationFrame}
+      selectRegion={() => onPresentationSelected?.(target)}
+      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { composer: <AgentSessionComposer reading={mailboxReading}
+        mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }}
+        onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
+        visible={false} {...(tabName ? { tabName } : {})} /> } : {})} />) : null}
+    {primary}
+  </>
   if (!session && acceptedLaunch) {
-    return <section className="agent-surface" data-agent-surface-mode="unconfirmed">
-      {preSnapshotHeader()}
-      {takeoverSurface}
-      <div className="agent-body"><FullPageLoadingSurface scope="region" phase="parked"
+    const acceptedSurface = <FullPageLoadingSurface scope="region" phase="parked"
         eyebrow="Original Session" title="Session created"
         detail="Creation is confirmed. Current process and input availability are not yet confirmed."
         actions={unobservedActions} supplement={launchNotice}
-        details={{ summary: 'Original reference', content: <dl><dt>Session ID</dt><dd>{acceptedLaunch.agentSessionId}</dd></dl> }} /></div>
+        details={{ summary: 'Original reference', content: <dl><dt>Session ID</dt><dd>{acceptedLaunch.agentSessionId}</dd></dl> }} />
+    return retainPresentations(() => acceptedSurface, <section className="agent-surface" data-agent-surface-mode="unconfirmed">
+      {preSnapshotHeader()}
+      {takeoverSurface}
+      <div className="agent-body">{acceptedSurface}</div>
       {!readOnly ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled {...(tabName ? { tabName } : {})} /> : null}
-    </section>
+    </section>)
   }
 
   // Retirement is Core's terminal fact, not a missing Runtime observation. Its native history
@@ -724,11 +742,7 @@ export function SessionPane({
           : 'Check again reads the original Core Session and Run. The unconfirmed operation is not resent.'
         : 'Check the Host and current Executor configuration, then explicitly try again. No new message is sent.'
     } }} /> : null
-    return <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
-      {preSnapshotHeader(label, executorLabel ?? providerLabel ?? 'Executor unknown')}
-      {takeoverSurface}
-      <div className="agent-body" data-observation-surface="workflow"><div className="agent-terminal-stage">
-        <ActivityView sessionId={sessionId} executionHostId={reference.hostId} items={timeline} capability="complete-events"
+    const retainedConversation = <ActivityView sessionId={sessionId} executionHostId={reference.hostId} items={timeline} capability="complete-events"
           conversationReading={{ reference, identity: JSON.stringify([reference.hostId, reference.agentSessionId]),
             enabled: visible && !parked, opened: true, readCaptured: true }}
           readingAction={resumeAction} readingNotice={reopenNotice ?? <div className="activity-feed__read-notice" role="status">
@@ -737,19 +751,22 @@ export function SessionPane({
           workspaceRoot={metadata?.workspacePath ?? ''} homeDir={fileContext.homeDir}
           readPastedImage={readPastedImage} openWorkspaceFile={openWorkspaceFile}
           openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker} />
+    return retainPresentations(target => cloneElement(retainedConversation, { conversationReading: {
+      ...retainedConversation.props.conversationReading, enabled: target.visible !== false && !parked
+    } }), <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="retained-history">
+      {preSnapshotHeader(label, executorLabel ?? providerLabel ?? 'Executor unknown')}
+      {takeoverSurface}
+      <div className="agent-body" data-observation-surface="workflow"><div className="agent-terminal-stage">
+        {retainedConversation}
 
       </div></div>
-    </section>
+    </section>)
   }
 
   // A launching Region exists before Core returns its Session snapshot. Keep that handoff
   // neutral; interrupted and exited Sessions use the explicit recovery banners below.
   if (!session || !terminalThemeId) {
-    return (
-      <section className="agent-surface" data-agent-surface-mode="connecting">
-          {preSnapshotHeader()}
-          {takeoverSurface}
-          <SessionConnectingSurface key={`connecting:${sessionId}`}
+    const connectingSurface = <SessionConnectingSurface key={`connecting:${sessionId}`}
           phase={pendingLaunch ? 'launch' : recoveryCandidate && !unobservedIdentity ? 'restore' : 'connect'}
           surfaceKind={surfaceKind}
           request={pendingLaunch?.request}
@@ -759,6 +776,11 @@ export function SessionPane({
           actions={unobservedActions}
           visible={visible && !parked}
         />
+    return retainPresentations(() => cloneElement(connectingSurface, { visible: false }),
+      <section className="agent-surface" data-agent-surface-mode="connecting">
+          {preSnapshotHeader()}
+          {takeoverSurface}
+          {connectingSurface}
         {surfaceKind === 'agent' && !pendingLaunch && historyCatalogue.error ? <ServiceWindowNotice notice={{
           kind: 'indeterminate', notice: { step: `Retained history metadata could not be read: ${historyCatalogue.error}`,
             mode: 'The original Region and Session reference remain visible. Its current state is unconfirmed.',
@@ -848,6 +870,19 @@ export function SessionPane({
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
 
+  const restoreSurface = <FullPageLoadingSurface scope="region" phase={recovering ? 'recovering' : continuityNotice || session.status.state === 'error' ? 'failed' : 'parked'} eyebrow="Session retained"
+                title={recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title : session.status.state === 'error' ? recoveryTitle : 'Ready to restore'}
+                detail={continuityNotice?.reason ?? (session.status.state === 'error'
+                  ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
+                  : pendingRestoreDetail ?? 'The saved Session is retained. Its process state is not yet confirmed.')}
+                actions={!historyOpen ? agentRecoveryAction : null}
+                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}
+                details={{ summary: 'Retained session', content: <dl>
+                  <dt>Session</dt><dd>{session.label}</dd>
+                  <dt>Session ID</dt><dd>{session.id}</dd>
+                  <dt>Retained Run</dt><dd>{session.control.run.runId}</dd>
+                </dl> }} />
+
   return (
     <>
     {session.kind === 'agent' && renderPresentationFrame ? presentations.map(target => <SessionActivityPresentation
@@ -856,6 +891,7 @@ export function SessionPane({
       sessionId={session.id} name={agentInputIdentity!} executorLabel={agentInputExecutor!}
       executionHost={regionExecutionHost(session, configuredExecutionHost)}
       activity={{ ...activityProps, revealRequest: revealRequest?.displayId === workbenchSessionStageHostId(target, linkOrigin.regionId!) ? revealRequest : null }} eligible={viewMode !== 'terminal' && !pendingAgentRestore}
+      recovery={pendingAgentRestore ? cloneElement(restoreSurface, { supplement: null }) : undefined}
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
@@ -891,18 +927,7 @@ export function SessionPane({
               ref={element => { if (element && !pendingAgentRestore && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
               inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore} style={{ height: '100%' }}>
             {pendingAgentRestore ? (inlineHistory ? null :
-              <FullPageLoadingSurface scope="region" phase={recovering ? 'recovering' : continuityNotice || session.status.state === 'error' ? 'failed' : 'parked'} eyebrow="Session retained"
-                title={recovering ? 'Restoring your session' : continuityNotice ? continuityNotice.title : session.status.state === 'error' ? recoveryTitle : 'Ready to restore'}
-                detail={continuityNotice?.reason ?? (session.status.state === 'error'
-                  ? humanizeDetail(session.interruptionReason, session.status.detail, exited, session.status.exitReason)
-                  : pendingRestoreDetail ?? 'The saved Session is retained. Its process state is not yet confirmed.')}
-                actions={!historyOpen ? agentRecoveryAction : null}
-                supplement={session.kind === 'agent' ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}
-                details={{ summary: 'Retained session', content: <dl>
-                  <dt>Session</dt><dd>{session.label}</dd>
-                  <dt>Session ID</dt><dd>{session.id}</dd>
-                  <dt>Retained Run</dt><dd>{session.control.run.runId}</dd>
-                </dl> }} />
+              restoreSurface
             ) : parked ? (
               <FullPageLoadingSurface scope="region" phase="parked" eyebrow="View retained"
                 title="Terminal parked"
