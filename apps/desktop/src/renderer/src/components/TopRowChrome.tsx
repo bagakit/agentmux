@@ -146,7 +146,7 @@ export function TopBreadcrumb() {
         <strong title={workspace ? displayPath(workspace.path, workspace.hostId) : undefined}>{branch}</strong>
       ) : null}
       {remoteHost ? (
-        <HostBadge context="Host" className="host-pill" showLocal={false} host={hostIdentityProjection(remoteHost, hosts?.find(host => host.id === remoteHost))} />
+        <HostBadge context="Host" className="host-pill" host={hostIdentityProjection(remoteHost, hosts?.find(host => host.id === remoteHost))} />
       ) : null}
     </div>
   )

@@ -85,12 +85,13 @@ function item(menu: HTMLElement, text: string) {
   expect(found, `actual ${text}`).toBeDefined(); return found!
 }
 
-it('puts the original single Agent controls in the Focus bar with one identity and no second local header row', async () => {
+it('keeps the original Region name and controls visible in the Focus bar without a second local header row', async () => {
   await mount()
   expect(toolbar().querySelector('.focus-toolbar__identity strong')!.textContent).toBe(name)
   expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(1)
   expect(region().querySelectorAll('.agent-region-header')).toHaveLength(0)
-  expect(toolbar().querySelectorAll('.agent-region-header__name')).toHaveLength(0)
+  expect(toolbar().querySelectorAll('.agent-region-header__name')).toHaveLength(1)
+  expect(toolbar().querySelector('.agent-region-header__name')!.textContent).toBe(name)
   expect(toolbar().querySelector('.agent-region-header')!.getAttribute('aria-label')).toContain(sessionIds[0]!)
   expect(region().querySelectorAll('[aria-label="Close split"]')).toHaveLength(0)
 })
@@ -228,21 +229,25 @@ it('does no further slot lookup or History I/O for unrelated observation timesta
 })
 
 it('keeps the local Header until a delayed controlled Focus slot arrives, then moves the same host and paint once', async () => {
-  await act(async () => root.render(<Workface showGlobal={false} />))
-  const header = region().querySelector('.agent-region-header'), paintNode = region().querySelector('[data-terminal-paint]')
+  await act(async () => root.render(<SessionPane sessionId={sessionIds[0]!} surfaceKind="agent" visible
+    headerPortalTargetId="delayed-focus-header" linkOrigin={{workspaceId,tabId,regionId}} />))
+  const header = container.querySelector('.agent-region-header'), paintNode = container.querySelector('[data-terminal-paint]')
   expect(header).not.toBeNull(); expect(header!.querySelector('strong')!.textContent).toBe(name)
-  await act(async () => { root.render(<Workface />); await new Promise(resolve => setTimeout(resolve, 0)) })
-  expect(toolbar().querySelector('.agent-region-header')).toBe(header)
-  expect(region().querySelectorAll('.agent-region-header')).toHaveLength(0)
-  expect(region().querySelector('[data-terminal-paint]')).toBe(paintNode)
-  expect(paint.mounts).toEqual({ [sessionIds[0]!]: 1, [sessionIds[1]!]: 1 })
+  const slot=document.createElement('div');slot.id='delayed-focus-header'
+  await act(async () => { container.append(slot); await new Promise(resolve => setTimeout(resolve, 0)) })
+  expect(slot.querySelector('.agent-region-header')).toBe(header)
+  expect(container.querySelector('.agent-region-header-home')!.children).toHaveLength(0)
+  expect(container.querySelector('[data-terminal-paint]')).toBe(paintNode)
+  expect(paint.mounts).toEqual({ [sessionIds[0]!]: 1 })
 })
 
-it('keeps a durable Region with an unobserved Session in the original connecting surface without manufacturing merged controls', async () => {
+it('keeps a durable Region identity and original connecting surface when its Session is unobserved', async () => {
   const before = useAppStore.getState()
   useAppStore.setState({ sessions: before.sessions.filter(session => session.id !== sessionIds[0]) })
   await mount()
-  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(0)
+  expect(toolbar().querySelectorAll('.agent-region-header')).toHaveLength(1)
+  expect(toolbar().querySelector('.agent-region-header__name')!.textContent).toBe(name)
+  expect(toolbar().querySelector('.agent-region-header')!.getAttribute('data-agent-session-id')).toBe(sessionIds[0])
   expect(region().querySelector('[data-agent-surface-mode="connecting"]')).not.toBeNull()
   expect(region().querySelector('[role="status"]')).not.toBeNull()
   expect(useAppStore.getState().tabs).toBe(before.tabs)
