@@ -17,10 +17,10 @@ const receipt = { verificationInputs: await verificationHashes(), passed: false,
 async function run(name, mutation, testcase) {
   const mutantPath = join(evidence, 'current-mutant.json')
   if (mutation) await writeFile(mutantPath, JSON.stringify(mutation))
-  const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/test/vitest.host-identity.config.mts', '--reporter=json', '--outputFile', join(evidence, `${name}.json`)]
+  const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', 'apps/desktop/test/vitest.host-identity.config.mts', '--configLoader', 'runner', '--no-cache', '--reporter=json', '--outputFile', join(evidence, `${name}.json`)]
   if (testcase) args.push('-t', testcase)
   const result = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, AGENTMUX_HOST_IDENTITY_MUTANT: mutation ? mutantPath : '' }, stdio: ['ignore','pipe','pipe'] })
+    const child = spawn(process.execPath, args, { cwd: root, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false', AGENTMUX_HOST_IDENTITY_MUTANT: mutation ? mutantPath : '' }, stdio: ['ignore','pipe','pipe'] })
     let log = ''; child.stdout.on('data', data => log += data); child.stderr.on('data', data => log += data)
     child.once('error', reject); child.once('exit', code => resolve({ code, log }))
   })
@@ -33,7 +33,7 @@ try {
     const source = JSON.parse(await readFile(join(evidence, 'source-proof.json'), 'utf8'))
     assert.equal(source.passed, true); assert.deepEqual(source.verificationInputs, receipt.verificationInputs)
     assert.equal(source.baseline.exitCode, 0); assert.equal(source.restored.exitCode, 0)
-    assert.ok(source.baseline.passed >= 8 && source.mutants.length === 9 && source.callers.length === 5)
+    assert.ok(source.baseline.passed >= 8 && source.mutants.length === 10 && source.callers.length === 5)
     for (const mutant of source.mutants) assert.ok(mutant.failed > 0 && mutant.exitCode !== 0)
     const review = JSON.parse(await readFile(join(evidence, 'visual-review.json'), 'utf8'))
     assert.equal(review.verdict, 'accepted'); assert.ok(review.images.length > 0)
@@ -60,7 +60,8 @@ try {
     { id: 'breadcrumb-opaque-id', target: base + 'components/TopRowChrome.tsx', before: 'hosts?.find(host => host.id === remoteHost)', after: 'undefined', testcase: 'breadcrumb consumes' },
     { id: 'board-wrong-host', target: base + 'components/WorkspaceBoard.tsx', before: 'hostIdentityProjection(hostId, hosts?.find(host => host.id === hostId))', after: "hostIdentityProjection('local', hosts?.find(host => host.id === 'local'))", testcase: 'Board presents' },
     { id: 'group-wrong-host', target: base + 'components/ProjectGroupsTree.tsx', before: 'hostIdentityProjection(member.hostId, hosts?.find(host => host.id === member.hostId))', after: "hostIdentityProjection('local', hosts?.find(host => host.id === 'local'))", testcase: 'mixed Group members' },
-    { id: 'hide-unknown-context', target: base + 'components/HostBadge.tsx', before: "if (!showLocal && host.kind === 'local') return null", after: "if (!showLocal) return null", testcase: 'suppresses only confirmed local' }
+    { id: 'hide-unknown-context', target: base + 'components/HostBadge.tsx', before: "if (context === 'Execution Host' && host.kind === 'local') return null", after: "if (context === 'Execution Host') return null", testcase: 'suppresses only confirmed local' },
+    { id: 'hide-local-host-globally', target: base + 'components/HostBadge.tsx', before: "if (context === 'Execution Host' && host.kind === 'local') return null", after: "if (host.kind === 'local') return null", testcase: 'mixed Group members' }
   ]
   for (const mutation of mutations) {
     const source = await readFile(join(root, mutation.target), 'utf8'); assert.ok(source.includes(mutation.before), mutation.id)

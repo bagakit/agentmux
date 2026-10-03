@@ -171,12 +171,15 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       return { ...(f.values.has('--kind') ? { target: { kind: id(f, '--kind'), id: id(f, '--id') } } : {}),
         ...(f.values.has('--after') ? { afterId: id(f, '--after') } : {}), ...numbers(f, { '--limit': 'limit' }) }
     }),
-  command('space.commit', '--revision N [--allow-entity-removal] < graph.json', 'Commit a spatial graph from JSON stdin using an exact revision; stale writes are refused.',
-    {'--revision':'value','--allow-entity-removal':'boolean'}, f => {
+  command('space.commit', '--revision N [--removed-project-groups FILE] [--allow-entity-removal] < graph.json', 'Commit a spatial graph from JSON stdin using an exact revision; stale writes are refused.',
+    {'--revision':'value','--removed-project-groups':'data','--allow-entity-removal':'boolean'}, async f => {
       const expectedRevision = Number(value(f,'--revision',true))
       if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) invalid('Revision must be a nonnegative integer.')
-      return {expectedRevision,...(f.booleans.has('--allow-entity-removal') ? {allowEntityRemoval:true} : {})}
-    }),
+      const removalFile = value(f, '--removed-project-groups')
+      if (removalFile === '-') invalid('Project group removal IDs require a JSON file; stdin supplies the spatial graph.')
+      return {expectedRevision,...(f.booleans.has('--allow-entity-removal') ? {allowEntityRemoval:true} : {}),
+        ...(removalFile === undefined ? {} : {removedProjectGroupIds:await readControlJsonInput(removalFile, 'Project group removal IDs')})}
+    }, 'To dissolve groups, provide a JSON array of exact group IDs in --removed-project-groups FILE and omit only those groups from graph.json. Original projects and execution remain unchanged. ' + SAVE_NOTICE),
   command('space.resolve', '--tab ID --region ID --direction left|right|up|down', 'Resolve relative positions from the original durable split tree.',
     {'--tab':'data','--region':'data','--direction':'value'}, f => ({tabId:id(f,'--tab'),regionId:id(f,'--region'),direction:value(f,'--direction',true)})),
   empty('whoami', 'Read your verified Session, Run, presentation and available capabilities.'),
