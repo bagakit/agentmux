@@ -504,16 +504,21 @@ export function ActivityView({
   useEffect(() => {
     const geometry = feedGeometry()
     if (!geometry) return
-    const last = unifiedItems.at(-1)
+    const page = nativeHistoryPage?.agentSessionId === sessionId ? nativeHistoryPage : null
+    const nativeTail = page?.items.at(-1)
+    const observedTail = unifiedItems.at(-1)
+    // The native source owns the reading tail. Inspect only its final record, never the whole page.
+    const nativeLength = nativeTail?.contentParts.reduce((length, part) => length +
+      Object.values(part).reduce<number>((size, value) => size + (typeof value === 'string' ? value.length : 0), 0), 0)
     const decision = onContentChange(followRef.current, {
-      itemCount: unifiedItems.length,
-      lastItemId: last?.id ?? null,
-      lastItemLength: last?.content?.length ?? 0
+      itemCount: unifiedItems.length + (page?.items.length ?? 0),
+      lastItemId: nativeTail ? JSON.stringify([page!.source.providerId, page!.source.nativeSessionId, nativeTail.id]) : observedTail?.id ?? null,
+      lastItemLength: nativeLength ?? observedTail?.content?.length ?? 0
     }, geometry)
     followRef.current = decision.state
     if (decision.scrollToBottom) pinToBottom()
     setShowJump(shouldShowJumpToLatest(followRef.current))
-  }, [unifiedItems, feedEl])
+  }, [unifiedItems, nativeHistoryPage, sessionId, feedEl])
 
   useEffect(() => {
     if (!revealRequest || !feedEl) return
@@ -729,22 +734,6 @@ export function ActivityView({
           ) : null
         }
       /> : null}
-      {nativeHistoryPage ? <ConversationNativeThread
-        page={nativeHistoryPage}
-        {...(renderMessageActions ? { renderMessageActions } : {})}
-        renderProcess={(props) => <NativeProcessObservation {...props} />}
-        sessionId={sessionId}
-        {...(executionHostId ? { executionHostId } : {})}
-        locatedMessageKey={locatedMessageKey}
-        {...(onContinue ? { onContinue } : {})}
-        workspaceRoot={workspaceRoot}
-        homeDir={homeDir}
-        {...(describeSpeaker ? { describeSpeaker } : {})}
-        {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-        {...(readPastedImage ? { readPastedImage } : {})}
-        {...(openHttpLink ? { openHttpLink } : {})}
-        {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-      /> : null}
       {placed.length > 0 ? <div className="activity-feed__observation-source">Submitted messages &amp; Hook observations · Separate recorded source</div> : null}
 
       <div className="activity-log" ref={logRef}>
@@ -822,6 +811,22 @@ export function ActivityView({
           )
         })}
       </div>
+      {nativeHistoryPage ? <ConversationNativeThread
+        page={nativeHistoryPage}
+        {...(renderMessageActions ? { renderMessageActions } : {})}
+        renderProcess={(props) => <NativeProcessObservation {...props} />}
+        sessionId={sessionId}
+        {...(executionHostId ? { executionHostId } : {})}
+        locatedMessageKey={locatedMessageKey}
+        {...(onContinue ? { onContinue } : {})}
+        workspaceRoot={workspaceRoot}
+        homeDir={homeDir}
+        {...(describeSpeaker ? { describeSpeaker } : {})}
+        {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
+        {...(readPastedImage ? { readPastedImage } : {})}
+        {...(openHttpLink ? { openHttpLink } : {})}
+        {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
+      /> : null}
       {showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
       {showJump ? (
         <button

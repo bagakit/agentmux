@@ -35,7 +35,7 @@ function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRec
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
 export function NativeProcessObservation({ id, items, renderRecord }: ConversationProcessProps) {
-  const [expanded, setExpanded] = useState(true)
+  const [expanded, setExpanded] = useState(false)
   const states = items.map(recordedStatus)
   const status = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
