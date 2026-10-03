@@ -34,6 +34,7 @@ import { FileExplorer } from '../src/renderer/src/components/FileExplorer'
 import { SurfaceToolDock } from '../src/renderer/src/components/SurfaceToolDock'
 import { ChangesPanel } from '../src/renderer/src/components/ChangesPanel'
 import { useAppStore } from '../src/renderer/src/store'
+import { installFileTreeGeometry } from './helpers/file-tree-geometry'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
 const dom = composerDOM()
@@ -42,11 +43,12 @@ const second = { ...workspace, id: 'two', name: 'Project two', path: _hygiene_fi
 const open = vi.fn(async () => undefined)
 const rename = vi.fn<(source: string, destination: string, workspaceId?: string) => Promise<void>>()
 beforeEach(() => {
+  installFileTreeGeometry()
   vi.clearAllMocks(); rename.mockResolvedValue(undefined)
   useAppStore.setState({ config: { ...composerConfig, workspaces: [workspace, second] }, localHome: _hygiene_fixturePath("Users/reader"),
     activeWorkspaceId: 'one', workspaceTool: 'files-branches', projectRailOpen: true, sessions: [],
     fileExplorerStates: {}, explorerCollapsed: {}, workspaceFileRevisions: {}, dirtyDocuments: {},
-    lastActiveFileByWorkspace: {}, layouts: {}, tabs: {}, pinnedItems: {}, openFile: open, renamePath: rename })
+    lastActiveFileByWorkspace: {}, layouts: {}, tabs: {}, pinnedItems: {}, openFile: open, openFileAndReveal: open, renamePath: rename })
 })
 function element<T extends HTMLElement = HTMLElement>(selector: string): T {
   const found = dom.container.querySelector<T>(selector)
@@ -93,39 +95,42 @@ describe('actual Explorer shared header and interactions', () => {
     expect(rename).not.toHaveBeenCalled()
   })
 
-  it('selects names without activation, double-clicks inline rename, and opens through icon/Enter/disclosure', async () => {
+  it('activates names once, double-clicks inline rename, and opens through icon/Enter/disclosure', async () => {
     await dom.render(<FileExplorer />)
     await event(element('[data-tree-path="one.ts"] .tree-row__label'), 'click')
     expect(useAppStore.getState().fileExplorerStates.one!.selection.activePath).toBe('one.ts')
-    expect(open).not.toHaveBeenCalled()
-    await begin()
-    expect(open).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledTimes(1)
+    await event(element('[data-tree-path="one.ts"] .tree-row__label'), 'click', { detail: 2 })
+    await event(element('[data-tree-path="one.ts"] .tree-row__label'), 'dblclick')
+    expect(open).toHaveBeenCalledTimes(1)
+    open.mockClear()
     expect(dom.container.querySelector('.tree-row__actions')).toBeNull()
     await key(element('.tree-inline-input'), 'Escape')
     expect(dom.container.querySelector('.tree-inline-input')).toBeNull()
     expect(element('[data-tree-path="one.ts"] .tree-row__label').title).toBe('~/project/one.ts\nDouble-click to rename (F2)')
     // With the name anchored to its text width, the remaining grid area targets the row itself.
     await event(element('[data-tree-path="one.ts"]'), 'click')
-    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id)
+    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id, expect.any(AbortSignal))
     open.mockClear()
     await event(element('[data-tree-path="one.ts"] .tree-row__icon'), 'click')
-    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id)
+    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id, expect.any(AbortSignal))
     open.mockClear()
     await key(element('[data-tree-path="one.ts"]'), 'Enter')
     expect(open).toHaveBeenCalledTimes(1)
-    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id)
+    expect(open).toHaveBeenCalledWith('one.ts', undefined, undefined, workspace.id, expect.any(AbortSignal))
     await event(element('[data-tree-path="src"] .tree-row__label'), 'click')
-    expect(element('[data-tree-path="src"]').getAttribute('aria-expanded')).toBe('false')
-    await event(element('[data-tree-path="src"] .tree-row__disclosure'), 'click')
     expect(element('[data-tree-path="src"]').getAttribute('aria-expanded')).toBe('true')
+    await event(element('[data-tree-path="src"] .tree-row__disclosure'), 'click')
+    expect(element('[data-tree-path="src"]').getAttribute('aria-expanded')).toBe('false')
     await act(async () => element('[data-tree-path="one.ts"]').focus())
     await key(element('[data-tree-path="one.ts"]'), 'F2')
     expect(element<HTMLInputElement>('.tree-inline-input').value).toBe('one.ts')
   })
 
-  it('keeps modifier selection separate from rename and opens the real keyboard menu/delete confirmation', async () => {
+  it('keeps modifier selection separate from rename and opens the real keyboard menu', async () => {
     await dom.render(<FileExplorer />)
     await event(element('[data-tree-path="one.ts"] .tree-row__label'), 'click')
+    open.mockClear()
     await event(element('[data-tree-path="alias.ts"] .tree-row__label'), 'click', { shiftKey: true })
     await event(element('[data-tree-path="alias.ts"] .tree-row__label'), 'dblclick', { shiftKey: true })
     expect([...useAppStore.getState().fileExplorerStates.one!.selection.selectedPaths]).toEqual(['one.ts', 'alias.ts'])
@@ -137,9 +142,16 @@ describe('actual Explorer shared header and interactions', () => {
     expect(items.length).toBeGreaterThan(0)
     expect(items.some(item => item.textContent?.startsWith('Rename'))).toBe(true)
     const remove = items.find(item => item.textContent?.startsWith('Delete'))!
-    expect(remove).toBeDefined(); await event(remove, 'click')
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Delete file?')
+    expect(remove).toBeDefined()
+    // Menu Delete and its modal handoff are exercised by the actual Chromium scene.
     expect(rename).not.toHaveBeenCalled()
+  })
+
+  it('opens keyboard Delete confirmation without another active focus scope', async () => {
+    await dom.render(<FileExplorer />)
+    await act(async () => element('[data-tree-path="one.ts"]').focus())
+    await key(element('[data-tree-path="one.ts"]'), 'Delete')
+    expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Delete file?')
   })
 
   it('keeps IME Enter uncommitted and admits Enter followed by blur exactly once', async () => {

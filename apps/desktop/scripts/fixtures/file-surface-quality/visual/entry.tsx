@@ -18,10 +18,18 @@ api.config.save = async (config) => structuredClone(config)
 api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [], environmentWarning: null })
 await useAppStore.getState().initialize()
 const restored = useAppStore.getState()
-const beforeFixture = boot.phase === 'restart' ? { tabs: structuredClone(restored.tabs), layouts: structuredClone(restored.layouts),
+const beforeFixture = boot.phase.endsWith('restart') ? { tabs: structuredClone(restored.tabs), layouts: structuredClone(restored.layouts),
   activeWorkspaceId: restored.activeWorkspaceId, documents: structuredClone(restored.documents), dirtyDocuments: structuredClone(restored.dirtyDocuments) } : null
 const root = createRoot(document.getElementById('root')!)
-function Shell() { return <><aside id="fixture-tree"><FileExplorer /></aside><div id="fixture-workbench"><WorkspaceWorkbench workspaceId={workspaceId} /></div><WindowOverlayHost /></> }
+const activationScene = boot.phase.startsWith('activation')
+if (activationScene && boot.phase === 'activation') useAppStore.setState({ mainSurface: 'agents' })
+function Shell() {
+  const mainSurface = useAppStore(state => state.mainSurface)
+  const visible = !activationScene || mainSurface === 'workbench'
+  return <><aside id="fixture-tree"><FileExplorer /></aside>
+    <div id="fixture-workbench" style={visible ? undefined : { display: 'none' }}><WorkspaceWorkbench workspaceId={workspaceId} visible={visible} /></div>
+    {activationScene && !visible ? <div>Private Focus selection before file navigation</div> : null}<WindowOverlayHost /></>
+}
 flushSync(() => root.render(<Shell />))
 const probe = {
   workspaceId, beforeFixture,
@@ -63,6 +71,7 @@ const probe = {
     const state = useAppStore.getState()
     return { tabs: state.tabs, layouts: state.layouts, activeWorkspaceId: state.activeWorkspaceId,
       documents: state.documents, dirtyDocuments: state.dirtyDocuments, issues: state.documentIssues,
+      mainSurface: state.mainSurface, selection: state.workbenchSpaceSelection, caret: state.regionCaretFocus,
       persisted: JSON.parse(localStorage.getItem('agentmux-workbench-v1') ?? 'null') }
   },
   geometry(path: string) {
