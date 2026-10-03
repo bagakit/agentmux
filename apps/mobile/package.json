@@ -16,6 +16,7 @@
   "dependencies": {
     "@agentmux/core": "workspace:*",
     "@agentmux/client-ui": "workspace:*",
+    "@agentmux/demand": "workspace:*",
     "@capacitor/core": "8.5.2",
     "@capacitor/ios": "8.5.2",
     "@capacitor/android": "8.5.2",

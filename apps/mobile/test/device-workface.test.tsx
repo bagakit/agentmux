@@ -39,7 +39,7 @@ describe('one durable mobile workface owner', () => {
     expect(restored.issue).toBeNull()
     expect(restored.record).toEqual({ ...original(), panel: 'terminal' })
     expect(createLocalDrafts(() => disk).attempts.get(key)).toEqual({ operationId: 'intent-original', runId: 'run-original',
-      draft: '原草稿', phase: 'unknown', message: '重启后的原输入回执未知；草稿保留，不会重新投递，请刷新核对原会话。' })
+      draft: '原草稿', phase: 'unknown', message: '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。' })
     expect(disk.setItem.mock.calls.map(call => call[0])).toEqual([DEVICE_WORKFACE_KEY, DEVICE_WORKFACE_KEY, DEVICE_WORKFACE_KEY])
   })
   it('retains durable bytes on a failed write and exports the current temporary workface for preservation', () => {
@@ -183,7 +183,7 @@ describe('one durable mobile workface owner', () => {
     expect(next.canSave).toBe(false); expect(next.notice).toContain('未确认输入仍保留')
     expect(next.drafts.get(key)).toBe('临时原草稿')
     expect(next.attempts.get(key)).toEqual({ operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown',
-      message: '重启后的原输入回执未知；草稿保留，不会重新投递，请刷新核对原会话。' })
+      message: '重启后的原输入回执未知；草稿保留，不会自动重投，请刷新核对原会话。' })
     next.drafts.set(key, '继续编辑的草稿'); next.save()
     expect(getDeviceWorkface(access).snapshot().record.conversation.attempts).toEqual([[key, {
       operationId: 'original-unknown', runId: 'original-run', draft: '临时原草稿', phase: 'unknown' }]])

@@ -395,6 +395,8 @@ export type AgentMuxControlDemandListRequest = RequestBase & { operation: 'deman
 export type AgentMuxControlDemandShowRequest = RequestBase & { operation: 'demand.show'; demandId: string }
 export type AgentMuxControlDemandCreateRequest = RequestBase & {
   operation: 'demand.create'
+  /** Caller-held original identity allows reading an uncertain save without creating again. */
+  demandId?: string
   title: string
   description?: string
   projectId?: string
@@ -409,6 +411,9 @@ export type AgentMuxControlDemandUpdateRequest = RequestBase & {
   patch: Partial<Pick<AgentMuxDemand, 'title' | 'description' | 'status' | 'priority' | 'projectId' | 'projectName' | 'assigneeExecutorId' | 'tags' | 'plannedStartAt' | 'targetAt' | 'parentDemandId' | 'phaseIndex' | 'activityLog' | 'sessionIds'>> & { alignment?: DemandAlignmentProposal; grounding?: DemandGroundingProposal }
   decision?: AgentMuxDemandDecision
 }
+export type AgentMuxControlGoalDiscussRequest = RequestBase & { operation: 'demand.discuss'; demandId: string; mode: 'open' | 'grill' | 'grounding' }
+export type AgentMuxControlGoalConfirmRequest = RequestBase & { operation: 'demand.confirm'; demandId: string; expectedRevision: number }
+export type AgentMuxControlGoalAcceptRequest = RequestBase & { operation: 'demand.accept'; demandId: string; expectedAlignmentRevision: number; expectedSubmissionId: string; acceptGaps: boolean }
 export type AgentMuxControlDemandAssignRequest = RequestBase & {
   operation: 'demand.assign'
   demandId: string
@@ -603,6 +608,9 @@ export type AgentMuxControlRequest =
   | AgentMuxControlDemandShowRequest
   | AgentMuxControlDemandCreateRequest
   | AgentMuxControlDemandUpdateRequest
+  | AgentMuxControlGoalDiscussRequest
+  | AgentMuxControlGoalConfirmRequest
+  | AgentMuxControlGoalAcceptRequest
   | AgentMuxControlDemandAssignRequest
   | AgentMuxControlDemandStartRequest
   | AgentMuxControlDemandContinuationActionRequest
@@ -706,6 +714,9 @@ export type AgentMuxControlResult =
   | { operation: 'demand.show'; demand: AgentMuxDemand | null; goalContinuations: ContinuousProgressLoop[] }
   | { operation: 'demand.create'; demand: AgentMuxDemand; receipt: { demandId: string; createdAt: number } }
   | { operation: 'demand.update'; demand: AgentMuxDemand; receipt: { demandId: string; updatedAt: number } }
+  | { operation: 'demand.discuss'; demand: AgentMuxDemand; receipt: { demandId: string; requestId: string; mode: 'open' | 'grill' | 'grounding'; tabId: string; agentSessionId: string | null } }
+  | { operation: 'demand.confirm'; demand: AgentMuxDemand; receipt: { demandId: string; confirmedRevision: number; confirmedAt: number } }
+  | { operation: 'demand.accept'; demand: AgentMuxDemand; receipt: { demandId: string; alignmentRevision: number; submissionId: string; acceptedAt: number; acceptedWithGaps: boolean } }
   | { operation: 'demand.assign'; demand: AgentMuxDemand; receipt: { demandId: string; assignedAt: number; startRequested: boolean } }
   | { operation: 'demand.start'; demand: AgentMuxDemand; continuation?: ContinuousProgressLoop; receipt: { demandId: string; startedAt: number; sessionId: string | null } }
   | { operation: 'demand.continuation-action'; demandId: string; continuation: ContinuousProgressLoop; diskDurability: 'confirmed' }
@@ -997,6 +1008,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   , 'demand.show': 'short'
   , 'demand.create': 'short'
   , 'demand.update': 'short'
+  , 'demand.discuss': 'long'
+  , 'demand.confirm': 'short'
+  , 'demand.accept': 'short'
   , 'demand.assign': 'short'
   , 'demand.start': 'long'
   , 'demand.continuation-action': 'long'

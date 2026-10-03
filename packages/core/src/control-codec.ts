@@ -458,6 +458,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     const sessionIds = source.sessionIds === undefined ? undefined : arrayOfIds(source.sessionIds, 'Demand Session ids')
     return {
       schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, title,
+      ...(source.demandId === undefined ? {} : { demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }),
       ...(source.description === undefined ? {} : { description: text(source.description, 'Demand description') }),
       ...(source.projectId === undefined ? {} : { projectId: spaceControlId(source.projectId, 'Project id is invalid.', 'INVALID_CONTROL_REQUEST', true) }),
       ...(source.priority === undefined ? {} : { priority: demandPriority(source.priority) }),
@@ -492,6 +493,18 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (patchSource.phaseIndex !== undefined) patch.phaseIndex = patchSource.phaseIndex === null ? null : finiteNumber(patchSource.phaseIndex, 'Demand phase index is invalid.')
     if (patchSource.sessionIds !== undefined) patch.sessionIds = arrayOfIds(patchSource.sessionIds, 'Demand Session ids')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation, demandId: id(source.demandId, 'Demand id is invalid.', 'INVALID_CONTROL_REQUEST'), patch, ...(source.decision === undefined ? {} : { decision: demandDecision(source.decision) }) }
+  }
+  if (source.operation === 'demand.discuss' || source.operation === 'demand.confirm' || source.operation === 'demand.accept') {
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, demandId: id(source.demandId, 'Goal id is invalid.', 'INVALID_CONTROL_REQUEST') }
+    if (source.operation === 'demand.discuss') {
+      if (!['open', 'grill', 'grounding'].includes(source.mode as string)) throw new AgentMuxError('Goal discussion mode is invalid.', 'INVALID_CONTROL_REQUEST')
+      return { ...base, operation: source.operation, mode: source.mode as 'open' | 'grill' | 'grounding' }
+    }
+    const revision = source.operation === 'demand.confirm' ? source.expectedRevision : source.expectedAlignmentRevision
+    if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('The exact positive Goal alignment revision is required.', 'INVALID_CONTROL_REQUEST')
+    if (source.operation === 'demand.confirm') return { ...base, operation: source.operation, expectedRevision: revision as number }
+    if (typeof source.acceptGaps !== 'boolean') throw new AgentMuxError('Result gaps require an explicit acceptance choice.', 'INVALID_CONTROL_REQUEST')
+    return { ...base, operation: source.operation, expectedAlignmentRevision: revision as number, expectedSubmissionId: id(source.expectedSubmissionId, 'Goal submission id is invalid.', 'INVALID_CONTROL_REQUEST'), acceptGaps: source.acceptGaps }
   }
   if (source.operation === 'demand.assign') {
     if (typeof source.start !== 'boolean') throw new AgentMuxError('Demand assignment start flag is invalid.', 'INVALID_CONTROL_REQUEST')
@@ -1176,6 +1189,19 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const demand = parseDemand(result.demand)
     const receipt = object(result.receipt, 'Control demand receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, ...(operation === 'demand.start' && result.continuation !== undefined ? { continuation: parseGoalContinuationLoop(result.continuation) } : {}), receipt: { demandId: id(receipt.demandId, 'Control demand receipt id is invalid.', 'CONTROL_PROTOCOL_ERROR'), ...(operation === 'demand.link-session' ? { sessionId: id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.link-project' ? { projectId: spaceControlId(receipt.projectId, 'Control demand project id is invalid.', 'CONTROL_PROTOCOL_ERROR', true) } : {}), ...(operation === 'demand.create' ? { createdAt: finiteNumber(receipt.createdAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.update' ? { updatedAt: finiteNumber(receipt.updatedAt, 'Control demand receipt timestamp is invalid.') } : {}), ...(operation === 'demand.assign' ? { assignedAt: finiteNumber(receipt.assignedAt, 'Control demand receipt timestamp is invalid.'), startRequested: receipt.startRequested === true } : {}), ...(operation === 'demand.start' ? { startedAt: finiteNumber(receipt.startedAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.handoff' ? { handedOffAt: finiteNumber(receipt.handedOffAt, 'Control demand receipt timestamp is invalid.'), sessionId: receipt.sessionId === null ? null : id(receipt.sessionId, 'Control demand Session id is invalid.', 'CONTROL_PROTOCOL_ERROR') } : {}), ...(operation === 'demand.delete' ? { deletedAt: finiteNumber(receipt.deletedAt, 'Control demand receipt timestamp is invalid.') } : {}) } } } as AgentMuxControlSuccessReceipt
+  }
+  if (operation === 'demand.discuss' || operation === 'demand.confirm' || operation === 'demand.accept') {
+    const demand = parseDemand(result.demand), r = object(result.receipt, 'Goal receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    const demandId = id(r.demandId, 'Goal id is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (operation === 'demand.discuss') {
+      if (!['open', 'grill', 'grounding'].includes(r.mode as string)) throw new AgentMuxError('Goal discussion receipt mode is invalid.', 'CONTROL_PROTOCOL_ERROR')
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, requestId: id(r.requestId, 'Goal operation id is invalid.', 'CONTROL_PROTOCOL_ERROR'), mode: r.mode as 'open' | 'grill' | 'grounding', tabId: id(r.tabId, 'Goal Tab is invalid.', 'CONTROL_PROTOCOL_ERROR'), agentSessionId: r.agentSessionId === null ? null : id(r.agentSessionId, 'Goal Session is invalid.', 'CONTROL_PROTOCOL_ERROR') } } }
+    }
+    const revision = operation === 'demand.confirm' ? r.confirmedRevision : r.alignmentRevision
+    if (!Number.isSafeInteger(revision) || (revision as number) < 1) throw new AgentMuxError('Goal receipt revision is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    if (operation === 'demand.confirm') return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, confirmedRevision: revision as number, confirmedAt: finiteNumber(r.confirmedAt, 'Goal confirmation time is invalid.') } } }
+    if (typeof r.acceptedWithGaps !== 'boolean') throw new AgentMuxError('Goal gap receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { demand, receipt: { demandId, alignmentRevision: revision as number, submissionId: id(r.submissionId, 'Goal submission is invalid.', 'CONTROL_PROTOCOL_ERROR'), acceptedAt: finiteNumber(r.acceptedAt, 'Goal acceptance time is invalid.'), acceptedWithGaps: r.acceptedWithGaps } } }
   }
   if (operation === 'demand.continuation-action') {
     if (result.diskDurability !== 'confirmed') throw new AgentMuxError('Continuation mutation durability is unconfirmed.', 'CONTROL_PROTOCOL_ERROR')

@@ -40,6 +40,7 @@ export const AGENTMUX_RPC_CONTROL_METHODS = {
   'browser.task.batch': 'browser.task.batch', 'browser.task.batch-stop': 'browser.task.batch-stop',
   'goal.ls': 'demand.list', 'goal.inspect': 'demand.show', 'goal.create': 'demand.create',
   'goal.update': 'demand.update', 'goal.delete': 'demand.delete', 'goal.assign': 'demand.assign',
+  'goal.discuss': 'demand.discuss', 'goal.confirm': 'demand.confirm', 'goal.accept': 'demand.accept',
   'goal.start': 'demand.start', 'goal.continuation-action': 'demand.continuation-action', 'goal.handoff': 'demand.handoff',
   'goal.link-session': 'demand.link-session', 'goal.link-project': 'demand.link-project',
   'goal.decisions': 'demand.decision-log', 'goal.focus': 'focus',
@@ -82,12 +83,12 @@ type GoalKeys<T> = T extends readonly (infer E)[] ? GoalKeys<E>[] : T extends ob
     K extends 'receipt' | 'goal' | 'demand' | 'goals' | 'demands' | 'decisions' | 'patch' ? GoalKeys<T[K]> : T[K]
 } : T
 type OperationKeys<T> = T extends object ? {
-  [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' ? OperationKeys<T[K]> : T[K]
+  [K in keyof T as K extends 'requestId' ? 'operationId' : K]: K extends 'request' | 'report' | 'binding' | 'receipt' ? OperationKeys<T[K]> : T[K]
 } : T
 type ControlParams<M extends ControlMethod> = M extends 'space.inspect'
   ? { target: import('./space-control.js').AgentMuxSpaceSelector | { operationId: string }; presentation?: boolean }
   : M extends 'goal.ls' ? AgentMuxRpcGoalFilters
-  : M extends 'goal.create' ? Omit<BusinessParams<M>, 'decision'> & {
+  : M extends 'goal.create' ? Omit<GoalKeys<BusinessParams<M>>, 'decision'> & {
       risk?: import('./control.js').AgentMuxDemandDecision['risk'];
       confirmation?: import('./control.js').AgentMuxDemandDecision['confirmation']; wikiVersion?: string;
       decision?: Omit<import('./control.js').AgentMuxDemandDecision, 'recordedAt' | 'sourceSessionId'> }

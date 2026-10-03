@@ -201,6 +201,82 @@ it('invokes the actual registered Main Demand handlers against the unique filesy
 
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
+import { createWorkspaceLayout, addTabPlacement } from '@agentmux/layout'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
+import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
+const human = { principal: { kind: 'device' as const, id: 'approved-phone' } }
+function goalService() { return new AgentMuxRpcService({ execute: request => useAppStore.getState().executeControl(request), coreClients: () => [] }) }
+
+it('public creation preserves the caller-held ID and permits unassigned without weakening risk or Project validation', async () => {
+  vi.mocked(api.demands.create).mockImplementation(input => owner.create(input))
+  const service = goalService(), input = { goalId: 'held-original-id', title: 'Untitled goal', description: '', status: 'backlog' as const, risk: 'low' as const, confirmation: 'user' as const, operationId: 'create-original' }
+  const result = await service.call('goal.create', input, human)
+  expect(result).toMatchObject({ goal: { id: input.goalId, projectId: null, projectName: null, description: '', sessionIds: [] }, receipt: { goalId: input.goalId } })
+  expect((await owner.get(input.goalId))!.alignment).toBeUndefined(); expect((await owner.get(input.goalId))!.grounding).toBeUndefined()
+  await expect(service.call('goal.create', { ...input, title: 'Overwrite original?' }, human)).rejects.toThrow(/exists/)
+  expect((await owner.list()).map(goal => goal.id)).toEqual([input.goalId]); expect((await owner.get(input.goalId))!.title).toBe('Untitled goal')
+  expect((await service.call('goal.inspect', { goalId: input.goalId }, human)).goal?.id).toBe(input.goalId)
+  for (const changes of [{ risk: 'unknown' }, { confirmation: 'pending' }, { projectId: 'unavailable-project' }, { projectId: '' }, { projectId: null }]) {
+    await expect(service.call('goal.create', { ...input, goalId: 'must-not-save', ...changes } as any, human)).rejects.toThrow()
+  }
+  expect(await owner.get('must-not-save')).toBeNull()
+})
+
+it('public human confirmation and result acceptance use the original owner CAS and retain report gaps', async () => {
+  await useAppStore.getState().createDemand({ title: 'Actual CAS goal' })
+  await useAppStore.getState().updateDemand('goal', { alignment: proposal })
+  const service = goalService()
+  const confirmed = await service.call('goal.confirm', { goalId: 'goal', expectedRevision: 1, operationId: 'human-confirm' }, human)
+  expect(confirmed).toMatchObject({ goal: { id: 'goal', alignment: { revision: 1, confirmedAt: expect.any(Number) } }, receipt: { goalId: 'goal', confirmedRevision: 1, confirmedAt: confirmed.goal.alignment!.confirmedAt } })
+  await useAppStore.getState().updateDemand('goal', { grounding: { alignmentRevision: 1, summary: 'Known gap', checks: [{ criterionId: 'tabs', outcome: 'gap', evidence: ['verification.log'], note: 'One tab differs' }] } })
+  const submission = useAppStore.getState().demands.goal.grounding!.submissionId
+  await expect(service.call('goal.accept', { goalId: 'goal', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps: false }, human)).rejects.toThrow()
+  expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
+  const accepted = await service.call('goal.accept', { goalId: 'goal', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps: true }, human)
+  expect(accepted.receipt).toMatchObject({ goalId: 'goal', alignmentRevision: 1, submissionId: submission, acceptedAt: accepted.goal.grounding!.acceptedAt, acceptedWithGaps: true })
+  expect((await openDemandStore({ root }).get('goal'))!.grounding!.checks[0].outcome).toBe('gap')
+  await owner.update('goal', { alignment: { ...proposal, summary: 'Changed externally' } })
+  await expect(service.call('goal.confirm', { goalId: 'goal', expectedRevision: 1 }, human)).rejects.toThrow(/changed/)
+  await expect(service.call('goal.accept', { goalId: 'goal', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps: true }, human)).rejects.toThrow(/changed|current/)
+  expect((await owner.get('goal'))!.alignment!.confirmedAt).toBeNull()
+})
+
+it('rejects a replaced result submission through the original public acceptance CAS', async () => {
+  await useAppStore.getState().createDemand({ title: 'Result CAS' })
+  await useAppStore.getState().updateDemand('goal', { alignment: proposal })
+  const service = goalService(); await service.call('goal.confirm', { goalId: 'goal', expectedRevision: 1 }, human)
+  const report = { alignmentRevision: 1, summary: 'First result', checks: [{ criterionId: 'tabs', outcome: 'met' as const, evidence: ['actual.log'], note: '' }] }
+  await useAppStore.getState().updateDemand('goal', { grounding: report })
+  const previous = useAppStore.getState().demands.goal.grounding!.submissionId
+  await owner.update('goal', { grounding: { ...report, summary: 'Another result' } })
+  await expect(service.call('goal.accept', { goalId: 'goal', expectedAlignmentRevision: 1, expectedSubmissionId: previous, acceptGaps: false }, human)).rejects.toThrow(/changed/)
+  expect((await owner.get('goal'))!.grounding!.acceptedAt).toBeNull()
+})
+
+it('public discussion uses the original dedicated main Mote tab and original durable input queue without acknowledging', async () => {
+  await useAppStore.getState().createDemand({ title: 'Discuss original' })
+  const scratch = { id: SCRATCH_WORKSPACE_ID, name: 'Main Mote', hostId: 'local', path: root, kind: 'scratch' as const }
+  const tab = { ...createWorkbenchTab('dedicated-goal-tab', { kind: 'agent', phase: 'attached', regionId: 'goal-region', workspaceId: scratch.id, sessionId: 'goal-session' }), topicId: PMO_TEAMS_TOPIC_ID }
+  const layout = createWorkspaceLayout('main-group')
+  useAppStore.setState({ config: { ...initial.config, workspaces: [scratch], executors: {} } as any, tabs: { [tab.id]: tab }, layouts: { [scratch.id]: addTabPlacement(layout, layout.activeGroupId, tab.id)! }, demandPmoTabIds: { goal: tab.id }, agentSteerQueues: {}, runtimeEndpointWarnings: [{ hostId: 'local', availability: 'unavailable' }] as any, sessions: [{ id: 'goal-session', kind: 'agent', hostId: 'local', executorId: 'original-bot', providerId: 'codex', workspacePath: root, processState: 'running', capabilities: {}, status: { state: 'working', observedAt: 1 }, control: { kind: 'agent', hostId: 'local', agentSessionId: 'goal-session', run: { runId: 'original-healthy-run' } } }] as any })
+  vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
+  vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
+  vi.spyOn(api.scratch, 'readTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID, title: 'Main Mote', summary: '', directoryPath: 'main-mote', topicPath: 'main-mote/Topic.md', collaborators: [], soul: { path: 'SOUL.md', content: '', version: '1' } } as never)
+  const auth = await rpcOwnerFixture()
+  try {
+    const service = new AgentMuxRpcService({ execute: request => useAppStore.getState().executeControl(request), coreClients: auth.coreClients })
+    const result = await service.call('goal.discuss', { goalId: 'goal', mode: 'grill', operationId: 'discussion-operation' }, { caller: auth.credentials })
+    expect(result.receipt).toEqual({ goalId: 'goal', mode: 'grill', operationId: 'discussion-operation', tabId: tab.id, agentSessionId: 'goal-session' })
+    const queue = useAppStore.getState().agentSteerQueues['goal-session']!
+    expect(queue).toHaveLength(1); expect(queue[0].text).toBe('Clarify goal'); expect(queue[0].agentMuxNote).toContain('existing Goal goal')
+    expect(useAppStore.persist.getOptions().partialize!(useAppStore.getState()).agentSteerQueues!['goal-session']).toEqual(queue)
+    await service.call('goal.discuss', { goalId: 'goal', mode: 'open' }, { caller: auth.credentials })
+    expect(useAppStore.getState().agentSteerQueues['goal-session']).toHaveLength(1)
+    expect(useAppStore.getState().demandPmoTabIds).toEqual({ goal: tab.id })
+    expect((await owner.get('goal'))!.alignment).toBeUndefined(); expect((await owner.get('goal'))!.grounding).toBeUndefined()
+  } finally { await auth.close() }
+})
 it('public goal.create uses the existing renderer decision and actual durable owner', async () => {
   const workspace = { id: 'original-workspace', hostId: 'local', path: root, name: '原项目', kind: 'folder' as const }
   useAppStore.setState({ config: { ...initial.config, workspaces: [workspace] } as any, sessions: [] })
@@ -210,4 +286,20 @@ it('public goal.create uses the existing renderer decision and actual durable ow
   const saved = await openDemandStore({ root }).get(result.goal.id)
   expect(saved).toMatchObject({ title: '手机新目标', description: '原意😀' }); expect(saved!.decisions).toHaveLength(1)
   expect(saved!.alignment).toBeUndefined(); expect(saved!.grounding).toBeUndefined()
+})
+
+
+it('native public Goal handlers persist caller identity and real human acknowledgement before returning', async () => {
+  vi.mocked(api.demands.create).mockImplementationOnce(input => owner.create(input))
+  const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: 'original-native-operation' }
+  const created = await useAppStore.getState().executeControl({ ...base, operation: 'demand.create', demandId: 'held-native-id', title: 'Untitled goal', decision: { ...decision, selectedProjectId: null, candidates: [] } })
+  expect(await owner.get('held-native-id')).not.toBeNull()
+  expect(created).toMatchObject({ demand: { id: 'held-native-id' }, receipt: { demandId: 'held-native-id' } })
+  await useAppStore.getState().updateDemand('held-native-id', { alignment: proposal })
+  await useAppStore.getState().executeControl({ ...base, operation: 'demand.confirm', demandId: 'held-native-id', expectedRevision: 1 })
+  expect(Number((await owner.get('held-native-id'))!.alignment!.confirmedAt)).toBeGreaterThan(0)
+  await useAppStore.getState().updateDemand('held-native-id', { grounding: { alignmentRevision: 1, summary: 'Original result', checks: [{ criterionId: 'tabs', outcome: 'met', evidence: ['actual.log'], note: '' }] } })
+  const submission = (await owner.get('held-native-id'))!.grounding!.submissionId
+  await useAppStore.getState().executeControl({ ...base, operation: 'demand.accept', demandId: 'held-native-id', expectedAlignmentRevision: 1, expectedSubmissionId: submission, acceptGaps: false })
+  expect(Number((await owner.get('held-native-id'))!.grounding!.acceptedAt)).toBeGreaterThan(0)
 })

@@ -1,12 +1,14 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxRpcGoal, AgentMuxRpcResult, AgentMuxRpcParams } from '@agentmux/core'
 import { AGENTMUX_DEMAND_PRIORITIES, AGENTMUX_DEMAND_STATUSES } from '@agentmux/core/control'
 import './goals.css'
-import { MobileGoalCreate } from './MobileGoalCreate'
+import { MobileGoalCreate, type GoalDiscussionReceipt } from './MobileGoalCreate'
+import { MobileZoneWorkface } from '../navigation/MobileZoneWorkface'
 import { MobileGoalActions } from './MobileGoalActions'
 import { MobileGoalLinks } from './MobileGoalLinks'
 import { MobileGoalSessions } from './MobileGoalSessions'
+import { MobileGoalAlignment } from './MobileGoalAlignment'
 import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
 
 export type MobileGoalsSurfaceProps = {
@@ -23,7 +25,13 @@ type Decisions = AgentMuxRpcResult<'goal.decisions'>['decisions']
 /** The original Goal owner supplies all facts and validates all mutations. */
 export function MobileGoalsSurface({ client, connected, visible, openSession }: MobileGoalsSurfaceProps) {
   const [goals, setGoals] = useState<AgentMuxRpcGoal[] | null>(null)
-  const [selected, select] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string | null>(null)
+  const selectedRef = useRef(selected)
+  const navigation = useRef({ visible, client, epoch: 0 })
+  if (navigation.current.visible !== visible || navigation.current.client !== client) { navigation.current.visible = visible; navigation.current.client = client; navigation.current.epoch += 1 }
+  const select = (id: string | null) => { navigation.current.epoch += 1; selectedRef.current = id; setSelected(id) }
+  const beginPresentation = () => { const epoch = navigation.current.epoch; return () => navigation.current.visible && navigation.current.epoch === epoch }
+  const [discussionTab, setDiscussionTab] = useState<{ goalId: string; tabId: string } | null>(null)
   const [details, setDetails] = useState<Record<string, AgentMuxRpcGoal>>({})
   const [decisions, setDecisions] = useState<Record<string, Decisions>>({})
   const [issue, setIssue] = useState(''), [detailIssue, setDetailIssue] = useState(''), [decisionIssue, setDecisionIssue] = useState('')
@@ -88,7 +96,12 @@ export function MobileGoalsSurface({ client, connected, visible, openSession }: 
     factEpoch.current.goals[id] = (factEpoch.current.goals[id] ?? 0) + 1
     setGoals(values => values?.filter(goal => goal.id !== id) ?? null)
     setDetails(values => Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)))
-    select(value => value === id ? null : value)
+    if (selectedRef.current === id) select(null)
+  }
+  const openDiscussion = (receipt: GoalDiscussionReceipt) => {
+    if (!navigation.current.visible || selectedRef.current !== receipt.goalId) return
+    if (receipt.agentSessionId && openSession) openSession(receipt.agentSessionId, { name: '目标原 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
+    else setDiscussionTab({ goalId: receipt.goalId, tabId: receipt.tabId })
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
   return <section className="mobile-goals" aria-label="Goals" hidden={!visible}>
@@ -97,12 +110,13 @@ export function MobileGoalsSurface({ client, connected, visible, openSession }: 
     {!client?.forwardRpc && <p role="status">目标公共端口暂不可用，已读目标与会话保留。</p>}
     {issue && <p role="status">{issue}</p>}
     {goals?.length === 1000 && <p role="status">目录已达到原服务单次返回范围，搜索仅覆盖已读目标；可按准确 Goal ID 打开其他目标。完整翻页仍待原服务提供。</p>}
-    <div hidden={selected !== null}>
-      <MobileGoalCreate client={client} visible={visible && selected === null} refresh={() => refresh(value => value + 1)} created={goal => {
+      <MobileGoalCreate client={client} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
         factEpoch.current.list += 1
         setGoals(previous => previous ? [...previous.filter(value => value.id !== goal.id), goal] : previous)
-        choose(goal)
+        setDetails(values => ({ ...values, [goal.id]: goal }))
+        if (present()) { selectedRef.current = goal.id; setSelected(goal.id) }
       }} />
+    <div hidden={selected !== null || !!discussionTab}>
       <div className="mobile-goals-filters"><input aria-label="搜索目标" placeholder="搜索目标或项目" value={query} onChange={event => setQuery(event.target.value)} />
         <select aria-label="筛选工作状态" value={status} onChange={event => setStatus(event.target.value)}><option value="">全部状态</option>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></div>
       <details><summary>按 Goal ID 打开</summary><form onSubmit={event => {
@@ -123,18 +137,22 @@ export function MobileGoalsSurface({ client, connected, visible, openSession }: 
         {!!goals.length && !visibleGoals?.length && <p>已读列表中没有匹配的目标。可清除搜索或筛选。</p>}
       </>}
     </div>
-    {Object.values(details).map(detail => <div key={detail.id} hidden={selected !== detail.id}><button onClick={() => select(null)}>返回目标列表</button>{selected === detail.id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <p key={index} role="status">{value}</p>)}
-      <GoalDetail key={detail.id} goal={detail} visible={visible && selected === detail.id} decisions={decisions[detail.id] ?? null} client={client} updated={updated} refresh={() => refresh(value => value + 1)} />
+    {Object.values(details).map(detail => <div key={detail.id} hidden={selected !== detail.id || !!discussionTab}><button onClick={() => select(null)}>返回目标列表</button>{selected === detail.id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <p key={index} role="status">{value}</p>)}
+      <GoalDetail key={detail.id} goal={detail} visible={visible && selected === detail.id} decisions={decisions[detail.id] ?? null} client={client} updated={updated} refresh={() => refresh(value => value + 1)}>
+        <MobileGoalAlignment client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
+      </GoalDetail>
       <MobileGoalSessions client={client} sessionIds={detail.sessionIds} visible={visible && selected === detail.id} openSession={openSession} />
       <MobileGoalLinks client={client} goal={detail} updated={updated} />
       <MobileGoalActions client={client} goal={detail} visible={visible && selected === detail.id} updated={updated} deleted={deleted} />
     </div>)}
+    {discussionTab && <div><button type="button" onClick={() => setDiscussionTab(null)}>返回原目标</button><MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} visible={visible}
+      openSession={(id, identity) => { if (openSession) openSession(id, identity) }} /></div>}
   </section>
 }
 
-function GoalDetail({ goal, visible, decisions, client, updated, refresh }: {
+function GoalDetail({ goal, visible, decisions, client, updated, refresh, children }: {
   goal: AgentMuxRpcGoal; visible: boolean; decisions: Decisions | null; client: AgentMuxHostedClient | null
-  updated(goal: AgentMuxRpcGoal, fields: Array<keyof AgentMuxRpcGoal>): void; refresh(): void
+  updated(goal: AgentMuxRpcGoal, fields: Array<keyof AgentMuxRpcGoal>): void; refresh(): void; children: ReactNode
 }) {
   const [editing, edit] = useState(false), [title, setTitle] = useState(goal.title), [description, setDescription] = useState(goal.description)
   const [unknownWrites, setUnknownWrites] = useState<Array<{ operationId: string; patch: AgentMuxRpcParams<'goal.update'>['patch']; issue: string }>>([])
@@ -162,8 +180,7 @@ function GoalDetail({ goal, visible, decisions, client, updated, refresh }: {
   }
   const alignment = goal.alignment, grounding = goal.grounding
   const currentReport = !!alignment && grounding?.alignmentRevision === alignment.revision
-  if (!visible) return null
-  return <article aria-label="目标详情">
+  return <article aria-label="目标详情" hidden={!visible}>
     <h2>{goal.title || '待定义目标'}</h2><p className="mobile-goals-body">{goal.description || '目标原意尚未整理。'}</p>
     <button onClick={() => edit(!editing)}>编辑目标正文</button>
     {editing && <form onSubmit={event => { event.preventDefault(); const patch = { ...(title !== baseline.current.title ? { title } : {}), ...(description !== baseline.current.description ? { description } : {}) }; if (Object.keys(patch).length) void save(patch) }}>
@@ -189,6 +206,7 @@ function GoalDetail({ goal, visible, decisions, client, updated, refresh }: {
         </li>)}</ul><p>{grounding.acceptedAt === null ? '结果尚未接受。' : `${currentReport ? '当前结果已接受' : '旧报告曾被接受，不代表当前结果接受'} · ${new Date(grounding.acceptedAt).toLocaleString()}`}</p>
       </> : <p>{goal.status === 'done' ? '工作状态已完成，结果尚未核验。' : '尚无结果报告。'}</p>}
     </section>
+    {children}
     <details><summary>工作状态与属性</summary>
       <label>工作状态<select disabled={saving} aria-label="工作状态" value={goal.status} onChange={event => { void save({ status: event.target.value as AgentMuxRpcGoal['status'] }) }}>{AGENTMUX_DEMAND_STATUSES.map(value => <option key={value} value={value}>{statuses[value]}</option>)}</select></label>
       <p>工作状态不代表目标确认或结果接受。</p>

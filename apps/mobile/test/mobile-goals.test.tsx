@@ -1,11 +1,13 @@
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { getDeviceWorkface, emptyDeviceWorkface } from '../src/recovery/device-workface'
 import { MobileGoalsSurface } from '../src/goals/MobileGoalsSurface'
 import type { AgentMuxRpcGoal } from '@agentmux/core'
 
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const mounts: { root: Root; element: HTMLDivElement }[] = []
+beforeEach(() => { localStorage.clear(); getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const view of mounts.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } vi.useRealTimers() })
 const original: AgentMuxRpcGoal = {
   id: 'goal-original', title: '原目标', description: '原用户意图', status: 'done', priority: 'high', projectId: 'project-original', projectName: '原项目',
@@ -26,13 +28,14 @@ async function mount(initial = [original]) {
     if (method === 'goal.assign' || method === 'goal.handoff') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, assigneeExecutorId: params.assigneeExecutorId, ...(params.sessionId ? { sessionIds: [...new Set([...goal.sessionIds, params.sessionId])] } : {}) } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? null, startRequested: false } } }
     if (method === 'goal.start') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, status: 'in_progress' as const } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId ?? goals.find(goal => goal.id === params.goalId)!.sessionIds[0] ?? null } } }
     if (method === 'goal.delete') { const goal = goals.find(goal => goal.id === params.goalId)!; goals = goals.filter(goal => goal.id !== params.goalId); return { goal, receipt: { goalId: params.goalId, deletedAt: 4 } } }
-    if (method === 'goal.create') { const goal = { ...original, id: 'created-original', title: params.title, description: params.description, projectId: params.projectId, alignment: undefined, grounding: undefined }; goals.push(goal); return { goal, receipt: { goalId: goal.id, createdAt: 3 } } }
+    if (method === 'goal.create') { const goal = { ...original, id: params.goalId, title: params.title, description: params.description, status: params.status, sessionIds: [], projectId: params.projectId ?? null, projectName: params.projectId ? '原项目' : null, alignment: undefined, grounding: undefined }; goals.push(goal); return { goal, receipt: { goalId: goal.id, createdAt: 3 } } }
+    if (method === 'goal.discuss') return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, mode: params.mode, operationId: params.operationId, tabId: 'original-goal-tab', agentSessionId: 'session-exact' } }
     if (method === 'goal.update') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, ...params.patch } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, updatedAt: 3 } } }
     throw new Error(`Unexpected RPC ${method}`)
   })
   const element = document.createElement('div'); document.body.append(element)
   const root = createRoot(element); mounts.push({ root, element })
-  const openSession = vi.fn(), client = { forwardRpc } as any
+  const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', availability: 'connected' }) } as any
   const render = async (visible = true, connected = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} connected={connected} visible={visible} openSession={openSession} />)) }
   await render()
   const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => button.textContent === text && !button.closest('[hidden]')); expect(button).toBeDefined(); await act(async () => button!.click()) }
@@ -332,26 +335,28 @@ describe('Mobile Goals original owner slice', () => {
   })
 })
 
-it('creates via the existing Goal public method with the exact Project and explicit user decision', async () => {
+it('one click saves the pending original Goal and opens its discussion with the exact selected Project', async () => {
   const view = await mount()
-  await view.click('新建目标')
-  await view.text(view.element.querySelector('[aria-label="新目标标题"]')!, '明确新目标')
-  await view.text(view.element.querySelector('[aria-label="新目标原意"]')!, '保留原用户意图😀')
   await view.change('新目标项目', 'project-original')
-  await act(async () => view.element.querySelector('section[aria-label="新建目标"] form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
-  expect(view.forwardRpc).toHaveBeenCalledWith('goal.create', { title: '明确新目标', description: '保留原用户意图😀', projectId: 'project-original', risk: 'medium', confirmation: 'user', operationId: expect.any(String) })
-  expect(view.element.querySelector('article h2')?.textContent).toBe('明确新目标')
+  await view.click('新建目标')
+  const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
+  expect(input).toEqual({ goalId: expect.stringMatching(/^demand_/), title: 'Untitled goal', description: '', status: 'backlog', projectId: 'project-original', risk: 'low', confirmation: 'user', operationId: expect.any(String) })
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'open', operationId: expect.any(String) })
+  expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
 })
 it('keeps an unknown creation and its exact operation across hide/show without sending it again', async () => {
-  const view = await mount(); await view.click('新建目标')
-  await view.text(view.element.querySelector('[aria-label="新目标标题"]')!, '未确认新目标')
-  await view.change('新目标项目', 'project-original')
+  const view = await mount()
   const invoke = view.forwardRpc.getMockImplementation()!
   view.forwardRpc.mockImplementation(async (method, params) => { if (method === 'goal.create') throw new Error('creation reply lost'); return invoke(method, params) })
-  const submit = () => view.element.querySelector('section[aria-label="新建目标"] form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
-  await act(async () => submit()); await view.render(false); await view.render(true); await act(async () => submit())
+  await view.click('新建目标'); await view.render(false); await view.render(true); await view.click('新建目标')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
   expect(view.element.textContent).toContain('creation reply lost')
-  expect(view.element.querySelector<HTMLInputElement>('[aria-label="新目标标题"]')?.value).toBe('未确认新目标')
+  const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
+  expect(view.element.textContent).toContain(input.goalId)
+  expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.discuss')).toBe(false)
+  await view.click('读取同一目标核对')
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.inspect', { goalId: input.goalId })
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.create')).toHaveLength(1)
+  expect(view.element.textContent).toContain('准确 ID 尚未保存')
 })
