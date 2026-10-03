@@ -3,7 +3,7 @@ import type { ScratchTopicSnapshot } from '../../../shared/contracts'
 import { fileTabId, initialWorkbenchRegionId } from './workbench-tabs'
 import type { FileOpenPlacement, FileOpenResult, FileWorkbenchState } from './file-workbench-state'
 import { spatialCatalog, spatialDestination, selectSpatialCatalog, zoneContext, type SpatialWorkbench } from './space-agent-control'
-import { zoneFileResource } from './zone-file-resource'
+import { zoneFileResource } from '../../../shared/zone-file-resource'
 import { awaitDesktopPresentation, captureDesktopInput, desktopInputPreserved } from './desktop-presentation'
 
 export type WorkfaceFileOpenPorts = {

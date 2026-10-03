@@ -1467,6 +1467,7 @@ export type AgentMuxDesktopApi = {
     keepOneOfFanOut(input: KeepOneOfFanOutInput): Promise<KeepOneOfFanOutOutcome>
   }
   files: {
+    readPublic(params: AgentMuxRpcParams<'file.read'>): Promise<AgentMuxRpcResult<'file.read'>>
     readDirectory(workspaceId: string, path: string): Promise<WorkspaceDirectoryEntry[]>
     read(workspaceId: string, path: string): Promise<WorkspaceFileReadResult>
     /** One complete, revision-verified bytes snapshot within the shared preview budget. */

@@ -502,6 +502,7 @@ const mockApi: AgentMuxDesktopApi = {
     keepOneOfFanOut: async (input) => ({ keptWorkspaceId: input.keepWorkspaceId, outcomes: [] })
   },
   files: {
+    readPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_RESOURCE_UNCONFIRMED', message: 'Original file discovery requires the connected desktop Host. The original reference is retained.' } }),
     readDirectory: async (_workspaceId, path) =>
       [...mockFiles.entries()]
         .filter(([entryPath]) => mockParent(entryPath) === path)

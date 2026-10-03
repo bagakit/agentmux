@@ -148,6 +148,7 @@ import { ScratchTopics } from './scratch-topics.js'
 import type { MoteAvatarInput, MoteAvatarRef } from '../shared/mote-avatars.js'
 import { configWithRuntimeBindings, saveRuntimeConfig } from './runtime-config-transaction.js'
 import { WorkspaceFiles, workspaceFileObserverCount } from './workspace-files.js'
+import { FileReadOwner } from './file-read-owner.js'
 import { classifyRetention, WorktreeService } from './worktree-service.js'
 import { runFanOutRequest } from './fanout-request.js'
 import { createSpaceZoneResource } from './space-zone-resources.js'
@@ -611,6 +612,12 @@ export async function registerIpc(args: {
   handle('files:readDirectory', async (workspaceId: string, path: string) =>
     await files.readDirectory(workspace(config, workspaceId), path)
   )
+  const publicFiles = new FileReadOwner({ files, workspace: id => config.workspaces.find(item => item.id === id),
+    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null } })
+  handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
+    requireTrustedSender('files:readPublic', event)
+    return await publicFiles.read(input)
+  })
   handle('files:read', async (workspaceId: string, path: string) => await files.read(workspace(config, workspaceId), path))
   handle('files:readPreview', async (workspaceId: string, path: string, options?: import('../shared/workspace-file-preview').WorkspaceFilePreviewReadOptions) =>
     await files.readPreview(workspace(config, workspaceId), path, options)
@@ -1269,6 +1276,7 @@ export async function registerIpc(args: {
     execute: executeControl,
     spatialState,
     topics: topicKnowledge,
+    files: publicFiles,
     notebookStore,
     coreClients: () => args.runtime.rpcClients(),
     snapshot: params => observeClientRpcSnapshot(config, args.scratchTopics, params),
