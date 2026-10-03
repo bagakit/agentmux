@@ -277,7 +277,8 @@ export function AgentSessionComposer({
           immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
           preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',
           sending: entry.operationId === sendingId && sendingPhase === 'submitting',
-          unconfirmed: entry.promptCondition != null && (entry.status === 'deferred' || entry.status === 'failed'),
+          unconfirmed: entry.promptCondition !== null && (entry.status === 'deferred' || entry.status === 'failed'),
+          ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),

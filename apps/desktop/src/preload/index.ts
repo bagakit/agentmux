@@ -358,7 +358,7 @@ const api: AgentMuxPreloadApi = {
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source).then(unwrapSessionInputWriteResult),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData).then(unwrapSessionInputWriteResult),
     submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel) =>
-      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel),
+      ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel).then(unwrapSessionInputWriteResult),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),
     submitMessage: (session, message) => ipcRenderer.invoke('sessions:submitMessage', session, message),
     respondInteraction: (session, response) =>

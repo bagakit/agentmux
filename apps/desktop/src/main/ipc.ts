@@ -1017,7 +1017,7 @@ export async function registerIpc(args: {
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8]
-  ) => {
+  ): Promise<SessionInputWriteResult> => sessionInputWriteResult(async () => {
     let effectiveAuthorHuman = false
     if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     if (authorHuman === true) {
@@ -1027,7 +1027,7 @@ export async function registerIpc(args: {
     if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     pauseUserProgress(session, 'Paused for your message.')
     await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
-  })
+  }))
   handleWithEvent('sessions:replyQuestion', async (event, session: AgentSessionControl,
     input: import('../shared/contracts.js').SessionQuestionReplyInput) => {
     assertManualPromptSenderTrusted(event.sender, args.window.webContents)
