@@ -135,7 +135,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       if (attempts.current.get(originalKey) !== original) return
       original.phase = deliveryOutcome(error, 'prompt')
       original.message = original.phase === 'unknown'
-        ? `回执未知；草稿已保留，不会再次投递这条输入。请刷新核对原会话。${errorMessage(error)}`
+        ? `回执未知；草稿已保留，不会自动重投这条输入。请刷新核对原会话。${errorMessage(error)}`
         : `Core 已拒绝这条输入，草稿已保留。${errorMessage(error)}`
       local.save()
       redraw(value => value + 1)
