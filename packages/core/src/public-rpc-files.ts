@@ -19,12 +19,19 @@ export type FileListParams = Omit<FileReadParams, 'maxBytes'> & { limit?: number
 /** Names only. A bounded observation does not claim to be a complete filesystem index. */
 export type FileNameListing = { status: 'listed'; files: string[]; complete: boolean; omitted: 'git-ignored' | 'none'; partialReason: 'limit' | 'budget' | 'unreadable' | null }
 export type FileListResult = { resource: FileReadResource | null; result: FileNameListing | FileReadUnknown }
-export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams }
-export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult }
+/** Save an existing original text file; null revisions/new-file creation are outside this method. */
+export type FileWriteParams = Omit<FileReadParams, 'maxBytes' | 'expectedResource'> & { expectedResource: FileReadResource; content: string; expectedRevision: string }
+export type FileWriteReceipt =
+  | { status: 'written'; revision: string }
+  | { status: 'conflict'; observedRevision: string | null }
+  | { status: 'error' | 'unknown'; code: string; message: string }
+export type FileWriteResult = { resource: FileReadResource | null; result: FileWriteReceipt }
+export type FileParameterMap = { 'file.read': FileReadParams; 'file.list': FileListParams; 'file.write': FileWriteParams }
+export type FileResultMap = { 'file.read': FileReadResult; 'file.list': FileListResult; 'file.write': FileWriteResult }
 export type FileMethod = keyof FileParameterMap
-export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult> }
-export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long' } as const
-export function isFileMethod(value: unknown): value is FileMethod { return value === 'file.read' || value === 'file.list' }
+export interface AgentMuxRpcFilesOwner { read(params: FileReadParams): Promise<FileReadResult>; list(params: FileListParams): Promise<FileListResult>; write(params: FileWriteParams): Promise<FileWriteResult> }
+export const AGENTMUX_RPC_FILE_METHODS = { 'file.read': 'short', 'file.list': 'long', 'file.write': 'long' } as const
+export function isFileMethod(value: unknown): value is FileMethod { return value === 'file.read' || value === 'file.list' || value === 'file.write' }
 
 function invalid(message: string, code: string): never { throw new AgentMuxError(message, code) }
 function string(value: unknown, code: string): asserts value is string {
@@ -115,4 +122,29 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
     if (params.maxBytes !== undefined && (r.byteLength as number) > params.maxBytes) invalid('The original binary File read exceeded its byte cap.', code)
   } else if (r.status === 'error' || r.status === 'unknown') { string(r.code, code); string(r.message, code) }
   return p as FileReadResult
+}
+
+export function parseFileWriteParams(value: unknown): FileWriteParams {
+  const code = 'INVALID_CONTROL_REQUEST', p = rpcRecord(value, ['zoneId', 'spaceId', 'path', 'expectedResource', 'content', 'expectedRevision'], code)
+  const { content, expectedRevision, ...read } = p
+  const original = resource(p.expectedResource, code, true) as FileReadResource
+  parseFileReadParams({ ...read, expectedResource: { hostId: original.hostId, workspaceId: original.workspaceId, workspacePath: original.workspacePath } })
+  parseFileReadResult({ resource: original, result: { status: 'directory' } }, read as FileReadParams)
+  if (typeof content !== 'string') invalid('File content must be text.', code)
+  revision(expectedRevision, code)
+  return p as FileWriteParams
+}
+export function parseFileWriteResult(value: unknown, params: FileWriteParams): FileWriteResult {
+  const code = 'CONTROL_PROTOCOL_ERROR', p = rpcRecord(value, ['resource', 'result'], code), r = rpcRecord(p.result, undefined, code)
+  const keys = r.status === 'written' ? ['status', 'revision'] : r.status === 'conflict' ? ['status', 'observedRevision']
+    : r.status === 'error' || r.status === 'unknown' ? ['status', 'code', 'message'] : null
+  if (!keys) invalid('The original File write status is invalid.', code)
+  rpcRecord(r, keys, code)
+  // Keep the original resource/path mapping checks shared with reads.
+  parseFileReadResult({ resource: p.resource, result: p.resource === null ? { ...r, message: 'Original write diagnostic follows.' } : { status: 'directory' } }, params)
+  if (p.resource !== null && ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => (p.resource as Record<string, unknown>)[key] !== (params.expectedResource as unknown as Record<string, unknown>)[key])) invalid('The original File mapping changed.', code)
+  if (r.status === 'written') revision(r.revision, code)
+  else if (r.status === 'conflict') { if (r.observedRevision !== null) revision(r.observedRevision, code) }
+  else { string(r.code, code); if (typeof r.message !== 'string') invalid('File write diagnostics must remain text.', code) }
+  return p as FileWriteResult
 }

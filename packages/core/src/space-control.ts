@@ -59,6 +59,8 @@ export type AgentMuxSpaceRegionFact = {
   regionId: string
   tabId: string
   kind: 'agent' | 'terminal' | 'browser' | 'file' | 'git-diff' | 'launcher'
+  browserId?: string
+  file?: { workspaceId: string; path: string; zoneRelativePath?: string; issue?: string }
   agentSessionId: string | null
   runId: string | null
   execution: { hostId: string; cwd: string } | null
@@ -89,7 +91,18 @@ export type AgentMuxAgentPresentation = {
   recap: { text: string; source: string } | null
   avatar?: { tint?: string; badge?: string }
 }
+/** Original Survey display preferences; missing topology does not retire these references. */
+export type AgentMuxSurveyPresentation = {
+  items: { zoneId: string; name: string; issue?: string }[]
+  selection: {
+    zoneId: string
+    selection: { tabId: string; regionId: string }[]
+    active: { tabId: string; regionId: string } | null
+  } | null
+  issue?: string
+}
 export type AgentMuxSpaceCatalog = {
+  survey?: AgentMuxSurveyPresentation
   agentPresentation?: AgentMuxAgentPresentation[]
   appearance?: AgentMuxSpaceAppearance[]
   projectGroups?: AgentMuxProjectGroupFact[]

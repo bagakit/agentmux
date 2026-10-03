@@ -82,12 +82,12 @@ async function mutation(ref, current) {
 const definitionFiles = {
   NoteFileSurfaceView: 'apps/desktop/src/renderer/src/components/NoteFileSurfaceView.tsx',
   NoteBlockEditor: 'apps/desktop/src/renderer/src/components/NoteBlockEditor.tsx',
-  noteKnowledge: 'apps/desktop/src/renderer/src/lib/note-knowledge.ts',
-  noteBacklinks: 'apps/desktop/src/renderer/src/lib/note-knowledge.ts',
+  noteKnowledge: 'packages/client-ui/src/note/note-knowledge.ts',
+  noteBacklinks: 'packages/client-ui/src/note/note-knowledge.ts',
   createNote: 'apps/desktop/src/renderer/src/store.ts',
   setNoteBlockSelection: 'apps/desktop/src/renderer/src/store.ts',
   refreshNoteDirectorySources: 'apps/desktop/src/renderer/src/store.ts',
-  blockReference: 'apps/desktop/src/shared/note-content-schema.ts'
+  blockReference: 'packages/client-ui/src/note/note-content-schema.ts'
 }
 async function callers(groups) {
   let count = 0

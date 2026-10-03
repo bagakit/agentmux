@@ -80,3 +80,49 @@ describe('mobile production workspace navigation', () => {
     expect(overlay.querySelector<HTMLSelectElement>('select')?.value).toBe('space')
   })
 })
+
+
+it('keeps the locally selected Topic across a Session round trip after an external Topic deep link', async () => {
+  const f = fixture(), overlay = document.createElement('div'); document.body.append(overlay)
+  const category = { categoryId: 'category', title: '分类', hostId: 'host-original', spaceId: 'category-space', directoryPath: fixturePath("category"), revision: 'revision' }
+  const topicA = { topicId: 'topic-a', title: 'Topic A', summary: '', hostId: 'host-original', zoneId: 'zone-a', directoryPath: fixturePath("a"), categorySpaceIds: ['category-space'], chatIds: ['tab-a'], spatialRevision: 1 }
+  const topicB = { ...topicA, topicId: 'topic-b', title: 'Topic B', zoneId: 'zone-b', directoryPath: fixturePath("b"), chatIds: ['tab-b'] }
+  const original = { ...catalog, spaces: [{ ...catalog.spaces[0], kind: 'topic', topicId: topicA.topicId, name: '外部 Topic A' }],
+    survey: { items: [{ zoneId: 'zone', name: '原研究' }], selection: { zoneId: 'zone', selection: [], active: null } },
+    agentPresentation: [{ agentSessionId: 'session-original', name: '原讨论 Agent', project: '原项目', detail: '', group: 'working', state: 'working', providerId: 'codex', recap: null }] }
+  f.client.forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => {
+    if (method === 'topic.inspect') return { topic: params.topicId === topicB.topicId ? topicB : topicA, unavailable: [] }
+    if (method === 'topic.category.ls') return { categories: [category], unavailable: [] }
+    if (method === 'topic.ls') return { topics: [topicA, topicB], unavailable: [] }
+    if (method === 'space.ls' && params.target.zoneId === 'zone-b') return { catalog: { ...original, tabs: [{ ...catalog.tabs[0], tabId: 'tab-b', zoneId: 'zone-b' }], regions: [{ ...catalog.regions[0], tabId: 'tab-b' }] } }
+    return { catalog: original }
+  })
+  const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
+  await click(button(view.element, '手机设置与连接')); await click(button(overlay, 'Survey研究与笔记'))
+  await click(button(view.element.querySelector('.mobile-survey') as HTMLElement, '外部 Topic A'))
+  const topics = view.element.querySelector('.mobile-topics') as HTMLElement
+  expect(topics.querySelector('h1')?.textContent).toBe('Topic A')
+  await click(topics.querySelector<HTMLButtonElement>('[aria-label="返回分类目录"]')!)
+  await click(button(topics, '分类')); await click(button(topics, 'Topic B'))
+  expect(topics.querySelector('h1')?.textContent).toBe('Topic B')
+  await click([...topics.querySelectorAll<HTMLButtonElement>('.mobile-topic-workface button')].find(value => value.textContent?.includes('原讨论 Agent'))!)
+  expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(false)
+  await click(button(view.element.querySelector('.mobile-session-toolbar') as HTMLElement, 'Topics'))
+  expect(topics.querySelector('h1')?.textContent).toBe('Topic B')
+  expect(f.client.forwardRpc).toHaveBeenCalledWith('topic.inspect', { topicId: topicB.topicId })
+  expect(f.client.forwardRpc).toHaveBeenCalledWith('space.ls', { target: { zoneId: 'zone-b' }, presentation: true })
+  expect(f.submit).not.toHaveBeenCalled()
+})
+
+it('shows a presentation owner failure in a mounted directory without taking away its healthy Session', async () => {
+  localStorage.setItem('agentmux-mobile-home', 'space')
+  const f = fixture()
+  const failed = { ...catalog, spaces: [{ ...catalog.spaces[0], issue: '原头像读取失败：appearance owner unavailable；可刷新重试' }] }
+  f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog: failed })
+  const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform()} />)
+  expect(view.element.textContent).toContain('appearance owner unavailable')
+  expect(button(view.element, '刷新原呈现')).toBeDefined()
+  await click([...view.element.querySelectorAll<HTMLButtonElement>('.mobile-session-list button')].find(value => value.textContent?.includes('Actual Space'))!)
+  await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')!)
+  expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
+})

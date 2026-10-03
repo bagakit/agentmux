@@ -16,7 +16,7 @@ import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { NOTE_SCHEMA, readNoteDocument, newNoteDocument } from '../src/shared/note-document'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import * as noteKnowledgeModule from '../src/renderer/src/lib/note-knowledge'
-import * as noteDocumentModule from '../src/shared/note-document'
+import * as noteDocumentModule from '@agentmux/client-ui/note/note-document'
 import * as noteDirectoryModule from '../src/renderer/src/lib/note-directory-sources'
 import { noteBlockSelectionKey } from '../src/renderer/src/lib/note-block-selection'
 const dom = composerDOM(), birth = directoryIdentity('local', _hygiene_fixturePath("repo")), zoneId = homeZoneId(birth)
@@ -71,7 +71,7 @@ it('connects the real FileSurfaceView to canonical update/save and the original 
   expect(state.dirtyDocuments[sourceKey]).toBe(true)
   const read = readNoteDocument(raw); expect(read.status).toBe('valid')
   if (read.status === 'valid') { expect(read.note.noteId).toBe('source-note'); expect(read.note.content.content![0]!.attrs!.blockId).toBe('source-block') }
-  await click('Source'); expect(dom.container.querySelector('textarea')!.value).toBe(raw)
+  await click('Source'); await vi.waitFor(() => expect(dom.container.querySelector('textarea')?.value).toBe(raw))
   await click('Preview'); expect(editor().state.doc.textContent).toBe('Edited Original finding')
   await click('Save'); expect(api.files.write).toHaveBeenCalledTimes(1)
   expect(vi.mocked(api.files.write).mock.lastCall).toEqual(['workspace', { path: sourceRegion.path, content: raw, expectedRevision: 'source-revision' }])

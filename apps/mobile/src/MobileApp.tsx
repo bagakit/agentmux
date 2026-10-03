@@ -1,7 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@radix-ui/react-dialog'
-import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, Settings2, SquareTerminal, Target, Wifi, X } from 'lucide-react'
+import { Check, ChevronRight, File, Link2, List, MessageSquare, Pencil, ShieldCheck, Layers, ArrowLeft, Settings2, SquareTerminal, Wifi, X, BookOpen, Compass, Target } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { TopicKnowledgeSource } from '@agentmux/core/control'
+import { MobileTopicSource } from './topics/MobileTopicSource'
+import { MobileTopicsSurface } from './topics/MobileTopicsSurface'
+import { MobileSurveySurface } from './survey/MobileSurveySurface'
+import { MobileGoalsSurface } from './goals/MobileGoalsSurface'
+import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
@@ -47,9 +53,27 @@ export function MobileApp({ client, connection, platform, native = false, focusC
   const [home, setHome] = useState<MobileHome>(initialHome.current.home)
   const [defaultHome, setDefaultHome] = useState<MobileHome>(initialHome.current.home)
   const [homeIssue, setHomeIssue] = useState(initialHome.current.issue)
+  const [secondary, setSecondary] = useState<'topics' | 'survey' | 'goals' | null>(null)
+  const [topicId, setTopicId] = useState<string | null>(null)
+  const [source, setSource] = useState<TopicKnowledgeSource | null>(null)
+  const pageName = secondary === 'topics' ? 'Topics' : secondary === 'survey' ? 'Survey' : secondary === 'goals' ? 'Goals' : home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'
+  const rpc = useCallback<NonNullable<AgentMuxHostedClient['forwardRpc']>>((method, params) => {
+    if (!client?.forwardRpc) return Promise.reject(new Error('连接暂不可用，原工作面保留。'))
+    return client.forwardRpc(method, params)
+  }, [client])
   const [showSession, setShowSession] = useState(false)
   const [showGoalWork, setShowGoalWork] = useState(false)
   const [objectIdentity, setObjectIdentity] = useState<MobileObjectIdentity | null>(null)
+  const openSession = (id: string, identity: MobileObjectIdentity) => {
+    setObjectIdentity(identity); setShowGoalWork(false)
+    setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' }))
+    setShowSession(true)
+  }
+  const openSource = (value: TopicKnowledgeSource) => {
+    if (value.kind === 'url') { openBrowserHttpLink(value.url); return }
+    if (value.kind === 'topic') { setTopicId(value.topicId); setSecondary('topics') }
+    setSource(value)
+  }
   const sessionTitle = objectIdentity?.name ?? null
   const [sheet, setSheet] = useState<'connection' | 'attachments' | 'settings' | 'identity' | null>(null)
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
@@ -119,7 +143,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
       {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button> : <span className="mobile-header-spacer" />}
     </header>
     {workspaceVisible && showSession && <div className="mobile-session-toolbar">
-      <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'}</button>
+      <button className="mobile-text-button" onClick={() => setShowSession(false)}><ArrowLeft size={16} />{pageName}</button>
       <span>{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
       <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><Target size={18} /></button>
       <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <MessageSquare size={18} /> : <SquareTerminal size={18} />}</button>
@@ -131,15 +155,28 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         <p className="mobile-spatial-notice" role="status">{connection.message}</p>{connectionPanel}
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><Link2 size={16} />连接详情</button>
       </section>}
-      {workspaceVisible && <div hidden={showSession}><MobileSpatialNavigation visible={!showSession} home={home} client={client} connected={connected} sessions={sessions} openSession={(id, title) => {
-        setObjectIdentity(title); setShowGoalWork(false)
-        setWorkface(value => ({ ...value, selectedSessionId: id, panel: 'conversation' })); setShowSession(true)
-      }} /></div>}
+      {workspaceVisible && <>
+        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation visible={!showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} /></div>
+        <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={!showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
+          onOpenTopic={topic => { setTopicId(topic.topicId); if (source?.kind === 'topic' && source.topicId !== topic.topicId) setSource(null) }} openSource={openSource} openHttpLink={openBrowserHttpLink}
+          renderWorkface={(topic, visible) => <MobileZoneWorkface key={topic.topicId} client={client} zoneId={topic.zoneId} name={topic.title} visible={visible}
+            {...(source?.kind === 'topic' && source.topicId === topic.topicId ? { tabId: source.chatId, regionId: source.threadId } : {})} openSession={openSession} />} /></div>
+        <div hidden={showSession || secondary !== 'survey'}><MobileSurveySurface client={client} connected={connected} visible={!showSession && secondary === 'survey'} openSession={openSession}
+          openTopic={spaceId => { void rpc('space.inspect', { target: { spaceId } }).then(value => { const topic = value.catalog.spaces.find(item => item.spaceId === spaceId)?.topicId; if (topic) { setTopicId(topic); setSource(null); setSecondary('topics') } else setNotice('原 Topic 身份尚未确认，研究与资料保留。') }).catch(error => setNotice(error instanceof Error ? error.message : String(error))) }} /></div>
+        {source && source.kind !== 'topic' && <div hidden={showSession}>
+          {source.kind === 'space' || source.kind === 'survey' ? <>
+            <button className="mobile-text-button" onClick={() => setSource(null)}><ArrowLeft size={16} />返回知识</button>
+            <MobileZoneWorkface key={source.zoneId} client={client} zoneId={source.zoneId} name="来源工作面" visible={!showSession} tabId={source.tabId} regionId={source.regionId} openSession={openSession} />
+          </> : source.kind === 'file' || source.kind === 'note' || source.kind === 'notebook' ? <MobileTopicSource source={source} rpc={rpc} onBack={() => setSource(null)} openHttpLink={openBrowserHttpLink}
+            openScope={scope => { setSource({ kind: 'space', zoneId: scope.zoneId }) }} /> : null}
+        </div>}
+        <div hidden={showSession || secondary !== 'goals'}><MobileGoalsSurface client={client} connected={connected} visible={!showSession && secondary === 'goals'} openSession={openSession} /></div>
+      </>}
       <section className="mobile-goal-panel" hidden={!workspaceVisible || !showSession || !showGoalWork}>
         <MobileGoalWork client={client} agentSessionId={workface.selectedSessionId} connected={connected} visible={workspaceVisible && showSession && showGoalWork} />
       </section>
       <section className="mobile-conversation-panel" hidden={!workspaceVisible || !showSession || showGoalWork || workface.panel === 'terminal'}>
-        {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {home === 'mote' ? 'Mote' : home === 'space' ? 'Space' : 'Focus'} 选择已有 Agent。</p>}
+        {!workface.selectedSessionId && <p className="mobile-spatial-empty">从 {pageName} 选择已有 Agent。</p>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
           <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} {...(sessionTitle ? { displayName: sessionTitle } : {})} visible={workspaceVisible && showSession && !showGoalWork && workface.panel !== 'terminal'} onShowTerminal={() => setWorkface(value => ({ ...value, panel: 'terminal' }))} openHttpLink={openBrowserHttpLink} onAttach={() => { void chooseAttachment() }} />
         </div>
@@ -149,9 +186,9 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     </main>
     {(notice || projectionError || connection.issue || hasConnected && !connected || !canPersist) && <aside className="mobile-service-notice" role="status"><span className="mobile-notice-mark"><ShieldCheck size={15} /></span><div><p>{notice ?? projectionError ?? connection.issue ?? connection.message}</p>{!canPersist && <button onClick={restoreNavigationStorage}>用当前工作面替换原记录</button>}</div></aside>}
     {workspaceVisible && <nav className="mobile-navigation" aria-label="手机导航">
-      <button aria-current={!showSession && home === 'mote' ? 'page' : undefined} onClick={() => { setHome('mote'); setShowSession(false) }}><MoteMark size={20} /><span>Mote</span></button>
-      <button aria-current={!showSession && home === 'focus' ? 'page' : undefined} onClick={() => { setHome('focus'); setShowSession(false) }}><List size={20} /><span>Focus</span></button>
-      <button aria-current={!showSession && home === 'space' ? 'page' : undefined} onClick={() => { setHome('space'); setShowSession(false) }}><Layers size={20} /><span>Space</span></button>
+      <button aria-current={!showSession && secondary === null && home === 'mote' ? 'page' : undefined} onClick={() => { setHome('mote'); setSecondary(null); setSource(null); setShowSession(false) }}><MoteMark size={20} /><span>Mote</span></button>
+      <button aria-current={!showSession && secondary === null && home === 'focus' ? 'page' : undefined} onClick={() => { setHome('focus'); setSecondary(null); setSource(null); setShowSession(false) }}><List size={20} /><span>Focus</span></button>
+      <button aria-current={!showSession && secondary === null && home === 'space' ? 'page' : undefined} onClick={() => { setHome('space'); setSecondary(null); setSource(null); setShowSession(false) }}><Layers size={20} /><span>Space</span></button>
     </nav>}
     <Dialog.Root open={sheet !== null} onOpenChange={open => { if (!open) setSheet(null) }}>
       <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
@@ -159,8 +196,13 @@ export function MobileApp({ client, connection, platform, native = false, focusC
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
 
+          <nav className="mobile-drawer-workfaces" aria-label="知识与目标">
+            <button className="mobile-menu-row" aria-current={secondary === 'topics' ? 'page' : undefined} onClick={() => { setSecondary('topics'); setShowSession(false); setSource(null); setSheet(null) }}><BookOpen size={20} /><span>Topics<small>讨论与知识</small></span></button>
+            <button className="mobile-menu-row" aria-current={secondary === 'survey' ? 'page' : undefined} onClick={() => { setSecondary('survey'); setShowSession(false); setSource(null); setSheet(null) }}><Compass size={20} /><span>Survey<small>研究与笔记</small></span></button>
+            <button className="mobile-menu-row" aria-current={secondary === 'goals' ? 'page' : undefined} onClick={() => { setSecondary('goals'); setShowSession(false); setSource(null); setSheet(null) }}><Target size={20} /><span>Goals<small>目标与结果</small></span></button>
+          </nav>
           <div className="mobile-drawer-settings">
-          {showSession && <button className="mobile-menu-row" onClick={() => { setShowSession(false); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {home === 'mote' ? 'Mote' : home === 'focus' ? 'Focus' : 'Space'}</span></button>}
+          {showSession && <button className="mobile-menu-row" onClick={() => { setShowSession(false); setSheet(null) }}><ArrowLeft size={18} /><span>返回 {pageName}</span></button>}
           <label className="mobile-home-select">默认主页<select aria-label="连接后的默认主页" value={defaultHome} onChange={event => {
             const value = event.target.value as MobileHome
             try { saveMobileHome(value); setDefaultHome(value); setHomeIssue(null) }

@@ -198,3 +198,16 @@ it('invokes the actual registered Main Demand handlers against the unique filesy
   expect(actual!.grounding!.acceptedAt).toBeGreaterThan(0)
   expect(actual!.sessionIds).toEqual(['healthy-run'])
 })
+
+import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
+import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
+it('public goal.create uses the existing renderer decision and actual durable owner', async () => {
+  const workspace = { id: 'original-workspace', hostId: 'local', path: root, name: '原项目', kind: 'folder' as const }
+  useAppStore.setState({ config: { ...initial.config, workspaces: [workspace] } as any, sessions: [] })
+  const service = new AgentMuxRpcService({ execute: request => useAppStore.getState().executeControl(request), coreClients: () => [] })
+  const result = await service.call('goal.create', { title: '手机新目标', description: '原意😀', projectId: workspaceProjectId(workspace), risk: 'medium', confirmation: 'user', operationId: 'mobile-create-original' })
+  expect(result.goal).toMatchObject({ id: 'goal', title: '手机新目标', description: '原意😀', projectId: workspaceProjectId(workspace), projectName: '原项目' })
+  const saved = await openDemandStore({ root }).get(result.goal.id)
+  expect(saved).toMatchObject({ title: '手机新目标', description: '原意😀' }); expect(saved!.decisions).toHaveLength(1)
+  expect(saved!.alignment).toBeUndefined(); expect(saved!.grounding).toBeUndefined()
+})
