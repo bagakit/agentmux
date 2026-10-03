@@ -267,7 +267,11 @@ export async function registerIpc(args: {
   // workspace's host differently.
   const gh = new GhService((id) => args.runtime.executionHost(id), git)
   const browserProfiles = new BrowserProfileManager()
-  await browserProfiles.initialize()
+  void browserProfiles.initialize().catch(error => {
+    // Profile metadata is a Browser service failure, not authority to stop healthy Agents or
+    // prevent the host from loading. The manager retains the cause for Browser requests below.
+    process.stderr.write(`browser_profile_initialization_failed=${JSON.stringify(error instanceof Error ? error.message : String(error))}\n`)
+  })
   const browserInputHistory = new BrowserInputHistoryStore(join(app.getPath('userData'), 'browser-input-history'))
   const browserOperationJournal = new BrowserOperationJournal(
     new BrowserOperationFileStore(join(app.getPath('userData'), BROWSER_OPERATION_JOURNAL_FILE))
@@ -1190,8 +1194,11 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
-  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string) =>
-    await browsers.create(id, url, verifiedBrowserWorkspace(config.workspaces, workspaceId), rememberedProfileId))
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string) => {
+    const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
+    await browserProfiles.initialize()
+    return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId)
+  })
   handle('browser:navigate', async (id: string, url: string) => await browsers.navigate(id, url))
   handle('browser:back', async (id: string) => await browsers.back(id))
   handle('browser:forward', async (id: string) => await browsers.forward(id))
@@ -1200,8 +1207,9 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:switchProfile', event)
     return await browsers.switchProfile(id, profileId)
   })
-  handleWithEvent('browser:listProfiles', (event) => {
+  handleWithEvent('browser:listProfiles', async (event) => {
     requireTrustedSender('browser:listProfiles', event)
+    await browserProfiles.initialize()
     return browserProfiles.listProfiles()
   })
   handleWithEvent('browser:createProfile', async (event, label: string) => {
@@ -1442,7 +1450,11 @@ export async function registerIpc(args: {
   handle('browser:restore', async (
     id: string,
     input: { workspaceId: unknown; profileId: string; viewport: BrowserViewport }
-  ) => await browsers.restore(id, { ...input, workspaceId: verifiedBrowserWorkspace(config.workspaces, input.workspaceId) }))
+  ) => {
+    const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, input.workspaceId)
+    await browserProfiles.initialize()
+    return await browsers.restore(id, { ...input, workspaceId: verifiedWorkspaceId })
+  })
   handle('browser:close', (id: string) => browsers.close(id))
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
