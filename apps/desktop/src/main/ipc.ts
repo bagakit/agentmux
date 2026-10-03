@@ -924,7 +924,8 @@ export async function registerIpc(args: {
     condition: AgentPromptCondition,
     choice?: Parameters<RuntimeController['submitPrompt']>[5],
     authorHuman?: boolean,
-    agentMuxNote?: string
+    agentMuxNote?: string,
+    sourceChannel?: Parameters<RuntimeController['submitPrompt']>[8]
   ) => {
     let effectiveAuthorHuman = false
     if (agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
@@ -932,8 +933,9 @@ export async function registerIpc(args: {
       assertManualPromptSenderTrusted(event.sender, args.window.webContents)
       effectiveAuthorHuman = true
     }
+    if (sourceChannel !== undefined) assertManualPromptSenderTrusted(event.sender, args.window.webContents)
     pauseUserProgress(session, 'Paused for your message.')
-    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote)
+    await args.runtime.submitPrompt(session, prompt, operationId, condition, undefined, choice, effectiveAuthorHuman, agentMuxNote, sourceChannel)
   })
   handle('sessions:submitMessage', async (session: AgentSessionControl, message: Parameters<RuntimeController['submitMessage']>[1]) => {
     await args.runtime.submitMessage(session, message)

@@ -159,7 +159,7 @@ export class AgentMuxHostedRuntimeService {
     const first = invocation.args[0] as unknown
     const sessionId = first && typeof first === 'object' && 'agentSessionId' in first ? String(first.agentSessionId)
       : typeof first === 'string' && invocation.method.endsWith('Agent') ? first : undefined
-    if (source && invocation.method === 'submitAgentPrompt') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
+    if (source && (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage')) invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
     const recordActivity = async (result: 'confirmed' | 'failed' | 'unknown') => {
       if (!source || !modifying) return

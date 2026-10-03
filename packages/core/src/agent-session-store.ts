@@ -1,3 +1,4 @@
+import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
@@ -1164,7 +1165,8 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
         ...(message.systemContext === undefined ? {} : { systemContext: bytes(message.systemContext) }),
         ...(message.authorAgentSessionId === undefined ? {} : { authorAgentSessionId: string(message.authorAgentSessionId, 'prompt message author') }),
         ...(message.authorHuman === true ? { authorHuman: true as const } : {}),
-        ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) })
+        ...(message.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(message.sourceDevice) }),
+        ...(message.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(message.sourceChannel) })
       }
     })() }) }
 }
