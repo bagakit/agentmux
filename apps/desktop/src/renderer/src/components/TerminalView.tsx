@@ -415,6 +415,8 @@ export function TerminalView({
     const element = terminal?.element
     if (!terminal || hydrating || !autoFocusRef.current || !visibleRef.current ||
       !element?.isConnected || element.closest('[inert]')) return
+    const active = element.ownerDocument.activeElement
+    if (active?.isConnected && active !== element.ownerDocument.body && !element.contains(active)) return
     terminal.focus()
   }, [hydrating])
 
@@ -1435,7 +1437,12 @@ export function TerminalView({
     viewport.observeViewport()
     requestAnimationFrame(() => {
       if (!disposed && autoFocusRef.current && visibleRef.current && terminal.element?.isConnected &&
-        !terminal.element.closest('[inert]')) terminal.focus()
+        !terminal.element.closest('[inert]')) {
+        const element = terminal.element
+        const active = element.ownerDocument.activeElement
+        if (active?.isConnected && active !== element.ownerDocument.body && !element.contains(active)) return
+        terminal.focus()
+      }
     })
     return () => {
       disposed = true
