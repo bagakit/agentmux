@@ -38,8 +38,8 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
     <Dialog.Portal container={resolveOverlayContainer()}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-knowledge-editor" onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
         onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
-        <Dialog.Title className="confirmation-dialog__title">{target?.entry ? 'Edit knowledge' : 'Save knowledge to Topic'}</Dialog.Title>
-        <Dialog.Description className="confirmation-dialog__description">{target?.topicLabel ? `To ${target.topicLabel}. ` : ''}Keep a useful reference or write a conclusion in your own words.</Dialog.Description>
+        <Dialog.Title className="confirmation-dialog__title">{target?.entry ? 'Edit knowledge note' : 'Create knowledge note'}</Dialog.Title>
+        <Dialog.Description className="confirmation-dialog__description">{target?.topicLabel ? `In ${target.topicLabel}. ` : ''}{sources.length ? 'Keep the source references and add what you learned.' : 'Write what future discussions should be able to find.'}</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void save() }}>
           <label>Title<input ref={input} value={title} maxLength={120} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
           <div className="topic-dialog__row"><label>Form<select value={form} disabled={busy} onChange={event => setForm(event.target.value as TopicKnowledge['form'])}><option value="derived">Written knowledge</option>{sources.length ? <option value="reference">Source reference</option> : null}</select></label>
@@ -95,8 +95,8 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
   return <><Dialog.Root open={Boolean(target) && !edit} onOpenChange={open => { if (!open && !edit && !creating) onClose() }}><Dialog.Portal container={resolveOverlayContainer()}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" /><Dialog.Content className="confirmation-dialog dialog-surface topic-dialog"
       onEscapeKeyDown={event => { if (creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (creating) event.preventDefault() }}>
-      <Dialog.Title className="confirmation-dialog__title">Save to Topic</Dialog.Title><Dialog.Description className="confirmation-dialog__description">{target?.title}</Dialog.Description>
-      <label>Topic<select value={topicId} disabled={creating} onChange={event => setTopicId(event.target.value)}><option value="">Choose a Topic…</option><option value="__new_topic__">Create a Topic…</option>{topics.map(topic => <option key={topic.topicId} value={topic.topicId}>{destinationLabel(topic)}</option>)}</select></label>
+      <Dialog.Title className="confirmation-dialog__title">Collect sources</Dialog.Title><Dialog.Description className="confirmation-dialog__description">Create a knowledge note with references to {target?.title || 'the selected content'}. The original content stays in place.</Dialog.Description>
+      <label>Destination topic<select value={topicId} disabled={creating} onChange={event => setTopicId(event.target.value)}><option value="">Choose a knowledge topic…</option><option value="__new_topic__">Create a knowledge topic…</option>{topics.map(topic => <option key={topic.topicId} value={topic.topicId}>{destinationLabel(topic)}</option>)}</select></label>
       {topicId === '__new_topic__' ? <><label>Topic title<input value={newTitle} maxLength={120} disabled={creating} onChange={event => setNewTitle(event.target.value)} /></label>
         <label>Category<select value={categoryId} disabled={creating} onChange={event => setCategoryId(event.target.value)}><option value="">未分类</option>{categories.filter(category => !category.readError).map(category => <option key={category.categoryId} value={category.categoryId}>{category.title}</option>)}</select></label></> : null}
       {error ? <p role="status" className="surface-inline-error">{error}</p> : null}{loading ? <p role="status">Reading Topics…</p> : null}
