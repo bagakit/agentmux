@@ -127,7 +127,6 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
   if (isBrowserTaskControlOperation(request.operation)) {
     assertBrowserTaskControlTarget(parseBrowserTaskControlPayload(request), parseBrowserTaskControlResult(request.operation, result))
   }
-  if (isToolkitRequest(request) && isToolkitRequest(result)) assertToolkitResultTarget(request, result)
   const actual = result as unknown as Record<string, unknown>
   switch (request.operation) {
     case 'message.pending.ls': case 'message.pending.edit': case 'message.pending.send':
