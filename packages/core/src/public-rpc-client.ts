@@ -264,7 +264,9 @@ class RpcClient implements AgentMuxRpcClient {
     const abort = () => controller.abort()
     signal?.addEventListener('abort', abort, { once: true })
     let deadline: ReturnType<typeof setTimeout> | undefined
-    const deviceRecovery = () => 'Read agentmux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
+    const deviceRecovery = () => method === 'device.hello'
+      ? "Check this device's connection state and ask a local user to inspect the original device facts before another explicit mutation. Never automatically replay a write."
+      : 'Read agentmux device ls and inspect the original device facts before another explicit mutation. Never automatically replay a write.'
     const armDeadline = () => {
       // Finite intents remain with their admitted owner until its receipt, an
       // explicit cancellation or transport failure. Only reader opening is timed.
