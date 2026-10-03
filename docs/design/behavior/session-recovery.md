@@ -235,6 +235,8 @@
 
 手机工作面把导航、原 Session 引用、草稿、未确认操作保护与已确认 Host 身份作为同一份非秘密记录原子保全；前台重连与重装后的恢复分别核实实际持久来源。导出／导入只承接这份工作面，不含邀请、claim、device credential、Cookie 或系统秘密。恢复记录先完整校验再整体采用，读取、保存或导入失败保留原字节、当前工作面与可操作告示，不把坏记录换成空态；原 Host 归属尚未确认或已改变时，不向另一 Host 串发原 Session 的输入，未确认操作不自动重投。手机接入的授权与系统秘密边界沿[《手机版 Relay 连接》](public-control.md#手机版-relay-连接)。
 
+手机原工作面可保全准确 Goal 选择与待确认公共操作；可选 `goalWork` 只保存原 Host 身份、Core Session／Goal 引用及原操作 ID 和参数，不复制 Goal、loop 或成果账本。长期引用以 durable semantic runtimeId 区分 Runtime，本代 ownerInstanceId 不改变原工作身份；Relay Host ID 与执行 Session 的 Host ID 分属原 owner，不能互相代用。重连只读取原事实，明确重试须核对同一原 Host、Goal 关联、loop 与版本，并复用原业务操作 ID；跨 Host、后来选择或迟到回执不重定向原操作。打开、关闭目标面板与查看成果保留原 Composer 节点、草稿和选区；目标入口不可用不拿走原 Agent 的手动输入能力。
+
 ## Session 发现与维护者定向提交
 
 - list sessions 应逐项返回：某个 stale binding 带准确 Session/Run/错误码，不导致其他条目不可见；可按 Provider、workspace、状态和活动时间筛选。全局连接失败不得伪装为空列表。
