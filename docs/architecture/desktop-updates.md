@@ -11,6 +11,12 @@ This document describes the update mechanisms in the current source, not an inst
 
 The first update needs `pnpm package:mac:install` to install the frontend loader. Subsequent compatible UI work can use `pnpm update:local` or explicitly `pnpm update:renderer`. The latter rejects host/runtime changes. Both build before selecting or activating a release. Packaging requires a clean committed checkout; a separate worktree can preserve unfinished work in the development tree.
 
+The `package-macos.mjs` entry point qualifies signing before its own build, candidate copy, signing or installation work. Set `AGENTMUX_MACOS_SIGN_IDENTITY` to the exact SHA1 of an available **Developer ID Application** certificate; [preflightMacosSigning](../../apps/desktop/scripts/macos-signing.mjs) validates that request at the start of [package-macos.mjs](../../apps/desktop/scripts/package-macos.mjs). Missing or mismatched identity rejects this candidate cheaply and keeps the installed App and healthy Runs.
+
+Development packaging must explicitly use `--ad-hoc`; it conflicts with a configured certificate and does not confirm permission continuity.
+
+The signing module owns exact configuration parsing and signed-output checks. Authorization continuity, the first identity transition and actual OS confirmation belong to the [Conversation Input screenshot contract](../design/behavior/conversation-input.md#message-tools-失败反馈与-browser-region-选中态); signing Source alone is not an OS authorization receipt.
+
 `pnpm update:local --ui-only` selects application installation with UI-only intent. Direct packaging uses `pnpm package:mac:install --ui-only` (`--ui-only` requires `--install` on the packaging script). This is an explicit route, not permission to declare Native upgraded or to replace the daemon. [installApplication](../../apps/desktop/scripts/package-macos.mjs) compares the actual runtime trees and qualifies the existing listener. Without an outgoing workbench observation, an active candidate GUI still leaves complete workbench recovery `unknown`.
 
 Use `pnpm update:renderer:rollback` or **View > Revert frontend update** to return to the preceding compatible frontend. Rollback changes code, not user edits or Session facts. Reapplying the current release preserves the rollback pointer.

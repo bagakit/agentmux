@@ -1,35 +1,33 @@
 # Browser 展示媒体资源合同
 
-Root `/root` 已批准本合同和准确 ABI 进入原 `f-2gn8f5azk/T-004`；批准记录（本机过程资料：`docs/reviews/shared-native-browser-presentation-abi-review.json`） 只批准设计和实施边界，不声明产品已实现、Task 已 start/done 或物理输入已通过。
+本文说明现有 Browser 呈现接口如何绑定原页面、呈现 lease、媒体 capture 与输入位置。产品约束只由交互 SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)定义；视觉只引用[Browser 呈现约束](../design/presentation/browser-workface.md)。精确接口与运行期校验来源见 [Browser 展示媒体 ABI](browser-presentation-abi.md)，本文不保存另一份类型或任务流程。
 
-产品约束唯一消费交互SSOT[《Zone→Tabs→Regions 的实体与展示绑定》](../design/behavior/spaces-and-layout.md#zonetabsregions-的实体与展示绑定)，视觉只消费密度同节。T004依赖已完成T001/T003，原三验收和product门不变；普通二GUI恢复只由T005签。本合同不把T003严格sourceDoc-pin试验policy搬成产品规则。
+## 页面、呈现与媒体分别由谁持有
 
-## 身份与资源
+| 对象 | 当前 holder 与边界 |
+| --- | --- |
+| 原 Browser 页面 | [BrowserViewManager](../../apps/desktop/src/main/browser-view-manager.ts) 的原 BrowserEntry／WebContents／view／Profile／navigation／viewport；foreign 展示不改资源 Workspace |
+| 呈现身份 | 原公共 occurrence 的 `presentationId` 与 exact location；BVM 只持实际注册的瞬态 lease，不建立第二持久位置目录 |
+| requester | 真实受信 IPC 的 App WebContents／Session／main frame／完整已加载文档；Renderer payload 不提供这些 Electron identity 或权限 |
+| 媒体流与 tracks | [BrowserPresentationStage](../../apps/desktop/src/renderer/src/components/BrowserPresentationStage.tsx) 中原媒体 holder；一个 Browser 的 capture 可共享给多个 video，Main 持许可及失效事实 |
+| 输入位置 | 原 Native view 的当前有效 lease；不因多个画面副本生出第二 viewport、导航或输入 owner |
 
-- 原BrowserEntry/WebContents/view/Profile/navigation/BrowserViewport属于唯一BVM。Browser所属资源Workspace不因foreign展示位置改写。
-- presentationId与exact location（displayWorkspaceId/groupId/tabId/regionId）来自同一现公共occurrence事实；DOM host或surface名称不代表新的实体。BVM只持实际注册的瞬态lease，不建立第二持久位置目录。
-- source同活体页面导航/reload更新现BrowserSnapshot并继续流，不改input occurrence、不生第二viewport；真实entry/view/WC/Profile替换或释放才使resource scope失效。
-- requester由真实受信IPC event得到精确App WC/Session/mainFrame/完整已加载文档寿命。Renderer payload不得携Electron对象/ID、origin、sourceURL或权限。file opaque origin不作为唯一身份校验。
-- 原App内容宿主持真实MediaStream/Track资源，一个Browser一个capture，多个video共享srcObject；Main负责许可/失效，不能声称持有Renderer物理track。stage可见性与真实输入可操作分别表达。
+原 source 的正常导航／reload 继续更新 BrowserSnapshot 和画面。真正的 entry／view／WebContents／Profile 替换或释放，与 requester 文档失效分别沿原资源 scope 处理；不能用 source navigationId 把活体媒体流永久钉到首个页面文档，也不能把 file opaque origin 当作 requester 的充分身份。 Profile 切换仅在成功 commit 后撤旧 capture 许可并替换原资源；失败保留旧页与原授权。
 
-## 登记、ARM、ACK、撤销
+## 登记、ARM、ACK 与撤销
 
-精确签名见 [Browser 展示媒体 ABI](browser-presentation-abi.md)。新方法直接属于现AgentMuxDesktopApi.browser，经原preload与registerIpc.handleWithEvent到BVM。BVM安装一个App Session display handler，video-only/无system picker，原SourceProfile权限不变；每requester只容一项未settledarm，避免无requestID的callback把源串线。
+原 `AgentMuxDesktopApi.browser` 经 preload、`registerIpc.handleWithEvent` 到 BVM。display handler 对准确 pending scope 提供 video-only 原页面，关闭 system picker，不改原 Source Profile 权限；每 requester 仅一项未 settled arm，避免没有业务 request ID 的 callback 串源。
 
-主Frame/文档/Session错误、opaquehandle不属sender、source已释放、没有真实visiblepositivegeometry均不得capture。任一流程检查失败不停止或销毁健康source；明确服务窗说明媒体呈现未确认。已有同capture多visibleconsumer不因某个issuer lease取消就停流；只有最后visible撤去才收媒体。
+错误主 frame／文档／Session、foreign opaque handle、已释放 source 或没有合法可见正面积 geometry，拒绝该次 capture。已有 capture 不因最初 issuer lease 隐藏或取消而收掉另一个可见 consumer 的流；最后可见 consumer 撤去才收媒体。媒体失败不作为原页面加载、导航或人工输入的前置条件，失败及显式重试规则见[《Browser 工作面》](../design/behavior/browser-workface.md#browser-工作面-1)中的多位置呈现边界引用。
 
-ACK为可信App媒体holder报告：ready/stopped带非空实际trackIds，failed单独；stopped不重启revokedscope。已ready时核同集合；迟到流直接停止可报道真实stopped，不假报ready。物理ended仍需actualqualification，不以Main发revoke/ACK无异常/RequesterDOM移除冒观测。requester毁掉后无法读取旧track时保unknown，而不是伪造ended。
+ACK 是可信 App holder 的媒体报告：ready／stopped 带实际非空 track IDs，failed 独立，stopped 不重启已撤 scope；已 ready 后核同一集合。迟到流可直接报告真实 stopped，不能先假报 ready。物理 ended 需要实际观察，Main 发 revoke、ACK 无异常或移除 DOM 都不等同于已观测停轨；requester 结束后无法读旧 track 时保持 unknown。
 
-媒体/input位置事件使用独立BROWSER_PRESENTATION_EVENT_CHANNEL→preload.onPresentationEvent→唯一媒体holder。BrowserEvent三项union和Store reducer不变；media revoke不得移除Tab/Region。每listener只退自身，handler/lease清理沿唯一BVM/dispose。
+媒体与 input 位置事件只经独立 `BROWSER_PRESENTATION_EVENT_CHANNEL` 到原 holder。原 BrowserEvent 与 Store 实体 reducer 保持自己的职责；media revoke 不移除 Tab／Region。listener 只退自身，handler／lease 清理沿原 BVM／dispose，旧 scope 的迟到报告不能复活新许可。
 
-## 显隐、输入与尺寸
+## 可见性、输入与尺寸
 
-Settings只更新当前background lease的可见性/命中，其他合法visible stage持续paint。stage cleanup不调用全browserId nullbounds/release；原预算沿可见集合保护原资源。隐藏/目录中引用无capture/fit/bytes/Reader放大。
+一个 stage 的可见性变化只影响该位置；其他合法可见位置的画面和原资源继续存在。stage cleanup 不调用全 Browser 的 null bounds／release。原窗口预算沿实际可见 bindings 集合消费，不另建保活策略；隐藏及目录中的引用不增加 capture、fit、bytes 或 Reader 工作。
 
-明确input选择才迁原Nativeview到准确有效lease；不在render/hover/导航时取首项抢焦点，不变Agent driving/humanControl、permissions或overlaylease。被动stage只contain同权威画面，原viewport/Native几何owner唯一。首次点击、IME/selection/clipboard须各自实际事实；stream像素或sourceCDP不等于两个位置均可操作。
+明确选择沿原 activation 迁 Native view 到准确有效 lease；被动显示、render、hover 或恢复不凭首项夺焦点，不改变 Agent driving／humanControl、权限或 overlay lease。被动 stage 以 contain 显示同一权威画面，原 viewport 与 Native 几何 owner 保持唯一。后台选择保人工输入的位置与 caret，第一击则消费原类型化准备／提交／取消协议，不能自动重放未知输入。
 
-## 接口发布与验收边界
-
-原六invoke的privileged sender接线/parity与renderer非定义caller全部非空；类型/builtNative/loaded三行为RED→exactG/独立宽窄图按T004原门。首产品counter从被动stage第一击/原Native命中进入，真实 requester文档失效是同域scope反例；源reload保持流为正控。实际test若因Sourceseam/原生物理输入或停轨观测不足而失败，保原件与未完成，不改原Task/门。
-
-研究工具的private props/mockAPI/旧canonicalSource不得进入公共ABI；产品不留legacyfallback，不新Browser/Profile/navigation/Runowner，不重T003已证矩阵，不打包或操作用户App。
+首次点击、IME、selection、clipboard、原页面正面积及普通恢复，各自需要对应的实际事实。stream 像素、source CDP、`selected` 或输入派发回执不能互相代签；媒体或输入未确认时保留原工作面与服务窗。研究工具的私有 props、mock API 或旧 candidate 不作为当前公共 ABI、已安装 App 或 Native 验收结论。
