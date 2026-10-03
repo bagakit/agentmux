@@ -136,8 +136,11 @@ Survey 负责探索与整理，Notebook 收纳知识页面，Note 提供块书�
 
 ## Topic 点击必须打开可见 Tabs
 
-- 用户点击 Topic 后，右侧必须显示该 Topic 已有的 Tabs、Region 和焦点；不能只改后台选中项而让工作面留在 Board 或 Agents。
-- 已有持久化工作面应先可见；读取 Topic 元数据的流程不能挡住已存在 Tabs。文件读取失败必须明确展示，不能清空 Tabs 或另建 Session。
+- 用户从 Category 页或二级导航点击具体 Topic 后，右侧必须直接显示该 Topic 已有的 Tabs、Region 和焦点；不能只改后台选中项而让工作面留在 Board 或 Agents。Topic 的 Zone 成员与 Group 布局范围沿[Project 与 Workspace](#project-与-workspace)的同一合同。
+- 进入具体 Topic 后，二级菜单默认列出其原 Zone 的 Chat／Tab 目录，包含跨 Group 的全部准确成员，右侧继续原 Chat／Thread 工作面；不能让分类全量 Topic 列表、知识搜索或无知识空态代替这个讨论目录。明确选择 Chat 沿其原展示位置落焦，保当前 Topic，不猜当前 Group 或第一个位置。知识与资料沿单独可达的工具入口；切换工具本身只改变二级内容，保原 Topic、工作面、草稿与执行焦点。分类页与 Topic 工作面的层级、单份列表及入口呈现只见[知识库呈现合同](../presentation/spaces-and-layout.md#topics-知识库的导航与内容层级)。
+- 一次点击只建立被点中 Topic 的这一次导航。首次显示可以复用该 Topic 原已选 Chat／Tab／Region；后续元数据读取、后台准备和恢复回执不能再把工作面切到另一个 Topic、Chat、Agent 或其他对象。Chat／Agent 的独立入口只响应自己的显式动作，不冒泡叠加 Topic 行的导航。
+- 已有持久化工作面应先可见；读取 Topic 元数据的流程不能挡住已存在 Tabs。读取失败或分类归属、准确工作面位置尚未确认时，保留原内容、工作面与健康 Run，明确说明失败或未知及恢复动作，不能清空 Tabs、猜另一个对象或另建 Session。
+- 用户随后选择 Category、Topic、Tab、Region 或其他工作面时，新导航优先；迟到的读取、准备或恢复结果可以更新同一对象已确认的事实，不能重放旧导航、夺回焦点。仍在同一 Workspace 不代表旧导航仍有效。
 - Leader Topic 浮层的后台准备不能抢普通 Topic 的导航焦点，也不能重复挂载其他 Topic 的终端；重启后保留原工作面。
 
 ## Scratch Topic 首次打开必须有可用 Terminal
@@ -359,7 +362,7 @@ Space 中通过 Git 仓库来源提示已登记项目的跨设备关联，用户
 - **一个 Topic 容纳多个 Agent，不是一 Agent 一 Topic**。同一 Topic 里的参与者关系在磁盘侧以 collaborators 表达（Scratch 文件系统是唯一真相），不另建 UI 侧的 Topic Registry；Topic 之间的切换归 Topic 面板，不靠 View 或 Tab 的开合暗中改绑。因此 `topicId` **绝不由 `tabId` 派生**——把当前 Tab 的 id 当作 topicId 会让每开一个 Tab 就凭空多出一个 Topic，与"一 Topic 多 Agent"直接矛盾；目标 Topic 由启动意图显式携带，缺失时不绑定任何 Topic 而非发明一个。
 - Topic 条目的目录动作只在内置 Explorer 中展开、选中并滚动到对应目录，不调用 Finder 或其他系统文件管理器。
 - Topic 条目的改名是对 `topic.md` 一级标题的语义编辑；`topic--*` 目录、`topicId`、Agent cwd 和 View 绑定保持稳定，Explorer 不向这些顶层目录暴露通用 Rename。
-- **切 Topic 就换它的 Chat/Tab 工作面，和项目里选 Branch 是同一种体验。** 当前 Topic 的原 Zone 成员、布局和全部合法绑定是投影来源，不建每 Topic 一份 UI Tab 状态。活动 Tab 要属于所选 Topic，不能以未绑定 Tab 仍可见为理由让切换无效。未绑定内容在 Scratch／Topics 总览的明确入口继续可达，不默认混入具体 Topic 或 Mote，也不因对象范围变化而删除、关闭或改绑。
+- **切 Topic 就换它的 Chat/Tab 工作面，和项目里选 Branch 是同一种体验。** Topic 是 Zone，选择具体 Topic 即打开该 Zone 的成员 Tabs；不能把 Topic 当成 Tab Group，或只切换共享 Scratch 的一个 Group。Group 只组织成员 Tabs 的展示布局，不决定 Topic 身份或成员；Tab 列表沿准确 Zone 成员筛选，同一 Zone 分布在不同 Group 的 Tabs 仍属于该 Topic，原准确展示绑定保留。当前 Topic 的原 Zone 成员、布局和全部合法绑定是投影来源，不建每 Topic 一份 UI Tab 状态。活动 Tab 要属于所选 Topic，不能以未绑定 Tab 仍可见为理由让切换无效。未绑定内容在 Scratch／Topics 总览的明确入口继续可达，不默认混入具体 Topic 或 Mote，也不因对象范围变化而删除、关闭或改绑。
 - **对象选择不能被局部落焦清掉。** 树、总览、恢复及公共导航进入具体 Topic/Mote 时都确认准确对象与原 Zone/Tab/Region 引用；在其工作面选择 Tab、Group、Region、编辑文件或继续输入，仍保当前对象范围。已有显式对象选择不被活动 Tab 的旧字段、资源 Workspace 或 cwd 覆盖；无显式范围的通用入口可由准确空间绑定定位，多个绑定返回候选。未绑定、失效或暂未知位置不等于用户选择了全局 Topics；保原对象、内容和服务窗，不退回全部 Scratch。
 - **从当前工作线新建的 Tab 必须继承明确的对象／Zone 展示范围。** 点击 Tabbar 的 `+`、从当前 View 打开 Browser/Terminal/Agent，或由 Control/链接创建新 Tab 时，沿已确认当前目标创建和绑定；不能因新建 `WorkbenchTab` 退回未绑定。无对象范围时仍可保未绑定，显式指定另一个目标时以显式意图为准；已有 Session 的执行目录与展示归属仍是两种事实。继承不新增布局、Topic 注册表或另一份当前状态。
 - Topic 列表与文件树在总览／Category 共用内容槽时，默认高度偏向 Topic 列表，文件树占更小一份；此密度规则不把全局 Topic 列表挂到具体 Topic 或 Mote。

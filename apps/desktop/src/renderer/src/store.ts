@@ -354,6 +354,8 @@ type OpenScratchTopicOptions = {
   signal?: AbortSignal
   /** When supplied, focus this exact bound Tab instead of selecting the first Tab for the Topic. */
   tabId?: string
+  /** An exact original display occurrence, required when this Tab has several positions. */
+  groupId?: string
 }
 export type AsyncCheckState = 'idle' | 'checking' | 'ready' | 'missing' | 'error'
 export type ExecutorDetectionState = {
@@ -6296,10 +6298,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const projected = projectWorkbenchSpaceSelection(layout, current.tabs, catalog,
         held?.spaceId === address.spaceId && held.zoneId === address.zoneId ? held : parent).layout
       const groups = projected?.groups.filter(group => group.tabOrder.length && groupIds(projected.root).includes(group.id)) ?? []
-      const group = targetTabId ? groups.find(group => group.tabOrder.includes(targetTabId))
+      const targetGroups = targetTabId ? groups.filter(group => group.tabOrder.includes(targetTabId)) : []
+      const group = targetTabId ? options?.groupId ? targetGroups.find(group => group.id === options.groupId)
+        : targetGroups.find(group => held?.zoneId === address.zoneId && held.tabId === targetTabId && group.id === held.groupId) ?? (targetGroups.length === 1 ? targetGroups[0] : undefined)
         : groups.find(group => group.id === projected?.activeGroupId) ?? (groups.length === 1 ? groups[0] : undefined)
       const tabId = targetTabId ?? group?.activeTabId
       if (!tabId && !catalog.tabs.some(tab => tab.zoneId === address.zoneId)) return parent
+      // A Topic opens its Zone. Multiple layout Groups do not require choosing one
+      // exact child occurrence before showing all of the Zone's original Tabs.
+      if ((!group || !tabId) && !targetTabId) return parent
       if (!group || !tabId) throw new Error('This object has no unique confirmed Tab occurrence. Its original workface is kept; choose an exact Tab and Group.')
       return { ...resolveDesktopSpaceSelection(current, catalog, { ...address, tabId, groupId: group.id,
         displayWorkspaceId: workspace.id }), topicId }
@@ -6375,16 +6382,25 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // user must still see the Scratch work surface and its error/retry path instead of an empty
     // right side. Background preparation explicitly keeps the current surface untouched.
     const known = scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(topic => topic.id === topicId)
+    let revealedExistingWorkface = false
     if (reveal && !options?.signal?.aborted) {
       if (known) {
         const choice = selectObject(get(), known, options?.tabId)
-        set({ activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench', workbenchSpaceSelection: choice,
-          retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null })
-        if (choice.tabId && choice.groupId) {
-          get().activateTab(choice.workspaceId, choice.groupId, choice.tabId)
-        }
+        revealedExistingWorkface = workbenchSelectionCatalog(get()).tabs.some(tab => tab.zoneId === choice.zoneId)
+        // Select the original occurrence, layout and execution context together. Calling
+        // activateTab after this choice would submit the same navigation a second time.
+        set(current => {
+          const layout = current.layouts[choice.workspaceId]
+          const activeRegion = choice.tabId && choice.regionId ? current.tabs[choice.tabId]?.regions[choice.regionId] : undefined
+          return { activeWorkspaceId: choice.workspaceId, mainSurface: 'workbench' as const, workbenchSpaceSelection: choice,
+            retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
+            ...(layout && choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
+              [choice.workspaceId]: activateLayoutTab(layout, choice.groupId, choice.tabId) } } : {}),
+            ...(activeRegion && isSessionSurface(activeRegion) ? { agentFocus: focusSessionContext(current, activeRegion.sessionId,
+              undefined, { displayWorkspaceId: choice.workspaceId, groupId: choice.groupId!, tabId: choice.tabId!, regionId: choice.regionId! }) } : {}) }
+        })
       }
-      set((current) => {
+      if (!known) set((current) => {
         // An unconfirmed discovery cannot replace a previously selected object.
         if (!known && current.workbenchSpaceSelection) return current
         const layout = current.layouts[workspace.id]
@@ -6430,6 +6446,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     remember(snapshot)
     const mayReveal = reveal && !options?.signal?.aborted && !laterIntent
     if (reveal && !mayReveal) return false
+    // The click already opened its durable Zone, optionally with an exact Chat.
+    // Metadata refresh is not another navigation or permission to create a Tab.
+    if (revealedExistingWorkface) return true
     let createdLauncher: WorkbenchTab | undefined
     let placementFailed = false
     set((current) => {
@@ -6438,28 +6457,24 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       if (!address) { placementFailed = true; return current }
       const catalog = workbenchSelectionCatalog(current)
       const requestedTab = options?.tabId ? current.tabs[options.tabId] : undefined
+      const objectChoice = options?.tabId ? null : selectObject(current, snapshot!)
       const boundTab = options?.tabId
         ? requestedTab && catalog.tabs.some(tab => tab.tabId === requestedTab.id && tab.zoneId === address.zoneId) && tabGroupForTab(layout, requestedTab.id) !== null
           ? requestedTab
           : undefined
-        : (() => { const choice = selectObject(current, snapshot!); return choice.tabId ? current.tabs[choice.tabId] : undefined })()
+        : objectChoice?.tabId ? current.tabs[objectChoice.tabId] : undefined
       if (options?.tabId && !boundTab) {
         placementFailed = true
         return current
       }
-      if (boundTab) {
+      if (boundTab || objectChoice && catalog.tabs.some(tab => tab.zoneId === address.zoneId)) {
         if (!mayReveal) return current
-        const choice = selectObject(current, snapshot!, boundTab.id)
-        const groupId = tabGroupForTab(layout, boundTab.id)!
+        const choice = objectChoice ?? selectObject(current, snapshot!, boundTab!.id)
         return {
           activeWorkspaceId: workspace.id, mainSurface: 'workbench' as const, workbenchSpaceSelection: choice,
           retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, regionCaretFocus: null,
-          // 切 Topic 就像切 Branch：换掉那一组 Tab。真相仍是这一份 layout——激活该 Topic 的
-          // Tab 就够了，当前 Topic 由活动 Tab 派生（scratch-topic-layout.ts），不另存一份。
-          layouts: {
-            ...current.layouts,
-            [workspace.id]: activateLayoutTab(layout, groupId, boundTab.id)
-          }
+          ...(choice.tabId && choice.groupId ? { layouts: { ...current.layouts,
+            [workspace.id]: activateLayoutTab(layout, choice.groupId, choice.tabId) } } : {})
         }
       }
       // A confirmed empty Mote is an empty discussion surface, not missing discovery.

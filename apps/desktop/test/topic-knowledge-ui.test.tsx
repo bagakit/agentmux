@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
-import { createRoot, type Root } from 'react-dom/client'
+import type { Root } from 'react-dom/client'
+import { createClientUiRoot } from './helpers/client-ui-render'
 import { webcrypto } from 'node:crypto'
 import { mkdir, mkdtemp, realpath, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -19,15 +20,19 @@ import { TopicCategoryDialog } from '../src/renderer/src/components/TopicCategor
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
+import { WorkspaceFilesTool } from '../src/renderer/src/components/SurfaceToolDock'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { selectedKnowledgeSources, moveKnowledgeTopic, openKnowledgeSource } from '../src/renderer/src/lib/topic-knowledge-actions'
 import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
 import { categoriesFromSpatial } from '../src/shared/topic-categories'
 import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
 import { useAppStore } from '../src/renderer/src/store'
+import { resolveDesktopSpaceSelection, workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { api } from '../src/renderer/src/lib/api'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import type { AppConfig, WorkspaceRecord } from '../src/shared/contracts'
+// Native PTY painting is outside this happy-dom navigation boundary; Electron proves the real workface.
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => createElement('div', { 'data-native-pty-paint-isolated': '' }) }))
 vi.mock('electron', () => ({ nativeImage: { createFromBuffer: () => { throw Error('No avatar writes in this proof') } } }))
 const initial = useAppStore.getState(), CATEGORY = '11111111-1111-4111-8111-111111111111'
 let directories: string[] = [], root: Root | null = null, host: HTMLDivElement
@@ -37,7 +42,7 @@ async function settle(predicate: () => boolean) {
   for (let i = 0; i < 100 && !predicate(); i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   expect(predicate()).toBe(true)
 }
-async function mount(component: React.ReactNode) { root = createRoot(host); await act(async () => root!.render(component)) }
+async function mount(component: React.ReactNode) { root = createClientUiRoot(host); await act(async () => root!.render(component)) }
 async function click(node: Element) { await act(async () => { (node as HTMLElement).click() }) }
 async function input(node: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement, value: string) {
   await act(async () => { const type = node instanceof HTMLSelectElement ? HTMLSelectElement : node instanceof HTMLTextAreaElement ? HTMLTextAreaElement : HTMLInputElement; Object.getOwnPropertyDescriptor(type.prototype, 'value')!.set!.call(node, value); node.dispatchEvent(new Event(node instanceof HTMLSelectElement ? 'change' : 'input', { bubbles: true })) })
@@ -219,4 +224,177 @@ describe('Topic knowledge UI consumes the real Host content and Core graph owner
     useAppStore.setState(state => ({ tabs: { ...state.tabs, [f.tabs[0]!.id]: { ...state.tabs[f.tabs[0]!.id]!, topicId: 'view:obsolete-tag' } }, spaceZoneBindings: originalBindings }))
     expect(selectedKnowledgeSources(f.workspace.id)?.sources).toEqual([{ kind: 'topic', topicId: f.first.topicId, chatId: f.tabs[0]!.id, threadId: f.tabs[0]!.layout.activeRegionId }])
   })
+  it('a Category Topic click selects its original Chat once while delayed metadata only refreshes content', async () => {
+    const f = await fixture(), originalSpatial = await f.state.read()
+    useAppStore.setState({ workbenchSpaceSelection: { workspaceId: f.workspace.id, spaceId: f.first.categorySpaceIds[0]!, zoneId: null, topicId: null, tabId: null, groupId: null, regionId: null } })
+    const read = vi.mocked(api.scratch.readTopic).getMockImplementation()!
+    let finish!: () => void
+    const gate = new Promise<void>(resolve => { finish = resolve })
+    vi.mocked(api.scratch.readTopic).mockImplementation(async (workspace, id) => { await gate; return read(workspace, id) })
+    await mount(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.first.categorySpaceIds[0], onRevealDirectory: () => {} }))
+    await settle(() => !!host.querySelector(`[data-topic-id="${f.second.topicId}"]`))
+    const commits: unknown[] = []
+    const unsubscribe = useAppStore.subscribe((next, previous) => {
+      if (next.workbenchSpaceSelection !== previous.workbenchSpaceSelection || next.layouts !== previous.layouts) commits.push(next.workbenchSpaceSelection)
+    })
+    try {
+      await click(host.querySelector(`[data-topic-id="${f.second.topicId}"]`)!)
+      const chosen = useAppStore.getState()
+      expect(chosen.workbenchSpaceSelection).toMatchObject({ topicId: f.second.topicId, tabId: f.tabs[1]!.id, regionId: f.tabs[1]!.layout.activeRegionId })
+      await act(async () => { finish(); await gate })
+      await settle(() => host.querySelector(`[data-topic-id="${f.second.topicId}"]`)?.getAttribute('aria-disabled') === 'false')
+      expect(commits).toHaveLength(1)
+      expect(useAppStore.getState().workbenchSpaceSelection).toBe(chosen.workbenchSpaceSelection)
+      expect(useAppStore.getState().layouts).toBe(chosen.layouts)
+      expect(useAppStore.getState().tabs).toBe(chosen.tabs)
+      expect(useAppStore.getState().agentComposerDrafts).toEqual(chosen.agentComposerDrafts)
+      expect(api.sessions.stop).not.toHaveBeenCalled()
+      expect((await f.state.read())!.graph).toEqual(originalSpatial!.graph)
+    } finally { unsubscribe() }
+  })
+
+  it.each(['category', 'other-topic'] as const)('a late Topic read preserves a newer %s choice', async destination => {
+    const f = await fixture(), read = vi.mocked(api.scratch.readTopic).getMockImplementation()!
+    let finish!: () => void
+    const gate = new Promise<void>(resolve => { finish = resolve })
+    vi.mocked(api.scratch.readTopic).mockImplementation(async (workspace, id) => { await gate; return read(workspace, id) })
+    let opening!: Promise<boolean>
+    await act(async () => { opening = useAppStore.getState().openScratchTopic(f.second.topicId, f.workspace.id) })
+    const later = destination === 'category'
+      ? { workspaceId: f.workspace.id, spaceId: f.category.spaceId, zoneId: null, topicId: null, tabId: null, groupId: null, regionId: null }
+      : { workspaceId: f.workspace.id, spaceId: f.first.categorySpaceIds[0]!, zoneId: f.first.zoneId, topicId: f.first.topicId, tabId: f.tabs[0]!.id, groupId: f.layout.activeGroupId, regionId: f.tabs[0]!.layout.activeRegionId }
+    await act(async () => { useAppStore.setState({ workbenchSpaceSelection: later }); finish(); expect(await opening).toBe(false) })
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(later)
+    expect(useAppStore.getState().tabs).toEqual(Object.fromEntries(f.tabs.map(tab => [tab.id, tab])))
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
+
+  it('a failed Topic metadata read retains the chosen original Chat and reports recovery', async () => {
+    const f = await fixture()
+    vi.mocked(api.scratch.readTopic).mockRejectedValue(new Error('Private Topic metadata unavailable'))
+    await expect(useAppStore.getState().openScratchTopic(f.second.topicId, f.workspace.id)).rejects.toThrow('Private Topic metadata unavailable')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ topicId: f.second.topicId, tabId: f.tabs[1]!.id, regionId: f.tabs[1]!.layout.activeRegionId })
+    expect(useAppStore.getState().error).toMatch(/Private Topic metadata unavailable/); expect(useAppStore.getState().errorNoticeContext?.summary).toMatch(/Topic metadata.*retry this Topic/i)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
+
+  it('a Topic Zone opens all its Tabs across Groups from another active Topic without inventing a Chat', async () => {
+    const f = await fixture()
+    const extra = { ...createWorkbenchTab('chat:second-first-topic', { kind: 'launcher', regionId: 'thread:second-first-topic', workspaceId: f.workspace.id }), topicId: f.first.topicId, space: f.tabs[0]!.space }
+    const groups = [createWorkspaceLayout('a-left', [f.tabs[0]!.id]), createWorkspaceLayout('a-right', [extra.id]), createWorkspaceLayout('b-current', [f.tabs[1]!.id])]
+    const layout = { activeGroupId: 'b-current', groups: groups.flatMap(item => item.groups), root: { type: 'split' as const, direction: 'horizontal' as const, ratio: 0.5, first: groups[0]!.root, second: { type: 'split' as const, direction: 'vertical' as const, ratio: 0.5, first: groups[1]!.root, second: groups[2]!.root } } }
+    const original = await f.state.read(), graph = original!.graph
+    graph.tabs.push({ tabId: extra.id, zoneId: f.first.zoneId, workspaceId: f.workspace.id, name: null, regionIds: [extra.layout.activeRegionId] })
+    graph.regions.push({ tabId: extra.id, regionId: extra.layout.activeRegionId, kind: 'launcher', agentSessionId: null, runId: null, execution: null })
+    graph.layouts[f.workspace.id] = layout
+    await f.state.commit({ expectedRevision: original!.revision, graph })
+    const tabs = { ...useAppStore.getState().tabs, [extra.id]: extra }
+    useAppStore.setState({ tabs, layouts: { [f.workspace.id]: layout }, workbenchSpaceSelection: { workspaceId: f.workspace.id, spaceId: f.first.categorySpaceIds[0]!, zoneId: null, topicId: null, tabId: null, groupId: null, regionId: null } })
+    await mount(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.first.categorySpaceIds[0], onRevealDirectory: () => {} }))
+    await settle(() => !!host.querySelector(`[data-topic-id="${f.first.topicId}"]`))
+    const current = useAppStore.getState()
+    expect(resolveDesktopSpaceSelection(current, workbenchSelectionCatalog(current), { spaceId: f.first.categorySpaceIds[0]!, zoneId: f.first.zoneId })).toMatchObject({ zoneId: f.first.zoneId, topicId: f.first.topicId, tabId: null, groupId: null })
+    expect(() => resolveDesktopSpaceSelection(current, workbenchSelectionCatalog(current), { spaceId: f.first.categorySpaceIds[0]!, zoneId: f.first.zoneId, groupId: 'b-current' })).toThrow()
+    await click(host.querySelector(`[data-topic-id="${f.first.topicId}"]`)!)
+    await settle(() => host.querySelector(`[data-topic-id="${f.first.topicId}"]`)?.getAttribute('aria-disabled') === 'false')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ topicId: f.first.topicId, zoneId: f.first.zoneId, tabId: null, groupId: null })
+    expect(useAppStore.getState().tabs).toBe(tabs)
+    expect(useAppStore.getState().layouts[f.workspace.id]).toBe(layout)
+    await act(async () => root!.render(createElement(WorkspaceWorkbench, { workspaceId: f.workspace.id })))
+    await settle(() => host.querySelectorAll('button.workbench-tab').length === 2)
+    expect([...host.querySelectorAll('button.workbench-tab')].map(tab => tab.getAttribute('data-workbench-tab-id')).sort()).toEqual([f.tabs[0]!.id, extra.id].sort())
+    await act(async () => useAppStore.getState().focusTabGroup(f.workspace.id, 'a-right'))
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ topicId: f.first.topicId, zoneId: f.first.zoneId, tabId: extra.id, groupId: 'a-right' })
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+    expect((await f.state.read())!.graph.tabs.map(tab => tab.tabId).sort()).toEqual([...f.tabs.map(tab => tab.id), extra.id].sort())
+  })
+
+  it('Category selection clears Topic current marking and a Chat chip opens its exact Topic once', async () => {
+    const f = await fixture()
+    useAppStore.setState({ workbenchSpaceSelection: { workspaceId: f.workspace.id, spaceId: f.first.categorySpaceIds[0]!, zoneId: null, topicId: null, tabId: null, groupId: null, regionId: null } })
+    await mount(createElement(WorkspaceTopicsPanel, { workspace: f.workspace, categorySpaceId: f.first.categorySpaceIds[0], onRevealDirectory: () => {} }))
+    await settle(() => !!host.querySelector(`[data-topic-tab-id="${f.tabs[1]!.id}"]`))
+    expect(host.querySelector('[aria-current="page"]')).toBeNull()
+    const choices: unknown[] = []
+    const unsubscribe = useAppStore.subscribe((next, previous) => { if (next.workbenchSpaceSelection !== previous.workbenchSpaceSelection) choices.push(next.workbenchSpaceSelection) })
+    try {
+      await click(host.querySelector(`[data-topic-tab-id="${f.tabs[1]!.id}"]`)!)
+      await settle(() => useAppStore.getState().workbenchSpaceSelection?.tabId === f.tabs[1]!.id)
+      expect(choices).toHaveLength(1)
+      expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ spaceId: f.first.categorySpaceIds[0]!, zoneId: f.second.zoneId, topicId: f.second.topicId, tabId: f.tabs[1]!.id })
+      expect(api.sessions.stop).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+  })
+
+  it('the real secondary Topic tool defaults to all original Zone Chats and knowledge is an explicit local view', async () => {
+    const f = await fixture()
+    const extra = { ...createWorkbenchTab('chat:extra-own', { kind: 'launcher', regionId: 'thread:extra-own', workspaceId: f.workspace.id }),
+      name: 'Second original Chat', topicId: f.first.topicId, space: f.tabs[0]!.space }
+    const unbound = createWorkbenchTab('chat:unbound', { kind: 'launcher', regionId: 'thread:unbound', workspaceId: f.workspace.id })
+    const groups = [createWorkspaceLayout('a-left', [f.tabs[0]!.id]), createWorkspaceLayout('a-right', [extra.id]), createWorkspaceLayout('unrelated', [f.tabs[1]!.id, unbound.id])]
+    const layout = { activeGroupId: 'unrelated', groups: groups.flatMap(item => item.groups), root: { type: 'split' as const, direction: 'horizontal' as const, ratio: 0.5, first: groups[0]!.root,
+      second: { type: 'split' as const, direction: 'vertical' as const, ratio: 0.5, first: groups[1]!.root, second: groups[2]!.root } } }
+    useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [extra.id]: extra, [unbound.id]: unbound }, layouts: { [f.workspace.id]: layout },
+      workbenchSpaceSelection: { workspaceId: f.workspace.id, spaceId: f.first.categorySpaceIds[0]!, zoneId: f.first.zoneId, topicId: f.first.topicId, tabId: null, groupId: null, regionId: null }, explorerCollapsed: { [f.workspace.id]: true } })
+    const saved = await entry(f.owner, f.first.topicId, 'Original Topic conclusion')
+    await mount(createElement(WorkspaceFilesTool, { workspace: f.workspace, isScratch: true, visible: true }))
+    const ids = () => [...host.querySelectorAll('[data-topic-chat-id]')].map(node => node.getAttribute('data-topic-chat-id')).sort()
+    await settle(() => ids().length === 2)
+    expect(ids()).toEqual([f.tabs[0]!.id, extra.id].sort())
+    expect(host.querySelector('[aria-label="Search this Topic"]')).toBeNull()
+    const before = useAppStore.getState()
+    await click(button('Show Topic Knowledge'))
+    await settle(() => host.querySelector('.topic-knowledge-row')?.textContent?.includes(saved.title) === true)
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(useAppStore.getState().layouts).toBe(before.layouts)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    await input(host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!, 'Original')
+    await click(button('Show Topic Chats'))
+    expect(ids()).toEqual([f.tabs[0]!.id, extra.id].sort())
+    await click(button('Show Topic Knowledge'))
+    expect(host.querySelector<HTMLInputElement>('[aria-label="Search this Topic"]')!.value).toBe('Original')
+    await click(button('Show Topic Chats'))
+    const choices: unknown[] = [], unsubscribe = useAppStore.subscribe((next, previous) => { if (next.workbenchSpaceSelection !== previous.workbenchSpaceSelection) choices.push(next.workbenchSpaceSelection) })
+    try {
+      await click(host.querySelector(`[data-topic-chat-id="${extra.id}"]`)!)
+      await settle(() => useAppStore.getState().workbenchSpaceSelection?.tabId === extra.id)
+      expect(choices).toHaveLength(1)
+      expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ topicId: f.first.topicId, zoneId: f.first.zoneId, tabId: extra.id, groupId: 'a-right' })
+      expect(host.querySelector(`[data-topic-chat-id="${extra.id}"]`)?.getAttribute('aria-current')).toBe('page')
+      expect(api.sessions.stop).not.toHaveBeenCalled()
+    } finally { unsubscribe() }
+    await click(button('Show Topic Knowledge'))
+    await act(async () => { await useAppStore.getState().openScratchTopic(f.second.topicId, f.workspace.id, { tabId: f.tabs[1]!.id }) })
+    await settle(() => ids().length === 1)
+    expect(ids()).toEqual([f.tabs[1]!.id])
+    expect(host.querySelector('[aria-label="Search this Topic"]')).toBeNull()
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  })
+
+  it('the secondary Chat directory retains exact duplicate positions and original non-Agent Tab names', async () => {
+    const f = await fixture()
+    const file = { ...createWorkbenchTab('chat:original-file', { kind: 'file', regionId: 'file:original', workspaceId: f.workspace.id, path: 'notes/decisions.md' }), topicId: f.first.topicId, space: f.tabs[0]!.space }
+    const groups = [createWorkspaceLayout('a-first', [f.tabs[0]!.id, file.id]), createWorkspaceLayout('a-second', [f.tabs[0]!.id]), createWorkspaceLayout('b-only', [f.tabs[1]!.id])]
+    const layout = { activeGroupId: 'a-second', groups: groups.flatMap(item => item.groups), root: { type: 'split' as const, direction: 'horizontal' as const, ratio: 0.5, first: groups[0]!.root,
+      second: { type: 'split' as const, direction: 'vertical' as const, ratio: 0.5, first: groups[1]!.root, second: groups[2]!.root } } }
+    const selected = { ...useAppStore.getState().workbenchSpaceSelection!, groupId: 'a-second' }
+    useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [file.id]: file }, layouts: { [f.workspace.id]: layout }, workbenchSpaceSelection: selected, explorerCollapsed: { [f.workspace.id]: true } })
+    await mount(createElement(WorkspaceFilesTool, { workspace: f.workspace, isScratch: true, visible: true }))
+    await settle(() => !!host.querySelector(`[data-topic-chat-id="${file.id}"]`))
+    expect(host.querySelector(`[data-topic-chat-id="${file.id}"]`)!.textContent).toBe('decisions.md')
+    expect(host.querySelectorAll(`[data-topic-chat-id="${f.tabs[0]!.id}"]`)).toHaveLength(1)
+    await click(host.querySelector(`[data-topic-chat-id="${f.tabs[0]!.id}"]`)!)
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: f.tabs[0]!.id, groupId: 'a-second' })
+    await act(async () => useAppStore.setState({ workbenchSpaceSelection: { ...selected, tabId: null, groupId: null, regionId: null } }))
+    const before = useAppStore.getState()
+    await click(host.querySelector(`[data-topic-chat-id="${f.tabs[0]!.id}"]`)!)
+    expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+    expect(host.querySelectorAll('[data-topic-chat-group-id]')).toHaveLength(2)
+    await click(host.querySelector('[data-topic-chat-group-id="a-second"]')!)
+    await settle(() => useAppStore.getState().workbenchSpaceSelection?.groupId === 'a-second')
+    expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ topicId: f.first.topicId, tabId: f.tabs[0]!.id, groupId: 'a-second' })
+    expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(api.sessions.stop).not.toHaveBeenCalled()
+  })
+
 })

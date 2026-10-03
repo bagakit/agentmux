@@ -1,4 +1,4 @@
-import { TopicKnowledgePanel } from './TopicKnowledgePanel'
+import { TopicChatsPanel } from './TopicChatsPanel'
 import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
 import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -128,7 +128,7 @@ export function WorkspaceFilesTool({
     onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
       setAllFiles(false); setExplorerCollapsed(workspace.id, false)
       setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
-    }} /> : knowledgeTopic && scratch ? <TopicKnowledgePanel key={knowledgeTopic.id} workspace={scratch} topic={knowledgeTopic} /> : selectedTopicId ? <div className="surface-inline-error" role="status">The selected object's original content is still restoring. Its workface is retained; refresh its original directory to continue.</div> : presentation.showTopics ? (
+    }} /> : knowledgeTopic && scratch ? <TopicChatsPanel key={knowledgeTopic.id} workspace={scratch} topic={knowledgeTopic} visible={visible} /> : selectedTopicId ? <div className="surface-inline-error" role="status">The selected object's original content is still restoring. Its workface is retained; refresh its original directory to continue.</div> : presentation.showTopics ? (
     <WorkspaceTopicsPanel
       workspace={workspace}
       categorySpaceId={category?.spaceId}
@@ -208,7 +208,7 @@ export function WorkspaceFilesTool({
         </button>
         <span title={displayPath(workspace.path, workspace.hostId)}>
           <strong>{mote ? allFiles ? workspace.name : mote.topic.title : knowledgeTopic?.title ?? category?.title ?? workspace.name}</strong>
-          {mote ? allFiles ? <small>All files</small> : null : isScratch || workspace.branch ? <small>{isScratch ? 'Knowledge' : workspace.branch}</small> : null}
+          {mote ? allFiles ? <small>All files</small> : null : isScratch || workspace.branch ? <small>{isScratch ? knowledgeTopic ? 'Topic' : 'Knowledge' : workspace.branch}</small> : null}
         </span>
         {workspace.hostId !== 'local' ? (
           <em><RadioTower size={11} /> {workspace.hostId}</em>

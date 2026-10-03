@@ -4,7 +4,7 @@ import type { AgentMuxDesktopObservation } from '@agentmux/core/control'
 const id = z.string().min(1)
 const nullableId = id.nullable()
 const provenance = z.enum(['observed', 'unavailable', 'unknown'])
-const desktopSpaceSelectionSchema = z.object({ spaceId: id, zoneId: id, workspaceId: id,
+const desktopSpaceSelectionSchema = z.object({ spaceId: nullableId, zoneId: nullableId, workspaceId: id,
   tabId: nullableId, groupId: nullableId, regionId: nullableId, topicId: nullableId }).strict()
 const desktopInputObservationSchema = z.object({ provenance,
   scope: z.enum(['main', 'floating', 'overlay', 'none', 'unknown']), ownerKind: z.enum(['terminal', 'composer', 'editor', 'dialog', 'other']).nullable(),
