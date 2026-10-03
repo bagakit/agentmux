@@ -205,3 +205,12 @@
 .notebook-name-input { width: 100%; min-width: 0; font: inherit; letter-spacing: inherit; border: 0; padding: 0; background: transparent; color: inherit; border-radius: 3px; }
 .notebook-name-input:hover { box-shadow: 0 1px 0 var(--line-soft); }
 .notebook-name-input:focus-visible { outline: 0; box-shadow: 0 1px 0 var(--text-3); }
+
+.notebook-directory-views { display: flex; flex: none; gap: var(--sp-2); }
+.notebook-directory-views button { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); flex: 1; min-width: 0; min-height: 26px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.notebook-directory-views button:hover { background: var(--wash-1); color: var(--text); }
+.notebook-directory-views button[aria-pressed="true"] { background: var(--wash-2); color: var(--text); }
+.notebook-archive-status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.notebook-archive-status > button { margin-left: auto; }
+
+.notebook-archive-status > span { min-width: 0; overflow-wrap: anywhere; }

@@ -1,11 +1,12 @@
-import type { NotebookPage } from '@agentmux/core/notebook-catalog'
+import { notebookPageArchiveRoot, type NotebookPage } from '@agentmux/core/notebook-catalog'
 
 /** The durable parent links form this directory; open Tabs never participate. */
-export function notebookPageRows(pages: NotebookPage[], notebookId: string, query = '', collapsed: ReadonlySet<string> = new Set()) {
-  const members = pages.filter(page => page.notebookId === notebookId)
+export function notebookPageRows(pages: NotebookPage[], notebookId: string, query = '', collapsed: ReadonlySet<string> = new Set(), archived?: boolean) {
+  const catalog = Object.fromEntries(pages.map(page => [page.noteId, page]))
+  const members = pages.filter(page => page.notebookId === notebookId && (archived === undefined || Boolean(notebookPageArchiveRoot(catalog, page.noteId)) === archived))
   const byId = new Map(members.map(page => [page.noteId, page]))
   const children = new Map<string | null, NotebookPage[]>()
-  for (const page of members) { const list = children.get(page.parentNoteId) ?? []; list.push(page); children.set(page.parentNoteId, list) }
+  for (const page of members) { const parentId = page.parentNoteId && byId.has(page.parentNoteId) ? page.parentNoteId : null; const list = children.get(parentId) ?? []; list.push(page); children.set(parentId, list) }
   const term = query.trim().toLocaleLowerCase(), matches = new Set<string>()
   if (term) for (const page of members) {
     if (![page.title, ...page.sources.flatMap(source => [source.title ?? '', source.url])].some(value => value.toLocaleLowerCase().includes(term))) continue
