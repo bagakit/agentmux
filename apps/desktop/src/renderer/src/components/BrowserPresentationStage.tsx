@@ -229,9 +229,16 @@ export function BrowserPresentationStage({ browserId, navigationId, presentation
       await media.registered(registered, latest.current.inputSelected, geometry().visible, () => !cancelled && inputCurrent(registered), selectionIntent.current)
     }
     registrationRetry.current = retry
-    // The original stable host attaches after child layout effects.
-    queueMicrotask(() => { if (!cancelled) void mount().catch(failure) })
-    return () => { cancelled = true; if (registrationRetry.current === retry) registrationRetry.current = null
+    // Renderer load completion precedes trusted Main registration. A single task also lets
+    // the original stable host attach; unlike an animation frame, it runs while hidden.
+    let mountTask: ReturnType<typeof setTimeout> | undefined
+    const documentReady = () => {
+      window.removeEventListener('load', documentReady)
+      if (!cancelled) mountTask = setTimeout(() => { mountTask = undefined; if (!cancelled) void mount().catch(failure) }, 0)
+    }
+    if (document.readyState === 'complete') documentReady()
+    else window.addEventListener('load', documentReady, { once: true })
+    return () => { cancelled = true; window.removeEventListener('load', documentReady); clearTimeout(mountTask); if (registrationRetry.current === retry) registrationRetry.current = null
       stopGeometry.current(); synchronizer.current?.dispose(); synchronizer.current = null; geometryWriter.current = null
       const current = lease.current; lease.current = null
       if (current) void api.browser.removePresentation(current.leaseId).catch(() => {}) }
