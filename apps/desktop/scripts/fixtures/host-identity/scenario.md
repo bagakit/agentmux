@@ -1,0 +1,12 @@
+# Host identity capture
+
+Run `node apps/desktop/scripts/capture-host-identity.mjs` from this isolated worktree.
+Evidence goes to `.tmp/host-identity/<timestamp>/`; capture never signs aesthetic acceptance.
+
+Owning constraints: [shared host identity](../../../../../docs/design/presentation/spaces-and-layout.md#共享机器身份标识), [Focus presentation](../../../../../docs/design/presentation/focus-context.md), [independent visual review](../../../../../docs/guides/agent-visual-e2e-review.md).
+
+Actual production GlobalFocusSurface (including FocusProjectLanes) is rendered at 1280 and 640 CSS px. WorkspaceSidebar (including ProjectGroupsTree) is rendered at the existing 300px rail width in 1280px and 640px windows, including mixed-host Folders section headings. TopRowLeadingChrome/TopBreadcrumb and BoardRowsProvider/WorkspaceBoard are rendered for local, SSH, unconfigured and long-name hosts. The local and SSH configuration labels both read Studio; a third host is deliberately not configured. Long project, branch and machine names exercise truncation. Native Electron captures the complete viewport after fonts and paint settle; capture.json records visible host identities and accessible descriptions.
+
+Production CSS is imported unchanged. Only data and outer mounting containers belong to this fixture; no host markup or styling is reproduced. Store state and the production web-preview API supply synthetic config, sessions, icons and Git snapshots. No App.initialize, user profile, Main IPC, SSH, real CLI, PTY or Run is used. Runtime mutation API calls are rejected within this private preview. This does not prove full App navigation, real session lifecycle, native menu tooltip display, actual Header/cwd preservation or performance. Those require their owning evidence.
+
+Native layout proof: normal capture asserts host text width >24 CSS px and fully hit-testable Refresh inside the 640px viewport, then dispatches native pointer input and confirms preview branch-read count increases with zero Runtime attempts. `AGENTMUX_HOST_IDENTITY_WRAP_MUTANT=1 node apps/desktop/scripts/capture-host-identity.mjs` runs only that narrow Board scene. A Vite pre-transform replaces the actual board.css owning matrix flex rule with its former grid rule through a private CSS import at the original cascade position; production files stay untouched. A loaded native assertion must fail; compilation failure or a non-applied transform is not a killed mutant.

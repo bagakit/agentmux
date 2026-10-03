@@ -1,3 +1,5 @@
+import { HostBadge } from './HostBadge'
+import { hostIdentityProjection } from '../lib/region-execution-host'
 import type { AgentMuxProjectGroupFact } from '@agentmux/core/control'
 import { projectGroupsFor } from '../lib/cross-device-project-groups'
 import { useGitProjectAssociations } from '../hooks/useGitProjectAssociations'
@@ -385,8 +387,8 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         {folderSections.map(section => {
           const foldersCollapsed = !filtering && collapsedProjectGroups[section.key] === true
           const folderSessions = [...new Map(section.projects.flatMap(project => sessionsByProject.get(project.id) ?? []).map(session => [session.id, session])).values()]
-          return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders`} key={section.hostId} data-folder-host={section.hostId}>
-          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={<Folders size={14} />}
+          return (        <nav className="project-list host-folders" aria-label={`${section.label} Folders · ${section.hostId}`} key={section.hostId} data-folder-host={section.hostId}>
+          <SpaceSectionHeader label={section.label} navigationId={section.key} count={section.projects.length} icon={folderSections.length > 1 || section.hostId !== 'local' ? <HostBadge context="Host" compact host={hostIdentityProjection(section.hostId, config?.hosts.find(host => host.id === section.hostId))} /> : <Folders size={14} />}
             expanded={!foldersCollapsed} filtering={filtering} onToggle={() => toggleProjectGroup(section.key)}
             createLabel={section.hostId === 'local' ? 'Open Folder' : `Open Folder on ${section.label}`} onCreate={async () => { if (section.hostId === 'local') await chooseFolder(); else setFolderHost({ hostId: section.hostId, label: section.label }) }}
             activity={foldersCollapsed && folderSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={folderSessions}
