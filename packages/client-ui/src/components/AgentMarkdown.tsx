@@ -22,6 +22,7 @@ type InlineContext = {
   homeDir: string
   sourcePath?: string
   documentMode: boolean
+  readOnly: boolean
   inLink?: boolean
 }
 
@@ -34,7 +35,7 @@ function FileReference({ text, reference, openWorkspaceFile }: {
 
 /** Pasted tokens claim their own narrow syntax before the common Terminal file scanner. */
 function TextWithFileReferences({ text, context }: { text: string; context: InlineContext }) {
-  if (context.inLink) return <>{text}</>
+  if (context.readOnly || context.inLink) return <>{text}</>
   const { openWorkspaceFile, readPastedImage, workspaceRoot, homeDir } = context
   const images = readPastedImage ? splitPastedImageReferences(text) : [{ kind: 'text' as const, text }]
   return <>{images.map((image, imageIndex) => {
@@ -64,6 +65,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
     if (node.kind === 'emphasis') return <em key={key}><Inline nodes={node.children} context={context} /></em>
     if (node.kind === 'strike') return <del key={key}><Inline nodes={node.children} context={context} /></del>
     if (node.kind === 'footnote-reference') {
+      if (context.readOnly) return <sup key={key} className="md-footnote-reference">{node.number}</sup>
       const reference = `${node.number}:${node.occurrence}`
       // An explicit link owns its label's one action; footnotes must not nest another button.
       if (context.inLink) return <sup key={key} className="md-footnote-reference" data-md-footnote-reference={reference} tabIndex={-1}>{node.number}</sup>
@@ -72,6 +74,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
         onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote', String(node.number))}>{node.number}</button></sup>
     }
     if (node.kind === 'image') {
+      if (context.readOnly) return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Image reference">🖼️ {node.alt || node.href}</span>
       const file = classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath)
       if (file && context.documentMode && context.renderWorkspaceImage) return <Fragment key={key}>{context.inLink
         ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</Fragment>
@@ -81,6 +84,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
       return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed">🖼️ {node.alt || node.href}</span>
     }
     const labelContext = { ...context, inLink: true }
+    if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
     if (context.documentMode && node.href.startsWith('#')) {
       let anchor: string
       try { anchor = decodeURIComponent(node.href.slice(1)) } catch { anchor = node.href.slice(1) }
@@ -105,7 +109,7 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
 function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
   if (node.kind === 'heading') {
     const Heading = context.documentMode ? (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[node.level - 1] ?? 'h6' : 'p'
-    return <Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode ? -1 : undefined}>
+    return <Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
       <Inline nodes={node.children} context={context} /></Heading>
   }
   if (node.kind === 'code') return <pre className="md-block-code" {...(node.language ? { 'data-language': node.language } : {})}><code>{node.text}</code></pre>
@@ -126,16 +130,16 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
     <tbody>{node.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, index) => <td key={index}
       {...(node.align[index] ? { 'data-align': node.align[index] } : {})}><Inline nodes={cell} context={context} /></td>)}</tr>)}</tbody></table></div>
   if (node.kind === 'footnotes') return <section className="md-footnotes" aria-label="Footnotes"><ol className="md-list">{node.items.map(note => <li key={note.identifier}
-    data-md-footnote={note.number} tabIndex={-1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} />)}
-    <span className="md-footnote-backlinks">{Array.from({ length: note.references }, (_, index) => <button key={index} type="button" className="md-link"
-      aria-label={`Return to footnote ${note.number} reference ${index + 1}`} onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote-reference', `${note.number}:${index + 1}`)}>↩{index > 0 ? index + 1 : ''}</button>)}</span>
+    data-md-footnote={note.number} tabIndex={context.readOnly ? undefined : -1}>{note.children.map((child, index) => <Block key={index} node={child} context={context} />)}
+    {!context.readOnly && <span className="md-footnote-backlinks">{Array.from({ length: note.references }, (_, index) => <button key={index} type="button" className="md-link"
+      aria-label={`Return to footnote ${note.number} reference ${index + 1}`} onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-footnote-reference', `${note.number}:${index + 1}`)}>↩{index > 0 ? index + 1 : ''}</button>)}</span>}
   </li>)}</ol></section>
   return <p className="md-paragraph"><Inline nodes={node.children} context={context} /></p>
 }
 
 /** Shared safe content renderer. Document mode retains document semantics; the Host retains IO. */
 export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
-  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, renderWorkspaceImage }: {
+  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, readOnly = false, renderWorkspaceImage }: {
   content: string
   className?: string
   openHttpLink?: OpenHttpLink
@@ -145,12 +149,14 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   homeDir?: string
   sourcePath?: string
   documentMode?: boolean
+  /** Selectable preview prose without link actions, resource reads or document navigation. */
+  readOnly?: boolean
   /** Root-confined path resolved against the document. A linked image must return noninteractive phrasing content. */
   renderWorkspaceImage?: RenderWorkspaceImage
 }) {
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode,
-    ...(sourcePath ? { sourcePath } : {}), ...(openWorkspaceFile ? { openWorkspaceFile } : {}),
-    ...(readPastedImage ? { readPastedImage } : {}), ...(renderWorkspaceImage ? { renderWorkspaceImage } : {}) }
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, readOnly,
+    ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
+    ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}) }
   if (!documentMode && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
   const blocks = parseAgentMarkdown(content)
   if (!blocks.length && !documentMode) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>

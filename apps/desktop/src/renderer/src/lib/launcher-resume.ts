@@ -1,20 +1,24 @@
 import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { clampStep } from '@agentmux/client-ui/activity-step-summary'
 import type { AgentSessionRecoveryCandidate, AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { resolveAgentName } from './display-name'
 import { firstPromptFromTimeline } from './workbench-tabs'
 import { workspaceProjectId } from './workspace-projects'
 
-export type LauncherRecap = { text: string; displayText?: string; source: 'Last assistant message' | 'Last prompt'; origin: 'timeline' | 'native' }
+export type LauncherRecap = { text: string; displayText?: string; reading?: { text: string; truncated: boolean }; source: 'Last assistant message' | 'Last prompt'; origin: 'timeline' | 'native' }
 
-function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displayText'> | null {
+function excerpt(text: string | undefined): Pick<LauncherRecap, 'text' | 'displayText' | 'reading'> | null {
   const value = text?.replace(/\s+/gu, ' ').trim()
   if (!value) return null
   const clamp = (body: string) => body.length > 800 ? `${body.slice(0, 799).trimEnd()}…` : body
   // Interpret complete reading wrappers before flattening; declarations prove no author.
-  const body = parseAgentMuxMessagePrefix(text!)?.body.replace(/\s+/gu, ' ').trim()
-  return { text: clamp(value), ...(body && body !== value ? { displayText: clamp(body) } : {}) }
+  const parsedBody = parseAgentMuxMessagePrefix(text!)?.body.trim()
+  const reading = parsedBody || text!.trim()
+  const body = reading.replace(/\s+/gu, ' ').trim()
+  return { text: clamp(value), ...(body && body !== value ? { displayText: clamp(body) } : {}),
+    reading: { text: clampStep(reading.slice(0, 1000), 'head', 800), truncated: reading.length > 800 } }
 }
 
 /** A recap is a labelled excerpt of observed conversation, never an invented summary. */

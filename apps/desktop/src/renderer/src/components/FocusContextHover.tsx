@@ -4,6 +4,8 @@ import { autoUpdate, computePosition, flip, offset, shift } from '@floating-ui/d
 import { useShallow } from 'zustand/react/shallow'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { clampStep } from '@agentmux/client-ui/activity-step-summary'
+import { AgentMarkdown } from '@agentmux/client-ui/components/AgentMarkdown'
+import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { FocusContext } from '../lib/focus-context'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
@@ -14,6 +16,13 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 
 // One transient reading surface, with no identity data or retained registry.
 let dismissCurrentPreview: (() => void) | null = null
+
+/** Only complete, budget-sized prose is parsed. A clipped excerpt stays literal. */
+function ReadingBody({ reading }: { reading: { text: string; truncated: boolean } }) {
+  return <div className="focus-context-hover__prose" data-reading-format={reading.truncated ? 'excerpt' : 'markdown'}>
+    {reading.truncated ? <p>{reading.text}</p> : <AgentMarkdown content={reading.text} readOnly />}
+  </div>
+}
 
 /** Mounted only inside the open preview; all input facts use the shared reader. */
 function FocusContextInputs({ context }: { context: FocusContext }) {
@@ -41,13 +50,20 @@ function FocusContextInputs({ context }: { context: FocusContext }) {
   return <section className="focus-context-hover__inputs" aria-label="Recent user messages">
     <h4>Recent user messages</h4>
     <small className="focus-context-hover__coverage">Current reading window{ordered ? '' : ' · Order unavailable'}</small>
-    {messages.length ? <ol>{messages.map(message => <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
+    {messages.length ? <ol>{messages.map(message => {
+      const raw = message.content.trim()
+      const body = parseAgentMuxMessagePrefix(raw)?.body.trim() || raw
+      const reading = { text: body ? clampStep(body.slice(0, 1000), 'head', 360) : 'Non-text input', truncated: body.length > 360 }
+      const recorded = message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? new Date(message.recordedAt) : null
+      const date = recorded && Number.isFinite(recorded.getTime()) ? recorded : null
+      return <li key={message.id} data-hover-input-id={message.id} data-input-author={message.author.kind}>
       <div className="focus-context-hover__input-meta"><strong>{describe(speakerOfUserMessage(message)).name}</strong>
-        <span>{message.source.kind === 'native' ? 'Native record' : 'Submission record'}</span>
-        <time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt)
-          ? new Date(message.recordedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : 'Time unknown'}</time></div>
-      <p>{message.content.trim() ? clampStep(message.content.trim().slice(0, 1000), 'head', 360) : 'Non-text input'}</p>
-    </li>)}</ol> : <p className="focus-context-hover__coverage">{reader.loading ? 'Loading recent messages…' : 'No user messages in the available reading window.'}</p>}
+        <span className="focus-context-hover__source" title={`${message.source.kind === 'native' ? 'Native record' : 'Submission record'} · ${clampStep(raw.slice(0, 1000), 'head', 360)}`}>{message.source.kind === 'native' ? 'Native record' : 'Submission record'}</span>
+        <time dateTime={date?.toISOString()} title="Record time, not a verified sender time">{date
+          ? date.toLocaleString(undefined, { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : 'Time unknown'}</time></div>
+      <ReadingBody reading={reading} />
+      {reading.truncated ? <small className="focus-context-hover__coverage">Excerpt</small> : null}
+    </li>})}</ol> : <p className="focus-context-hover__coverage">{reader.loading ? 'Loading recent messages…' : 'No user messages in the available reading window.'}</p>}
     {notice ? <p className="focus-context-hover__notice" role="status" title={reader.error?.message ?? reader.observationError?.message}>
       {notice}. Open the Agent to read History.</p> : null}
   </section>
@@ -130,7 +146,10 @@ export function useFocusContextHover(context: FocusContext, requested: boolean) 
     onPointerEnter={keepOpen} onPointerLeave={hideSoon}>
     <header><strong>{context.name}</strong><span>{context.stateLabel}</span></header>
     {!context.detailIsRecap ? <p className="focus-context-hover__activity">{context.detail}</p> : null}
-    {context.recap ? <section className="focus-context-hover__recap"><small>{context.recap.source} · {context.recap.origin}</small><p>{context.recap.text}</p></section> : null}
+    {context.recap ? <section className="focus-context-hover__recap">
+      <small title={`${context.recap.source} · ${context.recap.origin} · ${context.recap.text}`}>{context.recap.source === 'Last assistant message' ? 'Latest reply' : 'Latest input'}{(context.recap.reading?.truncated ?? true) ? ' · Excerpt' : ''}</small>
+      <ReadingBody reading={context.recap.reading ?? { text: context.recap.text, truncated: true }} />
+    </section> : null}
     {context.kind === 'agent' ? <FocusContextInputs key={`${context.hostId}:${context.id}:${context.runId}`} context={context} /> : null}
     <footer><strong>{context.workspaceName}</strong><span>{displayPath(context.workspacePath, context.hostId)}</span>
       {context.originAddress ? <span>{context.originAddress}</span> : null}<code>{context.id}</code></footer>
