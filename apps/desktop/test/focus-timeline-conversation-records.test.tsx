@@ -4,14 +4,15 @@ import { act, type ReactNode } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
-import { appendFile, writeFile } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
+import { appendFile, readFile, writeFile } from 'node:fs/promises'
+import { isAbsolute, resolve } from 'node:path'
 import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
+import * as conversationRecords from '@agentmux/client-ui/conversation-records'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { localDateTime } from '../src/renderer/src/lib/focus-time-window'
 // The actual Global/Store/Timeline/shared Hook and public Core/FileStore/Claude
@@ -29,7 +30,8 @@ function native(id: string, role: 'user' | 'assistant', text: unknown, at: numbe
 }
 const original = [native('u', 'user', 'Repeated original speech'), native('a', 'assistant', [{ type: 'thinking', thinking: 'Original recorded reasoning' }, { type: 'text', text: 'Repeated original speech' }]), native('thinking', 'assistant', [{ type: 'thinking', thinking: 'Reasoning without plain text' }])]
 function captured(id: string, kind: 'user_message' | 'assistant_message', more: Partial<AgentTimelineItem> = {}): AgentTimelineItem {
-  return { id, agentSessionId: ID, kind, source: 'native-hook', status: 'complete', createdAt: NOW - HOUR / 2, updatedAt: NOW - HOUR / 2, title: 'Recorded speech', content: 'Repeated original speech', ...more }
+  const at = more.createdAt ?? NOW - HOUR / 2
+  return { id, agentSessionId: ID, kind, source: 'native-hook', status: 'complete', createdAt: at, updatedAt: at, title: 'Recorded speech', content: 'Repeated original speech', ...more }
 }
 const overlay = () => { const node = document.getElementById('agentmux-window-overlay-host'); expect(node).not.toBeNull(); return node! }
 const markers = () => [...host.querySelectorAll<HTMLButtonElement>('.recent-focus__message')]
@@ -74,6 +76,102 @@ afterEach(async () => {
   await act(async () => root.unmount()); host.remove()
   expect(fixture.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
   await fixture.close(); for (const extra of extraFixtures.splice(0)) { expect(extra.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); await extra.close() } useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); document.getElementById('agentmux-window-overlay-host')?.remove()
+})
+
+it('newly observed other-Agent input is visible before the slow UI now clock ticks', async () => {
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
+  const before = Number(host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now)
+  expect(before).toBe(NOW)
+  // Only Date is fake in the original fixture. No interval advancement, no
+  // 30-second sleep and no Now button: use the real incoming fact boundary.
+  vi.setSystemTime(NOW + 1000)
+  const observedAt = Date.now(), rawId = 'fresh-other-agent-input'
+  await seedCaptured([captured(rawId, 'user_message', { createdAt: observedAt, updatedAt: observedAt, authorAgentSessionId: 'other-agent', sourceChannel: 'agent-message', content: 'Actual retained incoming input after the UI clock tick' })])
+  const canonical = projectConversationRecords({ agentSessionId: ID, executionHostId: 'local', timeline: await fixture.client.sessionTimeline(ID) })
+  expect(canonical.find(item => item.rawId === rawId)?.speaker).toEqual({ role: 'agent', id: 'other-agent' })
+  expect(canonical.find(item => item.rawId === rawId)?.recordedAt).toBe(observedAt)
+  expect(Number(host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now)).toBe(before)
+  await records()
+  const original = overlay().querySelector<HTMLElement>(`[data-record-raw-id="${rawId}"]`)
+  expect(original).not.toBeNull(); expect(original!.dataset.recordKind).toBe('user-message')
+  expect(original!.textContent).toContain('Actual retained incoming input after the UI clock tick')
+  healthy()
+  const evidence = { uiNow: before, actualWallNow: Date.now(), recordedAt: observedAt, rawId, canonical: canonical.map(item => ({ rawId: item.rawId, kind: item.kind, speaker: item.speaker, recordedAt: item.recordedAt })), actualReaderHasOriginal: !!original, actualMarkerRawIds: rawIds(), uiClockUnadvanced: Number(host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now) === before, kernelControls: fixture.controls.map(spy => spy.mock.calls.length), clientControls: controls.map(spy => spy.mock.calls.length), nativePagesRead: pages.length }
+  if (process.env.AGENTMUX_INCOMING_PREFLIGHT_FACTS) await appendFile(process.env.AGENTMUX_INCOMING_PREFLIGHT_FACTS, JSON.stringify(evidence) + '\n')
+  // Desired behavior. Exact Main currently excludes this already-observed,
+  // actually past record using the older UI clock. An AssertionError here is
+  // the mounted product counterexample; collection/import errors are not.
+  expect(rawIds(), 'Retained incoming record must be visible before the next 30-second UI clock tick').toContain(rawId)
+})
+
+it('an already-read source without a current Context admits its new input using the same current-time boundary', async () => {
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(() => fixture.client.sessionHistorySources())
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
+  await writeFile(fixture.path, '')
+  vi.setSystemTime(NOW + 1000)
+  await seedCaptured([captured('readonly-fresh', 'user_message', { createdAt: Date.now(), authorAgentSessionId: 'other-agent', content: 'Original already-read input without a current Context' })])
+  await act(async () => useAppStore.setState({ sessions: [] }))
+  await records()
+  await wait(() => expect(overlay().querySelector('[data-record-raw-id="readonly-fresh"]')).not.toBeNull())
+  expect(Number(host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now)).toBe(NOW)
+  const track = host.querySelector('[data-focus-timeline-id="private-agent"][data-history-only="true"]')
+  expect(track, 'An already-read in-range source remains visible without a current Context').not.toBeNull()
+  expect([...track!.querySelectorAll<HTMLElement>('.recent-focus__message')].flatMap(node => JSON.parse(node.dataset.messageRawIds!))).toContain('readonly-fresh')
+  expect(reads.mock.calls.length).toBeLessThanOrEqual(2)
+  expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT)
+})
+
+it('input and reply shapes stay distinct while a same-time mixed group is neutral and reads every original record', async () => {
+  await writeFile(fixture.path, '')
+  await seedCaptured([
+    captured('input-alone', 'user_message', { createdAt: NOW - 2 * HOUR, authorAgentSessionId: 'other-agent' }),
+    captured('reply-alone', 'assistant_message', { createdAt: NOW - HOUR }),
+    captured('group-agent', 'user_message', { createdAt: NOW - HOUR / 4, authorAgentSessionId: 'other-agent' }),
+    captured('group-human', 'user_message', { createdAt: NOW - HOUR / 4, authorHuman: true }),
+    captured('group-unknown', 'user_message', { createdAt: NOW - HOUR / 4 }),
+    captured('group-reply', 'assistant_message', { createdAt: NOW - HOUR / 4 })
+  ])
+  await render(); await wait(() => expect(recordCount()).toBe(6))
+  const shapeScene = process.env.AGENTMUX_INCOMING_SHAPE_SCENE
+  if (shapeScene) {
+    if (!isAbsolute(shapeScene)) throw new Error('AGENTMUX_INCOMING_SHAPE_SCENE must be an absolute path')
+    await writeFile(shapeScene, JSON.stringify({ now: NOW, config: useAppStore.getState().config, sessions: useAppStore.getState().sessions, agentFocus: useAppStore.getState().agentFocus, agentComposerDrafts: useAppStore.getState().agentComposerDrafts, nativePage: pages[0], timeline: await fixture.client.sessionTimeline(ID), boundary: 'Actual public Core/FileStore captured records from the owning mounted shape case. Original recorded times, author IDs, distinct records and contents retained; private transport does not claim a Native Writer or Runtime.' }, null, 2) + '\n')
+  }
+  const input = markers().find(node => node.dataset.messageRawId === 'input-alone')!, reply = markers().find(node => node.dataset.messageRawId === 'reply-alone')!
+  const style = document.createElement('style')
+  style.textContent = await readFile(resolve(import.meta.dirname, '../src/renderer/src/styles/focus.css'), 'utf8')
+  document.head.append(style)
+  try {
+    expect(getComputedStyle(input).borderRadius).toBe('2px')
+    expect(getComputedStyle(reply).borderRadius).toBe('50%')
+  } finally { style.remove() }
+  const group = markers().find(node => node.dataset.recordCount === '4')!
+  expect(group.dataset.recordKind).toBe('mixed'); expect(group.dataset.messageAuthor).toBeUndefined()
+  expect(group.textContent).toBe('4'); expect(group.title).toContain('3 inputs · 1 replies')
+  expect(group.getAttribute('aria-label')).toContain('3 inputs and 1 replies')
+  await act(async () => group.click())
+  const list = [...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')]
+  expect(list.map(node => node.dataset.recordRawId)).toEqual(['group-agent', 'group-human', 'group-unknown', 'group-reply'])
+  expect(list.map(node => node.dataset.messageAuthor)).toEqual(['agent', 'human', 'unknown', 'agent'])
+  expect(list.map(node => node.dataset.recordKind)).toEqual(['user-message', 'user-message', 'user-message', 'assistant-message'])
+  for (const node of list) { await act(async () => node.click()); expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Repeated original speech') }
+  healthy()
+})
+
+it('unrelated output does not reproject records or read history and the slow UI clock stays unchanged', async () => {
+  await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
+  const projector = vi.spyOn(conversationRecords, 'projectConversationRecords'), realClock = Date.now, stacks: string[] = []
+  vi.spyOn(Date, 'now').mockImplementation(() => { stacks.push(new Error().stack!); return realClock() })
+  const before = { projections: projector.mock.calls.length, reads: reads.mock.calls.length, now: host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now }
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { agentSessionId: 'unrelated', revision: 1, items: [captured('unrelated-output', 'assistant_message', { agentSessionId: 'unrelated' })] } } })))
+  expect(projector.mock.calls.length).toBe(before.projections)
+  if (process.env.AGENTMUX_INCOMING_PREFLIGHT_FACTS) await appendFile(process.env.AGENTMUX_INCOMING_PREFLIGHT_FACTS, JSON.stringify({ costClockStacks: stacks }) + '\n')
+  // The unchanged Focus Context Store selector reads Date.now once on a Store
+  // notification. Neither Timeline message derivation may run for that output.
+  expect(stacks.filter(stack => stack.includes('/components/RecentFocusTimeline.tsx'))).toHaveLength(0)
+  expect(reads.mock.calls.length).toBe(before.reads)
+  expect(host.querySelector<HTMLElement>('.recent-focus__playhead')!.dataset.now).toBe(before.now)
+  healthy()
 })
 
 it('the actual current Global page and shared ConversationView both retain user and assistant speech with original parts while keeping reasoning activity distinct', async () => {
