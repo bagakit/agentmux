@@ -56,6 +56,8 @@ export class AgentTerminalScreen {
 
   get authoritative(): boolean { return this.trusted }
 
+  get geometryRevision(): number { return this.resizeRevision }
+
   get throughByte(): number {
     return this.nextByte
   }
@@ -233,6 +235,23 @@ export class AgentTerminalScreenEvidence {
 
   get lastCompleteFrame(): { startByte: number; endByte: number } | null {
     return this.completeFrame
+  }
+
+  /** Observe actual pre-checkpoint frame markers without replaying their drawing
+   * into the restored grid. Only a contiguous original suffix at that exact fence
+   * can seed this observation; synthetic restore bytes never prove a native frame.
+   */
+  seedFrameEvidence(chunks: readonly AgentTerminalScreenChunk[], throughByte: number): void {
+    if (throughByte !== this.screen.throughByte || chunks.length === 0) return
+    let cursor = chunks[0]!.startByte
+    for (const chunk of chunks) {
+      if (chunk.startByte !== cursor || chunk.endByte - cursor !== chunk.dataBytes.byteLength || chunk.endByte > throughByte) {
+        throw new AgentMuxError('Native frame evidence is not contiguous at the checkpoint fence.', 'OUTPUT_GAP')
+      }
+      this.scanFrames(chunk)
+      cursor = chunk.endByte
+    }
+    if (cursor !== throughByte) throw new AgentMuxError('Native frame evidence did not reach the checkpoint fence.', 'OUTPUT_GAP')
   }
 
   subscribe(listener: () => void): () => void {

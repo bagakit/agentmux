@@ -73,7 +73,7 @@ const remoteDaemon=process.env.AGENTMUX_PROBE_PRIVATE_DAEMON==='1',controlPath=j
 try{
  await Promise.race([once(daemon.stdio[3],'data'),daemonClosed.then(()=>{throw new Error('Private Native startup failed: '+daemonError)})])
  const version=(await execute(process.env.AGENTMUX_REAL_CODEX_COMMAND??'codex',['--version'])).stdout.trim();assert.equal(version,'codex-cli 0.160.1');report.version=version
- report.nativeSource={repository:'openai/codex',commit:'d27764b82f7118f674371e6d6e76271d9d606edb',tag:'rust-v0.160.1',transport:'codex-rs/tui/src/lib.rs:565-610',interrupt:'codex-rs/tui/src/chatwidget/interaction.rs:192-253',url:'https://github.com/openai/codex/tree/d27764b82f7118f674371e6d6e76271d9d606edb/codex-rs/tui/src'}
+ report.nativeSource={repository:'openai/codex',commit:'d27764b82f7118f674371e6d6e76271d9d606edb',tag:'rust-v0.160.1',transport:'codex-rs/tui/src/lib.rs:565-610',interrupt:'codex-rs/tui/src/chatwidget/interaction.rs:192-253',refresh:{parser:'openai-oss-forks/crossterm efa177859fd9623d57b9fe7ae9bf491ae1ac6ec4 src/event/sys/unix/parse.rs:221',event:'codex-rs/tui/src/tui/event_stream.rs:294-298',draw:'codex-rs/tui/src/app.rs:880-889,1031-1032,1072-1093',semantics:'non-submitting draw refresh; normal draw timers still run'},url:'https://github.com/openai/codex/tree/d27764b82f7118f674371e6d6e76271d9d606edb/codex-rs/tui/src'}
  const original=new AgentProviderRegistry().get('codex')
  // This Run loads the old hook definition. Later Core versions cannot hot-load it.
  const provider = {
@@ -106,7 +106,7 @@ try{
  const attach=await client.reattachAgent(created.agentSessionId,0);output+=attach.attachment.replay.map(e=>e.data??'').join('')
  if(remoteDaemon){
   await client.screenEvidence.wait(client.agentSession(created.agentSessionId),0,false,screen=>screen.snapshot().lines.some(l=>l.text.includes('Hooks need review')),{timeoutMs:10_000,timeoutMessage:'private hook review',terminalMessage:'private exit',requireCompleteFrame:true})
-  await client.writeAgent({agentSessionId:created.agentSessionId,expectedRun:created.run,data:'3\r',source:'user'})
+  await client.writeAgent({agentSessionId:created.agentSessionId,expectedRun:created.run,data:'\x1b',source:'user'})
  }
  await until('native working + hook handle',()=>requests.length>=1&&(remoteDaemon||(client.agentSession(created.agentSessionId).nativeHandle?.kind==='provider'&&client.agentSession(created.agentSessionId).semanticStatus?.state==='working')))
  nativePid=(await client.statusAgent(created.agentSessionId)).run.pid
@@ -122,6 +122,13 @@ try{
  report.transport.rootBirth=await nativeProcessBirth(nativePid,AbortSignal.timeout(4000))
  const nativeOwner=report.transport.files.find(f=>f.access==='w'||f.access==='u')?.processId
  if(nativeOwner){report.transport.nativeBirth=await nativeProcessBirth(nativeOwner,AbortSignal.timeout(4000));report.transport.ownership='exact-writable-native-transcript'}
+ if(!remoteDaemon){
+  await client.resizeAgent(before.agentSessionId,before.run,110,35)
+  await client.resizeAgent(before.agentSessionId,before.run,120,40)
+  const checkpoint=await client.readRunReplay(before.run,0,'terminal')
+  assert.equal(checkpoint.terminal.type,'basic-vt');assert(checkpoint.resizeRevision>=2)
+  report.historicalResize={revision:checkpoint.resizeRevision,throughByte:checkpoint.terminal.checkpoint.throughByte,view:'terminal',originalRunId:before.run.runId,originalPid:nativePid}
+ }
  const input={...agentPromptCondition(before),agentSessionId:before.agentSessionId,operationId:'private-immediate-owned',prompt:'PRIVATE_ONLY_AUTHORIZED',execution:'immediate',authorHuman:true}
  if(remoteDaemon){
   assert.equal(report.transport.files.some(f=>f.access==='w'||f.access==='u'),false,'remote TUI cannot own the embedded native writer')
@@ -141,11 +148,25 @@ try{
   report.nativeSource.fixtureBoundary='Native handle observed from this private daemon rollout for the direct verifier; Core hook identity stays unknown. Core rejects specific immediate and ordinary typed input remains usable.'
   assert.equal(requests.length,1);report.phases.push({phase:'default-daemon-connection-unlinked-no-local-writer',immediateRefusedBeforeAndAfterUnlink:true,ordinaryInputAvailable:true,sameRunId:before.run.runId,samePid:nativePid})
  }else{
- const submitProcess=async(fault=false)=>{
-  const child=spawn(process.execPath,[fileURLToPath(new URL('./immediate-native-retry.mjs',import.meta.url)),join(root,'sessions.json'),JSON.stringify(input),...(fault?['--exit-after-interrupt-ack']:[])],{stdio:['ignore','pipe','pipe'],env:{...process.env}})
+ const submitProcess=async(fault)=>{
+  const child=spawn(process.execPath,[fileURLToPath(new URL('./immediate-native-retry.mjs',import.meta.url)),join(root,'sessions.json'),JSON.stringify(input),...(fault?[fault]:[])],{stdio:['ignore','pipe','pipe'],env:{...process.env}})
   let error='';child.stderr.on('data',b=>{error+=b});const [code]=await once(child,'close');assert.equal(code,fault?73:0,error)
  }
- await submitProcess(true)
+ // Assert the faithful checkpoint before native redraw; refresh cannot sign
+ // Runtime attribute fidelity retroactively.
+ await client.screenEvidence.wait(before,0,false,screen=>{
+  const row=screen.snapshot().lines[screen.snapshot().cursor.row]
+  assert.equal(screen.geometryRevision,report.historicalResize.revision)
+  assert(row.cells.some(cell=>cell.chars.trim()&&cell.dim),'native placeholder SGR2 survives checkpoint before refresh')
+  return true
+ },{timeoutMs:10_000,timeoutMessage:'private faithful checkpoint',terminalMessage:'private exit'})
+ report.historicalResize.attributesVerifiedBeforeRefresh=true
+ await submitProcess('--exit-after-refresh-ack')
+ const refreshed=await client.refreshAgentSession(before.agentSessionId,before.run)
+ assert.equal(refreshed.promptCompletionAdmission.frameRefresh.acknowledged,false)
+ assert.equal(refreshed.terminalPromptSubmission,undefined);assert.equal(requests.length,1)
+ report.phases.push({phase:'submitting-process-exits-after-runtime-refresh-ack',refresh:refreshed.promptCompletionAdmission.frameRefresh})
+ await submitProcess('--exit-after-interrupt-ack')
  const interrupted=await client.refreshAgentSession(before.agentSessionId,before.run)
  assert.equal(interrupted.terminalPromptSubmission.prepare.interrupt.acknowledged,false)
  assert.equal(interrupted.terminalPromptSubmission.payload.acknowledged,false);assert.equal(requests.length,1)
@@ -155,6 +176,7 @@ try{
  await until('owned input begins before stalled initial model request reaches any tool/result',()=>requests.length>=2)
  const current=client.agentSession(before.agentSessionId)
  assert.equal(current.run.runId,identity.runId);assert.equal(current.nativeHandle.sessionId,identity.nativeSessionId);assert.equal((await client.statusAgent(before.agentSessionId)).run.pid,nativePid)
+ assert.deepEqual(current.promptCompletionAdmission.frameRefresh,{...refreshed.promptCompletionAdmission.frameRefresh,acknowledged:true});assert.equal(current.terminalPromptSubmission.prepare.interrupt.inputByteRange.startByte,refreshed.promptCompletionAdmission.frameRefresh.inputByteRange.endByte)
  assert.equal(current.terminalPromptSubmission.prepare.context,'interruptible');assert(current.terminalPromptSubmission.prepare.interrupt.acknowledged);assert(current.terminalPromptSubmission.prepare.barrierReceiptId)
  assert.equal(current.terminalPromptSubmission.submit.acknowledged,true);assert(!JSON.stringify(requests[1]).includes('PRIVATE_NATIVE_PENDING'))
  const latestUser=requests[1].input.filter(v=>v.role==='user').at(-1);assert(JSON.stringify(latestUser).includes('PRIVATE_ONLY_AUTHORIZED'))
@@ -173,14 +195,21 @@ try{
  await client.submitAgentPrompt({...agentPromptCondition(client.agentSession(before.agentSessionId)),agentSessionId:before.agentSessionId,operationId:'private-second-busy',prompt:'PRIVATE_SECOND_BUSY'})
  await until('separate busy model request',()=>requests.length===4&&output.includes('PRIVATE_SECOND_BUSY'))
  await client.writeAgent({agentSessionId:before.agentSessionId,expectedRun:before.run,data:'\x1b[200~PRIVATE_NATIVE_PENDING\x1b[201~',source:'user'})
- await client.screenEvidence.wait(client.agentSession(before.agentSessionId),0,false,screen=>screen.composerText('›')==='PRIVATE_NATIVE_PENDING',{timeoutMs:10_000,timeoutMessage:'private pending render',terminalMessage:'private exit',requireOriginalAttributes:true,requireCompleteFrame:true})
+ await client.screenEvidence.wait(client.agentSession(before.agentSessionId),0,false,screen=>screen.composerText('›')==='PRIVATE_NATIVE_PENDING',{timeoutMs:10_000,timeoutMessage:'private pending render',terminalMessage:'private exit',requireCompleteFrame:true})
+ const draftCursor=(await client.statusAgent(before.agentSessionId)).run.acceptedInputBytes
+ await assert.rejects(client.submitAgentPrompt({...agentPromptCondition(client.agentSession(before.agentSessionId)),agentSessionId:before.agentSessionId,operationId:'private-draft-blocked',prompt:'PRIVATE_MUST_REMAIN_UNSENT',execution:'immediate'}),e=>e.code==='AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+ assert.equal((await client.statusAgent(before.agentSessionId)).run.acceptedInputBytes,draftCursor+3);assert.equal(requests.length,4)
+ await client.screenEvidence.wait(client.agentSession(before.agentSessionId),0,false,screen=>screen.composerText('›')==='PRIVATE_NATIVE_PENDING',{timeoutMs:10_000,timeoutMessage:'private unchanged draft',terminalMessage:'private exit',requireCompleteFrame:true})
+ report.phases.push({phase:'native-draft-preserved',onlyAuthorizedRefreshBytes:3,requestCount:requests.length})
  await client.writeAgent({agentSessionId:before.agentSessionId,expectedRun:before.run,data:'\r',source:'user'})
- await client.screenEvidence.wait(client.agentSession(before.agentSessionId),0,false,screen=>screen.snapshot().lines.some(l=>l.text.includes('Messages to be submitted after next tool call')),{timeoutMs:10_000,timeoutMessage:'private pending preview',terminalMessage:'private exit',requireOriginalAttributes:true,requireCompleteFrame:true})
+ await client.screenEvidence.wait(client.agentSession(before.agentSessionId),0,false,screen=>screen.snapshot().lines.some(l=>l.text.includes('Messages to be submitted after next tool call')),{timeoutMs:10_000,timeoutMessage:'private pending preview',terminalMessage:'private exit',requireCompleteFrame:true})
  const protectedBefore=(await client.statusAgent(before.agentSessionId)).run.acceptedInputBytes
  await assert.rejects(client.submitAgentPrompt({...agentPromptCondition(client.agentSession(before.agentSessionId)),agentSessionId:before.agentSessionId,operationId:'private-pending-blocked',prompt:'PRIVATE_MUST_REMAIN_UNSENT',execution:'immediate'}),e=>e.code==='AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
- assert.equal((await client.statusAgent(before.agentSessionId)).run.acceptedInputBytes,protectedBefore);assert.equal(requests.length,4)
+ assert.equal((await client.statusAgent(before.agentSessionId)).run.acceptedInputBytes,protectedBefore+3);assert.equal(requests.length,4)
+ assert(client.agentSession(before.agentSessionId).promptCompletionAdmission.frameRefresh.acknowledged)
+ await client.screenEvidence.wait(client.agentSession(before.agentSessionId),0,false,screen=>screen.snapshot().lines.some(l=>l.text.includes('PRIVATE_NATIVE_PENDING')),{timeoutMs:10_000,timeoutMessage:'private preserved pending',terminalMessage:'private exit',requireCompleteFrame:true})
  assert.equal(client.agentSession(before.agentSessionId).run.runId,identity.runId)
- report.phases.push({phase:'native-pending-preserved',acceptedInputBytes:protectedBefore,requestCount:requests.length})
+ report.phases.push({phase:'native-pending-preserved',acceptedInputBytes:protectedBefore+3,onlyAuthorizedRefreshBytes:3,requestCount:requests.length})
  await writeFile(join(evidenceDirectory,'native-output.bin'),output)
  const hooks=JSON.parse(await readFile(join(root,'workspace','.codex','hooks.json'),'utf8'));assert.equal(hooks.hooks.Interrupt,undefined)
  const transcript=await readFile(client.agentSession(before.agentSessionId).nativeHandle.transcriptPath,'utf8')

@@ -50,7 +50,7 @@ function promptReadinessDetail(
 function terminalPromptPhaseOperationIdentity(
   session: AgentMuxAgentSession,
   submissionId: string,
-  phase: 'interrupt' | 'payload' | 'submit',
+  phase: 'refresh' | 'interrupt' | 'payload' | 'submit',
   data: string
 ): string {
   return createHash('sha256')
@@ -128,7 +128,8 @@ export class AgentPromptSubmissionCoordinator {
           throw new AgentMuxError('Agent Run is not running.', 'AGENT_RUN_NOT_RUNNING')
         }
         const previous = current.promptCompletionAdmission
-        const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged
+        const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
+          !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
         try {
           const predecessor = previous === undefined ? null : previous.submissionId
           if (predecessor !== submissionId &&
@@ -160,12 +161,15 @@ export class AgentPromptSubmissionCoordinator {
                 previous.intent.prompt, previous.intent.plan, undefined, signal, true, renderSignal, undefined, previous.intent.message, previous.intent.execution)
             } catch (error) {
               const settled = await this.deps.registry.refresh(session.agentSessionId, session.run)
+              const refreshOnlySettled = settled.promptCompletionAdmission?.submissionId === previous.submissionId &&
+                settled.promptCompletionAdmission.frameRefresh?.acknowledged && settled.terminalPromptSubmission === undefined
+              const submitRejected = settled.terminalPromptSubmission?.submissionId === previous.submissionId &&
+                settled.terminalPromptSubmission.submit.notApplied
               if (previous.submissionId === submissionId ||
                 settled.promptCompletionAdmission?.submissionId !== previous.submissionId ||
-                settled.terminalPromptSubmission?.submissionId !== previous.submissionId ||
-                !settled.terminalPromptSubmission.submit.notApplied) throw error
-              // Actual Native rejected the remaining phase of the old intent. Its
-              // accepted payload is kept as accepted; only a different message may proceed.
+                (!refreshOnlySettled && !submitRejected)) throw error
+              // Only a different intent proceeds after confirmed harmless refresh
+              // or an actual rejected submit. The old prompt remains unsent.
             }
             if (previous.submissionId === submissionId) return structuredClone(previous.intent.message)
             current = await this.deps.registry.refresh(session.agentSessionId, session.run)
@@ -289,6 +293,8 @@ export class AgentPromptSubmissionCoordinator {
         intent: { run: { ...current.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId, prompt, plan: structuredClone(plan), execution,
           ...(message === undefined ? {} : { message: structuredClone(message) }) },
         acknowledged: false,
+        ...(current.promptCompletionAdmission?.submissionId === submissionId && current.promptCompletionAdmission.frameRefresh
+          ? { frameRefresh: current.promptCompletionAdmission.frameRefresh } : {}),
         ...(uncertainTurn ? { uncertainTurn: true } : {})
       }, ...(ended ? { terminalPromptReadiness: { ...current.terminalPromptReadiness!, consumedBySubmissionId: submissionId } } : {}),
       ...(uncertainTurn ? { terminalPromptDelivery: {
@@ -390,6 +396,7 @@ export class AgentPromptSubmissionCoordinator {
       ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
+    let preparationGeneration: number | undefined
     if (plan.prepare && session.terminalPromptSubmission?.submissionId !== submissionId) {
       try {
         const transportEvidence = provider.readPromptExecutionEvidence ? await provider.readPromptExecutionEvidence(nativeContext) : undefined
@@ -398,10 +405,85 @@ export class AgentPromptSubmissionCoordinator {
           throw new AgentMuxError('The native input transport can receive unowned pending input.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
         }
         const observation: { context: 'idle' | 'interruptible' | 'unavailable' } = { context: 'unavailable' }
-        const readyThroughByte = await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => {
+        let frameRefresh = session.promptCompletionAdmission?.submissionId === submissionId
+          ? session.promptCompletionAdmission.frameRefresh : undefined
+        if (plan.prepare.refresh) {
+          // Only this explicit intent authorizes native non-submitting refresh. The
+          // restored grid remains owner-confirmed before any native redraw occurs.
+          if (expectedCompletionId !== undefined) throw new AgentMuxError('Automatic admission cannot authorize native refresh.', 'INVALID_AGENT_PROMPT')
+          let resizeRevision = -1
+          await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false, screen => {
+            resizeRevision = screen.geometryRevision
+            return true
+          }, { timeoutMs: 2_000, timeoutMessage: 'Native screen attributes are unconfirmed.',
+            terminalMessage: 'Agent Run exited before native refresh.',
+            ...(frameRefresh ? { checkpointFrameFence: { outputByte: frameRefresh.outputCursorBytes, resizeRevision: frameRefresh.resizeRevision } } : {}),
+            ...(renderSignal ? { signal: renderSignal } : {}) })
+          if (!transportEvidence || frameRefresh && frameRefresh.nativeSourceId !== transportEvidence.sourceId) {
+            throw new AgentMuxError('Native refresh source is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+          }
+          if (frameRefresh && (frameRefresh.operationId !== terminalPromptPhaseOperationIdentity(session, submissionId, 'refresh',
+              JSON.stringify([plan.prepare.refresh, frameRefresh.nativeSourceId, frameRefresh.resizeRevision])) ||
+              frameRefresh.inputByteRange.endByte - frameRefresh.inputByteRange.startByte !== Buffer.byteLength(plan.prepare.refresh))) {
+            throw new AgentMuxError('Native refresh intent was reused with conflicting content.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+          }
+          // An acknowledged refresh at an older geometry can be renewed. An
+          // uncertain request always rejoins its original Runtime receipt first.
+          if (!frameRefresh || frameRefresh.acknowledged && frameRefresh.resizeRevision !== resizeRevision) {
+            const refreshedRun = await this.deps.kernel.status(run.runId)
+            this.deps.assertAgentRun(session, refreshedRun)
+            run = refreshedRun
+            if (run.acceptedInputBytes === null) throw new AgentMuxError('CtxMux omitted its accepted Input byte cursor.', 'CTXMUX_INPUT_CURSOR_MISSING')
+            const operationId = terminalPromptPhaseOperationIdentity(session, submissionId, 'refresh',
+              JSON.stringify([plan.prepare.refresh, transportEvidence.sourceId, resizeRevision]))
+            const startByte = run.acceptedInputBytes, endByte = startByte + Buffer.byteLength(plan.prepare.refresh)
+            const frozen = await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+              assertAdmission(stored)
+              const next = claimInput(stored, operationId, startByte, endByte, false)
+              return { ...next, promptCompletionAdmission: { ...next.promptCompletionAdmission!, frameRefresh: {
+                operationId, inputByteRange: { startByte, endByte }, acknowledged: false,
+                outputCursorBytes: run.latestOutputBytes, resizeRevision, nativeSourceId: transportEvidence.sourceId
+              } } }
+            })
+            frameRefresh = frozen.promptCompletionAdmission!.frameRefresh!
+          }
+          if (frameRefresh.notApplied) throw new AgentMuxError('The original refresh was not applied; its range cannot be reused.', 'AGENT_PROMPT_INPUT_NOT_APPLIED', 'not_applied')
+          if (!frameRefresh.acknowledged) {
+            const current = await this.deps.registry.refresh(session.agentSessionId, session.run)
+            if (run.acceptedInputBytes === null || run.acceptedInputBytes < frameRefresh.inputByteRange.endByte) assertAdmission(current)
+            const accepted = await this.applyInput(session, submissionId, {
+              ownerInstanceId: current.promptCompletionAdmission!.intent!.ownerInstanceId,
+              operationId: frameRefresh.operationId, expectedByte: frameRefresh.inputByteRange.startByte, data: plan.prepare.refresh
+            }, 'refresh')
+            if (accepted.appliedByteRange.startByte !== frameRefresh.inputByteRange.startByte ||
+                accepted.appliedByteRange.endByte !== frameRefresh.inputByteRange.endByte ||
+                accepted.run.acceptedInputBytes === null || accepted.run.acceptedInputBytes < frameRefresh.inputByteRange.endByte) {
+              throw new AgentMuxError('Native refresh receipt does not match its frozen Input.', 'AGENT_PROMPT_SUBMISSION_RECEIPT_MISMATCH')
+            }
+            run = accepted.run
+            const frozen = frameRefresh
+            await this.deps.updateExactAgentSession(session.agentSessionId, session.run, stored => {
+              if (stored.promptCompletionAdmission?.submissionId !== submissionId ||
+                  stored.promptCompletionAdmission.frameRefresh?.operationId !== frozen.operationId) {
+                throw new AgentMuxError('Native refresh admission changed before settlement.', 'STALE_AGENT_SESSION')
+              }
+              return { ...stored, promptCompletionAdmission: { ...stored.promptCompletionAdmission,
+                frameRefresh: { ...frozen, acknowledged: true } }, updatedAt: Math.max(stored.updatedAt, Date.now()) }
+            })
+            frameRefresh = { ...frameRefresh, acknowledged: true }
+            this.deps.agentInputCursors.set(session.agentSessionId, run.acceptedInputBytes!)
+          } else if (run.acceptedInputBytes === null || run.acceptedInputBytes < frameRefresh.inputByteRange.endByte) {
+            throw new AgentMuxError('CtxMux Input cursor precedes native refresh receipt.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
+          }
+        }
+        const readyThroughByte = await this.deps.screenEvidence.wait(session, frameRefresh?.outputCursorBytes ?? run.latestOutputBytes, Boolean(frameRefresh), screen => {
+          if (frameRefresh && screen.geometryRevision !== frameRefresh.resizeRevision) return false
           observation.context = provider.inspectPromptExecution?.(screen.snapshot()) ?? 'unavailable'
+          preparationGeneration = this.deps.screenEvidence.generation(session.agentSessionId)
           return observation.context !== 'unavailable'
-        }, { timeoutMs: 2_000, requireCompleteFrame: true, requireOriginalAttributes: true,
+        }, { timeoutMs: 2_000, requireCompleteFrame: true,
+          ...(frameRefresh ? { requireFrameAfterBoundary: true, checkpointFrameFence: {
+            outputByte: frameRefresh.outputCursorBytes, resizeRevision: frameRefresh.resizeRevision } } : {}),
           timeoutMessage: 'Native immediate input context is unconfirmed.',
           terminalMessage: 'Agent Run exited before native immediate preparation.', ...(renderSignal ? { signal: renderSignal } : {}) })
         const context = observation.context
@@ -510,7 +592,7 @@ export class AgentPromptSubmissionCoordinator {
         )
       }
       uncertainTurn = plan.prepare ? false : assertTurnBoundary(stored, existing !== undefined || stored.promptCompletionAdmission !== undefined)
-      if (plan.prepare && (!preparation || (!preparation.nativeSourceId && preparation.previousReceiptId !== stored.hookReceipt?.id))) {
+      if (plan.prepare && (preparationGeneration !== this.deps.screenEvidence.generation(session.agentSessionId) || !preparation || (!preparation.nativeSourceId && preparation.previousReceiptId !== stored.hookReceipt?.id))) {
         throw new AgentMuxError('Native context changed before immediate admission.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
       }
       const interruptBytes = preparation?.context === 'interruptible' ? Buffer.byteLength(plan.prepare!.interrupt) : 0
@@ -742,6 +824,9 @@ export class AgentPromptSubmissionCoordinator {
         const readyThroughByte = await this.deps.screenEvidence.wait(session, submission.outputCursorBytes,
           prepared.context === 'interruptible', screen => {
             const observed = this.deps.requireAgentSession(session.agentSessionId)
+            const refresh = observed.promptCompletionAdmission?.frameRefresh
+            if (refresh && screen.geometryRevision !== refresh.resizeRevision) return false
+            preparationGeneration = this.deps.screenEvidence.generation(session.agentSessionId)
             const receipt = observed.hookReceipt
             if (prepared.context === 'interruptible' && !prepared.nativeSourceId) {
               if (!receipt || receipt.id === prepared.previousReceiptId || receipt.eventName !== plan.prepare!.endEvent ||
@@ -750,7 +835,10 @@ export class AgentPromptSubmissionCoordinator {
               barrierReceiptId = receipt.id
             }
             return provider.inspectPromptExecution?.(screen.snapshot()) === 'idle'
-          }, { timeoutMs: TERMINAL_PROMPT_RENDER_TIMEOUT_MS, requireCompleteFrame: true, requireOriginalAttributes: true,
+          }, { timeoutMs: TERMINAL_PROMPT_RENDER_TIMEOUT_MS, requireCompleteFrame: true,
+            ...(current.promptCompletionAdmission?.frameRefresh ? { checkpointFrameFence: {
+              outputByte: submission.outputCursorBytes,
+              resizeRevision: current.promptCompletionAdmission.frameRefresh.resizeRevision } } : {}),
             ...(prepared.context === 'interruptible' ? { requireFrameAfterBoundary: true } : {}),
             timeoutMessage: 'Native interruption or empty composer is unconfirmed.',
             terminalMessage: 'Agent Run exited before immediate input was prepared.', ...(renderSignal ? { signal: renderSignal } : {}) })
@@ -758,6 +846,9 @@ export class AgentPromptSubmissionCoordinator {
           const state = stored.terminalPromptSubmission
           if (!state?.prepare) throw new AgentMuxError('The original preparation phase disappeared.', 'AGENT_PROMPT_SUBMISSION_STATE_INVALID')
           assertSubmission(state)
+          if (preparationGeneration !== this.deps.screenEvidence.generation(session.agentSessionId)) {
+            throw new AgentMuxError('Native screen geometry changed after interruption.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
+          }
           return { ...stored, terminalPromptSubmission: { ...state, outputCursorBytes: readyThroughByte,
             prepare: { ...state.prepare, readyThroughByte, ...(barrierReceiptId ? { barrierReceiptId } : {}) } },
             updatedAt: Math.max(stored.updatedAt, Date.now()) }
@@ -797,7 +888,7 @@ export class AgentPromptSubmissionCoordinator {
     session: AgentMuxAgentSession,
     submissionId: string,
     operation: Parameters<CtxmuxRunAdapter['input']>[1],
-    phaseName?: 'interrupt' | 'payload' | 'submit'
+    phaseName?: 'refresh' | 'interrupt' | 'payload' | 'submit'
   ): ReturnType<CtxmuxRunAdapter['input']> {
     const admission = this.deps.requireAgentSession(session.agentSessionId).promptCompletionAdmission
     if (admission?.submissionId === submissionId && admission.operationId === operation.operationId && admission.notApplied) {
@@ -822,6 +913,10 @@ export class AgentPromptSubmissionCoordinator {
             const admission = current.promptCompletionAdmission
             if (admission?.submissionId !== submissionId) return current
             const submission = current.terminalPromptSubmission
+            if (phaseName === 'refresh' && admission.frameRefresh?.operationId === operation.operationId) {
+              return { ...current, promptCompletionAdmission: { ...admission, notApplied: true,
+                frameRefresh: { ...admission.frameRefresh, notApplied: true } }, updatedAt: Math.max(current.updatedAt, Date.now()) }
+            }
             if (phaseName === 'submit' && error instanceof AgentMuxError && error.code === 'CTXMUX_input_cursor_mismatch' &&
               submission?.submissionId === submissionId && submission.submit.operationId === operation.operationId &&
               submission.submit.inputByteRange.startByte === operation.expectedByte) {
