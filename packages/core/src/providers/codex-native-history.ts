@@ -179,8 +179,13 @@ function itemEntry(value: unknown, source: AgentSessionHistorySource): AgentSess
     contentParts = [{ kind: 'text', text: JSON.stringify(item, null, 2) }]
   } else if (type === 'reasoning') {
     const text = extractReasoningText(item)
-    if (text) {
-      contentParts = [{ kind: 'reasoning', text }]
+    // A known empty marker has no prose. Keep its identity and use the shared
+    // empty-reasoning disclosure; unrecognized payload fields remain readable.
+    const empty = Array.isArray(item.summary) && item.summary.every(line => line === '')
+      && Array.isArray(item.content) && item.content.every(line => line === '')
+      && Object.keys(item).every(key => ['type', 'id', 'summary', 'content'].includes(key))
+    if (text !== null || empty) {
+      contentParts = [{ kind: 'reasoning', text: text ?? '' }]
     } else {
       contentParts = [{ kind: 'text', text: JSON.stringify(item, null, 2) }]
     }
