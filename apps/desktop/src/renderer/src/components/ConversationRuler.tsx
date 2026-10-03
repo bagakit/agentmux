@@ -85,7 +85,7 @@ export function Ruler({
    * 递出去，调用方把身份补上——两边各给自己知道的那一半，谁都不必知道对方的。
    */
   controls?: (close: () => boolean) => ReactNode
-  recentFraction?: number
+  recentFraction?: number | null
   activity?: AgentActivityHistoryProjection['segments']
   axes?: (peek: {
     width: number
@@ -243,10 +243,10 @@ export function Ruler({
       >
         <span className="activity-ruler__rail" />
         {scale.axis === 'temporal' ? <>
-          {recentFraction > 0 ? <span className="conversation-ruler__cutoff" style={{ left: `${recentFraction * 100}%` }} title="Latest recorded hour starts here" /> : null}
-          <span className="conversation-ruler__recent" style={{ left: `${recentFraction * 100}%` }} aria-hidden="true" />
+          {recentFraction !== null && recentFraction > 0 && recentFraction < 1 ? <span className="conversation-ruler__cutoff" style={{ left: `${recentFraction * 100}%` }} title="Latest recorded hour starts here" /> : null}
+          <span className="conversation-ruler__recent" style={{ left: `${Math.max(0, Math.min(1, recentFraction ?? 0)) * 100}%` }} aria-hidden="true" />
           {density.map((bin, index) => bin.count > 0 ? <span key={index} className="conversation-ruler__density"
-            data-era={bin.left < recentFraction ? 'history' : 'recent'}
+            data-era={recentFraction === null ? undefined : bin.left < recentFraction ? 'history' : 'recent'}
             style={{ left: `${bin.left * 100}%`, width: `${bin.width * 100}%`, height: `${2 + bin.strength * 5}px` }}
             title={`${bin.count} loaded records · Recorded density, not execution`} /> : null)}
           {activity.map(segment => {
@@ -262,7 +262,7 @@ export function Ruler({
           <span
             className="activity-ruler__band"
             data-axis={scale.axis}
-            style={{ left: `${band.startFraction * 100}%`, right: `${(1 - band.endFraction) * 100}%` }}
+            style={{ left: `min(${band.startFraction * 100}%, calc(100% - 3px))`, right: `${(1 - band.endFraction) * 100}%` }}
             aria-hidden="true"
           />
         ) : null}

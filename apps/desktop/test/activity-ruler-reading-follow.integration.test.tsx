@@ -40,7 +40,7 @@ function record(n: number) {
 }
 async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }) }
 async function render(node: ReactNode) { await act(async () => root.render(node)); await flush() }
-function view(p = page) { return <ActivityView sessionId={p.agentSessionId} items={[]} capability="complete-events" nativeHistoryPage={p} /> }
+function view(p = page) { return <ActivityView sessionId={p.agentSessionId} items={[]} capability="complete-events" nativeHistoryPage={p} describeSpeaker={speaker => ({ name: speaker.role === 'agent' ? 'Execution agent' : 'Original user' })} /> }
 function observer(): VisibleObserver {
  const feed = container.querySelector('.activity-feed')!
  const result = [...VisibleObserver.instances].reverse().find(item => item.options?.root === feed && item.targets.size > 0)
@@ -73,7 +73,7 @@ afterEach(async () => {
  expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0]); expect(reads).not.toHaveBeenCalled()
  useAppStore.setState(initial, true); window.getSelection()?.removeAllRanges(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
-it('moves the finite overview to visible older records and keeps recent relative to latest loaded facts', () => {
+it('moves the finite overview to visible older records and keeps recent relative to latest loaded facts', async () => {
  const records = conversationRulerRecords(sid, page, [])
  const latest = conversationRulerWindow(records, '1h')
  const old = conversationRulerWindow(records, '1h', new Set([records[0]!.id]))
@@ -83,9 +83,15 @@ it('moves the finite overview to visible older records and keeps recent relative
  const quarter = conversationRulerWindow([...records].reverse(), '15m', new Set([records[8]!.id]))
  expect(quarter.items.map(record => record.record.id)).toEqual(['ruler-8', 'ruler-9'])
  expect(conversationRulerWindow(records, '24h', new Set([records[0]!.id])).items).toHaveLength(21)
- expect(old.recentFraction).toBe(1)
+ expect(old.recentFraction).toBeGreaterThan(1)
  expect(latest.recentFraction).toBe(0)
  expect(conversationRulerWindow(records, 'all', new Set([records[0]!.id])).items).toHaveLength(21)
+ await writeFile(join(home, 'conversation.jsonl'), Array.from({ length: 21 }, (_, n) => JSON.stringify({ ...record(n), timestamp: new Date(start + n * 4 * 3_600_000).toISOString() })).join('\n') + '\n')
+ const extended = await client.sessionHistoryPage(sid, { limit: 30 })
+ const wide = conversationRulerRecords(sid, extended, [])
+ expect(wide.at(-1)!.recordedAt! - wide[0]!.recordedAt!).toBe(80 * 3_600_000)
+ expect(conversationRulerWindow(wide, '24h', new Set([wide[0]!.id])).items.map(record => record.record.id)).toEqual(Array.from({ length: 7 }, (_, n) => `ruler-${n}`))
+ expect(conversationRulerWindow(wide, '24h').items.map(record => record.record.id)).toEqual(Array.from({ length: 7 }, (_, n) => `ruler-${14 + n}`))
 })
 it('does not invent time when only an untimed record is visible or all times are absent', () => {
  const records = conversationRulerRecords(sid, page, [])
@@ -159,4 +165,38 @@ it('follows an original captured Message Tool shell without changing either sour
  expect(container.querySelector('.activity-ruler__band')).not.toBeNull()
  expect(shell.isConnected).toBe(true); expect(nativeBody.isConnected).toBe(true)
  expect(shell.textContent).toContain('Original Message Tool input')
+})
+
+it('keeps all-old final avatars historical and omits a cutoff outside the displayed time domain', async () => {
+ await render(view()); const user = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => observer().show([user])); await flush()
+ const marks = [...container.querySelectorAll<HTMLElement>('.conversation-axis__mark')]
+ expect(marks.length).toBeGreaterThan(0)
+ expect(marks.every(mark => mark.dataset.era === 'history')).toBe(true)
+ expect(container.querySelector('.conversation-ruler__cutoff')).toBeNull()
+})
+
+it('keeps a known single older record historical and untimed ordinal records unclassified', async () => {
+ await writeFile(join(home, 'conversation.jsonl'), Array.from({ length: 21 }, (_, n) => JSON.stringify({ ...record(n), timestamp: new Date(start + n * 4 * 3_600_000).toISOString() })).join('\n') + '\n')
+ const extended = await client.sessionHistoryPage(sid, { limit: 30 })
+ await render(view(extended)); const old = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ await act(async () => observer().show([old])); await flush()
+ // Direct public window projection supplies the same zero-span, known-time domain as the actual renderer.
+ const records = conversationRulerRecords(sid, extended, [])
+ const single = conversationRulerWindow(records, '1h', new Set([records[0]!.id]))
+ expect(single.items).toHaveLength(1); expect(single.scale.axis).toBe('ordinal'); expect(single.recentFraction).toBe(Infinity)
+ expect(container.querySelector('.conversation-ruler__cutoff')).toBeNull()
+ expect(container.querySelector('.conversation-axis__mark')?.getAttribute('data-era')).toBe('history')
+ await writeFile(join(home, 'conversation.jsonl'), [record(0), { ...record(6), timestamp: new Date(start).toISOString() }, { ...record(20), timestamp: new Date(start + 80 * 3_600_000).toISOString() }].map(record => JSON.stringify(record)).join('\n') + '\n')
+ const tied = await client.sessionHistoryPage(sid, { limit: 30 }); expect(tied.items).toHaveLength(3)
+ await render(view(tied)); await act(async () => observer().show([container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!])); await flush()
+ expect(container.querySelector('[role="slider"]')?.getAttribute('data-axis')).toBe('ordinal')
+ const tiedMarks = [...container.querySelectorAll<HTMLElement>('.conversation-axis__mark')]
+ expect(tiedMarks).toHaveLength(2); expect(tiedMarks.every(mark => mark.dataset.era === 'history')).toBe(true)
+ await writeFile(join(home, 'conversation.jsonl'), JSON.stringify({ ...record(0), timestamp: undefined }) + '\n')
+ const unknown = await client.sessionHistoryPage(sid, { limit: 30 }); expect(unknown.items).toHaveLength(1)
+ await render(view(unknown)); expect(container.querySelector('.conversation-axis__mark')).not.toBeNull()
+ expect(container.querySelector('.conversation-axis__mark')?.hasAttribute('data-era')).toBe(false)
+ expect(container.querySelector('.conversation-ruler__cutoff')).toBeNull()
+ expect(container.querySelector('.conversation-ruler__recent')).toBeNull()
 })

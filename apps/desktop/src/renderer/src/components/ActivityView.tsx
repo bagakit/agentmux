@@ -888,7 +888,7 @@ export function ActivityView({
         renderQuestionNotice={renderConversationQuestionNotice}
         {...(onReplyQuestion ? { onReplyQuestion } : {})}
         {...(renderMessageActions ? { renderMessageActions } : {})}
-        renderProcess={(props) => <NativeProcessObservation {...props} />}
+        renderProcess={(props) => <NativeProcessObservation {...props} compact={true} />}
         sessionId={sessionId}
         {...(executionHostId ? { executionHostId } : {})}
         locatedMessageKey={locatedMessageKey}
