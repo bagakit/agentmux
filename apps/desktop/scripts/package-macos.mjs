@@ -316,7 +316,9 @@ async function resolvePackageRoot(sourcePackage, packageName) {
     if (await pathExists(candidate)) return await realpath(candidate)
     if (current === repositoryRoot) break
     const parent = dirname(current)
-    if (parent === current || relative(repositoryRoot, parent).startsWith(`..${sep}`)) break
+    // pnpm may resolve a package into a shared store outside this checkout.
+    // Follow Node's ordinary ancestor lookup rather than truncating its dependencies.
+    if (parent === current) break
     current = parent
   }
   throw new Error(`Could not resolve package root for ${packageName} from ${sourcePackage}.`)
