@@ -39,12 +39,25 @@ export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot)
   if (lines.slice(footerRow + 2).some(line => line.text.trim())) return 'unavailable'
   let statusRow = cursor.row - 1
   while (statusRow >= 0 && !lines[statusRow]?.text.trim()) statusRow--
+  // The native busy indicator can append one Tip row below its header. This
+  // subordinate row is not an idle boundary. Keep the complete adjacent group;
+  // never scan transcript text for an earlier Working line to authorize Escape.
+  const detail = lines[statusRow]
+  if (detail?.wrapped) return 'unavailable'
+  const nativeTip = Boolean(detail && !detail.wrapped && cursor.row - statusRow === 3 &&
+    /^  └ Tip: \S/u.test(detail.text) && detail.text.search(/\S/u) === markerColumn + 2 &&
+    detail.cells[markerColumn + 2]?.dim &&
+    detail.cells.slice(markerColumn + 4).every(cell => !cell.chars.trim() || !cell.dim))
+  if (nativeTip) statusRow--
+  if (lines[statusRow]?.wrapped) return 'unavailable'
   const status = lines[statusRow]?.text.trim() ?? ''
   // Pending native inputs are rendered between the active status and composer.
   // Requiring that exact adjacent group and at least eight spare rows rejects a
   // preview whose requested height consumed/clipped the available viewport.
   if (/\besc to interrupt\)/u.test(status) && !/\b(?:review|hook)\b/iu.test(status) &&
-      statusRow >= 8 && cursor.row - statusRow === 3) return 'interruptible'
+      statusRow >= 8 && cursor.row - statusRow === (nativeTip ? 4 : 3)) return 'interruptible'
+  // A malformed or detached native detail cannot turn a busy frame into idle.
+  if (nativeTip || /^\s*└/u.test(detail?.text ?? '')) return 'unavailable'
   // Idle requires an ordinary shortcut footer; absence of a busy string alone does
   // not establish idle. Core also checks the native end/initial readiness evidence.
   if (!/to interrupt/u.test(status) && !/pending|queued|↳|approval|question|hook/iu.test(status)) return 'idle'
