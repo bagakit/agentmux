@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
 import { PROMPT_REACTION_STARTERS } from '@agentmux/core/prompt-reaction'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { ShortcutSettingsPane } from '../../../src/renderer/src/components/settings/ShortcutSettingsPane'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -30,7 +30,7 @@ function Scene(){
  {view==='settings'?<section className="reaction-scene__settings"><ShortcutSettingsPane config={current} active onSave={async(prompts)=>{useAppStore.setState({config:{...current,composerShortcuts:prompts}})}} /></section>:
  <section className="reaction-scene__conversation">
  <ConversationMessage messageId="question" conversationSessionId="reaction-agent" speaker={{role:'human',id:'human'}} name="You" content="回复卡片能直接给 Agent 一点反馈吗？保持紧凑，我不想丢掉原来的草稿。" createdAt={_hygiene_fixtureTime(24100980000)} />
- <ConversationNativeThread sessionId="reaction-agent" page={{agentSessionId:'reaction-agent',source:{providerId:'codex',nativeSessionId:'recorded-scene'},nextCursor:null,items:[{id:'answer',kind:'assistant-message',startedAt:_hygiene_fixtureTime(24101000000),contentParts:[{kind:'text',text:'可以。这里的三个 SVG 对应认可、继续和解释。\n\n悬停会显示完整含义；点击会作为新消息加入原发件箱，权限请求仍然需要明确确认。'}]}]}} describeSpeaker={()=>({name:'Interface',providerId:'codex'})} renderMessageActions={renderMessageActions} />
+ <ConversationView sessionId="reaction-agent" page={{agentSessionId:'reaction-agent',source:{providerId:'codex',nativeSessionId:'recorded-scene'},nextCursor:null,items:[{id:'answer',kind:'assistant-message',startedAt:_hygiene_fixtureTime(24101000000),contentParts:[{kind:'text',text:'可以。这里的三个 SVG 对应认可、继续和解释。\n\n悬停会显示完整含义；点击会作为新消息加入原发件箱，权限请求仍然需要明确确认。'}]}]}} describeSpeaker={()=>({name:'Interface',providerId:'codex'})} renderMessageActions={renderMessageActions} />
  <footer className="reaction-scene__draft">{useAppStore.getState().agentComposerDrafts['reaction-agent']}</footer>
  </section>}
  </main></DesktopClientUiProvider>

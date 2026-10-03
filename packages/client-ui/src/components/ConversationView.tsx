@@ -31,8 +31,8 @@ type Props = ReadingProps & {
 }
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
-export const ConversationNativeThread = memo(function ConversationNativeThread({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = true, onReplyQuestion, renderQuestionNotice, ...reading
+export const ConversationView = memo(function ConversationView({
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
@@ -80,7 +80,7 @@ export const ConversationNativeThread = memo(function ConversationNativeThread({
       </div>
 
   }
-  return <section className="conversation-native-thread" aria-label="Native conversation"
+  return <section className="conversation-native-thread" aria-label="Conversation"
     data-native-provider={page.source.providerId} data-native-source={JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     {showSource ? <div className="conversation-native-thread__source" title={`Native session ${page.source.nativeSessionId}`}>
       <span>{page.source.providerId} · Native conversation</span>

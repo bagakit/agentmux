@@ -42,7 +42,14 @@
 .toolkit-result__link { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-3); }
 .toolkit-result__link details { min-width: 0; flex: 1; color: var(--text-3); font-size: var(--fs-meta); }
 .toolkit-result__link summary { cursor: pointer; }
-.toolkit-result__link .settings-input { width: 100%; min-width: 0; margin-top: var(--sp-3); font-family: var(--font-mono); font-size: var(--fs-meta); }
+.toolkit-result__link > button { flex: none; }
+.toolkit-result__link details[open] { flex-basis: 100%; }
+.toolkit-result__url { box-sizing: border-box; width: 100%; min-width: 0; max-height: 160px; overflow: auto; margin-top: var(--sp-3); padding: var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; cursor: text; }
+.toolkit-result__url:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.toolkit-result__actions > .small-button:first-child { color: var(--text); }
+.toolkit-result__document + .toolkit-result__details { margin-top: var(--sp-2); }
 .toolkit-result__spinner { animation: toolkit-result-spin 1s linear infinite; }
 @keyframes toolkit-result-spin { to { transform: rotate(360deg); } }
 @media (prefers-reduced-motion: reduce) { .toolkit-result__spinner { animation: none; } }
+
+.toolkit-result__url { display: block; box-sizing: border-box; width: 100%; resize: vertical; }

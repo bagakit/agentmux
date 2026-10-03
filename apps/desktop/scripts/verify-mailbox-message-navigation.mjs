@@ -21,7 +21,7 @@ const typedPaths = [
   'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
   'apps/desktop/src/renderer/src/components/ComposerOutbox.tsx', 'apps/desktop/src/renderer/src/lib/session-user-messages.ts',
   'apps/desktop/src/renderer/src/lib/mailbox-message-navigation.ts', 'packages/client-ui/src/components/ConversationMessage.tsx',
-  'packages/client-ui/src/components/ConversationNativeThread.tsx', 'packages/client-ui/src/lib/conversation-message-location.ts'
+  'packages/client-ui/src/components/ConversationView.tsx', 'packages/client-ui/src/lib/conversation-message-location.ts'
 ]
 const stylePaths = ['packages/client-ui/src/styles/composer.css', 'packages/client-ui/src/styles/conversation-message.css']
 const productPaths = [...typedPaths, ...stylePaths]
@@ -127,7 +127,7 @@ async function source() {
   const callerSpecs = [
     [typedPaths[0], 'AgentSessionComposer', 'onRevealMessage'], [typedPaths[2], 'SessionMailbox', 'onRevealMessage'],
     [typedPaths[3], 'ConversationMessage', 'messageActions'], [typedPaths[0], 'ActivityView', 'revealRequest'],
-    [typedPaths[0], 'SessionActivityPresentation', 'activity'], [typedPaths[1], 'ConversationNativeThread', 'locatedMessageKey'],
+    [typedPaths[0], 'SessionActivityPresentation', 'activity'], [typedPaths[1], 'ConversationView', 'locatedMessageKey'],
     [typedPaths[8], 'ConversationMessage', 'located']
   ]
   result.callers = callerSpecs.map(([path, tag, prop]) => {

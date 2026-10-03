@@ -1,5 +1,5 @@
 import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
-import type { ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationNativeThread'
+import type { ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
 import { useAppStore } from '../store'

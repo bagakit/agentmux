@@ -1,7 +1,7 @@
 import { fixturePath as _hygiene_fixturePath } from "../../lib/fixture-values.mjs"
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import { ConversationNativeThread } from '../../../../../packages/client-ui/src/components/ConversationNativeThread'
+import { ConversationView } from '../../../../../packages/client-ui/src/components/ConversationView'
 import { ClientUiProvider, type ClientUiPlatform } from '../../../../../packages/client-ui/src/platform'
 import { AgentComposer } from '../../../../../packages/client-ui/src/components/AgentComposer'
 import '../../../src/renderer/src/styles/tokens.css'
@@ -22,7 +22,7 @@ function Scene() {
   const [notice, setNotice] = useState('')
   return <ClientUiProvider platform={platform}><main className="outputs-scene">
     <header>拾墨 <span>对话</span></header>
-    <div className="outputs-scene__reading"><ConversationNativeThread sessionId="fixture-original" workspaceRoot={_hygiene_fixturePath("fixture")}
+    <div className="outputs-scene__reading"><ConversationView sessionId="fixture-original" workspaceRoot={_hygiene_fixturePath("fixture")}
       page={{ agentSessionId: 'fixture-original', source: { providerId: 'codex', nativeSessionId: 'fixture-native' }, nextCursor: null, items: [
         { id: 'human', kind: 'user-message', contentParts: [{ kind: 'text', text: '把这轮讨论整理成可以继续使用的文件吧。' }] },
         { id: 'answer', kind: 'assistant-message', messagePhase: 'final', contentParts: [{ kind: 'text', text: '这一轮的说明、图表和待核实项在下面。PDF 里的时间安排仍需你确认；下一步可以从计划中的第一个小任务开始。\n\n' + files }] }

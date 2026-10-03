@@ -35,7 +35,7 @@ import { conversationRulerRecords, conversationRulerWindow, type RulerRecord, ty
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationNativeThread, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView, type ConversationQuestionReply } from '@agentmux/client-ui/components/ConversationView'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
@@ -816,7 +816,7 @@ export function ActivityView({
           )
         })}
       </div>
-      {nativeHistoryPage ? <ConversationNativeThread
+      {nativeHistoryPage ? <ConversationView
         page={nativeHistoryPage}
         renderQuestionNotice={renderConversationQuestionNotice}
         {...(onReplyQuestion ? { onReplyQuestion } : {})}

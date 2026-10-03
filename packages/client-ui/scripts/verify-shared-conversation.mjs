@@ -89,7 +89,7 @@ async function callers(candidateRoot = root) {
   const candidateSourceRoot = resolve(candidateRoot, 'packages/client-ui/src')
   const desktopSourceRoot = resolve(candidateRoot, 'apps/desktop/src/renderer/src')
   const all = [...await files(candidateSourceRoot), ...await files(desktopSourceRoot)]
-  const symbols = ['ConversationMessage', 'ConversationNativeThread', 'AgentComposer', 'AgentInteractionCard', 'InlineComposer', 'ClientUiProvider']
+  const symbols = ['ConversationMessage', 'ConversationView', 'AgentComposer', 'AgentInteractionCard', 'InlineComposer', 'ClientUiProvider']
   const result = {}
   for (const symbol of symbols) {
     const definition = symbol === 'ClientUiProvider' ? resolve(candidateSourceRoot, 'platform.tsx') : resolve(candidateSourceRoot, 'components', symbol + '.tsx')

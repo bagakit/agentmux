@@ -4,7 +4,7 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { beforeEach, afterEach, it, expect, vi } from 'vitest'
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { NativeProcessObservation } from '../src/renderer/src/components/NativeProcessObservation'
@@ -42,7 +42,7 @@ it('reads the same public Provider page with the unique conversation body, autho
   await act(async () => { await Promise.all(io.historyPage.mock.results.map(result => result.value)) })
   const page = await io.historyPage.mock.results[0]!.value
   expect(page.items.length).toBeGreaterThan(0)
-  await act(async () => liveRoot.render(<ConversationNativeThread page={page} sessionId={producer.control.agentSessionId}
+  await act(async () => liveRoot.render(<ConversationView page={page} sessionId={producer.control.agentSessionId}
     describeSpeaker={resolver} renderProcess={props => <NativeProcessObservation {...props} />} />))
   const rows = (node: HTMLElement) => [...node.querySelectorAll<HTMLElement>('[data-native-record-id]')]
   expect(rows(history).map(row => row.dataset.nativeRecordId)).toEqual(page.items.map((item: { id: string }) => item.id))
@@ -56,7 +56,7 @@ it('reads the same public Provider page with the unique conversation body, autho
   }
   expect(history.querySelector('.conversation-native-thread')).not.toBeNull()
   expect(history.querySelector('.conversation-native-thread__source')).toBeNull()
-  expect(conversation.querySelector('.conversation-native-thread__source')).not.toBeNull()
+  expect(conversation.querySelector('.conversation-native-thread__source')).toBeNull()
   expect(history.querySelectorAll('.wf-card--observation').length).toBeGreaterThan(0)
   expect(history.querySelectorAll('.wf-card--observation').length).toBe(conversation.querySelectorAll('.wf-card--observation').length)
   expect(history.querySelector('.session-history')?.getAttribute('style')).toBeNull()

@@ -31,7 +31,7 @@ export const toolkitSettingsModule = {
     const preferences = resolvePerformancePreferences(config)
     const mobile = resolveMobileConnectionPreferences(config)
     const count = config.toolkit?.tools?.length ?? 0
-    return `${count} ${count === 1 ? 'user tool' : 'user tools'} · ${preferences.enabled ? 'Performance available' : 'Performance hidden'} · ${mobile.enabled ? '手机连接可用' : '手机连接隐藏'}`
+    return `${count} ${count === 1 ? 'user tool' : 'user tools'} · ${preferences.enabled ? 'Performance available' : 'Performance hidden'} · ${mobile.enabled ? 'Phone connection available' : 'Phone connection hidden'}`
   },
   Pane({ config, active, toolId, navigationRequest }) {
     return <ToolkitSettingsPane mobileConnection={resolveMobileConnectionPreferences(config)} onSaveMobileConnection={saveMobileConnection} performance={resolvePerformancePreferences(config)} tools={config.toolkit?.tools ?? []} toolId={toolId} navigationRequest={navigationRequest} active={active} onSave={savePerformance}

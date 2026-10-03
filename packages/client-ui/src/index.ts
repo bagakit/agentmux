@@ -1,5 +1,5 @@
 export * from './components/ConversationMessage.js'
-export * from './components/ConversationNativeThread.js'
+export * from './components/ConversationView.js'
 export * from './components/ConversationInputDetails.js'
 export * from './components/AgentMarkdown.js'
 export * from './components/ConversationImage.js'

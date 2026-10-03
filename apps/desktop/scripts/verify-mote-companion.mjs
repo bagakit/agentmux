@@ -16,7 +16,7 @@ if (task !== 'outputs') {
 const sourceFiles = ['packages/client-ui/src/lib/conversation-files.ts', 'packages/client-ui/src/components/ConversationFiles.tsx',
   'packages/client-ui/src/components/ConversationMessage.tsx', 'packages/client-ui/src/styles/conversation-message.css',
   'packages/client-ui/test/conversation-files.test.tsx', 'apps/desktop/scripts/fixtures/mote-companion/vitest.outputs.config.mts',
-  'packages/client-ui/src/components/ConversationNativeThread.tsx', 'apps/desktop/src/renderer/src/components/SessionHistoryView.tsx']
+  'packages/client-ui/src/components/ConversationView.tsx', 'apps/desktop/src/renderer/src/components/SessionHistoryView.tsx']
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const source = Object.fromEntries(sourceFiles.map(file => [file, hash(readFileSync(path.join(root, file)))]))
 const directory = path.join(root, (".tmp/mote-companion/outputs-" + (globalThis.crypto.randomUUID()) + ""))
@@ -38,7 +38,7 @@ try {
     ['conversationFiles', 'packages/client-ui/src/components/ConversationMessage.tsx'],
     ['ConversationFiles', 'packages/client-ui/src/components/ConversationMessage.tsx'],
     ['ConversationMessage', 'apps/desktop/src/renderer/src/components/ActivityView.tsx'],
-    ['ConversationMessage', 'packages/client-ui/src/components/ConversationNativeThread.tsx']
+    ['ConversationMessage', 'packages/client-ui/src/components/ConversationView.tsx']
   ]
   for (const [symbol, file] of checks) {
     const text = readFileSync(path.join(root, file), 'utf8')

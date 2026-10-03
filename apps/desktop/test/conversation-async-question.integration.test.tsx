@@ -6,7 +6,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages';
 import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source';
 import type { AgentSessionHistoryPage, AgentSessionQuestionReplyReceipt } from '@agentmux/core';
-import { ConversationNativeThread } from '@agentmux/client-ui/components/ConversationNativeThread';
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView';
 import { AgentAsyncQuestionCard } from '@agentmux/client-ui/components/AgentAsyncQuestionCard';
 import { AgentInteractionCard } from '@agentmux/client-ui/components/AgentInteractionCard';
 import { createClientUiRoot } from './helpers/client-ui-render';
@@ -136,7 +136,7 @@ async function text(value: string) {
   await flush();
 }
 function thread(page: AgentSessionHistoryPage, onReply = replyConversationQuestion.bind(null, control)) {
-  return <ConversationNativeThread
+  return <ConversationView
     page={page}
     sessionId="question-session"
     onReplyQuestion={onReply}
@@ -450,7 +450,7 @@ it('local reply draft and ACK cannot cross Managed Session identities even when 
   });
   await render(thread(first, submit));
   await text('Only Session A draft');
-  await render(<ConversationNativeThread
+  await render(<ConversationView
     page={second}
     sessionId="second-managed-session"
     onReplyQuestion={submit}
@@ -461,7 +461,7 @@ it('local reply draft and ACK cannot cross Managed Session identities even when 
   await text('Session A submitted answer');
   await click('Submit reply');
   expect(container.querySelector('[data-question-state]')?.getAttribute('data-question-state')).toBe('submitted');
-  await render(<ConversationNativeThread
+  await render(<ConversationView
     page={second}
     sessionId="second-managed-session"
     onReplyQuestion={submit}
