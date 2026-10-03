@@ -105,8 +105,20 @@ try{
  created=await client.createAgent({agentSessionId:'private-native-immediate',createOperationId:'private-native-create',providerId:'codex',executorId:'codex',workspacePath:join(root,'workspace'),injectAgentMuxGuide:false,commandOverride:process.env.AGENTMUX_REAL_CODEX_COMMAND??'codex',env:{CODEX_HOME:join(root,'codex-home')},args,prompt:'PRIVATE_INITIAL_BUSY',cols:120,rows:40})
  const attach=await client.reattachAgent(created.agentSessionId,0);output+=attach.attachment.replay.map(e=>e.data??'').join('')
  if(remoteDaemon){
-  await client.screenEvidence.wait(client.agentSession(created.agentSessionId),0,false,screen=>screen.snapshot().lines.some(l=>l.text.includes('Hooks need review')),{timeoutMs:10_000,timeoutMessage:'private hook review',terminalMessage:'private exit',requireCompleteFrame:true})
-  await client.writeAgent({agentSessionId:created.agentSessionId,expectedRun:created.run,data:'\x1b',source:'user'})
+  const reviewThrough=await client.screenEvidence.wait(client.agentSession(created.agentSessionId),0,false,screen=>screen.snapshot().lines.some(l=>l.text.includes('Hooks need review')),{timeoutMs:10_000,timeoutMessage:'private hook review',terminalMessage:'private exit',requireCompleteFrame:true})
+  // The first modal paint precedes Native's protected startup input drain.
+  // Bind the private live process before navigation; paint alone is not input
+  // readiness. End only selects the last row; it cannot confirm an action.
+  const reviewRun=(await client.statusAgent(created.agentSessionId)).run
+  const {nativeProcessFiles,nativeProcessBirth}=await import('../../dist/agent-native-process.js')
+  const reviewBirth=await nativeProcessBirth(reviewRun.pid,AbortSignal.timeout(4000))
+  assert(reviewBirth);assert((await nativeProcessFiles(reviewRun.pid,AbortSignal.timeout(4000))).length>0)
+  assert.equal((await client.statusAgent(created.agentSessionId)).run.pid,reviewRun.pid)
+  await client.writeAgent({agentSessionId:created.agentSessionId,expectedRun:created.run,data:'\x1b[F',source:'user'})
+  const selectedThrough=await client.screenEvidence.wait(client.agentSession(created.agentSessionId),reviewThrough,true,screen=>screen.snapshot().lines.some(l=>/^›\s*3\. Continue without trusting/u.test(l.text)),{timeoutMs:10_000,timeoutMessage:'private untrusted option selected',terminalMessage:'private exit',requireCompleteFrame:true,requireFrameAfterBoundary:true})
+  assert.equal(requests.length,0,'menu navigation cannot submit the initial model request')
+  await client.writeAgent({agentSessionId:created.agentSessionId,expectedRun:created.run,data:'\r',source:'user'})
+  report.phases.push({phase:'private-native-hook-menu-confirmed-once',reviewThrough,selectedThrough,privateRunId:created.run.runId,pid:reviewRun.pid,selectionOnly:'End',confirmedOption:3,confirmations:1})
  }
  await until('native working + hook handle',()=>requests.length>=1&&(remoteDaemon||(client.agentSession(created.agentSessionId).nativeHandle?.kind==='provider'&&client.agentSession(created.agentSessionId).semanticStatus?.state==='working')))
  nativePid=(await client.statusAgent(created.agentSessionId)).run.pid
