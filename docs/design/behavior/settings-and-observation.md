@@ -131,6 +131,8 @@ Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Pr
 
 Overview 是普通入口，字号等分区从普通入口进入会多一次点击。显式分区与对象直达不经 Overview。具体页面构图与动效仍须实际呈现评审，不能以方案批准代替审美验收。任何品牌入口都保留全部实际设置分区的直接访问、原搜索与精确 Executor ID；不能让对象直达先经过宣传页、要求完成初始化或等待图像／动画。切换入口与分区不丢已访问草稿、阅读位置或焦点，配置仍由原 owner 保存；不自动检测资源、启动或影响健康 Run。Settings 仍是辅助界面，原工作面、关闭方式和 status bar 的原操作归属保持，视觉密度引用密度 SSOT[《左下角导航与右下角工具组》](../presentation/spaces-and-layout.md#左下角导航与右下角工具组)。品牌、图像与动态保护约束归密度 SSOT[《Settings 控制工作面》](../presentation/settings-and-observation.md#settings-控制工作面)。
 
+Focus 等工作面偏好归现有 Work 设置分组，不另立 Workflows 分组；Workflow 名称留给 Goals 中实际的工作流功能。
+
 设置围绕跨对象偏好、本人资料、Mote、工作、可复用资源和连接组织。Preferences 在前，包含 My Profile、Appearance、Notifications、Browser、General 与快捷键；Mote 与 Preferences 平级，提供 Mote Club；Work（工作）组织 Space、Focus、Goals、Survey 与 Notes；Mods 保独立 Toolkit Library；Resources 为 Agents 与 Prompts；Connections 为 Environments 与 Devices。统一底栏进入 Overview，各尺寸、搜索与深链使用同一模块目录。原 Workspaces 独立设置导航撤除，已登记目录收进 Environments 的准确已保存 Host → Projects；每项 Project 的 Folder/worktree 沿原登记与 Git 事实，不能把 Scratch 或每条 worktree 都计成另一个 Project。Project Rail 齿轮进入 Overview，Launcher 的管理项目进入唯一 Environments 入口；不增第二齿轮、兼容路由、Project 注册库或环境数据模型。Copied paths、诊断与恢复说明沿 General 原字段基线和作用范围。搜索仍能定位路径、字号、通知、Provider、本人资料、Mote、工作与设备接入。
 
 设置页要像一个现代工作台：侧栏只负责快速定位，主区首屏明确当前设置对象、当前状态和唯一主操作；可编辑内容与只读说明分层，重复说明收起到次级层。搜索、键盘导航、窄窗口和保存反馈必须保持可见且可恢复，切换分区不能丢弃未保存草稿。

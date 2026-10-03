@@ -28,6 +28,8 @@
 @import './settings-toolkit.css';
 @import './toolkit-custom.css';
 @import './settings-keyboard-shortcuts.css';
+@import './settings-workflows.css';
+@import './settings-focus.css';
 @import './board.css';
 @import './global-board.css';
 @import './goals.css';
@@ -35,6 +37,7 @@
 @import './focus-timeline-ruler.css';
 @import './pmo-teams-topic.css';
 @import './mote-workface.css';
+@import './mote-idea-controls.css';
 @import './browser.css';
 @import './browser-operation-surface.css';
 @import './browser-step-evidence.css';

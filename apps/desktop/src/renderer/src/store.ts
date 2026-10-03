@@ -4775,11 +4775,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const owners = new Set(existing.map(item => JSON.stringify([item.tab.id, item.surface.regionId])))
       let references = [...new Map(catalog.locations.filter(location => owners.has(JSON.stringify([location.tabId, location.regionId])))
         .map(location => [JSON.stringify([location.displayWorkspaceId, location.groupId, location.tabId, location.regionId]), location])).values()]
+      // An explicit Space Group is the caller's navigation intent. Held Focus only
+      // disambiguates inside that scope; it cannot erase a different requested Group.
+      if (preferredTabGroupId) references = references.filter(reference => reference.groupId === preferredTabGroupId)
       const held = current.agentFocus.execution.sessionId === id ? current.agentFocus.execution.reference : undefined
       if (held && references.some(reference => reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId &&
         reference.tabId === held.tabId && reference.regionId === held.regionId)) references = references.filter(reference =>
           reference.displayWorkspaceId === held.displayWorkspaceId && reference.groupId === held.groupId && reference.tabId === held.tabId && reference.regionId === held.regionId)
-      if (preferredTabGroupId) references = references.filter(reference => reference.groupId === preferredTabGroupId)
       if (references.length !== 1) {
         current.reportError(new Error('The Session has no unique confirmed display occurrence. Its original workface and input are kept; choose its exact Tab, Group and Region.'), { kind: 'indeterminate' })
         return

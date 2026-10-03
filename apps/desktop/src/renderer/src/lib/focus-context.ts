@@ -88,7 +88,8 @@ export function focusNeutralGroupSummary(rows: readonly FocusContext[]): { label
     : unknown ? 'Idle / Unknown' : 'Idle / Recovery'
   return { label, detail: `Idle ${idle} · Activity unknown ${unknown} · Recovery ${recovery}` }
 }
-function context(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
+/** Read-only Agent facts shared by Focus and the scoped Space directory. No eligibility policy or IO. */
+export function agentContextForSession(session: SessionSnapshot, timeline: AgentTimelineSnapshot | undefined, userName: string | undefined, workspace: WorkspaceRecord | undefined, topicId: string | null): FocusContext {
   const state = session.status.state, items = timeline?.items ?? []
   const latest = [...items].reverse().find(item => item.kind !== 'lifecycle')
   const result = latest?.kind === 'assistant_message' && latest.status === 'complete' && latest.content?.trim() ? latest : null
@@ -187,7 +188,7 @@ function createFocusProjectionCache() {
       if (lane === 'pmo') {
         if (focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
       } else {
-        const next = context(session, timeline, name, workspace, topicId)
+        const next = agentContextForSession(session, timeline, name, workspace, topicId)
         if (lane === null) {
           next.detail = 'Mote identity is not confirmed · ' + next.detail
           next.detailIsRecap = false
