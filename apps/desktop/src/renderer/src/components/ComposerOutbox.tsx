@@ -20,16 +20,18 @@ export type ComposerQueuedMessage = {
   unconfirmed?: boolean
   errorCode?: string
   error?: string
+  awaitingExplicitSend?: true
 }
 
 /** Labels describe the queue owner's facts, not native CLI rendering or model progress. */
 export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteraction = false) {
-  if (entry.preparing) return { label: entry.status === 'restoring' ? '恢复中' : '准备发送', detail: '正在准备原消息的投递，尚未提交。', busy: true }
+  if (entry.preparing) return { label: entry.status === 'restoring' ? '恢复中' : '准备发送', detail: '正在准备本次发送；原消息和已有投递记录会保留。', busy: true }
   if (entry.sending) return { label: '发送中', detail: '正在提交原消息，等待投递确认。', busy: true }
   if (pendingInteraction) return { label: '等待回答', detail: '先回答 Agent 当前请求；消息与原文会保留。', busy: false }
-  if (entry.unconfirmed) return { label: '投递未确认', detail: entry.error ?? '结果尚未确认；只可按原操作检查或重试，不会自动重放。', busy: false }
+  if (entry.errorCode === 'AGENT_PROMPT_PREPARATION_FAILED') return { label: '本次准备未完成', detail: `${entry.error ?? '本次发送的准备步骤未完成。'}${entry.unconfirmed ? '\n这条消息此前是否已提交仍待核实；会保留原操作，不会自动重发。' : ''}${entry.awaitingExplicitSend ? '\n重启后等待你明确发送这条原消息。' : ''}`, busy: false }
+  if (entry.unconfirmed) return { label: '发送结果待核实', detail: `${entry.error ?? '可能已经输入，但尚未拿到完整确认；请检查原对话和操作，不会自动重发。'}${entry.awaitingExplicitSend ? '\n重启后等待你明确发送这条原消息。' : ''}`, busy: false }
   if (!entry.deliverable) return { label: '原 Run 不可投递', detail: entry.error ?? '绑定的 Run 不可用或已改变，不会投递到其他 Run。', busy: false }
-  if (entry.errorCode === 'AGENT_EXECUTION_NOT_REQUESTED') return { label: '待手动发送', detail: entry.error ?? '恢复的消息等待明确发送，只授权这条原消息。', busy: false }
+  if (entry.awaitingExplicitSend) return { label: '待手动发送', detail: `重启后等待你明确发送这条原消息。${entry.error ? `\n此前记录：${entry.error}` : ''}`, busy: false }
   if (entry.errorCode === 'AGENT_TURN_END_UNCONFIRMED') return { label: '等待当轮确认', detail: entry.error ?? '上一轮尚未确认结束；消息已保留，可明确发送这条消息。', busy: false }
   if (entry.errorCode === 'AGENT_PROMPT_SUBMISSION_BUSY') return { label: '等待前条提交', detail: entry.error ?? '原 Run 的前条提交尚未完成，消息已保留。', busy: false }
   if (entry.error || entry.status === 'failed') return { label: '待处理', detail: entry.error ?? '投递失败，原文已保留。', busy: false }
@@ -40,7 +42,7 @@ export function queuedMessageState(entry: ComposerQueuedMessage, pendingInteract
 export function queuedMessageLocation(entry: ComposerQueuedMessage) {
   if (entry.preparing) return '准备发送，对话位置暂不可用'
   if (entry.sending) return '正在提交，对话位置等待确认'
-  if (entry.unconfirmed) return '投递未确认，对话位置暂不可用'
+  if (entry.unconfirmed) return '发送结果待核实，对话位置暂不可用'
   if (!entry.deliverable || entry.error || entry.status === 'failed') return '暂无已确认的对话位置'
   return '尚未发送，暂无对话位置'
 }

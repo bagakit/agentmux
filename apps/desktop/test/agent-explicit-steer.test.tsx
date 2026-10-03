@@ -12,7 +12,7 @@ import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxMemoryAgentSessionStore, agentPromptCondition, issueAgentCapability, hashAgentCapability,
+import { AGENTMUX_CONTROL_SCHEMA_VERSION, AgentMuxClient, AgentMuxError, AgentMuxMemoryAgentSessionStore, agentPromptCondition, issueAgentCapability, hashAgentCapability,
   type AgentMuxControlRequest, type AgentMuxMessageEnvelope, type AgentMuxStoredAgentSession } from '@agentmux/core'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig } from '../src/shared/contracts'
@@ -148,7 +148,13 @@ beforeEach(async () => {
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')
-    return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+    if (channel !== 'sessions:submitPrompt') return await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values)
+    try {
+      // Electron structured-clones return values but discards custom fields on a rejection.
+      return structuredClone(await handler!({ sender } as unknown as IpcMainInvokeEvent, ...values))
+    } catch (error) {
+      throw new Error(`Error invoking remote method '${channel}': ${error instanceof Error ? error.message : String(error)}`)
+    }
   })
   const session = { ...composerSession(ID), workspacePath: durable.workspacePath,
     status: { state: 'working' as const, source: 'native-hook' as const, observedAt: 1 } }
@@ -278,9 +284,9 @@ it('retains multiple exact explicit intents arriving while an earlier real Core 
 
 it('the sole queued Send retries its exact paused operation without an additional Continue action', async () => {
   const first = { operationId: 'paused-exact-op', runId: RUN, text: 'restored explicit retry', status: 'deferred' as const, promptCondition: null,
-    errorCode: 'AGENT_EXECUTION_NOT_REQUESTED', error: 'Waiting for explicit execution.' }
+    awaitingExplicitSend: true as const, error: 'Waiting for explicit execution.' }
   const second = { operationId: 'untouched-op', runId: RUN, text: 'other paused message', status: 'deferred' as const, promptCondition: null,
-    errorCode: 'AGENT_EXECUTION_NOT_REQUESTED', error: 'Waiting for explicit execution.' }
+    awaitingExplicitSend: true as const, error: 'Waiting for explicit execution.' }
   await act(async () => useAppStore.setState({ agentSteerQueues: { [ID]: [first, second] } }))
   const mailbox = container.querySelector('.composer-mailbox')
   expect(mailbox).not.toBeNull()
@@ -301,6 +307,51 @@ it('the sole queued Send retries its exact paused operation without an additiona
   expect(queue()).toEqual([second])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
   expect(submits.map(call => [call[3], call[5]])).toEqual([['paused-exact-op', { allowUncertainTurn: true }]])
+})
+
+it.each(['transport qualification timed out', 'provider has no preparation transport'])('keeps %s through the actual submit IPC and original queued message', async detail => {
+  const failure = new AgentMuxError('This send could not finish preparation.', 'AGENT_PROMPT_PREPARATION_FAILED', detail,
+    { disposition: 'not_applied', confirmedInputBytes: 0 })
+  const submit = vi.spyOn(runtime, 'submitPrompt').mockRejectedValue(failure)
+  const condition = agentPromptCondition(client.agentSession(ID))
+  const session = useAppStore.getState().sessions[0]!
+  if (session.kind !== 'agent') throw new Error('Private Agent fixture missing')
+  const control = session.control
+  await expect(api.sessions.submitPrompt(control, 'private direct request', 'private-prepare-op', condition)).rejects.toMatchObject({
+    code: failure.code, detail, controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }
+  })
+  expect(submit).toHaveBeenCalledOnce()
+  submit.mockClear()
+  const body = `Original preparation message: ${detail}`
+  await draft(body); await enter('metaKey'); await settled()
+  const original = queue()[0]!
+  expect(original, JSON.stringify({queue: queue(), writes, submits: bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt'), draft: useAppStore.getState().agentComposerDrafts[ID]})).toMatchObject({ text: body, runId: RUN,
+    promptCondition: condition, errorCode: failure.code, status: 'deferred' })
+  expect(original.error).toContain(detail)
+  expect(document.body.textContent).toContain('本次准备未完成')
+  expect(document.body.textContent).not.toContain('尚未发送，暂无对话位置')
+  expect(document.querySelector<HTMLButtonElement>('[aria-label="编辑这条待发消息"]')?.disabled).toBe(true)
+  expect(writes).toEqual([])
+  await settled(); expect(submit).toHaveBeenCalledOnce()
+  // A per-call preparation refusal grants no replay, but keeps the actual ordinary input path.
+  await act(async () => { await api.sessions.write(control, 'ordinary terminal input', 'user') })
+  expect(writes).toEqual(['ordinary terminal input'])
+  expect(queue()).toEqual([original])
+})
+
+it('restart pauses authorization while keeping the original unknown operation and its cause', async () => {
+  const original = { operationId: 'original-unknown-after-restart', runId: RUN, text: 'keep original unknown body',
+    status: 'deferred' as const, promptCondition: agentPromptCondition(client.agentSession(ID)), execution: 'default' as const,
+    errorCode: 'CTXMUX_io', error: 'The original submit ACK was lost.' }
+  disposeStore?.(); disposeStore = undefined
+  useAppStore.setState({ loading: true, agentSteerQueues: { [ID]: [original] } })
+  disposeStore = await useAppStore.getState().initialize()
+  await settled()
+  expect(queue()).toEqual([{ ...original, awaitingExplicitSend: true }])
+  expect(writes).toEqual([])
+  expect(bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')).toEqual([])
+  expect(document.body.textContent).toContain('发送结果待核实')
+  expect(useAppStore.getState().agentSteerQueues[ID]![0]!.error).toBe(original.error)
 })
 
 it('does not lend explicit authorization to a queue-only message admitted during its receipt', async () => {
@@ -507,7 +558,7 @@ it.each([false, true])('real Core receipt preserves a later Composer draft (lost
   expect(useAppStore.getState().agentComposerDrafts[ID]).toBe('later unsent draft')
   expect(container.querySelector('[contenteditable="true"]')?.textContent).toBe('later unsent draft')
   if (lostAck) {
-    expect(queue()).toEqual([{ ...entry, status: 'deferred', error: expect.stringContaining('Input ACK lost') }])
+    expect(queue()).toEqual([{ ...entry, status: 'deferred', error: expect.stringContaining('Input ACK lost'), errorCode: 'SESSION_INPUT_FAILED' }])
     await act(async () => useAppStore.getState().sendQueuedAgentSteer(ID, entry.operationId))
     expect(writes).toEqual([text, '\r'])
     const calls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
@@ -561,7 +612,7 @@ it('Core refuses the final Enter when a new permission arrived during render, re
   }))
   gate.resolve(); await settled()
   expect(writes).toEqual(['prompt before permission'])
-  expect(queue()).toEqual([{ ...entry, status: 'deferred', error: 'Answer the pending Agent interaction before submitting another prompt.' }])
+  expect(queue()).toEqual([{ ...entry, status: 'deferred', error: 'Answer the pending Agent interaction before submitting another prompt.', errorCode: 'AGENT_INTERACTION_PENDING' }])
   expect(useAppStore.getState().agentComposerDrafts[ID]).toBe('next draft stays editable')
   expect(container.querySelector('[contenteditable="true"]')?.textContent).toBe('next draft stays editable')
   expect(client.agentSession(ID).pendingInteraction).toEqual(pending)

@@ -169,7 +169,7 @@ function pendingGeometry(before, after, label, busy, disabled, attentionTransiti
   assert.equal(after.strip.busy, String(busy)); assert.equal(after.strip.sendDisabled, disabled);
   const state = after.strip.cards.find(card => card.selected === 'true').state;
   assert.equal(state.hiddenLabel,label);
-  assert.match(state.icon,busy?/lucide-loader-circle/:label==='投递未确认'?/lucide-circle-help/:/lucide-clock/,'The inline state has a distinct non-color semantic glyph');
+  assert.match(state.icon,busy?/lucide-loader-circle/:label==='发送结果待核实'?/lucide-circle-help/:/lucide-clock/,'The inline state has a distinct non-color semantic glyph');
   const r = after.strip.rect;
   assert.ok(r.width > 0 && r.height > 0 && after.strip.previewRect.width > 0);
   assert.ok(r.bottom <= after.composer.y + 1, 'Pending summary sits outside and above the input');
@@ -611,7 +611,7 @@ async function scene(scene) {
   await frame(scene, 'waiting');
   await evaluate("pendingNative.phase='permission-cleared';pendingDelivery.interaction(false);pendingDelivery.unknown()");
   const unknown = await settled();
-  result.noticeTransitions.push({ scene, name: 'unknown-notice-appears', ...pendingGeometry(clearedTail, unknown, '投递未确认', false, false, true) });
+  result.noticeTransitions.push({ scene, name: 'unknown-notice-appears', ...pendingGeometry(clearedTail, unknown, '发送结果待核实', false, false, true) });
   visibleCursor(unknown);
   assert.equal(unknown.facts.queues[sid][0].operationId, pending.operationId); assert.equal(unknown.facts.attempts.length, 1);
   await frame(scene, 'unknown');
@@ -620,7 +620,7 @@ async function scene(scene) {
   assert.equal(await evaluate(`${panel}.querySelector('.log-turn__body').textContent`), pending.text, 'Original Outbox retains the exact full queued text');
   assert.equal(await evaluate(`${panel}.querySelector('.log-turn__actions .composer-mailbox__reveal').disabled`), true);
   assert.equal(await evaluate(`${panel}.textContent.includes('尚未发送，暂无对话位置')`),false,'Unknown delivery is not falsely called not sent');
-  assert.ok(await evaluate(`${panel}.textContent.includes('投递未确认')&&${panel}.textContent.includes('对话位置')`),'Unknown delivery and missing position are explained independently');
+  assert.ok(await evaluate(`${panel}.textContent.includes('发送结果待核实')&&${panel}.textContent.includes('对话位置')`),'Unknown delivery and missing position are explained independently');
   await click(`${panel}.querySelector('[aria-label="Copy message"]')`);
   await waitFor(`pendingDelivery.facts().copies.length===1`);
   assert.equal(await evaluate('pendingDelivery.facts().copies[0]'), pending.text, 'Real Copy sends the full original text to the private clipboard sink');
