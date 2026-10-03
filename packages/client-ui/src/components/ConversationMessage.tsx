@@ -20,7 +20,7 @@ const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationMessageProps = {
   showInputSource?: boolean
-  /** Original host record title, used only by an explicitly attributed system record. */
+  /** Original record title: system disclosure heading or compact Provider speech context. */
   recordTitle?: string
   /** A compact record face, without changing ordinary conversation defaults. */
   compact?: boolean
@@ -249,6 +249,7 @@ export function ConversationMessage({
         {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
         {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
         {isPeerAgent ? <span className="log-turn__sender-kind">Agent</span> : null}
+        {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
         {status === 'streaming' ? (
           <span className="log-row__chip" role="status">{platform.renderIcon('working', 12)}Streaming</span>
         ) : null}

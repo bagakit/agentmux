@@ -51,6 +51,7 @@ export const ConversationView = memo(function ConversationView({
       const body = <ConversationMessage messageId={user?.id ?? recordId} conversationSessionId={sessionId}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
+          {...(user && item.title ? { recordTitle: item.title } : {})}
           content={record.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}
           {...(speaker ? { speaker } : {})}
           name={described?.name ?? (user ? 'Input' : speaker ? 'Assistant' : recordTitle(item))}

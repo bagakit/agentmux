@@ -63,18 +63,23 @@ function parts(content: unknown): AgentSessionHistoryContentPart[] {
 
 function convert(record: Record<string, unknown>, start: number): AgentSessionHistoryItem {
   const message = object(record.message)
-  const content = message?.content
+  const attachment = record.type === 'attachment' ? object(record.attachment) : undefined
+  // Claude accepts mid-turn prompts as attachments, not additional user turns.
+  // Queue logs and the rendered system wrapper do not establish accepted speech.
+  const queuedInput = attachment?.type === 'queued_command' && attachment.commandMode === 'prompt' &&
+    typeof attachment.prompt === 'string'
+  const content = queuedInput ? attachment.prompt : message?.content
   const blocks = Array.isArray(content) ? content : []
 
-  // Synthetic, meta, compact summaries or non-user/assistant records are always neutral activities.
-  const isNeutralActivity = !message || content === undefined ||
+  // Generated records remain neutral even when they carry a prompt-shaped attachment.
+  const isNeutralActivity = (!message && !queuedInput) || content === undefined ||
     record.isCompactSummary === true || record.isSynthetic === true || record.isMeta === true ||
-    (record.type !== 'user' && record.type !== 'assistant')
+    (!queuedInput && record.type !== 'user' && record.type !== 'assistant')
 
   let kind: 'user-message' | 'assistant-message' | 'activity'
   if (isNeutralActivity) {
     kind = 'activity'
-  } else if (record.type === 'user') {
+  } else if (record.type === 'user' || queuedInput) {
     // Tool result turns in Claude are sent under role 'user', often with tool_use_result on the record
     // or containing only tool_result blocks. These are activities, never human user speech.
     const isToolResultTurn = Boolean(record.toolUseResult) || (
@@ -99,8 +104,9 @@ function convert(record: Record<string, unknown>, start: number): AgentSessionHi
   return {
     id: typeof record.uuid === 'string' && record.uuid ? record.uuid : `claude-record:${start}`,
     kind,
-    contentParts: message ? parts(content) : [{ kind: 'text', text: JSON.stringify(record) }],
-    ...(kind === 'activity' ? { title: typeof record.type === 'string' ? `Claude ${record.type}` : 'Claude activity' } : {}),
+    contentParts: message || queuedInput && kind === 'user-message' ? parts(content) : [{ kind: 'text', text: JSON.stringify(record) }],
+    ...(queuedInput && kind === 'user-message' ? { title: '运行中追加' } :
+      kind === 'activity' ? { title: typeof record.type === 'string' ? `Claude ${record.type}` : 'Claude activity' } : {}),
     ...(turnId !== undefined ? { turnId } : {}),
     ...(Number.isSafeInteger(time) && time >= 0 ? { startedAt: time } : {})
   }

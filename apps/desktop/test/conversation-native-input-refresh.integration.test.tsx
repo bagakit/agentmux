@@ -228,3 +228,37 @@ it('failed automatic reread keeps the original DOM; later relevant append revali
   expect(current!.messages.map(item => item.rawId)).toEqual(['row-0', 'after-error', 'after-recovery'])
   expect(h.node.querySelector('.log-turn__body p')).toBe(body)
 })
+
+
+it('Claude accepted queued commands flow through the public reader and exact-file observer into the common labeled cards', async () => {
+  const h = await fixture('claude')
+  await h.render(); await h.waitRows(['row-0'])
+  const original = h.node.querySelector<HTMLElement>('.activity-feed .log-turn__body p')!
+  const range = document.createRange(); range.selectNodeContents(original)
+  document.getSelection()!.removeAllRanges(); document.getSelection()!.addRange(range)
+  const queued = (id: string) => ({ type: 'attachment', uuid: id, sessionId: 'native-main', isSidechain: false,
+    timestamp: new Date(NOW).toISOString(), attachment: { type: 'queued_command', commandMode: 'prompt',
+      prompt: '什么情况了?', source_uuid: 'command-' + id, delivery_id: 'delivery-' + id, origin: { kind: 'human' }, humanTurn: true },
+    renderedRole: 'system', rendered: [{ content: 'An original native wrapper, not the input body.' }] })
+  await h.append([{ type: 'queue-operation', operation: 'enqueue', sessionId: 'native-main', content: '什么情况了?' },
+    queued('mid-turn-1'), queued('mid-turn-2')])
+  await h.wait(() => {
+    expect(current?.messages.map(message => message.rawId)).toEqual(['row-0', 'mid-turn-1', 'mid-turn-2'])
+    expect(h.node.querySelectorAll('.activity-feed .log-turn__sender-kind')).toHaveLength(2)
+  })
+  for (const id of ['mid-turn-1', 'mid-turn-2']) {
+    const card = h.node.querySelector<HTMLElement>('[data-native-record-id="' + id + '"] .log-turn')!
+    expect(card).not.toBeNull()
+    expect(card.querySelector('.log-turn__body')?.textContent).toBe('什么情况了?')
+    expect(card.querySelector('.log-turn__sender-kind')?.textContent).toBe('运行中追加')
+    expect(card.getAttribute('data-speaker-role')).toBe('human') // Display convention, not recorded authorship.
+  }
+  expect(current!.messages.slice(1).map(message => message.author.kind)).toEqual(['unknown', 'unknown'])
+  expect(current!.nativeHistoryPage!.items.find(item => item.kind === 'activity')?.contentParts[0]?.kind).toBe('text')
+  expect(h.node.querySelector('.activity-feed .log-turn__body p')).toBe(original)
+  expect(document.getSelection()!.getRangeAt(0).startContainer).toBe(original)
+  expect(h.observe).toHaveBeenCalledTimes(1)
+  if (process.env.AGENTMUX_CLAUDE_QUEUED_PUBLIC_PAGE) {
+    await writeFile(process.env.AGENTMUX_CLAUDE_QUEUED_PUBLIC_PAGE, JSON.stringify(current!.nativeHistoryPage, null, 2) + '\n')
+  }
+})
