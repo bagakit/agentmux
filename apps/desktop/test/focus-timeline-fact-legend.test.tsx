@@ -19,7 +19,7 @@ it('shows four distinct meanings and a current work band without any focus histo
   const h = await fixture(undefined, 3)
   const contexts = [context(h, 0, 'working', NOW - HOUR), context(h, 1), context(h, 2, 'working')]
   await act(async () => h.root.render(createElement(RecentFocusTimeline, { contexts, entries: [visit('archived-1', NOW - HOUR)], currentSessionId: null, onSelect: h.onSelect })))
-  expect(h.element.querySelector('.recent-focus__legend-key')?.textContent).toBe('NowWorkingFocusAlive')
+  expect(h.element.querySelector('.recent-focus__legend-key')?.textContent).toBe('NowWorkingFocusedRunning')
   expect(h.element.querySelectorAll('[data-working-entered-at]')).toHaveLength(1)
   expect(h.element.querySelector('[data-working-entered-at]')?.getAttribute('data-working-entered-at')).toBe(String(NOW - HOUR))
   expect(h.element.querySelectorAll('[data-run-state="running"]')).toHaveLength(3)
@@ -28,7 +28,7 @@ it('shows four distinct meanings and a current work band without any focus histo
   const before = h.counts(); await h.click('Timeline meaning and coverage')
   const dialog = document.querySelector('[role="dialog"]')!
   expect(dialog.textContent).toContain('Being online does not mean it is working')
-  expect(dialog.textContent).toContain('Past working intervals were not continuously recorded')
+  expect(dialog.textContent).toContain('Missing older observations are not reconstructed from messages or focus visits')
   expect(dialog.querySelectorAll('[data-focus-fact]')).toHaveLength(4)
   expect(h.counts()).toEqual(before); h.noRuntime()
 })
@@ -103,6 +103,6 @@ it('does not turn a completed current state into invented past working history',
   expect(h.element.querySelectorAll('[data-working-entered-at]')).toHaveLength(0)
   expect(h.element.querySelectorAll('[data-run-state="running"]')).toHaveLength(1)
   await h.click('Timeline meaning and coverage')
-  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Past working intervals were not continuously recorded')
+  expect(document.querySelector('[role="dialog"]')!.textContent).toContain('Missing older observations are not reconstructed from messages or focus visits')
   h.noRuntime()
 })

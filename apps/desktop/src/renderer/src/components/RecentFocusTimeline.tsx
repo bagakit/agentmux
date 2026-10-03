@@ -2,8 +2,7 @@ import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, CircleHelp, History, LocateFixed, MessageSquare, Minus, Plus, SquareTerminal, X } from 'lucide-react'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
-import { projectAgentWorkHistory } from '@agentmux/core/timeline'
-import { EMPTY_FOCUS_WORK_ITEMS, MAX_FOCUS_WORK_RECORDS, clipFocusWorkInterval, createFocusWorkSelector, mergeFocusWorkItems, type FocusWorkFacts, type FocusWorkInterval } from '../lib/focus-work-history'
+import { EMPTY_FOCUS_WORK_ITEMS, MAX_FOCUS_WORK_RECORDS, clipFocusWorkInterval, createFocusWorkSelector, mergeFocusWorkItems, projectFocusWorkHistory, type FocusWorkFacts, type FocusWorkInterval } from '../lib/focus-work-history'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentSessionControl, SessionHistoryReference } from '../../../shared/contracts'
@@ -84,8 +83,8 @@ function useFocusSpeakerResolver(messages: readonly AgentSessionUserMessage[]): 
 
 const MAX_NATIVE_RECORDS = 90
 const MAX_BATCH_PAGES = 3
-type LatestInputs = { messages: readonly AgentSessionUserMessage[]; loading: boolean; error: Error | null; observationError: Error | null; windowFrozen: boolean; refresh(): Promise<void> }
-const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, observationError: null, windowFrozen: false, refresh: async () => {} }
+type LatestInputs = { messages: readonly AgentSessionUserMessage[]; loading: boolean; error: Error | null; observationError: Error | null; windowFrozen: boolean; windowIncomplete: boolean; refresh(): Promise<void> }
+const EMPTY_LATEST_INPUTS: LatestInputs = { messages: [], loading: false, error: null, observationError: null, windowFrozen: false, windowIncomplete: false, refresh: async () => {} }
 // Subscribe in a memoized leaf: another Context's status/output may update the
 // tracks, but cannot reproject this Context's unchanged native/captured inputs.
 const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pinned, onChange }: {
@@ -101,7 +100,7 @@ const FocusLatestInputs = memo(function FocusLatestInputs({ control, enabled, pi
     const retained = protectedMessage ? [...native.filter(item => item !== protectedMessage).slice(-capacity), protectedMessage] : native.slice(-capacity)
     return [...retained, ...latest.messages.filter(item => item.source.kind === 'captured')]
   }, [latest.messages, pinnedNative])
-  useLayoutEffect(() => { onChange({ messages, loading: latest.loading, error: latest.error, observationError: latest.observationError, windowFrozen: latest.windowFrozen, refresh: latest.refresh }) }, [messages, latest.loading, latest.error, latest.observationError, latest.windowFrozen, latest.refresh, onChange])
+  useLayoutEffect(() => { onChange({ messages, loading: latest.loading, error: latest.error, observationError: latest.observationError, windowFrozen: latest.windowFrozen, windowIncomplete: latest.windowIncomplete === true, refresh: latest.refresh }) }, [messages, latest.loading, latest.error, latest.observationError, latest.windowFrozen, latest.windowIncomplete, latest.refresh, onChange])
   return null
 })
 type NativeWindow = {
@@ -330,19 +329,20 @@ const FocusTimeTrack = memo(function FocusTimeTrack({ track, selected, nativeMes
   const available = working && session?.kind === 'agent' && session.status.state !== 'disconnected'
   // The public projector sees changes to typed facts/current semantic truth.
   // Viewport/Now changes only clip its current/open result below.
-  const workHistory = useMemo(() => projectAgentWorkHistory(workItems, { now: Date.now(), ...(runId ? { current: {
+  const workHistory = useMemo(() => projectFocusWorkHistory(workItems, context ? ownWorkItems : EMPTY_FOCUS_WORK_ITEMS, { now: Date.now(), ...(runId ? { current: {
     run: { runId }, processState: session!.processState, ...(semantic ? { semanticStatus: semantic } : {}), available
-  } } : {}) }), [workItems, runId, session?.processState, semantic?.state, semantic?.stateEnteredAt, available])
+  } } : {}) }), [workItems, ownWorkItems, !!context, runId, session?.processState, semantic?.state, semantic?.stateEnteredAt, available])
   useLayoutEffect(() => {
     if (observing && context && ownWorkItems.length) observeWork({ hostId: context.hostId, agentSessionId: sessionId }, ownWorkItems, identity)
   }, [observing, context?.hostId, sessionId, ownWorkItems, identity?.name, identity?.kind, identity?.hostId, identity?.workspacePath, identity?.providerId, identity?.project?.id, identity?.project?.name, identity?.branch, identity?.topicId, observeWork])
   const workIntervals = workHistory.segments.flatMap(segment => {
-    const start = workItems.find(item => item.createdAt === segment.startAt && item.activityState?.run.runId === segment.run.runId && 'state' in item.activityState && item.activityState.state === 'working')
+    const matchesStart = (item: AgentTimelineItem) => item.createdAt === segment.startAt && item.activityState?.run.runId === segment.run.runId && 'state' in item.activityState && item.activityState.state === 'working'
+    const start = workItems.find(matchesStart) ?? ownWorkItems.find(matchesStart)
     if (start && retainedHere?.identities?.has(start.id) && focusTimelineTrackKey(sessionId, retainedHere.identities.get(start.id)) !== track.key) return []
     const clipped = clipFocusWorkInterval(segment, window, now)
     return clipped ? [{ segment, ...clipped }] : []
   })
-  const work = working && !workHistory.coverage.recorded && !retainedHere?.trimmed && !retainedHere?.error
+  const work = working && !workHistory.coverage.recorded && !workHistory.segments.some(segment => segment.end === 'current')
     ? focusWorkSegment(context.workingEnteredAt, window, now) : null
   const gapAt = workHistory.coverage.gaps && !workIntervals.length ? workItems.at(-1)?.createdAt : undefined
   const gapVisible = gapAt !== undefined && gapAt >= window.start && gapAt <= Math.min(now, window.end)
@@ -453,13 +453,14 @@ const FocusTimeProject = memo(function FocusTimeProject({ project, registered, c
   </section>
 })
 
-function FocusTimelineLegend({ reading, sources, serviceNotice, onRead }: { reading: ReadingWindow; sources: number; serviceNotice: string | null; onRead(anchor: HTMLElement): void }) {
+function FocusTimelineLegend({ reading, sources, serviceNotice, latestIncomplete, onRead }: { reading: ReadingWindow; sources: number; serviceNotice: string | null; latestIncomplete: boolean; onRead(anchor: HTMLElement): void }) {
   const [open, setOpen] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
   const readingNext = useRef(false)
   const read = reading.sourceCount
+  const incomplete = reading.trimmed || latestIncomplete
   return <Dialog.Root open={open} onOpenChange={setOpen}>
-    <Dialog.Trigger asChild><button ref={trigger} data-focus-window-control type="button" className="recent-focus__coverage-button" aria-label="Timeline meaning and coverage" title={serviceNotice ?? "What these marks mean, and what has been read"}><CircleHelp size={12} /><span>{serviceNotice ? "Updates paused" : `${read} read`}</span></button></Dialog.Trigger>
+    <Dialog.Trigger asChild><button ref={trigger} data-focus-window-control type="button" className="recent-focus__coverage-button" aria-label="Timeline meaning and coverage" title={serviceNotice ?? (incomplete ? "Some history is outside this bounded window. Current activity is shown independently." : "Working, focused visits, running processes and history coverage")}><CircleHelp size={12} /><span>{serviceNotice ? "Updates paused" : incomplete ? "Partial history" : read ? `${read} read` : "History"}</span></button></Dialog.Trigger>
     <Dialog.Portal container={resolveOverlayContainer()}>
       <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="dialog-surface recent-focus__legend-dialog" onEscapeKeyDown={event => { event.preventDefault(); setOpen(false) }} onPointerDownCapture={event => event.stopPropagation()} onCloseAutoFocus={event => { if (readingNext.current) { event.preventDefault(); readingNext.current = false } }}>
@@ -468,12 +469,14 @@ function FocusTimelineLegend({ reading, sources, serviceNotice, onRead }: { read
         <dl className="recent-focus__legend-definitions">
           <dt><i data-focus-fact="now" />Now</dt><dd>The current moment, not an activity interval.</dd>
           <dt><i data-focus-fact="working" />Working</dt><dd>A confirmed current working state with a known start. Recorded work bands come from accepted state observations. Missing older observations are not reconstructed from messages or focus visits.</dd>
-          <dt><i data-focus-fact="focus" />Focus visit</dt><dd>When a Context received focus. This is not its execution duration.</dd>
-          <dt><i data-focus-fact="alive" />Run alive</dt><dd>A live Run at Now. Being online does not mean it is working.</dd>
+          <dt><i data-focus-fact="focus" />Focused</dt><dd>When a Context received focus. This is not its execution duration.</dd>
+          <dt><i data-focus-fact="alive" />Running</dt><dd>A live Run at Now. Being online does not mean it is working.</dd>
         </dl>
         <section className="recent-focus__legend-coverage" aria-label="Input coverage">
           <strong>{read} {read === 1 ? 'source' : 'sources'} read · {sources} available</strong>
           {serviceNotice ? <p role="status">{serviceNotice}</p> : null}
+          <p>Current working states and online markers do not depend on the history reading budget.</p>
+          {latestIncomplete ? <p>Some latest input records are outside the bounded window. Open Input records to read earlier pages or refresh the source.</p> : null}
           <p>The current Context can also show latest inputs. This count describes explicitly read history sources.</p>
           <p>Other sources have not been read. Select one in Input records to add its real records to this window.</p>
           <p>Inputs without a recorded time remain in Input records. Earlier pages, missing native identities and unavailable sources are explained there.</p>
@@ -916,7 +919,8 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
   const inputCoverage = !inputReference ? 'Choose a Context to read its inputs.' : historical ? nativeWindow.page
     ? `${nativeWindow.page.items.length} native records retained${nativeWindow.rotated ? ' · Some records are outside this bounded reading window' : ''}. ${nativeWindow.page.nextCursor === null ? 'Beginning of this available snapshot reached.' : 'Coverage incomplete. Earlier records can still be read.'}`
     : 'Native history has not been read for this window. Coverage unknown.'
-    : 'Latest input view. Earlier coverage is unknown; read earlier records to inspect the native snapshot.'
+    : latest.windowIncomplete ? 'Some latest input records are outside this bounded window. Read earlier records to inspect available history; refresh the source to read latest records.'
+      : 'Latest input view. Earlier coverage is unknown; read earlier records to inspect the native snapshot.'
   const inputObservationNotice = historical ? null : latest.windowFrozen
     ? 'Automatic updates are paused. The current reading window is kept. Read latest records to open a new window.'
     : latest.observationError ? `Automatic updates unavailable: ${presentError(latest.observationError)} Existing records are kept.` : null
@@ -938,7 +942,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
       onPointerDown={event => { if (event.button !== 0) return; event.preventDefault(); drag.current = { y: event.clientY, height, next: height }; document.body.style.cursor = 'row-resize'; document.body.style.userSelect = 'none' }}
       onKeyDown={event => { const next = event.key === 'ArrowUp' ? height + 16 : event.key === 'ArrowDown' ? height - 16 : event.key === 'Home' ? minimum : event.key === 'End' ? maximum : null; if (next !== null) { event.preventDefault(); saveHeight(Math.min(maximum, Math.max(minimum, next))) } }} /> : null}
     <header ref={headerRef} className="recent-focus__header">
-      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Work bands show proven working states; the blue line marks the current moment; hollow dots mark live Runs; thin clips show focus visits. Run start times are unknown. Input markers use recorded times from Core. Unknown-time inputs and incomplete native coverage are available through Input records. Shows up to 2000 retained focus switches within 512 KiB of serialized UTF-16 history; older observations may be outside retention.">{dateClock(range.start)} — {dateClock(range.end)}</span>{mode !== 'collapsed' ? <span className="recent-focus__legend-key" aria-label="Timeline marks"><span><i data-focus-fact="now" />Now</span><span><i data-focus-fact="working" />Working</span><span><i data-focus-fact="focus" />Focus</span><span><i data-focus-fact="alive" />Alive</span></span> : null}</span>
+      <span className="recent-focus__title"><History size={12} /><strong>Recent Focus</strong><span className="recent-focus__range" title="Work bands show proven working states; the blue line marks the current moment; hollow dots mark live Runs; thin clips show focus visits. Run start times are unknown. Input markers use recorded times from Core. Unknown-time inputs and incomplete native coverage are available through Input records. Shows up to 2000 retained focus switches within 512 KiB of serialized UTF-16 history; older observations may be outside retention.">{dateClock(range.start)} — {dateClock(range.end)}</span>{mode !== 'collapsed' ? <span className="recent-focus__legend-key" aria-label="Timeline marks"><span><i data-focus-fact="now" />Now</span><span><i data-focus-fact="working" />Working</span><span title="When you viewed this Context"><i data-focus-fact="focus" />Focused</span><span title="Run is online now; this does not imply working"><i data-focus-fact="alive" />Running</span></span> : null}</span>
       <span className="recent-focus__controls" onPointerDownCapture={event => {
         const control = event.target instanceof Element ? event.target.closest('[data-focus-window-control]') : null
         if (!control) return
@@ -947,7 +951,7 @@ export const RecentFocusTimeline = memo(function RecentFocusTimeline({ entries, 
         event.stopPropagation()
         if (control instanceof HTMLButtonElement) event.preventDefault()
       }}>
-        {mode !== 'collapsed' ? <><FocusTimelineLegend reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentSessionId} onClick={locateCurrentTrack}><LocateFixed size={12} /></button><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} title={`Input records${inputSource ? ` · ${inputSource.name}` : ''}, including inputs without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
+        {mode !== 'collapsed' ? <><FocusTimelineLegend reading={nativeWindow.window} sources={inputSources.length} serviceNotice={inputObservationNotice} latestIncomplete={!historical && latest.windowIncomplete} onRead={openInputRecords} /><button data-focus-window-control type="button" className="icon-button" aria-label="Locate current Context track" title="Scroll to the current Context without changing the time window" disabled={!currentSessionId} onClick={locateCurrentTrack}><LocateFixed size={12} /></button><button type="button" className="icon-button" aria-label="View input records" aria-expanded={readerOpen} title={`Input records${inputSource ? ` · ${inputSource.name}` : ''}, including inputs without a recorded time${inputObservationNotice ? ` · ${inputObservationNotice}` : ''}`} onClick={event => openInputRecords(event.currentTarget)}><MessageSquare size={12} /></button><input data-focus-window-control type="datetime-local" className="recent-focus__date" aria-label="Focus history date and time" aria-invalid={dateError !== null} title={`Clock time in ${time.zone}`} value={dateDraft ?? time.dateInput(anchor ?? now)} onChange={event => inspectDate(event.target.value)} />
         <button data-focus-window-control type="button" className="icon-button" aria-label="Previous focus window" onClick={() => inspectWindow((anchor ?? now) - hours * HOUR_MS)}><ChevronLeft size={12} /></button>
         <button data-focus-window-control type="button" className="icon-button" aria-label="Zoom out Focus timeline" title="Zoom out · wider time window" disabled={zoomIndex === FOCUS_WINDOW_HOURS.length - 1} onClick={() => setHours(FOCUS_WINDOW_HOURS[zoomIndex + 1]!)}><Minus size={12} /></button>
         <select data-focus-window-control aria-label="Focus window size" value={hours} onChange={event => setHours(Number(event.target.value))}>{FOCUS_WINDOW_HOURS.map(size => <option key={size} value={size}>{focusWindowLabel(size)}</option>)}</select>
