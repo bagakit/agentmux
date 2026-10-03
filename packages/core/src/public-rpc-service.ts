@@ -363,6 +363,15 @@ export class AgentMuxRpcService {
     }
     let result: unknown
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
+      if ((method === 'toolkit.run' || method === 'toolkit.action') &&
+          (context.caller !== undefined || context.transport !== 'unix' || context.principal?.kind !== 'user')) {
+        const listed = this.ports.forwardControl
+          ? await this.ports.forwardControl('toolkit.ls', {}, context)
+          : await this.toolkit(rpcControlRequest('toolkit.ls', {}), context.signal)
+        if ('tools' in listed && listed.tools.some(tool => tool.toolId === p.toolId && tool.kind === 'script' && tool.readonly)) {
+          throw new AgentMuxError('Official script tools require an explicit local-user invocation. Existing Agents and results remain available.', 'CONTROL_PERMISSION_DENIED')
+        }
+      }
       if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
       let body = p
       if (method === 'space.inspect') {
