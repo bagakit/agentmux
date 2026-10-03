@@ -1,3 +1,4 @@
+import { profileAgentContext } from '../shared/user-profile.js'
 import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } from '@agentmux/core/schedule'
 import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
@@ -857,6 +858,8 @@ export class RuntimeController {
         }
         // Topic 说明是 AgentMux 自己的话，作为 agentMuxNote 交给 Core 的出口署名进信封；
         // 用户的真实请求原样留在 prompt（user 段）。desktop 不自己拼信封，也不再把两者混成一段。
+        const profileContext = profileAgentContext(config.profile)
+        const agentMuxNote = [preparedTopic?.prompt, request.agentMuxNote, profileContext].filter(note => note?.trim()).join('\n\n')
         const receipt = await client.createAgentWithDelivery({
           providerId: executor.providerId,
           executorId: request.executorId,
@@ -868,7 +871,7 @@ export class RuntimeController {
           },
           injectAgentMuxGuide: executor.injectAgentMuxGuide,
           commandOverride: executor.command,
-          ...([preparedTopic?.prompt, request.agentMuxNote].some(note => note?.trim()) ? { agentMuxNote: [preparedTopic?.prompt, request.agentMuxNote].filter(note => note?.trim()).join('\n\n') } : {}),
+          ...(agentMuxNote ? { agentMuxNote } : {}),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
           ...(request.createOperationId === undefined ? {} : { createOperationId: request.createOperationId }),

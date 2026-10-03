@@ -24,7 +24,6 @@ beforeEach(async () => {
     activeWorkspaceId: 'project-a', hostChecks: {}, checkHost: originalCheckHost })
   unsubscribe = api.config.onChange(next => useAppStore.setState({ config: next }))
   vi.spyOn(api.deviceManagement, 'ls').mockResolvedValue(structuredClone(deviceList))
-  vi.spyOn(api.deviceManagement, 'invite').mockResolvedValue(structuredClone(deviceInvitation))
 })
 afterEach(() => unsubscribe?.())
 function LiveHost() {
@@ -75,7 +74,7 @@ describe('Connections settings', () => {
     expect(dom.container.querySelectorAll('[data-settings-pane]')).toHaveLength(0)
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
-  it('single: mounts only the exact current Host fields and read-only projects never mount a second editor', async () => {
+  it('single: mounts only the exact current connection fields and Projects uses its own committed Host form', async () => {
     await dom.render(<LiveHost />)
     expect(pane().querySelectorAll('[data-host-disclosure]')).toHaveLength(24)
     expect(pane().querySelectorAll('.host-connection-fields'), 'Only the selected Host has an editable connection subtree').toHaveLength(0)
@@ -88,7 +87,8 @@ describe('Connections settings', () => {
     expect(pane().querySelectorAll('.host-connection-fields')).toHaveLength(0)
     expect(pane().querySelectorAll('[data-resource-editor]')).toHaveLength(1)
     expect(editor().dataset.hostView).toBe('projects')
-    expect(editor().querySelectorAll('.settings-host-projects input')).toHaveLength(0)
+    expect(pane().querySelector('[data-host-projects="host-01"]')).not.toBeNull()
+    expect(pane().querySelectorAll('[data-host-projects]:not([hidden])')).toHaveLength(1)
     expect(document.activeElement).toBe(editor())
   })
   it('drafts: same-ID panel switching and B/A keep every authored field and per-ID disclosure', async () => {
@@ -114,15 +114,15 @@ describe('Connections settings', () => {
   it('projects use exact workspace host IDs even with duplicate names and identical project paths', async () => {
     await dom.render(<LiveHost />); await select(H, 'projects')
     expect(config.hosts.find(host => host.id === H)!.label).toBe(config.hosts.find(host => host.id === J)!.label)
-    expect(editor().querySelector('.settings-host-projects')!.textContent).toContain('Application on A')
-    expect(editor().querySelector('.settings-host-projects')!.textContent).not.toContain('Application on B')
-    expect(editor().querySelectorAll('.settings-host-projects li')).toHaveLength(2)
+    expect(pane().querySelector(`[data-host-projects="${editor().dataset.resourceEditor}"]`)!.textContent).toContain('Application on A')
+    expect(pane().querySelector(`[data-host-projects="${editor().dataset.resourceEditor}"]`)!.textContent).not.toContain('Application on B')
+    expect(pane().querySelectorAll(`[data-host-projects="${editor().dataset.resourceEditor}"] [data-registered-folder]`)).toHaveLength(2)
     await select(J, 'projects')
-    expect(editor().querySelector('.settings-host-projects')!.textContent).toContain('Application on B')
-    expect(editor().querySelector('.settings-host-projects')!.textContent).not.toContain('Application on A')
-    expect(editor().querySelectorAll('.settings-host-projects li')).toHaveLength(1)
-    expect(editor().querySelector('code')!.textContent).toBe(_hygiene_fixturePath("controlled/shared"))
-    await select('host-03', 'projects'); expect(editor().textContent).toContain('No linked projects')
+    expect(pane().querySelector(`[data-host-projects="${editor().dataset.resourceEditor}"]`)!.textContent).toContain('Application on B')
+    expect(pane().querySelector(`[data-host-projects="${editor().dataset.resourceEditor}"]`)!.textContent).not.toContain('Application on A')
+    expect(pane().querySelectorAll(`[data-host-projects="${editor().dataset.resourceEditor}"] [data-registered-folder]`)).toHaveLength(1)
+    expect(pane().querySelector(`[data-host-projects="${J}"] code`)!.textContent).toBe(_hygiene_fixturePath("controlled/shared"))
+    await select('host-03', 'projects'); expect(pane().querySelector('[data-host-projects="host-03"]')!.textContent).toContain('No projects yet')
     expect(api.deviceManagement.ls).not.toHaveBeenCalled()
   })
   it('search retains exact selected identity through each rename and filtering never selects a neighbor', async () => {
@@ -140,6 +140,7 @@ describe('Connections settings', () => {
     expect(search().value).toBe(''); expect(document.activeElement).toBe(pane().querySelector(`[data-host-disclosure="${H}"] [data-host-panel="connection"]`))
   })
   it('visited Host instance and draft survive devices while hidden reads stop and short invitations clear', async () => {
+    vi.spyOn(api.deviceManagement, 'invite').mockResolvedValue(structuredClone(deviceInvitation))
     await dom.render(<Shell section="hosts" />); await select(H); await toggleAdvanced(true); await fill(name(), 'Across device section')
     const originalPane = pane(), originalField = name(), originalDisclosure = editor().querySelector('.host-edit-disclosure')
     await dom.click('[data-settings-target="devices"]')

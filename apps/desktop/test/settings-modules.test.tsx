@@ -76,7 +76,7 @@ const overviewRow = () => connected('[data-settings-overview] [data-settings-sec
 it('a contributed module reaches Overview, sidebar, compact menu, search and its actual Pane through the generic shell', async () => {
   await dom.render(<SettingsPanel onClose={() => {}} />)
   expect(registration.originalIds).toEqual([
-    'appearance', 'notifications', 'browser', 'general', 'keyboard-shortcuts', 'toolkit', 'agents', 'prompts', 'workspaces', 'hosts', 'devices'
+    'profile', 'appearance', 'notifications', 'browser', 'focus', 'general', 'keyboard-shortcuts', 'toolkit', 'agents', 'prompts', 'hosts', 'devices'
   ])
   const catalog = visibleSettingsSections('')
   expect(catalog.map(module => module.id)).toEqual([...registration.originalIds, 'fixture-module'])

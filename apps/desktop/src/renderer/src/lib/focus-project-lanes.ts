@@ -4,6 +4,7 @@ import type { WorkbenchTab } from './workbench-tabs'
 import type { FocusContext } from './focus-context'
 import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget } from './space-object-appearance'
+import { resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -47,6 +48,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
   const projectRoots = focusProjectRoots(config)
+  const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 60 * 60 * 1000
   for (const row of rows) {
     const workspace = row.workspace
     const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
@@ -73,7 +75,7 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     lane.contextIds.push(row.id)
     lanes.set(id, lane)
     const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1
-      : row.lastActivityAt != null ? (now - row.lastActivityAt <= 24 * 60 * 60 * 1000 ? 2 : 3) : 4
+      : row.lastActivityAt != null ? (now - row.lastActivityAt <= recentActivityMs ? 2 : 3) : 4
     priorities.set(id, Math.min(priorities.get(id) ?? priority, priority))
   }
   return [...lanes.values()].sort((a, b) => priorities.get(a.id)! - priorities.get(b.id)!)

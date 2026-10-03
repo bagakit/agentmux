@@ -716,6 +716,26 @@ describe('RuntimeController configuration transaction', () => {
     }))
   })
 
+  it.each([true, false])('new launch consumes the saved human profile only when shared (%s)', async shareWithAgents => {
+    const controller = await configuredController()
+    const client = runtimeFixture.FakeClient.instances[0]!
+    const prompt = '  Keep this exact request.\n'
+    const profile = { displayName: 'Alex', about: 'Be direct and preserve my work.', avatar: 'visual-only', shareWithAgents }
+    const config: AppConfig = { ...localConfig, profile, executors: { codex: { label: 'Profile test', providerId: 'codex', command: 'codex', args: [], env: {}, injectAgentMuxGuide: false } } }
+    await expect(controller.launchAgent({ executorId: 'codex', hostId: 'local', workspacePath: _hygiene_fixturePath("repo"),
+      prompt, agentMuxNote: 'Existing launch note.' }, config)).rejects.toThrow('stopped after input capture')
+    const input = client.createAgent.mock.calls[0]![0] as { agentMuxNote: string; prompt: string; workspacePath: string }
+    expect(input.prompt).toBe(prompt)
+    expect(input.workspacePath).toBe(_hygiene_fixturePath("repo"))
+    expect(input.agentMuxNote).toContain('Existing launch note.')
+    expect(input.agentMuxNote.includes('Preferred name: Alex')).toBe(shareWithAgents)
+    expect(input.agentMuxNote.includes(profile.about)).toBe(shareWithAgents)
+    expect(input.agentMuxNote).not.toContain('visual-only')
+    const wire = composeAgentLaunchPrompt(input.prompt, false, input.agentMuxNote)
+    expect(wire.text).toContain(prompt)
+    expect(wire.systemContext?.includes('Preferred name: Alex') ?? false).toBe(shareWithAgents)
+  })
+
   it('launches a Scratch Agent inside its filesystem Topic with wiki context', async () => {
     const parent = await realpath(await mkdtemp(join(tmpdir(), 'agentmux-runtime-topic-')))
     const root = join(parent, 'scratch'); await mkdir(root)

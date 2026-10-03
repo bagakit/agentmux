@@ -1,0 +1,9 @@
+.focus-settings-description { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
+.focus-settings-window { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); margin: var(--sp-4) 0; padding: 0; border: 0; }
+.focus-settings-window legend { margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.focus-settings-window label { display: flex; align-items: center; gap: var(--sp-2); min-height: 36px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius); color: var(--text-2); font-size: var(--fs-meta); cursor: pointer; }
+.focus-settings-window label[data-selected='true'] { border-color: var(--green); background: var(--surface-2); color: var(--text); }
+.focus-settings-window input { accent-color: var(--green); margin: 0; }
+.focus-settings-window label:has(input:focus-visible) { outline: 2px solid var(--green); outline-offset: 2px; }
+.focus-settings-footnote { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+@media (max-width: 520px) { .focus-settings-window { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
