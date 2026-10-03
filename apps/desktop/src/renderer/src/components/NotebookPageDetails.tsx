@@ -1,6 +1,9 @@
+import * as Menu from '@radix-ui/react-dropdown-menu'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ArrowUpRight, ChevronRight, FolderInput, History, Link, Save } from 'lucide-react'
-import { notebookFingerprint, type NotebookChange, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { Archive, ArchiveRestore, MoreHorizontal, ArrowUpRight, ChevronRight, FolderInput, History, Link, Save } from 'lucide-react'
+import { notebookFingerprint, notebookPageArchiveRoot, type NotebookChange, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { useWorkbenchPresentationActive } from '../lib/workbench-presentation'
+import { resolveOverlayContainer } from './WindowOverlayHost'
 import { changeNotebook, useNotebookLibrary } from '../lib/notebook-library'
 import { notebookDescendants, notebookPageRows } from '../lib/notebook-page-tree'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -30,6 +33,10 @@ export function NotebookOperationIssue({ operation }: { operation: ReturnType<ty
 }
 
 export function NotebookPageDetails({ page }: { page: NotebookPage }) {
+  const visible = useWorkbenchPresentationActive()
+  const [menuOpen, setMenuOpen] = useState(false)
+  useEffect(() => { if (!visible) setMenuOpen(false) }, [visible])
+  useEffect(() => setMenuOpen(false), [page.noteId])
   const library = useNotebookLibrary(state => state.state), book = library?.notebooks[page.notebookId]
   const config = useAppStore(state => state.config), snapshots = useAppStore(state => state.scratchTopicSnapshots)
   const topicNames = useMemo(() => new Map(spatialSources(config, scratchTopicsForWorkspace(snapshots,
@@ -67,8 +74,10 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
       now.setSurveyNotebook(null); now.setMainSurface('survey'); now.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
     } catch (error) { setSourceIssue(presentError(error)) }
   }
+  const archiveRoot = library ? notebookPageArchiveRoot(library.pages, page.noteId) : undefined
+  const restoreLabel = archiveRoot && archiveRoot.noteId !== page.noteId ? 'Restore parent page' : 'Restore page'
   const events = library?.trail.filter(event => event.noteId === page.noteId).slice().reverse() ?? []
-  const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved' }
+  const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored' }
   return <header className="notebook-page-heading" aria-label="Page details">
     <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setSurveyNotebook(page.notebookId); state.setSurveyZoneSelection(null); state.setMainSurface('survey') }}>{book?.name ?? page.notebookId}<ChevronRight size={12} /></button>
     <input className="notebook-page-title" aria-label="Page title" value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
@@ -78,7 +87,19 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
       const Icon = kind === 'move' ? FolderInput : kind === 'sources' ? Link : History
       return <button className="note-text-button" key={kind} aria-label={kind === 'move' ? 'Move page' : kind === 'sources' ? 'Page sources' : 'Page history'} aria-expanded={panel === kind}
         onClick={() => { if (kind === 'move') { setDestination(page.notebookId); setParentId(page.parentNoteId ?? '') } setPanel(panel === kind ? null : kind) }}><Icon size={13} /><span>{kind === 'move' ? 'Move' : kind === 'sources' ? `Sources${page.sources.length ? ` · ${page.sources.length}` : ''}` : 'History'}</span></button>
-    })}</div>
+    })}
+      <Menu.Root modal={false} open={visible && menuOpen} onOpenChange={setMenuOpen}><Menu.Trigger asChild><button type="button" className="note-text-button" aria-label="Page options" title="Page options"><MoreHorizontal size={15} /></button></Menu.Trigger>
+        <Menu.Portal container={resolveOverlayContainer()}><Menu.Content className="tab-context-menu" align="end" sideOffset={4} collisionPadding={8} onCloseAutoFocus={event => { if (!visible) event.preventDefault() }}>
+          <Menu.Item className="tab-context-menu__item" disabled={operation.busy || Boolean(operation.issue)} title={archiveRoot?.title}
+            onSelect={() => void operation.run({ kind: archiveRoot ? 'restore' : 'archive', noteId: archiveRoot?.noteId ?? page.noteId })}>
+            {archiveRoot ? <ArchiveRestore size={14} /> : <Archive size={14} />}<span>{archiveRoot ? restoreLabel : 'Archive page'}</span>
+          </Menu.Item>
+        </Menu.Content></Menu.Portal>
+      </Menu.Root>
+    </div>
+    {archiveRoot ? <div className="notebook-archive-status" role="status"><Archive size={13} /><span>{archiveRoot.noteId === page.noteId ? 'Archived' : `Archived with ${archiveRoot.title}`}</span>
+      <button type="button" className="note-text-button" title={archiveRoot.title} disabled={operation.busy || Boolean(operation.issue)} onClick={() => void operation.run({ kind: 'restore', noteId: archiveRoot.noteId })}><ArchiveRestore size={13} />{restoreLabel}</button>
+    </div> : null}
     <NotebookOperationIssue operation={operation} />
     {panel === 'move' ? <form className="notebook-page-panel notebook-move" aria-label="Move Note page" onSubmit={event => { event.preventDefault(); void move() }}>
       <label>Notebook<select aria-label="Destination notebook" value={destination} disabled={operation.busy || Boolean(operation.issue)} onChange={event => { setDestination(event.target.value); setParentId('') }}>

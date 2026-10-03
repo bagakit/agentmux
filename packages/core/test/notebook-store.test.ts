@@ -1,7 +1,7 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { createServer } from 'node:net'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
-import { inspectNotebook } from '../src/notebook-catalog.js'
+import { inspectNotebook, notebookPageArchiveRoot } from '../src/notebook-catalog.js'
 import { afterEach, beforeAll, describe, expect, it } from 'vitest'
 import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -24,8 +24,10 @@ beforeAll(async()=>{
   const output=resolve('.tmp/survey-notebook/core-compiled');await mkdir(output,{recursive:true});await symlink('../../../packages/core/node_modules',join(output,'node_modules'),'dir').catch(e=>{if(e.code!=='EEXIST')throw e})
   cli=join(output,'cli.mjs');worker=join(output,'worker.mjs')
   const bundles=[]
-  bundles.push(await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',metafile:true,logLevel:'silent'}))
-  bundles.push(await build({stdin:{contents:`import {AgentMuxNotebookStore} from './packages/core/src/notebook-store.ts';const store=new AgentMuxNotebookStore(process.argv[2]);try{const state=process.argv[3]==='write'?await store.apply(JSON.parse(process.argv[4]),{kind:'user',id:'test-user'}):await store.read();console.log(JSON.stringify({pid:process.pid,state}));}catch(e){console.log(JSON.stringify({pid:process.pid,code:e.code,message:e.message}));process.exitCode=2}`,resolveDir:process.cwd()},outfile:worker,bundle:true,platform:'node',format:'esm',packages:'external',metafile:true,logLevel:'silent'}))
+  const relay = JSON.parse(await readFile(resolve('packages/relay/package.json'), 'utf8')) as { exports: Record<string, { import: string }> }
+  const alias = Object.fromEntries(Object.entries(relay.exports).map(([key, value]) => [key === '.' ? '@agentmux/relay' : '@agentmux/relay/' + key.slice(2), resolve('packages/relay', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))]))
+  bundles.push(await build({entryPoints:['packages/core/src/agentmux.ts'],outfile:cli,bundle:true,platform:'node',format:'esm',packages:'external',alias,metafile:true,logLevel:'silent'}))
+  bundles.push(await build({stdin:{contents:`import {AgentMuxNotebookStore} from './packages/core/src/notebook-store.ts';const store=new AgentMuxNotebookStore(process.argv[2]);try{const state=process.argv[3]==='write'?await store.apply(JSON.parse(process.argv[4]),{kind:'user',id:'test-user'}):await store.read();console.log(JSON.stringify({pid:process.pid,state}));}catch(e){console.log(JSON.stringify({pid:process.pid,code:e.code,message:e.message}));process.exitCode=2}`,resolveDir:process.cwd()},outfile:worker,bundle:true,platform:'node',format:'esm',packages:'external',alias,metafile:true,logLevel:'silent'}))
   const hashes:Record<string,string>={};for(const b of bundles)for(const file of Object.keys(b.metafile!.inputs)){if(file==='<stdin>')continue;hashes[file]=createHash('sha256').update(await readFile(file)).digest('hex')}
   await writeFile(join(output,'compiled-inputs.json'),JSON.stringify(hashes,null,2)+'\n')
 })
@@ -167,4 +169,61 @@ it('queries confirmed Topic and original resource changes through the shipping h
   expect(inspected.result.result.trail.map((event:any)=>event.action)).toEqual(['created','organized','relocated'])
   expect(inspected.result.result.trail.every((event:any)=>event.actor.kind==='user')).toBe(true)
   await writeFile(resolve('.tmp/survey-notebook/continuity-cli-receipt.json'),JSON.stringify({state,replay,inspected:inspected.result.result},null,2)+'\n')
+})
+
+
+it('archives and restores through the shipping CLI, preserves independent children and survives a fresh process without an App', async () => {
+  const { dir, store } = await fixture()
+  await apply(store, 'parent-created', { kind: 'register', noteId: 'parent', title: 'Question', resource, source })
+  await apply(store, 'child-created', { kind: 'register', noteId: 'child', parentNoteId: 'parent', title: 'Evidence', resource: { ...resource, path: 'child.note.json' } })
+  const server = new AgentMuxControlServer({ socketPath: join(dir, 'archive.sock'), notebookStore: store, coreClients: () => [] })
+  servers.push(server); await server.start()
+  const env = { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path }
+  async function change(operationId: string, value: NotebookChange) {
+    const result = await run(cli, ['notebook', 'apply', '--revision', String((await store.read()).revision), '--operation-id', operationId, '--change-json', JSON.stringify(value)], env)
+    expect(result.code, result.stderr).toBe(0); return result.result.result.state
+  }
+  const original = await store.read()
+  await change('child-archive', { kind: 'archive', noteId: 'child' })
+  const archived = await change('parent-archive', { kind: 'archive', noteId: 'parent' })
+  expect(archived.pages.parent.archivedAt).toBeTypeOf('number')
+  expect(archived.pages.child.archivedAt).toBeTypeOf('number')
+  const replay = await change('parent-archive', { kind: 'archive', noteId: 'parent' })
+  expect(replay).toEqual(archived)
+  const fresh = await run(worker, [join(dir, 'notebooks.json'), 'read'])
+  expect(fresh.code, fresh.stderr).toBe(0); expect(fresh.result.pid).not.toBe(process.pid)
+  expect(fresh.result.state).toEqual(archived)
+  const observed = await run(cli, ['notebook', 'inspect', '--note', 'parent'], env)
+  expect(observed.result.result.pages[0].resource).toEqual(resource)
+  expect(observed.result.result.pages[0].sources).toEqual([source])
+  expect(observed.result.result.trail.at(-1)).toMatchObject({ action: 'archived', actor: { kind: 'user' }, before: { resource }, after: { archivedAt: archived.pages.parent.archivedAt } })
+  let restored = await change('parent-restore', { kind: 'restore', noteId: 'parent' })
+  expect(restored.pages.parent.archivedAt).toBeUndefined()
+  expect(restored.pages.child.archivedAt).toBe(archived.pages.child.archivedAt)
+  expect(notebookPageArchiveRoot(restored.pages, 'child')?.noteId).toBe('child')
+  restored = await change('child-restore', { kind: 'restore', noteId: 'child' })
+  expect(notebookPageArchiveRoot(restored.pages, 'child')).toBeUndefined()
+  expect(restored.pages.child.parentNoteId).toBe('parent')
+  expect(restored.pages.parent.resource).toEqual(original.pages.parent!.resource)
+  expect(restored.pages.parent.sources).toEqual(original.pages.parent!.sources)
+  expect(restored.trail.map((event: { action: string }) => event.action)).toEqual(['created', 'created', 'archived', 'archived', 'restored', 'restored'])
+  const missing = await run(cli, ['notebook', 'apply', '--revision', String(restored.revision), '--operation-id', 'missing-page', '--change-json', JSON.stringify({ kind: 'archive', noteId: 'missing' })], env)
+  expect(missing.code).not.toBe(0); expect(await store.read()).toEqual(restored)
+  await writeFile(resolve('.tmp/survey-notebook/archive-cli-receipt.json'), JSON.stringify({ archived, fresh: fresh.result, inspected: observed.result.result, restored, missing: missing.result }, null, 2) + '\n')
+})
+
+it('derives inherited archive without rewriting child metadata and accepts old unarchived catalogs', async () => {
+  const { store } = await fixture()
+  await apply(store, 'parent', { kind: 'register', noteId: 'parent', title: 'Parent', resource })
+  await apply(store, 'child', { kind: 'register', noteId: 'child', title: 'Child', resource: { ...resource, path: 'child.note.json' }, parentNoteId: 'parent' })
+  const original = await store.read()
+  const archived = await apply(store, 'archive', { kind: 'archive', noteId: 'parent' })
+  expect(notebookPageArchiveRoot(archived.pages, 'child')?.noteId).toBe('parent')
+  expect(archived.pages.child).toEqual(original.pages.child)
+  const childArchived = await apply(store, 'child-independent', { kind: 'archive', noteId: 'child' })
+  const restored = await apply(store, 'restore', { kind: 'restore', noteId: 'parent' })
+  expect(restored.pages.child).toEqual(childArchived.pages.child)
+  expect(notebookPageArchiveRoot(restored.pages, 'child')?.noteId).toBe('child')
+  expect(restored.trail.at(-1)?.before?.archivedAt).toBe(archived.pages.parent!.archivedAt)
+  expect(restored.trail.at(-1)?.after.archivedAt).toBeUndefined()
 })

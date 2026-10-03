@@ -1,4 +1,4 @@
-import { DEFAULT_NOTEBOOK_ID, type NotebookPage } from '@agentmux/core/notebook-catalog'
+import { DEFAULT_NOTEBOOK_ID, notebookPageArchiveRoot, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { NotebookHome, NotebookNavigation } from './SurveyNotebook'
 import { changeNotebook, refreshNotebookLibrary, recordNotebookChanges, retryNotebookRecoveries, useNotebookLibrary, type NoteNotebookContext } from '../lib/notebook-library'
 import { openNotebookPage, prepareNotebookWorkface } from '../lib/survey-notebooks'
@@ -44,13 +44,16 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
   viewTargets?: Parameters<typeof WorkspaceWorkbench>[0]['viewTargets']
 }) {
   const [pageQuery, setPageQuery] = useState('')
+  const [archivedPages, setArchivedPages] = useState(false)
   const library = useNotebookLibrary(state => state.state)
   const libraryIssue = useNotebookLibrary(state => state.issue)
   const notebookRecoveries = useAppStore(state => state.notebookRecoveries)
   const [recoveringHistory, setRecoveringHistory] = useState(false)
   const notebookId = useAppStore(state => state.surveyNotebookId)
-  useEffect(() => setPageQuery(''), [notebookId])
+  useEffect(() => { setPageQuery(''); setArchivedPages(false) }, [notebookId])
   const noteId = useAppStore(state => state.surveyNoteId)
+  const selectedArchiveRoot = noteId && library ? notebookPageArchiveRoot(library.pages, noteId)?.noteId : undefined
+  useEffect(() => { if (noteId && library) setArchivedPages(Boolean(selectedArchiveRoot)) }, [noteId, selectedArchiveRoot])
   const activeNotebook = notebookId ? library?.notebooks[notebookId] : undefined
   const notebooks = useMemo(() => Object.values(library?.notebooks ?? {}), [library])
   const pages = useMemo(() => Object.values(library?.pages ?? {}), [library])
@@ -413,7 +416,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         <div className="survey-page-list" data-notebook-view={!!activeNotebook}>
           <NotebookNavigation notebooks={notebooks} pages={pages} selectedId={notebookId} selectedNoteId={noteId} onSelect={chooseNotebook} onOpen={page => void showNotebookPage(page)} query={pageQuery} onQuery={setPageQuery} onCreateChild={page => { setPageQuery(''); void openNote(false, false, true, page.noteId) }}
             onBack={() => { intent.current += 1; useAppStore.getState().setSurveyNotebook(null); setSelection(null); setError(null) }}
-            onCreate={() => void openNote(false, false, true)} pending={opening} actions={options} />
+            onCreate={() => void openNote(false, false, true)} pending={opening} actions={options} archived={archivedPages} onArchivedChange={value => { setArchivedPages(value); setPageQuery('') }} />
           {!activeNotebook ? <>
           {Object.keys(collected).filter(zoneId => !catalog?.zones.some(zone => zone.zoneId === zoneId)).map(zoneId => <div key={zoneId} className="survey-item-row" data-survey-zone-id={zoneId} data-selected={selection?.zoneId === zoneId}>
             <button type="button" className="survey-item" aria-label="Show retained survey item" onClick={() => chooseZone(zoneId)}><CircleHelp size={14} /><strong>Retained exploration</strong></button>
@@ -450,7 +453,7 @@ export const GlobalSurveySurface = memo(function GlobalSurveySurface({ visible =
         {creationNotice ? <p className="survey-relation-notice" role="status">{creationNotice}{noteRecovery ? <button className="survey-tab-view" disabled={opening} onClick={() => void openNote(false, true)}>Retry Notebook registration</button> : null}</p> : null}
         {notebookRecoveries.length ? <p className="survey-history-recovery" role="status"><span>History update pending. Your notes are saved.</span><button className="note-text-button" disabled={recoveringHistory} onClick={() => void recoverHistory()}>Retry history</button></p> : null}
         {libraryIssue && !creationNotice ? <p className="survey-relation-notice" role="status">Notebook directory is unconfirmed. Saved pages and browsing are kept. <button onClick={() => void refreshNotebookLibrary().catch(() => {})}>Refresh</button><details><summary>Details</summary>{libraryIssue}</details></p> : null}
-        {activeNotebook && !selection ? <NotebookHome query={pageQuery} onQuery={sidebarCollapsed ? setPageQuery : undefined} navigationVisible={!sidebarCollapsed} notebook={activeNotebook} pages={pages.filter(page => page.notebookId === activeNotebook.notebookId)} pending={opening} onCreate={() => void openNote(false, false, true)} onOpen={page => void showNotebookPage(page)} /> : !selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
+        {activeNotebook && !selection ? <NotebookHome query={pageQuery} onQuery={sidebarCollapsed ? setPageQuery : undefined} navigationVisible={!sidebarCollapsed} archived={archivedPages} onArchivedChange={sidebarCollapsed ? value => { setArchivedPages(value); setPageQuery('') } : undefined} notebook={activeNotebook} pages={pages.filter(page => page.notebookId === activeNotebook.notebookId)} pending={opening} onCreate={() => void openNote(false, false, true)} onOpen={page => void showNotebookPage(page)} /> : !selection ? <div className="survey-start" aria-label="New browser tab"><div className="survey-start-heading"><h1>Survey</h1><p>Search or open a page.</p></div>
           <form className="survey-start-input" onSubmit={event => { event.preventDefault(); browserInput.current?.submit() }}>
             <BrowserAddressInput ref={browserInput} value={query} aria-label="Search or enter a web address" placeholder="Search or enter a web address" disabled={opening} historyTarget={workspace ? { kind: 'workspace', workspaceId: workspace.id } : null} onValueChange={value => { setQuery(value); setError(null) }} onSubmit={value => { if (value.trim()) void openBrowser(value) }} onHistoryNotice={setInputHistoryNotice} onDeferredHistoryFailure={message => useAppStore.getState().reportError(message, { kind: 'process-degraded' })} />
             <button type="submit" aria-label="Search or open page" disabled={opening || !query.trim()}>{opening ? <LoaderCircle className="spin" size={16} /> : <ArrowUpRight size={16} />}</button></form><button type="button" className="survey-start-note" disabled={opening || !workspace} onClick={() => void newNotebook()}><NotebookPen size={16} /><span>Start a notebook</span></button>{inputHistoryNotice ? <p className="survey-relation-notice" role="status">{inputHistoryNotice}</p> : null}

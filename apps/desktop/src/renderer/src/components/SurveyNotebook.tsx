@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
-import { ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search } from 'lucide-react'
+import { Archive, ArrowLeft, ArrowUpRight, BookOpen, ChevronDown, ChevronRight, FileText, Plus, Search } from 'lucide-react'
 import { DEFAULT_NOTEBOOK_ID, type Notebook, type NotebookPage } from '@agentmux/core/notebook-catalog'
 import { notebookPageRows } from '../lib/notebook-page-tree'
 import { NotebookOperationIssue, useNotebookOperation } from './NotebookPageDetails'
 
-export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onCreateChild, query, onQuery, onBack, onCreate, pending, actions }: {
+export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteId, onSelect, onOpen, onCreateChild, query, onQuery, onBack, onCreate, pending, actions, archived, onArchivedChange }: {
   notebooks: Notebook[]; pages: NotebookPage[]; selectedId: string | null; selectedNoteId: string | null
   onSelect(notebookId: string): void; onOpen(page: NotebookPage): void; onCreateChild(page: NotebookPage): void; query: string; onQuery(query: string): void
-  onBack(): void; onCreate(): void; pending: boolean; actions: ReactNode
+  onBack(): void; onCreate(): void; pending: boolean; actions: ReactNode; archived: boolean; onArchivedChange(archived: boolean): void
 }) {
   const [collapsed, setCollapsed] = useState<Set<string>>(() => new Set())
   const book = notebooks.find(candidate => candidate.notebookId === selectedId)
@@ -19,7 +19,7 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
     </div>)}
   </div>
   const members = pages.filter(page => page.notebookId === book.notebookId)
-  const rows = notebookPageRows(pages, book.notebookId, query, collapsed)
+  const rows = notebookPageRows(pages, book.notebookId, query, collapsed, archived)
   return <div className="survey-notebook-navigation" aria-label="Notebook navigation" data-notebook-id={book.notebookId}>
     <button className="survey-notebook-back" aria-label="Back to Survey" onClick={onBack}><ArrowLeft size={14} /><span>Survey</span></button>
     <div className="survey-notebook-heading">
@@ -29,6 +29,7 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
       {actions}
     </div>
     <button className="survey-notebook-new-page" aria-label={`New page in ${book.name}`} disabled={pending} onClick={onCreate}><Plus size={14} /><span>New page</span></button>
+    <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} />
     {members.length ? <label className="notebook-find notebook-find--sidebar"><Search size={12} /><input aria-label={`Find pages in ${book.name}`} placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
     <div className="survey-notebook-pages" aria-label={`${book.name} pages`}>
       {rows.map(({ page, depth, hasChildren, expanded }) => <div key={page.noteId} className="survey-notebook-page-row" style={{ marginLeft: Math.min(depth, 8) * 10 }}>
@@ -36,8 +37,15 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
         <button className="survey-notebook-page" title={page.title} aria-current={selectedNoteId === page.noteId ? 'page' : undefined} data-selected={selectedNoteId === page.noteId} onClick={() => onOpen(page)}><FileText size={12} /><span>{page.title}</span></button>
         <button className="notebook-add-child" aria-label={`Add subpage to ${page.title}`} title="Add subpage" onClick={() => onCreateChild(page)}><Plus size={12} /></button>
       </div>)}
-      {!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : 'No pages yet'}</p> : null}
+      {!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}
     </div>
+  </div>
+}
+
+function NotebookDirectoryViews({ archived, onChange }: { archived: boolean; onChange(archived: boolean): void }) {
+  return <div className="notebook-directory-views" role="group" aria-label="Page directory view">
+    <button type="button" aria-pressed={!archived} onClick={() => onChange(false)}>Pages</button>
+    <button type="button" aria-label="Archived pages" aria-pressed={archived} onClick={() => onChange(true)}><Archive size={12} /><span>Archived</span></button>
   </div>
 }
 
@@ -49,18 +57,19 @@ function NotebookName({ notebook }: { notebook: Notebook }) {
     onFocus={() => setEditing(true)} onChange={event => setDraft(event.target.value)} onBlur={() => { setEditing(false); if (cancelled.current) { cancelled.current = false; return } void save() }}
     onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur(); if (event.key === 'Escape') { cancelled.current = true; setDraft(notebook.name); event.currentTarget.blur() } }} />}</h1><NotebookOperationIssue operation={operation} /></>
 }
-export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, query, onQuery, navigationVisible = false }: {
+export function NotebookHome({ notebook, pages, pending, onCreate, onOpen, query, onQuery, navigationVisible = false, archived = false, onArchivedChange }: {
   notebook: Notebook; pages: NotebookPage[]; pending: boolean; onCreate(): void; onOpen(page: NotebookPage): void; query: string; onQuery?: ((query: string) => void) | undefined
-  navigationVisible?: boolean
+  navigationVisible?: boolean; archived?: boolean; onArchivedChange?: ((archived: boolean) => void) | undefined
 }) {
-  const rows = notebookPageRows(pages, notebook.notebookId, query)
+  const rows = notebookPageRows(pages, notebook.notebookId, query, new Set(), archived)
   return <section className="survey-notebook-home" aria-label={`${notebook.name} Notebook`}>
     <div className="notebook-cover-mark"><BookOpen size={27} strokeWidth={1.3} /></div>
-    <header><NotebookName key={notebook.notebookId} notebook={notebook} />{pages.length ? <p>{pages.length} {pages.length === 1 ? 'page' : 'pages'}</p> : null}</header>
+    <header><NotebookName key={notebook.notebookId} notebook={notebook} />{pages.length ? <p>{rows.length} {archived ? 'archived ' : ''}{rows.length === 1 ? 'page' : 'pages'}</p> : null}</header>
+    {!navigationVisible && onArchivedChange ? <NotebookDirectoryViews archived={archived} onChange={onArchivedChange} /> : null}
     {!navigationVisible || !pages.length ? <button className="notebook-create-page" disabled={pending} onClick={onCreate}><Plus size={15} /><span>New page</span></button> : null}
     {pages.length ? <>{onQuery ? <label className="notebook-find notebook-find--directory"><Search size={14} /><input aria-label="Search notebook pages" placeholder="Find a page…" value={query} onChange={event => onQuery(event.target.value)} /></label> : null}
-      <div className="notebook-page-directory" aria-label="Saved pages">{rows.map(({ page, depth }) => <button key={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
+      <div className="notebook-page-directory" aria-label={archived ? "Archived pages" : "Saved pages"}>{rows.map(({ page, depth }) => <button key={page.noteId} style={{ paddingLeft: Math.min(depth, 8) * 16 + 3 }} onClick={() => onOpen(page)}>
         <FileText size={17} strokeWidth={1.5} /><span><strong>{page.title}</strong><small>{page.sources[0] ? new URL(page.sources[0].url).hostname : 'Note'} · {new Date(page.updatedAt).toLocaleDateString()}</small></span><ArrowUpRight size={14} />
-      </button>)}{query && !rows.length ? <p className="notebook-no-results">No matching pages</p> : null}</div></> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>Start with a blank page.<br />Notes captured from webpages stay here, too.</p></div>}
+      </button>)}{!rows.length ? <p className="notebook-no-results">{query ? 'No matching pages' : archived ? 'No archived pages' : 'No pages yet'}</p> : null}</div></> : <div className="notebook-empty"><span className="notebook-empty-line" /><p>{archived ? 'No archived pages.' : <>Start with a blank page.<br />Notes captured from webpages stay here, too.</>}</p></div>}
   </section>
 }

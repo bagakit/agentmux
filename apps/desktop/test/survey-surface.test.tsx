@@ -1811,3 +1811,97 @@ it('keeps an open standalone Notebook page and every exact foreign Group selecte
   expect(dom.container.querySelector('.global-survey-surface .note-editor .ProseMirror')).not.toBeNull()
   expect(files.get('Standalone renamed.note.json')).toBe(bytes);expect(JSON.parse(bytes).noteId).toBe(page.noteId); healthy()
 })
+
+
+async function archiveCurrentNotebookPage() {
+  const trigger = dom.container.querySelector<HTMLElement>('[aria-label="Page options"]')!
+  expect(trigger).not.toBeNull()
+  await act(async () => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })))
+  await vi.waitFor(() => expect([...document.querySelectorAll('[role="menuitem"]')].some(item => item.textContent === 'Archive page')).toBe(true))
+  const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Archive page')!
+  await act(async () => action.click())
+}
+
+it('archives from the actual page menu and reopens and restores the original Note through its archived directory', async () => {
+  const files = noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  await renameNotebookField('Page title', 'A thought worth keeping')
+  const state = useAppStore.getState(), bookId = state.surveyNotebookId!, noteId = state.surveyNoteId!, reference = state.surveyZoneSelection!.active!
+  const editor = dom.container.querySelector('.global-survey-surface .note-editor'), body = [...files.values()][0], writeCount = vi.mocked(api.files.write).mock.calls.length
+  await archiveCurrentNotebookPage()
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.pages[noteId]?.archivedAt).toBeTypeOf('number'))
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-notebook-navigation [aria-label="Archived pages"]')?.getAttribute('aria-pressed')).toBe('true'))
+  expect(dom.container.querySelector('.global-survey-surface .note-editor')).toBe(editor)
+  expect(dom.container.querySelector('.notebook-archive-status')?.textContent).toContain('Archived')
+  await dom.click(`[aria-label="Notebook directory: Untitled notebook"]`)
+  const pagesToggle = [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-notebook-navigation .notebook-directory-views button')].find(button => button.textContent === 'Pages')!
+  await act(async () => pagesToggle.click())
+  expect(dom.container.querySelector('.survey-notebook-page')).toBeNull()
+  expect(dom.container.querySelector('.survey-notebook-navigation')?.textContent).toContain('No pages yet')
+  await dom.click('.survey-notebook-navigation [aria-label="Archived pages"]')
+  expect(dom.container.querySelector('.survey-notebook-page')?.textContent).toBe('A thought worth keeping')
+  await dom.click('.survey-notebook-page')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyZoneSelection!.active).toEqual(reference))
+  await dom.click('.notebook-archive-status button')
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.pages[noteId]?.archivedAt).toBeUndefined())
+  expect(useAppStore.getState().surveyNotebookId).toBe(bookId)
+  expect(useAppStore.getState().surveyNoteId).toBe(noteId)
+  expect([...files.values()][0]).toBe(body); expect(vi.mocked(api.files.write).mock.calls).toHaveLength(writeCount)
+  expect((await api.notebooks.read()).trail.filter(event => ['archived', 'restored'].includes(event.action)).map(event => event.action)).toEqual(['archived', 'restored'])
+  expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
+
+it('keeps the original editor and active directory after an archive reply is lost and retries one exact operation', async () => {
+  noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  const noteId = useAppStore.getState().surveyNoteId!, editor = dom.container.querySelector('.global-survey-surface .note-editor')
+  const apply = vi.mocked(api.notebooks.apply).getMockImplementation()!, inputs: Parameters<typeof api.notebooks.apply>[0][] = []
+  let lost = true
+  vi.mocked(api.notebooks.apply).mockImplementation(async input => {
+    const state = await apply(input)
+    if (input.change.kind === 'archive') { inputs.push(structuredClone(input)); if (lost) { lost = false; throw new Error('Archive reply unavailable') } }
+    return state
+  })
+  await archiveCurrentNotebookPage()
+  await vi.waitFor(() => expect(dom.container.querySelector('.notebook-change-issue')?.textContent).toContain('Archive reply unavailable'))
+  expect(useNotebookLibrary.getState().state?.pages[noteId]?.archivedAt).toBeUndefined()
+  expect(dom.container.querySelector('.survey-notebook-page')).not.toBeNull()
+  expect(dom.container.querySelector('.global-survey-surface .note-editor')).toBe(editor)
+  await dom.click('.notebook-change-issue button')
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.pages[noteId]?.archivedAt).toBeTypeOf('number'))
+  expect(inputs).toHaveLength(2); expect(inputs[1]!.operationId).toBe(inputs[0]!.operationId)
+  expect((await api.notebooks.read()).trail.filter(event => event.action === 'archived')).toHaveLength(1)
+  expect(dom.container.querySelector('.global-survey-surface .note-editor')).toBe(editor); healthy()
+})
+
+
+it('keeps a separately archived child when restoring its parent and finds it through the collapsed Notebook home', async () => {
+  const files = noteTransport(); await renderApp(); await enterSurvey(); await startNotebookWithPage(); await readyNoteRegion()
+  await renameNotebookField('Page title', 'Original question')
+  const parent = Object.values((await api.notebooks.read()).pages)[0]!
+  await dom.click('[aria-label="Add subpage to Original question"]')
+  await vi.waitFor(async () => expect(Object.values((await api.notebooks.read()).pages).some(page => page.parentNoteId === parent.noteId)).toBe(true))
+  const child = Object.values((await api.notebooks.read()).pages).find(page => page.parentNoteId === parent.noteId)!
+  await vi.waitFor(() => expect(useAppStore.getState().surveyNoteId).toBe(child.noteId))
+  await renameNotebookField('Page title', 'Independent evidence')
+  await archiveCurrentNotebookPage()
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.pages[child.noteId]?.archivedAt).toBeTypeOf('number'))
+  const pagesButton = [...dom.container.querySelectorAll<HTMLButtonElement>('.survey-notebook-navigation .notebook-directory-views button')].find(button => button.textContent === 'Pages')!
+  await act(async () => pagesButton.click())
+  expect(dom.container.querySelectorAll('.survey-notebook-page')).toHaveLength(1)
+  await dom.click('.survey-notebook-page')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyNoteId).toBe(parent.noteId))
+  await archiveCurrentNotebookPage()
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.pages[parent.noteId]?.archivedAt).toBeTypeOf('number'))
+  expect(dom.container.querySelectorAll('.survey-notebook-page')).toHaveLength(2)
+  await dom.click('.notebook-archive-status button')
+  await vi.waitFor(() => expect(useNotebookLibrary.getState().state?.pages[parent.noteId]?.archivedAt).toBeUndefined())
+  expect(useNotebookLibrary.getState().state?.pages[child.noteId]?.archivedAt).toBeTypeOf('number')
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.survey-notebook-page')).toHaveLength(1))
+  await dom.click('[aria-label="Hide Survey items"]')
+  await dom.click('.survey-item-actions .survey-tab-view')
+  await vi.waitFor(() => expect(dom.container.querySelector('.survey-notebook-home')).not.toBeNull())
+  await dom.click('.survey-notebook-home [aria-label="Archived pages"]')
+  expect(dom.container.querySelector('.notebook-page-directory')?.textContent).toContain('Independent evidence')
+  expect(dom.container.querySelector('.notebook-page-directory')?.textContent).not.toContain('Original question')
+  expect((await api.notebooks.read()).pages[child.noteId]?.parentNoteId).toBe(parent.noteId)
+  expect(files.size).toBe(2); expect(api.browser.close).not.toHaveBeenCalled(); healthy()
+})
