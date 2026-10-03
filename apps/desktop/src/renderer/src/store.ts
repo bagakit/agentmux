@@ -404,7 +404,8 @@ export type AgentSteerQueueEntry = {
   error?: string
   errorCode?: string
   origin?: 'manual'
-  /** Frozen with the first admission; an unknown old input never gains a new execution mode. */
+  /** Frozen when explicitly selected, before awaits. Queue-only default leaves it absent;
+   * known-null retains that original selection across recovery/wait, but boot pauses it. */
   execution?: AgentPromptExecution
 }
 
@@ -7733,16 +7734,31 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   flushAgentSteerQueue(sessionId, explicitOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
-    const requested = explicitOperationId !== undefined &&
-      get().agentSteerQueues[sessionId]?.some(entry => entry.operationId === explicitOperationId)
+    const current = get()
+    const target = current.sessions.find(item => item.id === sessionId)
+    const selected = current.agentSteerQueues[sessionId]?.find(entry => entry.operationId === explicitOperationId)
+    const requested = explicitOperationId !== undefined && selected && target?.kind === 'agent' &&
+      (selected.runId === undefined || steerEntryTargetsRun(selected, target.control.run.runId))
       ? explicitOperationId : undefined
+    if (requested !== undefined && target?.kind === 'agent' && selected?.promptCondition === null && selected.execution === undefined) {
+      // Accept the exact user's selection synchronously. Async coordination is not its owner:
+      // recovery, interaction and storage waits retain this choice in the one durable queue.
+      const execution = agentSteerExecution(selected, target.capabilities)
+      set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
+        [sessionId]: state.agentSteerQueues[sessionId]!.map(entry =>
+          entry.operationId === requested && entry.promptCondition === null && entry.execution === undefined
+            ? { ...entry, execution } : entry) } }))
+    }
     const active = agentSteerDrains.get(sessionId)
     if (active) {
       if (requested !== undefined) active.explicitSteers.add(requested)
       active.wake = true
       return active.promise
     }
-    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>(requested ? [requested] : []), submitted: new Set<string>() }
+    const selectedIds = (get().agentSteerQueues[sessionId] ?? []).filter(entry =>
+      entry.errorCode !== EXECUTION_NOT_REQUESTED && entry.promptCondition === null && entry.execution !== undefined)
+      .map(entry => entry.operationId)
+    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>() }
     drain.promise = Promise.resolve().then(async () => {
       try {
         for (;;) {
@@ -7759,12 +7775,15 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             (item.runId === undefined || steerEntryTargetsRun(item, currentRunId)))
           // Explicit steer selects its exact intent, leaving queue-only work untouched. Multiple
           // explicit requests retain their author order in this one queue, including across awaits.
-          const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ?? pendingEntries?.[0]
+          const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ??
+            pendingEntries?.find(item => item.promptCondition === null && item.execution !== undefined) ?? pendingEntries?.[0]
           if (!entry) return
           if (entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
-          // Recovery and binding are part of this one attempt. Consume its grant before any
-          // failure or await; a new grant arriving during the attempt remains in the set.
-          const explicitAttempt = drain.explicitSteers.delete(entry.operationId)
+          // The set joins active callers; only a known unsubmitted original selection can
+          // outlive it. Unknown/historical or boot-paused inputs never gain auto-retry authority.
+          const explicitAttempt = drain.explicitSteers.delete(entry.operationId) ||
+            entry.promptCondition === null && entry.execution !== undefined
+          if (!explicitAttempt && entry.promptCondition === null && session.status.state === 'working') return
           if (!explicitAttempt && entry.promptCondition !== null) {
             // A prepared durable intent may already have crossed admission. A late completion,
             // startup or reconnect wake is no proof that it was never delivered. Only a fresh
@@ -7777,6 +7796,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Capture before recovery: a newly restored binding grants no save bypass.
           const explicitlyBound = explicitAttempt && entry.runId === currentRunId
           let preparedHere = false
+          let dispatchStarted = false
           set((current) => ({
             agentSteerInFlight: { ...current.agentSteerInFlight, [sessionId]: entry.operationId },
             agentSteerInFlightPhase: { ...current.agentSteerInFlightPhase, [sessionId]: 'preparing' }
@@ -7836,11 +7856,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                 'The Run changed before message preparation. This message will not be sent to another Run.')
               const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
                 afterSubmissionId: fresh.promptSubmissionPredecessor })
-              const execution = explicitAttempt ? agentSteerExecution(pending, fresh.capabilities) : 'default'
+              if (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected') return
+              if (!explicitAttempt && fresh.status.state === 'working') return
+              const execution = explicitAttempt ? (pending.execution ?? 'default') : 'default'
+              if (execution === 'immediate' && fresh.capabilities.promptExecution?.immediate !== 'interrupt-before-input') {
+                throw new Error('The original immediate-send capability is unconfirmed for this Run. Your original message and execution choice are kept; retry Send or use the terminal.')
+              }
               set(current => ({ agentSteerQueues: { ...current.agentSteerQueues,
                 [sessionId]: current.agentSteerQueues[sessionId]!.map(item =>
                   item.operationId === entry.operationId ? { ...item, promptCondition: condition,
-                    ...(execution === 'immediate' ? { execution } : {}) } : item) } }))
+                    ...(explicitAttempt ? { execution } : {}) } : item) } }))
               preparedHere = true
             }
             await flushMessageWorkbench(explicitlyBound)
@@ -7853,6 +7878,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             set((current) => ({ agentSteerInFlightPhase: {
               ...current.agentSteerInFlightPhase, [sessionId]: 'submitting'
             } }))
+            // After this invocation, even a BUSY/error can belong to another client joining
+            // this exact operation. Only Core receipts can settle it; never reconstruct input.
+            dispatchStarted = true
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
               explicitAttempt ? { allowUncertainTurn: true,
                 ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
@@ -7868,7 +7896,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             })
             drain.explicitSteers.delete(entry.operationId)
             // A steer grants no background tail permission. Other explicit requests still run.
-            if (explicitAttempt && !get().agentSteerQueues[sessionId]?.some(item =>
+            if (!get().agentSteerQueues[sessionId]?.some(item =>
               drain.explicitSteers.has(item.operationId))) return
           } catch (error) {
             const message = presentError(error)
@@ -7878,9 +7906,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             const submissionBusy = typeof error === 'object' && error !== null &&
               'code' in error && error.code === 'AGENT_PROMPT_SUBMISSION_BUSY' ||
               message.includes('Diagnostic: code=AGENT_PROMPT_SUBMISSION_BUSY')
-            // These first-call refusals occur before admission. A restored or previously
-            // uncertain intent never refreshes, even if a later attempt reports BUSY.
-            const unadmitted = preparedHere && (turnEndUnconfirmed || submissionBusy)
+            // A newly prepared condition is local until the real input API is invoked.
+            // Storage/read failures before that boundary cannot make delivery unknown.
+            // Error names after invocation cannot prove that no other client admitted it.
+            const unadmitted = preparedHere && !dispatchStarted
             // A delivery refusal is a retained local fact, not another global notification.
             set((current) => {
               const pending = current.agentSteerQueues[sessionId]

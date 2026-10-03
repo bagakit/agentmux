@@ -189,8 +189,8 @@ afterEach(async () => {
 it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an older queue-only head', async () => {
   await draft('ordinary queued message'); await enter(); await settled()
   const ordinary = queue()[0]!
-  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'ordinary queued message', status: 'deferred',
-    errorCode: 'AGENT_TURN_END_UNCONFIRMED', operationId: ordinary.operationId })])
+  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'ordinary queued message', status: 'queued',
+    promptCondition: null, operationId: ordinary.operationId })])
   expect(writes).toEqual([])
   await draft('first explicit steer'); await enter('metaKey'); await settled()
   await draft('second explicit steer'); await enter('ctrlKey'); await settled()
@@ -201,12 +201,23 @@ it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an
     ['first explicit steer', { allowUncertainTurn: true }],
     ['second explicit steer', { allowUncertainTurn: true }]
   ])
-  expect(submits.filter(call => call[2] === 'ordinary queued message').map(call => call[5])).toEqual(Array(4).fill(undefined))
-  expect(submits[2]?.[3]).not.toBe(ordinary.operationId)
+  expect(submits.filter(call => call[2] === 'ordinary queued message')).toEqual([])
+  expect(ordinary.execution).toBeUndefined()
   expect(client.agentSession(ID).run).toEqual({ runId: RUN })
   expect(client.agentSession(ID).terminalPromptDelivery?.reason).toBe('turn-end-unconfirmed')
   await settled()
   expect(writes).toEqual(['first explicit steer', '\r', 'second explicit steer', '\r'])
+  // The real Core completion owner makes the ordinary item eligible for its first input.
+  await (client as any).registry.update(ID, { runId: RUN }, (current: AgentMuxStoredAgentSession) => ({
+    ...current, semanticStatus: { state: 'done', source: 'native-hook', observedAt: Date.now() }, updatedAt: Date.now()
+  }))
+  await act(async () => useAppStore.getState().applyEvent({ type: 'core', hostId: 'local',
+    event: { type: 'agent-session', session: client.agentSession(ID) } }))
+  await settled()
+  expect(writes).toEqual(['first explicit steer', '\r', 'second explicit steer', '\r', 'ordinary queued message', '\r'])
+  expect(queue()).toEqual([])
+  const ordinaryCalls = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt' && call[2] === ordinary.text)
+  expect(ordinaryCalls.map(call => [call[3], call[5]])).toEqual([[ordinary.operationId, undefined]])
 })
 
 it('generic immediate capability travels from Cmd+Enter through preload, IPC and Main into the Core Provider plan', async () => {
@@ -228,7 +239,9 @@ it('ordinary Enter and an old unknown default input do not gain native immediate
     ? { ...item, capabilities: { ...item.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } } : item) })))
   const prepare = vi.spyOn((client as any).promptSubmission, 'submitInputPlan').mockImplementation(async (...args: any[]) => args[11])
   await draft('ordinary native queue input'); await enter(); await settled()
-  expect(prepare.mock.calls[0]![4].prepare).toBeUndefined();expect(prepare.mock.calls[0]![12]).toBeUndefined()
+  expect(prepare).not.toHaveBeenCalled()
+  expect(queue()[0]).toMatchObject({ promptCondition: null })
+  expect(queue()[0]!.execution).toBeUndefined()
   await act(async () => {
     useAppStore.setState({agentSteerQueues:{[ID]:[{operationId:'old-unknown-default',text:'original default text',runId:RUN,status:'deferred',promptCondition:{expectedRun:{runId:RUN},afterSubmissionId:null}}]}})
     await useAppStore.getState().sendQueuedAgentSteer(ID,'old-unknown-default')
@@ -295,9 +308,9 @@ it('does not lend explicit authorization to a queue-only message admitted during
   expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', operationId: pending[1]!.operationId })])
   await settled()
   expect(writes).toEqual(['explicit only', '\r'])
-  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', errorCode: 'AGENT_TURN_END_UNCONFIRMED' })])
+  expect(queue(), JSON.stringify(queue())).toEqual([expect.objectContaining({ text: 'bare Enter stays queued', promptCondition: null, status: 'queued' })])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')
-  expect(submits.filter(call => call[2] === 'bare Enter stays queued').map(call => call[5])).toEqual([undefined])
+  expect(submits.filter(call => call[2] === 'bare Enter stays queued')).toEqual([])
 })
 
 it('retains exact Run and permission boundaries even for explicit input', async () => {
@@ -378,6 +391,14 @@ it('a synchronous subscriber Send at final in-flight clear starts a live owner r
 })
 
 it('retains a fresh exact authorization arriving during a default Core attempt until its one explicit retry', async () => {
+  // A stale running projection permits the first ordinary call; Core still owns its refusal.
+  await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(item =>
+    item.id === ID ? { ...item, status: { ...item.status, state: 'running' } } : item) })))
+  const refresh = vi.mocked(api.sessions.refresh).getMockImplementation()!
+  vi.mocked(api.sessions.refresh).mockImplementation(async control => {
+    const fresh = await refresh(control)
+    return { ...fresh, status: { ...fresh.status, state: 'running' } }
+  })
   const gate = deferred()
   const original = client.submitAgentPrompt.bind(client)
   let first = true
@@ -385,7 +406,7 @@ it('retains a fresh exact authorization arriving during a default Core attempt u
     if (first) { first = false; await gate.promise }
     return original(...args)
   })
-  await draft('default awaiting explicit choice'); await enter()
+  await act(async () => expect(useAppStore.getState().enqueueAgentSteer(ID, 'default awaiting explicit choice', undefined, undefined, 'manual')).toBe(true))
   let defaultAttempt!: Promise<void>
   await act(async () => { defaultAttempt = useAppStore.getState().flushAgentSteerQueue(ID) })
   await vi.waitFor(() => expect(client.submitAgentPrompt, JSON.stringify(queue())).toHaveBeenCalledTimes(1))
@@ -393,7 +414,7 @@ it('retains a fresh exact authorization arriving during a default Core attempt u
   let retry!: Promise<void>
   await act(async () => { retry = useAppStore.getState().sendQueuedAgentSteer(ID, entry.operationId) })
   gate.resolve(); await act(async () => { await defaultAttempt; await retry })
-  expect(client.submitAgentPrompt).toHaveBeenCalledTimes(2)
+  expect(client.submitAgentPrompt, JSON.stringify({ queue: queue(), calls: bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt'), writes })).toHaveBeenCalledTimes(2)
   expect(writes).toEqual(['default awaiting explicit choice', '\r'])
   expect(queue()).toEqual([])
   const submits = bridge.invoke.mock.calls.filter(call => call[0] === 'sessions:submitPrompt')

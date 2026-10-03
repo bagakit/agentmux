@@ -92,7 +92,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
       expect(submit).not.toHaveBeenCalled()
       useAppStore.getState().removeAgentSteer(session.id, selected.operationId)
       useAppStore.getState().moveAgentSteer(session.id, selected.operationId, 'up')
-      expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([head, selected])
+      expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([head, { ...selected, execution: 'default' }])
       preparation.resolve()
       await vi.waitFor(() => expect(submit).toHaveBeenCalledTimes(1))
       expect(useAppStore.getState().agentSteerInFlightPhase[session.id]).toBe('submitting')
@@ -125,7 +125,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     await drain
     expect(submit).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([
-      { ...entry, status: 'deferred', error: 'Preparation read unavailable' }
+      { ...entry, execution: 'default', status: 'deferred', error: 'Preparation read unavailable' }
     ])
     expectReleased(session.id)
   })
@@ -146,7 +146,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     submission.resolve()
     await drain
     expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([
-      { ...entry, promptCondition: { expectedRun: session.control.run, afterSubmissionId: null },
+      { ...entry, execution: 'default', promptCondition: { expectedRun: session.control.run, afterSubmissionId: null },
         status: 'deferred', error: 'Original input outcome is unknown' }
     ])
     expectReleased(session.id)
@@ -180,7 +180,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     await drain
     const retained = useAppStore.getState().agentSteerQueues[session.id]!
     expect(retained[0]).toEqual(head)
-    expect(retained[1]).toEqual({ ...entry, promptCondition: null, status: 'deferred',
+    expect(retained[1]).toEqual({ ...entry, execution: 'default', promptCondition: { expectedRun: session.control.run, afterSubmissionId: null }, status: 'deferred',
       error: message, errorCode: 'AGENT_PROMPT_SUBMISSION_BUSY' })
     expect(submit).toHaveBeenCalledTimes(1)
     expectReleased(session.id)
@@ -201,7 +201,7 @@ describe('the existing queue drain publishes its actual transient phase', () => 
     useAppStore.setState({ sessions: [{ ...session, control: { ...session.control, run: { runId: 'replacement-run' } } }] })
     await send(session.id, entry.operationId)
     expect(submit).not.toHaveBeenCalled()
-    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([entry])
+    expect(useAppStore.getState().agentSteerQueues[session.id]).toEqual([{ ...entry, execution: 'default' }])
     expectReleased(session.id)
   })
 
