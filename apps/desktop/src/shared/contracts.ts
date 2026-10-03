@@ -1084,7 +1084,7 @@ export type SessionReplayResult = Pick<SessionAttachResult, 'replay' | 'gap'>
 
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
-  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot }
+  | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot; advisory?: string }
   | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' }>
 
 export type HostCheckResult = {
@@ -1507,7 +1507,7 @@ export type AgentMuxDesktopApi = {
     previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>
     saveMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef>
     readMoteAvatar(workspaceId: string, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage>
-    listTopics(workspaceId: string): Promise<ScratchTopicSnapshot[]>
+    listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicList>
     readTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot | null>
     ensureTopic(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
     ensureMote(workspaceId: string, topicId: string): Promise<ScratchTopicSnapshot>
@@ -1776,7 +1776,10 @@ export type AgentMuxDesktopApi = {
   }
 }
 
-export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'> & {
+export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions' | 'scratch'> & {
+  scratch: Omit<AgentMuxDesktopApi['scratch'], 'listTopics'> & {
+    listTopics(workspaceId: string): Promise<import('./scratch-topics').ScratchTopicListResponse>
+  }
   sessions: Omit<AgentMuxDesktopApi['sessions'], 'onEvent' | 'observeHistory'> & {
     /** Raw native transport. Renderer owns scoped subscriptions and its single bridge callback. */
     onEvent(listener: (event: RuntimeEvent) => void): () => void

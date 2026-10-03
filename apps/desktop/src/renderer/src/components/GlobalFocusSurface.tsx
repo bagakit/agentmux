@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { Check, CheckCircle2, CirclePause, Inbox, ListFilter, PlayCircle, Search, Unplug, Users } from 'lucide-react'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useAppStore } from '../store'
@@ -43,8 +44,8 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const {contexts: executionRows, laneContexts, pmoAttention} = useAppStore(useShallow(contextSelector))
   const moteIdentity = useAppStore(useShallow(state => {
     const session = state.sessions.find(item => item.id === pmoAttention[0])
-    const workspace = session && workspaceForSession(state.config, session)
-    const id = session && topicIdForSession(state.config, session)
+    const workspace = session && workspaceForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
+    const id = session && topicIdForSession(state.config, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
     const topic = id && scratchTopicsForWorkspace(state.scratchTopicSnapshots, workspace)?.find(item => item.id === id)
     const target = workspace && topic && !topic.readError ? topicSpaceIconTarget(workspace, topic) : null
     const key = target?.key
@@ -224,7 +225,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         const current = useAppStore.getState()
         const tab = tabForFocusedSession(current.tabs, id)
         const session = sessionPresentationById(current.sessions).get(id)
-        const topicId = tab?.topicId ?? (session ? topicIdForSession(current.config, session) : null)
+        const topicId = tab?.topicId ?? (session ? topicIdForSession(current.config, session, scratchTopicsForConfig(current.config, current.scratchTopicSnapshots)) : null)
         if (!topicId) {
           current.reportError(new Error('Mote context identity is not confirmed. The original work surface is retained.'))
           return

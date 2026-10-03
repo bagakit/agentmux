@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as Dialog from '@radix-ui/react-dialog'
 import { CornerDownLeft, FileCode2, Globe2, Search, PanelsTopLeft, SquareTerminal } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -34,6 +35,7 @@ function KindGlyph({ item }: { item: QuickSwitchItem }) {
 }
 
 export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; onClose: () => void; returnFocus?: () => HTMLElement | null }) {
+  const scratchTopicSnapshots = useAppStore(state => state.scratchTopicSnapshots)
   const config = useAppStore((state) => state.config)
   const sessions = useAppStore((state) => state.sessions)
   const tabs = useAppStore((state) => state.tabs)
@@ -49,13 +51,13 @@ export function QuickSwitcher({ open, onClose, returnFocus }: { open: boolean; o
 
   const items = useMemo(
     () =>
-      buildQuickSwitchIndex({
+      buildQuickSwitchIndex({ topics: scratchTopicsForConfig(config, scratchTopicSnapshots),
         config,
         sessions,
         tabs,
         tabGroupOf: (workspaceId, tabId) => tabGroupForTab(layouts[workspaceId], tabId)
       }),
-    [config, sessions, tabs, layouts]
+    [config, scratchTopicSnapshots, sessions, tabs, layouts]
   )
   const results = useMemo(() => rankQuickSwitchItems(items, query), [items, query])
 

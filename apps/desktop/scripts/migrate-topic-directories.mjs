@@ -43,12 +43,29 @@ async function classify(path, id) {
   throw failure('SOUL.md is not a confirmed regular file; this object is not classified or moved.', 'DIRECTORY_MIGRATION_KIND_UNKNOWN')
 }
 
+async function metadataContext(directory, expected) {
+  const match = directoryPattern.exec(expected.split('/').at(-1) ?? '')
+  if (!match || await classify(directory, `${match[1]}:${match[2]}`) !== 'mote') return expected
+  const parent = resolve(expected, '../..')
+  const roots = {}
+  for (const role of ['scratch', 'topics', 'motes']) {
+    const path = join(parent, role)
+    let actual
+    try { actual = await realpath(path) } catch (error) { if (error.code !== 'ENOENT') throw error }
+    roots[role] = [...new Set([path, ...(actual ? [actual] : [])])]
+  }
+  return { topicId: `${match[1]}:${match[2]}`, roots, original: expected }
+}
 async function readIdentity(directory, expected) {
-  return await inspectDirectoryIdentity(directory, expected)
+  return await inspectDirectoryIdentity(directory, await metadataContext(directory, expected))
+}
+async function normalizeIdentity(directory, expected, helperPath) {
+  return await normalizeDirectoryIdentity(directory, await metadataContext(directory, expected), { helperPath })
 }
 
 async function retainIdentity(directory, expected, helperPath) {
-  return await retainDirectoryIdentity(directory, expected, { helperPath })
+  const context = await metadataContext(directory, expected)
+  return await retainDirectoryIdentity(directory, typeof context === 'string' ? context : { ...context, original: expected }, { helperPath })
 }
 
 async function runHelper(helperPath, args) {
@@ -114,7 +131,7 @@ export async function migrateTopicDirectories({ home = homedir(), execute = fals
         const destinationInfo = await requireDirectory(destinationPath)
         const kind = await classify(destinationPath, id)
         if (parent !== (kind === 'mote' ? 'motes' : 'topics')) throw failure('The alias destination conflicts with the confirmed object kind.', 'DIRECTORY_MIGRATION_ALIAS_INVALID')
-        if (execute) await normalizeDirectoryIdentity(destinationPath, sourcePath, { helperPath })
+        if (execute) await normalizeIdentity(destinationPath, sourcePath, helperPath)
         await confirmAlias(sourcePath, destinationPath, identity(destinationInfo), link)
         Object.assign(row, { kind, destinationPath, ...identity(destinationInfo), state: 'already-migrated' })
         continue
@@ -168,7 +185,7 @@ export async function migrateTopicDirectories({ home = homedir(), execute = fals
           row.kind = kind
           if (!execute) row.state = saved.needsUpgrade ? 'identity-upgrade-planned' : 'identity-confirmed'
           else {
-            const result = await normalizeDirectoryIdentity(destinationPath, original, { helperPath })
+            const result = await normalizeIdentity(destinationPath, original, helperPath)
             row.state = result.state === 'upgraded' ? 'identity-upgraded' : 'identity-confirmed'
           }
         } catch (error) {

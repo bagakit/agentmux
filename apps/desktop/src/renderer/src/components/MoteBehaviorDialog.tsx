@@ -40,8 +40,9 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
   const form = useRef(draft); form.current = draft
   const trialInput = useRef<object>({})
   const edited = useRef(false), lifetime = useRef<object>({}), content = useRef<HTMLDivElement>(null)
-  const id = useId(), code = deriveMoteBehaviorCode(draft), target = topicSpaceIconTarget(scope.workspace, scope.topic)
-  const icon = useAppStore(state => state.spaceObjectIcons[target.key] ?? null)
+  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const id = useId(), code = deriveMoteBehaviorCode(draft), target = topicSpaceIconTarget(scope.workspace, scope.topic, bindings)
+  const icon = useAppStore(state => target ? state.spaceObjectIcons[target.key] ?? null : null)
   const update = (value: MoteBehaviorDraft) => { edited.current = true; form.current = value; setDraft(value) }
   useLayoutEffect(() => {
     const epoch = {}; lifetime.current = epoch
@@ -100,7 +101,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
         <div className="mote-behavior-body">
           <aside className="mote-behavior-preview" aria-label="Behavior preview">
             <div className="mote-behavior-identity"><div className="mote-behavior-avatar">
-              <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={target.key}
+              <SpaceObjectIcon kind="mote" name={scope.topic.title} manualIcon={icon} avatarObjectKey={target?.key}
                 avatarWorkspaceId={scope.workspace.id} avatarTopicId={scope.topic.id} />
             </div><div><strong>{scope.topic.title}</strong><span className="mote-behavior-type">{code ? 'MBTI style · ' + code : 'Choose four preferences'}</span></div></div>
             {moteBehaviorRules(draft).length ? <ul>{moteBehaviorRules(draft).map(rule => <li key={rule}>{rule}</li>)}</ul> : null}

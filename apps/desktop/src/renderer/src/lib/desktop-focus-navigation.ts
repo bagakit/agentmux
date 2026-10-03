@@ -86,6 +86,17 @@ export function projectWorkbenchSpaceSelection(layout: WorkspaceLayout | undefin
     return layout ? { layout: createWorkspaceLayout(layout.activeGroupId), issues: [], confirmed: true }
       : { layout: null, issues: ['The original Category workface is still restoring.'], confirmed: false }
   }
+  if (choice.spaceId === null && choice.zoneId === null && choice.tabId) {
+    const entity = catalog.tabs.find(tab => tab.tabId === choice.tabId)
+    const matching = catalog.locations.filter(location => location.spaceId === null && location.zoneId === null &&
+      location.displayWorkspaceId === choice.workspaceId && location.groupId === choice.groupId && location.tabId === choice.tabId && location.regionId === choice.regionId)
+    if (entity?.zoneId === null && layout && matching.length === 1 && choice.groupId && choice.regionId) {
+      const projected = projectWorkbenchProjection(layout, tabs, { entity: { kind: 'tab', tabId: choice.tabId },
+        presentationId: 'space-workbench', displayWorkspaceId: choice.workspaceId, catalog, selectionMode: 'occurrence',
+        selection: [{ displayWorkspaceId: choice.workspaceId, groupId: choice.groupId, tabId: choice.tabId, regionId: choice.regionId }], onSelect: () => {} })
+      return { layout: projected.layout, issues: projected.issues, confirmed: projected.selection.length === 1 && projected.layout !== null }
+    }
+  }
   const zone = catalog.zones.find(zone => zone.zoneId === choice.zoneId)
   if (!zone || !layout || (choice.spaceId !== null && !catalog.bindings.some(binding =>
     binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId))) return { layout: null, confirmed: false,

@@ -57,14 +57,14 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
     const index = new Map<string, SessionSnapshot[]>()
     for (const session of sessions) {
       if (session.hostId !== workspace.hostId) continue
-      const id = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath)
+      const id = scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)
       if (!id) continue
       const bucket = index.get(id)
       if (bucket) bucket.push(session)
       else index.set(id, [session])
     }
     return index
-  }, [sessions, workspace.hostId, workspace.path])
+  }, [sessions, workspace.hostId, workspace.path, topics])
   const entries = topics?.filter(topic => isKnowledgeTopicInBindings(topic, bindings)) ?? []
   const motes = scratchMoteTopics(topics)
   const archive = useMoteArchiveAction(workspace)
@@ -137,7 +137,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         const topic = byId.get(id)!
         const isMote = true
         const name = topic.title
-        const target = topicSpaceIconTarget(workspace, { ...topic, title: name })
+        const target = topicSpaceIconTarget(workspace, { ...topic, title: name }, bindings)
         const selected = activeWorkspaceId === workspace.id && current === id
         const bucket = byTopic.get(id) ?? []
         const attentionLabel = rowAttentionLabel(rowAttention(bucket))
@@ -163,13 +163,13 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
         <div className={`space-tree-entry${isMote ? ' space-mote-entry' : ''}`} data-space-entry data-mote-archive-state={isMote ? topic.moteArchive?.state : undefined}>
           <div className="project-rail-entry">
             <button type="button" data-space-nav={`topic:${id}`} data-space-parent={key}
-              data-space-icon-target={target.key} style={{ '--rail-depth': 1 } as CSSProperties}
+              data-space-icon-target={target?.key} style={{ '--rail-depth': 1 } as CSSProperties}
               className={`project-rail-row ${isMote ? 'space-mote-row' : 'space-topic-row'}${selected ? ' project-rail-row--active' : ''}`}
               aria-label={[`Open ${isMote && id !== PMO_TEAMS_TOPIC_ID ? `Mote · ${name}` : name}`, archived ? 'Archived' : '', attentionLabel].filter(Boolean).join(' · ')}
               aria-current={selected ? 'page' : undefined}
               title={[name, topic.readError ?? topic.summary, displayPath(scratchTopicPhysicalPath(workspace, topic), workspace.hostId)].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
-              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={icons[target.key] ?? null} avatarObjectKey={target.key} avatarWorkspaceId={target.avatarTarget?.workspaceId} avatarTopicId={target.avatarTarget?.topicId} />
+              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={target ? icons[target.key] ?? null : null} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}

@@ -21,7 +21,8 @@ export function PmoTeamsTopicEntry({ style, placement = 'compact' }: {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const identityConfirmed = Boolean(floating.targetTopicId || target.tab || typeof floating.targetTabId !== 'string')
   const topic = identityConfirmed ? topics?.find(item => item.id === target.topicId) : undefined
-  const iconTarget = useMemo(() => workspace && topic ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
+  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const iconTarget = useMemo(() => workspace && topic ? topicSpaceIconTarget(workspace, topic, bindings) : undefined, [workspace, topic, bindings])
   const manualIcon = useAppStore(state => iconTarget ? state.spaceObjectIcons[iconTarget.key] ?? null : null)
   const [editing, setEditing] = useState<SpaceIconTarget | null>(null)
   const button = useRef<HTMLButtonElement>(null)

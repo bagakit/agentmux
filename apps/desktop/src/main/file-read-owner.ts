@@ -1,6 +1,7 @@
 import { AgentMuxError, parseFileReadParams, parseFileListParams, type AgentMuxRpcFilesOwner, type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkspaceRecord } from '../shared/contracts'
+import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from '../shared/scratch-topics'
 import { zoneFileResource } from '../shared/zone-file-resource'
 import type { WorkspaceFiles } from './workspace-files'
 
@@ -8,6 +9,7 @@ import type { WorkspaceFiles } from './workspace-files'
 export class FileReadOwner implements AgentMuxRpcFilesOwner {
   constructor(private readonly ports: {
     catalog(): Promise<AgentMuxSpaceCatalog | null>
+    topicForDirectory?(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null>
     workspace(id: string): WorkspaceRecord | undefined
     files: Pick<WorkspaceFiles, 'read' | 'listFiles'>
   }) {}
@@ -49,9 +51,16 @@ export class FileReadOwner implements AgentMuxRpcFilesOwner {
     if (workspace.hostId !== expected.hostId || workspace.id !== expected.workspaceId || workspace.path !== expected.workspacePath || zone.hostId !== expected.hostId) {
       throw new AgentMuxError('The original File resource changed. Inspect its exact Host and Workspace before retrying this read.', 'FILE_RESOURCE_MISMATCH')
     }
-    const mapped = zoneFileResource(workspace, zone, params.path)
+    const root = workspace.path.replace(/\/+$/, '') || '/', directory = zone.directoryPath.replace(/\/+$/, '') || '/'
+    let topic: ScratchDirectoryFact | null = null
+    if (workspace.id === SCRATCH_WORKSPACE_ID && directory !== root && !directory.startsWith(root === '/' ? '/' : root + '/')) {
+      try { topic = await this.ports.topicForDirectory?.(workspace, directory) ?? null }
+      catch (error) { return unknown(error instanceof Error ? error.message : String(error)) }
+    }
+    const mapped = zoneFileResource(workspace, zone, params.path, topic ? [topic] : [])
     const resource = { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path,
-      zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path }
+      zoneId: zone.zoneId, zonePath: mapped.directoryPath, path: mapped.path,
+      ...(mapped.logicalDirectory === undefined ? {} : { logicalDirectory: mapped.logicalDirectory }) }
     return { resource, workspace: { ...workspace } }
   }
 }

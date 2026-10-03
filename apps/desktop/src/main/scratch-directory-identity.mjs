@@ -11,10 +11,59 @@ const invalid = message => Object.assign(new Error(message), { code: 'DIRECTORY_
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino
 const hash = path => createHash('sha256').update(path).digest('hex')
 
+const contentId = /^(launcher|session|view):([A-Za-z0-9][A-Za-z0-9_-]{0,127})$/
+const roles = ['scratch', 'topics', 'motes']
+export function moteDirectoryName(topicId) {
+  if (!contentId.test(topicId)) throw invalid('The full Mote content identity is unconfirmed.')
+  return hash(topicId).slice(0, 16)
+}
+
+function identityCandidates(context, name, role) {
+  return [...new Set((role ? context.roots[role] ?? [] : roles.flatMap(key => context.roots[key] ?? []))
+    .map(root => join(root, name)))]
+}
+
 export function directoryIdentityRecord(original) {
-  const name = basename(original)
-  if (!directoryName.test(name)) throw invalid('The original directory name is unconfirmed.')
-  return { version: 2, identityDirectoryName: name, identityPathHash: hash(original) }
+  if (typeof original === 'string') {
+    const name = basename(original)
+    if (!directoryName.test(name)) throw invalid('The original directory name is unconfirmed.')
+    return { version: 2, identityDirectoryName: name, identityPathHash: hash(original) }
+  }
+  const name = basename(original.original ?? '')
+  const id = original.topicId
+  if (!contentId.test(id) || !original.original) throw invalid('The original full content identity is unconfirmed.')
+  const matched = roles.filter(role => identityCandidates(original, name, role).includes(original.original))
+  if (matched.length !== 1 || !(name === `topic--${id.replace(':', '--')}` || matched[0] === 'motes' && name === moteDirectoryName(id)))
+    throw invalid('The original identity root or name is unconfirmed.')
+  return { version: 3, topicId: id, identityRoot: matched[0], identityDirectoryName: name, identityPathHash: hash(original.original) }
+}
+
+function verifiedRecord(value, original) {
+  if (typeof original === 'string') {
+    const expected = directoryIdentityRecord(original)
+    const legacy = value?.version === 1 && Object.keys(value).sort().join(',') === 'identityDirectoryPath,version' && value.identityDirectoryPath === original
+    const current = value?.version === 2 && Object.keys(value).sort().join(',') === 'identityDirectoryName,identityPathHash,version' && value.identityDirectoryName === expected.identityDirectoryName && value.identityPathHash === expected.identityPathHash
+    if (!legacy && !current) throw invalid('Directory identity is unconfirmed. Repair the original identity record before retrying.')
+    return { identityDirectoryPath: original, needsUpgrade: legacy, expectedRecord: expected }
+  }
+  const keys = value && Object.keys(value).sort().join(',')
+  const legacy = value?.version === 1 && keys === 'identityDirectoryPath,version' && typeof value.identityDirectoryPath === 'string'
+  const relative = value?.version === 2 && keys === 'identityDirectoryName,identityPathHash,version'
+  const current = value?.version === 3 && keys === 'identityDirectoryName,identityPathHash,identityRoot,topicId,version'
+  if (!legacy && !relative && !current) throw invalid('Directory content identity record is invalid.')
+  const name = legacy ? basename(value.identityDirectoryPath) : value.identityDirectoryName
+  const match = typeof name === 'string' ? directoryName.exec(name) : null
+  const id = current ? value.topicId : match ? `${match[1]}:${match[2]}` : null
+  if (!contentId.test(id) || original.topicId && original.topicId !== id ||
+      !(name === `topic--${id.replace(':', '--')}` || current && value.identityRoot === 'motes' && name === moteDirectoryName(id)) ||
+      current && !roles.includes(value.identityRoot)) throw invalid('Directory full content ID or original root is unconfirmed.')
+  const candidates = identityCandidates(original, name, current ? value.identityRoot : undefined)
+    .filter(path => legacy ? path === value.identityDirectoryPath : /^[0-9a-f]{64}$/.test(value.identityPathHash) && hash(path) === value.identityPathHash)
+  if (candidates.length !== 1 || original.original && original.original !== candidates[0])
+    throw invalid('The exact original directory address is unconfirmed. Existing bindings and files are kept.')
+  const identityDirectoryPath = candidates[0]
+  return { identityDirectoryPath, topicId: id, needsUpgrade: !current,
+    expectedRecord: directoryIdentityRecord({ ...original, topicId: id, original: identityDirectoryPath }) }
 }
 
 /** The legacy witness is exposed only with an explicit recovery diagnostic, never v2 success. */
@@ -32,7 +81,6 @@ export async function inspectDirectoryIdentity(directory, original) {
   let parent
   try { parent = await lstat(metadata, { bigint: true }) } catch (error) { if (error.code === 'ENOENT') return null; throw error }
   if (!parent.isDirectory() || parent.isSymbolicLink()) throw invalid('Directory identity metadata is not a regular directory.')
-  const expected = directoryIdentityRecord(original)
   async function record(path) {
     let handle
     try { handle = await open(join(directory, path), constants.O_RDONLY | constants.O_NOFOLLOW) }
@@ -45,11 +93,7 @@ export async function inspectDirectoryIdentity(directory, original) {
       const bytes = buffer.subarray(0, bytesRead).toString('utf8')
       let value
       try { value = JSON.parse(bytes) } catch { throw invalid('Directory identity metadata is unreadable or invalid.') }
-      const legacy = value && value.version === 1 && Object.keys(value).sort().join(',') === 'identityDirectoryPath,version' && value.identityDirectoryPath === original
-      const current = value && value.version === 2 && Object.keys(value).sort().join(',') === 'identityDirectoryName,identityPathHash,version' &&
-        value.identityDirectoryName === expected.identityDirectoryName && value.identityPathHash === expected.identityPathHash
-      if (!legacy && !current) throw invalid('Directory identity is unconfirmed. Repair the original identity record before retrying.')
-      return { record: value, bytes, info, needsUpgrade: legacy }
+      return { record: value, bytes, info, ...verifiedRecord(value, original) }
     } finally { await handle.close() }
   }
   // Pending is the moved original record, not a second identity or a guessed current address.
@@ -67,19 +111,21 @@ export async function inspectDirectoryIdentity(directory, original) {
     return null
   }
   const witness = pending ?? current
-  return { ...witness, identityDirectoryPath: original, needsUpgrade: Boolean(pending || current.needsUpgrade), parent, current, pending }
+  if (pending && current && (pending.identityDirectoryPath !== current.identityDirectoryPath || pending.topicId !== current.topicId))
+    throw invalid('Pending and current records do not witness the same original object.')
+  return { ...witness, needsUpgrade: Boolean(pending || current.needsUpgrade), parent, current, pending }
 }
 
 export async function readDirectoryIdentity(directory, original) {
   const inspected = await inspectDirectoryIdentity(directory, original)
-  if (inspected?.needsUpgrade) throw new DirectoryIdentityUpgradeRequiredError(original)
+  if (inspected?.needsUpgrade) throw new DirectoryIdentityUpgradeRequiredError(inspected.identityDirectoryPath)
   return inspected?.identityDirectoryPath ?? null
 }
 
 async function runFilePublication(mode, directory, root, before, temporary, options) {
   const currentPath = SCRATCH_DIRECTORY_IDENTITY_PATH, pendingPath = SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH
   const expected = before.pending ?? before.current
-  const wanted = mode === '--file-confirm' ? before.current.bytes : JSON.stringify(directoryIdentityRecord(before.identityDirectoryPath)) + '\n'
+  const wanted = mode === '--file-confirm' ? before.current.bytes : JSON.stringify(before.expectedRecord) + '\n'
   const args = [mode, directory, String(root.dev), String(root.ino), currentPath,
     '.agentmux/' + basename(temporary), pendingPath, String(before.parent.dev), String(before.parent.ino),
     String(expected.info.dev), String(expected.info.ino), hash(expected.bytes), hash(wanted)]
@@ -132,7 +178,7 @@ export async function normalizeDirectoryIdentity(directory, original, options = 
     if (needsPublication) {
       await options.beforeWrite?.()
       const handle = await open(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
-      try { await handle.writeFile(JSON.stringify(directoryIdentityRecord(original)) + '\n'); await handle.sync() }
+      try { await handle.writeFile(JSON.stringify(before.expectedRecord) + '\n'); await handle.sync() }
       finally { await handle.close() }
     }
     await options.beforeReplace?.()
@@ -145,7 +191,7 @@ export async function normalizeDirectoryIdentity(directory, original, options = 
     if (needsPublication) await runFilePublication('--file-publish', directory, root, before, temporary, options)
     if (needsPublication) await options.afterReplace?.()
     const published = await inspectDirectoryIdentity(directory, original)
-    const expectedCurrent = needsPublication ? JSON.stringify(directoryIdentityRecord(original)) + '\n' : before.current.bytes
+    const expectedCurrent = needsPublication ? JSON.stringify(before.expectedRecord) + '\n' : before.current.bytes
     if (!published?.pending || published.current?.needsUpgrade !== false ||
         !sameRecord(published.pending, before.pending ?? before.current) || published.current.bytes !== expectedCurrent)
       throw invalid('The same original publication witness changed or is unconfirmed. Its later bytes are kept; inspect the same object before retrying.')

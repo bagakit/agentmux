@@ -3,7 +3,7 @@ import { rpcRecord } from './rpc-data.js'
 
 /** The original Files owner and resource, independent of display occurrences. */
 export type FileResource = { hostId: string; workspaceId: string; workspacePath: string }
-export type FileReadResource = FileResource & { zoneId: string; zonePath: string; path: string }
+export type FileReadResource = FileResource & { zoneId: string; zonePath: string; path: string; logicalDirectory?: string }
 export type FileDocument = { path: string; content: string; revision: string }
 export type FileDocumentReadResult =
   | { status: 'read'; document: FileDocument }
@@ -34,7 +34,7 @@ function revision(value: unknown, code: string): void {
   if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/u.test(value)) invalid('The complete original File revision is required.', code)
 }
 function resource(value: unknown, code: string, read = false): FileResource | FileReadResource {
-  const p = rpcRecord(value, ['hostId', 'workspaceId', 'workspacePath', ...(read ? ['zoneId', 'zonePath', 'path'] : [])], code)
+  const p = rpcRecord(value, ['hostId', 'workspaceId', 'workspacePath', ...(read ? ['zoneId', 'zonePath', 'path', 'logicalDirectory'] : [])], code)
   for (const key of ['hostId', 'workspaceId', 'workspacePath', ...(read ? ['zoneId', 'zonePath', 'path'] : [])]) string(p[key], code)
   return p as FileResource | FileReadResource
 }
@@ -87,8 +87,17 @@ export function parseFileReadResult(value: unknown, params: FileReadParams): Fil
         original.workspaceId !== params.expectedResource.workspaceId || original.workspacePath !== params.expectedResource.workspacePath) invalid('Another File resource was returned.', code)
     const root = original.workspacePath.replace(/\/+$/u, '') || '/', zone = original.zonePath.replace(/\/+$/u, '') || '/'
     const prefix = root === '/' ? '/' : root + '/'
-    if (zone !== root && !zone.startsWith(prefix)) invalid('The File Zone is outside its original Workspace.', code)
-    const directory = zone === root ? '' : zone.slice(prefix.length), relative = params.path.split('/').filter(part => part && part !== '.').join('/')
+    let directory: string
+    if (original.logicalDirectory !== undefined) {
+      const declared = original.logicalDirectory
+      if (typeof declared !== 'string' || declared.length > 16384 || /[\0\r\n\\]/u.test(declared) || declared.startsWith('/') || /^[A-Za-z]:/u.test(declared) ||
+          declared !== '' && declared.split('/').some(part => !part || part === '.' || part === '..')) invalid('The declared File logical directory is invalid.', code)
+      directory = declared
+    } else {
+      if (zone !== root && !zone.startsWith(prefix)) invalid('The File Zone is outside its original Workspace.', code)
+      directory = zone === root ? '' : zone.slice(prefix.length)
+    }
+    const relative = params.path.split('/').filter(part => part && part !== '.').join('/')
     if (directory.split('/').some(part => part === '.' || part === '..' || part.includes('\\'))) invalid('The returned File Zone is invalid.', code)
     const mapped = directory && relative ? directory + '/' + relative : directory || relative || '.'
     if (original.path !== mapped) invalid('Another File path was returned.', code)

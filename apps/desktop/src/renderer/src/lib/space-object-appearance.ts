@@ -7,7 +7,7 @@ import {
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath } from '../../../shared/scratch-topics'
 import type { WorkspaceProject } from './workspace-projects'
-import { directoryIdentity } from '../../../shared/space-addresses'
+import { directoryIdentity, originalTopicAddress, type SpaceZoneBindings } from '../../../shared/space-addresses'
 
 /** One bounded, named source for the picker, renderer and persisted-value validation. */
 export const SPACE_ICON_CATALOG = {
@@ -68,9 +68,12 @@ export function folderSpaceIconTarget(project: Pick<WorkspaceProject, 'hostId' |
 
 export function topicSpaceIconTarget(
   workspace: Pick<WorkspaceRecord, 'hostId' | 'path'> & { id?: string },
-  topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'title' | 'soul' | 'identityDirectoryPath'>
-): SpaceIconTarget {
-  const key = spaceObjectIdentityKey(workspace.hostId, scratchTopicIdentityPath(workspace, topic))
+  topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'title' | 'soul' | 'identityDirectoryPath' | 'readError'>,
+  bindings: SpaceZoneBindings = {}
+): SpaceIconTarget | null {
+  const address = originalTopicAddress({ ...workspace, id: workspace.id ?? '' }, topic, bindings)
+  if (!address) return null
+  const key = address.spaceId
   return {
     key,
     name: topic.id === PMO_TEAMS_TOPIC_ID ? 'Mote' : topic.title,

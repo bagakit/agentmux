@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { ChevronRight } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
@@ -97,6 +98,7 @@ export function ProjectActivity({
   const displayPath = usePathDisplay()
   const selectSession = useAppStore((state) => state.selectSession)
   const providerCatalog = useAppStore((state) => state.providerCatalog)
+  const topicFacts = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
   const config = useAppStore((state) => state.config)
   const agentIds = useMemo(() => sessions.filter((session) => session.kind === 'agent').map((session) => session.id), [sessions])
   // Read only this consumer's facts. Another Session's output must not wake every Space row.
@@ -219,7 +221,7 @@ export function ProjectActivity({
               //
               // 显示的**名字**取归属（这一格属于哪个 Project），缩路径的**根**取包含（路径落在哪个
               // 仓里）——子目录终端只有后者答得出，是两个问题，故取两次。
-              const workspace = session.kind === 'agent' ? workspaceForSession(config ?? null, session) : undefined
+              const workspace = session.kind === 'agent' ? workspaceForSession(config ?? null, session, topicFacts) : undefined
               const project = workspace?.name ?? (session.kind === 'agent' ? session.workspacePath.split(/[\\/]/).filter(Boolean).at(-1) : 'Terminal')
               const activity = projectActivityRow(
                 session,

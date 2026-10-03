@@ -67,6 +67,7 @@ export function buildAgentTree(input: {
   providerCatalog: readonly AgentCatalogEntry[]
   workspaces: readonly WorkspaceRecord[]
   filter: AgentTreeFilter
+  topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
 }): AgentTreeProject[] {
   const rows = buildAgentRoster({ sessions: input.sessions, providerCatalog: input.providerCatalog })
   const sessionById = new Map(input.sessions.map((session) => [session.id, session]))
@@ -74,7 +75,7 @@ export function buildAgentTree(input: {
   for (const row of rows) {
     const session = sessionById.get(row.sessionId)
     if (!session || !rowMatchesFilter(session, row, input.filter)) continue
-    const workspace = input.workspaces.find((candidate) => workspaceOwnsSessionPath(candidate, session))
+    const workspace = input.workspaces.find((candidate) => workspaceOwnsSessionPath(candidate, session, input.topics))
     const key = workspace ? `${workspace.hostId}\0${workspace.id}` : `unassigned\0${session.hostId}`
     const project = byProject.get(key)
     if (project) project.rows.push(row)

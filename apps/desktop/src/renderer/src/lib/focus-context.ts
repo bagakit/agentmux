@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import type { AppConfig, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
@@ -163,9 +164,9 @@ function createFocusProjectionCache() {
         else if (old.lane === 'pmo' && focusBucketForSession(session, false) === 'attention') pmoAttention.push(session.id)
         continue
       }
-      const sameOwner = old && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
-      const workspace = sameOwner ? old.workspace : workspaceForSession(input.config, session)
-      const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath) : null
+      const sameOwner = old && previous?.scratchTopicSnapshots === input.scratchTopicSnapshots && old.config === input.config && old.session.hostId === session.hostId && old.session.workspacePath === session.workspacePath
+      const workspace = sameOwner ? old.workspace : workspaceForSession(input.config, session, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots))
+      const topicId = sameOwner ? old.topicId : workspace ? scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, scratchTopicsForConfig(input.config, input.scratchTopicSnapshots)) : null
       let model: FocusContext | null = null
       let laneModel: FocusContext | null = null
       const lane = focusLaneForSession(topicId, scratchTopicsForWorkspace(input.scratchTopicSnapshots, workspace))

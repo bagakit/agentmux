@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import * as ContextMenu from '@radix-ui/react-context-menu'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { ChevronUp, ShieldAlert } from 'lucide-react'
@@ -222,7 +223,8 @@ function AgentTreeContents({ filter, heading }: { filter: AgentTreeFilter; headi
   const workspaces = useAppStore((state) => state.config?.workspaces)
   const selectSession = useAppStore((state) => state.selectSession)
   const reportError = useAppStore((state) => state.reportError)
-  const projects = buildAgentTree({ sessions, providerCatalog, workspaces: workspaces ?? [], filter })
+  const topics = useAppStore(state => scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
+  const projects = buildAgentTree({ sessions, providerCatalog, workspaces: workspaces ?? [], filter, topics })
   return <>
     <div className="agent-roster__heading">
       <span>{heading}</span>

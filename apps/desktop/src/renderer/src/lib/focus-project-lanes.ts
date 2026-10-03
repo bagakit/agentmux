@@ -62,11 +62,12 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     if (branch) labels.push(branch)
     if (topicId) labels.push(topic?.title || topicId)
     const id = JSON.stringify([row.hostId, workspaceId, row.workspacePath, topicId])
+    const iconTarget = workspace && topic ? topicSpaceIconTarget(workspace, topic) : null
     const lane = lanes.get(id) ?? { id, workspaceId, projectId, projectWorkspaceId: project?.id ?? workspace?.id ?? null,
       name: labels.join(' / '), labels, summary: topic?.readError ? null : topic?.summary.trim() || null,
       path: row.workspacePath, hostId: row.hostId, topicId,
       ...(topicId ? { objectKind: scratchTopicKind(topicId, topics),
-        ...(workspace && topic && !topic.readError ? { objectIconKey: topicSpaceIconTarget(workspace, topic).key } : {}) } : {}),
+        ...(iconTarget ? { objectIconKey: iconTarget.key } : {}) } : {}),
       recovery: checkout?.removed ? 'removed' : !workspace && config ? 'unknown' : null, activeAgentIds: [], contextIds: [] }
     if (row.liveAgent) lane.activeAgentIds.push(row.id)
     lane.contextIds.push(row.id)

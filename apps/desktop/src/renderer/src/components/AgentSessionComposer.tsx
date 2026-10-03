@@ -1,3 +1,4 @@
+import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import { useRef, type ReactNode } from 'react'
@@ -111,7 +112,7 @@ export function AgentSessionComposer({
   }) : undefined
   const workspace = useAppStore((state) =>
     state.config?.workspaces.find((item) =>
-      session?.kind === 'agent' && workspaceOwnsSessionPath(item, session)
+      session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
     )
   )
   const activeFile = useAppStore((state) =>

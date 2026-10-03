@@ -55,7 +55,8 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   const region = tab?.regions[tab.layout.activeRegionId]
   const session = useAppStore(state => region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined)
   const workspace = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
-  const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic) : undefined, [workspace, topic])
+  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const iconTarget = useMemo(() => workspace ? topicSpaceIconTarget(workspace, topic, bindings) : undefined, [workspace, topic, bindings])
   const pinned = useAppStore(state => state.pinnedItems[SCRATCH_WORKSPACE_ID]?.includes(topic.id) === true)
   const scope = useMoteWorkfaceScope(SCRATCH_WORKSPACE_ID, topic.id)
   const fileReference = useMemo(() => {

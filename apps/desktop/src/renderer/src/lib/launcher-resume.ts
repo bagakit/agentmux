@@ -64,6 +64,7 @@ export type LauncherResumeRow = {
 export function launcherResumeRows(input: {
   candidates: readonly AgentSessionRecoveryCandidate[]
   config: AppConfig | null
+  topics?: readonly import('../../../shared/scratch-topics').ScratchTopicSnapshot[] | null
   workspace?: WorkspaceRecord | undefined
   timelines: Readonly<Record<string, AgentTimelineSnapshot>>
   agentNames: Readonly<Record<string, string>>
@@ -73,7 +74,7 @@ export function launcherResumeRows(input: {
   const projectId = input.workspace ? workspaceProjectId(input.workspace) : null
   const sessions = new Map(input.sessions.map(session => [session.id, session]))
   return input.candidates.map(candidate => {
-    const workspace = input.config?.workspaces.find(item => workspaceOwnsSessionPath(item, candidate))
+    const workspace = input.config?.workspaces.find(item => workspaceOwnsSessionPath(item, candidate, input.topics))
     const timeline = input.timelines[candidate.agentSessionId]
     const session = sessions.get(candidate.agentSessionId)
     const continuity = session?.status.continuity
