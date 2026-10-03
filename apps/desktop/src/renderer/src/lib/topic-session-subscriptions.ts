@@ -4,6 +4,9 @@ import type { ScratchTopicSnapshot, WorkspaceRecord } from '../../../shared/cont
 import { scratchTopicDirectoryName, scratchTopicIdFromWorkspacePath, scratchTopicStorageRoots } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { sessionPresentationById, sessionPresentationsAtPath } from './session-presentation'
+import { useRetainedSessionPresentation } from './workbench-session-subscriptions'
+
+const NO_REGION_SESSION_IDS: readonly string[] = []
 
 /** Resolve original directory aliases once per filesystem snapshot, including ambiguity checks. */
 export function topicSessionPaths(workspace: Pick<WorkspaceRecord, 'path'>, topics: readonly ScratchTopicSnapshot[]): ReadonlyMap<string, readonly string[]> {
@@ -30,9 +33,11 @@ export function topicSessionPaths(workspace: Pick<WorkspaceRecord, 'path'>, topi
 }
 
 /** A displayed Topic consumes its original directory Sessions and its actual open Regions only. */
-export function useTopicSessions(hostId: string, paths: readonly string[], regionSessionIds: readonly string[] = [], active = true) {
-  return useAppStore(useShallow(state => {
-    if (!active || paths.length === 0 && regionSessionIds.length === 0) return []
+export function useTopicSessions(hostId: string, paths: readonly string[], regionSessionIds: readonly string[] = NO_REGION_SESSION_IDS, active = true) {
+  const scope = useMemo(() => JSON.stringify([hostId, [...new Set(paths)].sort(), [...new Set(regionSessionIds)].sort()]), [hostId, paths, regionSessionIds])
+  const current = useAppStore(useShallow(state => {
+    if (!active) return null
+    if (paths.length === 0 && regionSessionIds.length === 0) return []
     const own = new Map(paths.flatMap(path => sessionPresentationsAtPath(state.sessions, hostId, path)
       .map(session => [session.id, session] as const)))
     for (const id of regionSessionIds) {
@@ -41,6 +46,7 @@ export function useTopicSessions(hostId: string, paths: readonly string[], regio
     }
     return [...own.values()]
   }))
+  return useRetainedSessionPresentation(scope, current)
 }
 
 export function useTopicSessionPaths(workspace: Pick<WorkspaceRecord, 'path'>, topics: readonly ScratchTopicSnapshot[]) {

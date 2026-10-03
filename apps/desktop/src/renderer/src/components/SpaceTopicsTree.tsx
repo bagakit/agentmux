@@ -32,8 +32,8 @@ import { MoteRenameDialog } from './MoteRenameDialog'
 /** Filesystem objects and existing Session facts; no separate Space or heat registry. */
 const NO_TOPICS: readonly ScratchTopicSnapshot[] = []
 
-export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: {
-  workspace: WorkspaceRecord; query?: string; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
+export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, visible = true }: {
+  workspace: WorkspaceRecord; query?: string; visible?: boolean; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
 }) {
   const displayPath = usePathDisplay()
   const { topics, error } = useScratchTopics(workspace.id)
@@ -67,7 +67,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
   const motes = useMemo(() => scratchMoteTopics(topics), [topics])
   const sessionPaths = useTopicSessionPaths(workspace, topics ?? NO_TOPICS)
   const motePaths = useMemo(() => motes.flatMap(topic => sessionPaths.get(topic.id) ?? []), [motes, sessionPaths])
-  const sessions = useTopicSessions(workspace.hostId, motePaths)
+  const sessions = useTopicSessions(workspace.hostId, motePaths, [], visible)
   const byTopic = useMemo(() => {
     const topicByPath = new Map(motes.flatMap(topic => (sessionPaths.get(topic.id) ?? []).map(path => [path, topic.id] as const)))
     const index = new Map<string, SessionSnapshot[]>()
@@ -141,7 +141,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
       <div className="space-category-heading"><SpaceSectionHeader label={heading} count={objects.length} icon={<MoteIcon size={14} />}
         expanded={expanded} filtering={filtering} onToggle={() => toggleGroup(key)}
         navigationId={key} createLabel="Create Mote" onCreate={() => createTopic('mote')}
-        activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={sectionSessions} contexts={contexts} /> : undefined} /></div>
+        activity={!expanded && sectionSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={sectionSessions} contexts={contexts} /> : undefined} /></div>
       {label === 'Motes' ? <button type="button" className="space-section-label" aria-label="Show archived Motes in Space"
         aria-pressed={showArchived} onClick={() => setShowArchived(value => !value)}><strong>{showArchived ? 'Hide archived' : 'Show archived'}</strong><small>{archivedMotes.length}</small></button> : null}
       {filtering && ids.length === 0 ? <p className="space-tree-empty" role="status">No matching {label}</p> : null}
@@ -181,7 +181,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               aria-current={selected ? 'page' : undefined}
               title={[name, topic.readError ?? topic.summary, displayPath(scratchTopicPhysicalPath(workspace, topic), workspace.hostId)].filter(Boolean).join('\n')}
               onClick={() => isMote ? void openMote(id) : void openTopic(id, workspace.id).catch(reportError)}>
-              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={target ? icons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />
+              <SpaceObjectIcon kind={isMote ? 'mote' : 'topic'} name={name} manualIcon={target ? icons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} visible={visible} />
               <span className="project-rail-row__identity"><strong>{name}</strong>{archived ? <small>Archived</small> : null}</span>
             </button>
             <button type="button" className={`icon-button space-row-action space-pin${isPinned ? ' space-pin--pinned' : ''}`}
@@ -191,7 +191,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon }: 
               title="Edit SOUL.md · New sessions use saved changes" onClick={editMote}><NotebookPen size={12} /></button> : null}
             {archived ? <button type="button" className="icon-button space-row-action" aria-label={`Restore Mote ${name}`} title="Restore Mote"
               disabled={archive.pending === id} onClick={() => void archive.change(topic, false)}><ArchiveRestore size={12} /></button> : null}
-            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
+            {bucket.some((session) => session.kind === 'agent') ? <ProjectActivity compact visible={visible} sessions={bucket} contexts={contextById.has(id) ? [contextById.get(id)!] : []} /> : null}
           </div>
           {topic.readError ? <div className="surface-inline-error" role="alert">{name}: {topic.readError}. Its work surface is retained.</div> : null}
           {topic.moteArchive?.state === 'unknown' ? <MoteArchiveNotice workspaceId={workspace.id} issue={topic.moteArchive.issue} /> : null}
