@@ -8,6 +8,23 @@ if (process.argv[process.argv.indexOf('--task') + 1] === 'T-002') {
  await import('./verify-mote-directory-short-maintenance.mjs')
  process.exit(process.exitCode ?? 0)
 }
+if (process.argv[process.argv.indexOf('--task') + 1] === 'T-003') {
+ if (!process.argv.includes('--run')) {
+  const repository = resolve(import.meta.dirname, '../../..'), sha = bytes => createHash('sha256').update(bytes).digest('hex')
+  const locator = JSON.parse(await readFile(join(repository, '.tmp/mote-directory-short-public/candidate-public.json'), 'utf8'))
+  const bytes = await readFile(resolve(repository, locator.candidateManifest.path)), candidate = JSON.parse(bytes)
+  assert.equal(sha(bytes), locator.candidateManifest.sha256, 'Exact reviewed T-003 candidate is required')
+  const paths = ['apps/desktop/scripts/verify-mote-directory-short-name.mjs', 'apps/desktop/scripts/verify-mote-directory-short-public.mjs',
+   ...['owner.ts', 'entry.mjs', 'main.cjs', 'probe.mjs', 'index.html'].map(name => 'apps/desktop/scripts/fixtures/mote-directory-short-public/' + name)]
+  assert.deepEqual(Object.keys(candidate.paths).sort(), paths.sort(), 'All seven reviewed public join paths are required')
+  for (const [file, digest] of Object.entries(candidate.paths)) {
+   assert.match(digest, /^[a-f0-9]{64}$/)
+   assert.equal(sha(await readFile(join(repository, file))), digest, 'Reviewed T-003 Source changed: ' + file)
+  }
+ }
+ await import('./verify-mote-directory-short-public.mjs')
+ process.exit(process.exitCode ?? 0)
+}
 const base=resolve(import.meta.dirname,'../../..'),out=join(base,'.tmp/mote-directory-short-name');await mkdir(out,{recursive:true})
 const attempt=await mkdtemp(join(out,'attempt-')),isolated=join(attempt,'source'),hash=b=>createHash('sha256').update(b).digest('hex')
 const task=process.argv[process.argv.indexOf('--task')+1];assert.ok(['T-001','T-004'].includes(task),'Only approved T-001/T-004 scopes share this qualification')
