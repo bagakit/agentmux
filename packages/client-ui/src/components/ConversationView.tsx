@@ -25,14 +25,12 @@ type Props = ReadingProps & {
   locatedMessageKey?: string | null
   renderProcess?: ConversationProcessRenderer
   renderMessageActions?: (source: ConversationReplySource) => ReactNode
-  /** Hosts may retain an existing annotation/disclosure identity without replacing presentation. */
-  messageIdForRecord?: (item: AgentSessionHistoryItem) => string
   showSource?: boolean
 }
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, messageIdForRecord, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
+  page, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, renderMessageActions, showSource = false, onReplyQuestion, renderQuestionNotice, ...reading
 }: Props) {
   const messages = useMemo(() => projectSessionUserMessages({ agentSessionId: sessionId, historyPage: page }),
     [page, sessionId])
@@ -55,7 +53,7 @@ export const ConversationView = memo(function ConversationView({
       const speaker = user ? speakerOfUserMessage(user)
         : item.kind === 'assistant-message' ? { role: 'agent' as const, id: sessionId } : undefined
       const described = speaker ? describeSpeaker?.(speaker) : undefined
-      const body = <ConversationMessage messageId={messageIdForRecord?.(item) ?? user?.id ?? recordId} conversationSessionId={sessionId}
+      const body = <ConversationMessage messageId={user?.id ?? recordId} conversationSessionId={sessionId}
           {...(completedNativeReply(item) ? { status: 'complete' } : {})}
           located={Boolean(user && locatedMessageKey === conversationMessageSourceKey(sessionId, user.source))}
           content={item.contentParts} {...(item.messagePhase ? { messagePhase: item.messagePhase } : {})} {...(user ? { inputSource: user.source } : {})}

@@ -21,7 +21,7 @@ function visibleRects(target: ConversationAnnotationSelection, region: HTMLEleme
     !target.contextElement.contains(target.range.startContainer) || !target.contextElement.contains(target.range.endContainer) ||
     target.contextElement.closest('[hidden], [inert]') || target.range.toString() !== target.quote) return []
   const bounds = region.getBoundingClientRect()
-  const viewport = target.contextElement.closest<HTMLElement>('.activity-feed, .session-history__viewport')?.getBoundingClientRect()
+  const viewport = target.contextElement.closest<HTMLElement>('.activity-feed')?.getBoundingClientRect()
   const bottom = Math.min(bounds.bottom, viewport?.bottom ?? bounds.bottom)
   const top = Math.max(bounds.top, viewport?.top ?? bounds.top)
   if (bounds.width <= 0 || bounds.height <= 0) return []
@@ -144,7 +144,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
     region.addEventListener('scroll', refresh, true)
     window.addEventListener('resize', refresh)
     const resize = new ResizeObserver(() => { void update() })
-    const viewport = target.contextElement.closest<HTMLElement>('.activity-feed, .session-history__viewport')
+    const viewport = target.contextElement.closest<HTMLElement>('.activity-feed')
     if (viewport) resize.observe(viewport)
     // Only the selected body and its ancestor chain; no message-list subtree scan.
     const observer = new MutationObserver(changes => {

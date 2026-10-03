@@ -335,3 +335,10 @@
 }
 
 .log-row__time[tabindex]:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
+
+/* One conversation host; navigation occupies a single quiet row, never another viewport. */
+.activity-feed__reading { display: flex; align-items: center; gap: 6px; min-height: 24px; flex-wrap: wrap; padding: 2px 18px 6px; color: var(--text-3); font-size: 11px; }
+.activity-feed__reading > span { flex: 1; }
+.activity-feed__reading .small-button { min-height: 22px; padding: 2px 6px; font-size: 11px; }
+.activity-feed__history-divider { display: flex; align-items: center; gap: 12px; padding: 18px 18px 10px; color: var(--text-3); font-size: 10px; }
+.activity-feed__history-divider::before, .activity-feed__history-divider::after { content: ''; height: 1px; flex: 1; background: var(--line-soft); }

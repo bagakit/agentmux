@@ -65,7 +65,6 @@
 @import '@agentmux/client-ui/styles/conversation-input-details.css';
 @import '@agentmux/client-ui/styles/conversation-tool-trace.css';
 @import '@agentmux/client-ui/styles/conversation-native-thread.css';
-@import './session-history.css';
 @import './workflow.css';
 @import '@agentmux/client-ui/styles/conversation-avatar.css';
 @import './conversation-axis.css';

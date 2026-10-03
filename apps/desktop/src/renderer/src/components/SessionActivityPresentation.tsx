@@ -1,5 +1,5 @@
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
-import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode } from 'react'
+import { cloneElement, useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react'
 import { useAppStore } from '../store'
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
@@ -83,7 +83,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
     selectRegion()
     noteRef.current?.select(selection, sessionId)
   }, [selectRegion, sessionId])
-  const presented = useRef<{ sourceKey: string; content: ReactNode }>({ sourceKey, content: null })
+  const presented = useRef<{ sourceKey: string; content: ReactElement<ComponentProps<typeof ActivityView>> | null }>({ sourceKey, content: null })
   if (presented.current.sourceKey !== sourceKey) presented.current = { sourceKey, content: null }
   if (visible && eligible) {
     const { openWorkspaceFile: _primaryFile, onSelectAnnotation: _primaryAnnotation, ...facts } = activity
@@ -93,9 +93,11 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
       openHttpLink={openProseLink}
       {...(onAnnotate ? { onSelectAnnotation: selectAnnotation } : {})}
-      {...(activity.userMessageRead ? { userMessageRead: { ...activity.userMessageRead, onReadEarlier: () =>
-        setService('Earlier records are available in History in the original Session work surface. This presentation keeps Activity and your draft.') } } : {})} />
+      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: false, onClose: undefined } } : {})} />
   }
+  const content = presented.current.content && activity.conversationReading
+    ? cloneElement(presented.current.content, { conversationReading: { ...activity.conversationReading,
+      enabled: visible && eligible, opened: false, onClose: undefined } }) : presented.current.content
   const hostId = workbenchSessionStageHostId(target, regionId)
   return <StableWorkbenchView kind="region" homeId={`${hostId}:parked`} targetId={hostId}
     active={target.active} visible={visible} retainedRegionId={regionId} reference={{ ...reference, regionId }}
@@ -108,7 +110,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
         <div className="agent-body" data-observation-surface="workflow">
           {!eligible ? <div role="status" className="workbench-restore-notice">Activity is retained here. Live Terminal and recovery remain in the original Session work surface.</div> : null}
           {service && eligible ? <div role="status" className="activity-feed__read-notice">{service}</div> : null}
-          <div className="agent-terminal-stage" hidden={!eligible} inert={!eligible}>{presented.current.content}</div>
+          <div className="agent-terminal-stage" hidden={!eligible} inert={!eligible}>{content}</div>
         </div>
         <OpenDestinationPopover request={linkRequest} canSplit={Boolean(origin.tabId && origin.regionId)}
           onDismiss={id => setLinkRequest(current => dismissOpenDestinationRequest(current, id))} onSelect={chooseDestination} />
