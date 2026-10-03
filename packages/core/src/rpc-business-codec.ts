@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { isDeepStrictEqual } from 'node:util'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
   type AgentMuxControlResult, type AgentMuxControlCaller } from './control.js'
 import { parseAgentMuxControlRequest, parseAgentMuxControlReceipt } from './control-codec.js'
@@ -39,6 +40,9 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
     throw new AgentMuxError('RPC business parameters cannot contain an internal Control envelope.', 'INVALID_CONTROL_REQUEST')
   }
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
+  if ((method === 'settings.hosts.upgrade' || method === 'settings.hosts.upgrade-inspect') && typeof source.operationId !== 'string') {
+    throw new AgentMuxError('Core maintenance requires the original explicit operationId.', 'INVALID_CONTROL_REQUEST')
+  }
   if (method.startsWith('goal.')) {
     const oldKeys = (value: Record<string, unknown>): boolean =>
       Object.keys(value).some(key => ['demandId', 'parentDemandId', 'demand', 'demands'].includes(key)) ||
@@ -190,6 +194,18 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     case 'inspect.tab': case 'arrange': if (request.target.kind === 'tab' && (actual.tab as Record<string, unknown>).tabId !== request.target.tabId) fail(); break
     case 'send': if (request.target.kind === 'agent-session' && !sessionMatches(request.target.agentSessionId, actual.agentSessionId)) fail(); break
     case 'settings.set': if ((actual.entry as Record<string, unknown>).key !== request.key) fail(); break
+    case 'settings.hosts.upgrade-check': {
+      const check = actual.check as { input: Record<string, unknown> }
+      if (request.id !== undefined ? check.input.id !== request.id : !isDeepStrictEqual(check.input, request.input)) fail()
+      break
+    }
+    case 'settings.hosts.upgrade': case 'settings.hosts.upgrade-inspect': {
+      const receipt = actual.receipt as { input: { id: string }; operationId: string; expected: unknown } | null
+      if (request.operation === 'settings.hosts.upgrade' && !receipt) fail()
+      if (receipt && (receipt.input.id !== request.id || receipt.operationId !== request.requestId ||
+        request.operation === 'settings.hosts.upgrade' && !isDeepStrictEqual(receipt.expected, request.expected))) fail()
+      break
+    }
     case 'settings.browser.links.forget': if (actual.scheme !== request.scheme) fail(); break
     case 'settings.resource.get': {
       const item = actual.item as Record<string, unknown>

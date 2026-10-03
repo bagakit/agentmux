@@ -310,11 +310,18 @@ export type AgentMuxControlSettingsHostsRequest = RequestBase & (
   | { operation: 'settings.hosts.list' }
   | { operation: 'settings.hosts.test'; id: string; input?: never }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; id?: never }
+  | { operation: 'settings.hosts.upgrade-check'; id: string; input?: never }
+  | { operation: 'settings.hosts.upgrade-check'; input: AgentMuxControlSettingsResourceFields; id?: never }
+  | { operation: 'settings.hosts.upgrade'; id: string; expected: import('./remote-core-upgrade.js').RemoteCoreUpgradeExpected }
+  | { operation: 'settings.hosts.upgrade-inspect'; id: string }
 )
 export type AgentMuxHostCheckOutcome = 'ready' | 'unsupported' | 'check-failed'
 export type AgentMuxControlSettingsHostsResult =
   | { operation: 'settings.hosts.list'; hosts: AgentMuxControlSettingsResourceFields[] }
   | { operation: 'settings.hosts.test'; input: AgentMuxControlSettingsResourceFields; outcome: AgentMuxHostCheckOutcome; detail: string }
+  | { operation: 'settings.hosts.upgrade-check'; check: import('./remote-core-upgrade.js').RemoteCoreUpgradeCheck }
+  | { operation: 'settings.hosts.upgrade'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
+  | { operation: 'settings.hosts.upgrade-inspect'; receipt: import('./remote-core-upgrade.js').RemoteCoreUpgradeReceipt | null }
 export type AgentMuxControlSettingsResourceItem = { id: string; value: AgentMuxControlSettingsResourceFields }
 export type AgentMuxControlSettingsWorkspaceAddRequest = RequestBase & {
   operation: 'settings.workspaces.add'; input: AgentMuxControlSettingsResourceFields
@@ -943,6 +950,9 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'diagnostics.crash-log.reveal': 'short',
   'settings.hosts.list': 'short',
   'settings.hosts.test': 'long',
+  'settings.hosts.upgrade-check': 'long',
+  'settings.hosts.upgrade': 'long',
+  'settings.hosts.upgrade-inspect': 'long',
   'settings.executors.refresh': 'long',
   'settings.set': 'long',
   'settings.browser.links.list': 'short',

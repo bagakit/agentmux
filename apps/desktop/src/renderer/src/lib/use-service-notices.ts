@@ -10,6 +10,8 @@ export type ServiceNoticeItem = {
   /** Display metadata from this notice's owner; never part of its read identity. */
   observedAt?: number
   notice: RenderableServiceNotice
+  /** Compact owner-supplied explanation; the original facts remain in Details. */
+  summary?: RenderableServiceNotice['notice']
   action?: { label: string; run(): void }
 }
 

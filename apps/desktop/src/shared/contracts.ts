@@ -1449,6 +1449,9 @@ export type AgentMuxDesktopApi = {
   }
   hosts: {
     check(host: HostConfig): Promise<HostCheckResult>
+    upgradeCheck(host: HostConfig): Promise<import('@agentmux/core').RemoteCoreUpgradeCheck>
+    upgrade(host: HostConfig, expected: import('@agentmux/core').RemoteCoreUpgradeExpected, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt>
+    upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
   deviceManagement: {
     link(params: AgentMuxRpcParams<'device.link'>): Promise<AgentMuxRpcResult<'device.link'>>

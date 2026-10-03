@@ -14,7 +14,7 @@ async function saveRecentActivityHours(recentActivityHours: FocusRecentActivityH
 
 export const focusSettingsModule = {
   id: 'focus',
-  group: 'workflows',
+  group: 'work',
   title: 'Focus',
   description: 'How long task activity keeps a project near the front.',
   icon: Clock3,

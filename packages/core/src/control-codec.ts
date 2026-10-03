@@ -61,6 +61,7 @@ import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBro
 import { parseBrowserTargetsResult } from './control-browser-targets.js'
 import { isSpaceControlOperation, parseSpaceControlRequest, parseSpaceControlSuccessReceipt, spaceControlId } from './space-control-parser.js'
 import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecord } from './settings-resource-json.js'
+import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { isSplitDirection } from './split-direction-ssot.js'
 import { validateAgentMuxMessageEnvelope, type AgentMuxMessageEnvelope } from './agent-global-message-queue.js'
@@ -321,9 +322,16 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsResourceBudget(request, code)
     return request
   }
-  if (source.operation === 'settings.hosts.list' || source.operation === 'settings.hosts.test') {
+  if (source.operation === 'settings.hosts.upgrade' || source.operation === 'settings.hosts.upgrade-inspect') {
     const code = 'INVALID_CONTROL_REQUEST'
-    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation === 'settings.hosts.test' ? ['id', 'input'] : [])], code)
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', 'id', ...(source.operation === 'settings.hosts.upgrade' ? ['expected'] : [])], code)
+    const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, id: text(source.id, 'Host ID', code) }
+    return source.operation === 'settings.hosts.upgrade' ? { ...base, operation: source.operation, expected: parseRemoteCoreUpgradeExpected(source.expected) }
+      : { ...base, operation: source.operation }
+  }
+  if (source.operation === 'settings.hosts.list' || source.operation === 'settings.hosts.test' || source.operation === 'settings.hosts.upgrade-check') {
+    const code = 'INVALID_CONTROL_REQUEST'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'operation', ...(source.operation !== 'settings.hosts.list' ? ['id', 'input'] : [])], code)
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId }
     if (source.operation === 'settings.hosts.list') return { ...base, operation: source.operation }
     if (Object.hasOwn(source, 'id') === Object.hasOwn(source, 'input')) throw new AgentMuxError('Host Test requires exactly one ID or input.', code)
@@ -1042,6 +1050,18 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     }
     return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { item: resourceItem(result.item), changed: result.changed } })
+  }
+  if (operation === 'settings.hosts.upgrade-check' || operation === 'settings.hosts.upgrade' || operation === 'settings.hosts.upgrade-inspect') {
+    const code = 'CONTROL_PROTOCOL_ERROR'
+    settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
+    settingsResourceBudget(source, code)
+    const fields = settingsResourceRecord(result, code)
+    if (operation === 'settings.hosts.upgrade-check') {
+      settingsResourceEnvelope(fields, ['check'], code)
+      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { check: parseRemoteCoreUpgradeCheck(fields.check) } }
+    }
+    settingsResourceEnvelope(fields, ['receipt'], code)
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { receipt: fields.receipt === null ? null : parseRemoteCoreUpgradeReceipt(fields.receipt) } }
   }
   if (operation === 'settings.hosts.list' || operation === 'settings.hosts.test') {
     const code = 'CONTROL_PROTOCOL_ERROR'

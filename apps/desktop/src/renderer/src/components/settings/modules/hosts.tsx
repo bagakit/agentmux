@@ -19,7 +19,7 @@ export const hostsSettingsModule = {
   icon: Server,
   keywords: 'host hosts ssh remote hostname user port key test connection environment project folder workspace worktree register open',
   savedSummary: (config) => `${config.hosts.length} ${config.hosts.length === 1 ? 'environment' : 'environments'}`,
-  Pane({ config, active, onClose }) {
-    return <HostSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} />
+  Pane({ config, active, onClose, navigationRequest }) {
+    return <HostSettingsPane config={config} onSave={saveHosts} active={active} onClose={onClose} navigationRequest={navigationRequest} />
   }
 } as const satisfies SettingsModule

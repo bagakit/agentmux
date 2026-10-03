@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
+import type { RemoteCoreUpgradeNativeRun } from './remote-core-upgrade.js'
 import { createHash, randomUUID } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
@@ -1501,4 +1502,24 @@ export class CtxmuxRunAdapter {
     }
     this.eventListener?.(translated)
   }
+}
+/** A deployment observation of an already serving Native owner. This deliberately
+ * uses the stateless SDK rather than adapter.connect(): no activation, attachments,
+ * process signal, input, or Run lifecycle operation is part of this read. */
+export async function observeExistingCtxmuxRuns(socketPath: string, expectedInstanceId: string): Promise<{
+  instanceId: string; protocolVersion: number; runs: RemoteCoreUpgradeNativeRun[]
+}> {
+  const probe = new CtxmuxClient({ socketPath })
+  const runtime = await probe.runtimeInfo()
+  assertAgentMuxRuntimeCompatibility(runtime)
+  if (runtime.daemonInstanceId !== expectedInstanceId) throw new AgentMuxError('The original Native owner changed.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+  const client = new CtxmuxClient({ socketPath, expectedRuntimeIdentity: runtime })
+  const runs: RemoteCoreUpgradeNativeRun[] = []
+  for (const summary of await client.list()) {
+    const status = await client.status(summary.id)
+    runs.push({ runId: status.id, pid: status.pid, state: status.state.type, outputBytes: status.latest_output_bytes, inputBytes: status.applied_input_bytes })
+  }
+  const after = await client.runtimeInfo()
+  if (after.daemonInstanceId !== runtime.daemonInstanceId) throw new AgentMuxError('The Native owner changed during inventory.', 'CORE_UPGRADE_RESPONSE_UNKNOWN')
+  return { instanceId: runtime.daemonInstanceId, protocolVersion: runtime.protocolGeneration, runs }
 }

@@ -328,7 +328,7 @@ class RpcClient implements AgentMuxRpcClient {
     const rpc = new JSONRPCClient(async payload => {
       try {
         if (this.endpoint.transport === 'ssh') {
-          if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined })
+          if (!this.ssh) this.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(this.endpoint), () => { this.ssh = undefined }, this.endpoint.socketPath)
           opening = this.ssh.open(payload, receive, end, controller.signal, armDeadline)
         } else { armDeadline(); opening = openRequest(this.endpoint, payload, receive, end, controller.signal, this.relayKeyPair) }
         reader = await opening
