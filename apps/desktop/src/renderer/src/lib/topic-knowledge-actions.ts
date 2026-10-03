@@ -50,6 +50,16 @@ export function selectedKnowledgeSources(workspaceId: string): { title: string; 
 }
 export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise<void> {
   const state = useAppStore.getState()
+  if (source.kind === 'notebook') {
+    const library = await api.notebooks.read()
+    if (!library.notebooks[source.notebookId]) throw new Error('The original notebook is not confirmed. Its source reference is kept.')
+    const current = useAppStore.getState()
+    if (current.mainSurface !== state.mainSurface || current.surveyNotebookId !== state.surveyNotebookId || current.surveyNoteId !== state.surveyNoteId || current.surveyZoneSelection !== state.surveyZoneSelection || current.workbenchSpaceSelection !== state.workbenchSpaceSelection) return
+    useAppStore.getState().setSurveyZoneSelection(null)
+    useAppStore.getState().setSurveyNotebook(source.notebookId)
+    useAppStore.getState().setMainSurface('survey')
+    return
+  }
   if (source.kind === 'url') return api.ui.openExternal(source.url)
   if (source.kind === 'file') {
     const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === source.hostId)

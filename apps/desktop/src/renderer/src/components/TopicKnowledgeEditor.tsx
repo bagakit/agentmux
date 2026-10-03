@@ -54,9 +54,9 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
   </Dialog.Root>
 }
 export function knowledgeSourceLabel(source: TopicKnowledgeSource): string {
-  return source.kind === 'file' ? source.path : source.kind === 'url' ? source.url : source.kind === 'note' ? 'Original note' : source.kind === 'topic' ? 'Original discussion' : source.kind === 'survey' ? 'Original research' : 'Original workface'
+  return source.kind === 'file' ? source.path : source.kind === 'url' ? source.url : source.kind === 'note' ? 'Original note' : source.kind === 'notebook' ? 'Original notebook' : source.kind === 'topic' ? 'Original discussion' : source.kind === 'survey' ? 'Original research' : 'Original workface'
 }
-export function TopicKnowledgeCapture({ target, onClose }: { target: { title: string; sources: TopicKnowledgeSource[] } | null; onClose(): void }) {
+export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { title: string; sources: TopicKnowledgeSource[] } | null; onClose(): void; onSaved?: (entry: TopicKnowledge) => void }) {
   const categories = useAppStore(state => state.topicCategories)
   const [topics, setTopics] = useState<KnowledgeTopic[]>([]), [topicId, setTopicId] = useState(''), [error, setError] = useState<string | null>(null)
   const [edit, setEdit] = useState<KnowledgeEditTarget | null>(null), [loading, setLoading] = useState(false)
@@ -102,6 +102,6 @@ export function TopicKnowledgeCapture({ target, onClose }: { target: { title: st
       {error ? <p role="status" className="surface-inline-error">{error}</p> : null}{loading ? <p role="status">Reading Topics…</p> : null}
       <footer><button type="button" className="small-button" disabled={creating} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={creating || !topicId || (topicId === '__new_topic__' && !newTitle.trim())} onClick={() => void continueCapture()}>{creating ? 'Creating…' : 'Continue'}</button></footer>
     </Dialog.Content></Dialog.Portal></Dialog.Root>
-    <TopicKnowledgeEditor target={edit} onClose={() => setEdit(null)} onSaved={() => { setEdit(null); onClose() }} />
+    <TopicKnowledgeEditor target={edit} onClose={() => setEdit(null)} onSaved={entry => { onSaved?.(entry); setEdit(null); onClose() }} />
   </>
 }

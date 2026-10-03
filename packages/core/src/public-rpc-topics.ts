@@ -25,6 +25,7 @@ export type TopicKnowledgeSource =
   | { kind: 'topic'; topicId: string; chatId?: string; threadId?: string }
   | { kind: 'file'; hostId: string; path: string; projectId?: string; revision?: string }
   | { kind: 'note'; noteId: string; blockId?: string }
+  | { kind: 'notebook'; notebookId: string }
   | { kind: 'survey'; zoneId: string; tabId?: string; regionId?: string }
   | { kind: 'space'; zoneId: string; tabId?: string; regionId?: string }
   | { kind: 'url'; url: string }
@@ -139,10 +140,11 @@ function knowledgePayload(p: Record<string, unknown>, code: string): void {
   for (const value of p.sources as unknown[]) {
     const source = rpcRecord(value, undefined, code)
     const fields = source.kind === 'topic' ? ['kind','topicId','chatId','threadId'] : source.kind === 'file' ? ['kind','hostId','path','projectId','revision']
-      : source.kind === 'note' ? ['kind','noteId','blockId'] : source.kind === 'survey' || source.kind === 'space' ? ['kind','zoneId','tabId','regionId'] : source.kind === 'url' ? ['kind','url'] : null
+      : source.kind === 'note' ? ['kind','noteId','blockId'] : source.kind === 'notebook' ? ['kind','notebookId']
+      : source.kind === 'survey' || source.kind === 'space' ? ['kind','zoneId','tabId','regionId'] : source.kind === 'url' ? ['kind','url'] : null
     if (!fields) invalid('Choose an original typed knowledge source.', code)
     rpcRecord(source, fields, code)
-    const required = source.kind === 'topic' ? ['topicId'] : source.kind === 'file' ? ['hostId','path'] : source.kind === 'note' ? ['noteId'] : source.kind === 'survey' || source.kind === 'space' ? ['zoneId'] : ['url']
+    const required = source.kind === 'topic' ? ['topicId'] : source.kind === 'file' ? ['hostId','path'] : source.kind === 'note' ? ['noteId'] : source.kind === 'notebook' ? ['notebookId'] : source.kind === 'survey' || source.kind === 'space' ? ['zoneId'] : ['url']
     for (const key of required) string(source[key], code)
     for (const key of fields) if (key !== 'kind' && source[key] !== undefined) string(source[key], code)
     if (source.kind === 'topic') topicId(source.topicId, code)

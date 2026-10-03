@@ -25,7 +25,7 @@ export type NotebookChange =
   | { kind: 'rename-page'; noteId: string; title: string }
   | { kind: 'source'; noteId: string; source: NoteSource }
   | { kind: 'organize'; noteId: string; topic: { spaceId: string; topicId?: string } }
-  | { kind: 'relocate'; noteId: string; resource: NoteResource }
+  | { kind: 'relocate'; noteId: string; resource: NoteResource; from?: NoteResource }
 export type NotebookWrite = { expectedRevision: number; operationId: string; change: NotebookChange }
 export type NotebookState = { schemaVersion: 1; revision: number; notebooks: Record<string, Notebook>;
   pages: Record<string, NotebookPage>; trail: NoteTrailEvent[];
@@ -121,7 +121,7 @@ export function parseNotebookState(value: unknown): NotebookState {
 /** One semantic writer shared by Node persistence and the explicitly labelled Renderer preview. */
 export function applyNotebookChange(state: NotebookState, input: NotebookWrite, recordedBy: NotebookActor, at: number): NotebookState {
   object(input, ['operationId', 'expectedRevision', 'change'])
-  const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource'] }
+  const fields: Record<string, readonly string[]> = { create: ['notebookId', 'name', 'workface'], rename: ['notebookId', 'name'], bind: ['notebookId', 'workface'], register: ['noteId', 'notebookId', 'parentNoteId', 'title', 'resource', 'workface', 'source'], move: ['noteId', 'notebookId', 'parentNoteId'], 'rename-page': ['noteId', 'title'], source: ['noteId', 'source'], organize: ['noteId', 'topic'], relocate: ['noteId', 'resource', 'from'] }
   const changeKind = object(input.change).kind
   if (!Object.hasOwn(fields, changeKind)) invalid('Unknown Notebook action. Original knowledge is kept.')
   object(input.change, ['kind', ...fields[changeKind]!])
@@ -159,7 +159,7 @@ export function applyNotebookChange(state: NotebookState, input: NotebookWrite, 
     case 'rename-page': {const p=getPage(change.noteId),before=location(p);const title=text(change.title,'page title').trim();if(title===p.title)break;p.title=title;event(p,'renamed',before);break}
     case 'source': {const p=getPage(change.noteId),added=source(change.source),old=p.sources.find(s=>s.sourceId===added.sourceId);if(old){if(notebookFingerprint(old)!==notebookFingerprint(added))invalid('The original source identity cannot be overwritten.');break}const before=location(p);p.sources.push(added);event(p,'source-added',before,{source:added});break}
     case 'organize': {const p=getPage(change.noteId),added=topic(change.topic);if(!p.topics.some(t=>t.spaceId===added.spaceId)){const before=location(p);p.topics.push(added);event(p,'organized',before,{topic:added})}break}
-    case 'relocate': {const p=getPage(change.noteId),before=location(p);const target=resource(change.resource);if(notebookFingerprint(p.resource)===notebookFingerprint(target))break;p.resource=target;event(p,'relocated',before);break}
+    case 'relocate': {const p=getPage(change.noteId),before=location(p);if(change.from && notebookFingerprint(p.resource)!==notebookFingerprint(resource(change.from)))invalid('The Note resource changed after this file operation. Its current reference is kept; inspect the original move before retrying.');const target=resource(change.resource);if(notebookFingerprint(p.resource)===notebookFingerprint(target))break;p.resource=target;event(p,'relocated',before);break}
     default: invalid('Unknown Notebook action. Original knowledge is kept.')
   }
   next.operations[operationId]={fingerprint,actor:recorded};next.revision=state.revision+1

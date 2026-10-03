@@ -133,3 +133,38 @@ describe('durable Notebook directory with no App or open Note',()=>{
   })
 
 })
+
+
+it('refuses an obsolete confirmed file-move receipt after another resource relocation and keeps foreign ownership', async () => {
+  const {store} = await fixture(), actor = {kind:'user' as const,id:'original-user'}
+  const original = {hostId:'remote-host',workspaceId:'remote-workspace',workspacePath:upstreamFixturePath("remote/research"),path:'Original.note.json'}
+  let state = await store.read()
+  state = await store.apply({expectedRevision:state.revision,operationId:'remote-note',change:{kind:'register',noteId:'remote-note',title:'Original',resource:original}},actor)
+  const current = {...original,path:'Current.note.json'}
+  state = await store.apply({expectedRevision:state.revision,operationId:'current-location',change:{kind:'relocate',noteId:'remote-note',from:original,resource:current}},actor)
+  await expect(store.apply({expectedRevision:state.revision,operationId:'obsolete-location',change:{kind:'relocate',noteId:'remote-note',from:original,resource:{...original,path:'Obsolete.note.json'}}},actor)).rejects.toThrow('resource changed')
+  expect(await store.read()).toEqual(state)
+  expect(state.pages['remote-note']!.resource).toEqual(current)
+})
+
+
+it('queries confirmed Topic and original resource changes through the shipping headless CLI and replays the same receipt', async () => {
+  const {dir,store} = await fixture(), server = new AgentMuxControlServer({socketPath:join(dir,'continuity.sock'),notebookStore:store,coreClients:()=>[]})
+  servers.push(server); await server.start()
+  const env = {AGENTMUX_RPC_ENDPOINT:'unix:'+server.path}
+  async function change(operationId:string,value:NotebookChange) {
+    const result = await run(cli,['notebook','apply','--revision',String((await store.read()).revision),'--operation-id',operationId,'--change-json',JSON.stringify(value)],env)
+    expect(result.code,result.stderr).toBe(0);return result.result.result.state
+  }
+  await change('original-file',{kind:'register',noteId:'continuous-note',title:'Research',resource,source})
+  await change('confirmed-topic',{kind:'organize',noteId:'continuous-note',topic:{spaceId:'topic-space',topicId:'published'}})
+  const relocation:NotebookChange = {kind:'relocate',noteId:'continuous-note',from:resource,resource:{...resource,path:'Findings.note.json'}}
+  const state = await change('confirmed-file-move',relocation), replay = await change('confirmed-file-move',relocation)
+  expect(replay).toEqual(state)
+  const inspected = await run(cli,['notebook','inspect','--note','continuous-note'],env)
+  expect(inspected.code,inspected.stderr).toBe(0)
+  expect(inspected.result.result.pages[0]).toMatchObject({resource:{...resource,path:'Findings.note.json'},sources:[source],topics:[{spaceId:'topic-space',topicId:'published'}]})
+  expect(inspected.result.result.trail.map((event:any)=>event.action)).toEqual(['created','organized','relocated'])
+  expect(inspected.result.result.trail.every((event:any)=>event.actor.kind==='user')).toBe(true)
+  await writeFile(resolve('.tmp/survey-notebook/continuity-cli-receipt.json'),JSON.stringify({state,replay,inspected:inspected.result.result},null,2)+'\n')
+})

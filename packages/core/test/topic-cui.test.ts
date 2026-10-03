@@ -1,8 +1,17 @@
 import { fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
-import { parseTopicParams, parseTopicResult, type TopicKnowledgeWrite } from '../src/public-rpc-topics'
-import { parseRpcNativeResult } from '../src/rpc-native-codec'
-import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help'
+import { spawn } from 'node:child_process'
+import { mkdtemp, rm, symlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { build } from 'esbuild'
+import { parseTopicParams, parseTopicResult, type TopicKnowledge, type TopicKnowledgeWrite, type TopicResult } from '../src/public-rpc-topics.js'
+import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
+import { AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
+import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 const category = { categoryId: '11111111-1111-4111-8111-111111111111', hostId: 'local', spaceId: JSON.stringify(['local', upstreamFixturePath('topics/category')]), directoryPath: upstreamFixturePath("topics/category"), title: '工作', revision: 'sha256:' + 'a'.repeat(64) }
 describe('Topic typed public contract', () => {
   it('rejects spoofed envelopes, malformed revisions and inexact content identities before mutation', () => {
@@ -48,4 +57,80 @@ describe('Topic typed public contract', () => {
     expect(() => parseTopicResult('topic.knowledge.write', { entry, diskDurability: 'unknown' }, input)).toThrow()
     expect(() => parseTopicResult('topic.knowledge.ls', { entries: [entry, entry], unavailable: [] }, { topicId: input.topicId, limit: 1 })).toThrow()
   })
+  it('rejects malformed Notebook locators and copied resource fields in both request and response sources', () => {
+    const input: TopicKnowledgeWrite = { topicId: 'view:topic', entryId: category.categoryId, title: 'Original notebook', content: '',
+      form: 'reference', certainty: 'proposal', sources: [{ kind: 'notebook', notebookId: 'original-notebook' }], expectedRevision: null }
+    expect(parseTopicParams('topic.knowledge.write', input).sources).toEqual(input.sources)
+    const { expectedRevision, ...authored } = input
+    for (const source of [{ kind: 'notebook' }, { kind: 'notebook', notebookId: '' }, { kind: 'notebook', notebookId: 42 },
+      { kind: 'notebook', notebookId: 'original\nnotebook' }, { kind: 'notebook', notebookId: 'original-notebook', noteId: 'borrowed-note' },
+      { kind: 'notebook', notebookId: 'original-notebook', resource: { path: 'copied.note.json' } }]) {
+      expect(() => parseTopicParams('topic.knowledge.write', { ...input, sources: [source] })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+      expect(() => parseTopicResult('topic.knowledge.read', { entry: { ...authored, sources: [source], revision: category.revision, updatedAt: 1 } }, input))
+        .toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+    }
+  })
+  it('round-trips exact Notebook and Note source identities through the real RPC service and shipping CLI', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'amx-topic-cui-')), cli = join(root, 'cli.mjs')
+    const entries = new Map<string, TopicKnowledge>(), calls: string[] = []
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), coreClients: () => [], topics: {
+      async call(method, params) {
+        calls.push(method)
+        const input = params as TopicKnowledgeWrite
+        if (method === 'topic.knowledge.write') {
+          const { expectedRevision, ...authored } = input
+          const entry: TopicKnowledge = structuredClone({ ...authored, revision: category.revision!, updatedAt: 1 })
+          entries.set(entry.entryId, entry)
+          return { entry, diskDurability: 'confirmed' } as TopicResult<typeof method>
+        }
+        if (method === 'topic.knowledge.read') return { entry: entries.get(input.entryId) ?? null } as TopicResult<typeof method>
+        throw new Error('Unexpected content owner operation: ' + method)
+      }
+    } })
+    try {
+      // Compile this source candidate privately; never rebuild or mutate shipping Core dist.
+      await symlink(fileURLToPath(new URL('../node_modules', import.meta.url)), join(root, 'node_modules'), 'dir')
+      const compiled = await build({ entryPoints: [fileURLToPath(new URL('../src/agentmux.ts', import.meta.url))], outfile: cli,
+        bundle: true, platform: 'node', format: 'esm', packages: 'external', metafile: true, logLevel: 'silent' })
+      expect(Object.keys(compiled.metafile!.inputs).some(path => path.endsWith('/src/public-rpc-topics.ts'))).toBe(true)
+      await server.start()
+      const env = objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+      async function run(args: string[], stdin = '') {
+        return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+          const child = spawn(process.execPath, [cli, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+          let stdout = '', stderr = ''
+          const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('Private Topic CLI exceeded its test deadline.')) }, 10_000)
+          child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8')
+          child.stdout.on('data', text => { stdout += text }); child.stderr.on('data', text => { stderr += text })
+          child.once('error', error => { clearTimeout(timer); reject(error) })
+          child.once('close', code => { clearTimeout(timer); resolve({ code, stdout, stderr }) })
+          child.stdin.end(stdin)
+        })
+      }
+      const input: TopicKnowledgeWrite = { topicId: 'view:topic', entryId: category.categoryId, title: 'Original notebook and borrowed Note', content: '',
+        form: 'reference', certainty: 'proposal', sources: [{ kind: 'notebook', notebookId: 'original-notebook' }, { kind: 'note', noteId: 'borrowed-note' }], expectedRevision: null }
+      const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+      try {
+        const written = await client.call('topic.knowledge.write', input)
+        expect(written.entry.sources).toEqual(input.sources)
+        expect((await client.call('topic.knowledge.read', { topicId: input.topicId, entryId: input.entryId })).entry).toEqual(written.entry)
+        const cliInput = { ...input, entryId: '22222222-2222-4222-8222-222222222222' }
+        const saved = await run(['topic', 'knowledge', 'write', '--input', '-'], JSON.stringify(cliInput))
+        expect(saved.code, saved.stderr).toBe(0)
+        expect(JSON.parse(saved.stdout).result.entry.sources).toEqual(input.sources)
+        const read = await run(['topic', 'knowledge', 'read', '--topic', input.topicId, '--entry', cliInput.entryId])
+        expect(read.code, read.stderr).toBe(0)
+        expect(JSON.parse(read.stdout).result.entry).toEqual(entries.get(cliInput.entryId))
+        const admittedCalls = [...calls]
+        await expect(client.call('topic.knowledge.write', { ...input, sources: [{ kind: 'notebook', notebookId: 'original-notebook', copiedChildren: [] }] } as unknown as TopicKnowledgeWrite))
+          .rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+        const refused = await run(['topic', 'knowledge', 'write', '--input', '-'], JSON.stringify({ ...cliInput, sources: [{ kind: 'notebook' }] }))
+        expect(refused.code).not.toBe(0)
+        expect(JSON.parse(refused.stderr).error.code).toBe('INVALID_CONTROL_REQUEST')
+        expect(calls).toEqual(admittedCalls)
+        expect(admittedCalls).toEqual(['topic.knowledge.write', 'topic.knowledge.read', 'topic.knowledge.write', 'topic.knowledge.read'])
+        expect(entries.size).toBe(2)
+      } finally { await client.dispose() }
+    } finally { await server.stop(); await rm(root, { recursive: true, force: true }) }
+  }, 20_000)
 })

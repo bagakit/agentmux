@@ -520,7 +520,7 @@ export function reduceFileRename(
   workspaceId: string,
   path: string,
   nextPath: string
-): FileWorkbenchState {
+): FileWorkbenchState & { tabIds: ReadonlyMap<string, string> } {
   const affectedTabs = Object.values(state.tabs).flatMap((tab) => {
     const surfaces = workbenchSurfaces(tab).filter((surface): surface is FileWorkbenchSurface => (
       surface.kind === 'file' &&
@@ -612,6 +612,7 @@ export function reduceFileRename(
     savingDocuments[documentKey(workspaceId, remapPathWithinSubtree(documentPath, path, nextPath))] = false
   }
   return {
+    tabIds: replacements,
     tabs,
     documents,
     dirtyDocuments,
@@ -622,7 +623,7 @@ export function reduceFileRename(
     layouts: Object.fromEntries(
       Object.entries(state.layouts).map(([id, layout]) => [
         id,
-        id === workspaceId ? remapLayoutTabIds(layout, replacements) : layout
+        remapLayoutTabIds(layout, replacements)
       ])
     ),
     lastActiveFileByWorkspace: {

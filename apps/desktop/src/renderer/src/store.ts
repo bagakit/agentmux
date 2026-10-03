@@ -29,6 +29,7 @@ import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import { desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
 import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
 import { directoryIdentity, homeZoneId, topicSpatialAddress } from '../../shared/space-addresses'
@@ -533,6 +534,7 @@ type AppState = {
   agentNames: Record<string, string>
   noticeReadReceipts: Record<string, Record<string, string>>
   mainSurface: MainSurface
+  notebookRecoveries: NotebookRecovery[]
   surveyNotebookId: string | null
   surveyNoteId: string | null
   setSurveyNotebook(notebookId: string | null, noteId?: string | null): void
@@ -2115,6 +2117,7 @@ type PersistedAppState = {
   viewModes?: Record<string, ViewMode>
   activeWorkspaceId?: string | null
   mainSurface?: MainSurface
+  notebookRecoveries?: NotebookRecovery[]
   surveyNotebookId?: string | null
   surveyNoteId?: string | null
   surveyZoneSelection?: PersistedSurveyZoneSelection | null
@@ -2147,6 +2150,7 @@ export type RestoredUiState = Pick<
   | 'workbenchSpaceSelection'
   | 'activeWorkspaceId'
   | 'mainSurface'
+  | 'notebookRecoveries'
   | 'surveyNotebookId'
   | 'surveyNoteId'
   | 'surveyZoneSelection'
@@ -2231,6 +2235,7 @@ export function restorePersistedUiState(
     | 'workbenchSpaceSelection'
     | 'activeWorkspaceId'
     | 'mainSurface'
+    | 'notebookRecoveries'
     | 'surveyNotebookId'
     | 'surveyNoteId'
     | 'surveyZoneSelection'
@@ -2261,6 +2266,7 @@ export function restorePersistedUiState(
     focusTimelineRuler: restoreFocusRuler(persisted.focusTimelineRuler),
     activeWorkspaceId: reseatActiveWorkspaceId(config, persisted.activeWorkspaceId),
     mainSurface: restoredMainSurface(persisted.mainSurface),
+    notebookRecoveries: restoreNotebookRecoveries(persisted.notebookRecoveries),
     surveyNotebookId: typeof persisted.surveyNotebookId === 'string' ? persisted.surveyNotebookId : null,
     surveyNoteId: typeof persisted.surveyNoteId === 'string' ? persisted.surveyNoteId : null,
     surveyZoneSelection: restoredSurveyZoneSelection(persisted.surveyZoneSelection),
@@ -2323,6 +2329,7 @@ function selectPersistedInputs(state: AppState) {
     // topology, while PTY/Run/scrollback/Provider transcript state remains Core-owned.
     activeWorkspaceId: state.activeWorkspaceId,
     mainSurface: state.mainSurface,
+    notebookRecoveries: state.notebookRecoveries,
     surveyNotebookId: state.surveyNotebookId, surveyNoteId: state.surveyNoteId,
     surveyZoneSelection: state.surveyZoneSelection,
     surveyCollectedZones: state.surveyCollectedZones,
@@ -2827,6 +2834,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   noticeReadReceipts: {},
   agentNames: {},
   mainSurface: 'workbench',
+  notebookRecoveries: [],
   surveyNotebookId: null, surveyNoteId: null,
   setSurveyNotebook(notebookId, noteId = null) { set({ surveyNotebookId: notebookId, surveyNoteId: noteId }) },
   surveyZoneSelection: null,
@@ -6636,6 +6644,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const documentPath = key.slice(prefix.length)
         return isPathWithinSubtree(documentPath, path) ? [documentPath] : []
       })
+      let originalLibrary = useNotebookLibrary.getState().state
+      try { originalLibrary = await refreshNotebookLibrary() }
+      catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
+      const resource = stateBeforeMove.config?.workspaces.find(item => item.id === workspaceId)
+      const relocations = originalLibrary && resource ? notebookRelocations(originalLibrary, resource, path, nextPath) : []
       let result
       try {
         result = await api.files.move({
@@ -6657,13 +6670,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       for (const observedPath of observedPaths) {
         advanceDocumentLifetime(documentKey(workspaceId, observedPath))
       }
-      set((state) => ({
-        ...reduceFileRename(state, workspaceId, path, nextPath),
+      set((state) => {
+        const { tabIds, ...renamed } = reduceFileRename(state, workspaceId, path, nextPath)
+        // The File owner confirmed these legacy Tab identities were replaced. Retire
+        // only the replaced Tabs; their original Region identities remain in the new Tabs.
+        for (const [oldTabId, newTabId] of tabIds) {
+          if (oldTabId !== newTabId) coreSpatialPersistence?.removeEntity(oldTabId)
+        }
+        const remap = (reference: NonNullable<AppState['surveyZoneSelection']>['selection'][number]) => tabIds.has(reference.tabId) ? { ...reference, tabId: tabIds.get(reference.tabId)! } : reference
+        return { ...renamed,
+        surveyZoneSelection: state.surveyZoneSelection ? { ...state.surveyZoneSelection,
+          selection: state.surveyZoneSelection.selection.map(remap), active: state.surveyZoneSelection.active ? remap(state.surveyZoneSelection.active) : null } : null,
         // Same reason as `createPath`: the Topics panel and the Board read this counter and nothing
         // else. Moving a Topic's `topic.md` out breaks the Topic's identity, and only the file tree
         // would notice. Folded into the projection's own `set` so it is one render, not two.
         workspaceFileRevisions: bumpWorkspaceFileRevision(state.workspaceFileRevisions, workspaceId)
-      }))
+        }
+      })
       for (const observedPath of observedPaths) {
         const renamedPath = remapPathWithinSubtree(observedPath, path, nextPath)
         transferFileSaveTail(workspaceId, observedPath, renamedPath)
@@ -6682,6 +6705,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         } catch (error) {
           get().reportError(error)
         }
+      }
+      // The original File owner has confirmed success. A catalog failure never undoes or
+      // blocks this healthy file; exact metadata intents survive in the original UI receipt.
+      if (relocations.length) {
+        try { await recordNotebookChanges(relocations, 'note-file-move:' + crypto.randomUUID()) }
+        catch (error) { get().reportError(error, { kind: 'process-degraded' }) }
       }
     })
   },

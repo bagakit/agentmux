@@ -205,15 +205,17 @@ function DesktopApp() {
   const surveyOccurrence = useRef<WorkbenchProjectionSelection | null>(null)
   const selectSurveyReference = useCallback<WorkbenchProjection['onSelect']>(reference => {
     const state = useAppStore.getState()
-    if (!surveyCatalog || !state.surveyZoneSelection || state.surveyZoneSelection.zoneId !== surveySelection?.zoneId) return
+    if (!state.surveyZoneSelection) return
+    const currentTopics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []
+    const currentCatalog = spatialCatalog(state, currentTopics)
     const tab = state.tabs[reference.tabId]
-    const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, surveyCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
+    const scope = resolveWorkbenchZone(state.surveyZoneSelection.zoneId, currentCatalog, state.layouts, state.tabs, 'survey-workbench', [], () => {})
     const layout = scope?.composition ?? state.layouts[reference.displayWorkspaceId]
-    if (!surveyCatalog || !tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
-      !spatialCatalog(state, surveyTopics ?? []).tabs.some(member => member.tabId === tab.id && member.zoneId === state.surveyZoneSelection!.zoneId)) return
+    if (!tab?.regions[reference.regionId] || !layout?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(tab.id)) ||
+      !currentCatalog.tabs.some(member => member.tabId === tab.id && member.zoneId === state.surveyZoneSelection!.zoneId)) return
     surveyOccurrence.current = reference
     state.setSurveyZoneSelection(surveySelectReference(state.surveyZoneSelection, reference))
-  }, [surveySelection?.zoneId, surveyCatalog, surveyTopics])
+  }, [])
   const surveyProjection = useMemo(() => {
     if (!surveySelection || !surveyCatalog) return null
     const projection = resolveWorkbenchZone(surveySelection.zoneId, surveyCatalog, layouts, tabs, 'survey-workbench',
@@ -223,6 +225,10 @@ function DesktopApp() {
     if (!projection || !surveyNotebookId || !surveyNoteId || !active || surface?.kind !== 'file') return projection
     const references = projection.selection.filter(reference => reference.tabId === active.tabId && reference.regionId === active.regionId)
     const reference = references.find(value => surveyOccurrence.current && sameWorkbenchProjectionSelection(value, surveyOccurrence.current))
+      // The original File owner may change a legacy path-based Tab ID. The same immutable Region
+      // in this exact display/Group remains the original occurrence; never choose another Group.
+      ?? references.find(value => surveyOccurrence.current && value.regionId === surveyOccurrence.current.regionId &&
+        value.displayWorkspaceId === surveyOccurrence.current.displayWorkspaceId && value.groupId === surveyOccurrence.current.groupId)
       ?? (references.length === 1 ? references[0] : undefined)
     return reference ? { ...projection, entity: { kind: 'region' as const, regionId: reference.regionId }, selection: [reference] } : projection
   }, [surveySelection, surveyCatalog, layouts, tabs, selectSurveyReference, surveyNotebookId, surveyNoteId])
@@ -489,7 +495,7 @@ function DesktopApp() {
                   <button className="primary-button" onClick={() => setSettingsRoute({ section: 'hosts' })}>Configure a host</button>
                 </section>
               ) : null}
-              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
+              {surveyVisited || mainSurface === 'survey' ? <GlobalSurveySurface onSelectReference={selectSurveyReference} visible={surveyVisible} controlsCoverPage={surveyToolsOpen && narrowControls} unconfirmedBrowserRegionIds={unconfirmedBrowserRegionIds} catalog={surveyCatalog} projection={surveyProjection} selection={surveyCurrentSelection} viewTargets={viewTargets}
                 /> : null}
               {mainSurface === 'agents' ? <GlobalFocusSurface visible={focusVisible} regionOnly={focusRegionOnly} onToggleRegion={() => setFocusRegionOnly(value => !value)} presentation={focusPresentation} directoryIssue={spatialDirectory.issue} viewTargets={viewTargets} /> : null}
               {mainSurface === 'board' ? <GlobalBoardSurface /> : null}
