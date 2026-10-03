@@ -1,6 +1,11 @@
-import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixturePath as _hygiene_fixturePath, fixtureYear as _hygiene_fixtureYear } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { webcrypto } from 'node:crypto'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
+import { displayLabel } from '@agentmux/core/spatial-graph'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -20,8 +25,11 @@ import type { AgentLaunchResult, AppConfig, SessionSnapshot } from '../src/share
 const initial = useAppStore.getState()
 let container: HTMLDivElement, root: Root, dispose: (() => void) | undefined
 let config: AppConfig, original: Extract<SessionSnapshot, { kind: 'agent' }>, source: TakeoverSource
+let nameOwner: AgentMuxSpatialStateStore, ownerDirectory: string
+const creations = new Map<string, AgentLaunchResult['created']>()
 const diagnostic = 'Original diagnostic ' + 'all retained details; '.repeat(100)
 beforeEach(async () => {
+  creations.clear()
   vi.stubGlobal('crypto', webcrypto)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -36,17 +44,22 @@ beforeEach(async () => {
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
   vi.spyOn(api.providers, 'list').mockResolvedValue([])
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
-  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [original], timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.sessions, 'snapshot').mockImplementation(async () => ({sessions:useAppStore.getState().sessions.length?useAppStore.getState().sessions:[original],timelines:{},recoveryCandidates:[]}))
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  vi.spyOn(api.sessions, 'creation').mockImplementation(async (_hostId, id) => {
+    const created = creations.get(id)
+    if (!created) throw new Error('The exact fixture creation is not observed')
+    return structuredClone(created)
+  })
   // Each scenario has a fresh external Core spatial store. The Desktop's real
   // persistence and spatial orchestrator consume it; prior preview cases cannot
   // reintroduce another case's durable creation intent.
-  let spatial: Awaited<ReturnType<typeof api.spatial.read>> = null
-  vi.spyOn(api.spatial, 'read').mockImplementation(async () => structuredClone(spatial))
-  vi.spyOn(api.spatial, 'commit').mockImplementation(async input => {
-    spatial = { schemaVersion: 1, revision: input.expectedRevision + 1, graph: structuredClone(input.graph) }
-    return structuredClone(spatial)
-  })
+  ownerDirectory = await mkdtemp(join(tmpdir(), 'amux-takeover-name-'))
+  nameOwner = new AgentMuxSpatialStateStore(join(ownerDirectory, 'spatial.json'))
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => nameOwner.readForLayout())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => nameOwner.commit(input))
+  vi.spyOn(api.spatial, 'renameLabel').mockImplementation(input => nameOwner.mutateDisplayLabel(input, {
+    actor: {kind:'device',id:'private-takeover-fixture',verified:true},source:'desktop-ui',entryPoint:'spatial:renameLabel',transport:'electron-ipc',location:{windowId:'private-window'}}))
   vi.spyOn(api.spatial, 'onChange').mockImplementation(() => () => {})
   useAppStore.setState({ ...initial, config: null, restoredWorkbench: null, tabs: {}, layouts: {}, spatialRequests: {}, spaceZoneBindings: {} }, true)
   dispose = await useAppStore.getState().initialize()
@@ -57,15 +70,19 @@ beforeEach(async () => {
     executorDetections: { [executorDetectionKey('local', 'fixture')]: { state: 'error', error: 'Discovery unavailable' } } })
   source = { agentSessionId: original.id, hostId: 'local', cwd: _hygiene_fixturePath("repo"), label: original.label, executorId: 'fixture', diagnostic,
     origin: { workspaceId: 'repo', tabGroupId: 'source-group', tabId: tab.id, regionId: 'source-region' } }
+  await useAppStore.getState().retryWorkbenchSave()
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
 })
 afterEach(async () => {
   await act(async () => root.unmount())
   dispose?.(); dispose = undefined; document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true)
+  await rm(ownerDirectory, {recursive:true,force:true})
 })
 function launched(id: string, operationId: string): AgentLaunchResult {
-  const session = { ...original, id, label: 'Successor', control: { ...original.control, agentSessionId: id, run: { runId: `new:${id}` } } }
-  return { created: { ...agentCreationFixture(session), creation: { createOperationId: operationId, initialPrompt: 'confirmed' } },
+  const session = { ...original, id, label: 'Successor', createdAt: Date.now(), control: { ...original.control, agentSessionId: id, run: { runId: `new:${id}` } } }
+  const created = { ...agentCreationFixture(session), hostId: 'local', creation: { createOperationId: operationId, initialPrompt: 'confirmed' as const } }
+  creations.set(id, created)
+  return { created,
     creation: { createOperationId: operationId, initialPrompt: 'confirmed' }, session,
     timeline: { agentSessionId: id, revision: 0, items: [] }, projectionFailures: [] }
 }
@@ -115,7 +132,7 @@ it('one choice reaches the real spatial owner, hands over complete context and p
   const onClose = await mountPicker()
   const pick = document.querySelector<HTMLButtonElement>('.agent-pick[data-executor-id="fixture"]')!
   await act(async () => { pick.click(); pick.click(); await vi.waitFor(() => expect(launch).toHaveBeenCalledTimes(1)) })
-  await act(async () => { await vi.waitFor(() => expect(onClose).toHaveBeenCalledTimes(1)) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(onClose).toHaveBeenCalledTimes(1) })
   const input = launch.mock.calls[0]![0]
   expect(input.hostId).toBe('local'); expect(input.workspacePath).toBe(_hygiene_fixturePath("repo"))
   expect(input.prompt).toContain(diagnostic)
@@ -132,6 +149,45 @@ it('one choice reaches the real spatial owner, hands over complete context and p
   expect(launch).toHaveBeenCalledTimes(1)
 })
 
+it.each(['Investigation - build', ("Investigation - build - " + _hygiene_fixtureCivil(9, 30) + " " + _hygiene_fixtureClock(8, 15))])('inherits %s with one stable creation-time suffix through the durable name owner', async label => {
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(_hygiene_fixtureYear,9,7,17,32))
+  try {
+    source = {...source,label}
+    const launch=launchBoundary(), before=structuredClone(useAppStore.getState().sessions)
+    const report=await takeOverSession(source,'fixture',()=>true),id=report.agent!.agentSessionId
+    expect(report.outcome).toBe('opened')
+    const expected=("Investigation - build - " + _hygiene_fixtureCivil(10, 7) + " " + _hygiene_fixtureClock(17, 32))
+    expect(useAppStore.getState().agentNames[id]).toBe(expected)
+    expect(displayLabel((await nameOwner.read())!.graph,{kind:'agent-session',id})?.value).toBe(expected)
+    vi.setSystemTime(new Date(_hygiene_fixtureYear,9,7,19,45))
+    await inspectTakeover(source);expect(useAppStore.getState().agentNames[id]).toBe(expected)
+    await useAppStore.getState().renameAgent(id,'User renamed successor')
+    await inspectTakeover(source);expect(useAppStore.getState().agentNames[id]).toBe('User renamed successor')
+    await useAppStore.getState().renameAgent(id,null)
+    await inspectTakeover(source);expect(useAppStore.getState().agentNames[id]).toBeUndefined()
+    expect(launch).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().sessions.find(s=>s.id===original.id)).toEqual(before[0])
+    expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+  } finally {vi.useRealTimers()}
+})
+
+it.each(['disk', 'identity'])('settles an unobserved new Agent from exact Core creation and preserves it after a %s naming failure', async failure => {
+  const names=vi.mocked(api.spatial.renameLabel);names.mockRejectedValue(new Error('Private inherited-name disk failure'))
+  const launch=launchBoundary(),report=await takeOverSession(source,'fixture',()=>true),id=report.agent!.agentSessionId
+  const execute=useAppStore.getState().executeControl
+  const confirmed=await execute({schemaVersion:5,requestId:'confirmed-name-inspection',operation:'space.inspect',target:{requestId:report.requestId}})
+  vi.spyOn(useAppStore.getState(),'executeControl').mockImplementation((request,signal)=>request.operation==='space.inspect'?Promise.resolve(confirmed):execute(request,signal))
+  // This fresh durable creation has no name mutation yet, as after a lost projection/ACK.
+  const current=useAppStore.getState();useAppStore.setState({sessions:current.sessions.filter(s=>s.id!==id),agentNames:{},nameLabels:{}})
+  const created={...agentCreationFixture({...original,id,createdAt:new Date(_hygiene_fixtureYear,9,7,18,10).getTime()}),agentSessionId:id,hostId:'local',createdAt:new Date(_hygiene_fixtureYear,9,7,18,10).getTime()}
+  const creation=vi.mocked(api.sessions.creation).mockClear().mockResolvedValue(failure==='identity'?{...created,agentSessionId:'another-agent'}:created)
+  const inspected=await inspectTakeover(source)
+  expect(inspected?.outcome).toBe('opened');expect(creation).toHaveBeenCalledExactlyOnceWith('local',id)
+  expect(useAppStore.getState().nameEditFailure?.message).toContain(failure==='identity'?'creation reply belongs to another Agent':'Private inherited-name disk failure')
+  expect(useAppStore.getState().tabs[report.to!.tabId]!.regions[report.to!.regionId]).toMatchObject({sessionId:id})
+  expect(launch).toHaveBeenCalledTimes(1)
+})
+
 it('a moved display uses the exact original execution Zone instead of the display Host', async () => {
   config = { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Build', hostname: 'private.invalid' }],
     workspaces: [...config.workspaces, { id: 'execution', hostId: 'remote', path: _hygiene_fixturePath("srv/repo"), name: 'Remote', kind: 'folder' }] }
@@ -145,6 +201,30 @@ it('a moved display uses the exact original execution Zone instead of the displa
   expect(launch.mock.calls[0]![0].prompt).toContain('"hostId":"remote"')
   expect(launch.mock.calls[0]![0].prompt).toContain('agent context --host local')
   expect(useAppStore.getState().tabs['source-tab']!.regions['source-region']).toMatchObject({ sessionId: 'original' })
+})
+
+it('names an unobserved remote successor through the original Desktop Host while its Core receipt says local', async () => {
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date(_hygiene_fixtureYear,9,7,18,10))
+  try {
+    config={...config,hosts:[...config.hosts,{id:'remote',kind:'ssh',label:'Build',hostname:'private.invalid'}],
+      workspaces:[...config.workspaces,{id:'execution',hostId:'remote',path:_hygiene_fixturePath("srv/repo"),name:'Remote',kind:'folder'}]}
+    original={...original,workspacePath:_hygiene_fixturePath("srv/repo"),control:{...original.control,hostId:'remote'}}
+    source={...source,hostId:'remote',cwd:_hygiene_fixturePath("srv/repo")};useAppStore.setState({config,sessions:[original]})
+    await useAppStore.getState().retryWorkbenchSave()
+    const names=vi.mocked(api.spatial.renameLabel),persist=names.getMockImplementation()!
+    names.mockRejectedValue(new Error('First name ACK unavailable'))
+    const launch=launchBoundary(),report=await takeOverSession(source,'fixture',()=>true),id=report.agent!.agentSessionId
+    expect(report.outcome).toBe('opened');expect(report.agent!.hostId).toBe('local')
+    useAppStore.setState({sessions:useAppStore.getState().sessions.filter(s=>s.id!==id)})
+    names.mockImplementation(persist);const creation=vi.mocked(api.sessions.creation).mockClear()
+    const inspected=await inspectTakeover(source)
+    expect(inspected?.outcome).toBe('opened')
+    expect(creation.mock.calls.length).toBeGreaterThan(0)
+    expect(creation.mock.calls.every(([host,sid])=>host==='remote'&&sid===id)).toBe(true)
+    expect(useAppStore.getState().agentNames[id]).toBe(("Original Agent - " + _hygiene_fixtureCivil(10, 7) + " " + _hygiene_fixtureClock(18, 10)))
+    expect(displayLabel((await nameOwner.read())!.graph,{kind:'agent-session',id})?.value).toBe(("Original Agent - " + _hygiene_fixtureCivil(10, 7) + " " + _hygiene_fixtureClock(18, 10)))
+    expect(launch).toHaveBeenCalledTimes(1)
+  } finally {vi.useRealTimers()}
 })
 
 it('a failed creation keeps its correlation and visible feedback; Check again never resends', async () => {
