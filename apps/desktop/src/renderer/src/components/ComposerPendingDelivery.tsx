@@ -112,8 +112,11 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     const composer = anchor.closest<HTMLElement>('.composer')
     const region = anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? anchor.closest<HTMLElement>('.agent-surface') ?? composer
     if (!composer || !region) return
-    const terminalContainer = composer.closest('.agent-surface')?.querySelector<HTMLElement>('.terminal-view__xterm')
+    const agentSurface = composer.closest('.agent-surface')
+    const terminalContainer = agentSurface?.querySelector<HTMLElement>('.terminal-view__xterm')
+    const interactionBody = agentSurface?.querySelector<HTMLElement>('.agent-body')
     let disposed = false, revision = 0
+    let observedInteraction: HTMLElement | null = null
     let observedHelper: HTMLElement | null = null
     let observedTerminal: HTMLElement | null = null, observedRegionId: string | undefined
     let stopInputGeometry = () => {}, geometryFrame = 0
@@ -124,9 +127,28 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     const cursorObserver = new MutationObserver(scheduleUpdate)
     const terminalObserver = new MutationObserver(scheduleUpdate)
     if (terminalContainer) terminalObserver.observe(terminalContainer, { childList: true })
+    // Observe only this Region's request host and its current request shell.
+    // Reading history or an unrelated Region must not schedule this placement.
+    const interactionObserver = new MutationObserver(scheduleUpdate)
+    const observeInteraction = () => {
+      interactionObserver.disconnect()
+      if (interactionBody) interactionObserver.observe(interactionBody, { childList: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] })
+      if (observedInteraction) interactionObserver.observe(observedInteraction, { attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class', 'data-request-id'] })
+    }
+    observeInteraction()
+    const resize = new ResizeObserver(() => { void update() })
     const update = async () => {
       const request = ++revision
       if (!composer.isConnected || composer.closest('[hidden], [inert]')) return
+      const interaction = Array.from(interactionBody?.children ?? []).find(node =>
+        node instanceof HTMLElement && node.matches('.agent-interaction[data-request-id]') &&
+        (node.closest('[data-workbench-region-id]') ?? node.closest('.agent-surface')) === region) as HTMLElement | undefined
+      if ((interaction ?? null) !== observedInteraction) {
+        if (observedInteraction) resize.unobserve(observedInteraction)
+        observedInteraction = interaction ?? null
+        if (observedInteraction) resize.observe(observedInteraction)
+        observeInteraction()
+      }
       const tool = composer.getBoundingClientRect()
       const terminal = Array.from(composer.closest('.agent-surface')?.querySelectorAll<HTMLElement>('.terminal-view__xterm .xterm') ?? [])
         .find(node => !node.closest('[hidden], [inert]') && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0)
@@ -162,28 +184,41 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
           } })]
       })
       let position = await locate(gap)
-      const cursor = helper?.getBoundingClientRect()
-      const width = floating.offsetWidth, height = floating.offsetHeight
-      const left = right - width
-      // Read the actual current row, including text to the right of a moved caret.
-      // The original mounted view owns cells and geometry; this surface keeps no input facts.
-      let overlapTop = terminal && regionId
-        ? readTerminalInputOverlapTop(regionId, terminal, new DOMRect(left, position.y, width, height)) : undefined
-      if (cursor && cursor.width > 0 && cursor.height > 0 &&
-          left < cursor.right && left + width > cursor.left &&
-          position.y < cursor.bottom && position.y + height > cursor.top) {
-        overlapTop = overlapTop === undefined ? cursor.top : Math.min(overlapTop, cursor.top)
+      // A move can encounter another protected row/control above the first one.
+      // The mounted terminal reads at most cursor/last-two rows; with its helper
+      // and this request there are at most five barriers, never history scans.
+      for (let barrier = 0; barrier < 5; barrier++) {
+        const cursor = helper?.getBoundingClientRect()
+        const width = floating.offsetWidth, height = floating.offsetHeight
+        const left = right - width
+        let overlapTop = terminal && regionId
+          ? readTerminalInputOverlapTop(regionId, terminal, new DOMRect(left, position.y, width, height)) : undefined
+        if (cursor && cursor.width > 0 && cursor.height > 0 &&
+            left < cursor.right && left + width > cursor.left &&
+            position.y < cursor.bottom && position.y + height > cursor.top) {
+          overlapTop = overlapTop === undefined ? cursor.top : Math.min(overlapTop, cursor.top)
+        }
+        if (interaction?.isConnected && !interaction.closest('[hidden], [inert]')) {
+          const style = getComputedStyle(interaction)
+          const rect = interaction.getBoundingClientRect()
+          if (style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
+              rect.width > 0 && rect.height > 0 && left < rect.right && left + width > rect.left &&
+              position.y < rect.bottom && position.y + height > rect.top) {
+            overlapTop = overlapTop === undefined ? rect.top : Math.min(overlapTop, rect.top)
+          }
+        }
+        if (overlapTop === undefined) break
+        position = await locate(Math.max(gap, tool.top - overlapTop + 2))
       }
-      if (overlapTop !== undefined) position = await locate(Math.max(gap, tool.top - overlapTop + 2))
       if (disposed || request !== revision) return
       floating.style.top = position.y + 'px'
       floating.dataset.positioned = 'true'
       paintPointer()
     }
     const stop = autoUpdate(composer, floating, () => { void update() })
-    const resize = new ResizeObserver(() => { void update() }); resize.observe(composer); resize.observe(region); if (terminalContainer) resize.observe(terminalContainer)
+    resize.observe(composer); resize.observe(region); if (terminalContainer) resize.observe(terminalContainer)
     return () => {
-      disposed = true; stop(); resize.disconnect(); cursorObserver.disconnect(); terminalObserver.disconnect()
+      disposed = true; stop(); resize.disconnect(); cursorObserver.disconnect(); terminalObserver.disconnect(); interactionObserver.disconnect()
       stopInputGeometry(); cancelAnimationFrame(geometryFrame)
     }
   }, [anchorRef, queued.length, suppressed])
