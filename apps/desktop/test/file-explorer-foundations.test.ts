@@ -128,7 +128,7 @@ describe('file explorer move interaction', () => {
   })
 
   it('refreshes exactly both move parents on success and after an unknown receipt', async () => {
-    const refresh = vi.fn(async () => {})
+    const refresh = vi.fn(async (_path: string) => {})
     const move = vi.fn(async () => {})
     await runFileExplorerMove({
       sourcePath: 'src/app/index.ts',

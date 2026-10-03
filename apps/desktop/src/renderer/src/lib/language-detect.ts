@@ -1,9 +1,4 @@
-function extname(filePath: string): string {
-  const lastDot = filePath.lastIndexOf('.')
-  const lastSep = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'))
-  if (lastDot <= lastSep) return ''
-  return filePath.slice(lastDot)
-}
+import { workspaceFileExtension } from '../../../shared/workspace-file-preview'
 
 const EXT_TO_LANGUAGE: Record<string, string> = {
   // Monaco maps TSX/CTS/MTS to typescript and JSX/MJS/CJS to javascript.
@@ -20,6 +15,8 @@ const EXT_TO_LANGUAGE: Record<string, string> = {
   '.jsonl': 'jsonl',
   '.ipynb': 'json',
   '.md': 'markdown',
+  '.markdown': 'markdown',
+  '.mdown': 'markdown',
   '.mdx': 'mdx',
   '.css': 'css',
   '.scss': 'scss',
@@ -106,5 +103,5 @@ export function detectLanguage(filePath: string): string {
   const parts = filePath.split(/[\\/]/)
   const filename = parts.at(-1)!
   if (FILENAME_TO_LANGUAGE[filename]) return FILENAME_TO_LANGUAGE[filename]
-  return EXT_TO_LANGUAGE[extname(filename).toLowerCase()] ?? 'plaintext'
+  return EXT_TO_LANGUAGE[`.${workspaceFileExtension(filename)}`] ?? 'plaintext'
 }

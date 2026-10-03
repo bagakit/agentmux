@@ -31,7 +31,7 @@ import {
   TriangleAlert,
   X
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
@@ -59,6 +59,7 @@ import { useGitStatus } from '../hooks/useGitStatus'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { fileExplorerContains } from '../lib/file-explorer-scope'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
+import { useFileTreeViewport } from './file-tree/useFileTreeViewport'
 import { refreshFileExplorer } from './file-tree/file-explorer-refresh'
 import { presentExpandedDir } from './file-tree/file-explorer-stale-dir-cache'
 import {
@@ -167,7 +168,7 @@ function FileTreeRow({
   onClick,
   onSelect,
   onCollapse,
-  onContextMenuOpen,
+  onContextMenuChange,
   onCopyPaths,
   onCreate,
   onToggle,
@@ -207,7 +208,7 @@ function FileTreeRow({
   onClick: (event: React.MouseEvent) => void
   onSelect: (event: React.MouseEvent) => void
   onCollapse: () => void
-  onContextMenuOpen: () => void
+  onContextMenuChange: (open: boolean) => void
   onCopyPaths: (kind: 'absolute' | 'relative') => void
   onCreate: (kind: 'file' | 'directory') => void
   onToggle: () => void
@@ -261,9 +262,7 @@ function FileTreeRow({
       isLocal={isLocal}
       selectionSize={selectionSize}
       getMoveTargets={getMoveTargets}
-      onOpenChange={(open) => {
-        if (open) onContextMenuOpen()
-      }}
+      onOpenChange={onContextMenuChange}
       onCreate={onCreate}
       onCopyPaths={onCopyPaths}
       onOpenTerminal={onOpenTerminal}
@@ -456,8 +455,11 @@ export function FileExplorer({
     path: string
     requestId: number
     focus: boolean
+    openMenu?: boolean
   } | null>(null)
   const treeRootRef = useRef<HTMLDivElement>(null)
+  const [focusedPath, setFocusedPath] = useState<string | null>(null)
+  const [menuPath, setMenuPath] = useState<string | null>(null)
   const lastRevealedPathRef = useRef<string | null>(null)
   const lastRevealRequestIdRef = useRef<number | null>(null)
   const autoRevealRequestIdRef = useRef(0)
@@ -511,6 +513,8 @@ export function FileExplorer({
     lastRevealedPathRef.current = null
     lastRevealRequestIdRef.current = null
     setScrollTarget(null)
+    setFocusedPath(null)
+    setMenuPath(null)
     setInlineEdit(null)
     setEditError(null)
     setEditPending(false)
@@ -565,14 +569,6 @@ export function FileExplorer({
     })
   }, [revealRequest, workspaceId, rootPath])
 
-  useEffect(() => {
-    if (!scrollTarget) return
-    const row = [...(treeRootRef.current?.querySelectorAll<HTMLElement>('[data-tree-path]') ?? [])]
-      .find((candidate) => candidate.dataset.treePath === scrollTarget.path)
-    if (scrollTarget.focus) row?.focus()
-    row?.scrollIntoView({ block: 'nearest' })
-  }, [scrollTarget, tree.dirCache])
-
   // Continuous filesystem watch would need a cross-host owner. Until the mux
   // decision, refresh on application focus through the same Local/SSH IPC
   // instead of introducing a local-only watcher with conflicting semantics.
@@ -598,6 +594,30 @@ export function FileExplorer({
     () => createFileExplorerRowProjection(visibleRows),
     [visibleRows]
   )
+  const editPath = inlineEdit?.kind === 'rename' ? inlineEdit.node.path : inlineEdit?.parentPath
+  const retainedPaths = useMemo(() => [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path],
+    [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path])
+  const viewport = useFileTreeViewport(rowProjection, treeRootRef, retainedPaths,
+    `${workspaceId}\0${workspacePath}\0${rootPath}`)
+  useEffect(() => {
+    if (!scrollTarget || !rowProjection.hasPath(scrollTarget.path)) return
+    viewport.scrollToPath(scrollTarget.path)
+    if (!scrollTarget.focus) return
+    const frame = requestAnimationFrame(() => {
+      const row = treeRootRef.current?.querySelector<HTMLElement>(
+        `[data-tree-path="${CSS.escape(scrollTarget.path)}"]`
+      )
+      row?.focus({ preventScroll: true })
+      if (row && scrollTarget.openMenu) {
+        const rect = row.getBoundingClientRect()
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left, clientY: rect.top }))
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [scrollTarget, rowProjection, viewport.scrollToPath])
+  useEffect(() => {
+    if (editPath !== undefined) viewport.scrollToPath(editPath)
+  }, [editPath, viewport.scrollToPath])
   const selectedNode = selectedPath ? rowProjection.getRowByPath(selectedPath) : null
   const createParent = selectedNode?.isDirectory
     ? selectedNode.path
@@ -912,13 +932,7 @@ export function FileExplorer({
           node.path,
           event.shiftKey && currentIndex !== null ? 'range' : 'replace'
         ))
-        requestAnimationFrame(() => {
-          const row = treeRootRef.current?.querySelector<HTMLElement>(
-            `[data-tree-index="${resolved.targetIndex}"]`
-          )
-          row?.focus()
-          row?.scrollIntoView({ block: 'nearest' })
-        })
+        setScrollTarget({ path: node.path, requestId: ++autoRevealRequestIdRef.current, focus: true })
         return
       }
     }
@@ -928,15 +942,7 @@ export function FileExplorer({
       : rowProjection.getRowAtIndex(currentIndex)
     if (isFileExplorerMenuKey(event) && actionNode) {
       event.preventDefault()
-      const row = treeRootRef.current?.querySelector<HTMLElement>(
-        `[data-tree-path="${CSS.escape(actionNode.path)}"]`
-      )
-      const rect = row?.getBoundingClientRect()
-      row?.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true,
-        clientX: rect?.left ?? 0,
-        clientY: rect?.top ?? 0
-      }))
+      setScrollTarget({ path: actionNode.path, requestId: ++autoRevealRequestIdRef.current, focus: true, openMenu: true })
     } else if ((event.key === 'Enter' || event.key === ' ') && actionNode) {
       event.preventDefault()
       actionNode.isDirectory ? toggle(actionNode) : void openFile(actionNode.path)
@@ -1003,11 +1009,22 @@ export function FileExplorer({
           aria-multiselectable="true"
           tabIndex={0}
           onKeyDown={handleTreeKeyDown}
+          onFocusCapture={event => setFocusedPath((event.target as HTMLElement).closest<HTMLElement>('[data-tree-path]')?.dataset.treePath ?? null)}
+          onBlurCapture={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedPath(null)
+          }}
         >
-          <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
-          {createEdit?.parentPath === rootPath ? createRow : null}
-          {visibleRows.map((node, rowIndex) => (
-            <Fragment key={node.path}>
+          <div className="file-tree__prefix" ref={viewport.prefixRef}>
+            <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
+            {createEdit?.parentPath === rootPath ? createRow : null}
+          </div>
+          <div className="file-tree__rows" ref={viewport.rowsRef} style={{ height: viewport.virtualizer.getTotalSize() }}>
+          {viewport.virtualizer.getVirtualItems().map(item => {
+            const node = rowProjection.getRowAtIndex(item.index)!
+            const rowIndex = item.index
+            return <div className="file-tree__virtual-row" key={node.path} data-index={rowIndex}
+              ref={viewport.virtualizer.measureElement}
+              style={{ transform: `translateY(${item.start - viewport.scrollMargin}px)` }}>
               <FileTreeRow
             key={node.path}
             node={node}
@@ -1033,8 +1050,9 @@ export function FileExplorer({
             onEditValue={(value) => { setEditValue(value); setEditError(null) }}
             onCommitEdit={commitEdit}
             onCancelEdit={() => { setInlineEdit(null); setEditError(null) }}
-            onContextMenuOpen={() => {
-              if (!selection.selectedPaths.has(node.path)) {
+            onContextMenuChange={open => {
+              setMenuPath(current => open ? node.path : current === node.path ? null : current)
+              if (open && !selection.selectedPaths.has(node.path)) {
                 setSelection(createSingleFileExplorerSelection(node.path))
               }
             }}
@@ -1091,8 +1109,9 @@ export function FileExplorer({
             selectionSize={pathsForContext(node).length}
               />
               {createEdit?.parentPath === node.path ? createRow : null}
-            </Fragment>
-          ))}
+            </div>
+          })}
+          </div>
           {tree.rootError ? (
             <div className="tree-empty tree-empty--error">
               <strong>Could not read workspace</strong>

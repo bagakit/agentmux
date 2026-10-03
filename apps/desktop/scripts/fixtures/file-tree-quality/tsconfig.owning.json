@@ -1,0 +1,16 @@
+{
+  "extends": "../../../tsconfig.renderer.json",
+  "compilerOptions": {
+    "types": ["node", "vite/client", "vitest/globals"]
+  },
+  "include": [
+    "../../../src/renderer/**/*.ts",
+    "../../../src/renderer/**/*.tsx",
+    "../../../src/shared/**/*.ts",
+    "../../../test/file-tree-quality.test.tsx",
+    "../../../test/helpers/file-tree-geometry.ts",
+    "../../../test/file-explorer-foundations.test.ts",
+    "../../../test/file-explorer-open-as-project.integration.test.tsx",
+    "../../../test/file-explorer-scratch-physical-path.test.tsx"
+  ]
+}

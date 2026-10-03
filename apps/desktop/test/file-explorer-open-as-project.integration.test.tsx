@@ -2,7 +2,8 @@ const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { installFileTreeGeometry } from './helpers/file-tree-geometry'
 
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 
@@ -11,7 +12,8 @@ const { configGet, addWorkspace, writeClipboard, listTopics, tree, defaultChildr
     { path: 'packages/core', name: 'core', isDirectory: true, isSymlink: false, ignored: false, depth: 0 },
     { path: 'README.md', name: 'README.md', isDirectory: false, isSymlink: false, ignored: false, depth: 0 }
   ]
-  return { configGet: vi.fn(), addWorkspace: vi.fn(), writeClipboard: vi.fn(), listTopics: vi.fn(), tree: { children: defaultChildren, dirCache: { '': { children: defaultChildren } } }, defaultChildren }
+  const dirCache: Record<string, { children: typeof defaultChildren }> = { '': { children: defaultChildren } }
+  return { configGet: vi.fn(), addWorkspace: vi.fn(), writeClipboard: vi.fn(), listTopics: vi.fn(), tree: { children: defaultChildren, dirCache }, defaultChildren }
 })
 vi.mock('../src/renderer/src/lib/api.js', () => ({
   api: {
@@ -57,6 +59,7 @@ vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 const initialStore = useAppStore.getState()
 const workspace = { id: 'root', name: 'repo', hostId: 'local', path: _hygiene_fixturePath("repo"), kind: 'folder' as const }
 const created = { id: 'core-project', name: 'core', hostId: 'local', path: _hygiene_fixturePath("repo/packages/core"), kind: 'folder' as const }
+beforeEach(() => installFileTreeGeometry())
 
 function config(workspaces: WorkspaceRecord[] = [workspace]): AppConfig {
   return {
@@ -79,7 +82,7 @@ afterEach(() => {
 })
 
 describe('FileExplorer directory context menu', () => {
-  it('keeps 500 actual closed row menus free of target enumeration and opens only the selected item against one current tree index', async () => {
+  it('keeps a visible window of 500 closed row menus free of target enumeration and opens only the selected item against one current tree index', async () => {
     tree.children = Array.from({ length: 500 }, (_, i) => ({ ...defaultChildren[1]!,
       path: i < 100 ? `dir-${i}` : `file-${i}.txt`, name: i < 100 ? `dir-${i}` : `file-${i}.txt`, isDirectory: i < 100 }))
     tree.dirCache = { '': { children: tree.children } }
@@ -87,12 +90,14 @@ describe('FileExplorer directory context menu', () => {
     const rename = vi.fn(async () => {}), drafts = { original: 'Keep original draft' }, dirty = { original: true }
     useAppStore.setState({ config: config(), activeWorkspaceId: workspace.id, loading: false,
       layouts: { [workspace.id]: createWorkspaceLayout('files-group') }, renamePath: rename,
-      agentComposerDrafts: drafts, dirtyDocuments: dirty })
+      agentComposerDrafts: drafts, dirtyDocuments: dirty,
+      lastActiveFileByWorkspace: { [workspace.id]: 'file-100.txt' } })
     const before = useAppStore.getState(), host = document.createElement('div'); document.body.append(host)
     const root = createRoot(host)
     try {
     await act(async () => root.render(<FileExplorer />))
-    expect(host.querySelectorAll('[data-tree-path]')).toHaveLength(500)
+    expect(host.querySelectorAll('[data-tree-path]').length).toBeGreaterThan(0)
+    expect(host.querySelectorAll('[data-tree-path]').length).toBeLessThan(40)
     expect(targets).not.toHaveBeenCalled()
     expect(index).toHaveBeenCalledTimes(1)
     await act(async () => root.render(<FileExplorer />))

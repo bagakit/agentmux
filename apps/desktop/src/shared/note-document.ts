@@ -1,9 +1,9 @@
 import type { JSONContent } from '@tiptap/core'
 import { NOTE_BLOCK_TYPES, noteContentSchema } from './note-content-schema'
+import { NOTE_SCHEMA } from './note-format'
 export { NOTE_BLOCK_TYPES } from './note-content-schema'
+export { NOTE_SCHEMA, NOTE_FILE_EXTENSION } from './note-format'
 
-export const NOTE_SCHEMA = 'agentmux.note.v1'
-export const NOTE_FILE_EXTENSION = '.note.json'
 export type NoteBlockTarget = { noteId: string; blockId: string }
 export type NoteBlockReference = { referenceId: string; target: NoteBlockTarget; mode: 'reference' | 'embed' }
 export type NoteDocument = { schema: typeof NOTE_SCHEMA; noteId: string; content: JSONContent }
