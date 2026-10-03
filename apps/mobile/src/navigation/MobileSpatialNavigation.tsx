@@ -1,20 +1,19 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useState } from 'react'
 import { ArrowLeft, ChevronRight, Layers, RefreshCw, Search } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxRpcResult } from '@agentmux/core'
+import { AgentAvatarBadgeIcon, type AgentAvatarBadge } from '@agentmux/client-ui/components/AgentAvatarBadgeIcon'
+import { AgentEnamelFilter } from '@agentmux/client-ui/components/AgentEnamelFilter'
+import { AgentProviderIcon } from '@agentmux/client-ui/components/AgentProviderIcon'
 import { MobileIdentity, type MobileObjectIdentity } from './MobileIdentity'
 import type { MobileHome } from './home-preference'
 
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 type Props = { home: MobileHome; client: AgentMuxHostedClient | null; connected: boolean;
   visible?: boolean; sessions: AgentMuxAgentSession[]; openSession(id: string, identity: MobileObjectIdentity): void }
-const statusLabels: Readonly<Record<string, string>> = { working: '执行中', waiting: '等待输入', blocked: '需要处理',
-  done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '执行状态未确认', disconnected: '状态未知' }
 export function MobileSpatialNavigation({ home, client, connected, sessions, openSession, visible = true }: Props) {
+  const avatarFilterId = useId().replace(/:/g, '')
   const [catalog, setCatalog] = useState<Catalog | null>(null)
-  const [projects, setProjects] = useState<AgentMuxRpcResult<'app.snapshot'>['agents']>([])
-  const [names, setNames] = useState<Record<string, string>>({})
-  const named = useRef(new Set<string>())
   const [issue, setIssue] = useState('')
   const [pending, setPending] = useState(false)
   const [query, setQuery] = useState('')
@@ -39,28 +38,6 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     document.addEventListener('visibilitychange', foreground)
     return () => { disposed = true; clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
   }, [client, connected, visible, revision])
-  useEffect(() => {
-    if (!client?.forwardRpc || !connected || !visible) return
-    let live = true
-    void client.forwardRpc('app.snapshot', { include: ['agents'] }).then(value => { if (live) setProjects(value.agents) }).catch(() => {})
-    if (revision) named.current.clear()
-    const ids = sessions.filter(session => !named.current.has(session.agentSessionId)).map(session => session.agentSessionId)
-    let next = 0
-    async function worker() {
-      while (live && next < ids.length) {
-        const id = ids[next++]!
-        try {
-          const value = await client!.forwardRpc!('agent.inspect', { target: { kind: 'agent-session', agentSessionId: id } })
-          if (live && value.session.agentSessionId === id && value.displayName?.availability === 'observed') {
-            named.current.add(id)
-            if (value.displayName.override) setNames(previous => ({ ...previous, [id]: value.displayName.override! }))
-          }
-        } catch { /* Unknown identity keeps the original accessible and explicitly unnamed. */ }
-      }
-    }
-    void Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker))
-    return () => { live = false }
-  }, [client, connected, visible, sessions.map(session => session.agentSessionId).join('|'), revision])
   useEffect(() => { setSpaceId(null); setQuery('') }, [home])
   const sessionById = new Map(sessions.map(session => [session.agentSessionId, session]))
   const spaces = catalog?.spaces ?? []
@@ -75,8 +52,8 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     const zone = catalog?.zones.find(zone => zone.zoneId === tab?.zoneId)
     const owner = spaces.find(owner => place.some(location => location.spaceId === owner.spaceId))
       ?? spaces.find(owner => catalog?.bindings.some(binding => binding.spaceId === owner.spaceId && binding.zoneId === zone?.zoneId))
-    const project = projects.find(agent => agent.agentSessionId === session.agentSessionId)?.projectName
-    return { name: names[session.agentSessionId] || tab?.name || (named.current.has(session.agentSessionId) ? '未命名 Agent' : '名字未确认'), project: project || owner?.name || '项目未确认',
+    const row = catalog?.agentPresentation?.find(value => value.agentSessionId === session.agentSessionId)
+    return { name: row?.name ?? '名称未确认', project: row?.project ?? owner?.name ?? '项目未确认',
       ...(owner?.kind === 'mote' ? { mote: { spaceId: owner.spaceId, appearance: catalog?.appearance?.find(item => item.spaceId === owner.spaceId) } } : {}) }
   }
   const name = (session: AgentMuxAgentSession) => identity(session).name
@@ -86,16 +63,14 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     return new Set(catalog?.regions.filter(region => regionIds.has(region.regionId) && region.agentSessionId).map(region => region.agentSessionId)).size
   }
   const sessionRow = (session: AgentMuxAgentSession, key = session.agentSessionId) => {
-    const object = identity(session), status = session.pendingInteraction ? '需要回应' : statusLabels[session.semanticStatus?.state ?? ''] ?? '状态未知'
+    const object = identity(session), row = catalog?.agentPresentation?.find(value => value.agentSessionId === session.agentSessionId), status = row?.state ?? 'unknown'
     return <li key={key}><button onClick={() => openSession(session.agentSessionId, object)}>
-      <MobileIdentity identity={object} session={session} client={client} connected={connected} />
-      <span className="mobile-session-copy"><span className="mobile-session-project">{object.project}</span><strong>{object.name}</strong></span>
-      <span className="mobile-session-state" data-state={session.pendingInteraction ? 'waiting' : session.semanticStatus?.state}><span>{status}</span><small>{session.providerId}</small></span>
+      <span className="mobile-executor-avatar">{row?.avatar?.tint ? <AgentEnamelFilter id={`${avatarFilterId}-${session.agentSessionId}`} tint={row.avatar.tint} className="mobile-executor-mark"><AgentProviderIcon providerId={session.providerId} size={22} /></AgentEnamelFilter> : <AgentProviderIcon providerId={session.providerId} size={22} />}{row?.avatar?.badge && ['spark', 'bolt', 'shield', 'flame'].includes(row.avatar.badge) && <small aria-label={row.avatar.badge}><AgentAvatarBadgeIcon badge={row.avatar.badge as AgentAvatarBadge} size={8} /></small>}</span>
+      <span className="mobile-session-copy"><span className="mobile-session-project">{object.project}</span><strong>{object.name}</strong>{row && <small className="mobile-session-recap" title={row.recap ? `${row.recap.source} · ${row.recap.text}` : row.detail}>{row.recap?.text ?? '暂无已确认摘要'}</small>}</span>
+      <span className="mobile-session-state" data-state={session.pendingInteraction ? 'waiting' : session.semanticStatus?.state}><span>{{ working: '执行中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', starting: '启动中', running: '状态未确认', disconnected: '断开' }[status] ?? '状态未确认'}</span><small>{session.providerId}</small></span>
     </button></li>
   }
-  const active = sessions.filter(session => session.pendingInteraction || ['working', 'running', 'starting', 'blocked', 'waiting', 'error'].includes(session.semanticStatus?.state ?? ''))
-  const attention = active.filter(session => session.pendingInteraction || ['blocked', 'waiting', 'error'].includes(session.semanticStatus?.state ?? ''))
-  const recent = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  const rows = catalog?.agentPresentation ?? []
   const visibleSpaces = spaces.filter(item => home === 'mote' ? item.kind === 'mote' : item.kind !== 'mote').filter(item => matching(item.name))
   const zoneIds = new Set(catalog?.bindings.filter(binding => binding.spaceId === spaceId).map(binding => binding.zoneId))
   const tabs = catalog?.tabs.filter(tab => tab.zoneId !== null && zoneIds.has(tab.zoneId)) ?? []
@@ -108,11 +83,13 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     {issue && <p className="mobile-spatial-notice" role="status">{issue}</p>}
     <label className="mobile-spatial-search"><Search size={16} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
-      <h2 className="mobile-spatial-subheading">需要处理 <span>{attention.length}</span></h2>
-      {filteredSessions(attention).length ? <ul className="mobile-session-list">{filteredSessions(attention).map(session => sessionRow(session))}</ul> : <p className="mobile-spatial-empty">{connected ? '当前没有已确认的待处理事项。' : '待处理状态尚未核实。'}</p>}
-      <h2 className="mobile-spatial-subheading">正在执行 <span>{active.filter(session => !attention.includes(session)).length}</span></h2>
-      <ul className="mobile-session-list">{filteredSessions(active.filter(session => !attention.includes(session))).map(session => sessionRow(session))}</ul>
-      <details className="mobile-spatial-recent"><summary>最近会话 · {sessions.length}</summary><ul className="mobile-session-list">{filteredSessions(recent).map(session => sessionRow(session))}</ul></details>
+      {(['attention', 'working', 'results', 'idle', 'disconnected'] as const).map(group => {
+        const values = rows.filter(row => row.group === group).flatMap(row => { const session = sessionById.get(row.agentSessionId); return session ? [session] : [] })
+        if (!values.length) return null
+        return <section key={group}><h2 className="mobile-spatial-subheading">{{ attention: '需要处理', working: '正在执行', results: '结果', idle: '空闲 / 未知', disconnected: '断开' }[group]} <span>{values.length}</span></h2><ul className="mobile-session-list">{filteredSessions(values).map(session => sessionRow(session))}</ul></section>
+      })}
+      {!rows.length && <p className="mobile-spatial-empty">Focus 呈现尚未确认；原会话保留。</p>}
+      {catalog?.agentPresentation === undefined && sessions.length > 0 && <details><summary>其他已有会话</summary><ul className="mobile-session-list">{filteredSessions(sessions.filter(session => !rows.some(row => row.agentSessionId === session.agentSessionId))).map(session => sessionRow(session))}</ul></details>}
     </> : space ? <>
       <button className="mobile-text-button" onClick={() => setSpaceId(null)}><ArrowLeft size={16} />{home === 'mote' ? '所有 Mote' : '所有 Space'}</button>
       <h2 className="mobile-spatial-subheading">{space.name}</h2>

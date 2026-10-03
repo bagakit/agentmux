@@ -1,3 +1,4 @@
+import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { ArrowLeft, ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent } from 'react'
@@ -862,8 +863,8 @@ export function ActivityView({
                   {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
                 />
               ) : speaker ? (
-                <ConversationMessage
-                  messageId={entry.item.id}
+                <CapturedConversationMessage
+                  item={entry.item}
                   {...(renderMessageActions && entry.item.kind === 'assistant_message' && entry.item.agentSessionId === sessionId &&
                     !entry.item.authorAgentSessionId && entry.item.source !== 'user' && entry.item.content?.trim() && entry.item.status === 'complete'
                     ? { messageActions: renderMessageActions({ kind: 'captured', agentSessionId: sessionId, recordId: entry.item.id }) } : {})}
@@ -873,9 +874,6 @@ export function ActivityView({
                   located={entry.item.kind === 'user_message' && locatedMessageKey === conversationMessageSourceKey(sessionId, { kind: 'captured', submissionId: entry.item.id })}
                   {...(describeSpeaker ? { describeSpeaker } : {})}
                   {...(speaker.role === 'system' ? { recordTitle: entry.item.title } : {})}
-                  content={entry.item.content ?? ''}
-                  status={entry.item.status}
-                  createdAt={entry.item.createdAt}
                   origin={origin}
                   speaker={speaker}
                   workspaceRoot={workspaceRoot}

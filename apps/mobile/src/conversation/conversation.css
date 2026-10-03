@@ -67,3 +67,28 @@
 .mobile-app .mobile-conversation__composer { padding-bottom:max(10px,env(safe-area-inset-bottom)); }
 .mobile-app .mobile-conversation .composer__editor .tiptap { font-size:16px; }
 .mobile-app .mobile-message-tools__trigger { border-radius:50%; background:transparent; }
+
+.mobile-conversation { gap:4px; }
+.mobile-conversation__notice { flex:none; font-size:11px; max-height:25%; overflow:auto; }
+.mobile-conversation__notice > summary { min-height:32px; display:flex; align-items:center; cursor:pointer; }
+.mobile-conversation__notice p { margin:4px 0; }
+.mobile-app .mobile-conversation .log-turn[data-message-bubble='true'] { padding:8px 10px; margin-block:6px; font-size:14px; }
+.mobile-app .mobile-conversation .log-turn__content { font-size:14px; line-height:1.5; }
+.mobile-app .mobile-conversation .log-turn__content p { margin-block:6px; }
+.mobile-app .mobile-conversation .log-turn__head { font-size:11px; }
+.mobile-app .mobile-conversation .composer { border-radius:20px; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) { display:grid; grid-template-columns:44px minmax(0,1fr) max-content; min-height:44px; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__editor { grid-column:2; grid-row:1; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row:1; padding:0; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column:3; }
+.mobile-app .mobile-conversation .composer-tool { min-width:44px; min-height:44px; justify-content:center; padding:0; }
+.mobile-app .mobile-conversation .composer__feedback { font-size:11px; }
+.mobile-app .mobile-conversation .composer-send { min-width:36px; padding:0 8px; }
+.mobile-app .mobile-conversation .composer-session-controls { box-shadow:none; background:transparent; }
+.mobile-app .mobile-conversation .composer__editor .tiptap { font-size:16px; line-height:1.4; }
+
+.mobile-conversation__captured > summary { color: var(--text-muted); font-size: 11px; padding: 6px 10px; cursor: pointer; }
+.mobile-conversation__captured > section { display: flex; flex-direction: column; gap: 6px; }
+.mobile-captured-source { color: var(--text-muted); font-size: 10px; margin: 4px 10px; }
+.mobile-reading-action { align-self: center; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 16px; background: var(--surface-1); color: var(--text-muted); font-size: 11px; }
+.mobile-reading-latest { position: sticky; top: 0; z-index: 1; }

@@ -40,6 +40,7 @@ describe('mobile production workspace navigation', () => {
     const f = fixture()
     Object.assign(f.client.agentSession('session-original'), { semanticStatus: { state: 'working' } })
     const originalCatalog = { ...catalog, spaces: [{ ...catalog.spaces[0], kind: 'mote', name: 'Original Mote' }],
+      agentPresentation: [{ agentSessionId: 'session-original', name: 'Chosen Agent', project: 'Original Project', group: 'working', state: 'working', detail: '执行中', providerId: 'codex', recap: { text: '原回复摘要', source: 'native-hook' } }],
       appearance: [{ spaceId: 'space', parts: { kind: 'face', shape: 'soft', palette: 'mint', eyes: 'round', brows: 'soft', mouth: 'smile', accessory: 'tuft' } }] }
     f.client.forwardRpc = vi.fn().mockImplementation(async (method: string, params: any) => method === 'app.snapshot'
       ? { agents: [{ agentSessionId: 'session-original', projectName: 'Original Project' }] }
@@ -55,7 +56,8 @@ describe('mobile production workspace navigation', () => {
     await click(view.element.querySelector<HTMLButtonElement>('.mobile-navigation button:first-child')!)
     await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-panel > .mobile-session-list button')!)
     expect(view.element.querySelector('[data-agent-session-id]')?.getAttribute('data-agent-session-id')).toBe('session-original')
-    expect(view.element.querySelector('.mobile-mote-heading strong')?.textContent).toBe('Original Mote')
+    expect(view.element.querySelector('.mobile-mote-heading strong')).toBeNull()
+    expect(view.element.querySelector('.mobile-mote-heading')?.getAttribute('aria-label')).toContain('Original Mote')
     expect(view.element.querySelector('.mobile-mote-heading .mote-face')).not.toBeNull()
     const input = editor(view.element)
     await click(button(view.element, '手机设置与连接'))
@@ -72,9 +74,9 @@ describe('mobile production workspace navigation', () => {
     const view = await mount(<MobileApp client={f.client} connection={connection} platform={createBrowserPlatform({ overlayContainer: () => overlay })} />)
     await click(button(view.element, '手机设置与连接'))
     vi.spyOn(localStorage, 'setItem').mockImplementation(() => { throw new Error('storage unavailable') })
-    await act(async () => { overlay.querySelector<HTMLInputElement>('input[aria-label="Mote"]')!.click() })
+    await act(async () => { const select = overlay.querySelector<HTMLSelectElement>('select')!; select.value = 'mote'; select.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(overlay.textContent).toContain('默认主页未保存')
     expect(localStorage.getItem('agentmux-mobile-home')).toBe('space')
-    expect(overlay.querySelector<HTMLInputElement>('input[aria-label="Space"]')?.checked).toBe(true)
+    expect(overlay.querySelector<HTMLSelectElement>('select')?.value).toBe('space')
   })
 })

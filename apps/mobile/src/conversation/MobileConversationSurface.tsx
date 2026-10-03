@@ -1,5 +1,6 @@
+import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxInteractionResponse } from '@agentmux/core'
 import { agentPromptCondition } from '@agentmux/core/prompt-condition'
@@ -13,6 +14,8 @@ import { deliveryOutcome, errorMessage } from './delivery'
 import { createLocalDrafts, type PromptAttempt, type ResponseAttempt } from './local-drafts'
 import { useHostedConversation, type MobileConnection } from './use-hosted-conversation'
 import { MobileMessageTools } from './MobileMessageTools'
+import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
+import { MobileMailbox } from './MobileMailbox'
 import './conversation.css'
 
 export type { MobileConnection } from './use-hosted-conversation'
@@ -31,6 +34,21 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
 export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const reading = useHostedConversation(client, agentSessionId, visible && connection.state === 'connected')
+  const feed = useRef<HTMLDivElement>(null), follow = useRef(initFollowState())
+  const [jump, setJump] = useState(false)
+  useEffect(() => { follow.current = initFollowState(); setJump(false) }, [agentSessionId])
+  useLayoutEffect(() => {
+    const node = feed.current
+    if (!visible || !node) return
+    const tail = reading.page?.items.at(-1) ?? reading.timeline?.items.at(-1)
+    const geometry = { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight }
+    const change = onContentChange(follow.current, { itemCount: reading.page?.items.length ?? reading.timeline?.items.length ?? 0, lastItemId: tail?.id ?? null, lastItemLength: tail ? JSON.stringify(tail).length : 0 }, geometry)
+    follow.current = change.state
+    if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
+    const resize = new ResizeObserver(() => { if (follow.current.following && !reading.olderWindow) node.scrollTop = node.scrollHeight })
+    for (const child of node.children) resize.observe(child)
+    return () => resize.disconnect()
+  }, [reading.page, reading.timeline, reading.olderWindow, visible])
   const draftKey = JSON.stringify(['draft', agentSessionId])
   const [local] = useState(createLocalDrafts)
   const drafts = useRef(local.drafts)
@@ -150,6 +168,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }), [client, session, agentSessionId, displayName])
   const captured = useMemo(() => agentSessionId && reading.timeline
     ? projectSessionUserMessages({ agentSessionId, timeline: reading.timeline }) : [], [agentSessionId, reading.timeline])
+  const capturedById = useMemo(() => new Map(captured.map(message => [message.id, message])), [captured])
   const appendQuote = (quote: string) => setDraft(`${drafts.current.get(draftKey) ?? ''}${drafts.current.get(draftKey) ? '\n\n' : ''}${quote}`)
   const readingProps = {
     ...(session ? { workspaceRoot: session.workspacePath } : {}),
@@ -162,7 +181,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   return <ClientUiProvider platform={platform}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前不能发送；草稿与阅读保留。' : ''}</p> : null}
-      {reading.notice ? <p className="mobile-conversation__notice" role="status">{reading.notice}</p> : null}
+      {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
       {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
         {local.canSave ? <button type="button" onClick={() => { local.save(); redraw(value => value + 1) }}>重试保存</button> : null}
         <button type="button" disabled={!draft} onClick={() => {
@@ -171,7 +190,17 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         }}>复制当前草稿</button>
         {copyNotice ? <span>{copyNotice}</span> : null}
       </aside> : null}
-      <div className="mobile-conversation__reading">
+      <div ref={feed} className="mobile-conversation__reading" onScroll={event => {
+        const node = event.currentTarget
+        follow.current = onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })
+        setJump(shouldShowJumpToLatest(follow.current))
+      }}>
+        {reading.page?.nextCursor && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
+        {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
+          follow.current = initFollowState(); setJump(false)
+          if (reading.olderWindow || reading.newerAvailable) void reading.refresh()
+          else if (feed.current) feed.current.scrollTop = feed.current.scrollHeight
+        }}>{reading.newerAvailable ? '有新回复 · 回到最新' : '回到最新'}</button>}
         {session?.semanticStatus?.state === 'working' ? <p className="mobile-active-state" role="status"><span />正在执行</p> : null}
         {reading.page && agentSessionId ? <>
           <ConversationView page={reading.page} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
@@ -183,19 +212,24 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             } } : {})}
             {...readingProps} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
-        {captured.length > 0 ? <section aria-label="已发送消息" className="mobile-conversation__captured">
-          {captured.map(message => <ConversationMessage key={message.id} messageId={message.id}
-            conversationSessionId={agentSessionId!} content={message.contentParts} inputSource={message.source}
-            speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
-            {...(message.deliveryStatus ? { status: message.deliveryStatus } : {})}
-            {...(message.recordedAt !== undefined ? { createdAt: message.recordedAt } : {})}
-            {...readingProps} />)}
-        </section> : null}
+        {captured.length > 0 || reading.timeline?.items.some(item => item.kind === 'assistant_message') ? <details className="mobile-conversation__captured" open={!reading.page?.items.length}><summary>发送与实时观察{attempt && attempt.phase !== 'confirmed' ? ' · 交付待确认' : ''}</summary><section aria-label="已发送消息">
+          {reading.page && <p className="mobile-captured-source">独立记录来源，保留发送设备与交付事实</p>}
+          {reading.timeline?.items.filter(item => item.agentSessionId === agentSessionId && (item.kind === 'user_message' || item.kind === 'assistant_message')).map(item => {
+            if (item.kind === 'assistant_message') return <CapturedConversationMessage key={item.id} item={item}
+              conversationSessionId={agentSessionId!} speaker={{ role: 'agent', id: agentSessionId! }} describeSpeaker={describeSpeaker} {...readingProps} />
+            const message = capturedById.get(`captured:${item.id}`)
+            return message ? <ConversationMessage key={message.id} messageId={message.id}
+              conversationSessionId={agentSessionId!} content={message.contentParts} inputSource={message.source}
+              speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
+              {...(message.deliveryStatus ? { status: message.deliveryStatus } : {})}
+              {...(message.recordedAt !== undefined ? { createdAt: message.recordedAt } : {})} {...readingProps} /> : null
+          })}
+        </section></details> : null}
       </div>
-      {reading.timeline?.items.filter(item => item.sourceDevice && item.kind === 'system_message').map(item => <ConversationMessage
-        key={item.id} messageId={item.id} conversationSessionId={agentSessionId!} content={item.content ?? item.title}
+      {reading.timeline?.items.filter(item => item.sourceDevice && item.kind === 'system_message').map(item => <details key={item.id} className="mobile-conversation__notice"><summary>设备操作记录</summary><ConversationMessage
+        messageId={item.id} conversationSessionId={agentSessionId!} content={item.content ?? item.title}
         inputSource={{ kind: 'captured', submissionId: item.id, device: item.sourceDevice! }}
-        speaker={{ role: 'system', id: 'agentmux' }} createdAt={item.createdAt} {...readingProps} />)}
+        speaker={{ role: 'system', id: 'agentmux' }} createdAt={item.createdAt} {...readingProps} /></details>)}
       {request && requestKey ? <div className="mobile-conversation__interaction">
         <AgentInteractionCard key={requestKey} request={request} disabled={responseDisabled}
           {...(responseAttempt?.phase === 'unknown' ? { responseUnavailableReason: responseAttempt.message } : {})}
@@ -203,11 +237,11 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {responseAttempt ? <p role="status">{responseAttempt.message}</p> : null}
       </div> : null}
       <div className="mobile-conversation__composer">
-        <AgentComposer identity={<MobileMessageTools session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
+        <AgentComposer tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
           refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
           onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit() } : {})}
           {...(onAttach ? { onAttach } : {})} {...(readPastedImage ? { readPastedImage } : {})}
-          feedback={attempt ? <span role="status">{attempt.message}</span> : undefined} />
+          feedback={attempt && attempt.phase !== 'confirmed' ? <span role="status">{attempt.message}</span> : undefined} />
       </div>
     </section>
   </ClientUiProvider>

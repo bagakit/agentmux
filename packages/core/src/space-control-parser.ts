@@ -221,7 +221,7 @@ function regionFact(value: unknown, code: Code): AgentMuxSpaceRegionFact {
 
 }
 function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
-  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance'], code)
+  const source = fields(value, ['projectGroups', 'spaces', 'zones', 'tabs', 'regions', 'bindings', 'locations', 'appearance', 'agentPresentation'], code)
   const projectGroups = Object.hasOwn(source, 'projectGroups') ? unique(list(source.projectGroups, value => {
     const item = fields(value, ['groupId', 'name', 'projectIds'], code)
     const name = string(item.name, 'Project group name', code)
@@ -259,7 +259,7 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
   }, 'Bindings', code), item => JSON.stringify([item.zoneId, item.spaceId]), 'Bindings', code)
   const locations = unique(list(source.locations, value => address(value, code), 'Locations', code), item => JSON.stringify(item), 'Locations', code)
   const appearance = Object.hasOwn(source, 'appearance') ? unique(list(source.appearance, value => {
-    const item = fields(value, ['spaceId', 'glyph', 'parts', 'image', 'issue'], code)
+    const item = fields(value, ['spaceId', 'glyph', 'parts', 'image', 'issue', 'preset', 'expression', 'activities'], code)
     const spaceId = spaceControlId(item.spaceId, 'Space appearance', code, true)
     if (!spaces.some(space => space.spaceId === spaceId)) fail('Appearance belongs to an unknown Space.', code)
     let parts: Record<string, string> | undefined
@@ -277,10 +277,27 @@ function catalog(value: unknown, code: Code): AgentMuxSpaceCatalog {
       image = { dataUrl, ...(Object.hasOwn(raw, 'revision') ? { revision: string(raw.revision, 'Image revision', code, 128) } : {}) }
     }
     return { spaceId, ...(parts ? { parts } : {}), ...(image ? { image } : {}),
+      ...(Object.hasOwn(item, 'preset') ? { preset: string(item.preset, 'Appearance preset', code, 64) } : {}),
+      ...(Object.hasOwn(item, 'activities') ? { activities: unique(list(item.activities, value => {
+        const activity = fields(value, ['agentSessionId', 'runId', 'expression'], code)
+        return { agentSessionId: spaceControlId(activity.agentSessionId, 'Appearance Session', code), runId: spaceControlId(activity.runId, 'Appearance Run', code), expression: string(activity.expression, 'Appearance expression', code, 64) }
+      }, 'Appearance activity', code), value => value.agentSessionId, 'Appearance activity', code) } : {}),
+      ...(Object.hasOwn(item, 'expression') ? { expression: string(item.expression, 'Appearance expression', code, 64) } : {}),
       ...(Object.hasOwn(item, 'glyph') ? { glyph: string(item.glyph, 'Appearance glyph', code, 64) } : {}),
       ...(Object.hasOwn(item, 'issue') ? { issue: string(item.issue, 'Appearance issue', code) } : {}) }
   }, 'Appearance', code), item => item.spaceId, 'Appearance', code) : undefined
-  return { ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
+  const agentPresentation = Object.hasOwn(source, 'agentPresentation') ? unique(list(source.agentPresentation, value => {
+    const item = fields(value, ['agentSessionId', 'name', 'project', 'detail', 'group', 'state', 'providerId', 'recap', 'avatar'], code)
+    const recap = item.recap === null ? null : fields(item.recap, ['text', 'source'], code)
+    const avatar = Object.hasOwn(item, 'avatar') ? fields(item.avatar, ['tint', 'badge'], code) : undefined
+    return { agentSessionId: spaceControlId(item.agentSessionId, 'Agent presentation', code),
+      name: string(item.name, 'Agent name', code, 256), project: string(item.project, 'Project name', code, 256),
+      detail: string(item.detail, 'Activity detail', code, 512), group: string(item.group, 'Presentation group', code, 64),
+      state: string(item.state, 'Presentation state', code, 64), providerId: string(item.providerId, 'Provider', code, 64),
+      recap: recap ? { text: string(recap.text, 'Recap excerpt', code, 512), source: string(recap.source, 'Recap source', code, 128) } : null,
+      ...(avatar ? { avatar: { ...(Object.hasOwn(avatar, 'tint') ? { tint: string(avatar.tint, 'Avatar tint', code, 64) } : {}), ...(Object.hasOwn(avatar, 'badge') ? { badge: string(avatar.badge, 'Avatar badge', code, 64) } : {}) } } : {}) }
+  }, 'Agent presentation', code), item => item.agentSessionId, 'Agent presentation', code) : undefined
+  return { ...(agentPresentation ? { agentPresentation } : {}), ...(appearance ? { appearance } : {}), ...(projectGroups === undefined ? {} : { projectGroups }), spaces, zones, tabs, regions, bindings, locations }
 }
 function issues(value: unknown, code: Code): AgentMuxSpaceBindingReport['issues'] {
   return list(value, value => {

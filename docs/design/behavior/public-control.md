@@ -239,6 +239,8 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 设备工作面采用明确的持久来源和可导出保全记录；重启与卸载后的存储条件分别说明，不假定密钥跨卸载必存。身份丢失后打开原 Mac 链接登记新设备，不创建替代 Host Session。iPhone 与 Android 保留同能力范围，未执行真机验收不得据构建成功宣称两类设备验收通过。
 
 ### 手机对象身份与工作面
-手机 Focus 行同时展示已确认的项目、Agent 名称与语义状态。项目关系消费公共事实，不以 cwd 猜空间归属；未知名字明确未命名，不伪装 provider 为名字。Mote 使用原保存头像，连接后以头像、名字、状态组织对话。左上入口揭示侧栏并保留工作面；连接与设备设置位于侧栏。
+手机 Focus 行同时展示已确认的项目、Agent 名称与语义状态。项目关系消费公共事实，不以 cwd 猜空间归属；显示名沿原名称解析链；事实不可读时标记未确认并保留原工作面。Mote 使用原保存头像及动画；会话顶部仅呈头像，身份与状态按需查看，不以不透明标题栏遮挡对话。左上入口揭示侧栏并保留工作面；连接与设备设置位于侧栏。
 
 `space.ls` / `space.inspect` 的只读 `presentation: true` 由 client 原呈现 owner 返回空间的 `catalog.appearance`，仅传有界 glyph、parts、图片引用版本与已选空间 PNG。Core 不解释头像外观，不保存新 identity。图片字节按选中 Space 的 inspect 读取；列表不批量传图片。现有 JSON-RPC／CLI raw RPC 可消费同一参数和回执，手机导航与头像为生产调用者。无新增写操作。
+
+Mobile 的 Mote 外观沿原耐久身份 target，图片／图标／捏脸自定义及原动画完整消费；主身份默认龙不用于其他对象。Focus 的原显示名、项目、Executor头像、recap和状态分组由现有呈现owner返回，不能用手动名称override代替显示名，不能在手机复制分类推断。缺事实沿服务窗保原可用会话。只读 presentation catalog 传有界 agentPresentation 事实，RPC与CLI raw可消费，无新增写操作。

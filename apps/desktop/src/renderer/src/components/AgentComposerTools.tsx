@@ -6,21 +6,8 @@ import type { SessionViewMode } from '../lib/session-state'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { SemanticIcon } from './semantic-icons'
 
-type ToolDockPhase = 'collapsed' | 'current' | 'expanded'
-
-export function nextToolDockPhase(phase: ToolDockPhase): ToolDockPhase {
-  switch (phase) {
-    case 'collapsed': return 'current'
-    case 'current': return 'expanded'
-    case 'expanded': return 'collapsed'
-  }
-}
-
-const NEXT_SHAPE = {
-  collapsed: { label: 'Show the message tool row', icon: 'message-tools' },
-  current: { label: 'Grow the input box for long text', icon: 'composer-grow' },
-  expanded: { label: 'Collapse the composer to one line', icon: 'composer-collapse' }
-} as const
+import { ComposerLayoutToggle, type ComposerToolPhase as ToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
+export { nextToolDockPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
 
 export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSkill, onCommand, onCapture, runAction, layoutControl = true, viewMode, onViewModeChange }: {
   disabled: boolean
@@ -40,7 +27,6 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
   const [error, setError] = useState('')
   const [phase, setMode] = useState<ToolDockPhase>('collapsed')
   const mode = layoutControl ? phase : 'current'
-  const next = NEXT_SHAPE[mode]
   async function discoverSkills() {
     setLoading(true); setError('')
     try { setSkills(await loadSkills()) } catch (cause) {
@@ -67,9 +53,7 @@ export function AgentComposerTools({ disabled, commands, loadSkills, onChooseSki
         {viewMode === 'terminal' ? <MessagesSquare size={14} /> : <SquareTerminal size={14} />}
       </button>
     </span> : null}
-    {layoutControl ? <button type="button" className="composer-tool composer-tool--mode"
-      aria-label={next.label} title={next.label}
-      onClick={() => setMode(nextToolDockPhase)}><SemanticIcon name={next.icon} size={14} /></button> : null}
+    {layoutControl ? <ComposerLayoutToggle phase={mode} onChange={setMode} /> : null}
     {mode === 'collapsed' ? null : <>
     {onCapture ? <button type="button" className="composer-tool" disabled={disabled || capturing}
       aria-label="Capture a screen region" title="Capture a screen region" onClick={() => { void runAction(capture) }}>{capturing ? <LoaderCircle size={14} className="spin" /> : <Camera size={14} />} <span className="composer-tool__label">Capture</span></button> : null}
