@@ -122,6 +122,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
 
   function addHost(): void {
     const id = `ssh-${crypto.randomUUID().slice(0, 8)}`
+    setUpgradeHosts(current => [...current, id])
     setHosts((current) => [...current, {
       id,
       kind: 'ssh',
@@ -226,7 +227,7 @@ export function HostSettingsPane({ config, onSave, active, onClose, navigationRe
             const draft = hosts.find(host => host.id === id)
             const committed = config.hosts.find(host => host.id === id)
             return draft?.kind === 'ssh' ? <div key={id} hidden={selectedId !== id || panel !== 'connection'} inert={selectedId !== id || panel !== 'connection'}>
-              <HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && selectedId === id && panel === 'connection'} />
+              <HostUpgradePanel host={draft} committed={committed?.kind === 'ssh' ? committed : undefined} active={active && view === 'editor' && selectedId === id && panel === 'connection'} />
             </div> : null
           })}
           {projectHosts.filter(id => hosts.some(host => host.id === id)).map(id => {
