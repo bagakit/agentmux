@@ -20,6 +20,8 @@ import { noteCreationTarget, noteCreationDisplayWorkspace, noteCreationResourceM
 import type { NoteBlockTarget } from '../../shared/note-document'
 import type { FileOpenPlacement, FileOpenResult, ConfirmedExistingFileSpace } from './lib/file-workbench-state'
 import type { EditorRegionMode } from './lib/file-region-presentation'
+import { effectiveFileRegionMode } from './lib/file-region-presentation'
+import { prepareFileSurface } from './lib/file-surface-loading'
 import { workbenchProjectionMatches, sameWorkbenchProjectionSelection, type WorkbenchProjection } from './lib/workbench-projection'
 import { projectWorkspaces, workspaceProjectId } from './lib/workspace-projects'
 import { goalProjectContext, goalProjectContextText } from './lib/goal-project-context'
@@ -5869,6 +5871,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return false
       }
     }
+    if (!background) prepareFileSurface(path, effectiveFileRegionMode(navigation.editorRegionModes, exactRegionId ?? '', path,
+      navigation.documentIssues[documentKey(workspaceId, path)]?.kind === 'binary'))
     try {
       // Stash the reveal target before opening. EditorPane consumes it once on Monaco mount (new
       // document) or on the `line` prop it reads (already-open document), then clears it. Setting it

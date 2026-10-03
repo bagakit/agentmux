@@ -14,7 +14,7 @@ import {
 } from './file-explorer-stale-dir-cache'
 import type { DirCache, TreeNode } from './file-explorer-types'
 import { fileExplorerContains } from '../../lib/file-explorer-scope'
-import { useAppStore } from '../../store'
+import { useWorkspaceResource } from '../../hooks/useWorkspaceResource'
 
 function pathDepth(path: string): number {
   return path ? path.split('/').length - 1 : -1
@@ -39,7 +39,7 @@ export function flattenFileTree(
 }
 
 export function useWorkspaceFileTree(workspaceId: string, expanded: ReadonlySet<string>, rootPath = '') {
-  const resource = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === workspaceId))
+  const resource = useWorkspaceResource(workspaceId)
   const [dirCache, setDirCache] = useState<Record<string, DirCache>>({})
   const cacheRef = useRef(dirCache)
   const loadTrackerRef = useRef(createFileExplorerDirLoadTracker())

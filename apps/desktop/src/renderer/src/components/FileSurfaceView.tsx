@@ -11,6 +11,7 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { FilePreviewPane, ImageContent } from './FilePreviewPane'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { WorkspaceImage } from './WorkspaceImage'
+import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 
 const EditorPane = lazy(async () => ({ default: (await import('./EditorPane')).EditorPane }))
 const NoteFileSurfaceView = lazy(async () => ({ default: (await import('./NoteFileSurfaceView')).NoteFileSurfaceView }))
@@ -38,8 +39,9 @@ export function FileSurfaceView({ tabId, surface, released = false, visible = tr
   const binary = useAppStore(state => state.documentIssues[key]?.kind === 'binary')
   const dirty = useAppStore(state => Boolean(state.dirtyDocuments[key]))
   const saving = useAppStore(state => Boolean(state.savingDocuments[key]))
-  const workspaceRoot = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)?.path ?? '')
-  const isLocal = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === surface.workspaceId)?.hostId === 'local')
+  const workspace = useWorkspaceResource(surface.workspaceId)
+  const workspaceRoot = workspace?.path ?? ''
+  const isLocal = workspace?.hostId === 'local'
   const reportError = useAppStore(state => state.reportError)
   const openFile = useAppStore(state => state.openFile)
   const noteReveal = useAppStore(state => state.documentRevealTargets[key]?.noteBlock)
