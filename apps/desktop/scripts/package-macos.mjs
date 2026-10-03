@@ -497,12 +497,13 @@ async function waitForProcessExit(findProcessIds, timeoutMs) {
   return remaining
 }
 
-async function waitForPath(path, deadline) {
+async function waitForPath(path, deadline, isAlive) {
   while (true) {
     if (Date.now() > deadline) return false
     const exists = await pathExists(path)
     if (Date.now() > deadline) return false
     if (exists) return true
+    if (isAlive && !(await isAlive())) return false
     const remaining = deadline - Date.now()
     if (remaining <= 0) return false
     await new Promise((resolveDelay) => setTimeout(resolveDelay, Math.min(20, remaining)))
@@ -605,7 +606,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   }
   let verificationError
   let verificationStage = 'launch-request'
-  const verificationDeadline = Date.now() + 180_000
+  const verificationDeadline = Date.now() + 20_000
   try {
     await run('open', ['-n', '--stdout', stdoutPath, '--stderr', stderrPath,
       '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
@@ -616,7 +617,13 @@ async function verifyLaunchServices(appPath, verificationRoot) {
       '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1', canonicalAppPath
     ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()) })
     verificationStage = 'ready-receipt'
-    assert(await waitForPath(readyFile, verificationDeadline), 'Packaged Desktop did not emit its ready receipt.')
+    let sawProcess = false
+    const isAppAlive = async () => {
+      const pids = await ownedApplicationPids()
+      if (pids.length > 0) sawProcess = true
+      return !sawProcess || pids.length > 0
+    }
+    assert(await waitForPath(readyFile, verificationDeadline, isAppAlive), 'Packaged Desktop did not emit its ready receipt.')
     const ready = JSON.parse(await readFile(readyFile, 'utf8'))
     assert(ready.productName === PRODUCT_NAME && ready.version === manifest.version,
       'LaunchServices started an application with the wrong product identity.')
@@ -624,7 +631,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(await realpath(ready.executable) === executable,
       'LaunchServices ready receipt did not come from the exact relocated application.')
     verificationStage = 'runtime-owner-receipt'
-    assert(await waitForPath(ownerReceiptPath, verificationDeadline), 'Packaged CtxMux did not publish its ownership receipt.')
+    assert(await waitForPath(ownerReceiptPath, verificationDeadline, isAppAlive), 'Packaged CtxMux did not publish its ownership receipt.')
     const ownerReceipt = JSON.parse(await readFile(ownerReceiptPath, 'utf8'))
     assert(await realpath(ownerReceipt.daemonPath) === await realpath(daemonEntrypoint) &&
       ownerReceipt.socketPath === endpointPath,
@@ -693,7 +700,7 @@ async function detachCreatedImage(imagePath) {
   }
 }
 
-async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelperSha256) {
+async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelperSha256, signingPlan) {
   const mountPoint = join(temporaryRoot, 'mounted-dmg')
   const verificationRoot = join(temporaryRoot, 'verification')
   const applicationsRoot = join(verificationRoot, 'Applications')
@@ -713,7 +720,11 @@ async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelp
   await auditBundleSymlinks(installedApp)
   await run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', installedApp], { capture: true })
   await verifyPackagedRuntime(installedApp, verificationRoot, source, signedWorkspaceMoveHelperSha256)
-  await verifyLaunchServices(installedApp, verificationRoot)
+  if (signingPlan?.kind === 'ad-hoc') {
+    process.stderr.write('Ad-hoc development candidate: skipping LaunchServices smoke test on temporary volume.\n')
+  } else {
+    await verifyLaunchServices(installedApp, verificationRoot)
+  }
 }
 
 /**
@@ -1094,7 +1105,7 @@ async function main() {
       await verifyPackagedRuntime(stagedApp, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
     } else {
       await createDmg(stagedApp, stagedDmg, temporaryRoot)
-      await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256)
+      await verifyDmg(stagedDmg, temporaryRoot, initialSource, signedWorkspaceMoveHelperSha256, signingPlan)
     }
     const finalSource = await sourceIdentity()
     assert(
