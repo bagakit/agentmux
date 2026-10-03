@@ -90,7 +90,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (receipt) confirmPrompt(draftKey, pending)
   }, [reading.timeline, reading.session, agentSessionId, draftKey, revision])
 
-  async function submit(): Promise<void> {
+  async function submit(explicit = true): Promise<void> {
     const existing = attempts.current.get(draftKey)
     if (!available || !client || !agentSessionId || !reading.session || !draft.trim()
       || existing?.phase === 'sending' || existing?.phase === 'unknown') return
@@ -109,7 +109,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     redraw(value => value + 1)
     try {
       await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
-        prompt: expandSemanticReferences(original.draft), authorHuman: true, ...condition })
+        prompt: expandSemanticReferences(original.draft), authorHuman: true, ...condition,
+        // Explicit Send/Cmd+Enter authorizes this input only; plain Enter keeps its original semantics.
+        ...(explicit ? { allowUncertainTurn: true, execution: 'immediate' as const } : {}) })
       if (!mounted.current) return
       confirmPrompt(originalKey, original)
       if (current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
@@ -239,9 +241,17 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       <div className="mobile-conversation__composer">
         <AgentComposer tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
           refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
-          onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit() } : {})}
+          onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           {...(onAttach ? { onAttach } : {})} {...(readPastedImage ? { readPastedImage } : {})}
-          feedback={attempt && attempt.phase !== 'confirmed' ? <span role="status">{attempt.message}</span> : undefined} />
+          />
+        {attempt && attempt.phase !== 'confirmed' ? <aside className="mobile-send-status" data-phase={attempt.phase} aria-live="polite">
+          <div className="mobile-send-status__summary">
+            <span>{attempt.phase === 'sending' ? '正在发送…' : attempt.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
+            {attempt.phase !== 'sending' ? <button type="button" onClick={() => { void reading.refresh() }}>刷新</button> : null}
+            {attempt.phase !== 'sending' && onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
+            {attempt.phase !== 'sending' ? <details><summary>详情</summary><p>{attempt.message}</p></details> : null}
+          </div>
+        </aside> : null}
       </div>
     </section>
   </ClientUiProvider>

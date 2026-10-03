@@ -90,7 +90,8 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.submit).toHaveBeenCalledOnce()
     const input = f.submit.mock.calls[0]![0]
     expect(input).toEqual({ agentSessionId: 'session-original', operationId: expect.any(String), prompt: expect.any(String),
-      authorHuman: true, expectedRun: { runId: 'run-original' }, afterSubmissionId: 'prior-submission' })
+      authorHuman: true, expectedRun: { runId: 'run-original' }, afterSubmissionId: 'prior-submission',
+      allowUncertainTurn: true, execution: 'immediate' })
     expect(input.prompt.trim()).toBe(`${skillPath} 保留引用`)
     expect(input.operationId).not.toBe('')
     expect(editor(view.element).textContent).toContain('保留引用')
@@ -115,6 +116,59 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.submit).toHaveBeenCalledOnce()
   })
 
+  it.each(['done', 'working'] as const)('explicitly sends two messages against the original %s Run without waiting for a completion probe', async state => {
+    const f = fixture(), original = session()
+    original.semanticStatus = { state, source: 'native-hook', observedAt: 1 }
+    f.sessions.set(original.agentSessionId, original)
+    f.submit.mockImplementationOnce(async input => {
+      const admitted = { ...original, promptCompletionAdmission: { submissionId: input.operationId, operationId: 'native-phase', startByte: 0, endByte: 8, acknowledged: true } }
+      f.sessions.set(original.agentSessionId, admitted)
+      f.emit({ type: 'agent-session', session: admitted })
+    })
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '第一条消息')
+    await click(button(view.element, 'Send'))
+    expect(editor(view.element).textContent).toBe('')
+    await paste(view.element, '第二条消息')
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledTimes(2)
+    const [first, second] = f.submit.mock.calls.map(call => call[0])
+    expect(first).toMatchObject({ expectedRun: original.run, afterSubmissionId: null, allowUncertainTurn: true, execution: 'immediate' })
+    expect(second).toMatchObject({ expectedRun: original.run, afterSubmissionId: first!.operationId, allowUncertainTurn: true, execution: 'immediate' })
+    expect(second!.operationId).not.toBe(first!.operationId)
+    expect(editor(view.element).textContent).toBe('')
+  })
+
+  it('keeps plain Enter separate from explicit Send and Cmd+Enter', async () => {
+    const f = fixture(), view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '普通输入')
+    await act(async () => editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })))
+    expect(f.submit).toHaveBeenCalledOnce()
+    expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('allowUncertainTurn')
+    expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('execution')
+    await paste(view.element, '明确steer')
+    await act(async () => editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter', metaKey: true })))
+    expect(f.submit).toHaveBeenCalledTimes(2)
+    expect(f.submit.mock.calls[1]![0]).toMatchObject({ allowUncertainTurn: true, execution: 'immediate' })
+  })
+
+  it('keeps a pre-input turn-boundary refusal editable with full-width recovery, without treating it as unknown delivery', async () => {
+    const f = fixture(), terminal = vi.fn()
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('The previous turn has not been confirmed complete.'), { code: 'AGENT_TURN_END_UNCONFIRMED' }))
+    const view = await mount(<MobileConversationSurface {...props(f)} onShowTerminal={terminal} />)
+    await paste(view.element, '第二条保留')
+    await click(button(view.element, 'Send'))
+    expect(editor(view.element).textContent).toBe('第二条保留')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    expect(view.element.querySelector('.composer .mobile-send-status')).toBeNull()
+    expect(view.element.querySelector('.mobile-send-status')?.getAttribute('data-phase')).toBe('rejected')
+    await click(button(view.element, '终端'))
+    expect(terminal).toHaveBeenCalledOnce()
+    await click(button(view.element, 'Send'))
+    expect(f.submit).toHaveBeenCalledTimes(2)
+    expect(editor(view.element).textContent).toBe('')
+  })
+
   it('keeps authoritative rejection editable and retries only by an explicit new action', async () => {
     const f = fixture()
     f.submit.mockRejectedValueOnce(Object.assign(new Error('Agent prompt exceeds its maximum byte length.'), { code: 'INVALID_AGENT_PROMPT' }))
@@ -129,6 +183,26 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.submit).toHaveBeenCalledTimes(2)
     expect(f.submit.mock.calls[1]![0].operationId).not.toBe(f.submit.mock.calls[0]![0].operationId)
     expect(editor(view.element).textContent).toBe('')
+  })
+
+  it('keeps a fresh read-only preparation refusal editable without unlocking a previously unknown operation', async () => {
+    const f = fixture()
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('This call ended during read-only preparation before attempting input.'), {
+      code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }
+    }))
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '准备失败但原Agent健康')
+    await click(button(view.element, 'Send'))
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    expect(editor(view.element).textContent).toBe('准备失败但原Agent健康')
+    f.submit.mockRejectedValueOnce(Object.assign(new Error('submit phase not applied after payload'), {
+      code: 'AGENT_PROMPT_INPUT_NOT_APPLIED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 }
+    }))
+    await click(button(view.element, 'Send'))
+    expect(button(view.element, 'Send').disabled).toBe(true)
+    await refreshOriginal(view.element)
+    expect(f.submit).toHaveBeenCalledTimes(2)
+    expect(button(view.element, 'Send').disabled).toBe(true)
   })
 
   it('binds a late receipt to its original operation and preserves edits in both Sessions', async () => {

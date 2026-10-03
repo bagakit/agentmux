@@ -92,3 +92,13 @@
 .mobile-captured-source { color: var(--text-muted); font-size: 10px; margin: 4px 10px; }
 .mobile-reading-action { align-self: center; min-height: 32px; padding: 4px 10px; border: 0; border-radius: 16px; background: var(--surface-1); color: var(--text-muted); font-size: 11px; }
 .mobile-reading-latest { position: sticky; top: 0; z-index: 1; }
+
+/* Delivery status belongs to the full-width surface below the shared input grid. */
+.mobile-send-status { min-width: 0; margin: 6px 6px 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.mobile-send-status__summary { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+.mobile-send-status__summary > span { flex: 1 1 120px; min-width: 0; overflow-wrap: anywhere; }
+.mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
+.mobile-send-status p { margin: 0 0 6px; max-height: 120px; overflow: auto; overflow-wrap: anywhere; user-select: text; }
+.mobile-send-status details[open] { flex: 1 0 100%; min-width: 0; }
+.mobile-send-status summary { display: flex; align-items: center; }
