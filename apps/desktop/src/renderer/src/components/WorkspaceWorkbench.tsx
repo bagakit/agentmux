@@ -520,6 +520,8 @@ function SurfaceContent({
   focusForPresentation,
   browserFrame,
   onBrowserInputSelected,
+  onBrowserRegionSplit,
+  onBrowserRegionClose,
   primaryPresentationHostId
 }: {
   surface: WorkbenchSurface
@@ -535,6 +537,8 @@ function SurfaceContent({
   primaryPresentationHostId?: string | undefined
   browserFrame?: ((content: ReactNode, target: WorkbenchViewTarget) => ReactNode) | undefined
   onBrowserInputSelected?: ((target: WorkbenchViewTarget) => void) | undefined
+  onBrowserRegionSplit?: ((direction: SplitDirection) => void) | undefined
+  onBrowserRegionClose?: (() => void) | undefined
 }) {
   const parked = useTerminalRegionParked(surface.regionId)
   const monacoReleased = useMonacoSurfaceReleased(surface.regionId)
@@ -582,6 +586,9 @@ function SurfaceContent({
     return (
       <BrowserPane key={surface.browserId}
         tab={surface}
+        onRegionSplit={onBrowserRegionSplit}
+        regionSplitSurface={browserPresentation.surface ?? (browserPresentation.survey ? 'survey' : undefined)}
+        onRegionClose={onBrowserRegionClose}
         presentations={browserTargets.flatMap(target => target.reference?.tabId === tabId && (!target.projection || target.projection.entity.kind !== 'region' || target.projection.entity.regionId === surface.regionId)
           ? [{ occurrence: { presentationId: workbenchBrowserStageHostId(target, surface.regionId), location: { ...target.reference, regionId: surface.regionId } },
             stageHostId: workbenchBrowserStageHostId(target, surface.regionId), visible: target.visible !== false,
@@ -844,8 +851,15 @@ function WorkbenchRegionContent({
     target?.surface === 'mote' && target.reference?.tabId === tab.id && Object.hasOwn(tab.regions, target.reference.regionId)
       ? regionFocusExpression(target.reference.regionId, node.regionId, regionCount) : focus
 
-  const renderFrame = (content: ReactNode, target?: WorkbenchViewTarget): ReactNode => (
-    <RegionContextMenu
+  const renderFrame = (content: ReactNode, target?: WorkbenchViewTarget): ReactNode => {
+    const splitMenu = workbenchSplitMenuEntries({
+      regionCount,
+      split: (direction) => splitRegion(tab.workspaceId, tab.id, node.regionId, direction),
+      arrange: (preset) => arrangeTabRegions(tab.workspaceId, tab.id, preset)
+    })
+    const surveyBrowser = surface.kind === 'browser' &&
+      (target ? target.surface === 'survey' : browserPresentation.surface === 'survey' || browserPresentation.survey === true)
+    return <RegionContextMenu
       regionId={node.regionId}
       // 只有承载 Agent 的一格才有语义身份可寻址。这个判定跟 Tab 级的唯一 Agent 判定同源
       // （tab-control-handoff 的 addressableAgentSessionId），所以第六种载 Agent 的 kind 只在那里声明一次。
@@ -857,11 +871,7 @@ function WorkbenchRegionContent({
       // 分屏落在**右键点中的这一格**上，不是「当前聚焦的那一格」。这正是这个菜单存在的理由
       // （见 RegionContextMenu 顶部注释）：Tab 条上那个 Split 下拉只能拿 activeSurface，于是
       // 想切旁边那一格时它切错格；这里 regionId 由右键事件本身给定，没有推断。
-      splitMenu={workbenchSplitMenuEntries({
-        regionCount,
-        split: (direction) => splitRegion(tab.workspaceId, tab.id, node.regionId, direction),
-        arrange: (preset) => arrangeTabRegions(tab.workspaceId, tab.id, preset)
-      })}
+      splitMenu={surveyBrowser ? splitMenu.filter(entry => entry.kind === 'rearrange') : splitMenu}
       // 换位同样落在**右键点中的这一格**：swapMenu 列出这张 Tab 里除本格外的每一格，点了把两格
       // 在既有布局里对调（见 regionSwapMenuEntries 与 store.swapRegions）。只有一格时它自然为空，
       // 整节以缺席表达。regions 按 regionIds（布局叶子的左→右 / 上→下 视觉顺序）喂进去，而非
@@ -895,7 +905,7 @@ function WorkbenchRegionContent({
       }}
     >
       {content}
-      {canClose ? (
+      {canClose && surface.kind !== 'browser' ? (
         <button
           type="button"
           className="workbench-region__close"
@@ -913,7 +923,7 @@ function WorkbenchRegionContent({
 
     </section>
     </RegionContextMenu>
-  )
+  }
   return <>{renderFrame(
       <SessionRegionHost arrangement="columns" className="workbench-session-region-host">
         <SurfaceContent
@@ -929,6 +939,8 @@ function WorkbenchRegionContent({
           browserFrame={renderFrame}
           primaryPresentationHostId={primaryPresentationHostId}
           onBrowserInputSelected={target => selectFrameRegion(target)}
+          onBrowserRegionSplit={direction => splitRegion(tab.workspaceId, tab.id, node.regionId, direction)}
+          onBrowserRegionClose={canClose ? requestRegionClose : undefined}
         />
       </SessionRegionHost>
   )}
