@@ -9,7 +9,10 @@ const dom = composerDOM()
 const queued = (operationId: string, runId = 'run-agent-1') => ({operationId, runId, text:'Original '+operationId, status:'queued' as const})
 const strip = () => document.querySelector<HTMLElement>('.composer-pending:not([hidden])')
 const selectedCard = () => [...strip()!.querySelectorAll<HTMLElement>('.composer-pending__card')].find(card => card.dataset.operationId === strip()!.dataset.operationId)!
-async function pendingClick(selector: string) { await act(async () => selectedCard().querySelector<HTMLButtonElement>(selector)!.click()) }
+async function pendingClick(selector: string) {
+  const owner = selector === '[aria-label="在 Outbox 查看待发消息和操作"]' ? strip()!.querySelector('.composer-pending__heading')! : selectedCard()
+  await act(async () => owner.querySelector<HTMLButtonElement>(selector)!.click())
+}
 const editor = () => dom.container.querySelector('[role="textbox"]')!
 async function mount(visible = true) { await dom.render(<AgentSessionComposer sessionId="agent-1" visible={visible} />) }
 beforeEach(() => {
@@ -59,7 +62,7 @@ it('pending interaction and changed Run explain waiting while the existing Outbo
 it('unknown delivery is retained and never gets a fabricated successful state',async()=>{
   useAppStore.setState({agentSteerQueues:{'agent-1':[{...queued('unknown'),status:'deferred',promptCondition:{kind:'test'} as never,error:'Original outcome unknown'}]}})
   await mount();expect(strip()!.textContent).toContain('投递未确认');await pendingClick('[aria-label="在 Outbox 查看待发消息和操作"]')
-  expect(dom.container.textContent).toContain('尚未发送，暂无对话位置');expect(dom.container.textContent).toContain('Original unknown')
+  expect(dom.container.textContent).toContain('投递未确认，对话位置暂不可用');expect(dom.container.textContent).not.toContain('尚未发送，暂无对话位置');expect(dom.container.textContent).toContain('Original unknown')
 })
 it('a confirmed captured record explains submission separately from CLI acceptance or reply',async()=>{
   useAppStore.setState({timelines:{'agent-1':{agentSessionId:'agent-1',revision:1,items:[{id:'sent',agentSessionId:'agent-1',kind:'user_message',status:'complete',source:'user',content:'Recorded original',createdAt:1,updatedAt:1}]}}})
@@ -93,7 +96,7 @@ it('100 distinct cards are discoverable and middle/tail hover, copy, send and Mo
   for (const index of [0, 49, 99]) {
     await act(async () => cards[index]!.dispatchEvent(new PointerEvent('pointermove', { bubbles: true })))
     expect(strip()!.dataset.operationId).toBe(entries[index]!.operationId)
-    expect(strip()!.querySelector('[data-reading-id]')!.textContent).toBe(entries[index]!.text)
+    expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe(entries[index]!.text)
     await pendingClick('[aria-label="复制这条待发消息"]')
     expect(clipboard).toHaveBeenLastCalledWith(entries[index]!.text)
   }
@@ -141,7 +144,7 @@ it('editing a nonhead never-admitted card saves through the original queue owner
   await act(async () => strip()!.querySelector<HTMLButtonElement>('[aria-label="保存待发消息"]')!.click())
   expect(save).toHaveBeenLastCalledWith('agent-1', 'edit-tail', entries[1]!.text, 'Edited tail\nFull second line')
   expect(useAppStore.getState().agentSteerQueues['agent-1']).toEqual([entries[0], { ...entries[1], text: 'Edited tail\nFull second line' }])
-  expect(strip()!.querySelector('textarea')).toBeNull();expect(strip()!.querySelector('[data-reading-id]')!.textContent).toBe('Edited tail\nFull second line')
+  expect(strip()!.querySelector('textarea')).toBeNull();expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe('Edited tail\nFull second line')
   expect(send).not.toHaveBeenCalled();expect(submit).not.toHaveBeenCalled();expect(dom.draft()).toBe('Keep my draft')
 })
 it('a rejected compare-and-swap keeps the local edit draft and original delivery record; IME Escape does not dismiss', async () => {
@@ -170,4 +173,65 @@ it('opening and closing the original Mailbox retains the floating edit draft whi
   expect(strip()).toBeNull();expect(document.querySelector('.composer-pending[hidden] textarea')).toBe(textarea)
   await dom.click('[aria-label="Close mailbox"]')
   expect(strip()!.querySelector('textarea')).toBe(textarea);expect(textarea.value).toBe('Unsaved local edit survives Mailbox');expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('compact rows have three original actions, no native full-text tooltip, and one reader and live announcement', async () => {
+  useAppStore.setState({agentSteerQueues:{'agent-1':[queued('head'),queued('tail')]}})
+  await mount()
+  for (const card of strip()!.querySelectorAll('.composer-pending__card')) {
+    expect(card.querySelectorAll('.composer-pending__actions button')).toHaveLength(3)
+    expect(card.querySelector('.composer-pending__preview')!.hasAttribute('title')).toBe(false)
+    expect(card.querySelector('.composer-pending__state')!.getAttribute('aria-label')).toBe('排队中')
+    expect(card.querySelector('[role="status"]')).toBeNull()
+  }
+  await act(async () => strip()!.querySelector('[data-queue-index="1"]')!.dispatchEvent(new PointerEvent('pointermove',{bubbles:true})))
+  expect(strip()!.querySelectorAll('.composer-pending__body')).toHaveLength(1)
+  expect(strip()!.querySelector('.composer-pending__body')!.textContent).toBe('Original tail')
+  expect(strip()!.querySelectorAll('[role="status"]')).toHaveLength(1)
+  expect(strip()!.querySelector('.composer-pending__reading-state')!.textContent).toContain('排队中')
+})
+
+it('copy shows a visible check only after the real clipboard owner accepts the original full body', async () => {
+  const write = vi.spyOn(api.ui,'writeClipboardText').mockResolvedValue()
+  useAppStore.setState({agentSteerQueues:{'agent-1':[queued('copy')]}})
+  await mount(); await pendingClick('[aria-label="复制这条待发消息"]')
+  const button = selectedCard().querySelector('.composer-pending__copy')!
+  expect(write).toHaveBeenCalledExactlyOnceWith('Original copy')
+  expect(button.getAttribute('data-copy-state')).toBe('copied')
+  expect(button.querySelector('svg.lucide-check')).not.toBeNull()
+  expect(strip()!.querySelector('[role="status"]')!.textContent).toBe('已复制待发消息')
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('a real clipboard rejection remains failed through the original feedback owner and never shows a success check', async () => {
+  vi.spyOn(api.ui,'writeClipboardText').mockRejectedValue(new Error('Clipboard unavailable'))
+  useAppStore.setState({agentSteerQueues:{'agent-1':[queued('copy-failed')]}})
+  await mount(); await pendingClick('[aria-label="复制这条待发消息"]')
+  const button = selectedCard().querySelector('.composer-pending__copy')!
+  expect(button.getAttribute('data-copy-state')).toBe('failed')
+  expect(button.querySelector('svg.lucide-check')).toBeNull()
+  expect(strip()!.querySelector('[role="status"]')!.textContent).not.toContain('已复制')
+  await pendingClick('[aria-label="在 Outbox 查看待发消息和操作"]')
+  await dom.click('[id$="-system-tab"]')
+  await dom.click('[data-record-key^="notice:tool:"]')
+  expect(dom.container.textContent).toContain('Clipboard unavailable')
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('a late clipboard result cannot mark a changed original body or supersede the latest copy operation', async () => {
+  let release!: () => void
+  const write = vi.spyOn(api.ui,'writeClipboardText').mockImplementationOnce(() => new Promise<void>(resolve => { release = resolve })).mockResolvedValue()
+  const original = queued('copy-late')
+  useAppStore.setState({agentSteerQueues:{'agent-1':[original,queued('copy-next')]}})
+  await mount(); await pendingClick('[aria-label="复制这条待发消息"]')
+  await act(async () => useAppStore.setState({agentSteerQueues:{'agent-1':[{...original,text:'Changed original body'},queued('copy-next')]}}))
+  await act(async () => { release() })
+  expect(selectedCard().querySelector('.composer-pending__copy')!.getAttribute('data-copy-state')).toBe('idle')
+  expect(strip()!.querySelector('[role="status"]')!.textContent).toBe('')
+  expect(write).toHaveBeenLastCalledWith('Original copy-late')
+  await act(async () => strip()!.querySelector('[data-queue-index="1"]')!.dispatchEvent(new PointerEvent('pointermove',{bubbles:true})))
+  await pendingClick('[aria-label="复制这条待发消息"]')
+  expect(selectedCard().querySelector('.composer-pending__copy')!.getAttribute('data-copy-state')).toBe('copied')
+  expect(write).toHaveBeenLastCalledWith('Original copy-next')
+  expect(dom.draft()).toBe('Keep my draft')
 })
