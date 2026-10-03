@@ -311,7 +311,7 @@
 .composer-pending { position: fixed; display: flex; flex-direction: column; width: max-content; max-width: min(360px, calc(100vw - 16px)); min-width: 0; margin: 0; padding: 0; background: transparent; color: var(--text); font-size: var(--fs-meta); pointer-events: auto; visibility: hidden; }
 .composer-pending[hidden] { display: none; }
 .composer-pending[data-positioned='true'] { visibility: visible; }
-.composer-pending__cards { position: relative; display: grid; max-height: 180px; min-height: 0; margin: 0; padding: 6px 0 6px 4px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
+.composer-pending__cards { position: relative; display: grid; max-height: 180px; min-height: 0; margin: 0; padding: 6px; overflow-y: auto; overflow-x: hidden; list-style: none; overscroll-behavior: contain; scrollbar-width: thin; }
 /* Only layout reads card bounds; native scroll changes two shared values. The
    projection stays behind the common right-bottom pivot, inside the scrollport. */
 .composer-pending__card {
