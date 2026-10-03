@@ -42,7 +42,8 @@ it('reads only after intent and shows the latest three native/captured inputs be
  const original=useAppStore.getState();await pointer(card(),'pointerover');await act(async()=>new Promise(resolve=>setTimeout(resolve,150)));expect(panel()).toBeNull();expect(api.sessions.historyPage).not.toHaveBeenCalled()
  await act(async()=>new Promise(resolve=>setTimeout(resolve,60)));await act(async()=>vi.waitFor(()=>expect(inputs()).toHaveLength(3)))
  expect(inputs().map(n=>n.dataset.hoverInputId)).toEqual(['native:claude:hover-hover-a:latest-native','captured:human','captured:peer'])
- expect(inputs().map(n=>n.dataset.inputAuthor)).toEqual(['unknown','human','agent']);expect(inputs()[2]!.textContent).toContain('Review Agent');expect(inputs()[0]!.textContent).toContain('Native record');expect(inputs()[1]!.textContent).toContain('Submission record')
+ expect(inputs().map(n=>n.dataset.inputAuthor)).toEqual(['unknown','human','agent']);expect(inputs()[2]!.textContent).toContain('Review Agent');expect(inputs()[0]!.querySelector('time')!.title).toContain('Native record');expect(inputs()[1]!.querySelector('time')!.title).toContain('Submission record')
+ for(const row of inputs()){const time=row.querySelector('time')!;expect(time.getAttribute('aria-label')).toContain(time.textContent)}
  expect(panel()!.textContent).toContain(response);expect(api.sessions.historyPage).toHaveBeenCalledExactlyOnceWith(original.sessions[0]!.control,{limit:30});expect(document.activeElement).toBe(input);expect([input.selectionStart,input.selectionEnd]).toEqual([2,8]);expect(useAppStore.getState().agentComposerDrafts).toBe(original.agentComposerDrafts)
  const count=vi.mocked(api.sessions.historyPage).mock.calls.length
  await act(async()=>root.render(<GlobalFocusSurface visible={false} />));expect(panel()).toBeNull()
