@@ -59,13 +59,21 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
     const composer = anchor.closest<HTMLElement>('.composer')
     const region = anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? anchor.closest<HTMLElement>('.agent-surface') ?? composer
     if (!composer || !region) return
-    const terminal = composer.closest('.agent-surface')?.querySelector<HTMLElement>('.terminal-view__xterm .xterm')
+    const terminalContainer = composer.closest('.agent-surface')?.querySelector<HTMLElement>('.terminal-view__xterm')
     let disposed = false, revision = 0
     const update = async () => {
       const request = ++revision
       if (!anchor.isConnected || anchor.closest('[hidden], [inert]')) return
       const tool = composer.getBoundingClientRect(), mailbox = anchor.getBoundingClientRect()
-      const anchorY = Math.min(tool.top, terminal?.getBoundingClientRect().bottom ?? tool.top)
+      const terminal = terminalContainer?.querySelector<HTMLElement>('.xterm')
+      const screen = terminal?.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
+      const helper = terminal?.querySelector<HTMLElement>('.xterm-helper-textarea')
+      const rowHeight = helper ? Number.parseFloat(getComputedStyle(helper).lineHeight) : 0
+      // xterm projects its actual cell height onto the helper. Protect the live
+      // last row as content; a cached hidden terminal must not move this surface.
+      const terminalDock = screen && screen.height > 0 && rowHeight > 0 && !terminal?.closest('[hidden], [inert]')
+        ? screen.bottom - rowHeight : tool.top
+      const anchorY = Math.min(tool.top, terminalDock)
       const reference = { contextElement: anchor, getBoundingClientRect: () => new DOMRect(mailbox.right, anchorY, 0, 0) }
       const position = await computePosition(reference, floating, {
         strategy: 'fixed', placement: 'top-end', middleware: [offset(8), shift({ boundary: region, padding: 8 }),
@@ -80,7 +88,7 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       floating.dataset.positioned = 'true'
     }
     const stop = autoUpdate(anchor, floating, () => { void update() }, { ancestorScroll: false })
-    const resize = new ResizeObserver(() => { void update() }); resize.observe(composer); resize.observe(region); if (terminal) resize.observe(terminal)
+    const resize = new ResizeObserver(() => { void update() }); resize.observe(composer); resize.observe(region); if (terminalContainer) resize.observe(terminalContainer)
     return () => { disposed = true; stop(); resize.disconnect() }
   }, [anchorRef, queued.length, dismissed, suppressed])
 
