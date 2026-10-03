@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto'
 import { constants } from 'node:fs'
-import { open } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
-import { nativeProcessFiles, nativeProcessBirth } from '../agent-native-process.js'
+import { chmod, copyFile, mkdtemp, open, rm } from 'node:fs/promises'
+import { isAbsolute, join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { nativeProcessFiles, nativeProcessBirth, openNativeProcessImage, type NativeProcessImage } from '../agent-native-process.js'
+import { runProcess } from '../process-runner.js'
+import { AgentMuxError } from '../errors.js'
 import type { AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import type { AgentPromptExecutionEvidence } from '../types.js'
 
@@ -17,39 +20,80 @@ const sourceIdentity = (sessionId: string, source: { dev: bigint; ino: bigint })
  * anonymous runtime socketpairs do not imply a remote connection.
  * Never infer past startup mode from today's missing control pathname.
  */
-export async function verifyCodexPromptExecutionTransport(context: AgentProviderPromptExecutionContext): Promise<boolean> {
-  if (context.args.some(arg => arg === '--remote' || arg.startsWith('--remote=')) || context.args.includes('agents')) return false
-  if (!context.processId || !Number.isSafeInteger(context.processId) || context.processId <= 0) return false
-  const handle = context.nativeHandle
-  if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return false
-  const signal = AbortSignal.timeout(8_000)
-  const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
-  let source
+async function readImageVersion(image: NativeProcessImage, signal: AbortSignal): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), 'amux-native-version-'))
   try {
-    source = await file.stat({ bigint: true })
-    if (!source.isFile()) return false
-    if (!context.nativeSourceId || sourceIdentity(handle.sessionId, source) !== context.nativeSourceId) return false
-    const header = Buffer.alloc(Number(source.size < BigInt(HEADER_BYTES) ? source.size : BigInt(HEADER_BYTES)))
-    await file.read(header, 0, header.length, 0)
-    const end = header.indexOf(10)
-    if (end < 0) return false
-    const meta = JSON.parse(header.subarray(0, end).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown; cli_version?: unknown } }
-    if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId ||
-      meta.payload?.cli_version !== '0.160.1') return false
-  } finally { await file.close() }
-  const rootBirth = await nativeProcessBirth(context.processId, signal)
-  const matches = (await nativeProcessFiles(context.processId, signal)).filter(file => file.path === handle.transcriptPath &&
-    file.device === source.dev && file.inode === source.ino && (file.access === 'w' || file.access === 'u'))
-  const owners = [...new Set(matches.map(file => file.processId))]
-  if (owners.length !== 1) return false
-  const nativePid = owners[0]!
-  const nativeBirth = await nativeProcessBirth(nativePid, signal)
-  const after = (await nativeProcessFiles(context.processId, signal)).filter(file =>
-    file.path === handle.transcriptPath && file.device === source.dev && file.inode === source.ino && (file.access === 'w' || file.access === 'u'))
-  const afterOwners = [...new Set(after.map(file => file.processId))]
-  return afterOwners.length === 1 && afterOwners[0] === nativePid &&
-    after.some(file => matches.some(old => old.processId === file.processId && old.descriptor === file.descriptor)) &&
-    await nativeProcessBirth(context.processId, signal) === rootBirth && await nativeProcessBirth(nativePid, signal) === nativeBirth
+    const executable = join(root, 'native')
+    // Execute only bytes from the held OS image. A launcher or a replacement at
+    // its former pathname says nothing about the process writing this Session.
+    // The kernel FD link refers to the held image even if its former pathname
+    // changes. Let the filesystem clone it when supported, otherwise copy bytes.
+    await copyFile(`${process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd'}/${image.file.fd}`,
+      executable, constants.COPYFILE_EXCL | constants.COPYFILE_FICLONE)
+    await chmod(executable, 0o700)
+    signal.throwIfAborted()
+    await image.assertCurrent(signal)
+    const result = await runProcess(executable, ['--version'], { cwd: root, signal, timeoutMs: 20_000, maxOutputBytes: 4096 })
+    if (result.exitCode !== 0 || result.stderr || !/^codex-cli [^\r\n]+\r?\n?$/u.test(result.stdout)) {
+      throw new AgentMuxError('The current native writer version could not be confirmed. Ordinary input remains available.', 'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
+    }
+    return result.stdout.trim().slice('codex-cli '.length)
+  } finally { await rm(root, { recursive: true, force: true }) }
+}
+
+/** A single image-version fact per Provider; never cache input authorization. */
+export function createCodexPromptExecutionTransportVerifier(): (context: AgentProviderPromptExecutionContext) => Promise<boolean> {
+  let versionFact: { identity: string; result: Promise<string> } | undefined
+  return async (context) => {
+    if (context.args.some(arg => arg === '--remote' || arg.startsWith('--remote=')) || context.args.includes('agents')) return false
+    if (!context.processId || !Number.isSafeInteger(context.processId) || context.processId <= 0) return false
+    const handle = context.nativeHandle
+    if (handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return false
+    const signal = AbortSignal.timeout(8_000)
+    const file = await open(handle.transcriptPath, constants.O_RDONLY | constants.O_NOFOLLOW)
+    let source
+    try {
+      source = await file.stat({ bigint: true })
+      if (!source.isFile()) return false
+      if (!context.nativeSourceId || sourceIdentity(handle.sessionId, source) !== context.nativeSourceId) return false
+      const header = Buffer.alloc(Number(source.size < BigInt(HEADER_BYTES) ? source.size : BigInt(HEADER_BYTES)))
+      await file.read(header, 0, header.length, 0)
+      const end = header.indexOf(10)
+      if (end < 0) return false
+      const meta = JSON.parse(header.subarray(0, end).toString('utf8')) as { type?: unknown; payload?: { id?: unknown; session_id?: unknown } }
+      // Resume appends to the creator's rollout. Its version is historical metadata.
+      if (meta.type !== 'session_meta' || (meta.payload?.session_id ?? meta.payload?.id) !== handle.sessionId) return false
+    } finally { await file.close() }
+    const rootBirth = await nativeProcessBirth(context.processId, signal)
+    const matches = (await nativeProcessFiles(context.processId, signal)).filter(file => file.path === handle.transcriptPath &&
+      file.device === source.dev && file.inode === source.ino && (file.access === 'w' || file.access === 'u'))
+    const owners = [...new Set(matches.map(file => file.processId))]
+    if (owners.length !== 1) return false
+    const nativePid = owners[0]!
+    const nativeBirth = await nativeProcessBirth(nativePid, signal)
+    const image = await openNativeProcessImage(nativePid, signal)
+    try {
+      if (versionFact?.identity !== image.identity) {
+        // Cold Darwin copy + executable validation was measured at ~20s for the
+        // pinned 241MB image. This budget applies only to a new version fact.
+        const fact = { identity: image.identity, result: readImageVersion(image, AbortSignal.timeout(35_000)) }
+        versionFact = fact
+        void fact.result.catch(() => { if (versionFact === fact) versionFact = undefined })
+      }
+      const version = await versionFact.result
+      const verificationSignal = AbortSignal.timeout(8_000)
+      await image.assertCurrent(verificationSignal)
+      if (version !== '0.160.1') {
+        throw new AgentMuxError(`The current native writer version ${version} does not support verified immediate execution. Ordinary input remains available.`, 'AGENT_PROMPT_IMMEDIATE_UNSUPPORTED')
+      }
+      const after = (await nativeProcessFiles(context.processId, verificationSignal)).filter(file =>
+        file.path === handle.transcriptPath && file.device === source.dev && file.inode === source.ino && (file.access === 'w' || file.access === 'u'))
+      const afterOwners = [...new Set(after.map(file => file.processId))]
+      return afterOwners.length === 1 && afterOwners[0] === nativePid &&
+        after.some(file => matches.some(old => old.processId === file.processId && old.descriptor === file.descriptor)) &&
+        await nativeProcessBirth(context.processId, verificationSignal) === rootBirth && await nativeProcessBirth(nativePid, verificationSignal) === nativeBirth
+    } finally { await image.file.close() }
+  }
 }
 
 /** Decode only the Provider's native turn records, with bounded work per operation.

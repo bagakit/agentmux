@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { inspectCodexPromptExecution } from '../src/providers/codex-prompt-execution.js'
-import { readCodexPromptExecutionEvidence, verifyCodexPromptExecutionTransport } from '../src/providers/codex-prompt-execution-evidence.js'
+import { readCodexPromptExecutionEvidence, createCodexPromptExecutionTransportVerifier } from '../src/providers/codex-prompt-execution-evidence.js'
 async function frame(body: string) {
  const s=new AgentTerminalScreen(120,40),b=Buffer.from(`\x1b[?2026h\x1b[2J${body}\x1b[16;3H\x1b[?2026l`)
  await s.write({startByte:0,endByte:b.length,dataBytes:b});return s
@@ -34,6 +34,7 @@ describe('Provider-owned immediate evidence',()=>{
   expect(()=>new AgentProviderRegistry().get('claude').planPromptInput('owned',{execution:'immediate'})).toThrow(/ordinary terminal input remains available/)
  })
  it('binds bounded native evidence and transport to this native Session',async()=>{
+  const verifyCodexPromptExecutionTransport=createCodexPromptExecutionTransportVerifier()
   const root=await mkdtemp(join(tmpdir(),'amux-native-evidence-'));try{
    const d=join(root,'sessions','2026','10','07');await mkdir(d,{recursive:true});const path=join(d,'rollout-private-native.jsonl')
    const c={args:[],workspacePath:root,nativeHandle:{kind:'provider' as const,providerId:'codex',sessionId:'native',transcriptPath:path}}

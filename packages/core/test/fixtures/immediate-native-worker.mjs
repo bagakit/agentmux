@@ -144,7 +144,8 @@ try{
  const input={...agentPromptCondition(before),agentSessionId:before.agentSessionId,operationId:'private-immediate-owned',prompt:'PRIVATE_ONLY_AUTHORIZED',execution:'immediate',authorHuman:true}
  if(remoteDaemon){
   assert.equal(report.transport.files.some(f=>f.access==='w'||f.access==='u'),false,'remote TUI cannot own the embedded native writer')
-  const {verifyCodexPromptExecutionTransport,readCodexPromptExecutionEvidence}=await import('../../dist/providers/codex-prompt-execution-evidence.js')
+  const {createCodexPromptExecutionTransportVerifier,readCodexPromptExecutionEvidence}=await import('../../dist/providers/codex-prompt-execution-evidence.js')
+  const verifyCodexPromptExecutionTransport=createCodexPromptExecutionTransportVerifier()
   const context={processId:nativePid,args,workspacePath:join(root,'workspace'),nativeHandle}
   const source=await readCodexPromptExecutionEvidence(context);assert(source);context.nativeSourceId=source.sourceId
   assert.equal(await verifyCodexPromptExecutionTransport(context),false)
