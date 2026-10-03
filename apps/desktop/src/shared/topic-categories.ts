@@ -12,10 +12,10 @@ export function isKnowledgeTopic(topic: ScratchTopicSnapshot): boolean {
 export function isKnowledgeTopicInBindings(topic: ScratchTopicSnapshot, bindings: SpaceZoneBindings): boolean {
   return isKnowledgeTopic(topic) && !Object.values(bindings).some(binding => binding.topicId === topic.id && binding.contentKind === 'mote')
 }
-export function topicContentSpaceId(workspace: WorkspaceRecord, topic: ScratchTopicSnapshot): string {
+export function topicContentSpaceId(workspace: WorkspaceRecord, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath'>): string {
   return directoryIdentity(workspace.hostId, scratchTopicIdentityPath(workspace, topic))
 }
-export function topicContentZoneId(workspace: WorkspaceRecord, topic: ScratchTopicSnapshot): string {
+export function topicContentZoneId(workspace: WorkspaceRecord, topic: Pick<ScratchTopicSnapshot, 'directoryPath' | 'identityDirectoryPath'>): string {
   return homeZoneId(topicContentSpaceId(workspace, topic))
 }
 export function categorySpaceFact(category: TopicCategory): AgentMuxSpaceFact {

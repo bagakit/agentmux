@@ -616,6 +616,12 @@ const mockApi: AgentMuxDesktopApi = {
     },
     reveal: async () => {}
   },
+  spaceObjects: {
+    appearance: async () => { throw new Error('Local image recognition requires the desktop filesystem owner.') },
+    previewAvatar: async () => { throw new Error('Avatar image processing is not available in the web preview.') },
+    saveAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },
+    readAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') }
+  },
   scratch: {
     setMoteArchived: async () => { throw new Error('Mote archive writes require the original desktop filesystem owner. The current Mote is kept.') },
     previewMoteAvatar: async () => { throw new Error('Avatar image processing is not available in the web preview.') },
@@ -735,6 +741,8 @@ const mockApi: AgentMuxDesktopApi = {
     onNativeOverlayWarning: () => () => {},
     requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
+    spatialLinksReady: async () => {},
+    onSpatialLinkIssue: () => () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     listWorkspaceSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },

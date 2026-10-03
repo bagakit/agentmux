@@ -1,5 +1,8 @@
+import { SpaceObjectImages } from './space-object-images.js'
+import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
+import type { SpatialLinkIngress } from './spatial-link-ingress.js'
 import { TopicSpatialOwner } from './topic-spatial-owner.js'
 import { AgentMuxNotebookStore, type NotebookWrite } from '@agentmux/core/notebook-store'
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
@@ -191,6 +194,7 @@ export async function registerIpc(args: {
   scratchTopics: ScratchTopics
   environmentWarning?: string
   onRendererUpdateReady?: (token: string) => void
+  spatialLinks?: SpatialLinkIngress
   loadedPackage?: DesktopPackageIdentity | null
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
@@ -371,7 +375,7 @@ export async function registerIpc(args: {
     controlBridge.accept(response)
   }
   const executeControlOwner = async (
-    request: AgentMuxControlRequest
+    request: AgentMuxControlRequest, signal?: AbortSignal
   ): Promise<AgentMuxControlResult> => {
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
       if(!request.presentation && !('requestId' in request.target)) {
@@ -408,11 +412,11 @@ export async function registerIpc(args: {
     if (request.operation === 'settings.resource.list' || request.operation === 'settings.resource.get' ||
         request.operation === 'settings.resource.add' || request.operation === 'settings.resource.update' ||
         request.operation === 'settings.resource.remove') return await executeSettingsResourcesControl(request, configOwner)
-    return projectBrowserControlResult(await controlBridge.execute(request))
+    return projectBrowserControlResult(await controlBridge.execute(request, signal))
   }
-  const executeControl = (request: AgentMuxControlRequest, context?: AgentMuxNameContext): Promise<AgentMuxControlResult> =>
+  const executeControl = (request: AgentMuxControlRequest, context?: AgentMuxNameContext, signal?: AbortSignal): Promise<AgentMuxControlResult> =>
     nameChangeRequests.run({ context: context ?? unknownNameContext(request.operation), operationId: request.requestId },
-      () => executeControlOwner(request))
+      () => executeControlOwner(request, signal))
   ipcMain.on(CONTROL_RESPONSE_CHANNEL, acceptControl)
   const handle = <TArgs extends unknown[], TResult>(
     channel: string,
@@ -759,6 +763,23 @@ export async function registerIpc(args: {
   topicKnowledge.setSpatialPort(new TopicSpatialOwner({ state: spatialState,
     workspace: () => workspace(config, SCRATCH_WORKSPACE_ID), topics: () => topicKnowledge.listTopicSnapshots(),
     categories: () => topicKnowledge.listCategories(), ensureDefaultCategory: () => topicKnowledge.ensureDefaultCategoryContent() }))
+  const spaceObjectImages = new SpaceObjectImages(async target => {
+    if (target.kind === 'category') return topicKnowledge.categoryAppearanceDirectory(target.categoryId, target.objectKey)
+    return { hostId: workspace(config, target.workspaceId).hostId,
+      directoryPath: await topicKnowledge.topicAppearanceDirectory(target.workspaceId, target.topicId, target.objectKey) }
+  })
+  handleWithEvent('spaceObjects:appearance', async (event, target: SpaceObjectImageTarget) => {
+    requireTrustedSender('spaceObjects:appearance', event); return spaceObjectImages.appearance(target)
+  })
+  handleWithEvent('spaceObjects:previewAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => {
+    requireTrustedSender('spaceObjects:previewAvatar', event); return spaceObjectImages.preview(target, input)
+  })
+  handleWithEvent('spaceObjects:saveAvatar', async (event, target: SpaceObjectImageTarget, input: ObjectAvatarInput) => {
+    requireTrustedSender('spaceObjects:saveAvatar', event); return spaceObjectImages.save(target, input)
+  })
+  handleWithEvent('spaceObjects:readAvatar', async (event, target: SpaceObjectImageTarget, ref: ObjectAvatarRef) => {
+    requireTrustedSender('spaceObjects:readAvatar', event); return spaceObjectImages.read(target, ref)
+  })
   handleWithEvent('topics:call', async (event, method: import('@agentmux/core').TopicMethod, params: import('@agentmux/core').TopicParams<import('@agentmux/core').TopicMethod>) => {
     requireTrustedSender('topics:call', event)
     return topicKnowledge.call(method, params)
@@ -819,6 +840,10 @@ export async function registerIpc(args: {
   handleWithEvent('ui:rendererUpdateReady', (event, token: string) => {
     requireTrustedSender('ui:rendererUpdateReady', event)
     args.onRendererUpdateReady?.(token)
+  })
+  handleWithEvent('ui:spatialLinksReady', event => {
+    requireTrustedSender('ui:spatialLinksReady', event)
+    args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => args.window.webContents.send('ui:spatialLinkIssue', message))
   })
   handle('ui:readClipboardText' , () => clipboard.readText())
   handle('ui:writeClipboardText', (text: string) => {
@@ -1465,6 +1490,7 @@ export async function registerIpc(args: {
     disposeToolkitIpc(); await toolkit.dispose() },
       () => {
         acceptingControl = false
+        args.spatialLinks?.unavailable()
         args.window.webContents.off('destroyed', closeMetrics)
         metrics.dispose()
         ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)

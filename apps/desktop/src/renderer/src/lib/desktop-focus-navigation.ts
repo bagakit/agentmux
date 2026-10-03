@@ -122,8 +122,21 @@ function reject(code: string, message: string, candidates?: AgentMuxSpaceSelecto
 }
 
 /** Resolve the durable placement, never execution cwd or the first unrelated Tab/Agent. */
-export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Partial<Pick<SpatialWorkbench, 'spaceZoneBindings'>>, catalog: AgentMuxSpaceCatalog,
+export function resolveDesktopSpaceSelection(state: DesktopSelectionState & Partial<Pick<SpatialWorkbench, 'spaceZoneBindings' | 'config' | 'topicCategories'>>, catalog: AgentMuxSpaceCatalog,
   target: AgentMuxSpaceSelector): AgentMuxDesktopSpaceSelection {
+  const category = target.spaceId && !target.zoneId && !target.tabId && !target.regionId && !target.groupId
+    ? state.topicCategories?.find(category => category.spaceId === target.spaceId) : undefined
+  if (category) {
+    const original = catalog.spaces.find(space => space.spaceId === category.spaceId)
+    const workspace = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === category.hostId)
+    if (!original || original.kind !== 'container' || original.hostId !== category.hostId || original.directoryPath !== category.directoryPath || !workspace) {
+      reject('SPACE_RESOURCE_UNKNOWN', 'The original Category resource is not currently confirmed.')
+    }
+    if (target.displayWorkspaceId && target.displayWorkspaceId !== workspace.id) {
+      reject('SPACE_LOCATION_REQUIRED', 'The requested display Workspace is not the original Category context.', [{ spaceId: category.spaceId, displayWorkspaceId: workspace.id }])
+    }
+    return { spaceId: category.spaceId, zoneId: null, workspaceId: workspace.id, topicId: null, tabId: null, groupId: null, regionId: null }
+  }
   const selected = selectSpatialCatalog(catalog, {
     ...(target.spaceId ? { spaceId: target.spaceId } : {}), ...(target.zoneId ? { zoneId: target.zoneId } : {}),
     ...(target.tabId ? { tabId: target.tabId } : {}), ...(target.regionId ? { regionId: target.regionId } : {}),

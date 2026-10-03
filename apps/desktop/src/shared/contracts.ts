@@ -1505,6 +1505,12 @@ export type AgentMuxDesktopApi = {
   topics: {
     call<M extends import('@agentmux/core').TopicMethod>(method: M, params: import('@agentmux/core').TopicParams<M>): Promise<import('@agentmux/core').TopicResult<M>>
   }
+  spaceObjects: {
+    appearance(target: SpaceObjectImageTarget): Promise<SpaceObjectAppearance>
+    previewAvatar(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarImage>
+    saveAvatar(target: SpaceObjectImageTarget, input: ObjectAvatarInput): Promise<ObjectAvatarRef>
+    readAvatar(target: SpaceObjectImageTarget, ref: ObjectAvatarRef): Promise<ObjectAvatarImage>
+  }
   scratch: {
     setMoteArchived(workspaceId: string, topicId: string, archived: boolean, objectKey: string, expectedVersion: string): Promise<import('./scratch-topics').MoteArchiveState & { state: 'active' | 'archived' }>
     previewMoteAvatar(workspaceId: string, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage>
@@ -1537,6 +1543,8 @@ export type AgentMuxDesktopApi = {
     /** Requests Chromium storage flush; completion is not a disk/fsync acknowledgement. */
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
+    spatialLinksReady(): Promise<void>
+    onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(): Promise<string | null>
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>
     listWorkspaceSkills(workspaceId: string, providerId: string): Promise<import('@agentmux/core').AgentSkill[]>
@@ -1848,3 +1856,5 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
   }
 }
 import type { MoteAvatarInput, MoteAvatarRef, MoteAvatarImage } from './mote-avatars.js'
+
+import type { SpaceObjectImageTarget, SpaceObjectAppearance, ObjectAvatarInput, ObjectAvatarImage, ObjectAvatarRef } from './object-avatars.js'

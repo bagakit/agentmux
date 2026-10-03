@@ -70,6 +70,11 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
   const [removing, setRemoving] = useState(false)
   const [query, setQuery] = useState('')
   const [iconTarget, setIconTarget] = useState<SpaceIconTarget | null>(null)
+  const iconInvoker = useRef<HTMLElement | null>(null)
+  function changeIcon(target: SpaceIconTarget): void {
+    iconInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setIconTarget(target)
+  }
   const filtering = Boolean(query.trim())
   const treeRef = useRef<HTMLDivElement>(null)
   const searchRef = useRef<HTMLInputElement>(null)
@@ -323,7 +328,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
           isLocal={project.hostId === 'local'}
           workspaceId={preferred ?? project.preferredWorkspaceId}
           onRemove={() => setRemoveRequest(project)}
-          onChangeIcon={() => setIconTarget(target)}
+          onChangeIcon={() => changeIcon(target)}
           onGroupProjects={() => setGroupDialog({ seed: project.id })}
         >
           <div className="project-rail-entry" data-space-entry>{row}{projectSessions.some((session) => session.kind === 'agent') ? <ProjectActivity compact sessions={projectSessions} contexts={activityContextsForWorkspaces(visibleProjectIds.flatMap((id) => projectRelations.nodes.get(id)!.workspaces))} /> : null}</div>
@@ -380,7 +385,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
         >{railDensity === 'default' ? <Rows2 size={15} /> : railDensity === 'compact' ? <Rows3 size={15} /> : <Rows4 size={15} />}</button>
       </div>
       <div className="space-tree" ref={treeRef} onKeyDown={navigateSpaceTree}>
-        {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={setIconTarget} /> : null}
+        {scratch ? <SpaceTopicsTree workspace={scratch} query={query} icons={icons} onChangeIcon={changeIcon} /> : null}
         <ProjectGroupsTree projects={projects} query={query} activeProjectId={activeProjectId}
           visible={visible} sessionsByProject={sessionsByProject} lastActivityByProject={lastActivityByProject}
           onCreate={() => setGroupDialog({})} onEdit={editing => setGroupDialog({ editing })} onDissolve={group => { setDissolveIssue(null); setDissolveRequest(group) }} />
@@ -437,7 +442,7 @@ export function WorkspaceSidebar({ visible = true }: { visible?: boolean }) {
             else setDissolveIssue(`Dissolution is applied here. Saving is unconfirmed: ${result.reason ?? 'The Core save acknowledgement is unavailable.'} Retry saving to confirm it.`)
           }, error => { reportError(error); setDissolveIssue('The group could not be dissolved. Retry saving; original work is retained.') }).finally(() => setDissolving(false))
         }} />
-      <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} />
+      <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() => iconInvoker.current?.isConnected ? iconInvoker.current : null} />
       <ConfirmationDialog
         open={removeRequest !== null}
         title="Remove project view?"

@@ -1,3 +1,4 @@
+import { formatZoneAddress, formatAmuxSpatialLink } from '@agentmux/core/sharing'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
 import { originalTopicAddress } from '../../../shared/space-addresses'
@@ -103,6 +104,7 @@ export function WorkspaceTopicsPanel({
   const manualIcons = useAppStore(state => state.spaceObjectIcons)
   const panel = useRef<HTMLElement>(null)
   const iconReturnKey = useRef<string | null>(null)
+  const iconInvoker = useRef<HTMLElement | null>(null)
   // The Topic list is authoritative and comes from the filesystem snapshot. Live Sessions are
   // matched onto it here for display; they never add or remove a Topic.
   // 拖拽要有一小段距离才启动，否则点一下打开 Topic 会被误判成拖动。键盘 sensor 提供等价路径。
@@ -390,7 +392,7 @@ export function WorkspaceTopicsPanel({
             const isCurrent = topic.id === currentTopic?.id
             const editing = editingTopicId === topic.id
             const pinned = pinnedTopics.includes(topic.id)
-            const target = topicSpaceIconTarget(workspace, topic)
+            const target = topicSpaceIconTarget(workspace, topic, bindings)
             const logicalPath = scratchTopicLogicalPath(workspace, topic)
             const physicalPath = scratchTopicPhysicalPath(workspace, topic)
             function withLogicalPath(action: (path: string) => void): void {
@@ -400,8 +402,17 @@ export function WorkspaceTopicsPanel({
               }
               action(logicalPath)
             }
+            function copyTopicAddress(asLink: boolean): void {
+              const address = originalTopicAddress(workspace, topic, bindings)
+              if (!address) { reportError(new Error('The original Topic identity is unconfirmed. Refresh Topics and retry copying its address.')); return }
+              void copyTextToClipboard(asLink
+                ? formatAmuxSpatialLink({ kind: 'zone', zoneId: address.zoneId })
+                : formatZoneAddress({ zoneId: address.zoneId, label: topic.title }), reportError)
+            }
             const menuActions = {
               pinned,
+              onCopyCard: () => copyTopicAddress(false),
+              onCopyLink: () => copyTopicAddress(true),
               onCopyPath: () => withLogicalPath(path => {
                 const absolute = scratchWorkspaceFilePath(workspace, topics, path)
                 if (absolute === null) { reportError(new Error('The original directory read is not confirmed. Refresh Topics and retry copying its path.')); return }
@@ -413,7 +424,7 @@ export function WorkspaceTopicsPanel({
               onEditWiki: () => withLogicalPath(path => void openFile(`${path}/${SCRATCH_TOPIC_WIKI_PATH}`, undefined, undefined, workspace.id).catch(reportError)),
               onToggleWiki: topic.wiki ? () => void setTopicWikiEnabled(topic, !topic.wiki!.enabled) : undefined,
               onResetWiki: topic.wiki ? () => void resetTopicWiki(topic) : undefined,
-              onChangeIcon: () => { if (!target) { reportError(new Error('The original object identity is unconfirmed. Repair its directory record before changing its icon.')); return } iconReturnKey.current = target.key; setIconTarget(target) },
+              onChangeIcon: () => { if (!target) { reportError(new Error('The original object identity is unconfirmed. Repair its directory record before changing its icon.')); return } iconReturnKey.current = target.key; iconInvoker.current = document.activeElement instanceof HTMLElement ? document.activeElement : null; setIconTarget(target) },
               onMove: () => setMoveTarget({ topicId: topic.id, title: topic.title }),
               wikiEnabled: topic.wiki?.enabled
             }
@@ -465,7 +476,7 @@ export function WorkspaceTopicsPanel({
                         spinner「只在有话说时才占用」的规矩。 */}
                     <SelectorRow
                       leading={pending === topic.id ? <span className="workspace-topic-glyph" aria-hidden="true"><LoaderCircle className="spin" size={14} /></span>
-                        : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
+                        : <SpaceObjectIcon kind={target?.kind ?? 'topic'} name={target?.name ?? topic.title} manualIcon={target ? manualIcons[target.key] ?? null : null} imageTarget={target?.imageTarget} avatarObjectKey={target?.key} avatarWorkspaceId={target?.avatarTarget?.workspaceId} avatarTopicId={target?.avatarTarget?.topicId} />}
                       title={<><span>{topic.title}</span>{pinned ? <Pin className="workspace-topic-entry__pin" size={11} aria-hidden="true" /> : null}</>}
                       subtitle={<><span>{topic.summary || displayPath(physicalPath, workspace.hostId)}</span>{topic.wiki ? <span className={`workspace-topic-entry__wiki workspace-topic-entry__wiki--${topic.wiki.enabled ? 'on' : 'off'}`} title={`${topic.wiki.source === 'default' ? 'Default' : 'User'} Wiki · ${topic.wiki.version}`}>{topic.wiki.enabled ? 'Wiki' : 'Wiki off'} · {topic.wiki.version}{topic.wiki.updatedAt ? ` · ${new Date(topic.wiki.updatedAt).toLocaleString(undefined, { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` : ' · default'}</span> : null}</>}
                       /* Region 几何和 Agent 身份同处一格；未挂载的后台 Agent 保留独立入口。 */
@@ -520,7 +531,7 @@ export function WorkspaceTopicsPanel({
       {error ? <div className="surface-inline-error" role="alert">{error}</div> : null}
       <TopicMoveDialog target={moveTarget} onClose={() => setMoveTarget(null)} />
       <SpaceIconPicker target={iconTarget} onClose={() => setIconTarget(null)} returnFocus={() =>
-        [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
+        iconInvoker.current?.isConnected ? iconInvoker.current : [...(panel.current?.querySelectorAll<HTMLElement>('[data-space-icon-target]') ?? [])]
           .find(node => node.dataset.spaceIconTarget === iconReturnKey.current) ?? null} />
     </section>
   )
@@ -538,6 +549,8 @@ function SortableTopicItem({
   pinned,
   children,
   onCopyPath,
+  onCopyCard,
+  onCopyLink,
   onRename,
   onReveal,
   onTogglePin,
@@ -553,6 +566,8 @@ function SortableTopicItem({
   pinned: boolean
   children: ReactNode
   onCopyPath(): void
+  onCopyCard(): void
+  onCopyLink(): void
   onRename(): void
   onReveal(): void
   onTogglePin(): void
@@ -570,6 +585,8 @@ function SortableTopicItem({
     <TopicContextMenu
       pinned={pinned}
       onCopyPath={onCopyPath}
+      onCopyCard={onCopyCard}
+      onCopyLink={onCopyLink}
       onRename={onRename}
       onReveal={onReveal}
       onTogglePin={onTogglePin}

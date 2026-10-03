@@ -243,6 +243,10 @@ Topics 是从日常讨论持续积累知识的入口。临时交流可以先开�
 
 **导航与持久归属。** Space 树的 Topics 分区只列 Category，点击分类在中间二级菜单显示该分类的 Topic 目录，再查找、创建和打开具体 Topic；树不展开 Topic 子项，进入分类不默认替用户打开任一 Topic 或 Chat。选择 Topic 时目录留在原位，右侧直达该 Topic 的原 Zone 工作面，不再把分类目录铺成右侧主页面。二级功能和 Chat 导航边界见[Topic 点击必须打开可见 Tabs](#topic-点击必须打开可见-tabs)。Topics 总览继续可达，与分类二级目录消费同一分类和 Topic 来源。Category 有自己的耐久身份与名称，Topic 保原耐久内容身份和 Zone；标题、当前 Chat、目录外观或分类改变不重发身份。原 `topic.md`、Wiki、资料、产出、协作者、pin 与已有工作面继续保全。Category 描述由原 Host 目录中的 `category.md` 持有，改名不改其持久目录或身份；明确创建与改名沿原内容 owner 保存，并表达真实持久确认，取消不写入。Category 是持久分类对象，不是只存于内存的筛选标签。分类目录承载分类自身的描述，不作为成员 Topic 内容目录的物理父；分类详情与 Topic 的目录动作分别呈现各自准确内容根，不能让分类导航冒充磁盘目录嵌套。Topic 与 Category 的主归属只取 Core 空间绑定，不在文件另存一份分类关系；转移分类保原内容目录，物理目录规则仍见[《Topic 与 Mote 的物理目录》](motes-and-coordination.md#topic-与-mote-的物理目录)。默认分类名为「未分类」：旧内容未明确归类、新讨论没有指定分类时在此可达并能继续讨论，不据标题猜工作／学习／Idea、不隐藏旧 Topic，也不先搬目录才可使用。已有明确分类保持；工作／学习／Idea 示例不强制建成固定目录。目录或分类读取暂失败属于未知，保原绑定与引用，不凭未知将已分类对象写回「未分类」。Notebook 的「随手记」仍是 Note 的默认内容收纳，沿[Notebook 合同](#notebook页面与持久目录)独立表达，不与 Topic 的默认分类合并。
 
+**分类与 Topic 的对象菜单。** 左树一级 Category 行的右键、键盘菜单与行尾入口操作该分类自身：改名、改变图标，以及复制该 Category 的 Space 名片或链接；不借其某个成员 Topic 作为目标。二级 Topic 行的右键与行尾菜单共用同一动作集，保原改名、置顶、目录、Wiki 和转分类，并提供改变图标、复制该 Topic 的 Zone 名片或链接。打开菜单和复制不先切换工作面或启动 Agent。Category 外观沿其原 Space 的准确身份，Topic 外观沿原内容身份，复用同一持久呈现 owner 与已有图标选择；改名、归属转移或菜单位置不换图标目标，不另存分类关系。选择、取消及保存未确认保原外观、原工作面和未提交选择，迟到回执不改后来目标。
+
+**对象图片与自动识别。** 分类与 Topic 都可选择现有图标或上传静态图片；上传沿共用图片处理与裁剪预览，明确保存后才成为同一原对象的持久选择，取消不替换。图片资产沿准确原目录保存有界不可变引用，选择仍由原持久呈现 owner 持有；原 Mote 身份、资产目录与读写能力保持，不以伪造 Mote 或 Workspace 目标承接其他对象。恢复自动外观时，本地图片识别复用 Space 原目录扫描：分类只扫描分类自身的准确目录，Topic 只扫描原内容的准确物理目录，不扫描全库或取成员 Topic／当前 Agent 的图片；改名与转分类不改资产身份或选择。候选发现、读取与解码有界，图片格式据实际字节确认；不可读、无匹配、解码失败及保存未确认分别说明，保原资产与引用，不用探测缺口冒充确认没有图片或静默抹掉已有选择。名片与链接的统一格式、准确寻址和失败边界只见[寻址与复制](#寻址与复制)。
+
 **本地内容承接新层级。** 旧 Topic 的目录与原内容身份保持，`topic.md`、Wiki、refs、outcome、协作者铭牌和任意用户文件保全；原 Home Zone、Chat/Tab、Group、Thread/Region、全部合法展示、文件逻辑引用、pin、图标、输入草稿与脏文件保留。旧 Topic-as-Space 导航节点按精确名单一次转换到 Category→Topic，旧目录 Space ID 保为 Topic 内容／来源身份，不作为另一套可导航 Space 并行保留，也不保留永久旧导航解析或分类 registry。Mote 的原 Space/Zone 与 Scratch 全局 Zone/Tab 不进入此转换；未绑定 Topic 的内容继续通过明确全局入口找到，不默认塞进 Mote 或丢弃。未明确归类的旧 Topic 原样进入「未分类」，不复制正文或强制重组用户知识。转换先保留原图、内容清单及受影响元数据并预演精确改动，再经同一业务 owner 调用 Core 的 exact-revision 提交；陈旧 revision 拒绝本次写入，并发或未知不覆盖较新工作。未确认回执核读同一对象与操作，不能盲重放创建；重启读回同一图，重复已完成的转换不再改动，旧图保存不能复活过时导航。分类转移及层级转换不搬执行目录、不停止或重建健康 Session/Run；已授权的物理目录承接及临时旧文件地址仍只见[《Topic 与 Mote 的物理目录》](motes-and-coordination.md#topic-与-mote-的物理目录)，不与永久旧空间 owner 混同。
 
 **整个 Topic 可以转移分类。** 用户或已获授权的 Agent 能选择准确 Topic 和目标 Category，看清当前与目标归属，再改变同一 Topic 的分类关系。从分类二级目录可以直接对准确 Topic 发起此操作，不要求先打开其 Chat 或启动 Agent；具体 Topic 内也能发起同一操作，两处复用同一转移 owner 和公共能力，不能另存 UI 分类关系。转移后其所有 Chat、Thread、知识和来源在目标分类继续可达，源分类不再将其列作该次转移的原成员；这是归属转移，不是复制内容或 Agent 移动。原 Topic/Zone/Tab/Region、Session/Run、cwd、布局、草稿与其他合法展示绑定保持。取消不写入，保存未确认保原引用与当下工作并提供核对／重试；成功回执区分关系已应用与持久确认。跨分类引用不等同于转移，多分类同时作为主归属的规则另行确定。
@@ -450,21 +454,26 @@ Space 中通过 Git 仓库来源提示已登记项目的跨设备关联，用户
   发生——说清哪一档范围是空的、另一档还能用。Agent 是好的、字节是全的，坏的是我们这一步取值，按
   [健康能力与未知状态：流程降级](../../../AGENTS.md#健康能力与未知状态)，它必须可见而不阻断。
 - **分享对象地址时，复制的是一个寻址方式。** 接收方（人或另一个 Agent）仅凭这份分享就能识别对象身份并执行准确命令，无须猜 ID 层级、flag 或回头问人。普通路径、URL、代码选区、终端输出与分支名的直接复制仍按其原任务生成内容，不包成身份名片；明确面向 Agent 的上下文分享按本节共用外框呈现。
-- **三类地址回答三个不同的问题，绝不互为别名**（与上文 Session/Run/Tab 的身份边界同源）：
+- **对象地址回答各自的问题，绝不互为别名**（与上文 Session/Run/Tab 的身份边界同源）：
+  - **Space** 回答“哪个外层组织对象”——Category 名片使用该 Category 的原 Space ID，不用分类标题、成员 Topic 的内容 Space ID 或当前选中项代替；
+  - **Zone** 回答“哪组完整工作面”——Topic 名片使用该 Topic 的原 Zone ID，不把当前 Category、Chat／Tab、Thread／Region 或其中的 Agent SID 当成 Topic 身份；
   - **Session** 回答"**哪个 Agent**"——Provider 语义身份，跨 Tab 稳定，一个 Session 可同时投影到多个 Region 与多个 Tab；
   - **Region** 回答"**哪一格内容**"——Tab 内的精确内容 leaf；物理位置命令必须使用已知准确 Region 与原展示上下文，不从一个 SID 猜唯一位置；
   - **Tab** 回答"**哪张完整工作面**"——只有其中恰好一个不同的 Agent Session ID 时才可用于语义发送；同一 SID 的多个 Region 投影仍是一个 Agent。既有 View 用语不形成另一层身份。
-- **amux sharing 使用紧凑、共用的对象卡片。** Agent 名片以 `--- amux : IDCard ---` 开头，Region／Tab 地址分别以 `--- amux : Region ---`／`--- amux : Tab ---` 开头，统一以 `-----` 结束。`ID: <原对象 ID>` 是准确身份；Agent 的 ID 始终是 Core SID，显示名与执行选择只作为真实 metadata 展示，不能参与寻址或替代原 ID。未知 metadata 不猜，展示文字中的换行与控制字符不能伪造额外字段或命令。名片中的声明不认证作者，发送身份继续由 Core 校验。
+- **amux sharing 使用紧凑、共用的对象卡片。** Agent 名片以 `--- amux : IDCard ---` 开头，Space／Zone／Region／Tab 地址分别以 `--- amux : Space ---`／`--- amux : Zone ---`／`--- amux : Region ---`／`--- amux : Tab ---` 开头，统一以 `-----` 结束。`ID: <原对象 ID>` 是准确身份；Agent 的 ID 始终是 Core SID，显示名与执行选择只作为真实 metadata 展示，不能参与寻址或替代原 ID。未知 metadata 不猜，展示文字中的换行与控制字符不能伪造额外字段或命令。名片中的声明不认证作者，发送身份继续由 Core 校验。
   - `Exe: <原生 Session ID> | <Executor 名> (<Provider 名>)` 展示执行器内的原生会话身份与实际执行选择，顺序固定。原生 ID 只取同一 Core Session 已确认的 `nativeHandle.sessionId`，Provider 与 ACP handle 均适用；合法绑定由 Core 持有，client 不另加 Provider 协议判断。缺少已确认 handle 只写 `?`，不以 Core SID、Run ID 或 Agent alias 补位。Executor 名来自原配置，Provider 名来自原 catalog；缺名称但已知原 ID 时显示原 ID，未知项写 `?`。Core SID 仍是 amux 寻址身份，`Exe` 不替代它；字段值转义且不改原值，不声明进程健康、作者认证或授权。
   - Agent 名片增加 `Link: amux://agent/<SID>`，引用 `ID` 字段的同一 Core SID；SID 按 URI path segment 编码，解析保持准确原值。对象链接的行为与归属见本节下条，不以名片 metadata 或声明认证作者。
   - 每条指引占一行，以 `# ` 开头，给出完整公开命令而非 `to ...` 等自创缩写。Agent 名片只保留按 SID 的 `amux agent send --to-session='<SID>' --text "..."` 和 `amux --skill` 两条指引；查看 Agent 及其他能力由 skill 按需发现，不常驻长篇身份解释。短可执行名 `amux` 必须正式指向同一公开 CLI 程序，命令树、权限与错误事实只有一份，不依赖用户另配 shell alias。当前可用性以实际构建的 `--help`／`--skill` 为准。
-  - Region／Tab 卡片只给出对应的 `space inspect` 和 `--skill` 两条指引。空间卡片不默认提供语义发送命令，避免把会更换内容的格或含多个 SID 的工作面冒充某个 Agent；显式空间发送能力与消歧规则保持。
+  - Space／Zone／Region／Tab 卡片只给出对应的 `space inspect` 和 `--skill` 两条指引。空间卡片不默认提供语义发送命令，避免把会更换内容的格或含多个 SID 的工作面冒充某个 Agent；显式空间发送能力与消歧规则保持。
   - 已知准确点击 Region 时，Agent 名片可增加 `Region: <原 Region ID>`；没有准确 Region 就省略，不从 SID 猜投影。空间检查、导航、移动与目标选择由 `--skill` 按需展开，不在每张名片复制动作清单或移动模板。复制本身不发送、不导航、不改变焦点、展示或健康 Run；后来导航仍沿公开默认保留输入与原 SID 校验移动合同。
   - 对象卡片骨架、命令格式和 shell 转义来自无 UI 依赖的同一公共出口，Desktop 菜单、其他 client 与寻址失败恢复均可复用；各入口只提供原 owner 已确认的事实，不另查位置、造 registry 或重拼命令。剪贴板写入仍归 client，路径表示、代码上下文和终端 bytes 仍归各自原出口。
 - **Agent 对象链接只定位同一 Core SID。** `amux://agent/<SID>` 是 Agent 语义对象的链接，不是 Region／Tab 地址、发送指令或身份认证。生成与解析使用 Core 的同一纯公共出口，不读 Store、不访问网络、不执行命令或改变 Session／Run／空间状态；URI 编码不得改变原 SID，不携带另一个目标、正文或自动执行参数。
   - Session 身份、持久空间组成与全部绑定由 Core 提供，Desktop/client 只负责系统协议注册、外部冷／热启动接收、屏幕呈现与输入焦点，复用原公开对象及导航通路，不另建位置或 Session 注册表。链接接收端只使用已知来源；SID 本身不提供域名、跨设备或远端 Host 解析，Region／Tab 继续沿原准确空间寻址。
   - 外部打开进入原 Agent 的真实展示，冷启动沿[原恢复合同](session-recovery.md#冷启动按需恢复p0-末位)保全工作面并承接定位请求，不能因恢复尚未完成丢弃请求或猜目标不存在。同一 SID 的多个绑定沿真实候选和既有导航处理，不宣称唯一 Region；没有已知展示时明确原对象状态与原打开／恢复入口，不按执行 cwd 搬动已有工作面。
   - 复制只生成文本，打开只定位，不自动发消息、执行任意命令或创建替代 Agent。保留原 Session、健康 Run、cwd、空间布局与草稿，导航和输入分别表达，默认保留输入。未知、来源不可读、未找到与明确终局不互相代称；定位或呈现失败保留原工作面与健康能力，给出具体失败和恢复入口。链接有效不等于目标存在、健康、已经呈现或在另一设备可达。
+- **Space／Zone 链接定位原实体。** Space 卡片携带 `Link: amux://space/<SpaceID>`，Zone 卡片携带 `Link: amux://zone/<ZoneID>`，与其 `ID` 字段使用同一原身份；ID 作为一个 URI path segment 编码，生成、严格解析与名片格式沿同一无 UI 依赖的 Core 公共出口，不携带正文、自动执行参数或授权。名称与 Category／Topic 角色仅作可读说明，不参与身份解析，也不从已编码 ID 反猜目录或归属。
+  - Category 链接打开该 Space 的原分类目录；Topic 链接沿同一 Zone 成员与导航 owner 打开完整 Topic 工作面，中间分类目录继续保留，右侧展示原 Tabs／Regions。迟到回执不再次跳转；多展示位置或分类关系不取第一项补造唯一目标，引用及未知恢复沿[Zone 实体展示](#zonetabsregions-的实体与展示绑定)和[Topic 导航](#topic-点击必须打开可见-tabs)。
+  - Desktop 沿同一系统协议接收与原公共导航通路承接外部冷／热打开，不新建 URL 目标注册表。尚无接收与导航消费的链接不冒称可打开；复制、解析成功、目标已发现与实际呈现是不同事实。接收端的原 Host／服务范围须明确，链接不承诺跨设备寻址或认证；未知／缺失说明准确目标与恢复动作，保当前工作面、布局、草稿、Session／Run 与执行 cwd。复制不导航，打开不创建替代对象、不发送消息或自动启动 Agent。
 - **已有的 Agent 上下文分享复用同一外框。** 编辑器的 Copy as Agent Context 以 `--- amux : File ---` 开头，Browser 的元素／批注上下文以 `--- amux : Browser ---` 开头，均以 `-----` 结束。它们是内容与来源分享，不冒称 Agent 身份，不强加 `ID`、`Exe` 或无关发送命令；外框只包原 owner 已产出的正文。
   - File 保留原工作区相对路径、起止行、语言围栏和所选代码；Browser 保留真实页面、元素／选区与批注来源、原顺序和原内容上限。格式器不读取文件或页面，不解析正文、不改原文或提升正文中的声明为身份、授权和可执行指引；范围、内容预算、复制失败反馈与重试继续由原 owner 执行，正文上限不能靠增加外框被绕过，最终外框须完整闭合。
 - **歧义在源头消除，不甩给接收方**。一张 Tab 承载多个不同 SID 时，整张 Tab 不能唯一指定消息收件人。右键已知某个 Agent 的那一格时，Agent 名片直接给出其语义 SID，并把已知准确 Region 作为独立空间位置提供；不能让接收方先撞 `MESSAGE_TARGET_NOT_UNIQUE` 再挑候选。同一 SID 的多个投影不构成语义发送歧义；精确位置查询、导航和移动仍不能据此猜成唯一位置。

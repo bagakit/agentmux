@@ -37,9 +37,10 @@ export type TopicSpatialInspection = {
   contentIdentity?: string
   contentKind?: 'topic' | 'mote'
 }
+export type TopicSpatialIdentity = Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath' | 'readError'>
 /** Borrows the original Core graph; content metadata never copies membership. */
 export interface TopicSpatialPort {
-  inspect(topic: ScratchTopicSnapshot): Promise<TopicSpatialInspection>
+  inspect(topic: TopicSpatialIdentity): Promise<TopicSpatialInspection>
   ensureCategory(category: TopicCategory): Promise<unknown>
   ensureTopic(topic: ScratchTopicSnapshot, categoryId?: string): Promise<TopicSpatialInspection>
   moveTopic(topicId: string, categoryId: string, expectedRevision: number): Promise<TopicSpatialInspection & { previousCategorySpaceIds: string[] }>
@@ -61,7 +62,7 @@ async function regularDirectory(path: string, create = false): Promise<string> {
 }
 async function boundedFile(path: string, maxBytes = 1024 * 1024, onReadCost?: (bytes: number) => void, signal?: AbortSignal): Promise<string> {
   signal?.throwIfAborted()
-  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK)
   let scannedBytes = 0
   try {
     const info = await handle.stat()
@@ -89,7 +90,7 @@ async function syncDirectory(path: string): Promise<void> {
 export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
   private spatial?: TopicSpatialPort
   private originalFiles?: Pick<FileReadOwner, 'list' | 'read'>
-  constructor(private readonly scratch: Pick<ScratchTopics, 'list' | 'read' | 'ensure'>,
+  constructor(private readonly scratch: Pick<ScratchTopics, 'list' | 'read' | 'ensure' | 'topicAppearanceIdentity'>,
     private readonly files: Pick<WorkspaceFiles, 'write'>, private readonly workspace: () => WorkspaceRecord,
     private readonly history?: TopicSearchHistoryOwner) {}
   setSpatialPort(port: TopicSpatialPort): void { this.spatial = port }
@@ -154,6 +155,21 @@ export class TopicKnowledgeOwner implements AgentMuxRpcTopicsOwner {
     return await this.createCategoryContent(UNCLASSIFIED_TOPIC_CATEGORY_ID, '未分类')
   }
   async listTopicSnapshots(): Promise<ScratchTopicList> { return await this.scratch.list(this.scope()) }
+  /** Client appearance borrows exact identity and directory facts, never knowledge-body reads. */
+  async topicAppearanceDirectory(workspaceId: string, topicId: string, objectKey: string): Promise<string> {
+    const workspace = this.scope()
+    if (workspace.id !== workspaceId) throw new Error('The original Topic workspace changed. Reopen its image editor.')
+    const identity = await this.scratch.topicAppearanceIdentity(workspace, topicId, objectKey)
+    if ((await this.spatialPort().inspect(identity)).contentKind !== 'topic')
+      throw new Error('The original ordinary Topic identity is unconfirmed. Its files and workface remain available; refresh its spatial identity.')
+    return identity.physicalDirectoryPath
+  }
+  async categoryAppearanceDirectory(categoryId: string, objectKey: string): Promise<{ hostId: string; directoryPath: string }> {
+    parseTopicParams('topic.ls', { categoryId })
+    const category = await this.readCategory(categoryId)
+    if (category.spaceId !== objectKey) throw new Error('The original Category changed. Reopen its image editor.')
+    return { hostId: category.hostId, directoryPath: category.directoryPath }
+  }
   private async confirmTopicScaffold(topic: ScratchTopicSnapshot): Promise<void> {
     const directory = scratchTopicPhysicalPath(this.scope(), topic)
     for (const path of ['topic.md', SCRATCH_TOPIC_WIKI_PATH, SCRATCH_TOPIC_WIKI_STATE_PATH]) {
