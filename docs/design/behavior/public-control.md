@@ -151,7 +151,7 @@
 | `settings` | `inspect`、`set`；`executors ls/inspect/create/update/delete/refresh`；`prompts ls/inspect/create/update/delete`；`hosts ls/test`；`workspaces register`；`browser-links ls/forget` |
 | `system` | `doctor`、`endpoint`；`crash-log inspect/reveal`；`metrics get/watch` |
 | `device` | `ls`、`link`、`revoke`：仅本机用户管理；`hello`：已认证 Relay 设备命名自身，权限与连接方式见[手机版 Relay 连接](#手机版-relay-连接) |
-| `toolkit` | `ls`、`inspect`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
+| `toolkit` | `ls`、`inspect`、`install`、`create`、`update`、`delete`、`action`、`script`、`run`、`stop`、`watch` |
 
 - **PMO 全局发现完整保留。** `app snapshot` 聚合原 PMO 跨对象观察：真实 Project 资源、Workspace、Topic／Mote／Space／Zone、配置 Executor、活动 Agent、Core Session、Goal、决策与活动事实；按各自来源保留已知、不可用和 unknown，不把不可用伪装成空列表。对象发现必须覆盖原 `list projects/active-agents/sessions` 与 PMO 全局观察的事实，不能只剩调用者的当前 Space／Workspace。配置 Executor 由 `settings executors` 发现，Agent 与 Session 由 `agent` 发现，空间与其资源绑定由 `space` 发现，各项 inspect 按对象提供；Project／Workspace 资源发现由原权威来源供给聚合及关联观察，不能从 Space 名称或单条 Workspace ID 伪造 Project。`goal activity` 只取原 Goal 活动来源，不把 Runtime 日志或跨域 snapshot 当成 Goal 已发生的活动。
 - **分类、Topic 与资料沿原事实发现。** 全局 Category／Topic／Mote 及其资料的发现复用原目录／文件 owner，分类描述、正文与修订来源明确；Topic 对应原 Zone，主分类关系只取 Core 空间图，不把当前活动 Tab、目录路径或调用者 cwd 当归属。未分类与局部 unknown 分别表达，宿主或范围不可用时显式 unknown／不可用，不补一个全局 registry，不借当前项目、默认 Mote 或另一份 Session 列表补齐事实。部分来源失败保留其他已经观察到的结果与原工作面，不宣称全局资料已经完整。知识对象的公共接入见[《Topics 知识库的公共接入》](#topics-知识库的公共接入)。

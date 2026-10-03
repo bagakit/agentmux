@@ -19,7 +19,7 @@ export const featureSettingsModule = {
 } as const satisfies SettingsModule
 ```
 
-模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Resources 或 Connections，顺序由该数组表达。Connections 组织环境连接与手机设备接入；分组只改变导航，不成为另一套配置或授权 owner。
+模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Mods、Resources 或 Connections，顺序由该数组表达。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Connections 组织环境连接与手机设备接入；分组只改变导航，不成为另一套配置或授权 owner。
 
 `Pane` 定义在模块作用域，不能在每次渲染时生成新的组件函数。壳只在首次访问时挂载编辑器，随后保留同一个实例；`active` 表达当前是否可见。像 Executor 这样的精确目标，仅在 `active` 时触发原焦点能力。`savedSummary` 只读已保存 config 与原默认解析器，不读取编辑草稿或触发诊断。
 
@@ -49,6 +49,6 @@ pnpm --filter @agentmux/desktop typecheck
 node apps/desktop/scripts/verify-settings-modules.mjs
 ```
 
-模块测试在真实组合入口追加第九个测试模块，再走产品的目录、Overview、菜单、搜索与 Pane；该模块不进入发行目录。Main 测试从持久化 schema 反推实际 scalar，防止新增字段只有 UI、没有 CLI。改变字段或模块后维护对应的行为测试与 owning 变异，不能只改两份名单让测试继续通过。
+模块测试在真实组合入口追加一个仅测试使用的模块，再走产品的目录、Overview、菜单、搜索与 Pane；该模块不进入发行目录。Main 测试从持久化 schema 反推实际 scalar，防止新增字段只有 UI、没有 CLI。改变字段或模块后维护对应的行为测试与 owning 变异，不能只改两份名单让测试继续通过。
 
 两个环境各有一个静态组合入口，Renderer 的 React 编辑器不会进入 Main 或通用 Core。此机制支持 Agent 修改源码后构建新功能；运行中的第三方模块热加载与卸载不在本合同内。
