@@ -94,7 +94,7 @@ function pane(visible = true) { return <SessionPane sessionId={RECIPIENT_ID} sur
 async function settle() { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }) }
 async function draw(visible = true) {
   await act(async () => root.render(pane(visible)))
-  await vi.waitFor(async () => { await settle(); expect(host.querySelectorAll('[data-native-record-id]')).toHaveLength(3) }, { timeout: 3000 })
+  await vi.waitFor(async () => { await settle(); expect(host.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(3) }, { timeout: 3000 })
 }
 function turn(id: string) { const found = [...host.querySelectorAll<HTMLElement>('.log-turn')].find(row => row.dataset.messageId === id); expect(found).toBeDefined(); return found! }
 function nativeTurn(id: string) { const found = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"] .log-turn`); expect(found).not.toBeNull(); return found! }
@@ -122,7 +122,7 @@ it('actual Pane presents renamed current and same-provider peer identities over 
   const pendingAppearance = new Promise<{ kind: 'directory'; icon: string | null }>(resolve => { resolvePeerAppearance = resolve })
   f.appearance.mockImplementation(workspaceId => workspaceId === 'sender-project' ? pendingAppearance : Promise.resolve({ kind: 'directory', icon: null }))
   await draw()
-  expect([...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS, ANSWER_ID])
+  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS, ANSWER_ID])
   const current = nativeTurn(ANSWER_ID), peer = turn('captured:captured-trusted'), user = nativeTurn(RAW_IDS[0])
   expect([name(current), name(peer)]).toEqual([CURRENT_NAME, PEER_NAME])
   expect([current.dataset.messageDirection, peer.dataset.messageDirection, user.dataset.messageDirection]).toEqual(['outgoing', 'incoming', 'incoming'])
@@ -216,8 +216,8 @@ it('actual Pane History shares current names/project identity and retains covere
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === 'unrelated-agent' ? { ...session, updatedAt: 999999, latestOutputBytes: 777 } : session) }))); await settle()
   expect([f.metadata.mock.calls.length, f.read.mock.calls.length, f.history.mock.calls.length, f.appearance.mock.calls.length]).toEqual(before)
   await act(async () => host.querySelector<HTMLButtonElement>('[data-leaf="header"] button')!.click())
-  await vi.waitFor(async () => { await settle(); expect(host.querySelectorAll('[data-history-item-id]')).toHaveLength(3) }, { timeout: 3000 })
-  expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(row => row.dataset.historyItemId)).toEqual([...RAW_IDS, ANSWER_ID])
+  await vi.waitFor(async () => { await settle(); expect(host.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(3) }, { timeout: 3000 })
+  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS, ANSWER_ID])
   const historyAnswer = turn(ANSWER_ID); expect(name(historyAnswer)).toBe(CURRENT_NAME); projectAvatar(historyAnswer, 'recipient-project', RECIPIENT_ID, CURRENT_NAME)
   expect(historyAnswer.dataset.messageDirection).toBe('outgoing'); expect(body.isConnected).toBe(true); expect(f.read.mock.calls).toEqual([]); expect(f.goalReads()).toBe(0)
   await toggle(turn(RAW_IDS[0])); expect(value(turn(RAW_IDS[0]), 'Record')).toBe(RAW_IDS[0]); expect(f.read.mock.calls.map(([id]) => id)).toEqual([DECLARED_ID])

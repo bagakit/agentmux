@@ -34,12 +34,12 @@ async function actualProducer() {
 }
 async function mount(control = { hostId: 'local', agentSessionId: 'synthetic-history' }, visible = true) {
   await act(async () => root.render(<SessionHistoryView control={control} readingKey="private-reading"
-    label="Private reader" visible={visible} themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("private")}
+    label="Private reader" visible={visible} workspaceRoot={_hygiene_fixturePath("private")}
     openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} onClose={fixture.onClose} />))
   await act(async () => { await Promise.all(fixture.historyPage.mock.results.map(result => result.value)) })
 }
 function article(id: string): HTMLElement {
-  const found = Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]')).find(node => node.dataset.historyItemId === id)
+  const found = Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')).find(node => node.dataset.nativeRecordId === id)
   expect(found, `raw article ${id}`).toBeDefined(); return found!
 }
 async function action(label: string) {
@@ -55,7 +55,7 @@ async function openRecord(id: string) {
 
 it('reads actual public readonly Core pages into the shared History sequence in original source order', async () => {
   const p = await actualProducer(); await mount(p.control)
-  expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'), node => node.dataset.historyItemId))
+  expect(Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), node => node.dataset.nativeRecordId))
     .toEqual(p.recorded.pages[0].items.map((item: { id: string }) => item.id))
   expect(article('progress-a').querySelector('[data-message-phase="progress"]')).not.toBeNull()
   expect(article('final-a').querySelector('[data-message-phase="final"]')).not.toBeNull()
@@ -66,7 +66,7 @@ it('reads actual public readonly Core pages into the shared History sequence in 
   expect(fixture.historyPage).toHaveBeenCalledTimes(1)
   await action('Load earlier records')
   expect(fixture.historyPage.mock.calls[1]![1]).toEqual({ cursor: 'older-opaque' })
-  expect(Array.from(container.querySelectorAll<HTMLElement>('[data-history-item-id]'), node => node.dataset.historyItemId))
+  expect(Array.from(container.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), node => node.dataset.nativeRecordId))
     .toEqual([...p.recorded.pages[1].items, ...p.recorded.pages[0].items].map((item: { id: string }) => item.id))
   expect(article('old-progress').querySelector('[data-message-phase="progress"]')).not.toBeNull()
   expect(article('old-collab').querySelector('.wf-native-process')).not.toBeNull()
@@ -127,7 +127,7 @@ it('keeps a selected real newest record inside the existing three-page fence wit
   selection.removeAllRanges(); selection.addRange(range); expect(selection.toString()).toContain('selected body newest')
   await action('Load earlier records'); await action('Load earlier records'); await action('Load earlier records')
   expect(article('newest')).toBe(newest); expect(selection.toString()).toContain('selected body newest')
-  expect(container.querySelectorAll('[data-history-item-id]')).toHaveLength(3)
+  expect(container.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(3)
   expect(container.textContent).toContain('preserve your reading position'); expect(container.textContent).not.toContain('selected body earlier-3')
   expect(fixture.historyPage).toHaveBeenCalledTimes(4)
 })

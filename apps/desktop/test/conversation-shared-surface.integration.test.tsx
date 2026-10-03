@@ -106,8 +106,6 @@ async function mount(entry: Entry, content = SOURCE, parts?: AgentSessionHistory
           control={control}
           label="Agent"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("synthetic")}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}
@@ -444,8 +442,6 @@ it('renders a repeated readonly part reference without duplicate React keys', as
           control={control}
           label="Agent"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("synthetic")}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}
@@ -504,8 +500,6 @@ it('assigns distinct local keys to parts with duplicate callIds without key warn
           control={control}
           label="Agent"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("synthetic")}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}

@@ -105,7 +105,7 @@ async function draw(f: Awaited<ReturnType<typeof fixture>>, state: 'done' | 'wor
   if (!fixtures.includes(f)) fixtures.push(f)
   await act(async () => root.render(<ActivityView sessionId={f.page.agentSessionId} capability="complete-events" displayState={state} items={[]}
     nativeHistoryPage={f.page} userMessages={f.messages} describeSpeaker={f.describeSpeaker} />))
-  expect([...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
+  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
 }
 function turn(id: string) { const found = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"] .log-turn`); expect(found).not.toBeNull(); return found! }
 function disclosures(row: HTMLElement) { return [...row.querySelectorAll<HTMLDetailsElement>('details.log-turn__declared-context')] }
@@ -202,8 +202,8 @@ it('actual Activity and History share original reader records while disclosure, 
   }
   const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(control => { expect(control.agentSessionId).toBe(f.session.agentSessionId); return f.client.sessionHistoryPage(control.agentSessionId) })
   await act(async () => root.render(<SessionHistoryView control={{ kind: 'agent', hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run }} visible
-    label="Original reader" themeId="graphite" fontSize={12} workspaceRoot={f.root} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} describeSpeaker={f.describeSpeaker} />))
-  await vi.waitFor(() => { expect(host.querySelectorAll('[data-history-item-id]')).toHaveLength(3) })
-  expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(item => item.dataset.historyItemId)).toEqual(f.ids)
+    label="Original reader" workspaceRoot={f.root} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} describeSpeaker={f.describeSpeaker} />))
+  await vi.waitFor(() => { expect(host.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(3) })
+  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(item => item.dataset.nativeRecordId)).toEqual(f.ids)
   expect(host.querySelectorAll('.log-turn__declared-context')).toHaveLength(4); expect(host.querySelector('strong')?.textContent).toBe('Read the original tail'); expect(history).toHaveBeenCalledOnce()
 })

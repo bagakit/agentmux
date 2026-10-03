@@ -86,8 +86,6 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
           control={control}
           label="Claude"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("repo")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -119,7 +117,7 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
     expect(body?.textContent).toContain('src/native-entry.ts')
 
     // Stable record identity preserved on container
-    const article = host.querySelector('article[data-history-item-id="record-native-turn-1"]')
+    const article = host.querySelector('article[data-native-record-id="record-native-turn-1"]')
     expect(article).not.toBeNull()
     expect(article?.getAttribute('data-history-kind')).toBe('user-message')
   })
@@ -147,8 +145,6 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
           control={control}
           label="Pi"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("repo")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -208,8 +204,6 @@ describe('T036 全来源 user 回合与共享作者呈现闭环', () => {
           control={control}
           label="Claude"
           visible
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("repo")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}

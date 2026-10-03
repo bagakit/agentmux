@@ -10,7 +10,7 @@ import { createHash } from 'node:crypto'
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AgentSessionControl, SessionSnapshot } from '../src/shared/contracts'
+import type { AgentSessionControl, SessionHistoryReference, SessionSnapshot } from '../src/shared/contracts'
 import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
@@ -19,7 +19,7 @@ import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
-import * as markdown from '../src/renderer/src/lib/agent-markdown'
+import * as markdown from '@agentmux/client-ui/agent-markdown'
 
 const observation = vi.hoisted(() => ({ enabled: false, refresh: vi.fn<() => Promise<void>>() }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({
@@ -138,7 +138,7 @@ async function withPublicNativeHistory(
   const controls = monitored.map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw new Error(`History must not control private fixture Run: ${name}`) }))
   const pages: AgentSessionHistoryPage[] = []
   const pending: Promise<AgentSessionHistoryPage>[] = []
-  historyPageSpy.mockImplementation(async (control: AgentSessionControl, options) => {
+  historyPageSpy.mockImplementation(async (control: SessionHistoryReference, options) => {
     expect(control).toEqual(controlA)
     const read = client.sessionHistoryPage(control.agentSessionId, options)
     pending.push(read)
@@ -176,7 +176,7 @@ function nativeParentSession(workspacePath: string): SessionSnapshot {
 
 async function mountNativeParent(workspacePath: string): Promise<void> {
   useAppStore.setState({ sessions: [nativeParentSession(workspacePath)],
-    config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
+    config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], hosts: [], executors: {} } as any,
     viewModes: { [controlA.agentSessionId]: 'terminal' }
   })
   await act(async () => root.render(<SessionPane sessionId={controlA.agentSessionId} surfaceKind="agent" interactiveResize={false}
@@ -228,7 +228,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     observation.refresh.mockImplementation(() => new Promise<void>(done => { release = done }))
     const portal = document.createElement('div'); portal.id = 'private-t028-header-portal'; document.body.append(portal)
     useAppStore.setState({ sessions: [nativeParentSession(_hygiene_fixturePath("private-observation"))],
-      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
+      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], hosts: [], executors: {} } as any,
       viewModes: { [controlA.agentSessionId]: 'terminal' }, refreshSession, recoverSession,
       error: 'Private retained observation failure', errorNoticeContext: { kind: 'indeterminate',
         lifecycle: { step: 'resume', subject: controlA, lastProcessState: 'running' } }
@@ -286,7 +286,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     await withPublicNativeHistory(ids, async ({ pages, workspacePath, flush }) => {
       await mountNativeParent(workspacePath)
       await act(async () => await flush())
-      const rows = () => [...host.querySelectorAll<HTMLElement>('[data-history-item-id]')]
+      const rows = () => [...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')]
       const loadEarlier = () => [...host.querySelectorAll<HTMLButtonElement>('.session-history__boundary button')]
         .find(button => button.textContent === 'Load earlier records')
       for (let i = 0; i < 2; i += 1) {
@@ -296,16 +296,16 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
       expect(rows()).toHaveLength(90)
       expect(pages.map(page => page.items.length)).toEqual([30, 30, 30])
       expect(pages[0]!.items.map(item => item.id)).toContain(opaque)
-      const selectedRow = rows().find(row => row.dataset.historyItemId === opaque)
+      const selectedRow = rows().find(row => row.dataset.nativeRecordId === opaque)
       expect(selectedRow).toBeDefined()
       const text = selectedRow!.querySelector('.log-turn__body p')!.firstChild!
       const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 'Selectable'.length)
       window.getSelection()!.addRange(range)
-      const before = rows().map(row => row.dataset.historyItemId)
+      const before = rows().map(row => row.dataset.nativeRecordId)
       expect(loadEarlier()).toBeDefined()
       await act(async () => { loadEarlier()!.click(); await flush() })
       expect(pages.map(page => page.items.length)).toEqual([30, 30, 30, 30])
-      expect(rows().map(row => row.dataset.historyItemId)).toEqual(before)
+      expect(rows().map(row => row.dataset.nativeRecordId)).toEqual(before)
       expect(host.textContent).toContain('Scroll toward the beginning before loading more history to preserve your reading position.')
       expect(host.textContent).not.toContain('not a valid selector')
       expect(text.isConnected).toBe(true)
@@ -330,8 +330,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -347,8 +345,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={false}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -372,8 +368,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -423,8 +417,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -449,7 +441,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     // Must NOT throw UI error banner
     expect(host.querySelector('.session-history__notice')?.textContent ?? '').not.toContain('Scroll toward the beginning')
     expect(host.textContent).toContain('Newer records are outside this three-page reading window')
-    const itemIds = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const itemIds = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(itemIds).toEqual(['p-4', 'p-3', 'p-2'])
   })
 
@@ -461,8 +453,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -480,7 +470,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     historyPageSpy.mockResolvedValueOnce(makePage('p2', 'c3'))
     await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
 
-    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(rowsBefore).toEqual(['p2', 'p1', 'p0'])
 
     // Now start loading page 4 (p3)
@@ -495,7 +485,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     viewport.scrollTop = 250
     await act(async () => viewport.dispatchEvent(new Event('scroll', { bubbles: true })))
 
-    const p0 = host.querySelector<HTMLElement>('[data-history-item-id="p0"]')!
+    const p0 = host.querySelector<HTMLElement>('[data-native-record-id="p0"]')!
     const textNode = p0.querySelector('.log-turn__body p')?.firstChild!
     const range = document.createRange()
     range.setStart(textNode, 0)
@@ -522,8 +512,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -536,7 +524,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
       top, bottom, left: 0, right: 500, width: 500, height: bottom - top, x: 0, y: top, toJSON() {}
     })
     vi.spyOn(viewport, 'getBoundingClientRect').mockImplementation(() => bounds(10, 210))
-    const initialItem = host.querySelector<HTMLElement>('[data-history-item-id="initial-item"]')!
+    const initialItem = host.querySelector<HTMLElement>('[data-native-record-id="initial-item"]')!
     let prependedHeight = 0
     vi.spyOn(initialItem, 'getBoundingClientRect').mockImplementation(() =>
       bounds(30 + prependedHeight - viewport.scrollTop, 70 + prependedHeight - viewport.scrollTop)
@@ -562,7 +550,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     })
     await act(async () => resolveOlder(makePage('prepended-item', null)))
 
-    const items = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const items = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(items).toEqual(['prepended-item', 'initial-item'])
     // Viewport scrollTop must have adjusted to 100px so initialItem remains at exact same pixel offset (20px from viewport top)
     expect(viewport.scrollTop).toBe(100)
@@ -577,8 +565,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -807,8 +793,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -844,7 +828,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
 
     expect(historyPageSpy).toHaveBeenCalledTimes(2)
-    const items = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const items = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(items).toEqual(['msg-older', 'msg-1'])
     // Trace control must remain expanded
     expect(isTraceOpen(trace)).toBe(true)
@@ -873,8 +857,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -980,8 +962,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1018,8 +998,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
             control={controlA}
             label="Agent"
             visible={true}
-            themeId="graphite"
-            fontSize={12}
             workspaceRoot={_hygiene_fixturePath("test")}
             openWorkspaceFile={vi.fn()}
             openHttpLink={vi.fn()}
@@ -1049,8 +1027,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
             control={controlA}
             label="Agent"
             visible={false}
-            themeId="graphite"
-            fontSize={12}
             workspaceRoot={_hygiene_fixturePath("test")}
             openWorkspaceFile={vi.fn()}
             openHttpLink={vi.fn()}
@@ -1068,8 +1044,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
             control={controlA}
             label="Agent"
             visible={true}
-            themeId="graphite"
-            fontSize={12}
             workspaceRoot={_hygiene_fixturePath("test")}
             openWorkspaceFile={vi.fn()}
             openHttpLink={vi.fn()}
@@ -1083,7 +1057,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
         (btn) => btn.textContent?.includes('Latest')
       )!
       expect(latestButton.disabled).toBe(false)
-      const rows = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+      const rows = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
       expect(rows).toEqual(['kept-item'])
 
       await act(async () => root.unmount())
@@ -1124,8 +1098,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1147,8 +1119,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Updated Agent Name"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1174,8 +1144,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlRemote}
           label="Remote Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1229,8 +1197,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1260,8 +1226,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Updated Agent Label"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1282,8 +1246,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1301,7 +1263,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     historyPageSpy.mockResolvedValueOnce(makePage('p2', 'c3'))
     await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
 
-    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(rowsBefore).toEqual(['p2', 'p1', 'p0'])
 
     // Now start loading page 4 (p3)
@@ -1313,8 +1275,8 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     })
 
     // User creates a selection starting in p1 and ending in p0!
-    const p1 = host.querySelector<HTMLElement>('[data-history-item-id="p1"]')!
-    const p0 = host.querySelector<HTMLElement>('[data-history-item-id="p0"]')!
+    const p1 = host.querySelector<HTMLElement>('[data-native-record-id="p1"]')!
+    const p0 = host.querySelector<HTMLElement>('[data-native-record-id="p0"]')!
     const p1Text = p1.querySelector('.log-turn__body p')?.firstChild!
     const p0Text = p0.querySelector('.log-turn__body p')?.firstChild!
 
@@ -1356,7 +1318,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     }
     useAppStore.setState({
       sessions: [sessionObj],
-      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
+      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], hosts: [], executors: {} } as any,
       viewModes: { [controlA.agentSessionId]: 'terminal' }
     })
 
@@ -1385,11 +1347,11 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     viewport.scrollTop = 0
     await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
     expect(historyPageSpy).toHaveBeenCalledTimes(2)
-    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(rowsBefore).toEqual(['p-older', 'p-latest'])
 
     // Select text in p-latest
-    const pLatest = host.querySelector<HTMLElement>('[data-history-item-id="p-latest"]')!
+    const pLatest = host.querySelector<HTMLElement>('[data-native-record-id="p-latest"]')!
     const textNode = pLatest.querySelector('.log-turn__body p')?.firstChild!
     const range = document.createRange()
     range.setStart(textNode, 0)
@@ -1426,7 +1388,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     }
 
     // Must still have 2 pages!
-    const rowsAfter = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
+    const rowsAfter = Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), (r) => r.dataset.nativeRecordId)
     expect(rowsAfter).toEqual(['p-older', 'p-latest'])
     // Text node must still be connected!
     expect(textNode.isConnected).toBe(true)
@@ -1457,7 +1419,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     }
     useAppStore.setState({
       sessions: [sessionObj],
-      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
+      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], hosts: [], executors: {} } as any,
       viewModes: { [controlA.agentSessionId]: 'terminal' }
     })
 
@@ -1551,8 +1513,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
             control={controlA}
             label="Agent"
             visible={true}
-            themeId="graphite"
-            fontSize={12}
             workspaceRoot={_hygiene_fixturePath("test")}
             openWorkspaceFile={vi.fn()}
             openHttpLink={vi.fn()}
@@ -1615,8 +1575,6 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
           control={controlA}
           label="Agent"
           visible={true}
-          themeId="graphite"
-          fontSize={12}
           workspaceRoot={_hygiene_fixturePath("test")}
           openWorkspaceFile={vi.fn()}
           openHttpLink={vi.fn()}
@@ -1671,7 +1629,7 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     await withPublicNativeHistory(ids, async ({ pages, replaceRecords, workspacePath, flush }) => {
       await mountNativeParent(workspacePath)
       await act(async () => await flush())
-      const rows = () => Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), row => row.dataset.historyItemId)
+      const rows = () => Array.from(host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]'), row => row.dataset.nativeRecordId)
       expect(rows()).toEqual(ids)
       const details = Array.from(host.querySelectorAll<TraceElement>(TRACE_SELECTOR))
       expect(details).toHaveLength(2)

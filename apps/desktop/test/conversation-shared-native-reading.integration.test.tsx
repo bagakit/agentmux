@@ -77,10 +77,10 @@ async function fixture() {
 }
 
 async function settledHistory(): Promise<void> {
-  for (let i = 0; i < 80 && host.querySelectorAll('[data-history-item-id]').length !== 1; i += 1) {
+  for (let i = 0; i < 80 && host.querySelectorAll('.session-history [data-native-record-id]').length !== 1; i += 1) {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) })
   }
-  expect(host.querySelectorAll('[data-history-item-id]')).toHaveLength(1)
+  expect(host.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(1)
 }
 
 describe('shared native presentation preserves the existing reading owner', () => {
@@ -89,13 +89,12 @@ describe('shared native presentation preserves the existing reading owner', () =
     const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => {
       expect(control).toEqual(f.control); const read = f.page(); pending.push(read); const result = await read; pages.push(result); return result
     })
-    await act(async () => root.render(<SessionHistoryView control={f.control} label="Recipient" visible={true}
-      themeId="graphite" fontSize={12} workspaceRoot={f.workspacePath} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
+    await act(async () => root.render(<SessionHistoryView control={f.control} label="Recipient" visible={true} workspaceRoot={f.workspacePath} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
     await act(async () => { await Promise.all(pending) })
     await settledHistory()
     expect(pages.map(page => page.items.map(item => item.id))).toEqual([[f.rawId]])
-    const row = host.querySelector<HTMLElement>('[data-history-item-id]')!
-    expect(row.dataset.historyItemId).toBe(f.rawId)
+    const row = host.querySelector<HTMLElement>('.session-history [data-native-record-id]')!
+    expect(row.dataset.nativeRecordId).toBe(f.rawId)
     expect(row.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
     const trace = row.querySelector<HTMLButtonElement>('button.conversation-tool-trace__row')!
     expect(trace).not.toBeNull(); expect(trace.getAttribute('aria-expanded')).toBe('false')

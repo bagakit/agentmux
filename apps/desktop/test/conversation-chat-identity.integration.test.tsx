@@ -67,9 +67,9 @@ it('uses recorded peer identity and the user display default in the actual Activ
 
 it('keeps native attribution unknown while History presents the same user appearance', async () => {
   vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page)
-  await act(async () => root.render(<SessionHistoryView control={control} label="Implementation" visible themeId="graphite" fontSize={12}
+  await act(async () => root.render(<SessionHistoryView control={control} label="Implementation" visible
     workspaceRoot={_hygiene_fixturePath("private")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
-  expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(e => e.dataset.historyItemId)).toEqual(['native-input', 'native-answer', 'native-activity'])
+  expect([...host.querySelectorAll<HTMLElement>('.session-history [data-native-record-id]')].map(e => e.dataset.nativeRecordId)).toEqual(['native-input', 'native-answer', 'native-activity'])
   const native = host.querySelector<HTMLElement>('[data-message-id="native-input"]')!
   expect(native.dataset.speakerRole).toBe('human')
   expect(native.querySelector('.log-turn__who')?.textContent).toBe('You')

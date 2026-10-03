@@ -190,7 +190,7 @@ describe('Actual conversation Range -> following note -> original reply draft', 
   })
   it('reaches native text in the actual History through the same draft consumer', async () => {
     await render(pane()); read.mockImplementation(async control => page(control.agentSessionId)); await click(button('History', host)); const history = host.querySelector('.session-history')!
-    expect(history.querySelectorAll('[data-history-item-id]')).toHaveLength(1)
+    expect(history.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(1)
     await select(body(history)); await typeNote('Native passage'); await click(button('将批注加入回复草稿'))
     expect(useAppStore.getState().agentComposerDrafts.a).toContain('Regarding message "native-text-original":\n> repeated phrase\n\n批注： Native passage')
   })

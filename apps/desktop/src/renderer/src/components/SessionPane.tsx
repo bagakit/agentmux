@@ -754,7 +754,7 @@ export function SessionPane({
         {historyOpen ? <SessionHistoryView
           key={JSON.stringify([reference.hostId, reference.agentSessionId])}
           control={reference} label={label} onClose={closeHistory} visible={visible && !parked}
-          returnLabel="Session" themeId={terminalThemeId} fontSize={terminalFontSize}
+          returnLabel="Session"
           primaryAction={resumeAction} serviceNotice={reopenNotice}
           workspaceRoot={metadata?.workspacePath ?? ''} openWorkspaceFile={openWorkspaceFile}
           openHttpLink={onProseLinkClick} describeSpeaker={describeSpeaker}
@@ -950,8 +950,6 @@ export function SessionPane({
             visible={visible && (historyOpen || inlineHistory)}
             returnLabel={pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity'}
             primaryAction={pendingAgentRestore ? agentRecoveryAction : undefined}
-            themeId={terminalThemeId}
-            fontSize={terminalFontSize}
             workspaceRoot={activeWorkspaceRoot}
             openWorkspaceFile={openWorkspaceFile}
             openHttpLink={onProseLinkClick}
