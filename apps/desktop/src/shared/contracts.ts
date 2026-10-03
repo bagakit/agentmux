@@ -1440,9 +1440,6 @@ export type AgentMuxDesktopApi = {
   deviceManagement: {
     link(params: AgentMuxRpcParams<'device.link'>): Promise<AgentMuxRpcResult<'device.link'>>
     ls(params: AgentMuxRpcParams<'device.ls'>): Promise<AgentMuxRpcResult<'device.ls'>>
-    invite(params: AgentMuxRpcParams<'device.invite'>): Promise<AgentMuxRpcResult<'device.invite'>>
-    approve(params: AgentMuxRpcParams<'device.approve'>): Promise<AgentMuxRpcResult<'device.approve'>>
-    reject(params: AgentMuxRpcParams<'device.reject'>): Promise<AgentMuxRpcResult<'device.reject'>>
     revoke(params: AgentMuxRpcParams<'device.revoke'>): Promise<AgentMuxRpcResult<'device.revoke'>>
   }
   workspaces: {

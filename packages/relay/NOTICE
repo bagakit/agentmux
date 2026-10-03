@@ -1,0 +1,7 @@
+AgentMux Relay incorporates Paseo source.
+Copyright (c) 2025-present Mohamed Boudra. Apache License 2.0.
+Source: https://github.com/getpaseo/paseo
+Pinned source revision: 3c6e4e39ec57fc1ecec35cd848ba259893d5e298
+Adaptations: local package imports and AgentMux RPC metadata; no Paseo service or branding is shipped as an AgentMux service.
+
+AgentMux adaptations also include a local V2 transport adapter, retained device keys, verified peer identity projection, admission budgets, and local-network URL policy. Device and Runtime semantics remain owned by AgentMux.

@@ -13,7 +13,7 @@
     "dev:web": "vite --config vite.web.config.ts --host 127.0.0.1",
     "build:gallery": "vite build --config vite.gallery.config.ts",
     "prebuild": "pnpm build:workspace-move-helper",
-    "build": "electron-vite build && node scripts/build-renderer-release.mjs",
+    "build": "pnpm --filter @agentmux/mobile build && electron-vite build && node scripts/build-renderer-release.mjs && node scripts/copy-mobile.mjs",
     "package:mac": "node scripts/package-macos.mjs",
     "package:mac:install": "node scripts/package-macos.mjs --install",
     "probe:file-editing": "node scripts/probe-file-editing.mjs",

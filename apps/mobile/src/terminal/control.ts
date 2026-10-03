@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import type { AgentMuxRunInputData, AgentMuxRunRef, AgentMuxAgentWriteInput } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 
@@ -76,7 +77,7 @@ export function createMobileTerminalControl({ client, agentSessionId, report, st
         }
         // This identity protects device storage ownership only; it is never sent as a
         // Core/ctxmux operation ID or used to claim an Input receipt.
-        unresolved = { intentId: crypto.randomUUID(), runId: intent.run.runId, kind: intent.kind, createdAt: Date.now() }
+        unresolved = { intentId: randomClientRequestId(), runId: intent.run.runId, kind: intent.kind, createdAt: Date.now() }
         persist()
         publish({ phase: 'sending', message: intent.kind === 'input' ? '正在确认原 Run 的输入回执。' : '正在确认用户选择的 PTY 尺寸。' })
         // Remove only the exact operation being dispatched. Later user bytes remain in order,

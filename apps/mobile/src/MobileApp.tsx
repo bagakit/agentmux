@@ -24,27 +24,17 @@ function loadWorkface(): { workface: Workface; issue: string | null } {
   }
 }
 
-export function validatedHostAddress(value: string): string {
-  const url = new URL(value.trim())
-  if (url.protocol !== 'https:' || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-    throw new Error('请输入 Mac 的 HTTPS 地址，不要包含账号、授权码或页面路径。')
-  }
-  return url.origin
-}
-
 export function MobileApp({ client, connection, platform, native = false, focusComposer = () => false,
-  onHostAddressSaved, connectionPanel }: {
+  connectionPanel }: {
   client: AgentMuxHostedClient | null; connection: MobileConnection; platform: ClientUiPlatform
   native?: boolean; focusComposer?: () => boolean
-  onHostAddressSaved?: (address: string) => void; connectionPanel?: ReactNode
+  connectionPanel?: ReactNode
 }) {
   const initial = useRef<ReturnType<typeof loadWorkface> | null>(null)
   initial.current ??= loadWorkface()
   const [workface, setWorkface] = useState<Workface>(initial.current.workface)
   const [canPersist, setCanPersist] = useState(initial.current.issue === null)
-  const addressSaveRequested = useRef(false)
   const [sheet, setSheet] = useState<'connection' | 'attachments' | null>(null)
-  const [hostDraft, setHostDraft] = useState(workface.hostUrl || (!native && location.protocol === 'https:' ? location.origin : ''))
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
   const [attachment, setAttachment] = useState<LocalAttachment | null>(null)
   const [choosingFile, setChoosingFile] = useState(false)
@@ -78,15 +68,10 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     if (workface === initial.current?.workface) return
     try {
       getDeviceWorkface().updateNavigation(workface)
-      if (addressSaveRequested.current) {
-        addressSaveRequested.current = false
-        setNotice(onHostAddressSaved ? null : 'Mac 地址已保存在这台设备。连接与设备授权尚未确认，请在 Mac 上完成授权。')
-      }
     } catch {
-      addressSaveRequested.current = false
       setNotice('这台设备暂时无法保存导航位置。地址与导航仅临时采用；当前阅读和 Mac 上的原会话仍保留，原存储记录尚未覆盖。')
     }
-  }, [workface, onHostAddressSaved])
+  }, [workface])
 
   const restoreNavigationStorage = () => {
     try {
@@ -97,16 +82,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
     } catch { setNotice('这台设备仍无法保存导航。原记录尚未覆盖；当前仍按临时导航继续阅读。') }
   }
 
-  const saveAddress = () => {
-    try {
-      const address = validatedHostAddress(hostDraft)
-      addressSaveRequested.current = canPersist
-      setWorkface(value => ({ ...value, hostUrl: address })); setHostDraft(address)
-      setNotice(canPersist ? 'Mac 地址已临时采用，设备保存尚待确认。'
-        : 'Mac 地址仅临时采用；设备原记录尚未覆盖。当前仍可尝试连接，导航存储尚需恢复。')
-      onHostAddressSaved?.(address)
-    } catch (error) { reportError(error) }
-  }
+
   const chooseAttachment = async () => {
     if (choosingFile) return
     setChoosingFile(true)
@@ -139,7 +115,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <span className="mobile-eyebrow">AGENTMUX · 随身继续</span>
           <h1>让对话继续</h1><p>连接你的 Mac，查看会话。<br />Agent 与会话由 Mac 管理。</p>
           <button className="mobile-primary" onClick={() => setSheet('connection')}><Link2 size={17} />查看连接状态<ArrowUpRight size={17} /></button>
-          <div className="mobile-onboarding-steps"><div><span>01</span><p><strong>Mac 保持在线</strong><small>手机与 Mac 在同一私网</small></p></div><div><span>02</span><p><strong>确认这台设备</strong><small>在 Mac 上批准独立授权</small></p></div><div><span>03</span><p><strong>继续原会话</strong><small>阅读、撰写与回应请求</small></p></div></div>
+          <div className="mobile-onboarding-steps"><div><span>01</span><p><strong>Mac 保持在线</strong><small>手机与 Mac 在同一局域网</small></p></div><div><span>02</span><p><strong>打开连接链接</strong><small>复制 Mac 上的链接，在手机打开</small></p></div><div><span>03</span><p><strong>继续原会话</strong><small>阅读、撰写与回应请求</small></p></div></div>
         </section>}
         <div className={`mobile-conversation-slot${workface.selectedSessionId ? ' is-active' : ''}`}>
           <MobileConversationSurface client={client} agentSessionId={workface.selectedSessionId} connection={connection} platform={platform} openHttpLink={openBrowserHttpLink} onAttach={() => { void chooseAttachment() }} />
@@ -165,15 +141,11 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           <button className="mobile-secondary" onClick={() => { setAttachment(null); setSheet(null) }}>移除本地选择</button>
         </> : <>
           <Dialog.Description id="mobile-sheet-description">连接同一私网里的 Mac。Agent 与会话由 Mac 管理。</Dialog.Description>
-          {native || !connectionPanel ? <>
-            <label className="mobile-address-label" htmlFor="mobile-host-address">Mac 的 HTTPS 地址</label>
-            <input id="mobile-host-address" className="mobile-address-input" type="url" value={hostDraft} onChange={event => setHostDraft(event.target.value)} />
-            <button className="mobile-primary" onClick={saveAddress}>{canPersist ? '保存地址' : '临时采用地址'}</button>
-          </> : <p>Mac：{location.origin} · {label}</p>}
+          <p>Mac：{location.origin} · {label}</p>
           <p className="mobile-sheet-note">Mac 保持在线即可继续使用原会话。</p>
           {connectionPanel}
           <MobileRecoveryPanel {...(native ? { exportFile: exportNativeWorkfaceFile } : {})} />
-          <p className="mobile-sheet-note">{connectionPanel ? '设备授权和会话连接分别核实。' : '此处只记录 Mac 地址，设备授权需要独立确认。'}重新安装后需要重新确认 Mac 和设备授权。{connection.message}</p>
+          <p className="mobile-sheet-note">连接会自动恢复。{connection.message}</p>
         </>}
       </Dialog.Content></Dialog.Portal>
     </Dialog.Root>

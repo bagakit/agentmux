@@ -25,7 +25,7 @@ async function ensureHost(storePath: string, socketPath: string): Promise<void> 
       try {
         const child = spawn(process.execPath, [join(import.meta.dirname, 'agentmux-host.js'), '--store', storePath], {
           detached: true, stdio: ['ignore', log.fd, log.fd],
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_STORE: storePath }
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MOBILE_BUILD_DIRECTORY: join(import.meta.dirname, '../mobile') }
         })
         await new Promise<void>((resolve, reject) => {
           child.once('error', reject); child.once('spawn', resolve)

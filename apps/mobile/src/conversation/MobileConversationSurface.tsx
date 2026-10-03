@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxInteractionResponse } from '@agentmux/core'
@@ -80,7 +81,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       local.save()
       redraw(value => value + 1); return
     }
-    const original: PromptAttempt = { operationId: crypto.randomUUID(), runId: condition.expectedRun.runId, draft, phase: 'sending', message: '正在发送输入…' }
+    const original: PromptAttempt = { operationId: randomClientRequestId(), runId: condition.expectedRun.runId, draft, phase: 'sending', message: '正在发送输入…' }
     attempts.current.set(originalKey, original)
     local.save()
     redraw(value => value + 1)

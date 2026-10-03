@@ -1,0 +1,50 @@
+{
+  "name": "@agentmux/relay",
+  "version": "0.1.0",
+  "type": "module",
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "LICENSE",
+    "NOTICE"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./e2ee": {
+      "types": "./dist/e2ee.d.ts",
+      "import": "./dist/e2ee.js"
+    },
+    "./server": {
+      "types": "./dist/server-transport.d.ts",
+      "import": "./dist/server-transport.js"
+    },
+    "./offer": {
+      "types": "./dist/connection-offer.d.ts",
+      "import": "./dist/connection-offer.js"
+    },
+    "./endpoint": {
+      "types": "./dist/daemon-endpoints.d.ts",
+      "import": "./dist/daemon-endpoints.js"
+    },
+    "./local": {
+      "types": "./dist/local-adapter.d.ts",
+      "import": "./dist/local-adapter.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "base64-js": "^1.5.1",
+    "tweetnacl": "^1.0.3",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/ws": "^8.5.8",
+    "@types/node": "^24.0.0"
+  }
+}

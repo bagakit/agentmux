@@ -253,6 +253,9 @@ importers:
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentmux/relay':
+        specifier: workspace:*
+        version: link:../../packages/relay
     devDependencies:
       '@types/node':
         specifier: ^24.0.0
@@ -269,6 +272,9 @@ importers:
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../demand
+      '@agentmux/relay':
+        specifier: workspace:*
+        version: link:../relay
       '@bufbuild/protobuf':
         specifier: 1.10.1
         version: 1.10.1
@@ -346,6 +352,9 @@ importers:
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@agentmux/relay':
+        specifier: workspace:*
+        version: link:../../packages/relay
       '@capacitor/android':
         specifier: 8.5.2
         version: 8.5.2(@capacitor/core@8.5.2)
@@ -410,6 +419,28 @@ importers:
       vitest:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
+
+  packages/relay:
+    dependencies:
+      base64-js:
+        specifier: ^1.5.1
+        version: 1.5.1
+      tweetnacl:
+        specifier: ^1.0.3
+        version: 1.0.3
+      ws:
+        specifier: ^8.18.0
+        version: 8.21.3
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      '@types/ws':
+        specifier: ^8.5.8
+        version: 8.18.1
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
 
 packages:
 
@@ -3041,6 +3072,9 @@ packages:
     resolution: {integrity: sha512-ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==}
     engines: {node: '>=22.13.0 || >=24'}
 
+  tweetnacl@1.0.3:
+    resolution: {integrity: sha512-6rt+RN7aOi1nGMyC4Xa5DdYiukl2UWCbcJft7YhxReBGQD7OAM8Pbxw6YMo4r2diNEA8FEmu32YOn9rhaiE5yw==}
+
 snapshots:
 
   '@electron/osx-sign@2.7.1':
@@ -4997,6 +5031,8 @@ snapshots:
   trough@2.2.0: {}
 
   tslib@2.8.1: {}
+
+  tweetnacl@1.0.3: {}
 
   typescript@5.9.3: {}
 

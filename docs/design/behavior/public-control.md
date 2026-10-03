@@ -14,7 +14,7 @@
 - [对象优先 CLI 与统一公共业务服务](#对象优先-cli-与统一公共业务服务)
 - [Topics 知识库的公共接入](#topics-知识库的公共接入)
 - [Agent-first 的 Space 工作入口](#agent-first-的-space-工作入口)
-- [私网手机版首个闭环](#私网手机版首个闭环)
+- [手机版 Relay 连接](#手机版-relay-连接)
 
 ## AgentMux 自操作与 Computer Use 边界
 
@@ -158,11 +158,11 @@
 - **`mote playbook pmo` 只读。** 它是说明 PMO 方法、分工、目标与完成标准确认、发现资源、编排已有能力、回读事实及未知恢复方式的工作手册，引用实际公开 CLI 及其真实边界，不启动 Agent、不自动执行步骤、不投递任务、不改变角色注册；已存在的 SOUL／Wiki 与用户资料保持原样，不机械改写。能力尚未落地时明确说明，不把目标命令写成已经可用的操作承诺。
 - **展示导航沿原合同。** `app focus` 表达主 Surface 的选择，`space focus` 与 `goal focus` 表达精确对象导航；选择、真实呈现和输入 caret 仍分开报告，默认保原 Mote 对话输入、草稿和组字，不改执行 cwd、不关闭健康 Session。原展示 owner 及对象间职责唯一见[《Agent 操作桌面主画面与保留对话输入》](#agent-操作桌面主画面与保留对话输入)，不因命令归域再造 router 或 caret owner。
 
-- **Host 的公开运行能力沿同一公共服务。** 长期无 UI Host 借原 Core，以 `runtime.bootstrap`、`runtime.invoke`、`runtime.events`、`runtime.history-watch`、`runtime.release-consumer` 提供有限、从原 SDK 类型派生的调用与观察；不复制 Provider、Session Store、Run Runtime、方法白名单或 wire codec。缺少 Host 端口时明确不可用，不隐式创建另一个 Core。五个 SDK 方法只接受传输 owner 实际认证／批准的用户或设备 principal；Agent capability 不能提升为用户输入权限，managed Agent 继续原 `agent.*` 语义与 A2A owner，调用 `runtime.*` 明确拒绝。真实连接的 signal 与 GUI 转发原 Agent caller 必须到达原业务 owner，不能由自由参数伪造；消费身份绑定稳定 principal，另一设备不能写入或释放它的观察。Unix 私有用户 endpoint、共享 HTTP 用户授权与实际设备授权分别如实表达，共享 token 不冒每设备身份，跨请求不以随机连接 ID 代稳定身份。原 SDK 参数、事件与 ordered bytes 保真，普通业务数据不能被当成连接控制字段剥除或协议 tag 重新解释，不同来源的事件不能因同名而丢失。GUI 转发保原业务 code 与 detail／details／candidates 字段，取消只收相关消费者，不停止健康 Run。 HTTP 认证明确拒绝与认证流程未完成必须区分：设备观察容量不足或认证服务暂不可用保持繁忙／不可用事实，不能冒凭证失效、撤销原授权或要求重新配对；原凭证、durable 状态与健康工作保留，未知回执不自动重试。`agent.output` 的初始事实必须来自同一次原 Attachment，保留真实 `terminal` continuation、`resizeRevision` 与 Run 字节边界；未知不能填零，不能另读一次状态冒同一快照。实际 Mac 用户批准设备的权限不能由 Unix 同用户、共享 token、普通设备身份或自由 JSON 参数代替，须沿原设备 Authority 的真实本机确认来源。Node 与浏览器共用无 Node-only 运行依赖的 frame/parser 与 HTTP fetch/SSE 入口，支持真实 cookie credentials，并公开复用同一纯 value codec 保留原 bytes 与 tuple；浏览器有限 SDK adapter、TLS 与设备授权沿各自 Client owner，接入同一公共传输，不能另造 wire，未验收时不宣称可用。
+- **Host 的公开运行能力沿同一公共服务。** 长期无 UI Host 借原 Core，以 `runtime.bootstrap`、`runtime.invoke`、`runtime.events`、`runtime.history-watch`、`runtime.release-consumer` 提供有限、从原 SDK 类型派生的调用与观察；不复制 Provider、Session Store、Run Runtime、方法白名单或 wire codec。缺少 Host 端口时明确不可用，不隐式创建另一个 Core。五个 SDK 方法只接受传输 owner 实际认证／批准的用户或设备 principal；Agent capability 不能提升为用户输入权限，managed Agent 继续原 `agent.*` 语义与 A2A owner，调用 `runtime.*` 明确拒绝。真实连接的 signal 与 GUI 转发原 Agent caller 必须到达原业务 owner，不能由自由参数伪造；消费身份绑定稳定 principal，另一设备不能写入或释放它的观察。Unix 私有用户 endpoint、共享 HTTP 用户授权与实际设备授权分别如实表达，共享 token 不冒每设备身份，跨请求不以随机连接 ID 代稳定身份。原 SDK 参数、事件与 ordered bytes 保真，普通业务数据不能被当成连接控制字段剥除或协议 tag 重新解释，不同来源的事件不能因同名而丢失。GUI 转发保原业务 code 与 detail／details／candidates 字段，取消只收相关消费者，不停止健康 Run。 HTTP 认证明确拒绝与认证流程未完成必须区分：设备观察容量不足或认证服务暂不可用保持繁忙／不可用事实，不能冒凭证失效、撤销原授权或要求重新配对；原凭证、durable 状态与健康工作保留，未知回执不自动重试。`agent.output` 的初始事实必须来自同一次原 Attachment，保留真实 `terminal` continuation、`resizeRevision` 与 Run 字节边界；未知不能填零，不能另读一次状态冒同一快照。手机设备鉴别与管理权限沿本页《手机版 Relay 连接》。Node 与浏览器共用无 Node-only 运行依赖的 frame/parser 与 HTTP fetch/SSE 入口，支持真实 cookie credentials，并公开复用同一纯 value codec 保留原 bytes 与 tuple；浏览器有限 SDK adapter、TLS 与设备授权沿各自 Client owner，接入同一公共传输，不能另造 wire，未验收时不宣称可用。
 
-- **设备管理保真实本机批准。** `device ls/invite/approve/reject/revoke` 沿同一公共服务借原长期 Host 的设备 Authority，只传管理意图和精确设备／码，不复制 issuer、pending、reader 或认证 wire。配置界面与本机 CLI 使用同一端口，秘密字段不公开。实际接收端的 transport、原 caller 与 signal 由传输 owner 提供，不能由 JSON 自称；managed Agent、普通 device、HTTP、未确认来源不能调用管理 owner。Unix 同用户只允许提出请求，变更仍须该次真实本机原生确认，默认取消并在提交前核原目标与有效期；确认失败保健康 Core／Run。现 SSH stdio 会桥到 Unix，最后接收端不能冒原始来源；公开非 Unix client 与标准 stdio 转发明确拒绝设备管理请求，不能借桥进入本机管理。失回执先回读原 deviceId 的事实，不能自动重做批准、撤销或邀请；未验原生确认与真实 UI caller 不宣称可用。
+- **设备管理沿原 Host Authority。** 接入、真实设备 principal、管理方法和撤销边界唯一沿[《手机版 Relay 连接》](#手机版-relay-连接)。传输来源和取消信号由实际 owner 提供，客户端参数不提升权限，未知副作用不自动重放。
 
-**当前实现与未实现范围。** `f-2j28fqcvt` 已交付严格 JSON-RPC 2.0 公共服务、对象化 CLI、Unix／显式 HTTP 与 SSH stdio 转发、只读 PMO 手册、真实全局发现，以及显式 Project 资源与 Space 落点的首 Tab／首任务编排。公开 wire 不再使用旧 schema5 信封；内部 Client DTO 仍由原业务 owner 持有。三传输的权限与独立观察者释放、真实 Client 调用和私有普通进程重启恢复已有对应证据。五个 `runtime.*` 有限公共端口、原 Host SDK 派生类型、真实上下文与权限隔离，以及 Node／浏览器共用的纯 HTTP/SSE 入口已完成公共 producer 的 Source 验收与 main 发布。实际长期 Host 组合、浏览器完整 SDK adapter、TLS、设备管理与实际本机批准仍须各自接线和验收，不能由公共接口完成代签。
+**当前实现与未实现范围。** `f-2j28fqcvt` 已交付严格 JSON-RPC 2.0 公共服务、对象化 CLI、Unix／显式 HTTP 与 SSH stdio 转发、只读 PMO 手册、真实全局发现，以及显式 Project 资源与 Space 落点的首 Tab／首任务编排。公开 wire 不再使用旧 schema5 信封；内部 Client DTO 仍由原业务 owner 持有。三传输的权限与独立观察者释放、真实 Client 调用和私有普通进程重启恢复已有对应证据。五个 `runtime.*` 有限公共端口、原 Host SDK 派生类型、真实上下文与权限隔离，以及 Node／浏览器共用的纯 HTTP/SSE 入口已完成公共 producer 的 Source 验收与 main 发布。手机 Host 组合、Relay、有限浏览器 SDK 和设备管理沿下述范围；构建不代替真实设备验收。
 
 **已评审的派生合同与实施边界。** 新 Zone 以 `--project`／typed `projectId` 显式选择资源，既有 Zone 不需要该项；Project 由原 Workspace 配置的 Host 与仓库根／目录同一性派生，不添加第二 registry。新 Zone 可用 `--source-workspace` 明确选择该 Project 内的执行来源；未指定时仅接受唯一根目录来源或唯一已登记来源，多工作区且没有根目录时明确要求消歧，不从第一个工作区或当前 HEAD 猜分支起点。一个 `--endpoint` descriptor 只定位同一公共服务，不承担资源或空间身份；HTTP 显式启用且同权，SSH stdio 只转发远端原 Unix 服务，不意味着 ctxmux 远程 Run 已实现。Unix／SSH 保持有界换行 framing，内容须为严格 JSON-RPC 2.0，不保原自定义 wire 或兼容别名。`--operation-id` 是沿原 owner 对账的业务操作身份，JSON-RPC `id` 只关联一次 wire 请求；订阅只有一次响应，先响应再通知，取消／断线只释放相应 reader，不停健康 Agent 或原业务 operation。完整命令树、原业务保留和第一方指引须一起落地，Toolkit 原 add／remove 能力改为 create／delete，update／action 保留；具体过滤与载体实现仍受上述真实来源和 typed 合同约束。少量独立端到端切片可并行推进，最终验收消费同一候选的公共 RPC、完整对象 CLI 与 Project／Space PMO 工作流，不以纯文档或 helper 通过交付。
 
@@ -191,32 +191,22 @@ Category／Topic／Chat／Thread 的对象、默认「未分类」、来源知�
 具体 grammar、缺省规则、失败保留、请求对账及真实私有重启验收见 [Agent-first 的 Space 工作入口](#agent-first-的-space-工作入口)；CLI 合同与推荐方案（本机过程资料：`docs/plans/pmo-cross-workspace-worktree-cli-design.md`）。上一版 `worktree create/start` 主流程不再是当前方案；技术文档或 proposal 状态不能冒充功能交付。
 
 
-## 私网手机版首个闭环
+## 手机版 Relay 连接
 
-用户先确认「我们先完成这一步」并要求创建或整理 Feature Tracker，随后授权彻底实现同一私网首个闭环：在 worktree 推进，基于最新 main rebase 后线性集成，main 保持单亲，并发变更与未保存工作完整保全。前文“尚未批准”及仅整理计划不启动的记录只表达其当轮状态；本次执行仍沿已评审的同一目标、约束与验收边界。
+手机在同一局域网打开 Mac 设置页或右下角手机 Toolkit 复制的完整链接，即可继续同一已有 AgentSession 的对话、Prompt、交互请求和终端。正常接入不手输地址、配对码，不回 Mac 二次批准，不弹系统确认。Mac 自带手机网页与局域网 Relay，无公网服务或部署前置条件；公网部署、Linux 发行、新建工作区、商店发布和系统推送不属于本批。
 
-手机先认证直连当前 Mac Host，继续同一已有AgentSession的对话、后续Prompt和确切交互请求，并让同一Run终端、连续阅读、手机输入和断线/重启恢复可用。公网relay、Linux发行、新建Agent/工作区、diff、商店发布和系统推送不属于本批。
+连接沿成熟 Relay V2 的稳定 Host ID、公钥 offer、端到端加密握手、多设备通道、心跳与自动重连。Relay 只转发密文，不持有业务语义、Agent Session 或 Runtime。Host 身份与地址分离：监听通配网卡地址，复制时读取当前可用局域网地址；地址变化不换身份或删除设备记录。旧 IP 链接在原地址失效后需从 Mac 重新复制，局域网方案不承诺跨网络寻址。局域网网页与 WS 可用 HTTP，公网入口须 HTTPS/WSS；页面地址的可信来源仍是用户从原 Mac 复制的链接。
 
-分层与远端身份沿[《联邦 Runtime 与远端恢复边界》](session-recovery.md#联邦-runtime-与远端恢复边界)，同公共方法沿[《对象优先 CLI 与统一公共业务服务》](#对象优先-cli-与统一公共业务服务)，原工作面与健康Run沿[《Session Attach 与 Runtime Projection 的边界》](session-recovery.md#session-attach-与-runtime-projection-的边界)，终端字节、阅读与成本沿[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)。长期无UI Host采用原Core/Hook/Store/Provider handle与ctxmux namespace，同时服务Desktop和Mobile；手机网络Client不冒充ctxmux Remote或另一Runtime。切换必须保持原Desktop可用，不先拆正常流程或新建空Store。
+链接承载公有 offer，不携带长期私钥或一次连接码；打开后从页面地址清除并保留公有连接信息。Host 私钥持久保存在原 Store 旁的受保护文件，损坏时保留原件；设备持久加密密钥沿设备拥有的存储保留，浏览器使用同源 IndexedDB，不进入 URL、日志、普通 localStorage 或工作面导出。链接不是限时单设备邀请；完成加密握手的设备按真实公钥登记独立身份，撤销立即终止该公钥的请求与订阅。旧设备、操作记录、Host 身份和工作面数据保留；旧固定 IP/TLS manifest、邀请、claim、OS 批准和原生 Cookie 传输实现删除。
 
-共享既有Conversation消息/历史、结构化请求和Composer组成；设备外壳、焦点、剪贴板、overlay与键盘沿明确平台owner。手机独立导航、草稿、阅读和布局共用Session事实，观看不搬桌面Region。认证与私网可达性是两件事：设备有独立授权和撤销，HTTPS或已验证可信私网里的受保护认证通道鉴别Host并保护credential；浏览器不自行绕过证书或承诺JS pinning。撤销终止该设备已连请求/订阅，只收相关消费者，不停止健康Run。Host睡眠/离线如实说明，不伪称Agent退出或手机能唤醒关机电脑。
+分层与远端身份沿[《联邦 Runtime 与远端恢复边界》](session-recovery.md#联邦-runtime-与远端恢复边界)，公共方法沿[《对象优先 CLI 与统一公共业务服务》](#对象优先-cli-与统一公共业务服务)，原工作面与健康 Run 沿[《Session Attach 与 Runtime Projection 的边界》](session-recovery.md#session-attach-与-runtime-projection-的边界)，终端字节、阅读与成本沿[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)。长期无 UI Host 使用原 Core/Hook/Store/Provider 与 ctxmux namespace，同时服务 Desktop 和 Mobile；加密连接接原公共 JSON-RPC dispatcher 与有限 Hosted SDK，不复制 Runtime。网络或手机入口故障只影响该入口，保留健康 Desktop、Unix、Agent 和 Run。
 
-设备通过本机设置页明确生成并复制的短时一次连接链接接入：生成动作即授权该链接的一次兑换，手机打开后自动识别原 Host、兑换连接码、登记独立设备并进入可操作会话，不再填写地址、输入配对码、核对确认码或回 Mac 二次批准；正常路径不另弹系统确认。远端或 managed Agent 不能生成接入授权或撤销本机授权。连接码仅用于短时一次兑换，消费后从当前页面地址清除，不进入日志或普通持久存储；长期秘密不进入普通存储、URL或日志。服务端将活请求、订阅和Runtime consumer绑定已认证设备，客户端身份字段不能窃听或释放另一设备。可选私网接入的TLS、授权状态或监听流程失败只说明该入口不可用，不停止或阻断原健康Host、Desktop或Run，也不覆盖原身份材料。
+公共 `device.ls/link/revoke` 只借原 Host Authority：本机用户读取状态、取得当前完整链接及撤销设备；managed Agent 和远端设备不能调用这些管理方法。`device.hello` 仅允许已认证 Relay 设备命名自己的身份，目标由真实加密握手 principal 确定，不能由 JSON 选择。GUI、SDK、CLI、方法发现和回执共用这些方法；原邀请、approve、reject、intent 方法删除。请求或订阅只能观察、释放自己的 Runtime consumer。
 
-设置页按独立设备身份展示当前在线数、已授权设备及每台设备的连接状态、最近活动和操作记录；同一设备多个请求或订阅不重复计为多台。记录包含发生时间、操作、目标 Session／对象与已确认结果，未知不得冒充成功，失联不得冒充撤销。操作归属由 Host 认证上下文确认，并沿 Core 的公共操作与消息事实保留；客户端提交的设备名称不能伪造身份。对话中的用户输入和交互操作须可辨来源设备，历史未知来源明确未知，不按当前设备补猜；设备来源与消息作者、Agent／Provider 身份分开，不将 Agent 回复整体归为发起设备。设备清单、操作记录与对话展示消费同一归属事实，重连与重启保留原记录。
+设置与 Toolkit 展示真实连接状态、当前在线数、已授权设备、最近活动与操作记录；同一公钥的多个请求或订阅只计一台。记录包含发生时间、操作、目标 Session/对象与结果，未知不冒成功，失联不冒撤销。操作来源沿 Host 认证上下文与 Core 公共事实保留，名称不代替身份。对话用户输入与交互操作可辨来源设备；未知历史不按当前设备补猜，不把 Agent 回复归为发起设备。两处共用同一设备和活动 owner。
 
-浏览器的同源HttpOnly／Secure Cookie与原生授权通道分别核实，不能拿浏览器Cookie冒系统秘密库已实现。原生长期设备秘密由Keychain／Keystore等平台系统owner保管，JS只得公有状态，不能读取、导出或在普通存储中保有秘密；Host鉴别使用系统TLS信任，不绕证书。一次claim的结果未知时不盲重发，系统秘密保存未确认不能伪称原生设备已可用；失败保留原身份与明确恢复动作。
+网络中断、休眠与后台返回自动重连，原工作面、Session 引用、草稿、阅读位置与未确认操作保留。恢复沿原 SDK 重新核验原 Host 与 Session/Run、接回事件和字节 cursor；副作用不自动重放，只有 Core 终局事实允许移除 Session 引用。相同 Host ID 的地址变化允许更新地址；不同 Host 不得接收原会话输入。连接步骤失败就地显示当前未知/不可用事实与恢复动作，不将协议失败猜成 Agent 退出。
 
-证书材料准备与设备系统信任分开：生成和导出不自动修改Mac/iPhone信任或激活服务，签发私钥保留在Mac，仅导出公开证书。既有签发身份或材料损坏时保留原件并说明，不静默换新；只有实际设备的OS信任和Host鉴别验证后才称连接可信，设备授权仍独立成立。
+观看与控制可辨。手机终端默认沿原 Run 已确认网格显示，旋转或 viewport 变化不自动改变 PTY；用户明确进入控制并主动调整尺寸，才向原 owner 请求。被动阅读不 resize，不发鼠标输入或 DA/DSR/颜色查询回写，checkpoint/replay 不触发输入、通知或剪贴板，不伪造 ctxmux 排他 lease。
 
-连接链接须从本机设置页取得原 Host 当前私网接入事实，并携带同一 Host 的一次连接码；不要求手机再次填写地址：已确认监听时显示真实HTTPS地址、叶证书指纹及有效期；叶指纹不冒充签发根指纹，监听不冒充手机系统已信任或设备已授权。未配置、配置／TLS／监听不可用及手机页面产物不可用分别说明，并给出原证书准备与显式启动manifest的可执行入口；不猜地址、不自动生成邀请、修改信任或激活服务，失败保原身份、会话和工作面。读取失败保上次已知结果并标明当前未确认，不以空列表或旧状态冒当前事实。
-
-配置位置和证书准备命令须沿原Host实际启动来源：配置路径只表示本次已合法选择的绝对启动manifest，文件缺失或解析失败仍保已确定来源，不从cwd、Store或默认路径补猜；准备入口只显示已确认真实可执行文件及同目录固定、非空可读产物，并区分本进程实际Node／Electron运行方式。界面只显示和严密引用参数后复制模板，用户值未明确时标需替换；不自动执行、写配置、信任、邀请、批准、激活或重启。未确认准备入口如实说明，不影响原私网监听、设备读取与健康Run。
-
-设备授权变更结果未知时，只有变更后重新取得的设备事实能恢复下一次明确操作；变更前发出的列表读取即使晚到，也不能覆盖已确认的变更结果或解除未知。原已知列表、确认目标与服务说明保留，未知不触发自动重做。
-
-观看与控制可辨。手机终端默认沿原Run已确认网格显示，手机旋转或viewport变化不自动改变PTY尺寸；用户明确进入控制并主动提出尺寸调整，才沿原owner请求变更。被动阅读不resize，不发鼠标输入或DA/DSR/颜色查询回写，checkpoint/replay不触发输入、通知或剪贴板；设备policy不伪造ctxmux排他输入/尺寸lease。发送和request响应保原业务身份，失联未知不盲重发。前台恢复先保原工作面，再核验连接、Session/Run、语义与字节cursor；只有Core终局事实移除引用。
-
-durable工作面明确保存位置和回读来源。设备进程重启与重新安装存储条件不同；不依靠普通缓存或假定秘密跨卸载必存宣称重装恢复。首闭环提供可保全的工作面来源、凭证丢失后的重新授权与明确恢复入口；未确认保原Host Session和服务说明，不创建替代对象。
-
-iPhone 与 Android 两类真机均可用，优先交付 iPhone 并完成其真机验收，Android 保留后续同能力范围；已评审的两类设备 oracle 与保护约束保持。当前已确认 iPhone 与这台 Mac 在「同一 Wi-Fi / 局域网」，这是本轮 iPhone 连接验收环境；网络可达性不代替本节的设备授权、Host 鉴别与受保护认证要求。
+设备工作面采用明确的持久来源和可导出保全记录；重启与卸载后的存储条件分别说明，不假定密钥跨卸载必存。身份丢失后打开原 Mac 链接登记新设备，不创建替代 Host Session。iPhone 与 Android 保留同能力范围，未执行真机验收不得据构建成功宣称两类设备验收通过。

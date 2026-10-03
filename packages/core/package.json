@@ -149,6 +149,18 @@
     "./prompt-reaction": {
       "types": "./dist/prompt-reaction.d.ts",
       "import": "./dist/prompt-reaction.js"
+    },
+    "./public-rpc-relay": {
+      "types": "./dist/public-rpc-relay.d.ts",
+      "import": "./dist/public-rpc-relay.js"
+    },
+    "./relay-identity": {
+      "types": "./dist/rpc-relay-keypair.d.ts",
+      "import": "./dist/rpc-relay-keypair.js"
+    },
+    "./relay-hosted": {
+      "types": "./dist/relay-hosted.d.ts",
+      "import": "./dist/relay-hosted.js"
     }
   },
   "bin": {
@@ -174,7 +186,8 @@
     "fs-native-extensions": "1.5.1",
     "wa-sqlite": "1.0.0",
     "yaml": "2.9.0",
-    "json-rpc-2.0": "1.8.1"
+    "json-rpc-2.0": "1.8.1",
+    "@agentmux/relay": "workspace:*"
   },
   "scripts": {
     "build": "node scripts/build.mjs",

@@ -1,3 +1,4 @@
+import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { App } from '@capacitor/app'
 import { Clipboard } from '@capacitor/clipboard'
 import { Keyboard } from '@capacitor/keyboard'
@@ -43,7 +44,7 @@ export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePi
   if (!file.name || !Number.isSafeInteger(file.size) || file.size < 0 || !file.mimeType) {
     throw new Error('系统尚未确认附件的名称、类型或大小；这次附件尚未采用。')
   }
-  return { id: crypto.randomUUID(), name: file.name, mimeType: file.mimeType, size: file.size }
+  return { id: randomClientRequestId(), name: file.name, mimeType: file.mimeType, size: file.size }
 }
 
 /** Observe OS lifecycle/keyboard only; closing these listeners cannot control a Host or a Run. */
