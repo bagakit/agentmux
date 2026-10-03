@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { fixtureFileUrl, fixturePath } from '../../../test/fixture-values.mjs'
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
