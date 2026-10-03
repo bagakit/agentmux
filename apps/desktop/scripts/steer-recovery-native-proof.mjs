@@ -23,7 +23,7 @@ const typedCrossCore = process.argv.includes('--typed-response-cross-core')
 const typedFirstHook = process.argv.includes('--typed-response-first-hook')
 const startupFirstSend = process.argv.includes('--startup-first-send')
 const startupRestoredOnly = process.argv.includes('--startup-restored-first-send')
-const finalQualification = process.argv.includes('--steer-recovery-final')
+const finalQualification = process.argv.includes('--steer-recovery-final') || !(diagnosticOnly || typedCrossCore || startupFirstSend || startupRestoredOnly)
 const startupQualification = startupFirstSend || startupRestoredOnly
 assert.ok(!(startupFirstSend && startupRestoredOnly), 'Startup proof triggers have distinct qualification scopes')
 assert.ok(!finalQualification || !(startupQualification || diagnosticOnly || typedCrossCore), 'Final GUI recovery qualification has a distinct Source and Native scope')
