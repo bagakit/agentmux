@@ -19,6 +19,7 @@ import { MoteRenameDialog } from './MoteRenameDialog'
 import { StatusDot } from './StatusDot'
 import { MoteIdeaControls } from './MoteIdeaControls'
 import { MoteFirstCooperation } from './MoteFirstCooperation'
+import { MoteCurrentWork } from './MoteCurrentWork'
 
 const NO_EXPANDED_PATHS: ReadonlySet<string> = new Set()
 type MoteSection = 'profile' | 'ideas'
@@ -122,6 +123,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
     {section === 'profile' ? <>
       <div className="mote-details__profile">{profile}</div>
       <MoteFirstCooperation scope={scope} reference={reference} />
+      <MoteCurrentWork scope={scope} reference={reference} />
       <MoteBehaviorSummary scope={scope} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
       {behaviorOpen ? <MoteBehaviorDialog scope={scope} reference={reference} onOpenPath={onOpenPath}
         onClose={() => setBehaviorOpen(false)} returnFocus={() => behaviorInvoker.current?.isConnected ? behaviorInvoker.current : null} /> : null}

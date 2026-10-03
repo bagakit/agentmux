@@ -11,7 +11,8 @@ const gates = {
   'T-006': 'verify-mote-daily-model.mjs'
 }
 if (!gates[task]) throw new Error('Choose an explicit Mote daily-autonomy Task.')
-const child = spawn(process.execPath, [new URL(gates[task], import.meta.url).pathname], {
+const childArgs = task === 'T-001' ? ['--task', task] : []
+const child = spawn(process.execPath, [new URL(gates[task], import.meta.url).pathname, ...childArgs], {
   stdio: 'inherit', env: process.env
 })
 child.on('error', error => { console.error(error); process.exitCode = 1 })
