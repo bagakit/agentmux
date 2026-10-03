@@ -1,10 +1,11 @@
 import type { AgentFocusHistoryEntry, AgentFocusHistoryIdentity } from './agent-focus'
 import type { AppConfig, ScratchTopicSnapshot, WorkspaceBranchesSnapshot } from '../../../shared/contracts'
 import type { WorkbenchTab } from './workbench-tabs'
-import type { FocusContext } from './focus-context'
+import { focusLastTaskActivityAt, type FocusContext } from './focus-context'
+import type { AgentSessionHistoryDescriptor, AgentTimelineSnapshot } from '@agentmux/core'
 import { scratchTopicKind, scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { topicSpaceIconTarget } from './space-object-appearance'
-import { resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
+import { FOCUS_RECENT_PROJECT_HOURS, resolveFocusRecentActivityHours } from '../../../shared/focus-preferences'
 
 export type FocusWorktreeFact = { hostId: string; path: string; repoPath: string; branch: string; removed: boolean }
 export type FocusHierarchyFacts = {
@@ -42,13 +43,18 @@ export function retainedWorktreeFacts(previous: readonly FocusWorktreeFact[], sn
   return [...other, ...known.filter(fact => !current.some(item => item.path === fact.path)).map(fact => ({ ...fact, removed: true })), ...current]
 }
 /** Project/checkout/Topic are held ownership facts, never a guess from Agent liveness. */
-export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>): FocusProjectLane[] {
+export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: AppConfig | null = null, facts: FocusHierarchyFacts = EMPTY_FOCUS_HIERARCHY, tabs: Readonly<Record<string, WorkbenchTab>> = {}, now = Date.now(), topicSnapshots?: Readonly<Record<string, ScratchTopicsSnapshot>>, visits: readonly AgentFocusHistoryEntry[] = []): FocusProjectLane[] {
   const tabWorkspace = new Map<string, string>()
   for (const tab of Object.values(tabs)) for (const region of Object.values(tab.regions)) if ('sessionId' in region) tabWorkspace.set(region.sessionId, tab.workspaceId)
   const lanes = new Map<string, FocusProjectLane>()
   const priorities = new Map<string, number>()
   const projectRoots = focusProjectRoots(config)
   const recentActivityMs = resolveFocusRecentActivityHours(config?.focus?.recentActivityHours) * 60 * 60 * 1000
+  const focusedAt = new Map<string, number>()
+  for (const visit of visits) if (visit.identity?.kind === 'agent' && Number.isSafeInteger(visit.focusedAt) && visit.focusedAt > 0 && visit.focusedAt <= now) {
+    const key = JSON.stringify([visit.identity.hostId, visit.sessionId])
+    focusedAt.set(key, Math.max(focusedAt.get(key) ?? 0, visit.focusedAt))
+  }
   for (const row of rows) {
     const workspace = row.workspace
     const checkout = facts.worktrees.find(item => item.path === row.workspacePath && item.hostId === row.hostId)
@@ -74,8 +80,9 @@ export function deriveFocusProjectLanes(rows: readonly FocusContext[], config: A
     if (row.liveAgent) lane.activeAgentIds.push(row.id)
     lane.contextIds.push(row.id)
     lanes.set(id, lane)
+    const lastUsedAt = Math.max(row.lastActivityAt ?? 0, focusedAt.get(JSON.stringify([row.hostId, row.id])) ?? 0)
     const priority = row.bucket === 'attention' ? 0 : row.bucket === 'working' ? 1
-      : row.lastActivityAt != null ? (now - row.lastActivityAt <= recentActivityMs ? 2 : 3) : 4
+      : lastUsedAt > 0 ? (now - lastUsedAt <= recentActivityMs ? 2 : 3) : 4
     priorities.set(id, Math.min(priorities.get(id) ?? priority, priority))
   }
   return [...lanes.values()].sort((a, b) => priorities.get(a.id)! - priorities.get(b.id)!)
@@ -86,21 +93,44 @@ export const focusProjectKey = (hostId: string, projectId: string) => JSON.strin
 export type FocusRetainedProject = {
   key: string; projectId: string; name: string; hostId: string
   identity: AgentFocusHistoryIdentity; lastFocusedAt: number | null
+  lastActivityAt: number | null; recent: boolean; state: 'active' | 'retired' | 'unknown'
 }
 /** Only retained observations contribute historical projects. Never fabricate
  * current Contexts, control references or task activity from a focus visit. */
-export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryEntry[], lanes: readonly FocusProjectLane[]): FocusRetainedProject[] {
+export function deriveRetainedFocusProjects(entries: readonly AgentFocusHistoryEntry[], lanes: readonly FocusProjectLane[], options: {
+  now?: number; sources?: readonly AgentSessionHistoryDescriptor[]; sourcesAvailable?: boolean
+  timelines?: Readonly<Record<string, AgentTimelineSnapshot>>
+} = {}): FocusRetainedProject[] {
+  const now = options.now ?? Date.now()
   const current = new Set(lanes.map(lane => focusProjectKey(lane.hostId, lane.projectId)))
   const projects = new Map<string, FocusRetainedProject>()
+  const sources = new Map(options.sources?.map(source => [JSON.stringify([source.hostId, source.agentSessionId]), source]))
+  const members = new Map<string, Map<string, AgentSessionHistoryDescriptor | undefined>>()
   for (const entry of entries) {
     const identity = entry.identity
     if (identity?.kind !== 'agent' || !identity.hostId || !identity.project?.id || !identity.project.name) continue
     const key = focusProjectKey(identity.hostId, identity.project.id)
     if (current.has(key)) continue
-    const lastFocusedAt = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= 8_640_000_000_000_000 ? entry.focusedAt : null
+    const lastFocusedAt = Number.isSafeInteger(entry.focusedAt) && entry.focusedAt > 0 && entry.focusedAt <= now ? entry.focusedAt : null
+    const source = options.sourcesAvailable ? sources.get(JSON.stringify([identity.hostId, entry.sessionId])) : undefined
+    const recorded = members.get(key) ?? new Map<string, AgentSessionHistoryDescriptor | undefined>()
+    recorded.set(entry.sessionId, source); members.set(key, recorded)
+    const timeline = options.timelines?.[entry.sessionId]
+    const lastActivityAt = timeline?.agentSessionId === entry.sessionId ? focusLastTaskActivityAt(timeline.items, undefined, now) : null
     const previous = projects.get(key)
-    if (previous && (previous.lastFocusedAt ?? -Infinity) >= (lastFocusedAt ?? -Infinity)) continue
-    projects.set(key, { key, projectId: identity.project.id, name: identity.project.name, hostId: identity.hostId, identity, lastFocusedAt })
+    if (previous) {
+      previous.lastActivityAt = Math.max(previous.lastActivityAt ?? 0, lastActivityAt ?? 0) || null
+      if ((previous.lastFocusedAt ?? -Infinity) >= (lastFocusedAt ?? -Infinity)) continue
+    }
+    projects.set(key, { key, projectId: identity.project.id, name: identity.project.name, hostId: identity.hostId, identity, lastFocusedAt,
+      lastActivityAt: Math.max(previous?.lastActivityAt ?? 0, lastActivityAt ?? 0) || null, recent: false, state: 'unknown' })
+  }
+  for (const project of projects.values()) {
+    const recorded = [...members.get(project.key)!.values()]
+    project.state = recorded.every(source => source?.state === 'retired') ? 'retired'
+      : recorded.some(source => source?.state === 'active') ? 'active' : 'unknown'
+    const lastUsedAt = Math.max(project.lastFocusedAt ?? 0, project.lastActivityAt ?? 0)
+    project.recent = project.state !== 'retired' && lastUsedAt > 0 && now - lastUsedAt <= FOCUS_RECENT_PROJECT_HOURS * 3_600_000
   }
   return [...projects.values()].sort((a, b) => a.name.localeCompare(b.name) || a.key.localeCompare(b.key))
 }

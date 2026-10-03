@@ -75,9 +75,11 @@ Attention 中的失败 Agent 沿原处理面提供可发现的查看与关闭动
 
 泳道按真实近期活动组织：需要处理的事项与权威 Working 保持前列，超过所选活动窗口没有可读任务活动的泳道后置；已知近期活动优先于无法判断活动时间的历史泳道。最近活动只取已有任务事件和权威状态进入时间，后台探测、同状态心跳、终端字节与打开视图不能刷新排序依据。归属层级、原 Context 与恢复入口保持，不能用后置代替删除或改变 Runtime 状态；同等级保持稳定次序，不随心跳反复跳动。
 
-活动窗口由 Settings → Focus 的 Recent activity window 调整：默认 24 小时，可选 12、24、72、168 小时，配置数值与默认的唯一源码定义见 [focus-preferences.ts](../../../apps/desktop/src/shared/focus-preferences.ts)，GUI 与 `settings inspect/set focus.recentActivityHours` 复用唯一配置 owner；只改变这里的近期归类与稳定排序，不改变 Session 恢复时间或 Runtime 状态。时间尺、时区、过滤和布局仍在原 Focus 工作面调整。
+近期排序窗口由 Settings → Focus 的 Recent activity window 调整：默认 48 小时，可选 12、24、48、72、168 小时，配置数值与默认的唯一源码定义见 [focus-preferences.ts](../../../apps/desktop/src/shared/focus-preferences.ts)，GUI 与 `settings inspect/set focus.recentActivityHours` 复用唯一配置 owner。已保存偏好继续有效，较短排序窗口不能取消下述 48 小时项目保留；Session 恢复时间与 Runtime 状态不变。时间尺、时区、过滤和布局仍在原 Focus 工作面调整。
 
-近期活跃过的项目仍保留，没有活跃 Session 时仅轻量收起；当前项目不因仅剩离线 Context 消失，无当前 Context 的项目也可沿既有有界执行焦点历史中可信 Agent／Host／Project 观察保留只读入口。超过所选活动窗口或时间未知只后置、收起，保可发现的项目数量与展开入口，不删除已保留历史。历史标题明确表达已观察项目与 Last focused／历史访问，focusedAt 不是任务活动；已知 Branch／Topic 只表达原记录，不推断当前归属或未记录的分类、名称、时间与控制权。收起、展开和按原日期窗口回顾只改变呈现，不制造 FocusContext、Session 状态或恢复能力，不刷新任务活跃时间，不建立第二项目／空间名册、状态账本或新的消息读取；原搜索、项目与状态条件继续真实作用，历史未知不冒成 Idle 或 Disconnected。
+当前未退休执行 Context 始终保留；项目在过去 48 小时内有可信执行焦点访问或真实任务活动时，也保留在泳道，没有当前 Context 时呈现原轻量项目行。使用观察与任务活动分别保留来源，focusedAt 不冒作任务活动；字节、同态心跳、探测、预览和旧摘录重新呈现不能刷新最近使用。仅 Core 明确确认全部已记录相关来源已退休时，该项目退出当前看板，历史仍可回顾；进程不在运行、Region 关闭、catalogue 等待／失败／缺项或一次空快照不代替退休事实，近期未知仍保轻量入口并说明当前身份／状态尚未确认，迟到旧退休观察不拿走当前健康 Context。
+
+轻量入口按准确 Host／Project 去重，名称与已知 Branch／Topic 只表达原观察，不推断当前归属或未记录的分类、时间与控制权。较老或时间未知且没有当前 Context 的项目可后置、收起，保可发现的数量、展开与原日期窗口回顾入口，不删除已保留历史。收起、展开和回顾只改变呈现，不制造 FocusContext、Session 状态、控制或恢复能力，不复活已关闭 Session，不建立第二项目／空间名册、状态账本或新的消息读取；原搜索、项目与状态条件继续真实作用，历史未知不冒成 Idle 或 Disconnected。
 
 用户本次要求 Disconnected 与 Idle / Recovery 分开，随后要求完全重新设计只有离线上下文时的页面。确认离线集合仍只消费原权威状态和 Run 事实：待处理请求／明确错误沿 Attention 优先，running 但观察失联、启动、恢复中或未知保原能力与服务窗，不因观测缺口进入历史目录。混合泳道中的 Disconnected 无论数量、选中或搜索命中仍只占原紧凑入口，摘要只读少量现有事实；点击进入同一个离线目录并按准确 lane.id 定位，不能用 Project 混淆 Topic／Branch。仅有确认离线执行上下文时，也默认保留项目轻量标题与准确离线数量，不自动将整个看板切成目录；显式进入同一目录后使用左主内容的可用区域，不退成局部收纳小区。目录保真实 Project／Branch／Topic 层级；同一现有搜索、项目和状态条件作用于其可见集合，完整离线资格仍取未过滤事实，区分当前匹配与总数，过滤不改变状态／归属。每项可扫读带来源的已有回复／请求摘录和最近已知任务活动；缺失如实表达，不把摘录或打开目录当成新活动、不冒任务完成或死亡。悬停、搜索、分组与目录定位只读且不改变执行关注或触发生命周期；行点击／Enter 的 Open in Focus／查看工作面是明确原导航动作，恢复仍由原工作面 owner 提供，复用原 Context／Tab／Region／Session 和 Core 恢复 owner，不创建替代 Session、不自动恢复、不删 durable 投影。目录关闭／Escape 在恢复原 hidden／inert 泳道后回仍可用的准确入口，入口失效则回有效搜索控件，较晚主动焦点优先；仅有离线项时也可返回仍保留项目标题的看板，不能返回空态；预览／菜单先沿原 Escape 边界关闭；原工作面、草稿、选择和控制引用保持。
 

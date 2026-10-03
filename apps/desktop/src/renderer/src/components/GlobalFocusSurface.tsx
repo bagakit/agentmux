@@ -9,6 +9,7 @@ import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
 import { FocusDisconnectedGroup } from './FocusDisconnectedGroup'
 import { FocusDisconnectedProjects } from './FocusDisconnectedProjects'
 import { deriveFocusProjectLanes, deriveRetainedFocusProjects, focusProjectKey } from '../lib/focus-project-lanes'
+import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { tabForFocusedSession, type ExecutionFocusPresentation } from '../lib/focus-tab-projection'
 import { AttentionRequestPanel } from './AttentionRequestPanel'
 import { SessionObservationRegions } from './SessionObservationRegions'
@@ -61,6 +62,14 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
+  const timelines = useAppStore(useShallow(state => {
+    const held: typeof state.timelines = {}
+    for (const entry of executionHistory) if (entry.identity?.kind === 'agent' && state.timelines[entry.sessionId]) held[entry.sessionId] = state.timelines[entry.sessionId]!
+    return held
+  }))
+  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
+  const visible = hostVisible && surfaceVisible
+  const catalogue = useFocusHistorySources(visible)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const focusRegion = useAppStore(state => state.focusRegion)
   const focusExecutionSession = useAppStore((state) => state.focusExecutionSession)
@@ -98,8 +107,10 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     return () => { window.removeEventListener('pointermove', onPointerMove); window.removeEventListener('pointerup', stop); window.removeEventListener('pointercancel', stop); window.removeEventListener('blur', stop) }
   }, [])
   const { facts, errors: hierarchyErrors } = useFocusHierarchy(laneContexts, config)
-  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
-  const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes), [executionHistory, allLanes])
+  const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots, executionHistory), [laneContexts, config, facts, tabs, topicSnapshots, executionHistory])
+  const retainedProjects = useMemo(() => deriveRetainedFocusProjects(executionHistory, allLanes, {
+    timelines, sources: catalogue.sources, sourcesAvailable: catalogue.available
+  }), [executionHistory, allLanes, timelines, catalogue.sources, catalogue.available])
   const trimmedQuery = query.trim()
   const search = trimmedQuery.toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
@@ -119,6 +130,12 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   }, [disconnectedContexts.size])
   const filteredRetainedProjects = retainedProjects.filter(item => (project === 'all' || item.key === project) && bucketFilter === 'all'
     && `${item.name} ${item.identity.workspacePath} ${item.identity.branch ?? ''} ${item.identity.topicId ?? ''}`.toLocaleLowerCase().includes(search))
+  const recentProjects = filteredRetainedProjects.filter(item => item.recent)
+  const pastProjects = filteredRetainedProjects.filter(item => !item.recent)
+  const readProjectHistory = (item: typeof retainedProjects[number]) => {
+    const at = Math.max(item.lastFocusedAt ?? 0, item.lastActivityAt ?? 0)
+    if (at > 0) setHistoryWindowRequest(current => ({ at, sequence: (current?.sequence ?? 0) + 1 }))
+  }
   const openDisconnected = (laneId?: string, trigger?: HTMLElement) => {
     setDisconnectedReveal(laneId && trigger ? { laneId, trigger } : null)
     setDisconnectedOpen(true)
@@ -126,10 +143,8 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const closeDisconnected = () => { setDisconnectedOpen(false); setDisconnectedReveal(null) }
   const clearFilters = () => { setQuery(''); setProject('all'); setBucketFilter('all') }
   const boardRowsRef = useRef<HTMLDivElement>(null)
-  const surfaceVisible = useAppStore(state => state.mainSurface === 'agents')
-  const visible = hostVisible && surfaceVisible
   const [laneMetrics, setLaneMetrics] = useState<FocusLaneMetrics>({ width: 0, padding: 4, gap: 2, cardGap: 2 })
-  const hasBoardLanes = boardLanes.length > 0
+  const hasBoardLanes = boardLanes.length > 0 || recentProjects.length > 0
   useLayoutEffect(() => {
     const rows = boardRowsRef.current
     if (!visible || disconnectedExpanded || !hasBoardLanes || !rows || typeof ResizeObserver === 'undefined') return
@@ -220,6 +235,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
     <div ref={focusLayoutRef} className="global-focus-layout">
       <div className="global-board-main global-focus-main">
       {hierarchyErrors.length ? <p className="focus-hierarchy-warning" role="status" title={hierarchyErrors.join('\n')}>Some lane details could not load. Contexts remain available.</p> : null}
+      {catalogue.error ? <p className="focus-hierarchy-warning" role="status" title={catalogue.error}>Project status could not be checked. Recent projects remain available; retry sources in conversation records.</p> : null}
       {pmoAttention.length ? <button type="button" className="focus-pmo-attention" onClick={() => {
         const id = pmoAttention[0]!
         const current = useAppStore.getState()
@@ -239,12 +255,12 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
       }}><span className="focus-pmo-attention__identity"><SpaceObjectIcon kind="mote" name={moteIdentity.name} manualIcon={moteIdentity.icon} avatarWorkspaceId={moteIdentity.avatarWorkspaceId} avatarTopicId={moteIdentity.avatarTopicId} avatarObjectKey={moteIdentity.avatarObjectKey} /><strong>{moteIdentity.name}</strong><span>· {pmoAttention.length} to review</span></span><span>Open context ↗</span></button> : null}
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
-          <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={boardLanes.length === 0 || undefined} hidden={disconnectedExpanded} inert={disconnectedExpanded}>
-            {boardLanes.length ? <FocusProjectLanes lanes={boardLanes} selectedProjectKey={project} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+          <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined} hidden={disconnectedExpanded} inert={disconnectedExpanded}>
+            {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
           </div></WorkbenchPresentationContext.Provider>
           <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={selectedId} projectKey={project} expanded={disconnectedExpanded} canReturn reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} /></WorkbenchPresentationContext.Provider>
-          <FocusRetainedProjects projects={filteredRetainedProjects} total={retainedProjects.length} onRead={item => { if (item.lastFocusedAt !== null) setHistoryWindowRequest(current => ({ at: item.lastFocusedAt!, sequence: (current?.sequence ?? 0) + 1 })) }} />
+          <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />
         </div>
       </div>}
       </div>
@@ -298,7 +314,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
           : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
-    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} />
+    <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} catalogue={catalogue} />
     {requestId ? <AttentionRequestPanel sessionId={requestId} onClose={() => setRequestId(null)} onReturnFocus={() => {
       if (useAppStore.getState().mainSurface === 'agents') searchRef.current?.focus()
     }} onSessionChange={focusExecutionSession} /> : null}
