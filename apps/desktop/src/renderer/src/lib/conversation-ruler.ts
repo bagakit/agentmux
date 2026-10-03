@@ -13,8 +13,9 @@ export type RulerRecord = {
   target: { kind: 'native'; source: string; recordId: string } | { kind: 'observed'; index: number }
   record: AgentSessionHistoryItem | Exclude<ConversationAxisItem, RulerRecord>
 }
-export type RulerWindow = '15m' | '1h' | '24h' | 'all'
-export const RULER_WINDOWS = { '15m': 15 * 60_000, '1h': 60 * 60_000, '24h': 24 * 60 * 60_000, all: Infinity }
+export const RULER_WINDOWS = { '6h': 6 * 3_600_000, '12h': 12 * 3_600_000, '24h': 24 * 3_600_000,
+  '3d': 3 * 86_400_000, '7d': 7 * 86_400_000, all: Infinity }
+export type RulerWindow = keyof typeof RULER_WINDOWS
 
 /** References only. The committed reading surfaces keep their own source order and bodies. */
 export function conversationRulerRecords(sessionId: string | undefined, page: AgentSessionHistoryPage | null | undefined,
@@ -51,9 +52,10 @@ export function conversationRulerWindow(records: readonly RulerRecord[], window:
   const items = known.length === 0 ? [...records] : known.filter(r => r.recordedAt! >= end - RULER_WINDOWS[window] && r.recordedAt! <= end)
     .sort((a, b) => a.recordedAt! - b.recordedAt!)
   const scale = createRulerScale(items.map(r => r.recordedAt), 1)
+  const recentStart = latest - 3_600_000
   return { items, untimed: known.length ? untimed : [], scale,
-    recentFraction: scale.axis === 'temporal' ? (latest - RULER_WINDOWS['1h'] - scale.origin) / scale.span
-      : known.length === 0 ? null : items[0]!.recordedAt! < latest - RULER_WINDOWS['1h'] ? Infinity : 0 }
+    recentFraction: scale.axis === 'temporal' ? (recentStart - scale.origin) / scale.span
+      : known.length === 0 ? null : items[0]!.recordedAt! < recentStart ? Infinity : 0 }
 }
 
 /** At most 48 displayed bins; count is recorded density, never execution time. */

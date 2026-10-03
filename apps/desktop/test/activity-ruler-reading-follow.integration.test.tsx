@@ -48,7 +48,7 @@ class MeasuringObserver {
 function record(n: number) {
  const user = n % 6 === 0
  return { uuid: `ruler-${n}`, type: user ? 'user' : 'assistant', sessionId: native,
-  timestamp: new Date(start + n * 600_000).toISOString(), message: { role: user ? 'user' : 'assistant',
+  timestamp: new Date(start + n * 6 * 3_600_000).toISOString(), message: { role: user ? 'user' : 'assistant',
    content: user ? `User ${n}` : n < 5 ? [{ type: 'thinking', thinking: `Process ${n}` }] : [{ type: 'text', text: `Reply ${n}` }] } }
 }
 async function flush() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) }) }
@@ -61,7 +61,7 @@ function observer(): VisibleObserver {
 }
 function spanText() { return container.querySelector('.activity-ruler__span-range')?.textContent?.replace('→', '') }
 function expectedSpan(items: ReturnType<typeof conversationRulerRecords>, visible = new Set<string>()) {
- const span = describeSpan(conversationRulerWindow(items, '1h', visible).scale)!
+ const span = describeSpan(conversationRulerWindow(items, '24h', visible).scale)!
  return span.from + span.to
 }
 beforeEach(async () => {
@@ -88,16 +88,16 @@ afterEach(async () => {
 })
 it('moves the finite overview to visible older records and keeps recent relative to latest loaded facts', async () => {
  const records = conversationRulerRecords(sid, page, [])
- const latest = conversationRulerWindow(records, '1h')
- const old = conversationRulerWindow(records, '1h', new Set([records[0]!.id]))
+ const latest = conversationRulerWindow(records, '6h')
+ const old = conversationRulerWindow(records, '6h', new Set([records[0]!.id]))
  expect(old.items[0]!.record.id).toBe('ruler-0')
- expect(old.items.at(-1)!.record.id).toBe('ruler-6')
- expect(latest.items[0]!.record.id).toBe('ruler-14')
- const quarter = conversationRulerWindow([...records].reverse(), '15m', new Set([records[8]!.id]))
- expect(quarter.items.map(record => record.record.id)).toEqual(['ruler-8', 'ruler-9'])
- expect(conversationRulerWindow(records, '24h', new Set([records[0]!.id])).items).toHaveLength(21)
+ expect(old.items.at(-1)!.record.id).toBe('ruler-1')
+ expect(latest.items[0]!.record.id).toBe('ruler-19')
+ const twelveHours = conversationRulerWindow([...records].reverse(), '12h', new Set([records[8]!.id]))
+ expect(twelveHours.items.map(record => record.record.id)).toEqual(['ruler-8', 'ruler-9', 'ruler-10'])
+ expect(conversationRulerWindow(records, '24h', new Set([records[0]!.id])).items).toHaveLength(5)
  expect(old.recentFraction).toBeGreaterThan(1)
- expect(latest.recentFraction).toBe(0)
+ expect(latest.recentFraction).toBeCloseTo(5 / 6)
  expect(conversationRulerWindow(records, 'all', new Set([records[0]!.id])).items).toHaveLength(21)
  await writeFile(join(home, 'conversation.jsonl'), Array.from({ length: 21 }, (_, n) => JSON.stringify({ ...record(n), timestamp: new Date(start + n * 4 * 3_600_000).toISOString() })).join('\n') + '\n')
  const extended = await client.sessionHistoryPage(sid, { limit: 30 })
@@ -108,11 +108,11 @@ it('moves the finite overview to visible older records and keeps recent relative
 })
 it('does not invent time when only an untimed record is visible or all times are absent', () => {
  const records = conversationRulerRecords(sid, page, [])
- const result = conversationRulerWindow(records, '1h', new Set([records.at(-1)!.id]))
- expect(result.items.map(item => item.id)).toEqual(conversationRulerWindow(records, '1h').items.map(item => item.id))
+ const result = conversationRulerWindow(records, '6h', new Set([records.at(-1)!.id]))
+ expect(result.items.map(item => item.id)).toEqual(conversationRulerWindow(records, '6h').items.map(item => item.id))
  expect(result.untimed).toHaveLength(1)
  const unknown = records.map(({ recordedAt: _recordedAt, ...record }) => record)
- const ordinal = conversationRulerWindow(unknown, '15m', new Set([unknown[0]!.id]))
+ const ordinal = conversationRulerWindow(unknown, '12h', new Set([unknown[0]!.id]))
  expect(ordinal.scale.axis).toBe('ordinal'); expect(ordinal.items).toHaveLength(22); expect(ordinal.scale.readoutOf(0)).not.toHaveProperty('at')
 })
 it('uses current managed identity for both native and captured ruler references without changing source targets', async () => {
@@ -143,11 +143,38 @@ it('consumes actual shell visibility while retaining original body DOM, Range an
  expect(container.querySelector('[data-native-record-id="ruler-0"]')).toBe(user)
  expect(text!.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('User')
  expect(container.querySelector('.activity-ruler__band')).not.toBeNull()
- expect(container.querySelector('[aria-label="History window: 1h"]')?.getAttribute('title')).toContain('reading position')
+ expect(container.querySelector('[aria-label="History window: 24h"]')?.getAttribute('title')).toContain('reading position')
  await act(async () => observer().show([container.querySelector<HTMLElement>('[data-native-record-id="ruler-20"]')!])); await flush()
  expect(spanText()).toBe(expectedSpan(records))
  expect(user.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('User')
 })
+it('defaults to 24h and selects all six real menu windows without replacing the original message', async () => {
+ await render(view())
+ const user = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
+ const body = user.querySelector('.log-turn__body') ?? user
+ const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT)
+ let text: Text | null = null
+ while (walker.nextNode()) if (walker.currentNode.textContent?.includes('User 0')) { text = walker.currentNode as Text; break }
+ expect(text).not.toBeNull()
+ const range = document.createRange(); range.setStart(text!, 0); range.setEnd(text!, 4); window.getSelection()!.addRange(range)
+ const trigger = () => container.querySelector<HTMLButtonElement>('[aria-label^="History window:"]')!
+ expect(trigger().getAttribute('aria-label')).toBe('History window: 24h')
+ const records = conversationRulerRecords(sid, page, [])
+ for (const preset of ['6h', '12h', '24h', '3d', '7d', 'all'] as const) {
+  await act(async () => trigger().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))); await flush()
+  const options = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')]
+  expect(options.map(item => item.textContent)).toEqual(['6h reading window', '12h reading window', '24h reading window', '3d reading window', '7d reading window', 'All loaded records'])
+  const target = options.find(item => item.textContent === (preset === 'all' ? 'All loaded records' : preset + ' reading window'))!
+  expect(target).toBeDefined(); await act(async () => target.click()); await flush()
+  expect(trigger().getAttribute('aria-label')).toBe('History window: ' + (preset === 'all' ? 'All' : preset))
+  const span = describeSpan(conversationRulerWindow(records, preset).scale)!
+  expect(spanText()).toBe(span.from + span.to)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  expect(container.querySelector('[data-native-record-id="ruler-0"]')).toBe(user)
+  expect(text!.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('User')
+ }
+})
+
 it('maps a collapsed Workflow header to all original record references and observes the real opened steps', async () => {
  await render(view()); const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!
  const head = group.querySelector<HTMLElement>('.wf-head')!
@@ -190,13 +217,13 @@ it('keeps all-old final avatars historical and omits a cutoff outside the displa
 })
 
 it('keeps a known single older record historical and untimed ordinal records unclassified', async () => {
- await writeFile(join(home, 'conversation.jsonl'), Array.from({ length: 21 }, (_, n) => JSON.stringify({ ...record(n), timestamp: new Date(start + n * 4 * 3_600_000).toISOString() })).join('\n') + '\n')
+ await writeFile(join(home, 'conversation.jsonl'), Array.from({ length: 21 }, (_, n) => JSON.stringify({ ...record(n), timestamp: new Date(start + n * 48 * 3_600_000).toISOString() })).join('\n') + '\n')
  const extended = await client.sessionHistoryPage(sid, { limit: 30 })
  await render(view(extended)); const old = container.querySelector<HTMLElement>('[data-native-record-id="ruler-0"]')!
  await act(async () => observer().show([old])); await flush()
  // Direct public window projection supplies the same zero-span, known-time domain as the actual renderer.
  const records = conversationRulerRecords(sid, extended, [])
- const single = conversationRulerWindow(records, '1h', new Set([records[0]!.id]))
+ const single = conversationRulerWindow(records, '6h', new Set([records[0]!.id]))
  expect(single.items).toHaveLength(1); expect(single.scale.axis).toBe('ordinal'); expect(single.recentFraction).toBe(Infinity)
  expect(container.querySelector('.conversation-ruler__cutoff')).toBeNull()
  expect(container.querySelector('.conversation-axis__mark')?.getAttribute('data-era')).toBe('history')

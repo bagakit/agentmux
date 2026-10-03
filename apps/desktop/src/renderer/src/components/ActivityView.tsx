@@ -476,7 +476,7 @@ export function ActivityView({
   }, [unifiedItems])
   const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems),
     [sessionId, nativeHistoryPage, unifiedItems])
-  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('1h')
+  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const [visible, setVisible] = useState<Set<string>>(new Set())
   const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
   const activity = useMemo(() => projectAgentActivityHistory(items), [items])
