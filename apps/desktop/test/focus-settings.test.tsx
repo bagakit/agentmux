@@ -42,12 +42,12 @@ it('saves the real module with its authored baseline while merging an unrelated 
     current = applyConfigEdit(current, expected!, next)
     return current
   })
-  await dom.render(<Pane config={current} onClose={() => {}} active />)
+  await dom.render(<Pane config={current} onClose={() => {}} onNavigate={() => {}} active />)
   expect(checked(24)).toBe(true)
   await choose(72)
   current = { ...current, copyPathsAsAbsolute: true }
   useAppStore.setState({ config: current })
-  await dom.render(<Pane config={current} onClose={() => {}} active />)
+  await dom.render(<Pane config={current} onClose={() => {}} onNavigate={() => {}} active />)
   await dom.click('[data-settings-save-bar] button')
   expect(save).toHaveBeenCalledTimes(1)
   expect(current.focus?.recentActivityHours).toBe(72)
@@ -60,11 +60,11 @@ it('keeps a same-field conflicting draft and original baseline on a real config 
   let current: AppConfig = { ...composerConfig, focus: { recentActivityHours: 24 } }
   const save = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => applyConfigEdit(current, expected!, next))
   useAppStore.setState({ config: current })
-  await dom.render(<Pane config={current} onClose={() => {}} active />)
+  await dom.render(<Pane config={current} onClose={() => {}} onNavigate={() => {}} active />)
   await choose(12)
   current = { ...current, focus: { recentActivityHours: 72 } }
   useAppStore.setState({ config: current })
-  await dom.render(<Pane config={current} onClose={() => {}} active />)
+  await dom.render(<Pane config={current} onClose={() => {}} onNavigate={() => {}} active />)
   await dom.click('[data-settings-save-bar] button')
   expect(dom.container.querySelector('[role="alert"]')?.textContent).toContain('focus.recentActivityHours')
   expect(checked(12)).toBe(true)

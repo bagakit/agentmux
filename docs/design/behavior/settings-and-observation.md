@@ -131,7 +131,7 @@ Status Bar 的资源面板必须能把每个进程关联到项目/工作区、Pr
 
 Overview 是普通入口，字号等分区从普通入口进入会多一次点击。显式分区与对象直达不经 Overview。具体页面构图与动效仍须实际呈现评审，不能以方案批准代替审美验收。任何品牌入口都保留全部实际设置分区的直接访问、原搜索与精确 Executor ID；不能让对象直达先经过宣传页、要求完成初始化或等待图像／动画。切换入口与分区不丢已访问草稿、阅读位置或焦点，配置仍由原 owner 保存；不自动检测资源、启动或影响健康 Run。Settings 仍是辅助界面，原工作面、关闭方式和 status bar 的原操作归属保持，视觉密度引用密度 SSOT[《左下角导航与右下角工具组》](../presentation/spaces-and-layout.md#左下角导航与右下角工具组)。品牌、图像与动态保护约束归密度 SSOT[《Settings 控制工作面》](../presentation/settings-and-observation.md#settings-控制工作面)。
 
-设置围绕跨对象偏好、本人资料、可复用资源和连接组织。Preferences 在前，包含 My Profile、Appearance、Notifications、Browser、Focus、General 与快捷键；Mods 保独立 Toolkit Library；Resources 为 Agents 与 Prompts；Connections 为 Environments 与 Devices。统一底栏进入 Overview，各尺寸、搜索与深链使用同一模块目录。原 Workspaces 独立设置导航撤除，已登记目录收进 Environments 的准确已保存 Host → Projects；每项 Project 的 Folder/worktree 沿原登记与 Git 事实，不能把 Scratch 或每条 worktree 都计成另一个 Project。Project Rail 齿轮进入 Overview，Launcher 的管理项目进入唯一 Environments 入口；不增第二齿轮、兼容路由、Project 注册库或环境数据模型。Copied paths、诊断与恢复说明沿 General 原字段基线和作用范围。搜索仍能定位路径、字号、通知、Provider、本人资料与设备接入。
+设置围绕跨对象偏好、本人资料、工作方式、可复用资源和连接组织。Preferences 在前，包含 My Profile、Appearance、Notifications、Browser、General 与快捷键；Workflows 接着组织 Space、Focus、Goals 的全局偏好；Mods 保独立 Toolkit Library；Resources 为 Agents 与 Prompts；Connections 为 Environments 与 Devices。统一底栏进入 Overview，各尺寸、搜索与深链使用同一模块目录。原 Workspaces 独立设置导航撤除，已登记目录收进 Environments 的准确已保存 Host → Projects；每项 Project 的 Folder/worktree 沿原登记与 Git 事实，不能把 Scratch 或每条 worktree 都计成另一个 Project。Project Rail 齿轮进入 Overview，Launcher 的管理项目进入唯一 Environments 入口；不增第二齿轮、兼容路由、Project 注册库或环境数据模型。Copied paths、诊断与恢复说明沿 General 原字段基线和作用范围。搜索仍能定位路径、字号、通知、Provider、本人资料、工作方式与设备接入。
 
 设置页要像一个现代工作台：侧栏只负责快速定位，主区首屏明确当前设置对象、当前状态和唯一主操作；可编辑内容与只读说明分层，重复说明收起到次级层。搜索、键盘导航、窄窗口和保存反馈必须保持可见且可恢复，切换分区不能丢弃未保存草稿。
 
@@ -141,7 +141,9 @@ Settings 占据窗口内容区，status bar 始终可见、可交互，其低条
 
 用户的 My Profile 是本人称呼、头像和协作背景；Mote 的 Profile/SOUL 则是该 Mote 的身份与角色，互不覆盖。本人资料保存到原本机 ConfigOwner：称呼和 About 为有界自由文本，头像为有界静态 PNG/JPEG，默认不自动分享。用户明确启用 Share with new agents 后，准确已保存的称呼与 About 由现 Main 启动入口加入原通用 Agent 上下文；头像只用于界面，原用户请求、Topic 说明与启动说明保留。既有或恢复中的 Session 不热改上下文，也不自动发送新消息。关闭自动分享不构成访问隔离；有既有读取授权的 Agent 仍能通过 settings inspect profile 查询保存事实。Profile 不代表认证、不授予权限、不修改消息原作者记录；人类展示头像沿现展示语义，原 unknown 作者事实仍保持。字段草稿、expected、并发 clean 更新、同字段冲突、保存期间后续输入与失败保留沿原设置合同。
 
-Mote Club 管理 Mote 集合与观察视图，单个 Mote 的名称、头像、角色、SOUL 与协作偏好留在准确 Mote 的 Profile/内容管理；Space 的对象名称、分类、图标、绑定和 Wiki 留在 Mote/Topic/Project 本身；Survey 的 Notebook 组织、探索保留与研究产物留在原研究流程。不能因为概念有顶层入口，就增加没有生产消费者的全局开关、统一人格、第二内容库或默认执行模板。Focus 的时间尺、时区、过滤与布局仍在 Focus 工作面调整；全局 Recent activity window 在 Settings 的 Focus 内调整，具体默认、范围及排序边界唯一见[《Focus 执行上下文》](focus-context.md#项目归属状态与离线目录)。
+Workflows 的 Space 调整原项目栏密度，Focus 调整近期活动窗口，Goals 调整常用操作的默认折叠状态。GUI 和公开 CLI 共用既有字段、唯一 Main ConfigOwner 与保存合同；Goals 的有效默认由 shared 单源提供，明确空的常用操作目录保持为空，修改折叠状态不得覆盖并发更新的引用、顺序或原 Prompt 正文。各分区切换仍保留已访问草稿，不引入新的订阅、轮询或对象探测。
+
+Space 内的具名管理入口让 Mote Club、Topics、Projects、Survey 可发现。Mote Club 沿原浮层 owner；Topics 打开 Space；Projects 在原设置 Shell 内进入 Environments；Survey 打开原研究工作面。入口打开管理面，不猜某个未选对象，也不自动登记、启动或发送。Mote Club 管理 Mote 集合与观察视图，单个 Mote 的名称、头像、角色、SOUL 与协作偏好留在准确 Mote 的 Profile/内容管理；Space 的对象名称、分类、图标、绑定和 Wiki 留在 Mote/Topic/Project 本身；Survey 的 Notebook 组织、探索保留与研究产物留在原研究流程。不能因为概念有顶层入口，就增加没有生产消费者的全局开关、统一人格、第二内容库或默认执行模板。Focus 的时间尺、时区、过滤与布局仍在 Focus 工作面调整；全局 Recent activity window 在 Settings 的 Focus 内调整，具体默认、范围及排序边界唯一见[《Focus 执行上下文》](focus-context.md#项目归属状态与离线目录)。
 
 ### 编译期模块贡献
 

@@ -19,7 +19,7 @@ export const featureSettingsModule = {
 } as const satisfies SettingsModule
 ```
 
-模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Mods、Resources 或 Connections，顺序由该数组表达。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Connections 组织环境连接与手机设备接入；分组只改变导航，不成为另一套配置或授权 owner。
+模块的元信息同时用于侧栏、窄窗菜单、搜索和 Overview；`SettingsSectionId` 从注册数组的 literal id 派生，不另维护一份类型名单。`overview` 是呈现页，不能作为模块 ID；ID 在注册数组内唯一，组使用现有 Preferences、Workflows、Mods、Resources 或 Connections，顺序由该数组表达。Workflows 组织 Space、Focus、Goals 的真实跨对象偏好，具体对象内容沿原管理入口。Mods 的模块组 ID 是 `toolkit`，入口为 Toolkit Library。Connections 组织环境连接与手机设备接入；分组只改变导航，不成为另一套配置或授权 owner。
 
 `Pane` 定义在模块作用域，不能在每次渲染时生成新的组件函数。壳只在首次访问时挂载编辑器，随后保留同一个实例；`active` 表达当前是否可见。像 Executor 这样的精确目标，仅在 `active` 时触发原焦点能力。`savedSummary` 只读已保存 config 与原默认解析器，不读取编辑草稿或触发诊断。
 
@@ -37,7 +37,7 @@ booleanSetting('feature.enabled', false,
 
 这是字段声明的形状示例，当前没有 `feature.enabled` 配置。新增实际 AppConfig 字段时，必须同时明确类型、默认值、生效范围与 ConfigStore 的持久化校验；注册模块不自动创造可保存的字段。新字段随后由原 `agentmux settings inspect <key>` 与 `agentmux settings set <key> <value>` 消费，不增加 CLI 解析分支或任意路径 setter。公共接口影响与完整交付按[公共能力贡献约定](guides/public-capability-contributions.md)判断。
 
-Main 通过原 ConfigOwner 排队，持久保存、Runtime commit 与发布完成后才回复成功。有效默认未改变时不回填配置或写盘。资源 CRUD、权限选择等有独立合同，不能为了套进 scalar helper 而降低原身份、引用与 expected 校验。当前公开 prefix 由 Main 的明确范围决定（包含 profile、focus），模块名称不自动成为 CLI target，输出继续明确 `partial: true`。个人资料与 Focus 示例沿此机制，不增加独立解析器或配置 owner。
+Main 通过原 ConfigOwner 排队，持久保存、Runtime commit 与发布完成后才回复成功。有效默认未改变时不回填配置或写盘。资源 CRUD、权限选择等有独立合同，不能为了套进 scalar helper 而降低原身份、引用与 expected 校验。当前公开 prefix 由 Main 的明确范围决定（包含 profile、focus、goalsCommonActions），模块名称不自动成为 CLI target，输出继续明确 `partial: true`。个人资料、Focus 与 Goals 示例沿此机制，不增加独立解析器或配置 owner。
 
 ## 修改后的验证
 

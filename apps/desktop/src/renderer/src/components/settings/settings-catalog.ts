@@ -2,9 +2,11 @@ import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
+import type { SettingsPageId } from './settings-modules'
 
 export const SETTINGS_GROUPS = [
   { id: 'preferences', title: 'Preferences' },
+  { id: 'workflows', title: 'Workflows' },
   { id: 'toolkit', title: 'Mods' },
   { id: 'resources', title: 'Resources' },
   { id: 'connections', title: 'Connections' }
@@ -14,6 +16,7 @@ export type SettingsPaneProps = {
   config: AppConfig
   onClose: () => void
   active: boolean
+  onNavigate(section: SettingsPageId): void
   executorId?: string | undefined
   toolId?: string | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
