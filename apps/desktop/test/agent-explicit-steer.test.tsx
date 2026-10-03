@@ -222,6 +222,14 @@ it('real Cmd/Ctrl+Enter steers the exact new intent through Main/Core despite an
 
 it('generic immediate capability travels from Cmd+Enter through preload, IPC and Main into the Core Provider plan', async () => {
   immediateCapability = true
+  // This case exercises a generic Provider plan, not native transport qualification.
+  // The synthetic Run has no actual CLI; the owning qualification tests cover that boundary.
+  const providers = (client as any).providers
+  const provider = providers.get('codex')
+  vi.spyOn(providers, 'get').mockImplementation((id: string) => {
+    expect(id).toBe('codex')
+    return { ...provider, preparePromptExecutionTransport: undefined }
+  })
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(item => item.id === ID
     ? { ...item, capabilities: { ...item.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } } : item) })))
   const prepare = vi.spyOn((client as any).promptSubmission, 'submitInputPlan').mockImplementation(async (...args: any[]) => args[11])
