@@ -8,7 +8,7 @@ import type { WorkspaceRecord } from '../src/shared/contracts.js'
 import type { GitHistoryCommit, GitHistoryResult, GitHistorySnapshot } from '../src/shared/git-contracts.js'
 
 const fixture = vi.hoisted(() => ({
-  state: { localHome: _hygiene_fixturePath("Users/private"), config: { copyPathsAsAbsolute: false, hosts: [{ id: 'local', kind: 'local' }] } }
+  state: { localHome: _hygiene_fixturePath("Users/private"), config: { copyPathsAsAbsolute: false, hosts: [{ id: 'local', kind: 'local' }] }, openGitWorkbench: vi.fn() }
 }))
 vi.mock('../src/renderer/src/store.js', () => ({ useAppStore: (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state) }))
 import { GitHistoryPanel } from '../src/renderer/src/components/GitHistoryPanel.js'
@@ -44,6 +44,7 @@ beforeEach(() => {
   history = vi.fn()
   Object.defineProperty(window, 'agentmux', { configurable: true, value: { git: { history } } })
   fixture.state.config.copyPathsAsAbsolute = false
+  fixture.state.openGitWorkbench.mockReset()
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
 })
 afterEach(async () => {
@@ -70,6 +71,40 @@ async function select(value: string) {
 function rows() { return [...host.querySelectorAll('[data-history-oid]')].map(row => row.getAttribute('data-history-oid')) }
 
 describe('mounted GitHistoryPanel with production hook and bridge', () => {
+  it('keeps an unread hidden history pending until Git confirms repository status', async () => {
+    history.mockResolvedValueOnce({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: workspace.path })
+    await render(false)
+    expect(history).not.toHaveBeenCalled()
+    expect(host.textContent).toContain('History will load when visible')
+    expect(host.textContent).not.toContain('Not a Git repository')
+    await render(true)
+    expect(history).toHaveBeenCalledExactlyOnceWith(workspace.id, { ref: null })
+    expect(host.textContent).toContain('Not a Git repository')
+  })
+
+  it('opens the exact fixed commit snapshot on row click/Enter while reference labels keep metadata as their action', async () => {
+    history.mockResolvedValue(page([commit(a, 'Selected merge', [b, c]), commit(b, 'Root commit', [])]))
+    await render()
+    const rendered = [...host.querySelectorAll<HTMLElement>('.git-history-commit')]
+    expect(rendered[0]!.getAttribute('role')).toBe('button')
+    expect(rendered[0]!.hasAttribute('aria-haspopup')).toBe(false)
+    expect(rendered[0]!.getAttribute('aria-label')).toContain('Open commit')
+    await act(async () => rendered[0]!.querySelector('strong')!.click())
+    expect(fixture.state.openGitWorkbench).toHaveBeenCalledExactlyOnceWith(workspace.id, {
+      hostId: snapshot.hostId, repoPath: snapshot.repoPath, commitOid: a, parentOid: b
+    })
+    await act(async () => rendered[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    expect(fixture.state.openGitWorkbench).toHaveBeenLastCalledWith(workspace.id, {
+      hostId: snapshot.hostId, repoPath: snapshot.repoPath, commitOid: b, parentOid: null
+    })
+    const ref = rendered[0]!.querySelector<HTMLElement>('.git-history-ref')!
+    expect(ref.getAttribute('aria-haspopup')).toBe('dialog')
+    await act(async () => { ref.focus(); ref.click(); ref.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+    expect(fixture.state.openGitWorkbench).toHaveBeenCalledTimes(2)
+    expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain(a)
+    expect(document.querySelector('[data-history-detail-oid]')?.textContent).toContain('refs/heads/main')
+  })
+
   it('reserves only the tracks crossing each row, keeps wide merges reachable and leaves SVG whitespace transparent to reading', async () => {
     const f = oid('f'), g = oid('1')
     history.mockResolvedValue(page([
