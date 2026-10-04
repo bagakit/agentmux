@@ -1,8 +1,9 @@
 import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { WorkspaceRecord } from '../src/shared/contracts.js'
+import { DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_PATH, serializeMoteBehaviorDocument } from '../src/shared/mote-behavior.js'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import {
   DEFAULT_TOPIC_WIKI,
@@ -14,9 +15,21 @@ import {
   workspaceOwnsSessionPath
 } from '../src/shared/scratch-topics.js'
 
+const fault = vi.hoisted(() => ({ withheld: false }))
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...actual, open: vi.fn(async (...args: Parameters<typeof actual.open>) => {
+    if (fault.withheld && String(args[0]).endsWith('/BEHAVIOR.md')) {
+      fault.withheld = false
+      throw Object.assign(new Error('Controlled initial file admission failure'), { code: 'EACCES' })
+    }
+    return actual.open(...args)
+  }) }
+})
 const roots: string[] = []
 
 afterEach(async () => {
+  fault.withheld = false
   await Promise.all(roots.splice(0).map(async (path) => await rm(path, { recursive: true, force: true })))
 })
 
@@ -184,4 +197,35 @@ describe('filesystem-backed Scratch Topics', () => {
     )
     await expect(topics.ensure(workspace, '../escape')).rejects.toThrow('Invalid Scratch Topic identity')
   })
+})
+
+it('creates original behavior defaults once and reads custom Mote behavior into each new Session preparation', async () => {
+  const workspace = await scratchWorkspace(), owner = new ScratchTopics()
+  const mote = await owner.ensureMote(workspace, 'launcher:behavior-original')
+  const file = join(mote.physicalDirectoryPath!, MOTE_BEHAVIOR_PATH)
+  expect(await readFile(file, 'utf8')).toBe(DEFAULT_MOTE_BEHAVIOR)
+  expect(mote.soul?.content).toContain('[BEHAVIOR.md](./BEHAVIOR.md)')
+  const saved = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, { engagement: 'I', information: 'N', decisions: 'T', approach: 'P', custom: '## Project habits\nKeep my original examples.\n' })
+  await writeFile(file, saved)
+  const first = await owner.prepareAgent(workspace, mote.id, { providerId: 'codex', sessionId: 'behavior-a' })
+  expect(first.prompt).toContain('Saved behavior from BEHAVIOR.md (version ')
+  expect(first.prompt).toContain('MBTI style: INTP'); expect(first.prompt).toContain('Keep my original examples.')
+  await writeFile(file, saved.replace('version: 1', 'version: 2'))
+  const second = await owner.prepareAgent(workspace, mote.id, { providerId: 'codex', sessionId: 'behavior-b' })
+  expect(second.prompt).toContain('BEHAVIOR.md is unconfirmed'); expect(second.prompt).not.toContain('MBTI style: INTP')
+  expect(first.prompt).toContain('MBTI style: INTP'); expect(second.absolutePath).toBe(first.absolutePath)
+  expect((await owner.read(workspace, mote.id))?.id).toBe(mote.id)
+})
+
+it('retries the same owner observed partial Mote behavior scaffold without rewriting original files', async () => {
+  const workspace = await scratchWorkspace(), owner = new ScratchTopics()
+  fault.withheld = true
+  await expect(owner.ensureMote(workspace, 'launcher:behavior-retry')).rejects.toThrow('Controlled initial file admission failure')
+  const retained = await owner.read(workspace, 'launcher:behavior-retry')
+  expect(retained?.kind).toBe('mote')
+  expect(retained?.soul?.content).toContain('[BEHAVIOR.md](./BEHAVIOR.md)')
+  const resumed = await owner.ensureMote(workspace, 'launcher:behavior-retry')
+  expect(resumed.id).toBe(retained!.id)
+  expect(await readFile(join(resumed.physicalDirectoryPath!, 'BEHAVIOR.md'), 'utf8')).toBe(DEFAULT_MOTE_BEHAVIOR)
+  expect(resumed.soul).toEqual(retained!.soul)
 })

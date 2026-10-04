@@ -14,7 +14,7 @@ import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
-import { replaceMoteBehaviorBlock } from '../../../src/renderer/src/lib/mote-behavior'
+import { serializeMoteBehaviorDocument, DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_LINK } from '../../../src/renderer/src/lib/mote-behavior'
 import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
 import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
@@ -28,7 +28,7 @@ const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath) throw new Error('This private Renderer requires its exact isolated workspace path.')
 const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' as const }
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID), path = rootPath + '/context-and-decisions-with-an-original-source.md', anotherPath = rootPath + '/another-original-material.md'
-const soul = '# Mote\n\nWork with me as a thoughtful colleague. Keep my current directions first.\n\nKeep this custom paragraph unchanged.\n'
+const soul = '# Mote\n\nWork with me as a thoughtful colleague. Keep my current directions first.\n\nKeep this custom paragraph unchanged.\n\n' + MOTE_BEHAVIOR_LINK + '\n'
 const topic: ScratchTopicSnapshot = { id: PMO_TEAMS_TOPIC_ID, title: 'Mote', summary: 'A place to work through ideas together.', directoryPath: workspace.path + '/' + rootPath,
   topicPath: workspace.path + '/' + rootPath + '/topic.md', collaborators: [], soul: { path: workspace.path + '/' + rootPath + '/SOUL.md', content: soul, version: 'display-soul-version' } }
 const secondId = 'launcher:analyst', secondRoot = scratchTopicDirectoryName(secondId)
@@ -46,7 +46,7 @@ const contextSession: Extract<SessionSnapshot, { kind: 'agent' }> = { id: 'rende
   control: { kind: 'agent', hostId: 'local', agentSessionId: 'core-fixture-context', run: { runId: 'fixture-context-run' } } }
 const calls: { operation: string; path?: string; message?: string; agentSessionId?: string; hostId?: string; limit?: number }[] = []
 let unknown = false, editorUnconfirmed = false, unknownWrite = false, deferNextRead = false, lateRead: { params: FileReadParams; resolve(result: FileReadResult): void } | null = null, unsubscribeLater: (() => void) | null = null
-let fileDisk: Record<string, string> = { [rootPath + '/SOUL.md']: soul, [path]: '# A saved decision\n\nSource: the team discussion on 6 October.\nScope: this project.\n\nKeep the current design until the next review. The earlier preference applies only to the draft.\n',
+let fileDisk: Record<string, string> = { [rootPath + '/BEHAVIOR.md']: DEFAULT_MOTE_BEHAVIOR, [secondRoot + '/BEHAVIOR.md']: DEFAULT_MOTE_BEHAVIOR, [rootPath + '/SOUL.md']: soul, [path]: '# A saved decision\n\nSource: the team discussion on 6 October.\nScope: this project.\n\nKeep the current design until the next review. The earlier preference applies only to the draft.\n',
   [anotherPath]: '# Another original material\n\nThis file has its own confirmed content.', [secondRoot + '/SOUL.md']: soul, [secondRoot + '/analyst-original-material.md']: '# Analyst material\n\nSource: the Analyst Mote directory.\nThis belongs to the other original scope.' }
 const originalFiles = { ...fileDisk }
 const revision = async (content: string) => 'sha256:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(byte => byte.toString(16).padStart(2, '0')).join('')
@@ -87,6 +87,7 @@ function reset() {
   topic.title = 'Mote'
   unknown = false; editorUnconfirmed = false; unknownWrite = false; deferNextRead = false; lateRead = null; unsubscribeLater?.(); unsubscribeLater = null; calls.length = 0
   fileDisk[rootPath + '/SOUL.md'] = soul
+  fileDisk[rootPath + '/BEHAVIOR.md'] = DEFAULT_MOTE_BEHAVIOR
   useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } },
     tabs: { [tab.id]: tab, [secondTab.id]: secondTab }, layouts: { [workspace.id]: createWorkspaceLayout('mote-group', [tab.id, secondTab.id]) }, sessions: [], documents: {}, dirtyDocuments: {}, documentIssues: {},
@@ -107,26 +108,26 @@ function Scene() {
     selectMote: (id: string) => useAppStore.getState().openScratchTopic(id, workspace.id, { tabId: id === secondId ? secondTab.id : tab.id }),
     unknownSave: () => { unknownWrite = true }, longName: () => { topic.title = 'Mote for thoughtful choices and a long project name'; setEpoch(value => value + 1) },
     savedProfileBehavior: () => {
-      fileDisk[rootPath + '/SOUL.md'] = replaceMoteBehaviorBlock(soul, { engagement: 'I', information: 'N', decisions: 'T', approach: 'P', custom: 'Keep my current project priorities first.' })
+      fileDisk[rootPath + '/BEHAVIOR.md'] = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, { engagement: 'I', information: 'N', decisions: 'T', approach: 'P', custom: 'Keep my current project priorities first.' })
       useAppStore.setState(state => ({ workspaceFileRevisions: { [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
     },
     profileScenario: (kind: 'empty' | 'populated' | 'long') => {
       topic.title = kind === 'long' ? 'Debuger for thoughtful choices and a long original project name' : 'Debuger'
       topic.summary = 'Describe the shared goal and the outcome this Topic should produce.'
-      fileDisk = kind === 'empty' ? { [rootPath + '/SOUL.md']: soul } : { ...originalFiles }
+      fileDisk = kind === 'empty' ? { [rootPath + '/SOUL.md']: soul, [rootPath + '/BEHAVIOR.md']: DEFAULT_MOTE_BEHAVIOR } : { ...originalFiles }
       const target = topicSpaceIconTarget(workspace, topic)
       useAppStore.setState(state => ({ spaceObjectIcons: target ? { ...state.spaceObjectIcons, [target.key]: { ...DEFAULT_MOTE_FACE, palette: 'peach' } } : state.spaceObjectIcons,
         workspaceFileRevisions: { [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
       setEpoch(value => value + 1)
     },
     originalSoul: () => soul,
-    behaviorInput: () => ({ path: rootPath + '/SOUL.md', initialContent: soul, content: fileDisk[rootPath + '/SOUL.md'] }),
+    behaviorInput: () => ({ path: rootPath + '/BEHAVIOR.md', initialContent: DEFAULT_MOTE_BEHAVIOR, content: fileDisk[rootPath + '/BEHAVIOR.md'] }),
     unconfirmedEditor: () => { editorUnconfirmed = true },
     restartInput: () => { const state = useAppStore.getState(), launcher = useLauncherState.getState(); return {
       config: state.config, tabs: state.tabs, layouts: state.layouts, spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests,
       topics, selection: state.workbenchSpaceSelection, agentComposerDrafts: state.agentComposerDrafts,
       launcherState: useLauncherState.persist.getOptions().partialize!(launcher),
-      ...(fileDisk[rootPath + '/SOUL.md'] !== soul ? { behavior: { path: rootPath + '/SOUL.md', initialContent: soul, content: fileDisk[rootPath + '/SOUL.md'] } } : {})
+      ...(fileDisk[rootPath + '/BEHAVIOR.md'] !== DEFAULT_MOTE_BEHAVIOR ? { behavior: { path: rootPath + '/BEHAVIOR.md', initialContent: DEFAULT_MOTE_BEHAVIOR, content: fileDisk[rootPath + '/BEHAVIOR.md'] } } : {})
     } },
     selectExactContext: () => useAppStore.setState(state => ({ sessions: [contextSession], tabs: { ...state.tabs, [tab.id]: { ...tab, regions: {
       'original-region': { kind: 'agent', phase: 'attached', regionId: 'original-region', workspaceId: workspace.id, sessionId: contextSession.id } } } } })),

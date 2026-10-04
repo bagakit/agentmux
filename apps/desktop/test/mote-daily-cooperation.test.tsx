@@ -8,6 +8,7 @@ import { defaultAgent, defaultTab, customMoteId, customTab, scratchWorkspace, mo
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { DEFAULT_MOTE_BEHAVIOR, serializeMoteBehaviorDocument } from '../src/shared/mote-behavior'
 import { prepareMoteCooperationDraft } from '../src/renderer/src/lib/mote-cooperation'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -38,7 +39,7 @@ describe('original Mote natural question and saved material preparation', () => 
   it('prepares a real question and exact saved sources in one new Launcher without starting or clearing original inputs', async () => {
     const before = useAppStore.getState()
     const result = await prepareMoteCooperationDraft(scope(), undefined, { question: 'Help me choose a next step.', materialPaths: [root + '/decision.md', root + '/decision.md'] }, () => true)
-    expect(result.sources.map(source => source.path)).toEqual([root + '/SOUL.md', root + '/decision.md'])
+    expect(result.sources.map(source => source.path)).toEqual([root + '/SOUL.md', root + '/BEHAVIOR.md', root + '/decision.md'])
     expect(draft(result.selection)).toBe('Help me choose a next step.')
     expect(note(result.selection)).toContain(revision); expect(note(result.selection)).toContain('A saved, scoped decision.')
     expect(note(result.selection)).toContain('not a claim that an Agent used them')
@@ -85,9 +86,9 @@ describe('original Mote natural question and saved material preparation', () => 
   })
   it('keeps unknown and failed original reads truthful while still preparing the user question', async () => {
     vi.mocked(api.files.readPublic).mockResolvedValueOnce({ resource: null, result: { status: 'unknown', code: 'ORIGINAL_UNKNOWN', message: 'Original saved SOUL is unavailable.' } })
-      .mockRejectedValueOnce(new Error('Original file read failed.'))
+      .mockRejectedValueOnce(new Error('Original file read failed.')).mockRejectedValueOnce(new Error('Original material read failed.'))
     const result = await prepareMoteCooperationDraft(scope(), undefined, { question: 'My useful question', materialPaths: [root + '/decision.md'] }, () => true)
-    expect(result.sources).toHaveLength(2); expect(result.sources[0]).toMatchObject({ path: root + '/SOUL.md', observation: { resource: null, result: { status: 'unknown' } } })
+    expect(result.sources).toHaveLength(3); expect(result.sources[0]).toMatchObject({ path: root + '/SOUL.md', observation: { resource: null, result: { status: 'unknown' } } })
     expect(draft(result.selection)).toBe('My useful question'); expect(note(result.selection)).toContain('Original saved SOUL is unavailable.')
     expect(note(result.selection)).toContain('Original file read failed.'); expect(note(result.selection)).not.toContain('A saved, scoped decision.')
   })
@@ -100,7 +101,7 @@ describe('original Mote natural question and saved material preparation', () => 
   it('uses the second Mote original resource without borrowing the first Mote saved material', async () => {
     useAppStore.getState().activateTab(SCRATCH_WORKSPACE_ID, 'mote-group', customTab.id)
     const result = await prepareMoteCooperationDraft(scope(customMoteId), undefined, { question: 'Analyst question' }, () => true)
-    expect(result.sources.map(source => source.path)).toEqual([scratchTopicDirectoryName(customMoteId) + '/SOUL.md'])
+    expect(result.sources.map(source => source.path)).toEqual([scratchTopicDirectoryName(customMoteId) + '/SOUL.md', scratchTopicDirectoryName(customMoteId) + '/BEHAVIOR.md'])
     expect(result.sources[0]!.observation.resource!.zonePath).toBe(_hygiene_fixturePath("topics/") + scratchTopicDirectoryName(customMoteId))
     expect(useAppStore.getState().tabs[result.selection.tabId]!.topicId).toBe(customMoteId)
     expect(note(result.selection)).not.toContain('"moteId":"' + PMO_TEAMS_TOPIC_ID + '"')
@@ -251,4 +252,43 @@ describe('original Mote natural question and saved material preparation', () => 
     expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
     expect(useAppStore.getState().agentComposerDrafts['custom-agent']).toBe('Analyst unsent'); expect(app.launch).not.toHaveBeenCalled()
   })
+})
+
+const legacySoul = `# My original SOUL
+Keep the original custom introduction.
+<!-- agentmux:mote-behavior:begin v1 INFJ -->
+## Collaboration behavior
+
+- Organize your thinking first, then respond with focus and ask when needed.
+- Connect the bigger picture, patterns and possibilities; distinguish them from confirmed facts.
+- Stay truthful while considering people, relationships and the values that matter to me.
+- Once the direction is clear, suggest steps, decision points and completion signals.
+
+### Extra preferences
+Keep original examples.
+
+My current directions, original custom SOUL text and extra preferences take priority. These choices do not grant new actions or change factual standards.
+<!-- agentmux:mote-behavior:end -->
+My original trailing note.
+`
+
+it('review counter: explicit preparation removes retired behavior rules when the new authority exists', async () => {
+  const soulDisk = legacySoul
+  const disk = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, { engagement: 'E', information: 'N', decisions: 'T', approach: 'P', custom: 'Current new-file preference.' })
+  vi.mocked(api.files.readPublic).mockImplementation(async params => read(params, params.path === 'BEHAVIOR.md' ? disk : soulDisk))
+  await app.mount()
+  const result = await prepareMoteCooperationDraft(scope(), undefined, { question: 'Use my saved preference.' }, () => true)
+  const note = useAppStore.getState().agentComposerNotes[result.selection.regionId]!
+  expect(note).toContain('Current new-file preference.')
+  expect(note).toContain('Keep the original custom introduction.')
+  expect(note).not.toContain('agentmux:mote-behavior:begin v1 INFJ')
+})
+it('review counter: readable malformed authority is explicitly unconfirmed in the prepared context', async () => {
+  const soulDisk = legacySoul; const disk = '---\nversion: 2\npreferences: {}\n---\nDo not infer a valid preference.'
+  vi.mocked(api.files.readPublic).mockImplementation(async params => read(params, params.path === 'BEHAVIOR.md' ? disk : soulDisk))
+  await app.mount()
+  const result = await prepareMoteCooperationDraft(scope(), undefined, { question: 'Use only confirmed settings.' }, () => true)
+  const note = useAppStore.getState().agentComposerNotes[result.selection.regionId]!
+  expect(note).toContain('unconfirmed')
+  expect(note).not.toContain('agentmux:mote-behavior:begin v1 INFJ')
 })
