@@ -2,7 +2,6 @@ import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-valu
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { createWorkspaceLayout } from '@agentmux/layout'
 import { applyNotebookChange, emptyNotebookState, type NotebookState } from '@agentmux/core/notebook-catalog'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
@@ -26,7 +25,7 @@ beforeEach(() => {
   useLauncherState.setState({ drafts: {}, persistenceIssue: null })
   useAppStore.setState({ config: { ...composerConfig, workspaces: [...composerConfig.workspaces, notes] }, mainSurface: 'survey',
     surveyZoneSelection: { zoneId: 'browser-zone', selection: [{ tabId: 'browser-tab', regionId: 'browser-region' }], active: { tabId: 'browser-tab', regionId: 'browser-region' } },
-    recallNotebookId: null, recallNoteId: null, recallZoneSelection: null, layouts: { [notes.id]: createWorkspaceLayout(notes.id) } })
+    recallNotebookId: null, recallNoteId: null, recallZoneSelection: null, layouts: {} })
   vi.spyOn(api.notebooks, 'read').mockImplementation(async () => structuredClone(catalog))
   vi.spyOn(api.notebooks, 'apply').mockImplementation(async input => { catalog = applyNotebookChange(catalog, input, { kind: 'user', id: 'capture-user' }, Date.now()); return structuredClone(catalog) })
   vi.spyOn(api.files, 'createPublic').mockImplementation(async (input) => { body.set(input.path, { content: input.content, revision: 'original-written-revision' }); return { resource: input.expectedResource, result: { status: 'written', revision: 'original-written-revision' } } })
@@ -51,8 +50,11 @@ it('cancels without creating a Note, keeps its input, and reopens the same draft
 it('saves a finding to the exact Notebook and preserves its original URL without moving browser navigation', async () => {
   catalog = applyNotebookChange(catalog, { expectedRevision: catalog.revision, operationId: 'new-book', change: { kind: 'create', notebookId: 'chosen-notebook', name: 'Chosen notebook' } }, { kind: 'user', id: 'capture-user' }, 1)
   const before = useAppStore.getState().surveyZoneSelection
+  expect(useAppStore.getState().layouts[notes.id]).toBeUndefined()
   const saved = await saveSurveyToRecall(target, 'chosen-notebook', 'Remember this finding')
   expect(saved.status).toBe('written'); expect(saved.notebookRegistered).toBe(true)
+  expect(useAppStore.getState().layouts[notes.id]).toBeDefined()
+  expect(useAppStore.getState().layouts[notes.id]?.activeGroupId).toBe(saved.target.groupId)
   expect(api.files.createPublic).toHaveBeenCalledExactlyOnceWith({ zoneId: 'notes-zone', expectedResource: { hostId: 'local', workspaceId: notes.id, workspacePath: notes.path, zoneId: 'notes-zone', zonePath: notes.path, path: saved.path }, path: saved.path, content: JSON.stringify(newNoteDocument(saved.draft, saved.noteId, saved.blockIds[0]!), null, 2), expectedRevision: null })
   expect(catalog.pages[saved.noteId]!.notebookId).toBe('chosen-notebook')
   expect(catalog.pages[saved.noteId]!.sources).toEqual([target.source])
