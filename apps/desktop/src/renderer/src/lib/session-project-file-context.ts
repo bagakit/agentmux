@@ -7,7 +7,8 @@ import type { FileOpenPlacement } from './file-workbench-state'
 import type { OpenHttpLinkOrigin } from './open-destination'
 import { sessionPresentationById } from './session-presentation'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { spatialCatalog, zoneContext } from './space-agent-control'
+import { zoneContext } from './space-agent-control'
+import { workbenchNavigationCatalog, workbenchNavigationTabs } from './workbench-navigation-catalog'
 import { workspaceRootForPath, type WorkbenchTab } from './workbench-tabs'
 
 type Facts = {
@@ -21,6 +22,8 @@ type Facts = {
   spaceZoneBindings: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   scratchTopicSnapshots: Readonly<Record<string, ScratchTopicsSnapshot>>
+  topicCategories?: import('@agentmux/core/control').TopicCategory[]
+  projectGroups?: import('@agentmux/core/control').AgentMuxProjectGroupFact[]
 }
 
 export type SessionProjectFileContext = {
@@ -36,8 +39,9 @@ export type SessionProjectFileContext = {
 // This is an index of the immutable mapping, not another mapping owner. Unrelated Session
 // output never scans Goals; replacing the mapping naturally releases the old index.
 const goalIdsByTab = new WeakMap<Facts['demandPmoTabIds'], ReadonlyMap<string, readonly string[]>>()
+const NO_GOALS: readonly string[] = []
 function mappedGoals(mapping: Facts['demandPmoTabIds'], tabId: string | undefined): readonly string[] {
-  if (!tabId) return []
+  if (!tabId) return NO_GOALS
   let index = goalIdsByTab.get(mapping)
   if (!index) {
     const next = new Map<string, string[]>()
@@ -49,7 +53,7 @@ function mappedGoals(mapping: Facts['demandPmoTabIds'], tabId: string | undefine
     index = next
     goalIdsByTab.set(mapping, index)
   }
-  return index.get(tabId) ?? []
+  return index.get(tabId) ?? NO_GOALS
 }
 
 /** One Pane's current parsing scope. It makes no claim about earlier messages' origins. */
@@ -62,12 +66,22 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
   let project: GoalProjectContext | null = null
   let metadataInputs: readonly unknown[] | undefined
   let originalSpace: FileOpenPlacement['space'] | undefined
+  let relatedInputs: readonly unknown[] | undefined
   return (state) => {
     const ids = mappedGoals(state.demandPmoTabIds, origin.tabId)
     seenGoal ||= ids.length > 0
     const goalId = ids.length === 1 ? ids[0] : undefined
     const goal = goalId ? state.demands[goalId] : undefined
     const session = sessionPresentationById(state.sessions).get(sessionId)
+    const navigationTabs = workbenchNavigationTabs(state.tabs)
+    // Runtime clocks, status and unrelated timelines do not alter a file resource.
+    // Return before walking layout/Workspace metadata or serializing the result.
+    const inputs = [state.config, state.localHome, ids, goal, navigationTabs, state.layouts,
+      state.spaceZoneBindings, state.spatialRequests, state.scratchTopicSnapshots,
+      state.topicCategories, state.projectGroups, session?.id, session?.kind,
+      session?.hostId, session?.workspacePath, session?.control.run.runId]
+    if (previous && relatedInputs && inputs.every((input, index) => input === relatedInputs![index])) return previous
+    relatedInputs = inputs
     const tab = origin.tabId ? state.tabs[origin.tabId] : undefined
     const region = origin.regionId ? tab?.regions[origin.regionId] : undefined
     const resourceWorkspace = state.config?.workspaces.find(workspace => workspace.id === tab?.workspaceId)
@@ -91,15 +105,18 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     }
     if (!seenGoal) {
       const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, resourceWorkspace)
-      const inputs = [state.config, state.tabs, state.layouts, state.spaceZoneBindings, topics,
+      const inputs = [state.config, navigationTabs, state.layouts, state.spaceZoneBindings, topics,
+        state.spatialRequests, state.topicCategories, state.projectGroups,
         resourceWorkspace, session?.id, session?.hostId, session?.workspacePath, session?.control.run.runId, occurrence]
       if (!metadataInputs || inputs.some((input, index) => input !== metadataInputs![index])) {
         metadataInputs = inputs
         originalSpace = undefined
         if (occurrence && session && resourceWorkspace?.hostId === session.hostId && tab) {
           const spatialState = { config: state.config, tabs: state.tabs, layouts: state.layouts,
-            spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests, sessions: [...state.sessions] }
-          const catalog = spatialCatalog(spatialState, topics ?? [])
+            spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests,
+            ...(state.topicCategories ? { topicCategories: state.topicCategories } : {}),
+            ...(state.projectGroups ? { projectGroups: state.projectGroups } : {}) }
+          const catalog = workbenchNavigationCatalog(spatialState, topics)
           const originalTab = catalog.tabs.find(candidate => candidate.tabId === tab.id)
           const zone = catalog.zones.find(candidate => candidate.zoneId === originalTab?.zoneId)
           const confirmed = zone?.workspaceId === resourceWorkspace.id && zone.hostId === resourceWorkspace.hostId &&
@@ -108,7 +125,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
               location.tabId === tab.id && location.regionId === origin.regionId)
           if (zone && confirmed) {
             try {
-              const spaceId = zoneContext(spatialState, topics ?? [], zone)
+              const spaceId = zoneContext({ ...spatialState, sessions: [] }, topics ?? [], zone)
               if (!tab.space || tab.space.zoneId === zone.zoneId && tab.space.spaceId === spaceId) {
                 originalSpace = { zoneId: zone.zoneId, spaceId }
               }

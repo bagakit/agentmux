@@ -55,6 +55,7 @@ import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-presentation'
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
 import { useWorkbenchObjectLayout } from './hooks/useWorkbenchObjectLayout'
+import { workbenchNavigationTabs } from './lib/workbench-navigation-catalog'
 import { mainRegionReference } from './lib/desktop-focus-navigation'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
@@ -94,7 +95,7 @@ function DesktopApp() {
   const config = useAppStore((state) => state.config)
   const activeWorkspaceId = useAppStore((state) => state.activeWorkspaceId)
   const layouts = useAppStore((state) => state.layouts)
-  const tabs = useAppStore((state) => state.tabs)
+  const tabs = useAppStore((state) => workbenchNavigationTabs(state.tabs))
   const resourceWorkspaces = useMemo(() => workbenchResourceTabs(tabs), [tabs])
   const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()

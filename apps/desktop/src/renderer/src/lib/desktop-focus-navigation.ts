@@ -7,6 +7,7 @@ import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
 import { projectWorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { createWorkspaceLayout } from '@agentmux/layout'
+import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 
 export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey' } as const
 export const desktopSurface: Record<AgentMuxDesktopMainSurface, AgentMuxDesktopSurface> = {
@@ -33,16 +34,11 @@ export class DesktopFocusFailure extends Error {
 export type NavigationState = SpatialWorkbench & DesktopSelectionState & {
   scratchTopicSnapshots: Readonly<Record<string, ScratchTopicsSnapshot>>
 }
-let cachedCatalog: { inputs: readonly unknown[]; value: AgentMuxSpaceCatalog } | null = null
 /** Structural navigation facts do not subscribe to unrelated Runtime output or Session timelines. */
 export function workbenchSelectionCatalog(state: NavigationState): AgentMuxSpaceCatalog {
   const scratch = state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)
   const topics = scratchTopicsForWorkspace(state.scratchTopicSnapshots, scratch)
-  const inputs = [state.config, state.tabs, state.layouts, state.spaceZoneBindings, topics, state.topicCategories]
-  if (cachedCatalog && inputs.every((value, index) => value === cachedCatalog!.inputs[index])) return cachedCatalog.value
-  const value = spatialCatalog({ ...state, sessions: [] }, topics ?? [])
-  cachedCatalog = { inputs, value }
-  return value
+  return workbenchNavigationCatalog(state, topics)
 }
 
 /** A local focus keeps its explicit parent; an explicit jump can resolve another object. */
