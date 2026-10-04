@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import type { BrowserWindow } from 'electron'
+import { EventEmitter } from 'node:events'
 import { observeWorkbenchStorageAuthority, requireWorkbenchStorageAuthority } from '../src/main/workbench-storage-authority.js'
 import { prepareWindowWorkbenchForQuit, reportWorkbenchQuitFailure } from '../src/main/window-state-persistence.js'
 import { inspectDesktopClient } from '../src/main/client-observation.js'
@@ -23,6 +24,16 @@ afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await Promise.
 async function fixture() {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-storage-owner-test-")); roots.push(root)
   return { root, configured: { userData: root, sessionData: root }, session: { getStoragePath: () => root } }
+}
+
+async function initializeWorkbench() {
+  const config = await api.config.get()
+  // Spatial identities require absolute identity paths. The web preview's demo path is a
+  // display placeholder and cannot qualify this real Store checkpoint fixture.
+  vi.spyOn(api.config, 'get').mockResolvedValue({ ...config, workspaces: config.workspaces.map(workspace => ({
+    ...workspace, path: workspace.path.startsWith('/') ? workspace.path : (_hygiene_fixturePath("private-storage-test/") + (workspace.id) + "")
+  })) })
+  return await useAppStore.getState().initialize()
 }
 
 it('qualifies the actual persistent Session category, without assuming a particular LevelDB generation or disk ACK', async () => {
@@ -85,7 +96,7 @@ it('refuses an outgoing UI update for unknown or missing storage before any exit
 it('awaits the actual renderer preparation, bounds a missing response, and allows a later retry', async () => {
   vi.useFakeTimers(); let resolve!: () => void
   const executeJavaScript = vi.fn(() => new Promise<void>(done => { resolve = done }))
-  const window = { isDestroyed: () => false, webContents: { isDestroyed: () => false, executeJavaScript } } as unknown as BrowserWindow
+  const window = { isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, isCrashed: () => false, executeJavaScript }) } as unknown as BrowserWindow
   const first = prepareWindowWorkbenchForQuit(window)
   expect(executeJavaScript).toHaveBeenCalledWith('window.agentmuxPrepareRendererUpdate("quit")')
   const rejected = expect(first).rejects.toThrow('five seconds')
@@ -104,7 +115,7 @@ it('reports a quit preparation failure through the existing service window witho
 })
 
 it('flushes the last actual Store draft before awaiting its host and retains it when the host refuses', async () => {
-  const dispose = await useAppStore.getState().initialize()
+  const dispose = await initializeWorkbench()
   try {
     expect(useAppStore.getState().loading).toBe(false)
     let release!: () => void
@@ -117,7 +128,7 @@ it('flushes the last actual Store draft before awaiting its host and retains it 
     expect(encoded).not.toBeNull()
     const stored = JSON.parse(encoded!).state
     expect(stored.agentComposerDrafts).toEqual({ 'private-session': 'Last exact unsent draft' })
-    expect(host).toHaveBeenCalled(); await Promise.resolve(); expect(completed).toBe(false)
+    await vi.waitFor(() => expect(host).toHaveBeenCalled()); expect(completed).toBe(false)
     release(); await prepared; expect(completed).toBe(true)
     host.mockRejectedValue(new Error('storage missing'))
     await expect(prepareRendererUpdate('quit')).rejects.toThrow('storage missing')
@@ -126,7 +137,7 @@ it('flushes the last actual Store draft before awaiting its host and retains it 
 })
 
 it('keeps the real save service notice through workspace changes, another error and folding, until an actual retry succeeds', async () => {
-  const dispose = await useAppStore.getState().initialize()
+  const dispose = await initializeWorkbench()
   const host = vi.spyOn(api.ui, 'requestStorageFlush').mockRejectedValue(new Error('database missing'))
   const element = document.createElement('div'); document.body.append(element); const root = createRoot(element)
   try {
@@ -159,11 +170,12 @@ it('keeps the real save service notice through workspace changes, another error 
 })
 
 it('does not let a late accepted pre-timeout request erase an unconfirmed quit warning', async () => {
-  const dispose = await useAppStore.getState().initialize()
+  const dispose = await initializeWorkbench()
   try {
     let release!: () => void
-    vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(() => new Promise<void>(done => { release = done }))
+    const host = vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(() => new Promise<void>(done => { release = done }))
     const prepared = prepareRendererUpdate('quit')
+    await vi.waitFor(() => expect(host).toHaveBeenCalled())
     useAppStore.getState().reportWorkbenchSaveFailure(new Error('quit timed out'))
     release(); await prepared
     expect(useAppStore.getState().workbenchSaveWarning).toBe('quit timed out')

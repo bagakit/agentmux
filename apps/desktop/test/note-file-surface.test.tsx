@@ -6,6 +6,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, type WorkspaceLayout } from '@agentmux/layout'
 vi.mock('../src/renderer/src/monaco', () => ({}))
 vi.mock('@monaco-editor/react', () => ({ default: ({ value }: { value: string }) => <textarea aria-label="Original file source" value={value} readOnly /> }))
+import { NoteBlockEditor, type NoteEditorHandle } from '../src/renderer/src/components/NoteBlockEditor'
 import { FileSurfaceView } from '../src/renderer/src/components/FileSurfaceView'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -33,7 +34,7 @@ beforeEach(() => {
     layouts: { workspace: createWorkspaceLayout('original-group', [mixed.id, referringTab.id]) },
     documents: { [sourceKey]: { path: sourceRegion.path, content: JSON.stringify(source), revision: 'source-revision' }, [referenceKey]: { path: referring.path, content: JSON.stringify(reference), revision: 'referring-revision' } },
     dirtyDocuments: {}, savingDocuments: {}, documentIssues: {}, documentGenerations: {}, documentObservationGenerations: {}, documentRevealTargets: {}, noteBlockSelections: {}, noteDirectorySources: {}, workspaceFileRevisions: {}, spaceZoneBindings: {}, scratchTopicSnapshots: {}, spatialRequests: {},
-    surveyZoneSelection: { zoneId, selection: [{ displayWorkspaceId: 'workspace', groupId: 'original-group', tabId: referringTab.id, regionId: referring.regionId }], active: { displayWorkspaceId: 'workspace', groupId: 'original-group', tabId: referringTab.id, regionId: referring.regionId } },
+    surveyZoneSelection: { zoneId, selection: [{ tabId: referringTab.id, regionId: referring.regionId }], active: { tabId: referringTab.id, regionId: referring.regionId } },
     regionCaretFocus: null, retainedSpatialFocus: null, error: null, lastError: null, lastActiveFileByWorkspace: {} })
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined); vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'read').mockRejectedValue(new Error('These canonical documents are already read'))
@@ -45,7 +46,7 @@ function display(surface = sourceRegion, tabId = mixed.id) {
 }
 async function mount(surface = sourceRegion, tabId = mixed.id, confirmed = true) {
   const state = useAppStore.getState(), projection = { entity: { kind: 'zone' as const, zoneId }, presentationId: 'survey-workbench', displayWorkspaceId: 'workspace',
-    catalog: spatialCatalog(state, []), selection: state.surveyZoneSelection!.selection, onSelect: () => {} }
+    catalog: spatialCatalog(state, []), selection: state.surveyZoneSelection!.selection.map(item => ({ ...item, displayWorkspaceId: 'workspace', groupId: 'original-group' })), onSelect: () => {} }
   await dom.render(<WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, survey: true, projection, ...(confirmed ? display(surface, tabId) : {}) }}>
     <FileSurfaceView tabId={tabId} surface={surface} />
   </WorkbenchPresentationContext.Provider>)
@@ -299,4 +300,37 @@ it('opens an explicitly chosen unread directory source through the original File
   expect(useAppStore.getState().documents[documentKey('workspace', path)]?.content).toBe(JSON.stringify(note))
   expect(useAppStore.getState().mainSurface).toBe('survey')
   expect(api.files.write).not.toHaveBeenCalled()
+})
+
+it('retains the original selected block through real editor unmount and framework remount', async () => {
+  const note = { ...source, content: { type: 'doc', content: [...source.content.content!, { type: 'paragraph', attrs: { blockId: 'remount-block' }, content: [{ type: 'text', text: 'Remount target' }] }] } }
+  useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...state.documents[sourceKey]!, content: JSON.stringify(note) } } }))
+  await mount()
+  const originalEditor = editor()
+  const originalDocument = useAppStore.getState().documents[sourceKey], target = { noteId: source.noteId, blockId: 'remount-block' }
+  const key = noteBlockSelectionKey(display())
+  await act(async () => originalEditor.unmount())
+  await act(async () => useAppStore.setState({ noteBlockSelections: { [key]: target } }))
+  expect(dom.container.querySelector('.note-file-view')).not.toBeNull()
+  expect(useAppStore.getState().noteBlockSelections[key]).toBe(target)
+  expect(useAppStore.getState().documents[sourceKey]).toBe(originalDocument)
+  await vi.waitFor(() => expect(editor().isDestroyed).toBe(false))
+  expect(editor().state.selection.$from.parent.attrs.blockId).toBe(target.blockId)
+  expect(editor().view.hasFocus()).toBe(false)
+  await act(async () => { editor().view.focus(); editor().commands.insertContentAt(1, 'Recovered ') })
+  expect(useAppStore.getState().documents[sourceKey]!.content).toContain('Recovered Original finding')
+  await click('Save')
+  expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(false)
+})
+
+it('publishes a Note handle only while its actual view is mounted and republishes the same editor identity', async () => {
+  const published: { handle: NoteEditorHandle | null } = { handle: null }
+  await dom.render(<NoteBlockEditor note={source} knowledge={noteKnowledgeModule.noteKnowledge([])} onChange={() => {}} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} handleRef={value => { published.handle = value }} />)
+  const originalEditor = editor(), contentHost = originalEditor.view.dom.parentElement!
+  expect(published.handle?.editor).toBe(originalEditor)
+  await act(async () => originalEditor.unmount())
+  expect(published.handle).toBeNull()
+  await act(async () => originalEditor.mount(contentHost))
+  expect(published.handle?.editor).toBe(originalEditor)
+  expect(published.handle?.focusBlock('source-block', false)).toBe(true)
 })
