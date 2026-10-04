@@ -1,3 +1,4 @@
+import { readAgentPromptPreparationWait, type AgentPromptPreparationWait, type AgentPromptPreparationRetryFence } from './prompt-preparation.js'
 import { createHash } from 'node:crypto'
 import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameRun } from './agent-session-identity.js'
@@ -45,7 +46,12 @@ function promptFailureCauseDetail(error: unknown): string {
 /** Invocation-local pre-input failure; it says nothing about an older logical operation. */
 export function promptPreparationFailure(error: unknown): AgentMuxError {
   if (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_PREPARATION_FAILED') return error
-  return new AgentMuxError('This call ended during read-only preparation before attempting input. The original operation and healthy terminal are kept.',
+  const wait = readAgentPromptPreparationWait({ code: 'AGENT_PROMPT_PREPARATION_FAILED', detail: promptFailureCauseDetail(error) })
+  const message = wait?.reason === 'context-compaction'
+    ? 'The Agent is compacting its context. The original message is kept; retry shortly after compaction finishes.'
+    : wait?.reason === 'native-busy' ? 'The Agent is temporarily preparing its native input. The original message is kept; retry shortly.'
+    : 'This call ended during read-only preparation before attempting input. The original operation and healthy terminal are kept.'
+  return new AgentMuxError(message,
     'AGENT_PROMPT_PREPARATION_FAILED', promptFailureCauseDetail(error), { disposition: 'not_applied', confirmedInputBytes: 0 })
 }
 
@@ -55,7 +61,7 @@ export type AgentPromptProtocolInputBoundary = {
   invalid: boolean
   cancelled?: Error
   /** Invocation-local lane release; closed before any claim may be persisted. */
-  preclaim?: { interruption: Error; claimStarted: boolean; observation?: {
+  preclaim?: { interruption: Error; claimStarted: boolean; wait?: AgentPromptPreparationWait | undefined; completedPaneTimeout?: { error: AgentMuxError; runId: string; signal?: AbortSignal }; observation?: {
     phase: AgentPromptPreparationPhase
     phaseEnteredAt: number
     lastCompletedPhase: AgentPromptPreparationPhase | null
@@ -63,7 +69,8 @@ export type AgentPromptProtocolInputBoundary = {
     deadline: number
     pane: { predicateEvaluations: number; predicateEvaluationsCapped: boolean; lastPredicateResult: boolean | null
       frameObservedAt: number | null; outputThroughByte: number | null; geometryRevision: number | null
-      evidenceGeneration: number | null; authoritative: boolean | null; completeFrameAvailable: true | null } | null
+      evidenceGeneration: number | null; authoritative: boolean | null; completeFrameAvailable: true | null
+      cols: number | null; rows: number | null; cursor: { row: number; column: number } | null } | null
   } }
 }
 
@@ -74,6 +81,7 @@ export type AgentPromptPreparationPhase = 'input-lane' | 'current-run' | 'submis
 export function beginPromptPreparationPhase(boundary: AgentPromptProtocolInputBoundary | undefined, phase: AgentPromptPreparationPhase): void {
   const preclaim = boundary?.preclaim
   if (!preclaim?.observation || preclaim.claimStarted) return
+  if (phase !== 'current-pane') delete preclaim.wait
   preclaim.observation.phase = phase
   preclaim.observation.phaseEnteredAt = Date.now()
 }
@@ -88,7 +96,9 @@ export function completePromptPreparationPhase(boundary: AgentPromptProtocolInpu
 /** Serialize now: a later return must not change the original emitted timeout. */
 export function promptPreparationObservationDetail(boundary: AgentPromptProtocolInputBoundary | undefined): string | undefined {
   const observation = boundary?.preclaim?.observation
-  return observation ? JSON.stringify({ preclaimObservation: observation }) : undefined
+  const wait = observation?.phase === 'current-pane' && observation.pane?.authoritative && observation.pane.completeFrameAvailable &&
+    observation.pane.lastPredicateResult === false && !boundary?.invalid && !boundary?.preclaim?.claimStarted ? boundary?.preclaim?.wait : undefined
+  return observation ? JSON.stringify({ preclaimObservation: observation, ...(wait ? { preparationWait: wait } : {}) }) : undefined
 }
 
 export type AgentPromptTransportQualification = Readonly<{
@@ -208,7 +218,7 @@ export class AgentPromptSubmissionCoordinator {
   /** Called outside the input lane. A claimed/unknown original operation is never prepared anew. */
   async qualifyInputTransport(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, submissionId: string,
     prompt: string, signal: AbortSignal, onPreparationStarted?: () => void,
-    protocolInput?: AgentPromptProtocolInputBoundary, deadline = Date.now() + 40_000): Promise<AgentPromptTransportQualification | undefined> {
+    protocolInput?: AgentPromptProtocolInputBoundary, deadline = Date.now() + 40_000, retryFence?: AgentPromptPreparationRetryFence): Promise<AgentPromptTransportQualification | undefined> {
     const provider = this.deps.providers.get(session.providerId)
     const direct = provider.catalog.capabilities.promptExecution?.immediate === 'native-steer'
     if (!direct && !provider.preparePromptExecutionTransport) return undefined
@@ -216,7 +226,10 @@ export class AgentPromptSubmissionCoordinator {
     const previous = current.promptCompletionAdmission
     const unfinished = previous && !previous.acknowledged && !current.terminalPromptSubmission?.submit.acknowledged &&
       !(previous.frameRefresh?.acknowledged && current.terminalPromptSubmission === undefined)
-    if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId || unfinished) return undefined
+    if (previous?.submissionId === submissionId || current.terminalPromptSubmission?.submissionId === submissionId || unfinished) {
+      if (retryFence) throw new AgentMuxError('Input was admitted while this original preparation was waiting. Automatic retry stopped; inspect the original receipt before manual recovery.', 'AGENT_PROMPT_RETRY_FENCE_CHANGED')
+      return undefined
+    }
     if (direct && current.pendingInteraction) throw new AgentMuxError(
       'Answer the pending Agent interaction before submitting another prompt.', 'AGENT_INTERACTION_PENDING')
     onPreparationStarted?.()
@@ -242,6 +255,9 @@ export class AgentPromptSubmissionCoordinator {
           ...(evidence ? { nativeSourceId: evidence.sourceId } : {}) }) : undefined
       if (!evidence || !transport || transport.nativeSourceId !== evidence.sourceId) {
         throw new AgentMuxError('The original native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+      }
+      if (retryFence && (run.acceptedInputBytes !== retryFence.inputByte || nativeSourceId !== retryFence.nativeSourceId)) {
+        throw new AgentMuxError('The original input or native source changed during retry waiting. Automatic preparation retry stopped; the original message and terminal are kept.', 'AGENT_PROMPT_RETRY_FENCE_CHANGED')
       }
       signal.throwIfAborted()
       return { agentSessionId: current.agentSessionId, run: current.run, processId: run.pid,
@@ -691,10 +707,18 @@ export class AgentPromptSubmissionCoordinator {
         const observation = boundary?.preclaim?.observation
         if (observation) observation.pane = { predicateEvaluations: 0, predicateEvaluationsCapped: false, lastPredicateResult: null,
           frameObservedAt: null, outputThroughByte: null, geometryRevision: null,
-          evidenceGeneration: null, authoritative: null, completeFrameAvailable: null }
+          evidenceGeneration: null, authoritative: null, completeFrameAvailable: null, cols: null, rows: null, cursor: null }
         await observePromptTransport(preparationSignal, () => this.deps.screenEvidence.wait(session, run.latestOutputBytes, false,
           screen => {
-            const result = Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(screen.snapshot(), 'native-steer') !== 'unavailable'
+            const snapshot = screen.snapshot()
+            const result = Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(snapshot, 'native-steer') !== 'unavailable'
+            const reason = !result && screen.authoritative ? provider.inspectPromptPreparationWait?.(snapshot, 'native-steer') : undefined
+            if (boundary?.preclaim) {
+              boundary.preclaim.wait = reason && transportQualification ? { reason, retrySafe: !boundary.preclaim.claimStarted &&
+                  session.promptCompletionAdmission?.submissionId !== submissionId && session.terminalPromptSubmission?.submissionId !== submissionId &&
+                  !promptBelongsToPreviousNativeSource(session, submissionId), agentSessionId: session.agentSessionId,
+                runId: session.run.runId, operationId: submissionId, inputByte: preparedInputByte(transportQualification), nativeSourceId } : undefined
+            }
             const pane = observation?.pane
             if (pane) {
               // Align the last result and finite owner facts to this same predicate.
@@ -705,6 +729,9 @@ export class AgentPromptSubmissionCoordinator {
               pane.evidenceGeneration = this.deps.screenEvidence.generation(session.agentSessionId)
               pane.authoritative = screen.authoritative
               pane.completeFrameAvailable = true
+              pane.cols = snapshot.cols
+              pane.rows = snapshot.rows
+              pane.cursor = { ...snapshot.cursor }
               if (pane.predicateEvaluations < 65_535) pane.predicateEvaluations++
               else pane.predicateEvaluationsCapped = true
               pane.lastPredicateResult = result
@@ -720,6 +747,21 @@ export class AgentPromptSubmissionCoordinator {
       } catch (error) {
         const preclaim = transportQualification?.protocolInput?.preclaim
         if (preclaim && !preclaim.claimStarted && error === preclaim.interruption) throw error
+        if (preclaim?.observation?.phase === 'current-pane' && !preclaim.claimStarted && !transportQualification?.protocolInput?.invalid &&
+            !signal?.aborted && !renderSignal?.aborted && preclaim.observation.pane?.authoritative &&
+            preclaim.observation.pane.completeFrameAvailable && preclaim.observation.pane.lastPredicateResult === false && preclaim.observation.pane.evidenceGeneration === this.deps.screenEvidence.generation(session.agentSessionId) &&
+            (error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_RENDER_TIMEOUT' || error instanceof Error && error.name === 'TimeoutError' ||
+              error instanceof AgentMuxError && error.code === 'AGENT_PROMPT_READINESS_CANCELLED' && preparationSignal.aborted &&
+                preparationSignal.reason instanceof Error && preparationSignal.reason.name === 'TimeoutError')) {
+          const failure = promptPreparationFailure(new AgentMuxError(error.message, 'AGENT_INPUT_PREPARATION_UNCONFIRMED',
+            promptPreparationObservationDetail(transportQualification?.protocolInput)))
+          // Freeze this completed pane timeout before the store awaits read-only lock
+          // cleanup. The outer original deadline may win during that cleanup; it must
+          // return the same classified receipt rather than a later cleanup phase.
+          preclaim.completedPaneTimeout = { error: failure, runId: session.run.runId, ...(signal ? { signal } : {}) }
+          throw failure
+        }
+        if (preclaim) delete preclaim.wait
         throw promptPreparationFailure(error)
       }
     }

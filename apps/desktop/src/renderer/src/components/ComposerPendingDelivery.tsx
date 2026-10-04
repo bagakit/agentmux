@@ -8,11 +8,12 @@ import { WindowOverlayPortal } from './WindowOverlayHost'
 import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../lib/terminal-view-observation'
 
 /** Original queue facts, viewed by operation identity; this surface owns no delivery state. */
-export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCopy, onEdit, onArchive, sendImmediately = false, suppressed = false, onMore }: {
+export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, sendImmediately = false, suppressed = false, onMore }: {
   queued: readonly ComposerQueuedMessage[]
   pendingInteraction: boolean
   anchorRef: RefObject<HTMLButtonElement | null>
   onSend?: ((id: string) => void) | undefined
+  onCancelPreparation?: ((id: string) => void) | undefined
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   onEdit?: EditQueuedMessage | undefined
   onArchive?: ArchiveQueuedMessage | undefined
@@ -312,7 +313,9 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
                 if (surfaceRef.current?.contains(document.activeElement)) listRef.current?.querySelector<HTMLElement>('[data-selected="true"]')?.focus()
               }} /> : <button type="button" className="composer-pending__preview" aria-label="编辑这条待发消息" disabled={!entry.editable || !onEdit || Boolean(editingId)}
                 onClick={() => { setSelectedId(entry.id); setEditingId(entry.id); setCopyResult(null) }}>{entry.text.replace(/\s+/g, ' ').trim()}</button>}
+              {entry.preparationWait ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
               <div className="composer-pending__actions">
+                {entry.preparationWait?.state === 'waiting' && onCancelPreparation ? <button type="button" className="composer-tool" onClick={() => onCancelPreparation(entry.id)}>停止等待</button> : null}
                 {entry.id === selected.id ? <button key="archive" type="button" className="composer-tool composer-pending__archive" aria-label="归档这条待发消息" title="归档原条目，保留原文和投递记录" disabled={Boolean(editingId) || state.busy || !onArchive} onClick={() => { void onArchive?.(entry.id, entry.text, true) }}><X size={12} aria-hidden="true" /></button> : null}
                 <button key="send" type="button" className="composer-pending__send" aria-label={immediate ? '立即发送这条待发消息' : '发送这条待发消息'} title={canSend ? immediate ? '立即发送这条消息' : '只发送这条消息' : !onSend ? '当前显示面只读' : state.detail}
                   disabled={!canSend} onClick={() => onSend?.(entry.id)}><ArrowUp size={14} aria-hidden="true" /></button>

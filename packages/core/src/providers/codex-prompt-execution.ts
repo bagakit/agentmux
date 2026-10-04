@@ -1,3 +1,4 @@
+import type { AgentPromptPreparationWaitReason } from '../prompt-preparation.js'
 import type { AgentCapabilities, AgentPromptExecutionContext, AgentTerminalScreenSnapshot } from '../types.js'
 
 /** Codex's ordinary bottom pane, not its transcript or a historical prompt.
@@ -5,7 +6,7 @@ import type { AgentCapabilities, AgentPromptExecutionContext, AgentTerminalScree
  * viewport above the complete status/composer/footer group before using Escape.
  * Placeholder spans are dim; actual draft cells (including after the cursor) are not.
  */
-export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot, strategy: NonNullable<AgentCapabilities['promptExecution']>['immediate'] = 'interrupt-before-input'): AgentPromptExecutionContext {
+function inspectCodexPromptPane(screen: AgentTerminalScreenSnapshot, strategy: NonNullable<AgentCapabilities['promptExecution']>['immediate'] = 'interrupt-before-input'): AgentPromptExecutionContext | AgentPromptPreparationWaitReason {
   const { lines, cursor, cols, rows } = screen
   const steering = strategy === 'native-steer'
   if (steering ? cols < 3 || rows < 3 || cursor.row < 0 || cursor.row >= rows - 1 :
@@ -97,9 +98,20 @@ export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot,
       detail.text.search(/\S/u) === markerColumn + 2 && detail.cells[markerColumn + 2]?.dim &&
       detail.cells.slice(markerColumn + 4).every(cell => !cell.chars.trim() || !cell.dim))
     if (nativeTip) currentRow--
+    // Compaction owns one adjacent detail row, followed by the optional native Tip.
+    // Historical text, a popup or a draft cannot reach this point: the complete
+    // ordinary composer/footer and cursor were already checked above.
+    const compactDetail = lines[currentRow]
+    const makingRoom = Boolean(compactDetail && !compactDetail.wrapped &&
+      /^  └ Making room to continue\.$/u.test(compactDetail.text))
+    if (makingRoom) currentRow--
     const statusLine = lines[currentRow]
     const status = statusLine?.text.trim() ?? ''
     if (statusLine?.wrapped) return 'unavailable'
+    const adjacent = !preview && cursor.row - currentRow === (nativeTip ? 4 : 3) + (makingRoom ? 1 : 0)
+    if (adjacent && /^• Compacting context(?: \(.*\))?$/u.test(status)) return 'context-compaction'
+    if (adjacent && !makingRoom && /^• (?:Running|Waiting for) hooks?(?: \(.*\))?$/u.test(status)) return 'native-busy'
+    if (makingRoom) return 'unavailable'
     if (/^• (?:Working|Running)\b/u.test(status) &&
         /\b(?:esc|escape|f\d+) to (?:interrupt|cancel)\)/iu.test(status) &&
         !/\b(?:review|compact(?:ing)?|hook)\b/iu.test(status) &&
@@ -133,4 +145,15 @@ export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot,
   // not establish idle. Core also checks the native end/initial readiness evidence.
   if (!/to interrupt/u.test(status) && !/pending|queued|↳|approval|question|hook/iu.test(status)) return 'idle'
   return 'unavailable'
+}
+
+/** Input eligibility remains strict; temporary states explain the refusal only. */
+export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot, strategy: NonNullable<AgentCapabilities['promptExecution']>['immediate'] = 'interrupt-before-input'): AgentPromptExecutionContext {
+  const context = inspectCodexPromptPane(screen, strategy)
+  return context === 'context-compaction' || context === 'native-busy' ? 'unavailable' : context
+}
+
+export function inspectCodexPromptPreparationWait(screen: AgentTerminalScreenSnapshot, strategy: NonNullable<AgentCapabilities['promptExecution']>['immediate'] = 'interrupt-before-input'): AgentPromptPreparationWaitReason | undefined {
+  const context = inspectCodexPromptPane(screen, strategy)
+  return context === 'context-compaction' || context === 'native-busy' ? context : undefined
 }

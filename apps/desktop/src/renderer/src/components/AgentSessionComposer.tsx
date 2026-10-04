@@ -278,13 +278,14 @@ export function AgentSessionComposer({
           immediateSend: session?.kind === 'agent' && agentSteerExecution(entry, session.capabilities) === 'immediate',
           preparing: entry.operationId === sendingId && sendingPhase !== 'submitting',
           sending: entry.operationId === sendingId && sendingPhase === 'submitting',
-          unconfirmed: entry.promptCondition !== null && (entry.status === 'deferred' || entry.status === 'failed'),
+          unconfirmed: entry.promptCondition !== null && !entry.preparationInputNotApplied && (entry.status === 'deferred' || entry.status === 'failed'),
           ...(entry.awaitingExplicitSend ? { awaitingExplicitSend: true as const } : {}),
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
           ...(entry.logId ? { logId: entry.logId } : {}),
           ...(entry.error ? { error: entry.error } : {}),
+          ...(entry.preparationWait ? { preparationWait: entry.preparationWait } : {}),
         }))}
         {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
           await feedback.run(async () => { await archiveAgentSteer(sessionId, operationId, expectedText, archived) })
@@ -293,6 +294,7 @@ export function AgentSessionComposer({
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
         {...(!readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
+        {...(!readOnly ? { onCancelQueuedPreparation: (operationId: string) => { useAppStore.getState().cancelAgentSteerPreparation(sessionId, operationId) } } : {})}
         {...(!disabled && !readOnly ? { onEditQueued: async (id: string, expectedText: string, nextText: string) => {
           feedback.dismiss()
           try { useAppStore.getState().editQueuedAgentSteer(sessionId, id, expectedText, nextText) }

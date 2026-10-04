@@ -1525,7 +1525,7 @@ export class RuntimeController {
     operationId: string,
     condition: AgentPromptCondition,
     automation?: { completionId?: string; futureIntent?: { intentId: string; occurrenceAt: number }; inputByte?: number; isCurrent(): boolean; signal: AbortSignal },
-    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution },
+    choice?: { allowUncertainTurn?: true; execution?: AgentPromptExecution; preparationRetry?: import('@agentmux/core').AgentPromptPreparationRetryFence },
     authorHuman?: boolean,
     agentMuxNote?: string,
     sourceChannel: AgentMessageChannel = 'message-tool'
@@ -1557,6 +1557,7 @@ export class RuntimeController {
           sourceChannel,
           ...(choice?.allowUncertainTurn === true && !automation ? { allowUncertainTurn: true } : {}),
           ...(!automation && choice?.execution !== undefined ? { execution: choice.execution } : {}),
+          ...(!automation && choice?.preparationRetry ? { preparationRetry: choice.preparationRetry } : {}),
           ...(authorHuman === true ? { authorHuman: true } : {})
         })
       } catch (error) {

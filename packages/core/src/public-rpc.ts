@@ -21,7 +21,7 @@ import type { HostSettingsParameterMap, HostSettingsResultMap, HostSettingsMetho
 
 /** Canonical public names and their existing business owner. No wire aliases. */
 export const AGENTMUX_RPC_CONTROL_METHODS = {
-  'message.pending.ls': 'message.pending.ls', 'message.pending.edit': 'message.pending.edit', 'message.pending.send': 'message.pending.send',
+  'message.pending.ls': 'message.pending.ls', 'message.pending.edit': 'message.pending.edit', 'message.pending.send': 'message.pending.send', 'message.pending.stop': 'message.pending.stop',
   'message.pending.archive': 'message.pending.archive', 'message.pending.restore': 'message.pending.restore',
   'agent.open': 'agent.open', 'agent.rename': 'agent.rename', 'agent.view': 'agent.view',
   'agent.interrupt': 'interrupt', 'agent.resume': 'resume', 'agent.stop': 'stop',

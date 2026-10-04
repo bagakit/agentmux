@@ -283,7 +283,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
       agentSessionId: identity(source.agentSessionId, 'Pending message Session ID is invalid.', code) }
     if (source.operation === 'message.pending.ls') return { ...base, operation: source.operation }
     const pendingId = identity(source.pendingId, 'Pending message ID is invalid.', code)
-    if (source.operation === 'message.pending.send') return { ...base, operation: source.operation, pendingId }
+    if (source.operation === 'message.pending.send' || source.operation === 'message.pending.stop') return { ...base, operation: source.operation, pendingId }
     if (source.operation === 'message.pending.archive' || source.operation === 'message.pending.restore') {
       return { ...base, operation: source.operation, pendingId, expectedText: text(source.expectedText, 'Original message', code) }
     }
@@ -993,6 +993,9 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     if (operation !== 'message.pending.send') {
       if (typeof result.changed !== 'boolean') throw new AgentMuxError('Pending message edit result is invalid.', code)
       const message = parsePendingMessage(result.message)
+      if (operation === 'message.pending.stop' && (message.archived || message.preparationWait?.state !== 'stopped')) {
+        throw new AgentMuxError('Pending wait stop result does not describe the retained stopped intent.', code)
+      }
       if (operation === 'message.pending.archive' && !message.archived || operation === 'message.pending.restore' && message.archived) {
         throw new AgentMuxError('Pending message archive result does not match the action.', code)
       }

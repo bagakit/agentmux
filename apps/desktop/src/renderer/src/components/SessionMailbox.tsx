@@ -113,7 +113,7 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueued, onSendQueued, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
   children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
   pendingInteraction?: boolean
   onRevealMessage?: RevealMailboxMessage | undefined
@@ -129,6 +129,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   onArchiveQueued?: ArchiveQueuedMessage | undefined
   onMoveQueued?: (id: string, direction: 'up' | 'down') => void
   onSendQueued?: (id: string) => void
+  onCancelQueuedPreparation?: ((id: string) => void) | undefined
   onCopyQueued?: (text: string) => Promise<boolean>
   onEditQueued?: EditQueuedMessage
   sendImmediately?: boolean
@@ -409,7 +410,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
         {open && folder === 'outbox' ? <>
-          {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} selectedId={selectedQueue?.id ?? null}
+          {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} onCancelPreparation={onCancelQueuedPreparation} selectedId={selectedQueue?.id ?? null}
             onSelect={(key) => { focusAfter.current=null; setSelection({scope,folder:'outbox',key:`queue:${key}`}) }} reading={reading}
             {...(onArchiveQueued ? { onArchive: onArchiveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
             {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
@@ -452,5 +453,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }
