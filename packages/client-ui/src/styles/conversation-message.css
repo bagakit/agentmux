@@ -16,7 +16,7 @@
   position: relative;
   display: grid;
   grid-template-columns: 20px minmax(0, 1fr);
-  grid-template-rows: auto auto auto;
+  grid-template-rows: auto auto auto auto;
   column-gap:var(--sp-4);
   padding:var(--sp-3) var(--sp-4);
   margin:var(--sp-2) 0;
@@ -42,13 +42,20 @@
 .log-turn__head {
   grid-column: 2;
   grid-row: 1;
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap:var(--sp-1) var(--sp-2);
+  display: grid;
+  grid-template-columns: minmax(0, max-content) auto minmax(max-content, 1fr) auto;
+  align-items: start;
+  gap: var(--sp-1) var(--sp-2);
   min-width: 0;
   min-height: 20px;
 }
+.log-turn__title { grid-column: 1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.log-turn__head > .log-turn__time { grid-column: 2; grid-row: 1; align-self: start; line-height: 20px; }
+.log-turn__head > .log-turn__actions { grid-column: 3; grid-row: 1; }
+.log-turn__head .conversation-input-details__toggle { grid-column: 4; grid-row: 1; }
+.log-turn__head .conversation-input-details__body { grid-column: 1 / -1; grid-row: 2; }
+.log-turn__meta { grid-column: 2; grid-row: 2; display: grid; gap: var(--sp-1); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+
 .log-turn__actions { display: inline-flex; align-items: center; gap: var(--sp-1); margin-left: auto; opacity: 0; transition: opacity var(--dur-fast) ease; }
 .log-turn:hover .log-turn__actions, .log-turn:focus-within .log-turn__actions, .log-turn__actions[data-copy-state='failed'] { opacity: 1; }
 @media (hover: none) {
@@ -69,7 +76,7 @@
 }
 .log-turn__body {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 3;
   min-width: 0;
   margin:var(--sp-1) 0 0;
   color: var(--text);
@@ -142,7 +149,7 @@
    强调色。无底色无描边：它坐在 turn 自己的地上，一条底色会在密集的对话流里读成一个多余的盒子。 */
 .log-turn__continue {
   grid-column: 2;
-  grid-row: 3;
+  grid-row: 4;
   justify-self: start;
   padding:0;
   border: 0;
@@ -163,8 +170,6 @@
 .log-turn[data-compact='true'] .log-turn__who { flex: 1 1 100px; min-width: 0; font-size: var(--fs-body); }
 .log-turn[data-compact='true'] .log-turn__body { font-size: var(--fs-body); }
 .log-turn[data-compact='true'] .md-paragraph { color: var(--text); }
-.log-turn[data-compact='true'] .log-turn__head { display: flex; }
-.log-turn[data-compact='true'] .log-turn__packet-declaration { flex-basis: 100%; }
 .log-turn[data-compact='true'] .log-turn__actions { opacity: 1; }
 .log-turn[data-compact='true'] .log-turn__head .conversation-input-details { position: static; }
 .log-turn[data-compact='true'] .conversation-input-details__body { margin-block: var(--sp-2); }
@@ -203,7 +208,7 @@
 }
 .log-turn[data-message-bubble='true'] .log-turn__time { font-size: var(--fs-micro); }
 /* The identity spans the text rows instead of making an empty, avatar-height header. */
-.log-turn[data-message-bubble='true'] .log-turn__node { grid-row: 1 / span 2; align-self: start; }
+.log-turn[data-message-bubble='true'] .log-turn__node { grid-row: 1 / span 3; align-self: start; }
 .log-turn[data-message-bubble='true'][data-speaker-role='human'] .log-turn__node { margin-top: var(--sp-1); }
 .log-turn[data-message-bubble='true'][data-speaker-role='agent'] {
   grid-template-columns: 32px minmax(0, 1fr);
@@ -233,6 +238,7 @@
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 10%, transparent);
 }
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__head,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__meta,
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__body,
 .log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__continue {
   grid-column: 1;
@@ -242,10 +248,10 @@
   grid-row: 1;
   background: transparent;
 }
-.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node { grid-row: 1 / span 2; }
-.log-turn__context { order: 1; flex-basis: 100%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
+.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node { grid-row: 1 / span 3; }
+.log-turn__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
 .log-turn__source-caption { color: var(--text-3); font-weight: 400; }
-.log-turn__declared-source { flex-basis: 100%; color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
+.log-turn__declared-source { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .log-turn[data-trace-only='true'] { grid-template-columns: minmax(0, 1fr); margin-block: var(--sp-1); }
 .log-turn[data-trace-only='true'] .log-turn__head,
 .log-turn[data-trace-only='true'] .log-turn__body { grid-column: 1; }
@@ -266,7 +272,6 @@
   background: transparent;
 }
 .log-turn[data-speaker-role='system'] .log-turn__node { background: transparent; opacity: .7; }
-.log-turn[data-speaker-role='system'] .log-turn__head { flex-wrap: nowrap; }
 .log-turn[data-speaker-role='system'] .log-turn__time { font-size: var(--fs-micro); }
 .log-turn[data-speaker-role='system'] .log-turn__actions { margin-left: 0; }
 .log-turn[data-speaker-role='system'] .log-turn__body { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
@@ -319,7 +324,7 @@
 .log-turn__declared-context > pre { margin: var(--sp-2) 0; padding: var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-family: var(--font-mono); font-size: var(--fs-micro); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* The exact address stays beside the readable name, separate from full-message Copy. */
-.log-turn__sender { display: flex; flex: 1 1 160px; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0; }
+.log-turn__sender { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0; }
 .log-turn__sender .log-turn__who { flex: 0 1 auto; min-width: 0; }
 .log-turn__sender-id { position: relative; display: inline-flex; align-items: center; gap: 2px; min-width: 0; max-width: 100%; color: var(--text-3); }
 .log-turn__sender-id code { min-width: 0; overflow-wrap: anywhere; white-space: normal; font: var(--fs-micro)/1.5 var(--font-mono); user-select: text; }

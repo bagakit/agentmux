@@ -8,6 +8,10 @@
 .md-heading[data-level='3'] { font-weight: 620; }
 .md-heading[data-level='4'], .md-heading[data-level='5'], .md-heading[data-level='6'] { color: var(--text-2); font-weight: 600; }
 
+/* Inputs keep source headings in the same reading scale, including nested blocks. */
+.md-input .md-heading { margin: 0; font-size: inherit; font-weight: 680; color: var(--text); letter-spacing: 0; }
+.md-input .md-code, .md-input .md-block-code, .md-input .md-block-code code { font-size: inherit; }
+
 .md-table-scroll { min-width: 0; max-width: 100%; overflow-x: auto; overscroll-behavior: contain; }
 .md-table { border-collapse: collapse; font-size: inherit; }
 .md-table th, .md-table td { padding: var(--sp-2) var(--sp-4); border-bottom: 1px solid var(--wash-2); text-align: left; white-space: nowrap; }

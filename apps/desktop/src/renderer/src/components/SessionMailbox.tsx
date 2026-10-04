@@ -82,7 +82,8 @@ function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, o
     <ConversationMessage {...reading} compact recordedIdentity {...(sessionId ? { conversationSessionId: sessionId } : {})}
       messageId={messageKey(selected)} speaker={speakerOf(selected) as ConversationSpeaker} name={authorLabel(selected)}
       content={isUserMessage(selected) && selected.contentParts.length > 0 ? selected.contentParts : selected.content ?? ''}
-      copyText={selected.content ?? ''}
+      {...(isUserMessage(selected) && selected.source.kind === 'native' && selected.contentParts.length > 0
+        ? {} : { copyText: selected.content ?? '' })}
       {...(time(selected) === undefined ? {} : { createdAt: time(selected)! })}
       {...(isUserMessage(selected) ? { inputSource: selected.source } : {})}
       {...(onCopy ? { onCopy } : {})}

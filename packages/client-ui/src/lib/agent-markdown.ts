@@ -19,7 +19,7 @@ export type TableAlign = 'left' | 'center' | 'right' | null
 export type MarkdownFootnote = { identifier: string; number: number; references: number; children: BlockNode[] }
 
 export type BlockNode =
-  | { kind: 'heading'; level: number; anchor: string; children: InlineNode[] }
+  | { kind: 'heading'; level: number; anchor: string; sourceMarker?: string; children: InlineNode[] }
   | { kind: 'paragraph'; children: InlineNode[] }
   | { kind: 'code'; language: string | null; text: string }
   | { kind: 'list'; ordered: boolean; start?: number; checked?: (boolean | null)[]; items: BlockNode[][] }
@@ -123,7 +123,10 @@ function blocksFrom(nodes: readonly RootContent[], context: ParseContext): Block
     switch (node.type) {
       case 'heading': {
         const children = inlineFrom(node.children, context)
-        const heading: MarkdownHeading = { kind: 'heading', level: node.depth, anchor: headingAnchor(children, context), children }
+        const original = context.source.slice(node.position?.start.offset, node.position?.end.offset)
+        const sourceMarker = /^(#{1,6})(?:[\t ]|$)/u.exec(original)?.[1]
+        const heading: MarkdownHeading = { kind: 'heading', level: node.depth, anchor: headingAnchor(children, context),
+          ...(sourceMarker ? { sourceMarker } : {}), children }
         out.push(heading)
         context.headings?.push(heading)
         break

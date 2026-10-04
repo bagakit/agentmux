@@ -15,7 +15,7 @@ export function describeConversationInputSource(source: AgentSessionUserMessageS
   const channel = source.kind === 'captured' ? source.channel : undefined
   const device = source.kind === 'captured' ? source.device : undefined
   const channelLabel = channel === undefined ? '渠道未记录' : channelLabels[channel]
-  const caption = source.kind === 'native' ? '原生记录 · 来源未记录'
+  const caption = source.kind === 'native' ? '原生 - 未知来源'
     : `${channelLabel} · ${device?.name ?? '设备未记录'}`
   const title = source.kind === 'native'
     ? `Provider 原生记录 · ${source.providerId}\n输入渠道与发送设备未记录`
