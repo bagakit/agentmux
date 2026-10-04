@@ -1,3 +1,4 @@
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@radix-ui/react-dialog'
 import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeSource } from '@agentmux/core/control'
 import { useEffect, useRef, useState } from 'react'
@@ -41,11 +42,11 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
         <Dialog.Title className="confirmation-dialog__title">{target?.entry ? 'Edit knowledge note' : 'Create knowledge note'}</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">{target?.topicLabel ? `In ${target.topicLabel}. ` : ''}{sources.length ? 'Keep the source references and add what you learned.' : 'Write what future discussions should be able to find.'}</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void save() }}>
-          <label>Title<input ref={input} value={title} maxLength={120} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
+          <label>Title<TextInput ref={input} value={title} maxLength={120} disabled={busy} onChange={event => setTitle(event.target.value)} /></label>
           <div className="topic-dialog__row"><label>Form<select value={form} disabled={busy} onChange={event => setForm(event.target.value as TopicKnowledge['form'])}><option value="derived">Written knowledge</option>{sources.length ? <option value="reference">Source reference</option> : null}</select></label>
             <label>Status<select value={certainty} disabled={busy} onChange={event => setCertainty(event.target.value as TopicKnowledge['certainty'])}><option value="proposal">Proposal</option><option value="inference">Inference</option><option value="fact">Fact</option><option value="decision">Decision</option></select></label></div>
-          <label>Knowledge<textarea value={content} rows={9} disabled={busy} placeholder="What should future discussions be able to find?" onChange={event => setContent(event.target.value)} /></label>
-          <label>Applies to<input value={scope} disabled={busy} placeholder="Optional context or limits" onChange={event => setScope(event.target.value)} /></label>
+          <label>Knowledge<ComposerTextarea value={content} rows={9} disabled={busy} placeholder="What should future discussions be able to find?" onValueChange={setContent} /></label>
+          <label>Applies to<TextInput value={scope} disabled={busy} placeholder="Optional context or limits" onChange={event => setScope(event.target.value)} /></label>
           {sources.length ? <details className="topic-knowledge-sources"><summary>{sources.length} original source{sources.length === 1 ? '' : 's'}</summary>{sources.map((source, index) => <p key={index}>{knowledgeSourceLabel(source)}</p>)}</details> : null}
           {error ? <p role="alert" className="surface-inline-error">{error}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy || !title.trim()}>{busy ? 'Saving…' : 'Save knowledge'}</button></footer>
@@ -97,7 +98,7 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
       onEscapeKeyDown={event => { if (creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (creating) event.preventDefault() }}>
       <Dialog.Title className="confirmation-dialog__title">Collect sources</Dialog.Title><Dialog.Description className="confirmation-dialog__description">Create a knowledge note with references to {target?.title || 'the selected content'}. The original content stays in place.</Dialog.Description>
       <label>Destination topic<select value={topicId} disabled={creating} onChange={event => setTopicId(event.target.value)}><option value="">Choose a knowledge topic…</option><option value="__new_topic__">Create a knowledge topic…</option>{topics.map(topic => <option key={topic.topicId} value={topic.topicId}>{destinationLabel(topic)}</option>)}</select></label>
-      {topicId === '__new_topic__' ? <><label>Topic title<input value={newTitle} maxLength={120} disabled={creating} onChange={event => setNewTitle(event.target.value)} /></label>
+      {topicId === '__new_topic__' ? <><label>Topic title<TextInput value={newTitle} maxLength={120} disabled={creating} onChange={event => setNewTitle(event.target.value)} /></label>
         <label>Category<select value={categoryId} disabled={creating} onChange={event => setCategoryId(event.target.value)}><option value="">未分类</option>{categories.filter(category => !category.readError).map(category => <option key={category.categoryId} value={category.categoryId}>{category.title}</option>)}</select></label></> : null}
       {error ? <p role="status" className="surface-inline-error">{error}</p> : null}{loading ? <p role="status">Reading Topics…</p> : null}
       <footer><button type="button" className="small-button" disabled={creating} onClick={onClose}>Cancel</button><button type="button" className="primary-button" disabled={creating || !topicId || (topicId === '__new_topic__' && !newTitle.trim())} onClick={() => void continueCapture()}>{creating ? 'Creating…' : 'Continue'}</button></footer>
