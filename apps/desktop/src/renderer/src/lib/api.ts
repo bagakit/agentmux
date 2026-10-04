@@ -526,6 +526,7 @@ const mockApi: AgentMuxDesktopApi = {
   },
   files: {
     readPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_RESOURCE_UNCONFIRMED', message: 'Original file discovery requires the connected desktop Host. The original reference is retained.' } }),
+    createPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_CREATE_UNCONFIRMED', message: 'File creation requires the connected desktop Host. The original draft and target are retained.' } }),
     list: async () => { throw new Error('Project file discovery requires the connected desktop Host. Recent files remain available.') },
     readDirectory: async (_workspaceId, path) =>
       [...mockFiles.entries()]
