@@ -1,6 +1,7 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
+import { AgentHookServer } from '../src/hook-server.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { RECONNECT_MAX_ATTEMPTS } from '../src/ctxmux-reconnect.js'
 import { RECONNECT_FLAP_BUDGET, RECONNECT_PROBATION_MS } from '../src/ctxmux-reconnect-budget.js'
@@ -12,8 +13,17 @@ import type {
   AgentMuxStoredAgentSession
 } from '../src/types.js'
 
+const clients: AgentMuxClient[] = []
+function isolatedClient(options: ConstructorParameters<typeof AgentMuxClient>[0] = {}) {
+  const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore(), ...options })
+  Object.assign((client as unknown as { hookServer: AgentHookServer }).hookServer, { port: 0 })
+  clients.push(client)
+  return client
+}
+afterEach(async () => { await Promise.all(clients.splice(0).map(client => client.dispose())) })
+
 // Layers 2+3 的接线守卫：Core 掉线时必须 (1) 发 connection-state:lost（渲染端置 disconnected 的唯一源），
-// (2) 起**有界**重连——用尽仍失败要发 connection-state:unrecoverable（响亮终局，不无限转圈），
+// (2) 有界快速重连耗尽后发 connection-state:retrying，原身份转入可取消的低频恢复，
 // (3) 重连成功要按 daemon 的 list() 把每个 run 的当前状态重新发出去（重连 ≠ 状态就对了）。
 //
 // client 内部自建 kernel，这里把私有 kernel/registry 换成可控 fake、并覆盖 reconnectSleep 成即时，
@@ -35,16 +45,16 @@ type Internals = {
 }
 
 function fakeKernel(overrides: Partial<Record<string, unknown>> = {}) {
+  let connected = false
+  const attempt = overrides.connect as (() => Promise<void>) | undefined
   return {
-    isConnected: () => false,
-    connect: vi.fn(async () => {}),
-    disconnect: vi.fn(() => {}),
-    resetConnection: vi.fn(() => {}),
     list: vi.fn(async () => []),
-    onEvent: () => () => {},
-    onError: () => () => {},
-    onConnectionLost: () => () => {},
-    ...overrides
+    onEvent: () => () => {}, onError: () => () => {}, onConnectionLost: () => () => {},
+    ...overrides,
+    isConnected: overrides.isConnected ?? (() => connected),
+    connect: vi.fn(async () => { await attempt?.(); connected = true }),
+    disconnect: vi.fn(() => { connected = false }),
+    resetConnection: vi.fn(() => { connected = false })
   }
 }
 
@@ -60,7 +70,7 @@ function internals(client: AgentMuxClient): Internals {
 
 describe('AgentMuxClient connection-lost wiring', () => {
   it('publishes connection-state:lost the moment the kernel reports a lost connection', async () => {
-    const client = new AgentMuxClient()
+    const client = isolatedClient()
     const events = captureEvents(client)
     const state = internals(client)
     // 让重连的每次 attempt 立刻失败，且不等真退避，这样 lost→exhausted 端到端在一拍内跑完。
@@ -70,7 +80,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
     state.handleConnectionLost(state.connectionEpoch)
     // 等有界重连循环全部跑完（用尽为止）。
     await vi.waitFor(() => {
-      expect(events.some((event) => event.type === 'connection-state' && event.state === 'unrecoverable')).toBe(true)
+      expect(events.some((event) => event.type === 'connection-state' && event.state === 'retrying')).toBe(true)
     })
 
     const first = events[0]
@@ -80,8 +90,8 @@ describe('AgentMuxClient connection-lost wiring', () => {
     expect((client as unknown as { connected: boolean }).connected).toBe(false)
   })
 
-  it('gives up with connection-state:unrecoverable after a bounded number of attempts — never unbounded', async () => {
-    const client = new AgentMuxClient()
+  it('slows recovery after a bounded fast window without flooding consumers', async () => {
+    const client = isolatedClient()
     const events = captureEvents(client)
     const state = internals(client)
     state.reconnectSleep = async () => {}
@@ -90,7 +100,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
 
     state.handleConnectionLost(state.connectionEpoch)
     await vi.waitFor(() => {
-      expect(events.some((event) => event.type === 'connection-state' && event.state === 'unrecoverable')).toBe(true)
+      expect(events.some((event) => event.type === 'connection-state' && event.state === 'retrying')).toBe(true)
     })
 
     // 界的具体化：把重连改成无限重试（删 give-up / 抬 ceiling 到 Infinity），connect 会被调用远超上限、
@@ -100,7 +110,7 @@ describe('AgentMuxClient connection-lost wiring', () => {
   })
 
   it('on reconnect, republishes each live run state from the daemon and then emits connection-state:restored', async () => {
-    const client = new AgentMuxClient()
+    const client = isolatedClient()
     const events = captureEvents(client)
     const state = internals(client)
     state.reconnectSleep = async () => {}
@@ -119,9 +129,9 @@ describe('AgentMuxClient connection-lost wiring', () => {
     // open() 里做很多恢复工作；这里让 open 直接成功（overriding open 是私有面），但仍要求重连成功后
     // republishLiveRunState 走真 kernel.list()。因此覆盖私有 open 为 no-op，只让 list 提供真相。
     const list = vi.fn(async () => [liveRun])
-    state.kernel = fakeKernel({ list })
-    ;(client as unknown as { open: (epoch: number) => Promise<void> }).open = async () => {}
-    ;(state.registry as unknown) = { findByRun: () => undefined }
+    state.kernel = fakeKernel({ list, isConnected: () => true })
+    ;(client as unknown as { open: (epoch: number) => Promise<void> }).open = async () => { (client as unknown as { connected: boolean }).connected = true }
+    ;(state.registry as unknown) = { findByRun: () => undefined, releaseReopenOwner: async () => {} }
 
     state.handleConnectionLost(state.connectionEpoch)
     await vi.waitFor(() => {
@@ -155,13 +165,13 @@ describe('AgentMuxClient connection-lost wiring', () => {
 describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () => {
   /** 让每次重连都立刻成功的 client：open 是 no-op，list 空，退避即时。 */
   function flappingClient(): { client: AgentMuxClient; events: AgentMuxClientEvent[]; state: Internals } {
-    const client = new AgentMuxClient()
+    const client = isolatedClient()
     const events = captureEvents(client)
     const state = internals(client)
     state.reconnectSleep = async () => {}
-    state.kernel = fakeKernel()
-    ;(client as unknown as { open: (epoch: number) => Promise<void> }).open = async () => {}
-    ;(state.registry as unknown) = { findByRun: () => undefined }
+    state.kernel = fakeKernel({ isConnected: () => true })
+    ;(client as unknown as { open: (epoch: number) => Promise<void> }).open = async () => { (client as unknown as { connected: boolean }).connected = true }
+    ;(state.registry as unknown) = { findByRun: () => undefined, releaseReopenOwner: async () => {} }
     return { client, events, state }
   }
 
@@ -171,7 +181,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     await vi.waitFor(() => {
       // 每一轮的终局是 restored 或 unrecoverable 二者之一；等到本轮出现新的终局事件为止。
       expect(events.slice(before).some((event) =>
-        event.type === 'connection-state' && (event.state === 'restored' || event.state === 'unrecoverable')
+        event.type === 'connection-state' && (event.state === 'restored' || event.state === 'retrying')
       )).toBe(true)
     })
   }
@@ -185,17 +195,17 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     // 预算内的每一轮都必须真的走完「lost → 重连 → restored」，用户看到的是自愈而不是终局。
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored'))
       .toHaveLength(RECONNECT_FLAP_BUDGET)
-    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'unrecoverable')).toHaveLength(0)
+    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'retrying')).toHaveLength(0)
 
     // 第 BUDGET+1 次抖动跨过界：终局。若把 handleConnectionLost 里的判决删掉，这里会再来一条
     // restored、unrecoverable 永不出现，本断言红——这就是「无穷抖动 → 红」的具体化。
     await flapOnce(events, state)
-    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'unrecoverable')).toHaveLength(1)
+    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'retrying')).toHaveLength(1)
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored'))
       .toHaveLength(RECONNECT_FLAP_BUDGET)
   })
 
-  it('放弃时直接发 unrecoverable，绝不再发一次 lost、也不再起重连', async () => {
+  it('跨轮预算耗尽时直接转低频，不重复开始高频窗口', async () => {
     // 检查点必须在**发 lost 之前**。放进 reconnectLoop 里就晚了：那样每次抖动仍会先把整屏 Agent
     // 置灰、再白等一整轮（退避 31.5s + daemon ready + 握手）才拿到终局，抖动一次都没少。
     const { client, events, state } = flappingClient()
@@ -208,7 +218,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
 
     // 同步就该拿到终局——放弃这条路上没有任何 await。
     expect(events).toHaveLength(1)
-    expect(events[0]).toMatchObject({ type: 'connection-state', state: 'unrecoverable' })
+    expect(events[0]).toMatchObject({ type: 'connection-state', state: 'retrying' })
     // 没有 lost：整屏 Agent 不该为了一个已经判死的连接再变灰一次。
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'lost')).toHaveLength(0)
     // 没有重连尝试：kernel.connect 一次都没被调。若判决被移进 reconnectLoop，这条会红。
@@ -227,7 +237,7 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     // 清账后重新起算，所以这一次仍然重连、自愈。若清账那句被删（或判据写成拿 restored 清），
     // 这台机器会在第 4 次正常抖动时被判死，本断言红。
     expect(events.filter((e) => e.type === 'connection-state' && e.state === 'restored')).toHaveLength(1)
-    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'unrecoverable')).toHaveLength(0)
+    expect(events.filter((e) => e.type === 'connection-state' && e.state === 'retrying')).toHaveLength(0)
     // 清零后本次记 1，不是 BUDGET+1。
     expect(state.reconnectFlaps).toBe(1)
   })
@@ -239,10 +249,11 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     // 这里走的是**真的** `open()`（不像上面几条覆盖掉它），因为要证的恰恰是写入点落在 open 的
     // 成功尾部：覆盖掉 open 再断言这个字段，等于断言测试自己写的那一行。代价是要把 registry 的
     // 协作面 fake 齐——那是协作者，不是被测对象。
-    const client = new AgentMuxClient()
+    const client = isolatedClient()
     const state = internals(client)
-    state.kernel = fakeKernel({ isConnected: () => false })
+    state.kernel = fakeKernel()
     ;(state.registry as unknown) = {
+      async releaseReopenOwner() {},
       async claimStaleLifecycles() { return [] },
       async load() {},
       list: () => [],
@@ -270,14 +281,15 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
     // 若起点被写在 connect() 之后、恢复工作之前，一台每轮都在这里失败的 daemon 会每轮刷新起点，
     // 于是 `shouldClearFlapLedger` 每轮为真、账每轮清零，预算永不累积，unrecoverable 永不到来——
     // 即 #159 那个缺陷原样复活。实测把写入点上移到 connect() 之后，本条会红。
-    const client = new AgentMuxClient()
+    const client = isolatedClient()
     const state = internals(client)
     state.kernel = fakeKernel({
-      isConnected: () => false,
+      isConnected: () => true,
       // connect 成功，list 失败：wire 通了、daemon 随即不干活。
       list: vi.fn(async () => { throw new Error('stream closed') })
     })
     ;(state.registry as unknown) = {
+      async releaseReopenOwner() {},
       async claimStaleLifecycles() { return [] },
       async load() {},
       list: () => [],
@@ -287,14 +299,15 @@ describe('AgentMuxClient 跨成功幸存的抖动预算（半死 daemon）', () 
 
     await expect(client.connect()).rejects.toThrow('stream closed')
     expect(state.connectionHealthySince).toBe(0)
+    expect((client as unknown as { connected: boolean }).connected).toBe(true)
   })
 
   it('open() 抛出时不许写下缓刑期起点——失败的连接不是健康的连接', async () => {
     // 最靠前那个出口：wire 根本没通。上面那条守的是「通了但没干完活」，两条一起把整条 open 夹住。
-    const client = new AgentMuxClient()
+    const client = isolatedClient()
     const state = internals(client)
     state.kernel = fakeKernel({
-      isConnected: () => false,
+      isConnected: () => true,
       connect: vi.fn(async () => { throw new Error('daemon refused') })
     })
 
@@ -379,7 +392,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
   }> {
     const store = new AgentMuxMemoryAgentSessionStore()
     await store.compareAndSwap(null, readinessStoredSession())
-    const client = new AgentMuxClient({ store })
+    const client = isolatedClient({ store })
     const state = internals(client)
     state.reconnectSleep = async () => {}
     await (state.registry as { load(hostId: string): Promise<void> }).load('local')
@@ -391,6 +404,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
     let openHandshakeGate: () => void = () => {}
     const handshakeGate = new Promise<void>((resolve) => { openHandshakeGate = resolve })
     const kernel = state.kernel as Record<string, unknown>
+    kernel.isConnected = () => true
     kernel.observeOutput = async (_runId: string, _afterByte: number, _listener: unknown, view: string) => {
       expect(view).toBe('terminal')
       observeCalls += 1
@@ -423,6 +437,7 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
         close: async () => {}
       }
     }
+    kernel.replay = async () => ({ gap: null, run: { latestOutputBytes: 0 }, replay: [] })
     kernel.list = async () => []
     ;(client as unknown as { open: (epoch: number) => Promise<void> }).open = async () => {}
 
@@ -608,4 +623,208 @@ describe('#628 掉线让屏幕证据与 readiness 观察一起失效', () => {
       '在途握手的产物被登记了：掉线时它还不在表里，作废撤不到它，于是 ensure() 复用了一具挂在死线上的证据'
     ).toBe(2)
   })
+})
+
+
+describe('low-frequency recovery preserves original capability', () => {
+  async function slowed(connect = vi.fn(async () => { throw new Error('offline') })) {
+    const client = isolatedClient()
+    const state = internals(client)
+    const events = captureEvents(client)
+    state.kernel = fakeKernel({ connect })
+    state.reconnectFlaps = RECONNECT_FLAP_BUDGET
+    state.connectionHealthySince = Date.now()
+    state.handleConnectionLost(state.connectionEpoch)
+    return { client, state, connect, events }
+  }
+
+  it('tries one transport at a time, quietly survives failed intervals, and restores without manual replacement', async () => {
+    vi.useFakeTimers()
+    let available = false
+    const connect = vi.fn(async () => { if (!available) throw new Error('offline') })
+    const h = await slowed(connect)
+    try {
+      expect(connect).not.toHaveBeenCalled()
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(connect).toHaveBeenCalledTimes(2)
+      expect(h.events.filter(event => event.type === 'connection-state')).toEqual([
+        expect.objectContaining({ state: 'retrying' })
+      ])
+      available = true
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(connect).toHaveBeenCalledTimes(3)
+      expect(h.events.at(-1)).toMatchObject({ type: 'connection-state', state: 'restored' })
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(connect).toHaveBeenCalledTimes(3)
+    } finally { h.client.disconnect(); vi.useRealTimers() }
+  })
+
+  it('explicit connect retries immediately and joins a background attempt already in flight', async () => {
+    vi.useFakeTimers()
+    let release!: () => void
+    const connect = vi.fn(() => new Promise<void>(resolve => { release = resolve }))
+    const h = await slowed(connect)
+    try {
+      await vi.advanceTimersByTimeAsync(30_000)
+      const manual = Promise.all([h.client.connect(), h.client.connect()])
+      expect(connect).toHaveBeenCalledTimes(1)
+      release(); await manual
+      expect(h.events.at(-1)).toMatchObject({ state: 'restored' })
+      expect(h.events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(90_000)
+      expect(connect).toHaveBeenCalledTimes(1)
+    } finally { h.client.disconnect(); vi.useRealTimers() }
+  })
+
+  it('shares the entire explicit recovery completion among concurrent callers', async () => {
+    vi.useFakeTimers()
+    const h = await slowed(vi.fn(async () => {}))
+    let release!: () => void
+    const republish = vi.spyOn(h.client as unknown as { republishLiveRunState(): Promise<void> }, 'republishLiveRunState')
+      .mockImplementation(() => new Promise(resolve => { release = resolve }))
+    let firstDone = false, secondDone = false
+    try {
+      const first = h.client.connect().then(() => { firstDone = true })
+      const second = h.client.connect().then(() => { secondDone = true })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(republish).toHaveBeenCalledTimes(1)
+      expect(firstDone).toBe(false); expect(secondDone).toBe(false)
+      release(); await Promise.all([first, second])
+      expect(h.events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(1)
+    } finally { release?.(); h.client.disconnect(); vi.useRealTimers() }
+  })
+
+  it.each(['disconnect', 'dispose'] as const)('cancels slow recovery on %s', async action => {
+    vi.useFakeTimers()
+    const h = await slowed()
+    try {
+      await h.client[action]()
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(h.connect).not.toHaveBeenCalled()
+    } finally { h.client.disconnect(); vi.useRealTimers() }
+  })
+
+  it('cancels a waiting fast window before another attempt can run', async () => {
+    vi.useFakeTimers()
+    const client = isolatedClient()
+    const state = internals(client)
+    const connect = vi.fn(async () => {})
+    state.kernel = fakeKernel({ connect })
+    try {
+      state.handleConnectionLost(state.connectionEpoch)
+      client.disconnect()
+      await vi.advanceTimersByTimeAsync(120_000)
+      expect(connect).not.toHaveBeenCalled()
+    } finally { client.disconnect(); vi.useRealTimers() }
+  })
+})
+
+
+describe('connection observation failures preserve healthy capabilities', () => {
+  it('retains original Hook ingress and input when Session observation fails, and retries that observation', async () => {
+    const client = isolatedClient()
+    const state = internals(client)
+    const input = vi.fn(async () => ({ run: { acceptedInputBytes: 1 }, appliedByteRange: { startByte: 0, endByte: 1 } }))
+    const kernel = fakeKernel({ input })
+    state.kernel = kernel
+    const hook = (client as unknown as { hookServer: AgentHookServer }).hookServer
+    const stop = vi.spyOn(hook, 'stop')
+    await hook.start()
+    const load = vi.spyOn(state.registry as { load(host: string): Promise<void> }, 'load')
+      .mockRejectedValueOnce(new Error('Store observation unavailable'))
+    const events = captureEvents(client)
+    await expect(client.connect()).rejects.toThrow('Store observation unavailable')
+    expect(stop).not.toHaveBeenCalled()
+    expect(kernel.resetConnection).not.toHaveBeenCalled()
+    await expect(client.writeTerminal({ runId: 'healthy-original' }, { ownerInstanceId: 'owner', operationId: 'input-1', expectedByte: 0, data: 'x' }))
+      .resolves.toMatchObject({ acceptedThroughByte: 1 })
+    expect(events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED' }))
+    expect(events.some(event => event.type === 'connection-state' && event.state === 'retrying')).toBe(false)
+    await client.connect()
+    expect(load).toHaveBeenCalledTimes(2)
+    expect(events.at(-1)).toMatchObject({ state: 'restored' })
+  })
+
+  it('does not reset a newer connection when an old open observation fails after disconnect', async () => {
+    const client = isolatedClient(), state = internals(client)
+    const kernel = fakeKernel(); state.kernel = kernel
+    let fail!: (error: Error) => void
+    const pendingLoad = new Promise<void>((_, reject) => { fail = reject })
+    const load = vi.spyOn(state.registry as { load(host: string): Promise<void> }, 'load').mockReturnValueOnce(pendingLoad)
+    const old = client.connect(); void old.catch(() => {})
+    await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(1))
+    client.disconnect()
+    await client.connect()
+    fail(new Error('Old observation failed'))
+    await expect(old).rejects.toThrow('Old observation failed')
+    expect(kernel.isConnected()).toBe(true)
+    expect(kernel.resetConnection).not.toHaveBeenCalled()
+  })
+
+  it('keeps a failed post-connect Run observation recoverable on the healthy transport', async () => {
+    vi.useFakeTimers()
+    const client = isolatedClient(), state = internals(client)
+    const kernel = fakeKernel(); state.kernel = kernel
+    const events = captureEvents(client)
+    let ready = true
+    const republish = vi.spyOn(client as unknown as { republishLiveRunState(): Promise<void> }, 'republishLiveRunState')
+      .mockImplementation(async () => { if (ready) throw new Error('Run observation failed') })
+    state.reconnectFlaps = RECONNECT_FLAP_BUDGET; state.connectionHealthySince = Date.now()
+    state.handleConnectionLost(state.connectionEpoch)
+    try {
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(events).toContainEqual(expect.objectContaining({ code: 'CTXMUX_RECONNECT_OBSERVATION_FAILED' }))
+      expect(kernel.isConnected()).toBe(true)
+      ready = false
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(events.at(-1)).toMatchObject({ state: 'restored' })
+      expect(republish).toHaveBeenCalledTimes(2)
+    } finally { client.disconnect(); vi.useRealTimers() }
+  })
+
+  it('does not let an old same-epoch recovery completion cancel or restore a newer in-flight recovery', async () => {
+    vi.useFakeTimers()
+    const client = isolatedClient(), state = internals(client)
+    const kernel = fakeKernel(); state.kernel = kernel
+    const events = captureEvents(client), releases: Array<() => void> = []
+    const republish = vi.spyOn(client as unknown as { republishLiveRunState(): Promise<void> }, 'republishLiveRunState')
+      .mockImplementation(() => new Promise(resolve => { releases.push(resolve) }))
+    state.reconnectFlaps = RECONNECT_FLAP_BUDGET; state.connectionHealthySince = Date.now()
+    state.handleConnectionLost(state.connectionEpoch)
+    try {
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(republish).toHaveBeenCalledTimes(1)
+      kernel.disconnect()
+      state.handleConnectionLost(state.connectionEpoch)
+      await vi.advanceTimersByTimeAsync(30_000)
+      expect(republish).toHaveBeenCalledTimes(2)
+      expect(kernel.isConnected()).toBe(true)
+      releases[0]!(); await vi.advanceTimersByTimeAsync(0)
+      expect(events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(0)
+      releases[1]!(); await vi.advanceTimersByTimeAsync(0)
+      expect(events.filter(event => event.type === 'connection-state' && event.state === 'restored')).toHaveLength(1)
+      await vi.advanceTimersByTimeAsync(60_000)
+      expect(kernel.connect).toHaveBeenCalledTimes(2)
+    } finally { client.disconnect(); for (const release of releases) release(); vi.useRealTimers() }
+  })
+
+  it('reports recovery accounting failure while keeping original Session input and confirmed transport', async () => {
+    const client = isolatedClient(), state = internals(client)
+    const kernel = fakeKernel(); state.kernel = kernel
+    const events = captureEvents(client)
+    await client.connect()
+    const privateState = client as unknown as { runPids: Map<string, number>; reconnectGeneration: number; finishReconnect(epoch: number, generation: number): Promise<void>; republishLiveRunState(): Promise<void>; persistActivityBoundary(): Promise<void> }
+    privateState.runPids.set('original-run', 123)
+    vi.spyOn(state.registry as { findByRun(run: { runId: string }): AgentMuxAgentSession }, 'findByRun')
+      .mockReturnValue({ agentSessionId: 'original-session', run: { runId: 'original-run' } } as AgentMuxAgentSession)
+    vi.spyOn(privateState, 'republishLiveRunState').mockResolvedValue()
+    vi.spyOn(privateState, 'persistActivityBoundary').mockRejectedValue(new Error('Durable accounting unavailable'))
+    await privateState.finishReconnect(state.connectionEpoch, privateState.reconnectGeneration)
+    expect(events).toContainEqual(expect.objectContaining({ code: 'CTXMUX_RECONNECT_ACCOUNTING_FAILED', agentSessionId: 'original-session' }))
+    expect(events.at(-1)).toMatchObject({ state: 'restored' })
+    expect(kernel.isConnected()).toBe(true)
+    expect(kernel.resetConnection).not.toHaveBeenCalled()
+    expect(privateState.runPids.get('original-run')).toBe(123)
+  })
+
 })

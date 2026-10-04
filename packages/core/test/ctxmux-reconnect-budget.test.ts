@@ -10,7 +10,7 @@ import {
 // 无穷次「失联→重连中→恢复→失联」。把 give-up 分支删掉、或把预算改成 Infinity，本文件必须变红。
 describe('judgeReconnectFlap', () => {
   it('把预算钉成写死的字面量（与派生断言并存）', () => {
-    // 下面的机制断言全用 import 的常量当期望值，会跟着常量一起漂：把 3 改成 0（一次抖动就放弃、
+    // 下面的机制断言全用 import 的常量当期望值，会跟着常量一起漂：把 3 改成 0（一次抖动就结束快速窗口、
     // 正常的网络切换都活不过）或 9999（等于没有界）都不会让它们红。这条钉住产品取值本身。
     expect(RECONNECT_FLAP_BUDGET).toBe(3)
     // 缓刑期同理。下界是一整轮内层重连的最坏墙钟：31.5s 退避 + 5s daemon ready + 10s 握手 ≈ 46.5s，
@@ -31,7 +31,7 @@ describe('judgeReconnectFlap', () => {
     expect(judgeReconnectFlap({ flapCount: 2 })).toEqual({ kind: 'reconnect', flapCount: 3 })
   })
 
-  it('账面已达预算时放弃，且绝不再排重连', () => {
+  it('账面已达预算时结束快速窗口，由 client 转入低频恢复', () => {
     // 边界极性：账面 == 预算 的那一次必须 give-up。把 `>=` 写成 `>` 会多放一次抖动过去——
     // 这条断言正是那个差一变异的落点。
     expect(judgeReconnectFlap({ flapCount: RECONNECT_FLAP_BUDGET })).toEqual({
