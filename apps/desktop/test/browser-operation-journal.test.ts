@@ -163,7 +163,7 @@ describe('BrowserOperationJournal', () => {
     })
   })
 
-  it('bounds operations, steps, and events while retaining the newest facts', async () => {
+  it('bounds history presentation and events while keeping original durable operations', async () => {
     const store = new MemoryStore()
     let now = 1
     let nextId = 0
@@ -171,8 +171,7 @@ describe('BrowserOperationJournal', () => {
       now: () => now++,
       id: () => `op-${nextId++}`,
       maxOperations: 2,
-      maxEvents: 4,
-      maxSteps: 2
+      maxEvents: 4
     })
     for (let index = 0; index < 3; index += 1) {
       const operation = await journal.start({
@@ -187,7 +186,8 @@ describe('BrowserOperationJournal', () => {
     }
     const operations = await journal.list()
     expect(operations.map((operation) => operation.id)).toEqual(['op-1', 'op-2'])
-    expect(operations.every((operation) => operation.steps.length <= 2)).toBe(true)
+    expect(await journal.get('op-0')).toMatchObject({ id: 'op-0', phase: 'completed' })
+    expect(store.document?.operations.map(operation => operation.id)).toEqual(['op-0', 'op-1', 'op-2'])
     expect((await journal.events()).length).toBeLessThanOrEqual(4)
   })
 
