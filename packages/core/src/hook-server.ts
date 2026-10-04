@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { performance } from 'node:perf_hooks'
 import { AgentMuxError } from './errors.js'
 import type { AgentProviderId, NativeHookEnvelope } from './types.js'
 import { defaultAgentMuxHookPort } from './runtime-paths.js'
@@ -10,6 +11,8 @@ const MAX_BINDINGS = 256
 const MAX_PENDING_EVENTS = 8
 const MAX_PENDING_DELIVERIES = 8
 // Keep completed and unknown receipts for the sender's two-observation retry window.
+// All ingress deadlines use elapsed time; a wall-clock correction cannot expire
+// an unknown receipt or turn its observation retry into another owner mutation.
 const RECEIPT_RETRY_WINDOW_MS = 2 * (HOOK_REQUEST_TIMEOUT_MS + HOOK_RETRY_DELAY_MS) + HOOK_RETRY_DELAY_MS
 const MAX_RECEIPT_BYTES = MAX_PENDING_DELIVERIES * MAX_BODY_BYTES
 
@@ -303,7 +306,7 @@ export class AgentHookServer {
       (_key, value: unknown) => value && typeof value === 'object' && !Array.isArray(value)
         ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : value)).digest('hex')
     for (const [id, receipt] of binding.receipts) {
-      if (receipt.expiresAt < Date.now()) binding.receipts.delete(id)
+      if (receipt.expiresAt < performance.now()) binding.receipts.delete(id)
     }
     const existing = binding.receipts.get(parsed.receiptId)
     if (existing) {
@@ -382,7 +385,7 @@ export class AgentHookServer {
 
   private enqueue(binding: PendingBinding, event: HookIngressEvent): Promise<void> {
     binding.pendingDeliveries += 1
-    const deadline = Date.now() + HOOK_REQUEST_TIMEOUT_MS
+    const deadline = performance.now() + HOOK_REQUEST_TIMEOUT_MS
     let expired = false
     let queueTimer: ReturnType<typeof setTimeout>
     const queueTimeout = new Promise<never>((_resolve, reject) => {
@@ -393,8 +396,8 @@ export class AgentHookServer {
     })
     const started = binding.tail.catch(() => {}).then(() => {
       clearTimeout(queueTimer)
-      if (expired || Date.now() >= deadline) throw new HookQueueTimeoutError()
-      return this.publish(binding, event, Math.min(HOOK_OWNER_TIMEOUT_MS, deadline - Date.now()))
+      if (expired || performance.now() >= deadline) throw new HookQueueTimeoutError()
+      return this.publish(binding, event, Math.min(HOOK_OWNER_TIMEOUT_MS, deadline - performance.now()))
     })
     const response = Promise.race([queueTimeout, started.then(async (delivery) => await delivery.response)])
     const drain = started.then(async (delivery) => await delivery.drain).finally(() => {
@@ -405,14 +408,14 @@ export class AgentHookServer {
     const receipt = binding.receipts.get(event.receiptId)
     if (receipt) {
       receipt.response = response
-      void response.then(() => { receipt.expiresAt = Date.now() + RECEIPT_RETRY_WINDOW_MS }, (error: unknown) => {
+      void response.then(() => { receipt.expiresAt = performance.now() + RECEIPT_RETRY_WINDOW_MS }, (error: unknown) => {
         // Keep the original response while work drains. Afterward only the
         // ingress-proven not-started case may execute again. Owner rejection or
         // abort is unknown, so preserve its fingerprint and outcome for retry.
         void binding.tail.then(() => {
           if (binding.receipts.get(event.receiptId) !== receipt) return
           if (error instanceof HookQueueTimeoutError) binding.receipts.delete(event.receiptId)
-          else receipt.expiresAt = Date.now() + RECEIPT_RETRY_WINDOW_MS
+          else receipt.expiresAt = performance.now() + RECEIPT_RETRY_WINDOW_MS
         })
       })
     }
