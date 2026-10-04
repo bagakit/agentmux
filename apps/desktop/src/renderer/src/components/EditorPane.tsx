@@ -152,7 +152,7 @@ export function EditorPane({
 
   return (
     <section
-      className={`editor-pane ${issue ? 'editor-pane--issue' : ''} ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
+      className={`editor-pane ${onTogglePreview || extraActions ? 'editor-pane--format' : ''}`}
       data-file-state={issue?.kind ?? (saving ? 'saving' : dirty ? 'dirty' : 'clean')}
     >
       <header className="editor-header">
@@ -177,23 +177,25 @@ export function EditorPane({
           </DropdownMenu.Root>
         </div>
       </header>
-      <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
-      {issue ? (
-        <div className={`editor-file-notice editor-file-notice--${issue.kind}`} role="alert">
-          <AlertTriangle size={13} />
-          <span>
-            {issue.kind === 'changed'
-              ? 'File changed on disk. Your draft is preserved.'
-              : issue.kind === 'deleted'
-                ? 'File was deleted on disk. Reload accepts the deletion; Overwrite recreates it.'
-                : issue.kind === 'read-error'
-                  ? `Could not refresh the file (${issue.message}). The last buffer is preserved.`
-                  : issue.kind === 'write-unknown' ? `Save outcome is not confirmed. Your draft is preserved. Check the saved file before saving again.${issue.checkMessage ? ' Check unavailable: ' + issue.checkMessage : ''}`
-                    : issue.kind === 'write-error' ? `Save failed (${issue.message}). Your draft is still unsaved.`
-                    : 'The file is binary. The existing text buffer is preserved.'}
-          </span>
-        </div>
-      ) : null}
+      <div className="editor-file-notices">
+        <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
+        {issue ? (
+          <div className={`editor-file-notice editor-file-notice--${issue.kind}`} role="alert">
+            <AlertTriangle size={13} />
+            <span>
+              {issue.kind === 'changed'
+                ? 'File changed on disk. Your draft is preserved.'
+                : issue.kind === 'deleted'
+                  ? 'File was deleted on disk. Reload accepts the deletion; Overwrite recreates it.'
+                  : issue.kind === 'read-error'
+                    ? `Could not refresh the file (${issue.message}). The last buffer is preserved.`
+                    : issue.kind === 'write-unknown' ? `Save outcome is not confirmed. Your draft is preserved. Check the saved file before saving again.${issue.checkMessage ? ' Check unavailable: ' + issue.checkMessage : ''}`
+                      : issue.kind === 'write-error' ? `Save failed (${issue.message}). Your draft is still unsaved.`
+                      : 'The file is binary. The existing text buffer is preserved.'}
+            </span>
+          </div>
+        ) : null}
+      </div>
       <div className="editor-canvas">
         <Suspense fallback={<FullPageLoadingSurface scope="region" phase="loading" title="Loading editor" detail="Preparing the editor" />}>
         {previewing ? preview : regionMode === 'diff' ? (

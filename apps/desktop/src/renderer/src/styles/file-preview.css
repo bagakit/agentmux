@@ -21,8 +21,7 @@
 .file-media > .file-preview-state { flex:0 1 auto; }
 .file-markdown-preview { height:100%; overflow:auto; padding:var(--sp-6) max(var(--sp-7), calc((100% - 78ch) / 2)); color:var(--text); font-size:var(--fs-prose); line-height:1.65; overflow-wrap:anywhere; }
 .file-markdown-preview > * { width:100%; max-width:100%; margin-inline:0; }
-.editor-pane { container-type:inline-size; grid-template-rows:30px minmax(0, 1fr); }
-.editor-pane--issue { grid-template-rows:30px auto minmax(0, 1fr); }
+.editor-pane { container-type:inline-size; grid-template-rows:30px auto minmax(0, 1fr); }
 .editor-pane > .editor-header { flex-wrap:nowrap; min-height:30px; gap:var(--sp-3); }
 .editor-header__actions { flex:none; flex-wrap:nowrap; }
 .editor-header__path { flex:1; }
