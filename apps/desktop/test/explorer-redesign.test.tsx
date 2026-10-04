@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
-const fixture = vi.hoisted(() => ({ refresh: vi.fn(async () => true), refreshDir: vi.fn(async () => true), load: vi.fn(async () => true) }))
+const fixture = vi.hoisted(() => ({ refresh: vi.fn(async () => true), refreshDir: vi.fn(async (_path: string) => true), load: vi.fn(async () => true) }))
 vi.mock('../src/renderer/src/hooks/useGitStatus', () => ({ useGitStatus: () => ({
   status: { kind: 'git-repository', hostId: 'local', repoPath: _hygiene_fixturePath("Users/reader/project"), repoRelativePrefix: '', branch: 'main',
     changes: [{ path: 'one.ts', indexStatus: ' ', worktreeStatus: 'M', staged: false, untracked: false }] },
@@ -40,7 +40,7 @@ import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const workspace = { id: 'one', name: 'Project one', hostId: 'local', path: _hygiene_fixturePath("Users/reader/project"), branch: 'main', kind: 'folder' as const }
 const second = { ...workspace, id: 'two', name: 'Project two', path: _hygiene_fixturePath("Users/reader/second") }
-const open = vi.fn(async () => undefined)
+const open = vi.fn(async (_path: string) => true)
 const rename = vi.fn<(source: string, destination: string, workspaceId?: string) => Promise<void>>()
 beforeEach(() => {
   installFileTreeGeometry()
@@ -222,7 +222,7 @@ describe('actual Explorer shared header and interactions', () => {
 
   it('uses one keyboard-accessible Git navigation plane without duplicate panel titles', async () => {
     await dom.render(<SurfaceToolDock workspace={workspace} />)
-    expect(element('[role="tablist"]').className).toBe('source-control-switch')
+    expect(element('[role="tablist"]').className).toBe('surface-mode-switch')
     const branches = element<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
     await key(branches, 'ArrowRight')
     const changes = element<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
@@ -239,13 +239,16 @@ describe('actual Explorer shared header and interactions', () => {
   it('loads actual control styles with nonempty surfaces and keeps static material/focus signals', () => {
     const dock = readFileSync(resolve('apps/desktop/src/renderer/src/styles/dock.css'), 'utf8')
     const control = readFileSync(resolve('apps/desktop/src/renderer/src/styles/source-control.css'), 'utf8')
+    const modes = readFileSync(resolve('apps/desktop/src/renderer/src/styles/surface-mode-switch.css'), 'utf8')
     const file = readFileSync(resolve('apps/desktop/src/renderer/src/styles/file-explorer.css'), 'utf8')
     const selectors = [...control.matchAll(/([^{}]+)\{/g)].map(match => match[1]!.trim())
     expect(selectors.length).toBeGreaterThan(0)
-    expect(dock).toContain('var(--material-control-surface)')
-    expect(control).toContain('var(--material-control-surface)')
-    expect(control).toContain('.source-control-switch button:focus-visible')
-    expect(control).toContain('prefers-reduced-motion: reduce')
+    expect(dock).toContain('background: var(--surface-1)')
+    expect(dock).not.toContain('backdrop-filter: blur')
+    expect(modes).toContain('background: transparent')
+    expect(modes).not.toContain('backdrop-filter: blur')
+    expect(modes).toContain('.surface-mode-switch button:focus-visible')
+    expect(modes).toContain('prefers-reduced-motion: reduce')
     const context = control.match(/\.changes-repository-context \{([^}]+)\}/)
     expect(context).not.toBeNull()
     expect(context![1]).toContain('display: flex')

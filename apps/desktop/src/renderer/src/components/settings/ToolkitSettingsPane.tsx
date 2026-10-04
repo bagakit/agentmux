@@ -9,7 +9,7 @@ import { BuiltinPerformanceSettings } from './BuiltinPerformanceSettings'
 import { ToolkitPackageEditor } from './ToolkitPackageEditor'
 import { packageFact, toolkitIdentity, useToolkitPackages } from '../toolkit/use-toolkit-packages'
 import { ToolkitToolEditor } from './ToolkitToolEditor'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { isInlineDraft, isPackageDraft, toolkitDraftDirty, toolkitFields, useToolkitDrafts, type ToolkitDraftWriter } from './use-toolkit-drafts'
 
 function shortDirectory(path: string) {

@@ -93,7 +93,7 @@ function exactly(source, before, after) {
 async function mutations() {
   const branch = execFileSync('git', ['branch', '--show-current'], { cwd: root, encoding: 'utf8' }).trim()
   assert.ok(branch.startsWith('feat/settings-liquid-motion-'), 'Sourcewriter mutations require the explicitly owned feature worktree, never main')
-  const surface = 'apps/desktop/src/renderer/src/components/settings/LiquidSelectionSurface.tsx'
+  const surface = 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx'
   const pane = 'apps/desktop/src/renderer/src/components/settings/ShortcutSettingsPane.tsx'
   const originals = new Map(await Promise.all((task === 'settings' ? [surface] : [pane]).map(async file => [file, await fs.readFile(path.join(root, file), 'utf8')])))
   const s = originals.get(surface)

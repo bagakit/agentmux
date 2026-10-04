@@ -10,7 +10,7 @@ import { customMoteId, customTab, defaultAgent, defaultTab, quietMoteId, quietTa
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdentityPath } from '../src/shared/scratch-topics'
 import { requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
-import { WorkspaceFilesTool } from '../src/renderer/src/components/SurfaceToolDock'
+import { WorkspaceFilesTool } from '../src/renderer/src/components/WorkspaceFilesTool'
 import { useMoteWorkfaceScope } from '../src/renderer/src/lib/mote-workface'
 import { useMoteMaterialsActions } from '../src/renderer/src/lib/mote-materials-actions'
 import { topicSpaceIconTarget } from '../src/renderer/src/lib/space-object-appearance'

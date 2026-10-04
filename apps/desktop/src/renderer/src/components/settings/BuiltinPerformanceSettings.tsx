@@ -3,7 +3,7 @@ import { useId } from 'react'
 import { PERFORMANCE_STATUS_BAR_IDS, type PerformancePreferences } from '../../../../shared/toolkit-preferences'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 
 export function BuiltinPerformanceSettings({ performance, active, onSave }: {
   performance: PerformancePreferences

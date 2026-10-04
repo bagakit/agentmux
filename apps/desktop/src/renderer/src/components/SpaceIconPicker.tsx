@@ -9,7 +9,7 @@ import { useAppStore } from '../store'
 import { MoteAvatarCrop } from './MoteAvatarCrop'
 import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
-import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 /** Shared chooser; drafts stay local until Save, authored metadata has the existing store owner. */

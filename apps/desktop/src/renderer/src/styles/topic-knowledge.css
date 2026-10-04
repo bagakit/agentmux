@@ -11,7 +11,7 @@
 .topic-navigation-panel__topics, .topic-navigation-panel__knowledge { min-height: 0; flex: 1; overflow: auto; }
 .topic-navigation-panel__topics { display: flex; flex-direction: column; }
 .topic-navigation-panel__topics[hidden], .topic-navigation-panel__knowledge[hidden] { display: none; }
-.topic-navigation-panel > .source-control-switch { flex-shrink: 0; }
+.topic-navigation-panel > .surface-mode-switch { flex-shrink: 0; }
 .topic-navigation-panel__knowledge > .surface-inline-error { margin: var(--sp-3); }
 .topic-knowledge-panel__header { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; flex-shrink: 0; margin: var(--sp-3) var(--sp-5); }
 .topic-knowledge-scope { flex: 1; min-width: 0; display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); }

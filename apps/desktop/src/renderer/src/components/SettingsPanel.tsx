@@ -8,7 +8,7 @@ import { useAppStore } from '../store'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { SettingsOverviewPane } from './settings/SettingsOverviewPane'
-import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { SETTINGS_GROUPS as GROUPS } from './settings/settings-catalog'
 import { settingsModules, visibleSettingsSections, settingsNavGroups, type SettingsPageId, type SettingsSectionId } from './settings/settings-modules'
 

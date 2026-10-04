@@ -3,7 +3,7 @@ import { lazy, Suspense, useId, useLayoutEffect, useRef, useState, type RefObjec
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
 import { TOOLKIT_ICON_IDS } from '../../../../shared/toolkit-preferences'
 import { ToolkitIcon, toolkitIconLabels } from '../toolkit/ToolkitIcon'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 import { presentError } from '@agentmux/client-ui/error-presentation'

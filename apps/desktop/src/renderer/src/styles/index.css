@@ -15,6 +15,7 @@
 @import './topic-topology.css';
 @import './topic-knowledge.css';
 @import './file-explorer.css';
+@import './surface-mode-switch.css';
 @import './source-control.css';
 @import './git-history.css';
 @import './workbench.css';
@@ -49,6 +50,7 @@
 @import '@agentmux/client-ui/styles/interaction.css';
 @import '@agentmux/client-ui/styles/inline-rename-field.css';
 @import './settings-prompts.css';
+@import './liquid-selection.css';
 @import './settings-materials.css';
 @import './survey.css';
 @import './result-review.css';
