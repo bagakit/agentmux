@@ -1,12 +1,28 @@
 import { fixturePath } from './helpers/fixture-values.js'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '../src/notebook-store.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
+const directorySyncFault = vi.hoisted(() => ({ path: '', attempts: 0, failNext: false }))
+vi.mock('node:fs/promises', async importOriginal => {
+  const original = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...original, open: async (...args: Parameters<typeof original.open>) => {
+    const file = await original.open(...args)
+    if (String(args[0]) === directorySyncFault.path && args[1] === 'r') {
+      const sync = file.sync.bind(file)
+      file.sync = async () => {
+        directorySyncFault.attempts++
+        if (directorySyncFault.failNext) { directorySyncFault.failNext = false; throw new Error('Directory sync unconfirmed') }
+        return sync()
+      }
+    }
+    return file
+  } }
+})
 const directories: string[] = []
-afterEach(async () => { for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }) })
+afterEach(async () => { directorySyncFault.path = ''; directorySyncFault.attempts = 0; directorySyncFault.failNext = false; for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true }) })
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'notes-owner-')); directories.push(root)
   const original = join(root, 'original'), target = join(root, 'new library'), location = join(root, 'state', 'notes-location.json')
@@ -112,6 +128,31 @@ describe('one durable Notes directory operation', () => {
     await writeFile(path, bytes); await expect(f.storage.resume()).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
     expect(await readFile(path, 'utf8')).toBe(bytes); expect((await f.storage.inspect()).directory).toBe(f.original)
     expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
+  })
+  it('retains every original when one Note changes during host acknowledgement', async () => {
+    const f = await fixture(), secondPath = join(f.original, 'two.note.json')
+    await writeFile(secondPath, JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'second-note', content: 'Second original' }))
+    const changed = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'second-note', content: 'New original input during acknowledgement' })
+    const storage = new AgentMuxNotesStorage(f.location, f.original, { beforeSourceCleanup: async () => { await writeFile(secondPath, changed) } })
+    await expect(storage.change({ operationId: 'changed-during-ack', expectedDirectory: f.original, directory: f.target })).rejects.toThrow('during the host acknowledgement')
+    expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
+    expect(await readFile(secondPath, 'utf8')).toBe(changed)
+    expect(await readFile(join(f.original, 'notebooks.json'), 'utf8')).toContain('original-note')
+    expect((await storage.inspect()).operation?.operationId).toBe('changed-during-ack')
+  })
+  it('reconfirms directory durability when retrying an already published Note after sync failed', async () => {
+    const f = await fixture(), operation = { operationId: 'directory-sync-retry', expectedDirectory: f.original, directory: f.target }
+    directorySyncFault.path = f.target; directorySyncFault.failNext = true
+    await expect(f.storage.change(operation)).rejects.toThrow('Directory sync unconfirmed')
+    expect(directorySyncFault.attempts).toBe(1)
+    expect(await readFile(join(f.target, 'one.note.json'), 'utf8')).toBe(f.bytes)
+    expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
+    expect((await f.storage.inspect()).operation?.phase).toBe('prepared')
+    await f.storage.change(operation)
+    expect(directorySyncFault.attempts).toBeGreaterThanOrEqual(3)
+    expect(await readFile(join(f.target, 'one.note.json'), 'utf8')).toBe(f.bytes)
+    expect((await f.storage.inspect()).operation).toBeNull()
+    await expect(readFile(join(f.original, 'one.note.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
   it('bootstrap uses the same operation, moving only registered flat local scratch notes', async () => {
     const f = await fixture(); const legacy = join(f.root, 'legacy', 'notebooks.json'); await mkdir(join(f.root, 'legacy')); await writeFile(legacy, JSON.stringify({ ...f.before, pages: { ...f.before.pages, 'original-note': { ...f.before.pages['original-note'], resource: { ...f.before.pages['original-note']!.resource, workspaceId: '__scratch__' } } } }))
