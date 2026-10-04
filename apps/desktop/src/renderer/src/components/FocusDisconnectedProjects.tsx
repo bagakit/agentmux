@@ -1,13 +1,14 @@
 import { ChevronRight, Unplug } from 'lucide-react'
 import { useLayoutEffect, useRef, type RefObject } from 'react'
-import type { FocusContext } from '../lib/focus-context'
+import { groupFocusContexts, type FocusContext } from '../lib/focus-context'
 import { focusProjectKey, type FocusProjectLane } from '../lib/focus-project-lanes'
 import { FocusProjectLanes } from './FocusProjectLanes'
 import { FocusContextRow } from './FocusContextRow'
 
 /** The same confirmed-offline directory in both the full and mixed Focus surfaces. */
-export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selectedId, projectKey, expanded, canReturn, reveal, fallbackFocus, onExpand, onClose, onClearFilters, onProject, onSelect }: {
+export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selectedId, currentLaneId, projectKey, expanded, canReturn, reveal, fallbackFocus, onExpand, onClose, onClearFilters, onProject, onSelect }: {
   lanes: readonly FocusProjectLane[]; contexts: ReadonlyMap<string, FocusContext>; selectedId: string | null
+  currentLaneId?: string | null | undefined
   visibleIds: ReadonlySet<string>; expanded: boolean; canReturn: boolean
   projectKey: string; reveal: { laneId: string; trigger: HTMLElement } | null
   fallbackFocus: RefObject<HTMLInputElement | null>
@@ -60,11 +61,11 @@ export function FocusDisconnectedProjects({ lanes, contexts, visibleIds, selecte
       {expanded && canReturn ? <button type="button" className="focus-disconnected-projects__return" onClick={close}>Return to board</button> : null}
     </div>
     {expanded && matchingCount !== ids.size ? <p className="focus-disconnected-projects__matches">{matchingCount} of {ids.size} contexts match the current filters</p> : null}
-    {expanded && visibleLanes.length ? <FocusProjectLanes lanes={visibleLanes} selectedProjectKey={projectKey} onSelect={onProject} renderLane={(lane, heading) => <>
-      {heading}<div className="focus-disconnected-projects__cards">{lane.contextIds.flatMap(id => {
+    {expanded && visibleLanes.length ? <FocusProjectLanes lanes={visibleLanes} selectedProjectKey={projectKey} currentLaneId={currentLaneId} onSelect={onProject} renderLane={(lane, heading) => <>
+      {heading}<div className="focus-disconnected-projects__cards">{groupFocusContexts(lane.contextIds.flatMap(id => {
         const context = visibleIds.has(id) ? contexts.get(id) : null
-        return context ? [<FocusContextRow key={id} context={context} variant="directory" selected={id === selectedId} onSelect={onSelect} />] : []
-      })}</div>
+        return context ? [context] : []
+      })).disconnected.map(context => <FocusContextRow key={context.id} context={context} variant="directory" selected={context.id === selectedId} onSelect={onSelect} />)}</div>
     </>} /> : expanded ? <div className="focus-disconnected-projects__empty" role="status">
       <strong>No matching disconnected contexts</strong><span>Try another search or clear the filters.</span>
       <button type="button" onClick={onClearFilters}>Clear filters</button>

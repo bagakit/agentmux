@@ -42,6 +42,7 @@ export function focusColumnFor(context: FocusContext): FocusColumn {
 export function groupFocusContexts(rows: readonly FocusContext[]): Record<FocusColumn, FocusContext[]> {
   const groups: Record<FocusColumn, FocusContext[]> = { attention: [], working: [], results: [], idle: [], disconnected: [] }
   for (const row of rows) groups[focusColumnFor(row)].push(row)
+  for (const group of Object.values(groups)) group.sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))
   return groups
 }
 type Inputs = { sessions: readonly SessionSnapshot[]; timelines: Record<string, AgentTimelineSnapshot>; agentNames: Record<string, string>; config: AppConfig | null; scratchTopicSnapshots: Record<string, ScratchTopicsSnapshot> }
