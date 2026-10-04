@@ -1,3 +1,4 @@
+import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { TopicKnowledge, TopicKnowledgeItem, TopicKnowledgeSource, TopicKnowledgeWrite } from '@agentmux/core/control'
@@ -48,7 +49,7 @@ function KnowledgeScope({ rpc, topicId, title, openSource, openHttpLink, visible
   }
   return <section className="mobile-topic-knowledge" aria-label={`${title}知识`}>
     <form className="mobile-topics-search" onSubmit={event => { event.preventDefault(); setSearch(query.trim()) }}>
-      <input aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => setQuery(event.target.value)} />
+      <TextInput aria-label="搜索知识" placeholder={topicId ? '搜索此 Topic 的知识' : '搜索 All Topics'} value={query} onChange={event => setQuery(event.target.value)} />
       <button type="submit">搜索</button>
     </form>
     <div className="mobile-topics-actions"><small>{topicId ? title : 'All Topics'}{loading ? ' · 读取中' : ''}</small>
@@ -111,11 +112,11 @@ export function MobileTopicKnowledgeEditor({ rpc, target, onClose, onSaved }: { 
   return <section className="mobile-topic-editor" aria-label="知识编辑">
     <h2>{original.entry ? '编辑知识' : '新建知识'}</h2>
     <form onSubmit={event => { event.preventDefault(); void save() }}>
-      <label>标题<input aria-label="知识标题" value={title} maxLength={120} readOnly={busy} onChange={event => setTitle(event.target.value)} /></label>
-      <label>正文<textarea aria-label="知识正文" value={content} rows={10} readOnly={busy} onChange={event => setContent(event.target.value)} /></label>
+      <label>标题<TextInput aria-label="知识标题" value={title} maxLength={120} readOnly={busy} onChange={event => setTitle(event.target.value)} /></label>
+      <label>正文<ComposerTextarea aria-label="知识正文" value={content} rows={10} readOnly={busy} onValueChange={setContent} /></label>
       <div className="mobile-topics-actions"><label>形式<select value={form} disabled={busy} onChange={event => setForm(event.target.value as TopicKnowledge['form'])}><option value="derived">整理成果</option><option value="reference">来源引用</option></select></label>
         <label>性质<select value={certainty} disabled={busy} onChange={event => setCertainty(event.target.value as TopicKnowledge['certainty'])}>{Object.entries(certaintyLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label></div>
-      <label>适用范围<input value={scope} readOnly={busy} onChange={event => setScope(event.target.value)} /></label>
+      <label>适用范围<TextInput value={scope} readOnly={busy} onChange={event => setScope(event.target.value)} /></label>
       {issue && <p className="mobile-topics-issue" role="status">{issue}</p>}
       {unknown && <button type="button" onClick={() => { void inspect() }}>检查原保存结果</button>}
       {checked && <div><p>{checked.entry ? '已读回原条目的当前保存版本；草稿尚未替换。' : '已确认当前没有此条目；草稿仍保留。'}</p>

@@ -1,7 +1,7 @@
 .mobile-topics { height: 100%; overflow-y: auto; color: var(--text); overscroll-behavior: contain; padding: 4px 12px 12px; }
 .mobile-topics h1, .mobile-topics h2 { overflow-wrap: anywhere; font-size: 17px; margin: 4px 0; }
 .mobile-topics button { min-height: 44px; padding: var(--sp-4) var(--sp-5); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); }
-.mobile-topics button:focus-visible, .mobile-topics input:focus-visible, .mobile-topics textarea:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.mobile-topics button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .mobile-topics-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .mobile-topics-actions h1, .mobile-topics-actions small { flex: 1; }
 .mobile-topic-organization { position: relative; }
