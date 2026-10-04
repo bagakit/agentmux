@@ -135,7 +135,8 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-session-toolbar > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: 12px; }
 .mobile-navigation > button > span { font-size: 10px; }
 .mobile-spatial-search { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 9px; color: var(--text-3); background: var(--surface-1); min-height: 44px; padding: 4px 10px; }
-.mobile-spatial-search input { width: 100%; min-width: 0; border: 0; outline: none; color: var(--text); background: transparent; font: inherit; font-size: 16px; }
+.mobile-spatial-search input { width: 100%; min-width: 0; border: 0; padding: 0; outline: none; color: var(--text); background: transparent; font: inherit; font-size: 16px; }
+.mobile-spatial-search input.ui-input:focus-visible { outline: none; }
 .mobile-spatial-search:focus-within { outline: 1px solid var(--focus-line); }
 .mobile-spatial-subheading > span { color: var(--text-3); font-size: 12px; font-weight: 400; }
 .mobile-spatial-panel .mobile-session-icon { width: 28px; height: 28px; flex: 0 0 28px; border-radius: 8px; }

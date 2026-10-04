@@ -1,4 +1,5 @@
 import { useEffect, useId, useState } from 'react'
+import { TextInput } from '@agentmux/client-ui/input'
 import { ArrowLeft, ChevronRight, Layers, RefreshCw, Search } from 'lucide-react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxRpcResult } from '@agentmux/core'
@@ -83,7 +84,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     {!connected && <p className="mobile-spatial-notice" role="status">连接暂不可用，原工作面与最近目录保留。</p>}
     {issue && <p className="mobile-spatial-notice" role="status">{issue}</p>}
     {presentationIssues.map(value => <p key={value} className="mobile-spatial-notice" role="status">{value} 原目录与工作面保留。<button type="button" onClick={() => refresh(count => count + 1)}>刷新原呈现</button></p>)}
-    <label className="mobile-spatial-search"><Search size={16} /><input value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
+    <label className="mobile-spatial-search"><Search size={16} /><TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder={home === 'focus' ? '查找 Agent 或工作空间' : '查找工作空间'} aria-label="查找" /></label>
     {home === 'focus' ? <>
       {(['attention', 'working', 'results', 'idle', 'disconnected'] as const).map(group => {
         const values = rows.filter(row => row.group === group).flatMap(row => { const session = sessionById.get(row.agentSessionId); return session ? [session] : [] })
