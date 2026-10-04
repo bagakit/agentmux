@@ -1016,8 +1016,7 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'settings.executors.refresh') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
-    const fields = settingsResourceRecord(result, code)
-    settingsResourceEnvelope(fields, ['input', 'availability', 'executable', 'cause'], code)
+    const fields = settingsResourceEnvelope(result, ['input', 'availability', 'executable', 'cause'], code)
     const captured = settingsResourceEnvelope(fields.input, ['executorId', 'providerId', 'command', 'host'], code)
     const input = {
       executorId: text(captured.executorId, 'Executor ID', code),
@@ -1026,14 +1025,13 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
       host: settingsResourceRecord(captured.host, code)
     }
     const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true as const, operation }
-    settingsResourceBudget(source, code)
     const executable = Object.hasOwn(fields, 'executable') ? text(fields.executable, 'Resolved executable', code) : undefined
     if (fields.availability !== 'available' && fields.availability !== 'missing' && fields.availability !== 'check-failed') {
       throw new AgentMuxError('Executor Refresh outcome is invalid.', code)
     }
     if (fields.availability === 'available') {
       if (executable === undefined || Object.hasOwn(fields, 'cause')) throw new AgentMuxError('Available executable fact is invalid.', code)
-      return { ...base, result: { input, executable, availability: fields.availability } }
+      return resourceReceipt({ ...base, result: { input, executable, availability: fields.availability } })
     }
     const cause = Object.hasOwn(fields, 'cause') ? (() => {
       const value = settingsResourceEnvelope(fields.cause, ['code', 'message'], code)
@@ -1041,10 +1039,10 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     })() : undefined
     if (fields.availability === 'check-failed') {
       if (!cause) throw new AgentMuxError('A failed executable check requires its cause.', code)
-      return { ...base, result: { input, availability: fields.availability, cause, ...(executable === undefined ? {} : { executable }) } }
+      return resourceReceipt({ ...base, result: { input, availability: fields.availability, cause, ...(executable === undefined ? {} : { executable }) } })
     }
     if (executable === undefined) throw new AgentMuxError('Missing executable fact is invalid.', code)
-    return { ...base, result: { input, executable, availability: fields.availability, ...(cause ? { cause } : {}) } }
+    return resourceReceipt({ ...base, result: { input, executable, availability: fields.availability, ...(cause ? { cause } : {}) } })
   }
   if (operation === 'diagnostics.crash-log.get' || operation === 'diagnostics.crash-log.reveal') {
     const code = 'CONTROL_PROTOCOL_ERROR'
@@ -1090,18 +1088,21 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
   if (operation === 'settings.hosts.list' || operation === 'settings.hosts.test') {
     const code = 'CONTROL_PROTOCOL_ERROR'
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result'], code)
-    settingsResourceBudget(source, code)
-    const fields = settingsResourceRecord(result, code)
     if (operation === 'settings.hosts.list') {
-      settingsResourceEnvelope(fields, ['hosts'], code)
-      if (!Array.isArray(fields.hosts)) throw new AgentMuxError('Host list is invalid.', code)
-      const hosts = fields.hosts.map(host => settingsResourceRecord(host, code))
-      return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { hosts } }
+      const fields = settingsResourceEnvelope(result, ['hosts'], code)
+      if (!Array.isArray(fields.hosts) || Object.getPrototypeOf(fields.hosts) !== Array.prototype ||
+        Reflect.ownKeys(fields.hosts).length !== fields.hosts.length + 1) throw new AgentMuxError('Host list is invalid.', code)
+      const hosts = Array.from({ length: fields.hosts.length }, (_, index) => {
+        const descriptor = Object.getOwnPropertyDescriptor(fields.hosts, String(index))
+        if (!descriptor?.enumerable || !('value' in descriptor)) throw new AgentMuxError('Host list is invalid.', code)
+        return settingsResourceRecord(descriptor.value, code)
+      })
+      return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation, result: { hosts } })
     }
-    settingsResourceEnvelope(fields, ['input', 'outcome', 'detail'], code)
+    const fields = settingsResourceEnvelope(result, ['input', 'outcome', 'detail'], code)
     if (fields.outcome !== 'ready' && fields.outcome !== 'unsupported' && fields.outcome !== 'check-failed') throw new AgentMuxError('Host check outcome is invalid.', code)
-    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
-      result: { input: settingsResourceRecord(fields.input, code), outcome: fields.outcome, detail: text(fields.detail, 'Host check detail', code) } }
+    return resourceReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { input: settingsResourceRecord(fields.input, code), outcome: fields.outcome, detail: text(fields.detail, 'Host check detail', code) } })
   }
   if (operation === 'settings.browser.links.list' || operation === 'settings.browser.links.forget') {
     const code = 'CONTROL_PROTOCOL_ERROR'
@@ -1421,9 +1422,10 @@ export function parseAgentMuxControlReceipt(value: unknown): AgentMuxControlRece
   const source = object(value, 'Control receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
   const operation = Object.getOwnPropertyDescriptor(source, 'operation')
   if (operation && !('value' in operation)) throw new AgentMuxError('Control receipt operation must be data.', 'CONTROL_PROTOCOL_ERROR')
-  if (isToolkitOperation(operation?.value)) {
+  if (isToolkitOperation(operation?.value) || operation?.value === 'settings.executors.refresh' ||
+    operation?.value === 'settings.hosts.list' || operation?.value === 'settings.hosts.test') {
     // Validate header descriptors before reads; the original typed result codec
-    // owns nested retained executions, independently of the generic JSON depth.
+    // owns nested payloads, independently of the opaque Settings JSON depth.
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', 'result', 'error'], 'CONTROL_PROTOCOL_ERROR')
     settingsResourceEnvelope(source, ['schemaVersion', 'requestId', 'ok', 'operation', source.ok === true ? 'result' : 'error'], 'CONTROL_PROTOCOL_ERROR')
     const { result: _result, ...header } = source

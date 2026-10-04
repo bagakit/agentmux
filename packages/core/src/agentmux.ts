@@ -10,7 +10,7 @@ import {
 import { forwardAgentMuxRpcStdio } from './agentmux-rpc-stdio.js'
 import { isAgentMuxRpcMethod, isAgentMuxRpcStream } from './public-rpc.js'
 import { AgentMuxError } from './errors.js'
-import { rpcEncode } from './public-rpc-wire.js'
+import { AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode } from './public-rpc-wire.js'
 import {
   AGENTMUX_CLI_COMMANDS, agentMuxCliArguments, agentMuxCliMatch,
   agentMuxCliRequestsHelp, parseAgentMuxCliInvocation
@@ -18,15 +18,21 @@ import {
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { agentMuxPmoPlaybook } from './agentmux-pmo-playbook.js'
 
-function write(value: unknown, stream: NodeJS.WritableStream = process.stdout, boundedReader = false): void {
-  if (!stream.write(JSON.stringify(value) + '\n') && boundedReader) {
-    throw new AgentMuxError('CLI output consumer is too slow; reconnect using the original cursor.', 'CONTROL_UNAVAILABLE')
+function write(value: unknown, stream: NodeJS.WriteStream = process.stdout, boundedReader = false): void {
+  const line = boundedReader ? rpcEncode(value) : JSON.stringify(value) + '\n'
+  // Synchronous RPC callbacks cannot await drain. Admit a legal frame even
+  // above the pipe highWaterMark; cap actual pending bytes before enqueueing.
+  if (boundedReader && stream.writableLength + Buffer.byteLength(line) > AGENTMUX_RPC_MAX_MESSAGE_BYTES + 1) {
+    outputAbandoned = true
+    throw new AgentMuxError('CLI pending output exceeds its byte budget; reconnect this reader. Existing Agents are preserved.', 'CONTROL_UNAVAILABLE')
   }
+  stream.write(line)
 }
 let operationId: string | undefined
 const outputClosed = new AbortController()
 let outputFailed = false
 let failureReported = false
+let outputAbandoned = false
 function partial(method: AgentMuxRpcMethod, result: unknown): boolean {
   if (!result || typeof result !== 'object') return false
   const body = result as Record<string, unknown>
@@ -57,8 +63,9 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
   let finish!: () => void
   let streamError: unknown
   let failureFrameDelivered = false
+  let cancelled = false
   const ended = new Promise<void>(resolve => { finish = resolve })
-  const interrupted = () => { controller.abort(); finish() }
+  const interrupted = () => { cancelled = true; outputAbandoned = true; controller.abort(); finish() }
   process.once('SIGINT', interrupted)
   process.once('SIGTERM', interrupted)
   outputClosed.signal.addEventListener('abort', interrupted, { once: true })
@@ -80,10 +87,14 @@ async function follow(client: AgentMuxRpcClient, method: AgentMuxRpcStreamMethod
       onEnd: error => { if (error) streamError = error; finish() }
     })
     await ended
+    if (cancelled) return 0
     if (streamError) {
       if (failureFrameDelivered) return 1
       throw streamError
     }
+    return 0
+  } catch (error) {
+    if (!cancelled) throw error
     return 0
   } finally {
     process.off('SIGINT', interrupted)
@@ -204,4 +215,13 @@ process.stdout.on('error', () => {
   outputClosed.abort()
   reportFailure(new AgentMuxError('CLI output consumer disconnected; reconnect using the original cursor.', 'CONTROL_UNAVAILABLE'))
 })
-void main().then(code => { if (!outputFailed) process.exitCode = code }, reportFailure)
+function finishAbandonedOutput() {
+  // process.stdout has special shutdown semantics: pending pipe writes can
+  // keep it alive even after destroy(). Only an explicitly abandoned reader
+  // skips them, after main has awaited subscription/client disposal and the
+  // small stderr capacity receipt has flushed. Ordinary completion flushes.
+  if (outputAbandoned) process.stderr.write('', () => process.exit(process.exitCode ?? 0))
+}
+void main().then(code => { if (!outputFailed) process.exitCode = code; finishAbandonedOutput() }, error => {
+  reportFailure(error); finishAbandonedOutput()
+})
