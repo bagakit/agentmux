@@ -318,6 +318,7 @@ export async function connectHostedAgentMux(options: {
       stream = { dispose: releaseAcquired }
       reconnectDelay = 100
       reconnectAttempts = 0
+      let projectionFailure: unknown
       try {
         const projectionResponse = await rpc.call('runtime.invoke', { consumerId, fence: fence(),
           invocation: { method: 'runtimeProjection', args: [] } })
@@ -325,6 +326,7 @@ export async function connectHostedAgentMux(options: {
         for (const subject of projection.subjects) publisher.publishRunState(subject.run,
           subject.kind === 'agent' ? subject.agentSession.agentSessionId : undefined)
       } catch (error) {
+        projectionFailure = error
         // Host/Store identity and process observation are separate facts. An unsuccessful read
         // cannot discard the confirmed event lease or withhold writes which the original Core
         // can still validate against the exact Session and Run. Never invent a process-state.
@@ -361,8 +363,8 @@ export async function connectHostedAgentMux(options: {
           }
         }
         requireObservation()
-        connectionState('restored')
-      } else if (connectionPhase !== undefined) connectionState('restored')
+        connectionState('restored', projectionFailure)
+      } else if (connectionPhase !== undefined) connectionState('restored', projectionFailure)
     })().finally(() => { connecting = undefined })
     return connecting
   }

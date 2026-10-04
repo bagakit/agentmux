@@ -1559,10 +1559,10 @@ export type AgentMuxClientEvent = (
       /**
        * 我们与本 Host 的 daemon 之间那条**唯一实时连接**的状态变化。不针对某个 run/session：单 daemon
        * 语义下连接是共享的，断了就是这台 Host 上所有 Agent 一起失联。渲染端据此把该 Host 的每个 Agent
-       * Session 置为 `disconnected`（`lost`）、或让它们回到进程真相（`restored`）。
+       * Session 置为 `disconnected`（`lost`）；`restored` 只说明实时连接可用，Session 状态由各 Run 的权威事实恢复。
        *
        * - `lost`：实时通道断了（socket 错误，或 daemon 关流却没交代 run 下场）。开始有界重连。
-       * - `restored`：重连成功、已重新订阅并补发各 run 的当前状态。
+       * - `restored`：实时连接已重新订阅。携带 diagnostic 时恢复观察尚未确认或失败，保留原能力及服务窗；不携带 diagnostic 时本轮观察已完成。
        * - `retrying`：高频重试已停止；每 30 秒可取消地重试一次，显式 connect 可立即重试。
        * - `unrecoverable`：权限或目标等明确错误需要用户处理；不用于重试次数耗尽。
        */

@@ -7,7 +7,7 @@ import type { AgentMuxRpcSubscriptionOptions } from './public-rpc-client.js'
 
 /** The finite SDK surface delegated by a Client to the single semantic Host. */
 export const AGENTMUX_HOSTED_METHODS = [
-  'readDeliveryAttempt', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
+  'connectRuntime', 'readDeliveryAttempt', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'probeAgent', 'probeExecutorAvailability',
   'listHostExecutors', 'configureHostExecutor', 'createHostAgentWithDelivery',
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',

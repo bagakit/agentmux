@@ -99,13 +99,15 @@ export class AgentMuxAgentSessionRegistry {
     catch { /* An observation consumer cannot change the completed filesystem operation. */ }
   }
 
-  async load(hostId: string): Promise<void> {
+  async load(hostId: string, assertCurrent?: () => void): Promise<void> {
     await Promise.allSettled([...this.writeDrains.values()].map((drain) => drain.promise))
+    assertCurrent?.()
     const [sessions, retiredRuns, retiredAgentSessions] = await Promise.all([
       loadAgentSessions(this.store),
       this.store.loadRetiredRuns(),
       this.store.loadRetiredAgentSessions()
     ])
+    assertCurrent?.()
     this.sessions.clear()
     this.providerIdByRun.clear()
     this.providerIdByRetiredRun.clear()

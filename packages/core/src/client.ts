@@ -812,6 +812,7 @@ export class AgentMuxClient {
   private reconnectGeneration = 0
   private reconnectController: AbortController | null = null
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  private runtimeConnecting: Promise<void> | null = null
   private connecting: Promise<void> | null = null
   private connectRequest: Promise<void> | null = null
   private connectionEpoch = 0
@@ -1019,12 +1020,16 @@ export class AgentMuxClient {
 
   private async connectRequested(): Promise<void> {
     const recovering = this.reconnectController !== null
+    const observationNeeded = this.connectionNeedsObservation || !this.connected || !this.kernel.isConnected()
     this.cancelReconnect()
     const epoch = this.connectionEpoch
     const generation = this.reconnectGeneration
     try {
       await this.connectOnce(epoch)
+      this.assertConnectionEpoch(epoch)
       if (recovering) await this.finishReconnect(epoch, generation)
+      else if (observationNeeded) this.publisher.publish({ type: 'connection-state', state: 'restored',
+        evidence: { source: 'run-process', observedAt: Date.now() } })
     } catch (error) {
       if (recovering && epoch === this.connectionEpoch && generation === this.reconnectGeneration) this.scheduleSlowReconnect(epoch)
       throw error
@@ -1041,8 +1046,18 @@ export class AgentMuxClient {
     finally { if (this.connecting === attempt) this.connecting = null }
   }
 
-  private async open(epoch: number): Promise<void> {
-    let phase = 'Runtime connection'
+  /** Confirm the original Runtime transport without waiting for Session or semantic observation. */
+  async connectRuntime(): Promise<void> {
+    if (this.connected && this.kernel.isConnected()) return
+    if (this.runtimeConnecting) return await this.runtimeConnecting
+    const epoch = this.connectionEpoch
+    const request = this.openRuntime(epoch)
+    this.runtimeConnecting = request
+    try { await request }
+    finally { if (this.runtimeConnecting === request) this.runtimeConnecting = null }
+  }
+
+  private async openRuntime(epoch: number): Promise<void> {
     try {
       await this.kernel.connect()
       this.assertConnectionEpoch(epoch)
@@ -1068,21 +1083,46 @@ export class AgentMuxClient {
       // 就在这里驱动整套「置 disconnected → 有界重连 → 恢复真相」。这不是某个 run 的语义错误，故与
       // onError 分居两处。
       this.unsubscribeConnectionLost = this.kernel.onConnectionLost(() => this.handleConnectionLost(epoch))
+      this.assertConnectionEpoch(epoch)
+      if (!this.kernel.isConnected()) throw new AgentMuxError('Runtime connection changed during admission.', 'CTXMUX_DISCONNECTED')
+      this.connected = true
+      this.connectionNeedsObservation = true
+      // Availability comes from the transport. Completion of recovery is still observed separately.
+      this.publisher.publish({ type: 'connection-state', state: 'restored',
+        diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING',
+          message: 'The original Runtime connection is available. Session recovery observation remains unconfirmed; original terminal input and output remain available. Retry Session observation on this endpoint.' },
+        evidence: { source: 'run-process', observedAt: Date.now() } })
+    } catch (error) {
+      if (epoch === this.connectionEpoch && !this.kernel.isConnected()) this.connected = false
+      throw error
+    }
+  }
+
+  private async open(epoch: number): Promise<void> {
+    let phase = 'Runtime connection'
+    try {
+      await this.connectRuntime()
+      this.assertConnectionEpoch(epoch)
       phase = 'lifecycle recovery'
       await this.recoverStaleLifecycles()
+      this.assertConnectionEpoch(epoch)
       phase = 'Session store observation'
-      await this.registry.load('local')
+      await this.registry.load('local', () => this.assertConnectionEpoch(epoch))
+      this.assertConnectionEpoch(epoch)
       phase = 'Run observation'
       const runs = await this.withRunSnapshot(null, () => this.kernel.list(), (snapshot, wasRemoved) => {
+        this.assertConnectionEpoch(epoch)
         const current = snapshot.filter(run => !wasRemoved(run.runId))
         this.backfillEndedRuns(current)
         for (const run of current) this.runPids.set(run.runId, run.pid)
         return current
       })
       // list() 补齐 App 不在运行期间的终局；刚装好的事件订阅只提供此后的新变化。
+      this.assertConnectionEpoch(epoch)
       this.synchronizeAgentRuns(runs)
       phase = 'Hook restoration'
       await this.tryRestoreHookIngress(runs)
+      this.assertConnectionEpoch(epoch)
       // Probe every running Session together. A serial `await` here makes N healthy Agents
       // wait behind N ten-second capability windows, which is especially visible when the
       // user opens several sessions at once. Each promise still owns one exact Run; only the
@@ -1101,6 +1141,7 @@ export class AgentMuxClient {
             error instanceof AgentMuxError &&
             error.code === AGENT_TERMINAL_HANDSHAKE_FAILED
           ) {
+            this.assertConnectionEpoch(epoch)
             // A Run that vanished during this Session's handshake is a real failure for this exact
             // Agent, but it is not a failure of the shared CtxMux connection. Keep the other Sessions
             // attachable and make the scoped failure visible to the renderer.
@@ -1123,6 +1164,7 @@ export class AgentMuxClient {
           handshakeErrors.push(error)
         }
       }))
+      this.assertConnectionEpoch(epoch)
       if (handshakeErrors.length > 0) throw handshakeErrors[0]
       phase = 'pending interaction recovery'
       await this.recoverPendingInteractionResponses(runs)
@@ -1153,6 +1195,10 @@ export class AgentMuxClient {
         this.publisher.publish({ type: 'agent-error', code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
           message: `${phase} failed: ${error instanceof Error ? error.message : String(error)}. The confirmed Runtime connection and original capabilities were retained; observation will retry.`,
           evidence: { source: 'agentmux', observedAt: Date.now() } })
+        this.publisher.publish({ type: 'connection-state', state: 'restored',
+          diagnostic: { code: 'CTXMUX_CONNECTION_OBSERVATION_FAILED',
+            message: `${phase} failed: ${error instanceof Error ? error.message : String(error)}. Original terminal capabilities remain available; retry Session observation on this endpoint.` },
+          evidence: { source: 'agentmux', observedAt: Date.now() } })
         this.scheduleSlowReconnect(epoch, false)
       } else {
         this.connected = false
@@ -1167,6 +1213,10 @@ export class AgentMuxClient {
     if (epoch !== this.connectionEpoch) return
     if (this.reconnecting && !this.connected) return
     this.cancelReconnect()
+    epoch = ++this.connectionEpoch
+    this.runtimeConnecting = null
+    this.connecting = null
+    this.connectRequest = null
     this.connectionNeedsObservation = false
     const now = Date.now()
     // 连续健康满缓刑期 → 清账。判据是「健康了多久」而非「刚刚 restored」：restored 恰恰是抖动那一刻
@@ -1607,6 +1657,7 @@ export class AgentMuxClient {
     this.connectionEpoch += 1
     this.connectionNeedsObservation = false
     this.connected = false
+    this.runtimeConnecting = null
     this.connecting = null
     this.connectRequest = null
     this.reconnecting = false

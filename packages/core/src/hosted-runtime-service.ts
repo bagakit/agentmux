@@ -12,6 +12,13 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'readAgentSessions', 'sessionTimeline', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff'
 ])
+// These exact Run capabilities have no Session-observation prerequisite. Semantic methods keep connect().
+const RUNTIME_METHODS = new Set<AgentMuxHostedMethod>([
+  'connectRuntime', 'runtimeDiagnostics', 'runtimeResourceSnapshot', 'observeRunStorage', 'listRuns',
+  'reattachAgent', 'writeAgent', 'pasteAgent', 'resizeAgent', 'signalAgent',
+  'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
+  'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal'
+])
 type Emit = (event: AgentMuxHostedStreamEvent) => void | Promise<void>
 type Context = { principal?: import('./public-rpc.js').AgentMuxRpcPrincipal; caller?: unknown; sourceDevice?: undefined | import('./types.js').AgentOperationDevice;
   recordDeviceOperation?: (source: import('./types.js').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => Promise<void>; signal?: AbortSignal; afterResponse?: Array<() => void | Promise<void>> }
@@ -161,7 +168,8 @@ export class AgentMuxHostedRuntimeService {
     }
     const original = this.consumer(id), invocation = input as unknown as AgentMuxHostedInvocation
     context.signal?.throwIfAborted()
-    if (!OFFLINE_METHODS.has(invocation.method)) await this.client.connect()
+    if (RUNTIME_METHODS.has(invocation.method)) await this.client.connectRuntime()
+    else if (!OFFLINE_METHODS.has(invocation.method)) await this.client.connect()
     context.signal?.throwIfAborted(); this.assertFence(p.fence)
     if (this.consumer(id) !== original) throw new AgentMuxError('Host consumer changed while reconnecting its original Core.', 'CONTROL_CANCELLED')
     if (context.signal && (invocation.method === 'submitAgentPrompt' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], signal: context.signal }
@@ -292,6 +300,8 @@ export class AgentMuxHostedRuntimeService {
       return { initial: { owner, source: observer.source }, start: () => consumer.start(), dispose: async () => stop() }
     }
     if (method !== 'runtime.attachment-watch' && method !== 'runtime.replay-watch') throw new AgentMuxError('Unknown hosted subscription.', 'RPC_METHOD_NOT_FOUND')
+    await this.client.connectRuntime()
+    this.assertFence(p.fence)
     const target = record(p.target) as AgentMuxHostedAttachmentTarget, afterByte = count(p.afterByte)
     if (p.view !== 'raw' && p.view !== 'terminal' || target.kind !== 'agent-session' && target.kind !== 'terminal-run') throw new AgentMuxError('Invalid Attachment target or view.', 'INVALID_CONTROL_REQUEST')
     if (target.kind === 'agent-session' && typeof target.agentSessionId !== 'string' || target.kind === 'terminal-run' && typeof target.runId !== 'string') throw new AgentMuxError('Invalid Attachment identity.', 'INVALID_CONTROL_REQUEST')
