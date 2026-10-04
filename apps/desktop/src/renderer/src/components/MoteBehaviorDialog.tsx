@@ -1,13 +1,12 @@
 import * as Dialog from '@radix-ui/react-dialog'
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { Check, FileText, MessageCircle, Plus, X } from 'lucide-react'
-import type { FileDocument } from '@agentmux/core'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { MOTE_SOUL_PATH } from '../../../shared/scratch-topics'
 import type { MoteWorkfaceScope } from '../lib/mote-workface'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { MOTE_BEHAVIOR_AXES, deriveMoteBehaviorCode, moteBehaviorRules, parseMoteBehaviorBlock, type MoteBehaviorDraft, type MoteBehaviorPreferences } from '../lib/mote-behavior'
-import { readMoteMaterial, stageMoteBehaviorPreferences } from '../lib/mote-cooperation'
+import { MOTE_BEHAVIOR_AXES, deriveMoteBehaviorCode, moteBehaviorRules, MOTE_BEHAVIOR_PATH, type MoteBehaviorDraft, type MoteBehaviorPreferences } from '../lib/mote-behavior'
+import { readMoteBehavior, saveMoteBehaviorPreferences, type SavedMoteBehavior } from '../lib/mote-cooperation'
 import { openMoteDiscussionDraft } from '../lib/mote-materials-actions'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { fileNavigationSelection, useAppStore } from '../store'
@@ -29,12 +28,12 @@ export function MoteBehaviorAction({ label, children, onClick, expanded }: {
   </>
 }
 
-/** Local editing session; the original SOUL Editor is the only document and Save owner. */
+/** Local editing session; the original Editor/Store is the only document and Save owner. */
 export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, returnFocus }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
   onOpenPath(path: string): Promise<unknown>; onClose(): void; returnFocus(): HTMLElement | null
 }) {
-  const [draft, setDraft] = useState<MoteBehaviorDraft>({ custom: '' }), [saved, setSaved] = useState<FileDocument | null>(null)
+  const [draft, setDraft] = useState<MoteBehaviorDraft>({ custom: '' }), [saved, setSaved] = useState<SavedMoteBehavior | null>(null)
   const [loading, setLoading] = useState(true), [issue, setIssue] = useState<string | null>(null), [busy, setBusy] = useState(false)
   const [extra, setExtra] = useState<'custom' | 'trial' | null>(null), [question, setQuestion] = useState(''), [attempt, setAttempt] = useState(0)
   const form = useRef(draft); form.current = draft
@@ -49,31 +48,28 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
     const navigation = fileNavigationSelection(useAppStore.getState()); let changed = false
     const unsubscribe = useAppStore.subscribe(state => { if (fileNavigationSelection(state) !== navigation) changed = true })
     setLoading(true); setIssue(null)
-    void readMoteMaterial(scope, scope.rootPath + '/' + MOTE_SOUL_PATH).then(observation => {
+    void readMoteBehavior(scope).then(source => {
       if (lifetime.current !== epoch) return
-      if (changed) throw new Error('Your selection changed while reading. Your choices are kept; reread the original SOUL.')
-      const result = observation.result
-      if (result.status !== 'read') throw new Error('The saved SOUL is unconfirmed. ' + (result.status === 'error' || result.status === 'unknown' ? result.message : result.status))
-      setSaved(result.document)
-      const parsed = parseMoteBehaviorBlock(result.document.content)
-      if (parsed.status === 'unconfirmed') setIssue(parsed.message)
+      if (changed) throw new Error('Your selection changed while reading. Your choices are kept; reread the original settings.')
+      setSaved(source)
+      if (source.issue) setIssue(source.issue)
       else if (!edited.current) {
-        const value = parsed.status === 'valid' ? parsed.preferences : { custom: '' }
+        const value = source.preferences
         form.current = value; setDraft(value)
       }
     }).catch(cause => { if (lifetime.current === epoch) { setSaved(null); setIssue(presentError(cause)) } })
       .finally(() => { unsubscribe(); if (lifetime.current === epoch) setLoading(false) })
     return () => { lifetime.current = {}; unsubscribe() }
   }, [attempt])
-  async function review() {
+  async function save() {
     if (busy) return
     if (!code) { setIssue('Choose one option in each of the four pairs.'); return }
-    if (!saved) { setIssue('The saved SOUL is unconfirmed. Your choices are kept; reread it or inspect the original file.'); return }
+    if (!saved || saved.issue) { setIssue('The saved behavior is unconfirmed. Your choices are kept; reread it or inspect the original file.'); return }
     const epoch = lifetime.current, submitted = form.current, submittedTrial = trialInput.current
     const current = () => lifetime.current === epoch && form.current === submitted && trialInput.current === submittedTrial
     setBusy(true); setIssue(null)
     try {
-      await stageMoteBehaviorPreferences(scope, submitted as MoteBehaviorPreferences, saved, onOpenPath, current, reference)
+      await saveMoteBehaviorPreferences(scope, submitted as MoteBehaviorPreferences, saved, onOpenPath, current, reference)
       if (current()) onClose()
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
     finally { if (lifetime.current === epoch) setBusy(false) }
@@ -81,10 +77,10 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
   async function inspect() {
     const epoch = lifetime.current, submitted = form.current
     try {
-      const opened = await onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)
+      const opened = await onOpenPath(scope.rootPath + '/' + (saved?.legacySoul ? MOTE_SOUL_PATH : MOTE_BEHAVIOR_PATH))
       if (lifetime.current !== epoch || form.current !== submitted) return
       if (opened) onClose()
-      else setIssue('The original SOUL Editor is unconfirmed. Your form is kept; retry opening it.')
+      else setIssue('The original settings Editor is unconfirmed. Your form is kept; retry opening it.')
     } catch (cause) { if (lifetime.current === epoch) setIssue(presentError(cause)) }
   }
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
@@ -125,7 +121,7 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
             <div className="mote-behavior-tools">
               <MoteBehaviorAction label="Extra preferences" expanded={extra === 'custom'} onClick={() => setExtra(value => value === 'custom' ? null : 'custom')}><Plus size={16} /></MoteBehaviorAction>
               <MoteBehaviorAction label="Try a cooperation question" expanded={extra === 'trial'} onClick={() => setExtra(value => value === 'trial' ? null : 'trial')}><MessageCircle size={16} /></MoteBehaviorAction>
-              <MoteBehaviorAction label="Open original SOUL file" onClick={() => void inspect()}><FileText size={16} /></MoteBehaviorAction>
+              <MoteBehaviorAction label="Open original behavior file" onClick={() => void inspect()}><FileText size={16} /></MoteBehaviorAction>
             </div>
             {extra === 'custom' ? <label className="mote-behavior-extra">Extra preferences<textarea aria-label="Custom cooperation preferences" rows={3}
               value={draft.custom} onChange={event => update({ ...form.current, custom: event.target.value })} placeholder="What helps us work together?" /></label> : null}
@@ -137,13 +133,14 @@ export function MoteBehaviorDialog({ scope, reference, onOpenPath, onClose, retu
               }}>Prepare new discussion</button>
               <p className="mote-details__hint">Uses saved settings. Edit the question in the new Launcher, then Start.</p>
             </div> : null}
+            {saved?.legacySoul && !issue ? <p className="mote-details__hint">Your original preferences are kept. Save to move them into BEHAVIOR.md.</p> : null}
             {loading ? <p role="status" className="mote-details__hint">Reading saved settings…</p> : null}
-            {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Reread SOUL</button></div> : null}
+            {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Reread settings</button></div> : null}
           </div>
         </div>
-        <footer className="mote-behavior-footer"><p>Review the draft in the original Editor, then Save there.</p><div>
+        <footer className="mote-behavior-footer"><p>Saved settings apply to new discussions. Current conversations keep their context.</p><div>
           <button type="button" className="small-button" onClick={onClose}>Cancel</button>
-          <button type="button" className="primary-button" disabled={busy} onClick={() => void review()}>{busy ? 'Preparing draft…' : 'Review changes'}</button>
+          <button type="button" className="primary-button" disabled={busy} onClick={() => void save()}>{busy ? 'Saving…' : 'Save'}</button>
         </div></footer>
       </Dialog.Content>
     </Dialog.Portal>

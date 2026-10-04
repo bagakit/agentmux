@@ -10,8 +10,8 @@ import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { documentKey } from '../lib/workbench-tabs'
-import { readMoteMaterial } from '../lib/mote-cooperation'
-import { MOTE_BEHAVIOR_AXES, parseMoteBehaviorBlock } from '../lib/mote-behavior'
+import { readMoteMaterial, readMoteBehavior, type SavedMoteBehavior } from '../lib/mote-cooperation'
+import { MOTE_BEHAVIOR_AXES, MOTE_BEHAVIOR_PATH, moteBehaviorIntroduction } from '../lib/mote-behavior'
 import { MoteBehaviorAction, MoteBehaviorDialog } from './MoteBehaviorDialog'
 import { useAppStore } from '../store'
 import { useWorkspaceFileTree } from './file-tree/useWorkspaceFileTree'
@@ -126,7 +126,7 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
     }).catch(error => { if (currentNote.current === noteRequest) setIssue(presentError(error)) })
       .finally(() => { if (currentNote.current === noteRequest) setLoading(false) })
   }, [active, noteRequest])
-  const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && !['SOUL.md', 'topic.md'].includes(entry.name))
+  const notes = (tree.rootCache?.children ?? []).filter(entry => !entry.isDirectory && /\.(md|txt)$/i.test(entry.name) && ![MOTE_SOUL_PATH, MOTE_BEHAVIOR_PATH, 'topic.md'].includes(entry.name))
   const recent = notes.filter(entry => typeof entry.mtimeMs === 'number' && Number.isFinite(entry.mtimeMs))
     .sort((a, b) => b.mtimeMs! - a.mtimeMs!).slice(0, 3)
   const emptyIdeas = !!tree.rootCache && !tree.rootCache.loading && !tree.rootError && notes.length === 0
@@ -176,23 +176,25 @@ function MoteContent({ scope, reference, section, profile, onShowIdeas, onOpenPa
 function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
   scope: MoteWorkfaceScope; active: boolean; onEdit(): void; onOpenPath(path: string): Promise<unknown>
 }) {
-  const key = documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)
+  const key = documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_BEHAVIOR_PATH)
+  const soulKey = documentKey(scope.workspace.id, scope.rootPath + '/' + MOTE_SOUL_PATH)
   const snapshot = () => {
     const state = useAppStore.getState()
     return { revision: state.workspaceFileRevisions[scope.workspace.id] ?? 0,
-      documentIssue: state.documentIssues[key]?.kind, savedRevision: state.documents[key]?.revision }
+      documentIssue: state.documentIssues[key]?.kind, soulIssue: state.documentIssues[soulKey]?.kind, savedRevision: state.documents[key]?.revision }
   }
   const observed = useAppStore(useShallow(state => active ? {
     revision: state.workspaceFileRevisions[scope.workspace.id] ?? 0,
-    documentIssue: state.documentIssues[key]?.kind, savedRevision: state.documents[key]?.revision
+    documentIssue: state.documentIssues[key]?.kind, soulIssue: state.documentIssues[soulKey]?.kind, savedRevision: state.documents[key]?.revision
   } : null))
   const retained = useRef(observed ?? snapshot())
   if (observed !== null) retained.current = observed
-  const { revision, documentIssue, savedRevision } = retained.current
-  const [saved, setSaved] = useState<{ content: string; revision: string } | null>(null)
+  const { revision, documentIssue, soulIssue, savedRevision } = retained.current
+  const [saved, setSaved] = useState<SavedMoteBehavior | null>(null)
   const [issue, setIssue] = useState<string | null>(null), [loading, setLoading] = useState(false), [attempt, setAttempt] = useState(0)
   const [soulOpen, setSoulOpen] = useState(false)
-  const request = useMemo(() => ({}), [revision, attempt, documentIssue, savedRevision])
+  const [soul, setSoul] = useState<string | null>(null), [soulReadIssue, setSoulReadIssue] = useState<string | null>(null)
+  const request = useMemo(() => ({}), [revision, attempt, documentIssue, soulIssue, savedRevision])
   const current = useRef<object | null>(request); current.current = request
   const admitted = useRef<object | null>(null)
   useEffect(() => () => { current.current = null }, [])
@@ -200,26 +202,41 @@ function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
     current.current = request
     if (!active || admitted.current === request) return
     admitted.current = request; setLoading(true); setIssue(null)
-    void readMoteMaterial(scope, scope.rootPath + '/' + MOTE_SOUL_PATH).then(observation => {
+    void readMoteBehavior(scope).then(source => {
       if (current.current !== request) return
-      const result = observation.result
-      if (result.status === 'read') setSaved(result.document)
-      else setIssue('Saved behavior is unconfirmed. ' + (result.status === 'unknown' || result.status === 'error' ? result.message : result.status))
+      setSaved(source); setIssue(source.issue)
     }).catch(cause => { if (current.current === request) setIssue(presentError(cause)) })
       .finally(() => { if (current.current === request) setLoading(false) })
   }, [active, request])
-  const parsed = useMemo(() => saved ? parseMoteBehaviorBlock(saved.content) : null, [saved?.content])
-  const confirmed = !loading && !issue && !documentIssue && parsed?.status === 'valid' ? parsed : null
-  const summary = confirmed ? MOTE_BEHAVIOR_AXES.map(axis => axis.choices.find(choice => choice.value === confirmed.preferences[axis.id])!.title).join(' · ') : null
+  useEffect(() => {
+    if (!active || !soulOpen) return
+    let live = true; setSoulReadIssue(null)
+    void readMoteMaterial(scope, scope.rootPath + '/' + MOTE_SOUL_PATH).then(read => {
+      if (!live) return
+      if (read.result.status === 'read') setSoul(read.result.document.content)
+      else setSoulReadIssue('The original SOUL read is unconfirmed. Open the file to inspect it.')
+    }).catch(cause => { if (live) setSoulReadIssue(presentError(cause)) })
+    return () => { live = false }
+  }, [active, soulOpen, revision, soulIssue])
+  const confirmed = !loading && !issue && !documentIssue && !(saved?.legacySoul && soulIssue) ? saved : null
+  const choices = confirmed ? MOTE_BEHAVIOR_AXES.flatMap(axis => { const choice = axis.choices.find(choice => choice.value === confirmed.preferences[axis.id]); return choice ? [{ id: axis.id, title: choice.title }] : [] }) : []
+  const hasPreferences = !!confirmed && (choices.length > 0 || !!confirmed.preferences.custom)
+  const summary = hasPreferences ? moteBehaviorIntroduction(confirmed!.preferences, 'summary') : null
   return <div className="mote-details__self mote-behavior-summary">
     <div className="mote-details__section-actions"><span>Behavior</span><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><Pencil size={14} /></MoteBehaviorAction></div>
-    {confirmed ? <><span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span><p className="mote-behavior-summary__rules" title={summary!}>{summary}</p></> : !loading && !issue && !documentIssue && parsed?.status === 'absent' ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ArrowRight size={12} /></button> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : issue || documentIssue ? 'Saved behavior is unconfirmed.' : parsed?.status === 'unconfirmed' ? 'Original behavior needs review.' : 'Choose how we work together.'}</p>}
+    {confirmed && hasPreferences ? <div className="mote-behavior-summary__saved" title={summary!}>
+      {confirmed.code ? <span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span> : null}
+      <div className="mote-behavior-summary__choices">{choices.map(choice => <span key={choice.id}>{choice.title}</span>)}</div>
+      {confirmed.preferences.custom ? <p className="mote-behavior-summary__custom">{confirmed.preferences.custom}</p> : null}
+      {confirmed.legacySoul ? <p className="mote-details__hint">Saved in your original SOUL. Save settings once to move them into BEHAVIOR.md.</p> : null}
+    </div> : confirmed ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ArrowRight size={12} /></button> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : 'Saved behavior is unconfirmed.'}</p>}
     {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry settings</button></div> : null}
     <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary><FileText size={12} />Original files<ChevronDown size={12} /></summary>
       {soulOpen && scope.topic.summary ? <div className="mote-details__original-context"><span className="mote-details__hint">topic.md · saved context</span><p>{scope.topic.summary}</p><button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}>Open original context</button></div> : null}
       {soulOpen ? <p className="mote-details__hint">SOUL.md · self instructions</p> : null}
-      {active && soulOpen && (saved || scope.topic.soul) ? <AgentMarkdown content={saved?.content ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
-        workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : soulOpen && !saved && !scope.topic.soul ? <p className="mote-details__hint">Open the original file to inspect it.</p> : null}
+      {active && soulOpen && (soul !== null || scope.topic.soul) ? <AgentMarkdown content={soul ?? scope.topic.soul!.content} className="mote-details__prose" sourcePath={scope.rootPath + '/' + MOTE_SOUL_PATH}
+        workspaceRoot={scope.workspace.path} openWorkspaceFile={path => { void onOpenPath(path) }} /> : soulOpen && soul === null && !scope.topic.soul ? <p className="mote-details__hint">Open the original file to inspect it.</p> : null}
+      {soulReadIssue ? <p role="status" className="mote-details__issue">{soulReadIssue}</p> : null}
       <p className="mote-details__hint">Saved changes apply to new Sessions. Current discussions keep their context; your current directions take priority.</p>
       <button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/' + MOTE_SOUL_PATH)}>Open original SOUL</button>
     </details>

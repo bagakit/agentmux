@@ -64,7 +64,10 @@
 .mote-behavior-summary { padding: 8px 0 12px; }
 .mote-behavior-summary .mote-details__section-actions { margin-bottom: 0; }
 .mote-behavior-summary > p { margin: 7px 0; line-height: 1.6; color: var(--text-2); }
-.mote-behavior-summary__rules { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mote-behavior-summary__saved { display: grid; gap: 8px; padding-top: 5px; }
+.mote-behavior-summary__choices { display: flex; flex-wrap: wrap; gap: 5px; }
+.mote-behavior-summary__choices > span { padding: 3px 7px; border-radius: 5px; background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.4; }
+.mote-behavior-summary__custom { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden; }
 .mote-behavior-summary__tag { display: inline-block; color: var(--text); font-size: var(--fs-meta); font-weight: 600; }
 .mote-behavior-summary .mote-details__soul { margin-top: 8px; font-size: var(--fs-meta); }
 .mote-details__soul summary { display: flex; align-items: center; gap: 6px; color: var(--text-3); }
