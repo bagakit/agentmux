@@ -375,7 +375,7 @@ Hook 对原生主会话的解释同时使用当前已校验的 Session／Run／P
 - `agentmux send` 的消息必须带可验证的来源、目标和 AgentMux Session/Run 关联事实；这些事实来自 Core 凭证和会话上下文，不得从 View、Region、标题或正文猜出。`requestId` 只标识 Control request，不能充当 `messageId`。
 - 全局消息队列由 AgentMux Core 独占持有。消息记录 append-only 且不可变，至少保留 `messageId`、版本化 A2A envelope、`createdAt`、sender/recipient、workspace/session/run 关联、thread/correlation/replyTo、顺序号，以及独立的投递状态变更和失败原因；消息本体和投递状态不能因空快照、握手超时或重启被清空。
 - 队列重启后必须可 reopen/replay。consumer 游标与 ack 带 generation fence；重复检查可安全重放，迟到或旧 generation 的 ack 必须失败而不能推进新一代游标。相同 `messageId`/operation 的重试必须幂等。
-- 队列必须有界并明确背压或拒绝码。无法确认 durable append 时不得返回已入队；Store 短暂故障按服务窗降级，不能把健康 Agent 误判为死亡，也不能静默丢正文。正文原样保留，可读来源只是展示，不是认证。
+- 单条消息解析及在途处理内存须有明确边界及背压或拒绝码；累计 durable journal 的保全与合法消息准入沿[持久消息的显式消费与派发等待](#持久消息的显式消费与派发等待)，不将累计历史计入上述资源额度。无法确认 durable append 时不得返回已入队；Store 短暂故障按服务窗降级，不能把健康 Agent 误判为死亡，也不能静默丢正文。正文原样保留，可读来源只是展示，不是认证。
 
 ## A2A 消息要让人一眼看懂
 

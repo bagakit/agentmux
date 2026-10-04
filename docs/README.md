@@ -40,7 +40,7 @@
 
 - 包版本、平台和依赖：各包 `package.json` 与根 `pnpm-lock.yaml`。
 - 随包 ctxmux 源码身份、协议、SDK 和二进制：唯一 [vendor manifest](../packages/core/vendor/ctxmux/darwin-arm64/manifest.json)。实际 serving Runtime 身份另由公开 Runtime 事实确认。
-- 实现与接线：当前源码及其定义文件外的消费入口；源码存在不代表已经安装或通过行为验收。
+- 实现与接线：当前源码及其真实产品消费调用链；源码存在不代表已经安装或通过行为验收。
 - 任务状态与 acceptance：官方 `feature-tracker.sh` 读取 `.bagakit/feature-tracker/`；提交、合并和安装事实各按自己的 owner 核对。
 - 验证结果：绑定候选、场景、命令和范围的实际 receipt。测试策略描述方法，不是当前候选的通过报告。
 
