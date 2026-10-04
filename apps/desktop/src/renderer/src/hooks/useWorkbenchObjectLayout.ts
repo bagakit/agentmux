@@ -13,7 +13,10 @@ export function useWorkbenchObjectLayout(workspaceId: string, residentLayout?: W
     activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface, selectedDemandId: state.selectedDemandId })))
   const current = useMemo(() => enabled ? workbenchObjectLayout({ ...facts, sessions: [] }, workspaceId, residentLayout)
     : { layout: null, choice: null, confirmed: false, issues: [] }, [facts, workspaceId, residentLayout, enabled])
-  const identity = JSON.stringify([workspaceId, current.choice?.spaceId, current.choice?.zoneId])
+  const choice = current.choice
+  const identity = JSON.stringify([workspaceId, choice?.spaceId, choice?.zoneId,
+    ...(choice?.spaceId === null && choice.zoneId === null
+      ? [choice.groupId, choice.tabId, choice.regionId] : [])])
   const retained = useRef<{ identity: string; layout: WorkspaceLayout } | null>(null)
   if (retained.current?.identity !== identity) retained.current = null
   if (current.confirmed && current.layout) retained.current = { identity, layout: current.layout }
