@@ -1,6 +1,7 @@
 import { fixtureClock as upstreamFixtureClock, fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
+import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { inspectCodexPromptExecution } from '../src/providers/codex-prompt-execution.js'
 
 // Complete native bottom pane: a status line, empty composer, custom status footer,
@@ -113,5 +114,58 @@ describe('captured native warning footer', () => {
     ['dim warning text unlike the captured native pane', warningHint.replace('4 warnings', '\x1b[2m4 warnings\x1b[22m')]
   ])('keeps %s unavailable', async (_name, hint) => {
     expect(await inspectWarning(warningBody + hint)).toBe('unavailable')
+  })
+})
+
+// Observed current native pane: a model/status footer and only the right warning
+// badge. Keep the geometry and ANSI attributes, without recording user history.
+describe('native warnings-only final row', () => {
+  const provider = new AgentProviderRegistry().get('codex')
+  async function inspectOnly(options: {
+    cols?: number, rows?: number, hint?: string, warningRow?: number,
+    warningColumn?: number, before?: string, after?: string, dim?: boolean
+  } = {}) {
+    const cols = options.cols ?? 233, rows = options.rows ?? 75
+    const composerRow = rows - 3, statusRow = rows - 1
+    const hint = options.hint ?? '⚠ 4 warnings · f2 to view'
+    const terminal = new AgentTerminalScreen(cols, rows)
+    try {
+      const output = `\x1b[?2026h\x1b[2J\x1b[${composerRow - 3};1H\x1b[2m  Worked for 45s • ${upstreamFixtureClock(14, 26)}\x1b[22m` +
+        `\x1b[${composerRow};1H› \x1b[2mAsk Codex to do anything\x1b[22m` +
+        `\x1b[${statusRow};3HGPT-6.1-Sol xhigh · ${upstreamFixtureDisplayPath("project")} · Main` +
+        (options.before ?? '') +
+        `\x1b[${options.warningRow ?? rows};${options.warningColumn ?? cols - hint.length}H` +
+        (options.dim ? '\x1b[2m' : '\x1b[22m') + hint + '\x1b[22m' +
+        (options.after ?? '') + `\x1b[${composerRow};3H\x1b[?2026l`
+      const bytes = Buffer.from(output)
+      await terminal.write({ startByte: 0, endByte: bytes.length, dataBytes: bytes })
+      expect(provider.catalog.capabilities.promptExecution?.immediate).toBe('native-steer')
+      return provider.inspectPromptExecution!(terminal.snapshot(), 'native-steer')
+    } finally { terminal.dispose() }
+  }
+
+  it('accepts the complete current right-aligned warnings-only native pane', async () => {
+    expect(await inspectOnly()).toBe('idle')
+  })
+  it('uses the actual viewport edges for the singular warning badge', async () => {
+    expect(await inspectOnly({ cols: 100, rows: 30, hint: '⚠ 1 warning · f2 to view' })).toBe('idle')
+  })
+  it.each([
+    ['dim badge', { dim: true }],
+    ['shifted badge', { warningColumn: 207 }],
+    ['clipped badge', { warningColumn: 210 }],
+    ['wrong final row', { warningRow: 74, before: ("\u001b[74;1H\u001b[2K\u001b[73;3HGPT-6.1-Sol xhigh · " + (upstreamFixtureDisplayPath("project"))) }],
+    ['zero warnings', { hint: '⚠ 0 warnings · f2 to view' }],
+    ['unknown count', { hint: '⚠ ? warnings · f2 to view' }],
+    ['unknown key', { hint: '⚠ 4 warnings · f3 to view' }],
+    ['truncated label', { hint: '⚠ 4 warnings · f2 to vie' }],
+    ['duplicate badge', { before: '\x1b[75;3H⚠ 4 warnings · f2 to view' }],
+    ['extra tail text', { after: '\x1b[75;3HKEEP_UNKNOWN' }],
+    ['wrapped badge', { warningColumn: 225 }],
+    ['actual draft after cursor', { after: '\x1b[72;3HKEEP_NATIVE_DRAFT' }],
+    ['approval instead of empty composer', { after: '\x1b[72;1H1. Approve request' }],
+    ['question between composer and footer', { before: '\x1b[73;1H1. Choose an answer' }]
+  ])('keeps %s unavailable', async (_name, options) => {
+    expect(await inspectOnly(options)).toBe('unavailable')
   })
 })

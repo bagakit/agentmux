@@ -24,13 +24,14 @@ export function inspectCodexPromptExecution(screen: AgentTerminalScreenSnapshot,
   const footer = lines[footerRow]?.text.trim() ?? ''
   if (!footer || !/^(?:\? for shortcuts|\S+ (?:none|minimal|low|medium|high|xhigh|default)(?: ·|$)|\d+% context left)/u.test(footer)) return 'unavailable'
   // A custom status line leaves the native shortcut hint on the next row.
-  // The native warning badge shares the last row with a non-dim shortcut label.
-  // Recognize its complete, aligned layout; other hints retain the dim label check.
+  // The last-row warning badge can share a non-dim shortcut label or stand alone.
+  // Recognize only its complete, aligned layout; other hints retain the dim check.
   const hintLine = lines[footerRow + 1]
   const hint = hintLine?.text.trim() ?? ''
   const nativeWarnings = Boolean(!footer.startsWith('?') && hintLine && !hintLine.wrapped && footerRow + 1 === rows - 1 &&
-    hintLine.text.search(/\S/u) === markerColumn + 2 && hintLine.text.trimEnd().length === cols - 1 &&
-    /^\? for shortcuts {2,}⚠ [1-9]\d* warnings? · f2 to view$/u.test(hint) &&
+    hintLine.text.trimEnd().length === cols - 1 &&
+    (hintLine.text.search(/\S/u) === markerColumn + 2 && /^\? for shortcuts {2,}⚠ [1-9]\d* warnings? · f2 to view$/u.test(hint) ||
+      /^⚠ [1-9]\d* warnings? · f2 to view$/u.test(hint)) &&
     hintLine.cells.every(cell => !cell.chars.trim() || !cell.dim))
   if (hint && !nativeWarnings) {
     if (footer.startsWith('?') || hintLine?.wrapped ||
