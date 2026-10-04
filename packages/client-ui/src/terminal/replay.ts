@@ -18,7 +18,17 @@ export const TERMINAL_REPLAY_BATCH_BYTES = 128 * 1024
 
 /** Let the host process input, navigation, and close actions between parser batches. */
 export function yieldTerminalWork(): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, 0))
+  return new Promise((resolve) => {
+    // This is a task boundary, not a timed wait: hidden pages throttle timers even when the
+    // inner parser has its own task scheduler. Each continuation owns and releases its ports.
+    const channel = new MessageChannel()
+    channel.port1.onmessage = () => {
+      channel.port1.close()
+      channel.port2.close()
+      resolve()
+    }
+    channel.port2.postMessage(null)
+  })
 }
 
 /** Restores retained terminal bytes without turning a large replay into one uninterruptible write. */
