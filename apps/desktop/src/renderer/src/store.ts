@@ -409,7 +409,7 @@ export type ErrorNoticeContext = {
 // a semantic resume from silently consuming messages addressed to its predecessor.
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
-const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown> }>()
+const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown>; waitingForInteraction: Set<string> }>()
 type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
 // A click's diagnostic follows its one ordered consumer; it never grants input.
 const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
@@ -8223,6 +8223,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       await pending
       if (originalDrain?.submitted.has(operationId) || confirmedSteerDelivery(get().timelines[sessionId], sessionId, operationId)) return 'submitted'
       if (originalDrain?.failures.has(operationId)) throw originalDrain.failures.get(operationId)
+      if (originalDrain?.waitingForInteraction.has(operationId)) return 'unconfirmed'
       throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original selection left the ordered consumer without a confirmed submission. No new operation was created; inspect the original queue and retry this message.')
     } catch (error) {
       const failure = describeError(error)
@@ -8273,7 +8274,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const selectedIds = (get().agentSteerQueues[sessionId] ?? []).filter(entry =>
       !entry.archived && !entry.awaitingExplicitSend && entry.promptCondition === null && entry.execution !== undefined)
       .map(entry => entry.operationId)
-    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>(), failures: new Map<string, unknown>() }
+    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>(), failures: new Map<string, unknown>(), waitingForInteraction: new Set<string>() }
+    const retainWaitingSelections = (runId: string): void => {
+      for (const item of get().agentSteerQueues[sessionId] ?? []) {
+        if (!item.archived && !item.awaitingExplicitSend && item.runId === runId &&
+          item.promptCondition === null && item.execution !== undefined) drain.waitingForInteraction.add(item.operationId)
+      }
+    }
     drain.promise = Promise.resolve().then(async () => {
       try {
         for (;;) {
@@ -8297,6 +8304,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ??
             pendingEntries?.find(item => item.promptCondition === null && item.execution !== undefined) ?? pendingEntries?.[0]
           if (!entry) { refuseSelections('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived, paused or belongs to a different Run before dispatch.'); return }
+          if (entry.runId === currentRunId && entry.promptCondition === null && entry.execution !== undefined && session.pendingInteraction) {
+            retainWaitingSelections(currentRunId)
+            return
+          }
           if (!drain.explicitSteers.has(entry.operationId) && entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) {
             refuseSelections('CONTROL_UNAVAILABLE', session.pendingInteraction ? 'The original Agent is waiting for an interaction response. Answer it before retrying this message.' : `Original Run ${session.control.run.runId} is ${session.processState}; Agent status is ${session.status.state}${session.status.detail ? `: ${session.status.detail}` : ''}`)
             return
@@ -8397,6 +8408,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               if (fresh.kind !== 'agent' || fresh.hostId !== attemptHostId || fresh.control.hostId !== attemptHostId ||
                 fresh.control.agentSessionId !== attemptSessionId || fresh.control.run.runId !== pending.runId) throw new Error(
                 'The original Session binding changed before message preparation. Your message is kept without dispatch.')
+              if (pending.execution !== undefined && fresh.pendingInteraction) {
+                if (drain.wake) continue
+                retainWaitingSelections(fresh.control.run.runId)
+                return
+              }
               const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
                 afterSubmissionId: fresh.promptSubmissionPredecessor })
               if (!explicitAttempt && (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected')) return
