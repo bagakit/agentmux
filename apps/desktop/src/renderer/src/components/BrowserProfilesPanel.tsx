@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import {
   Download,
   Globe2,
@@ -272,7 +273,7 @@ export function BrowserProfilesPanel({
         event.preventDefault()
         void createProfile()
       }}>
-        <input
+        <TextInput
           aria-label="New Browser Profile name"
           placeholder="New Profile name"
           value={createLabel}
@@ -305,7 +306,7 @@ export function BrowserProfilesPanel({
               </label>
               <label>
                 <span>AgentMux Profile name</span>
-                <input value={importLabel} maxLength={128} onChange={(event) => setImportLabel(event.target.value)} />
+                <TextInput value={importLabel} maxLength={128} onChange={(event) => setImportLabel(event.target.value)} />
               </label>
             </>
           )}
