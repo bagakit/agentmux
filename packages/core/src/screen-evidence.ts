@@ -262,8 +262,7 @@ export class AgentScreenEvidenceStore {
       continuation.type === 'basic-vt' ? continuation.checkpoint.resizeRevision : observation.resizeRevision
     )
     try {
-      if (continuation.type === 'basic-vt' && matcher && (continuation.checkpoint.resizeRevision === 0 ||
-        frameFence?.resizeRevision === continuation.checkpoint.resizeRevision)) {
+      if (continuation.type === 'basic-vt' && matcher) {
         // The seed owns cells/geometry, while real ordered bytes own frame
         // completion. Bound this one-time scan independently of history length.
         const fence = continuation.checkpoint.throughByte
@@ -273,7 +272,8 @@ export class AgentScreenEvidenceStore {
             startByte: chunk.startByte, endByte: Math.min(chunk.endByte, fence),
             dataBytes: chunk.dataBytes.subarray(0, Math.min(chunk.endByte, fence) - chunk.startByte)
           }))
-          built.seedFrameEvidence(chunks, fence)
+          built.seedFrameEvidence(chunks, fence, continuation.checkpoint.resizeRevision === 0 ? 0
+            : frameFence?.resizeRevision === continuation.checkpoint.resizeRevision ? frameFence.outputByte : undefined)
         }
       }
       if ((this.generations.get(session.agentSessionId) ?? 0) !== generation) {

@@ -14,10 +14,10 @@ import type { AgentMuxStoredAgentSession } from '../src/types.js'
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const defer = () => { let resolve!: () => void; const promise = new Promise<void>(yes => { resolve = yes }); return { promise, resolve } }
-type Phase = 'handshake' | 'registered-wait' | 'frame-scan'
+type Phase = 'handshake' | 'registered-wait' | 'frame-scan' | 'current-pane'
 
 // Actual public Client/Coordinator/FileStore/Screen and RPC; only Runtime bytes and Provider facts are controlled.
-async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immediate') {
+async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immediate', closedFrame = true) {
   const root = await mkdtemp(join(tmpdir(), 'amx-observation-continuity-'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', root); vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(root, 'state'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
@@ -32,11 +32,11 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
     inspectPromptExecution: snapshot => snapshot.lines[snapshot.cursor.row]?.text.trimEnd() === '>' ? 'idle' : 'unavailable' })
   const client = new AgentMuxClient({ store, providers: [provider] }), owner = client as any
   await owner.registry.load('local'); owner.connected = true
-  let cursor = 0, output = 0, text = '', ready = false, closed = false, cols = 80, rows = 24, revision = 0
+  let cursor = 0, output = 0, text = '', ready = phase === 'current-pane', closed = false, cols = phase === 'current-pane' ? 81 : 80, rows = 24, revision = phase === 'current-pane' ? 1 : 0
   const entered = defer(), release = defer(), waiting = defer(), listeners: Array<(event: any) => void> = [], writes: string[] = []
   const run = () => ({ nativeService: null, lifecycleOperationId: null, runId: record.run.runId, program: 'controlled-steer', args: [], workspacePath: root, pid: 123,
     state: { type: 'running' }, cols, rows, firstAvailableByte: 0, latestOutputBytes: output, acceptedInputBytes: cursor })
-  const frame = () => Buffer.from(`\x1b[?2026h\x1b[2J\x1b[10;1H${ready ? '> ' + text : 'NOT_READY'}\x1b[10;${ready ? 3 + text.length : 1}H\x1b[?2026l`)
+  const frame = () => Buffer.from(`\x1b[?2026h\x1b[2J\x1b[10;1H${ready ? '> ' + text : 'NOT_READY'}\x1b[10;${ready ? 3 + text.length : 1}H${closedFrame ? '\x1b[?2026l' : ''}`)
   let current = frame(); output = current.length
   const history = [{ startByte: 0, endByte: output, dataBytes: current }]
   const draw = () => { current = frame(); const startByte = output; output += current.length; history.push({ startByte, endByte: output, dataBytes: current }); for (const accept of listeners) accept({ type: 'data', runId: record.run.runId, startByte, endByte: output, dataBytes: current, data: current.toString() }) }
@@ -58,11 +58,11 @@ async function fixture(phase: Phase, execution: 'default' | 'immediate' = 'immed
     expect(_id).toBe(record.run.runId); expect(view).toBe('terminal'); listeners.push(listener); const first = ++observations === 1
     if (first && phase === 'handshake') { entered.resolve(); await release.promise }
     const bytes = frame(), endByte = output
-    if (!first) setImmediate(draw) // Controlled Runtime's natural redraw; no Core refresh/input.
+    if (!first && phase !== 'current-pane') setImmediate(draw) // Controlled Runtime's natural redraw; no Core refresh/input.
     return { run: run(), resizeRevision: revision, gap: null, close: async () => {},
-      terminal: phase === 'frame-scan' || !first ? { type: 'basic-vt', checkpoint: { runId: record.run.runId, throughByte: endByte, resizeRevision: revision,
+      terminal: phase === 'frame-scan' || phase === 'current-pane' || !first ? { type: 'basic-vt', checkpoint: { runId: record.run.runId, throughByte: endByte, resizeRevision: revision,
         size: { cols, rows }, restoreSize: { cols, rows }, restoreScrollbackRows: null, resizeAfterRestoreBytes: 0 }, restoreBytes: bytes, resizes: [] } : { type: 'not-requested' },
-      replay: phase === 'frame-scan' || !first ? [] : [...history] }
+      replay: phase === 'frame-scan' || phase === 'current-pane' || !first ? [] : [...history] }
   }
   owner.kernel.replay = async () => {
     if (++scans === 1 && phase === 'frame-scan') { entered.resolve(); await release.promise }
@@ -230,3 +230,37 @@ it('lets the original timer terminate a rebuild storm and an unresolved attachme
     } finally { closing.resolve(); store.discardAll() }
   }
 })
+
+it('submits through the public SDK once from a resized current checkpoint without a new drawing', async () => {
+  const f = await fixture('current-pane')
+  try {
+    const original = structuredClone(f.request)
+    expect(await f.send().then(() => true, () => false)).toBe(true); expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+    expect(f.counts()).toEqual({ observations: 1, scans: 1 }); expect(f.request).toEqual(original)
+    await f.send(); expect(f.writes).toEqual(['ORIGINAL_BODY', '\r'])
+    if (process.env.AGENTMUX_CURRENT_PANE_FACTS) {
+      await mkdir(process.env.AGENTMUX_CURRENT_PANE_FACTS, { recursive: true })
+      await writeFile(join(process.env.AGENTMUX_CURRENT_PANE_FACTS, 'public-current-pane.json'), JSON.stringify({ original, request: f.request, counts: f.counts(), writes: f.writes, native: false }, null, 2) + '\n')
+    }
+  } finally { await f.close() }
+})
+
+it('keeps an open current checkpoint failure and logid truthful through the original public SDK', async () => {
+  const f = await fixture('current-pane', 'immediate', false)
+  try {
+    const original = structuredClone(f.request), error = await f.send().then(() => null, failure => failure)
+    expect(error).toMatchObject({ code: 'AGENT_PROMPT_PREPARATION_FAILED', controlFailure: { disposition: 'not_applied', confirmedInputBytes: 0 } })
+    expect(error.logId).toMatch(/^delivery-/u)
+    const cause = JSON.parse(error.detail)
+    // The original preparation signal and screen timer share the same 8s budget.
+    if (cause.code === 'AGENT_PROMPT_READINESS_CANCELLED') expect(JSON.parse(cause.detail)).toMatchObject({ code: 'TimeoutError' })
+    else expect(cause.code).toBe('AGENT_PROMPT_RENDER_TIMEOUT')
+    expect((await f.client.readDeliveryAttempt(error.logId)).record).toMatchObject({ operationId: original.operationId, expectedRunId: original.expectedRun.runId, error: { detail: error.detail } })
+    expect(f.writes).toEqual([]); expect(f.request).toEqual(original)
+    if (process.env.AGENTMUX_CURRENT_PANE_FACTS) {
+      await mkdir(process.env.AGENTMUX_CURRENT_PANE_FACTS, { recursive: true })
+      await writeFile(join(process.env.AGENTMUX_CURRENT_PANE_FACTS, 'public-open-pane-failure.json'), JSON.stringify({ original, request: f.request,
+        error: { code: error.code, detail: error.detail, controlFailure: error.controlFailure, logId: error.logId }, record: (await f.client.readDeliveryAttempt(error.logId)).record, writes: f.writes, native: false }, null, 2) + '\n')
+    }
+  } finally { await f.close() }
+}, 12_000)
