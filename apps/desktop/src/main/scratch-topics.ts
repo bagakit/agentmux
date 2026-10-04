@@ -12,6 +12,8 @@ import { decodeObjectAvatar, previewObjectAvatar, objectAvatarPng } from './obje
 import { readObjectAvatarFile, saveObjectAvatarFile } from './object-avatar-files.js'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { NameChangeAudit } from './name-change-audit.js'
+import { MOTE_BEHAVIOR_PATH, DEFAULT_MOTE_BEHAVIOR, parseMoteBehaviorDocument, moteBehaviorIntroduction } from '../shared/mote-behavior.js'
+import { moteSoulForBehaviorContext } from '../shared/mote-behavior-legacy.js'
 import {
   SCRATCH_WORKSPACE_ID,
   MOTE_SOUL_PATH,
@@ -217,6 +219,7 @@ export class ScratchTopics {
   private readonly moteStateWrites = new Map<string, Promise<unknown>>()
   private readonly titleWrites = new Map<string, Promise<unknown>>()
   private readonly pendingEnsures = new Map<string, Promise<ScratchTopicSnapshot>>()
+  private readonly pendingBehaviorScaffolds = new Set<string>()
   private nameAudit: NameChangeAudit | undefined
   setNameAudit(audit: NameChangeAudit): void { this.nameAudit = audit }
   private directoryMaintenanceIssue: { directory: string; message: string; shortenMotes: boolean } | undefined
@@ -519,7 +522,16 @@ export class ScratchTopics {
       ensureDirectory(join(absolutePath, '.agentmux'))
     ])
     await ensureRegularFile(join(absolutePath, 'topic.md'), topicId === PMO_TEAMS_TOPIC_ID ? '# Mote\n\nYour global coordination partner.\n' : initialTitle ? renamedTopicContent(TOPIC_TEMPLATE, initialTitle) : TOPIC_TEMPLATE)
-    if (mote) await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
+    if (mote) {
+      const createdSoul = await ensureRegularFile(join(absolutePath, MOTE_SOUL_PATH), DEFAULT_MOTE_SOUL)
+      const scaffoldKey = JSON.stringify([workspace.id, workspace.hostId, workspace.path, topicId, absolutePath])
+      if (createdSoul) this.pendingBehaviorScaffolds.add(scaffoldKey)
+      // Retry only this owner's observed partial creation, never infer an old Mote from SOUL prose.
+      if (this.pendingBehaviorScaffolds.has(scaffoldKey)) {
+        await ensureRegularFile(join(absolutePath, MOTE_BEHAVIOR_PATH), DEFAULT_MOTE_BEHAVIOR)
+        this.pendingBehaviorScaffolds.delete(scaffoldKey)
+      }
+    }
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_PATH), topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)
     await ensureRegularFile(join(absolutePath, SCRATCH_TOPIC_WIKI_STATE_PATH), '{"enabled":true}\n')
     return (await this.read(workspace, topicId))!
@@ -573,12 +585,26 @@ export class ScratchTopics {
     return (await this.read(workspace, topicId))!
   }
 
+  /** Saved behavior is original file context, never Runtime, permission or an existing Session update. */
+  private async behaviorContext(directory: string): Promise<{ prompt: string; present: boolean }> {
+    try {
+      const content = await readRegularFile(join(directory, MOTE_BEHAVIOR_PATH))
+      const parsed = parseMoteBehaviorDocument(content)
+      return { present: true, prompt: parsed.status === 'valid'
+        ? `Saved behavior from ${MOTE_BEHAVIOR_PATH} (version ${wikiVersion(content)}):\n${moteBehaviorIntroduction(parsed.preferences, 'full')}\nCurrent user instructions and authorization take priority; these preferences grant no new permissions.`
+        : `Saved behavior from ${MOTE_BEHAVIOR_PATH} is unconfirmed: ${parsed.message} Read the original file before relying on its preferences. Original conversations and available capabilities remain usable.` }
+    } catch (error) {
+      return { present: errorCode(error) !== 'ENOENT', prompt: `Saved behavior from ${MOTE_BEHAVIOR_PATH} is unavailable: ${error instanceof Error ? error.message : String(error)}. Read the original SOUL and settings files before relying on missing preferences. This does not change an existing Session or its capabilities.` }
+    }
+  }
+
   async prepareAgent(workspace: WorkspaceRecord, topicId: string, input: {
     providerId: AgentProviderId
     sessionId: string
   }): Promise<PreparedScratchAgentTopic> {
     const snapshot = await this.ensure(workspace, topicId)
     const absolutePath = snapshot.physicalDirectoryPath!
+    const behaviorContext = snapshot.kind === 'mote' ? await this.behaviorContext(absolutePath) : null
     const identityPath = join(
       absolutePath,
       '.agents',
@@ -610,7 +636,8 @@ Your persistent Mote identity is ${topicId}, with its durable home at ${absolute
 This saved personality applies to this new Session. Recovery retains the Session's existing context; editing the file does not hot-update a running Session.
 Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Session, Project and Run facts take precedence over this personality.
 
-${snapshot.soul.content}`] : []),
+${moteSoulForBehaviorContext(snapshot.soul.content, behaviorContext?.present ?? false)}`] : []),
+        ...(behaviorContext ? [behaviorContext.prompt] : []),
         ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : []),
         ...(snapshot.readError ? [`Some original context could not be read. Keep existing work and inspect the original files before relying on missing context:\n${snapshot.readError}`] : []),
         snapshot.wiki?.enabled
