@@ -126,7 +126,15 @@ export function normalizeSessionHistoryPage(
     if (!Array.isArray(item.contentParts)) return invalid()
     const contentParts: AgentSessionHistoryContentPart[] = item.contentParts.map((value: unknown) => {
       const part = object(value)
-      if (part.kind === 'text' && typeof part.text === 'string') return { kind: 'text', text: part.text }
+      if (part.kind === 'text' && typeof part.text === 'string') {
+        const readingRange = part.readingRange === undefined ? undefined : object(part.readingRange)
+        if (readingRange && (!Number.isSafeInteger(readingRange.start) || !Number.isSafeInteger(readingRange.end) ||
+          (readingRange.start as number) < 0 || (readingRange.end as number) < (readingRange.start as number) ||
+          (readingRange.end as number) > part.text.length)) return invalid()
+        return { kind: 'text', text: part.text, ...(readingRange === undefined ? {} : {
+          readingRange: { start: readingRange.start as number, end: readingRange.end as number }
+        }) }
+      }
       if (part.kind === 'reasoning' && typeof part.text === 'string') {
         if (part.signature !== undefined && typeof part.signature !== 'string') return invalid()
         if (part.redacted !== undefined && typeof part.redacted !== 'boolean') return invalid()

@@ -270,6 +270,12 @@ function parseContentParts(content: unknown): AgentSessionHistoryContentPart[] {
   return []
 }
 
+function grokUserQueryRange(text: string): { start: number; end: number } | undefined {
+  const opening = '<user_query>\n', closing = '\n</user_query>'
+  return text.startsWith(opening) && text.endsWith(closing) && text.length >= opening.length + closing.length
+    ? { start: opening.length, end: text.length - closing.length } : undefined
+}
+
 function convertGrokRecord(
   record: Record<string, unknown>,
   start: number
@@ -282,10 +288,10 @@ function convertGrokRecord(
 
   if (type === 'user') {
     const syntheticReason = extractString(record.synthetic_reason)
-    const isHuman = !syntheticReason || syntheticReason === 'human'
+    const isUserSpeech = !syntheticReason || syntheticReason === 'human'
     const contentParts = parseContentParts(record.content)
 
-    if (!isHuman) {
+    if (!isUserSpeech) {
       return {
         id,
         kind: 'activity',
@@ -294,6 +300,11 @@ function convertGrokRecord(
       }
     }
 
+    // Grok's whole-string native user envelope is a reading projection, never author/source authority.
+    if (typeof record.content === 'string') {
+      const readingRange = grokUserQueryRange(record.content)
+      if (readingRange) contentParts[0] = { kind: 'text', text: record.content, readingRange }
+    }
     return {
       id,
       kind: 'user-message',

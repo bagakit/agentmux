@@ -751,7 +751,9 @@ export type AgentTerminalPromptReadinessState = {
 )
 
 export type AgentSessionHistoryContentPart =
-  | { kind: 'text'; text: string }
+  | { kind: 'text'; text: string;
+      /** Provider-owned reading span in the original text, using UTF-16 indices. Copy keeps text complete. */
+      readingRange?: { start: number; end: number } }
   | { kind: 'resource'; resourceType: 'image' | 'audio' | 'file' | 'other'; reference: string; label?: string }
   | { kind: 'reasoning'; text: string; signature?: string; redacted?: boolean }
   | { kind: 'tool-call'; name: string; input: string; callId?: string }
