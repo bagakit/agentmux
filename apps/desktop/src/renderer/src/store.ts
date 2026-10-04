@@ -373,7 +373,7 @@ export type EditorRegionDiffState = {
   diff: GitFileDiff | null
   error: string | null
 }
-export type MainSurface = 'survey' | 'agents' | 'workbench' | 'board'
+export type MainSurface = 'recall' | 'survey' | 'agents' | 'workbench' | 'board'
 type OpenScratchTopicOptions = {
   /** An explicit new discussion keeps the Mote identity and owns its first draft before preparation. */
   newTab?: boolean
@@ -2896,6 +2896,7 @@ async function ensurePersistHydrated(): Promise<unknown | null> {
 }
 
 function restoredMainSurface(candidate: unknown): MainSurface {
+  if (candidate === 'recall') return 'recall'
   if (candidate === 'survey') return 'survey'
   if (candidate === 'agents') return 'agents'
   return candidate === 'board' ? 'board' : 'workbench'

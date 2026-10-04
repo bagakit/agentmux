@@ -9,9 +9,9 @@ import { projectWorkbenchProjection, type WorkbenchProjectionSelection } from '.
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 
-export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey' } as const
+export const desktopMainSurface = { space: 'workbench', focus: 'agents', goals: 'board', survey: 'survey', recall: 'recall' } as const
 export const desktopSurface: Record<AgentMuxDesktopMainSurface, AgentMuxDesktopSurface> = {
-  workbench: 'space', agents: 'focus', board: 'goals', survey: 'survey'
+  workbench: 'space', agents: 'focus', board: 'goals', survey: 'survey', recall: 'recall'
 }
 export type DesktopSelectionState = {
   activeWorkspaceId: string | null
