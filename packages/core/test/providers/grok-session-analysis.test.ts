@@ -9,6 +9,7 @@ import { AgentMuxClient } from '../../src/client.js'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
 import { SESSION_HISTORY_MAX_PAGE_BYTES, normalizeSessionHistoryPage } from '../../src/session-history.js'
+import { readSessionHistoryTextResource } from '../../src/session-history-content.js'
 import { projectSessionUserMessages, sessionHistoryTextForReading } from '../../src/session-user-messages.js'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../src/control-host.js'
 import {
@@ -1139,8 +1140,12 @@ describe('Grok native whole-user-query reading projection', () => {
     const f = await readingFixture([{ type: 'user', content: raw }])
     const page = await f.client.sessionHistoryPage('grok-test-agent', { limit: 1 })
     expect(SESSION_HISTORY_MAX_PAGE_BYTES).toBe(4 * 1024 * 1024)
-    expect(page.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: raw, readingRange: { start: 13, end: raw.length - 14 } })
-    expect(reading(page.items[0]!.contentParts[0]!)).toBe(body)
+    const part = page.items[0]!.contentParts[0]!
+    if (part.kind !== 'resource' || part.resourceType !== 'text') throw new Error('Expected complete native text resource')
+    const complete = await readSessionHistoryTextResource(part, 0, { source: page.source, recordId: page.items[0]!.id },
+      input => f.client.sessionHistoryResource('grok-test-agent', input))
+    expect(complete).toEqual({ kind: 'text', text: raw, readingRange: { start: 13, end: raw.length - 14 } })
+    expect(reading(complete)).toBe(body)
     expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(SESSION_HISTORY_MAX_PAGE_BYTES)
     expect(await f.bytes()).toEqual(f.before)
     for (const control of f.controls) expect(control).not.toHaveBeenCalled()

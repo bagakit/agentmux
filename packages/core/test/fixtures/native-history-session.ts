@@ -1,6 +1,6 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { vi } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
@@ -9,18 +9,20 @@ import type { CtxmuxRunAdapter } from '../../src/ctxmux-run-adapter.js'
 
 /** Real built-in Provider → public Client → FileStore, with no Runtime connection or model. */
 export async function nativeHistoryFixture(
-  providerId: 'claude' | 'pi',
-  data: string | Buffer | ((root: string) => string)
+  providerId: 'claude' | 'pi' | 'antigravity' | 'droid' | 'grok' | 'kimi',
+  data: string | Buffer | ((root: string) => string),
+  options: { nativeSessionId?: string; relativePath?: string } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), `agentmux-${providerId}-history-`))
-  const path = join(root, 'native.jsonl')
+  const path = join(root, options.relativePath ?? 'native.jsonl')
+  await mkdir(dirname(path), { recursive: true })
   await writeFile(path, typeof data === 'function' ? data(root) : data)
   const storePath = join(root, 'agent-sessions.json')
   const store = new AgentMuxFileAgentSessionStore(storePath)
   const session: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'private-agent', providerId,
     executorId: providerId, hostId: 'local', workspacePath: root, run: { runId: 'unchanged-private-run' },
     retiredRuns: [], createdAt: 1, updatedAt: 1, hookBindingId: 'private-binding', hookToken: 'private-token',
-    nativeHandle: { kind: 'provider', providerId, sessionId: 'native-main', transcriptPath: path } }
+    nativeHandle: { kind: 'provider', providerId, sessionId: options.nativeSessionId ?? 'native-main', transcriptPath: path } }
   await store.compareAndSwap(null, session)
   const before = { native: await readFile(path), store: await readFile(storePath) }
   // Core cancellation settles the logical request before the physical FileStore read/sweep.
