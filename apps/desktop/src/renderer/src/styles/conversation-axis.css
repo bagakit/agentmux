@@ -17,7 +17,7 @@
 /* Absolute marks keep their original time positions; the row contains the full hit height. */
 .conversation-axis {
   position: relative;
-  height: 24px;
+  height: var(--timeline-marker-size);
 }
 
 /* A mark.
@@ -43,8 +43,8 @@
      all while reading like a deliberate touch affordance. This is the mobile-portability requirement
      met at the source rather than deferred, and it costs no layout because the button is absolutely
      positioned and centred on its own centre. */
-  min-width: var(--sp-7);
-  min-height: var(--sp-7);
+  width: var(--timeline-marker-size);
+  height: var(--timeline-marker-size);
   align-items: center;
   justify-content: center;
   border-radius: 50%;
@@ -115,9 +115,8 @@
 }
 
 /* Clusters represent records, never a new author or a substituted timestamp. */
-.conversation-axis__cluster { width:36px; border-radius:var(--radius-sm); }
-.conversation-axis__cluster .conversation-axis__glyph { position:relative; width:32px; height:16px; }
-.conversation-axis__count { position:absolute; right:0; bottom:-2px; min-width:14px; padding:0 2px; border-radius:5px; background:var(--surface-2); box-shadow:0 0 0 2px var(--surface-0); color:var(--text-2); font:600 var(--fs-micro)/14px var(--font-sans); text-align:center; }
+.conversation-axis__cluster { border-radius: 6px; color: var(--text-2); }
+.conversation-axis__count { display: grid; place-items: center; box-sizing: border-box; width: 20px; height: 20px; border-radius: 6px; background: var(--surface-3); color: var(--text-2); font: 600 9px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .conversation-axis__cluster-menu { width:min(320px, calc(100vw - 24px)); max-height:min(360px, var(--radix-dropdown-menu-content-available-height)); overflow-y:auto; }
 .conversation-axis__menu-heading { padding:6px 8px; color:var(--text-3); font-size:var(--fs-micro); }
 .conversation-axis__entry { align-items:start; gap:8px; padding:7px 8px; }

@@ -142,7 +142,7 @@ export function FocusMessagePreview({ message, sender, recipient, recipientName,
       {!reader.loading && reader.messages.length === 0 ? <p>No conversation records read in this view. Coverage may be incomplete.</p> : null}
     </div> : null}
     {message ? !interactive ? <>
-      <p className="recent-focus__message-caption">{reply ? 'In' : 'To'} {targetName}</p>
+      <p className="recent-focus__message-caption">{reply ? 'Reply in ' : '→ '}{targetName}</p>
       <p className="recent-focus__message-excerpt">{message.content.trim() || (resources.length ? resources.join(' · ') : 'Input has no recorded text')}</p>
       <footer className="recent-focus__message-meta"><span title={describeConversationRecordSource(message).title}>{describeConversationRecordSource(message).caption}</span><time title="Record time, not a verified sender time">{message.recordedAt !== undefined && Number.isFinite(message.recordedAt) ? time.dateClock(message.recordedAt) : 'Record time unknown'}</time></footer>
       <span className="recent-focus__message-hint">Click or press Enter to keep reading</span>

@@ -37,13 +37,7 @@
 .conversation-ruler__activity[data-state='working'] { background:color-mix(in oklab,var(--blue) 65%,transparent); }
 .conversation-ruler__activity[data-state='idle'] { background:repeating-linear-gradient(90deg,var(--text-3) 0 2px,transparent 2px 4px); opacity:.5; }
 .conversation-ruler__activity[data-state='awaiting-input'] { background:color-mix(in oklab,var(--amber) 65%,transparent); }
-.conversation-axis__cluster { width:64px; }
-.conversation-axis__participants { display:flex; align-items:center; justify-content:center; height:18px; }
-.conversation-axis__participants > .conversation-axis__avatar + .conversation-axis__avatar { margin-left:-6px; }
 .conversation-axis__avatar { display:inline-flex; flex:none; }
-.conversation-axis__participants .conversation-message-avatar,.conversation-axis__participants .conversation-avatar { box-shadow:0 0 0 1.5px var(--surface-0); }
-.conversation-axis__participants .conversation-axis__count { position:static; margin-left:4px; padding:0 2px; min-width:12px; box-shadow:none; background:transparent; }
-.conversation-axis__more { font:var(--fs-micro)/1 var(--font-sans); color:var(--text-2); margin-left:2px; }
 .conversation-axis__activity { display:inline-flex; width:16px; justify-content:center; }
 @media(max-width:420px) {
   .activity-ruler { column-gap:4px; }
@@ -51,8 +45,8 @@
   .activity-ruler__count { display:none; }
 }
 
-.conversation-axis__mark[data-era='history'] .conversation-axis__glyph,.conversation-axis__mark[data-era='history'] .conversation-axis__participants { opacity:.6; }
-.conversation-axis__mark[data-era='history']:hover .conversation-axis__participants,.conversation-axis__mark[data-era='history']:focus-visible .conversation-axis__participants { opacity:1; }
+.conversation-axis__mark[data-era='history'] .conversation-axis__glyph,.conversation-axis__mark[data-era='history'] .conversation-axis__count { opacity:.6; }
+.conversation-axis__mark[data-era='history']:hover .conversation-axis__count,.conversation-axis__mark[data-era='history']:focus-visible .conversation-axis__count { opacity:1; }
 .conversation-ruler__cutoff { position:absolute; top:1px; bottom:0; border-left:1px dashed var(--text-3); opacity:.6; }
 
 .activity-ruler__actions { grid-row:1; grid-column:2; justify-self:end; display:flex; align-items:center; gap:4px; }

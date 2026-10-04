@@ -1,3 +1,5 @@
+import type { CSSProperties } from 'react'
+import { TIMELINE_MARKER_SIZE } from '../lib/timeline-marker-layout'
 import { speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { conversationAxis, clusterConversationAxis, type ConversationAxisCluster, type RulerAxisItem, type ConversationAxisMark, type SpeakerPredicate } from '../lib/conversation-axis'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
@@ -94,6 +96,7 @@ export function ConversationAxis({
   return (
     <div
       className="conversation-axis"
+      style={{ '--timeline-marker-size': `${TIMELINE_MARKER_SIZE}px` } as CSSProperties}
       role="group"
       aria-label={label}
       // Escape 关面板。挂在轴容器而不是每枚标记上：事件从聚焦的那枚标记冒上来，一处足够，而挂在
@@ -116,6 +119,7 @@ export function ConversationAxis({
         <AxisMark
           key={cluster.members[0]!.item.id}
           mark={cluster.members[0]!}
+          fraction={cluster.fraction}
           size={size}
           describe={describe}
           recentFraction={recentFraction}
@@ -138,6 +142,7 @@ export function ConversationAxis({
  */
 function AxisMark({
   mark,
+  fraction,
   size,
   describe,
   selected,
@@ -147,6 +152,7 @@ function AxisMark({
   recentFraction = 0
 }: {
   mark: ConversationAxisMark
+  fraction: number
   recentFraction?: number | null
   size: number
   describe: DescribeSpeaker
@@ -170,7 +176,7 @@ function AxisMark({
       className="conversation-axis__mark"
       data-era={recentFraction === null ? undefined : mark.fraction < recentFraction ? 'history' : 'recent'}
       // 位置来自全量 scale 的 fraction，与主刻度同一条时间基准。
-      style={{ left: `${mark.fraction * 100}%` }}
+      style={{ left: `${fraction * 100}%` }}
       data-selected={selected ? '' : undefined}
       // 名字挂在 button 上，不拼时刻：诚实的时刻只能从 scale 的 readout 取，而这枚标记手里的
       // `createdAt` 是个裸数字——把它格式化进任何属性，就把 ruler 特意做成类型上不可表达的那种
@@ -203,24 +209,13 @@ function AxisCluster({ cluster, size, describe, selected, onSelect, onPeekEnd, c
   onSelect: (index: number) => void
   onPeekEnd?: () => boolean
 }) {
-  const speakers = new Map<string, ConversationSpeaker>()
-  for (const mark of cluster.members) {
-    const speaker = speakerForDisplay(mark.speaker)
-    speakers.set(JSON.stringify([speaker.role, speaker.id]), speaker)
-  }
-  const participants = [...speakers.values()]
   return <Menu.Root modal={false} onOpenChange={open => { if (open) onPeekEnd?.() }}>
     <Menu.Trigger asChild>
       <button type="button" className="conversation-axis__mark conversation-axis__cluster"
-        style={{ left: `clamp(32px, ${cluster.fraction * 100}%, calc(100% - 32px))` }} data-selected={selected ? '' : undefined}
+        style={{ left: `${cluster.fraction * 100}%` }} data-selected={selected ? '' : undefined}
         data-era={recentFraction === null ? undefined : cluster.members.every(mark => mark.fraction < recentFraction) ? 'history' : cluster.members.every(mark => mark.fraction >= recentFraction) ? 'recent' : 'mixed'}
         aria-label={`${cluster.members.length} messages; choose a record`}>
-        <span className="conversation-axis__participants" aria-hidden="true">
-          {participants.slice(0, 3).map(speaker => <AxisAvatar key={JSON.stringify([speaker.role, speaker.id])}
-            speaker={speaker} identity={describe(speaker, size)} size={size} />)}
-          {participants.length > 3 ? <span className="conversation-axis__more">+{participants.length - 3 > 99 ? '99+' : participants.length - 3}</span> : null}
-          {participants.length <= 3 ? <span className="conversation-axis__count">{cluster.members.length > 99 ? '99+' : cluster.members.length}</span> : null}
-        </span>
+        <span className="conversation-axis__count" aria-hidden="true">{cluster.members.length > 99 ? '99+' : cluster.members.length}</span>
       </button>
     </Menu.Trigger>
     <Menu.Portal>
