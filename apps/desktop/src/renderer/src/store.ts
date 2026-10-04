@@ -3471,8 +3471,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const restoredAgentFocus = sanitizeAgentFocus(
         restoreAgentFocus(persistedState.agentFocus),
         visibleSessions,
-        (session) => focusLaneForSession(topicIdForSession(config, session, scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)),
-          scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspaceForSession(config, session, scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)))),
+        (session) => {
+          const topics = scratchTopicsForConfig(config, persistedState.scratchTopicSnapshots)
+          const workspace = workspaceForSession(config, session, topics)
+          // Hashed Mote paths need directory identity discovery, which runs after this restore.
+          // An unobserved owner cannot reclassify and erase a durable coordination focus.
+          return workspace ? focusLaneForSession(topicIdForSession(config, session, topics),
+            scratchTopicsForWorkspace(persistedState.scratchTopicSnapshots, workspace)) : null
+        },
         new Set([...persistedSessionIds].filter((id) => (
           !retiredAgentIds.has(id) && hasAttachedSessionView(workbench.tabs, id)
         )))
