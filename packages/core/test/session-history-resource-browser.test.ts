@@ -69,6 +69,22 @@ describe('browser Hosted recorded-image contract', () => {
     expect(h.invocations[0]).toMatchObject({ fence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
   })
 
+  it('consumes exact bounded text fragments through Hosted without Node Buffer and rejects foreign offsets', async () => {
+    const h = browserPort(), fragment: AgentSessionHistoryResourceReadResult = { ...receipt,
+      result: { status: 'fragment', encoding: 'json-utf8', dataBase64: 'e30=', byteLength: 2,
+        offsetBytes: 3, totalBytes: 5, sha256: 'a'.repeat(64), nextOffsetBytes: null } }
+    h.respond(fragment)
+    await withoutNodeBuffer(async () => {
+      const client = await connectHostedAgentMux({ rpc: h.port, consumerId: 'browser-text-reader' })
+      try {
+        expect(await client.sessionHistoryResource(receipt.agentSessionId, { ...request, offsetBytes: 3, maxBytes: 128 * 1024 })).toEqual(fragment)
+        await expect(client.sessionHistoryResource(receipt.agentSessionId, { ...request, offsetBytes: 2 })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+        h.respond({ ...fragment, result: { ...fragment.result, byteLength: 1 } } as AgentSessionHistoryResourceReadResult)
+        await expect(client.sessionHistoryResource(receipt.agentSessionId, { ...request, offsetBytes: 3 })).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+      } finally { await client.dispose() }
+    })
+  })
+
   it('rejects foreign, noncanonical or misbudgeted image receipts in that same browser SDK', async () => {
     const h = browserPort()
     const failures = await withoutNodeBuffer(async () => {
