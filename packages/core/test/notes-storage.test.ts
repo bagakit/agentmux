@@ -90,6 +90,29 @@ describe('one durable Notes directory operation', () => {
     await writeFile(join(f.original, 'one.note.json'), f.bytes); await f.storage.resume()
     expect((await f.storage.inspect()).directory).toBe(f.target)
   })
+  it.each(['missing body', 'changed body', 'missing catalog', 'changed catalog'])('never deletes the last good sources on a committed retry with %s', async damage => {
+    const f = await fixture(); let acknowledged = false
+    const storage = new AgentMuxNotesStorage(f.location, f.original, { beforeSourceCleanup: async () => { if (!acknowledged) throw new Error('Host references not acknowledged') } })
+    const operation = { operationId: 'committed-original', expectedDirectory: f.original, directory: f.target }
+    await expect(storage.change(operation)).rejects.toThrow('not acknowledged')
+    expect((await storage.inspect(operation.operationId)).operation?.phase).toBe('committed')
+    if (damage === 'missing body') await rm(join(f.target, 'one.note.json'))
+    if (damage === 'changed body') await writeFile(join(f.target, 'one.note.json'), 'damaged target')
+    if (damage === 'missing catalog') await rm(join(f.target, 'notebooks.json'))
+    if (damage === 'changed catalog') { const catalog = JSON.parse(await readFile(join(f.target, 'notebooks.json'), 'utf8')); catalog.pages = {}; await writeFile(join(f.target, 'notebooks.json'), JSON.stringify(catalog)) }
+    acknowledged = true; await expect(storage.change(operation)).rejects.toThrow()
+    expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
+    expect(await readFile(join(f.original, 'notebooks.json'), 'utf8')).toContain('original-note')
+  })
+  it.each(['source', 'destination'])('does not overwrite a %s Notebook catalog changed while the original operation was prepared', async changed => {
+    const f = await fixture(); await mkdir(f.target); await writeFile(join(f.target, 'one.note.json'), 'occupied body')
+    await expect(f.storage.change({ operationId: 'prepared-catalog', expectedDirectory: f.original, directory: f.target })).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
+    await rm(join(f.target, 'one.note.json'))
+    const path = join(changed === 'source' ? f.original : f.target, 'notebooks.json'), bytes = JSON.stringify({ ...f.before, revision: f.before.revision + 1 })
+    await writeFile(path, bytes); await expect(f.storage.resume()).rejects.toMatchObject({ code: 'NOTES_STORAGE_CONFLICT' })
+    expect(await readFile(path, 'utf8')).toBe(bytes); expect((await f.storage.inspect()).directory).toBe(f.original)
+    expect(await readFile(join(f.original, 'one.note.json'), 'utf8')).toBe(f.bytes)
+  })
   it('bootstrap uses the same operation, moving only registered flat local scratch notes', async () => {
     const f = await fixture(); const legacy = join(f.root, 'legacy', 'notebooks.json'); await mkdir(join(f.root, 'legacy')); await writeFile(legacy, JSON.stringify({ ...f.before, pages: { ...f.before.pages, 'original-note': { ...f.before.pages['original-note'], resource: { ...f.before.pages['original-note']!.resource, workspaceId: '__scratch__' } } } }))
     await writeFile(join(f.original, 'unrelated.txt'), 'keep this'); const storage = new AgentMuxNotesStorage(join(f.root, 'otherstate', 'notes-location.json'), f.target)

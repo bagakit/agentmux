@@ -9,6 +9,7 @@ import { createRequire } from 'node:module'
 const { build } = createRequire(resolve('packages/core/package.json'))('esbuild')
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '../../../packages/core/src/notebook-store.js'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state.js'
+import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import { ConfigOwner } from '../src/main/config-owner.js'
 import { NotesStorageOwner } from '../src/main/notes-storage-owner.js'
@@ -72,6 +73,32 @@ describe('Notes storage original production consumers', () => {
   it('retains the original creating intent and new input when its directory moves', () => {
     const receipt = { intentId: 'same-intent', noteId: 'original', blockIds: ['same-block'], path: 'one.note.json', draft: 'UNSAVED', target: { workspaceId: '__scratch__', workspacePath: _hygiene_fixturePath("old"), directoryPath: _hygiene_fixturePath("old"), hostId: 'local', zoneId: 'same-zone', groupId: 'same-group' } } as any
     expect(reconcileNotesCreationReceipt(receipt, [change], _hygiene_fixturePath("notes"))).toMatchObject({ intentId: 'same-intent', blockIds: ['same-block'], draft: 'UNSAVED', target: { workspaceId: '__notes__', workspacePath: _hygiene_fixturePath("notes"), directoryPath: _hygiene_fixturePath("notes"), zoneId: 'same-zone' } })
+  })
+  it('keeps original bytes and references until the Main durable resource acknowledgement succeeds', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'notes-host-ack-')); roots.push(root)
+    const original = join(root, 'notes'), target = join(root, 'target'); await mkdir(original)
+    let owner!: NotesStorageOwner
+    const storage = new AgentMuxNotesStorage(join(root, 'state', 'notes-location.json'), original, { beforeSourceCleanup: async () => { await owner.confirmResources(await storage.inspect()) } })
+    const store = new AgentMuxNotebookStore(undefined, storage), bytes = JSON.stringify({ schema: 'agentmux.note.v1', noteId: 'original', content: 'Last good source' })
+    await writeFile(join(original, 'one.note.json'), bytes)
+    await store.apply({ operationId: 'register', expectedRevision: 0, change: { kind: 'register', noteId: 'original', title: 'Original', resource: { ...change.to, workspacePath: original } } }, { kind: 'user', id: 'fixture' })
+    let config = { hosts: [], executors: {}, workspaces: [{ id: '__notes__', hostId: 'local', path: original, kind: 'folder' }] } as unknown as AppConfig
+    const configOwner = new ConfigOwner({ read: () => config, save: async value => value, publish: value => { config = value } })
+    const spatial = new AgentMuxSpatialStateStore(join(root, 'state', 'spatial.json')), spaceId = directoryIdentity('local', original), zoneId = workspaceZoneId(spaceId, '__notes__')
+    await spatial.commit({ expectedRevision: 0, graph: { spaces: [{ spaceId, kind: 'folder', name: 'Recall', hostId: 'local', directoryPath: original, projectId: null }], zones: [{ zoneId, workspaceId: '__notes__', kind: 'directory', hostId: 'local', directoryPath: original, branch: null }], bindings: [{ spaceId, zoneId }], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: { ['zone:' + zoneId]: { directoryPath: original } } } })
+    owner = new NotesStorageOwner(configOwner, spatial, () => {}, storage)
+    vi.spyOn(spatial, 'commit').mockRejectedValueOnce(new Error('Original host reference acknowledgement failed'))
+    const operation = { operationId: 'original-host-ack', expectedDirectory: original, directory: target }
+    await expect(owner.change(operation)).rejects.toThrow('acknowledgement failed')
+    expect(await readFile(join(original, 'one.note.json'), 'utf8')).toBe(bytes); expect(await readFile(join(original, 'notebooks.json'), 'utf8')).toContain('original')
+    expect(config.workspaces[0]?.path).toBe(original); expect((await spatial.readForLayout())!.graph.zones[0]?.directoryPath).toBe(original)
+    const pending = await new AgentMuxRpcService({ notebookStore: store }).call('notebook.inspect', { noteId: 'original' })
+    expect(pending.storageOperation).toMatchObject({ operationId: operation.operationId, phase: 'committed' })
+    expect((await storage.inspect()).catalogPath).toBe(join(target, 'notebooks.json'))
+    expect((await store.read()).pages.original?.resource.workspacePath).toBe(target)
+    await owner.change(operation)
+    expect(config.workspaces[0]?.path).toBe(target); expect((await spatial.readForLayout())!.graph.zones[0]?.directoryPath).toBe(target)
+    await expect(readFile(join(original, 'one.note.json'))).rejects.toMatchObject({ code: 'ENOENT' })
   })
   it('changes the real directory through shipping CLI and the same Settings owner, then inspects the original operation', async () => {
     const root = await mkdtemp(join(tmpdir(), 'notes-settings-')); roots.push(root); const original = join(root, 'notes'), target = join(root, 'new notes'); await mkdir(original)
