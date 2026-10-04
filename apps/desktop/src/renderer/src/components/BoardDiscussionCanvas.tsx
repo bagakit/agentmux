@@ -24,7 +24,7 @@ import { currentExecutorDetection } from '../lib/executor-detection'
 import type { BoardRow } from '../lib/project-board'
 import { executorDetectionKey, useAppStore } from '../store'
 import { agentProviderLabel } from './AgentProviderIcon'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { resolveOverlayContainer } from './WindowOverlayHost'
 
 export function BoardDiscussionCanvas({

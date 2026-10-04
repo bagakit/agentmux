@@ -3,7 +3,7 @@ import { autoUpdate, computePosition, inline, offset, shift } from '@floating-ui
 import { ChevronDown, Plus, X } from 'lucide-react'
 import { useEffect, useImperativeHandle, useLayoutEffect, useRef, useState, type Ref, type RefObject } from 'react'
 import type { ConversationAnnotation } from '@agentmux/client-ui/components/ConversationMessage'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { getWindowOverlayHost, WindowOverlayPortal } from './WindowOverlayHost'
 
 export type ConversationAnnotationNoteHandle = {

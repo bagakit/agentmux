@@ -48,7 +48,7 @@ import {
   type BrowserAnnotation
 } from '../lib/browser-annotations'
 import { composeScreenshot } from './browser-screenshot/compose'
-import { ComposerTextarea } from './ComposerTextarea'
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { BrowserOperationHistory, BrowserOperationStatus, BrowserOperationWarning, BrowserOperationTimeline, BrowserReplayPreview } from './BrowserOperationSurface'
 import { BrowserAddressInput, type BrowserAddressInputHandle } from './BrowserAddressInput'
 import { selectedBrowserPresentationId } from '../lib/browser-presentation-selection'
