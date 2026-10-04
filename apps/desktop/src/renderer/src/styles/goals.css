@@ -247,6 +247,6 @@
 .goals-continuation__actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
 .goals-continuation form { display: flex; min-width: 0; gap: var(--sp-4); align-items: flex-end; flex-wrap: wrap; }
 .goals-continuation label { display: grid; min-width: 0; max-width: 100%; gap: var(--sp-3); color: var(--text-3); font-size: var(--fs-meta); }
-.goals-continuation select, .goals-continuation input { max-width: 100%; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-body); }
-.goals-continuation select { width: 220px; }
+.goals-continuation input { max-width: 100%; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-body); }
+.goals-continuation .selection-field { width: 220px; max-width: 100%; }
 .goals-continuation input { width: 72px; }

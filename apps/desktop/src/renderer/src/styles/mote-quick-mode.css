@@ -9,6 +9,5 @@
 .mote-quick-mode-dialog__body label { display: flex; align-items: center; gap: 9px; color: var(--text); font-size: 13px; }
 .mote-quick-mode-dialog__body label:not(:first-child) { margin-top: 8px; }
 .mote-quick-mode-dialog__body small { display: block; color: var(--text-2); font-size: 11px; margin-top: 3px; }
-.mote-quick-mode-dialog__body select { width: 100%; min-width: 0; border: 1px solid var(--line-soft); border-radius: 7px; padding: 9px 10px; background: var(--surface-1); color: var(--text); font: inherit; font-size: 12px; }
 .mote-quick-mode-dialog__footer { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-top: 1px solid var(--line-soft); }
 .mote-quick-mode-dialog__footer > span { flex: 1; color: var(--text-2); font-size: 10px; }

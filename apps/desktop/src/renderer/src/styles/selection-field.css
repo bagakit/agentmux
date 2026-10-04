@@ -1,0 +1,10 @@
+.selection-field { display: inline-flex; align-items: center; gap: var(--sp-3); width: 100%; min-width: 0; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; font-size: var(--fs-body); text-align: left; cursor: pointer; }
+.selection-field > span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.selection-field > svg { flex: 0 0 auto; color: var(--text-3); }
+.selection-field:hover, .selection-field[data-state='open'] { background: var(--surface-2); }
+.selection-field:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.selection-field:disabled { opacity: .5; cursor: default; }
+.selection-field__menu { width: min(var(--radix-dropdown-menu-trigger-width), var(--radix-dropdown-menu-content-available-width)); min-width: 0; max-height: min(320px, var(--radix-dropdown-menu-content-available-height)); overflow: auto; }
+.selection-field__option { gap: var(--sp-3); }
+.selection-field__menu .selection-field__option > span:nth-child(2) { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
+.selection-field__mark { display: inline-flex; flex: 0 0 13px; width: 13px; color: var(--text); }

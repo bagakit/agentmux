@@ -9,6 +9,7 @@ import { goalsForMote, moteCurrentGoals, moteGoalContext, moteGoalSummary } from
 import { sessionPresentationById } from '../lib/session-presentation'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { MoteBehaviorAction } from './MoteBehaviorDialog'
+import { SelectionField } from './SelectionField'
 import { GoalContinuationControl } from './GoalContinuationControl'
 
 /** A reading surface over the original Goal owner; it has no timer or execution state. */
@@ -142,12 +143,12 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
       onClick={() => { associationIntent.current = {}; setShowAll(value => !value) }}>{showAll ? 'Current summary' : 'All work'}<span>{showAll ? currentGoals.length : goals.length}<ChevronDown size={12} /></span></button> : null}
     {chooser ? <div className="mote-current-work__chooser">
       <button type="button" className="mote-current-work__navigation" onClick={() => void openGoal(null)}>Create or review in Goals<ArrowUpRight size={13} /></button>
-      <select aria-label="Goal to associate with this Mote" value={selectedGoal} onChange={event => { associationIntent.current = {}; setSelectedGoal(event.target.value) }}>
-        <option value="">Choose an existing goal…</option>{Object.values(demands).map(goal => <option key={goal.id} value={goal.id}>{goal.title}</option>)}
-      </select>
-      <select aria-label="Mote discussion for the goal" value={sessionId} onChange={event => { associationIntent.current = {}; setSessionId(event.target.value) }}>
-        <option value="">Choose a discussion…</option>{context.sessionIds.map(id => <option key={id} value={id}>{labels[id] ?? 'Retained discussion · ' + id}</option>)}
-      </select>
+      <SelectionField label="Goal to associate with this Mote" value={selectedGoal}
+        onValueChange={value => { associationIntent.current = {}; setSelectedGoal(value) }}
+        options={[{ value: '', label: 'Choose an existing goal…' }, ...Object.values(demands).map(goal => ({ value: goal.id, label: goal.title }))]} />
+      <SelectionField label="Mote discussion for the goal" value={sessionId}
+        onValueChange={value => { associationIntent.current = {}; setSessionId(value) }}
+        options={[{ value: '', label: 'Choose a discussion…' }, ...context.sessionIds.map(id => ({ value: id, label: labels[id] ?? 'Retained discussion · ' + id }))]} />
       <button type="button" className="mote-current-work__navigation" onClick={() => void link()} disabled={loading || !selectedGoal || !sessionId}>Link this discussion<ChevronDown size={12} /></button>
       <p className="mote-details__hint">Linking does not start work. Confirm the scope and choose its executing Agent before continuing.</p>
     </div> : null}
