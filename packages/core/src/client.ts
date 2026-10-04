@@ -327,6 +327,30 @@ export type AgentMuxAgentAttachment = {
   attachment: AgentMuxRunAttachment
 }
 
+/** Byte syntax only: neither the entry kind nor a mouse encoding authenticates a human action. */
+function rawInputBytePattern(data: AgentMuxRunInputData, byteLength: number): 'mouse-sgr' | 'mouse-legacy' | 'other' {
+  if (byteLength > 48) return 'other'
+  const bytes = typeof data === 'string' ? Buffer.from(data, 'utf8') : data
+  if (bytes.length === 6 && bytes[0] === 27 && bytes[1] === 91 && bytes[2] === 77 &&
+      bytes.subarray(3).every(byte => byte >= 32) &&
+      (typeof data !== 'string' || data.length === byteLength)) return 'mouse-legacy'
+  if (bytes.every(byte => byte < 128)) {
+    const match = /^\x1b\[<\d{1,10};\d{1,10};\d{1,10}[Mm]$/u.exec(Buffer.from(bytes).toString('ascii'))
+    if (match?.[0].length === byteLength) return 'mouse-sgr'
+  }
+  return 'other'
+}
+
+function rawInputCancellationDetail(session: AgentMuxAgentSession, data: AgentMuxRunInputData,
+  operationId: string, inputKind: 'write' | 'paste' | 'posture') {
+  const byteLength = typeof data === 'string' ? Buffer.byteLength(data, 'utf8') : data.byteLength
+  return Object.freeze({ agentSessionId: session.agentSessionId, runId: session.run.runId, operationId, inputKind,
+    encoding: typeof data === 'string' ? 'utf8' as const : 'binary' as const,
+    byteLength, bytePattern: rawInputBytePattern(data, byteLength), phase: 'before-input-lane' as const,
+    expectedByte: null, acknowledgementAtCancellation: 'not-attempted' as const,
+    confirmedInputBytesAtCancellation: 0, eventualOutcome: 'unknown' as const })
+}
+
 export type AgentMuxClientOptions = {
   /** Exact local public owner endpoint inherited by managed CLI callers. */
   controlSocketPath?: string
@@ -3870,7 +3894,7 @@ export class AgentMuxClient {
     if (input.source !== 'user' && input.source !== 'terminal-protocol') {
       throw new AgentMuxError('Native input must declare its user or terminal-protocol source.', 'INVALID_AGENT_INPUT_SOURCE')
     }
-    return await this.writeAgentInput(session, input.data, input.source)
+    return await this.writeAgentInput(session, input.data, input.source, 'write')
   }
 
   async pasteAgent(input: AgentMuxAgentPasteInput): Promise<AgentMuxRunInputAck> {
@@ -3882,7 +3906,7 @@ export class AgentMuxClient {
     const plan = this.providers.get(session.providerId).planPromptInput(input.text)
     return await this.writeAgentInput(session, plan.kind === 'render-then-submit'
       ? plan.payload
-      : input.terminalData, 'user')
+      : input.terminalData, 'user', 'paste')
   }
 
   async submitAgentPrompt(input: AgentMuxAgentPromptInput): Promise<void> {
@@ -4331,7 +4355,7 @@ export class AgentMuxClient {
     if (!plan.data) {
       throw new AgentMuxError('Provider posture keystroke cannot be empty.', 'INVALID_AGENT_PROVIDER')
     }
-    await this.writeAgentInput(session, plan.data, 'user')
+    await this.writeAgentInput(session, plan.data, 'user', 'posture')
   }
 
   async resizeAgent(
@@ -5728,7 +5752,8 @@ export class AgentMuxClient {
   private async writeAgentInput(
     requestedSession: AgentMuxAgentSession,
     data: AgentMuxRunInputData,
-    source: AgentMuxAgentWriteInput['source']
+    source: AgentMuxAgentWriteInput['source'],
+    inputKind: 'write' | 'paste' | 'posture'
   ): Promise<AgentMuxRunInputAck> {
     // Capture before waiting on the input lane: a later request cannot inherit this operation.
     const requestId = source === 'user' && !requestedSession.pendingInteraction?.nativeInput &&
@@ -5761,7 +5786,10 @@ export class AgentMuxClient {
       ? [...(this.agentInputTails.get(requestedSession.agentSessionId)?.renderObservations ?? [])]
           .filter(observation => sameRun(observation.run, requestedSession.run) && observation.protocolInput)
       : []
-    this.cancelPromptRenderObservation(requestedSession, source)
+    // This is the same operation later passed to ctxmux, before any input-lane or ACK fact exists.
+    const operationId = randomUUID()
+    this.cancelPromptRenderObservation(requestedSession, source,
+      rawInputCancellationDetail(requestedSession, data, operationId, inputKind))
     return await this.serializeAgentInput(requestedSession, async (session, run) => {
       // The native terminal remains usable while a typed request is pending. These bytes
       // are not a semantic answer and must not settle or approve that request.
@@ -5774,7 +5802,6 @@ export class AgentMuxClient {
       const idleObservationAt = source === 'user' && session.semanticStatus?.state === 'done' ? session.semanticStatus.observedAt : undefined
       const idleEntryTime = session.semanticStatus?.state === 'done'
         ? session.semanticStatus.stateEnteredAt : undefined
-      const operationId = randomUUID()
       // Save uncertainty before the side effect; a crash must not re-enable an old typed approval.
       const observeNativeInput = async (delivery: 'unknown' | 'accepted' | 'not_applied'): Promise<void> => {
         if (!requestId) return
@@ -5865,13 +5892,15 @@ export class AgentMuxClient {
   }
 
   private cancelPromptRenderObservation(session: AgentMuxAgentSession,
-    source: AgentMuxAgentWriteInput['source'] | 'interaction-response'): void {
+    source: AgentMuxAgentWriteInput['source'] | 'interaction-response',
+    competingInput?: ReturnType<typeof rawInputCancellationDetail>): void {
     const preserveProtocolPreparation = source === 'terminal-protocol'
     const cancellation = new AgentMuxError(
       source === 'interaction-response' ? 'Input observation cancelled for a semantic interaction response.'
         : source === 'terminal-protocol' ? 'Input observation yielded for a terminal protocol response.'
-          : 'Input observation cancelled for human terminal input.',
-      'AGENT_INPUT_OBSERVATION_CANCELLED', JSON.stringify({ source: source === 'user' ? 'terminal-user' : source }))
+          : 'Input observation cancelled for terminal user-source input.',
+      'AGENT_INPUT_OBSERVATION_CANCELLED', JSON.stringify({ source: source === 'user' ? 'terminal-user' : source,
+        ...(competingInput ? { competingInput } : {}) }))
     const lane = this.agentInputTails.get(session.agentSessionId)
     for (const observation of lane?.renderObservations ?? []) {
       if (!sameRun(observation.run, session.run)) continue
