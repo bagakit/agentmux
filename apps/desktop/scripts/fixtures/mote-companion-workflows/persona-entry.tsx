@@ -14,6 +14,9 @@ import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { scratchTopicsScope } from '../../../src/renderer/src/lib/scratch-topic-snapshots'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../../../src/shared/scratch-topics'
+import { replaceMoteBehaviorBlock } from '../../../src/renderer/src/lib/mote-behavior'
+import { DEFAULT_MOTE_FACE } from '../../../src/shared/mote-avatars'
+import { topicSpaceIconTarget } from '../../../src/renderer/src/lib/space-object-appearance'
 import { directoryIdentity, homeZoneId } from '../../../src/shared/space-addresses'
 import type { ScratchTopicSnapshot, WorkspaceFileReadResult, SessionSnapshot } from '../../../src/shared/contracts'
 import type { Demand } from '@agentmux/demand'
@@ -45,6 +48,7 @@ const calls: { operation: string; path?: string; message?: string; agentSessionI
 let unknown = false, editorUnconfirmed = false, unknownWrite = false, deferNextRead = false, lateRead: { params: FileReadParams; resolve(result: FileReadResult): void } | null = null, unsubscribeLater: (() => void) | null = null
 let fileDisk: Record<string, string> = { [rootPath + '/SOUL.md']: soul, [path]: '# A saved decision\n\nSource: the team discussion on 6 October.\nScope: this project.\n\nKeep the current design until the next review. The earlier preference applies only to the draft.\n',
   [anotherPath]: '# Another original material\n\nThis file has its own confirmed content.', [secondRoot + '/SOUL.md']: soul, [secondRoot + '/analyst-original-material.md']: '# Analyst material\n\nSource: the Analyst Mote directory.\nThis belongs to the other original scope.' }
+const originalFiles = { ...fileDisk }
 const revision = async (content: string) => 'sha256:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(byte => byte.toString(16).padStart(2, '0')).join('')
 api.files.readDirectory = async (_workspace, directory) => Object.keys(fileDisk).filter(path => path.startsWith(directory + '/')).map(path => ({ path, name: path.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false, mtimeMs: 20 }))
 api.files.read = async (_workspace, path): Promise<WorkspaceFileReadResult> => {
@@ -102,6 +106,19 @@ function Scene() {
   Object.assign(window, { moteCompanion: { calls, reset: () => { reset(); setEpoch(value => value + 1) }, unknown: () => { unknown = true; useAppStore.setState(state => ({ workspaceFileRevisions: { [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } })) },
     selectMote: (id: string) => useAppStore.getState().openScratchTopic(id, workspace.id, { tabId: id === secondId ? secondTab.id : tab.id }),
     unknownSave: () => { unknownWrite = true }, longName: () => { topic.title = 'Mote for thoughtful choices and a long project name'; setEpoch(value => value + 1) },
+    savedProfileBehavior: () => {
+      fileDisk[rootPath + '/SOUL.md'] = replaceMoteBehaviorBlock(soul, { engagement: 'I', information: 'N', decisions: 'T', approach: 'P', custom: 'Keep my current project priorities first.' })
+      useAppStore.setState(state => ({ workspaceFileRevisions: { [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
+    },
+    profileScenario: (kind: 'empty' | 'populated' | 'long') => {
+      topic.title = kind === 'long' ? 'Debuger for thoughtful choices and a long original project name' : 'Debuger'
+      topic.summary = 'Describe the shared goal and the outcome this Topic should produce.'
+      fileDisk = kind === 'empty' ? { [rootPath + '/SOUL.md']: soul } : { ...originalFiles }
+      const target = topicSpaceIconTarget(workspace, topic)
+      useAppStore.setState(state => ({ spaceObjectIcons: target ? { ...state.spaceObjectIcons, [target.key]: { ...DEFAULT_MOTE_FACE, palette: 'peach' } } : state.spaceObjectIcons,
+        workspaceFileRevisions: { [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
+      setEpoch(value => value + 1)
+    },
     originalSoul: () => soul,
     behaviorInput: () => ({ path: rootPath + '/SOUL.md', initialContent: soul, content: fileDisk[rootPath + '/SOUL.md'] }),
     unconfirmedEditor: () => { editorUnconfirmed = true },

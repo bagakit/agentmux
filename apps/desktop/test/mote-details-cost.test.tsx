@@ -61,6 +61,34 @@ it('nonempty Details ignores selected Session bookkeeping and never parses close
   expect(renders).toBe(0); expect(parse).not.toHaveBeenCalled(); expect(markdown.renders).toBe(0)
 })
 
+it('Profile keeps the saved topic context on demand and opens its original file without replacing SOUL', async () => {
+  const savedScope = { ...scope, topic: { ...scope.topic, summary: 'My original saved project context.' } }
+  await act(async () => root.render(<MoteDetailsPanel scope={savedScope} onOpenPath={openPath} onCreateNote={createNote} />))
+  expect(container.textContent).not.toContain(savedScope.topic.summary)
+  expect(markdown.renders).toBe(0)
+  const details = container.querySelector<HTMLDetailsElement>('.mote-details__soul')!
+  await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  expect(details.textContent).toContain(savedScope.topic.summary)
+  expect(details.textContent).toContain('topic.md · saved context')
+  expect(details.textContent).toContain('SOUL.md · self instructions')
+  expect(details.textContent).toContain('Saved fact 299')
+  await click('Open original context')
+  expect(openPath).toHaveBeenLastCalledWith(rootPath + '/topic.md')
+  await click('Open original SOUL')
+  expect(openPath).toHaveBeenLastCalledWith(rootPath + '/SOUL.md')
+})
+
+it('confirmed empty Profile actions use the original Behavior dialog and Ideas tab', async () => {
+  vi.mocked(api.files.readDirectory).mockResolvedValue([])
+  await mount()
+  await click('Choose how we work together.')
+  expect(document.querySelector('.mote-behavior-dialog')).not.toBeNull()
+  const close = document.querySelector<HTMLButtonElement>('[aria-label="Close behavior settings"]')!
+  await act(async () => close.click())
+  await click('View ideas and saved materials')
+  expect(container.querySelector('[role="tabpanel"]')?.getAttribute('aria-label')).toBe('Mote ideas')
+})
+
 it('hidden Surface Files consumer defers automatic reads and changed revisions', async () => {
   useAppStore.setState({ workspaceTool: 'files-branches', explorerCollapsed: { [scratchWorkspace.id]: false } })
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('file-tree') ? 240 : 0 })

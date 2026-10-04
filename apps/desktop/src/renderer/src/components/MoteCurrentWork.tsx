@@ -124,7 +124,6 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     </div></div>
     {context.issue || issue ? <p role="status" className="mote-details__issue">{issue ?? context.issue} Last confirmed goals are kept.</p> : null}
     {loading ? <p role="status" className="mote-details__hint">Reading original goals…</p> : null}
-    {!goals.length ? <p className="mote-details__hint">No goal linked yet. A question can stay a conversation.</p> : null}
     {visibleGoals.map(goal => {
       const summary = moteGoalSummary(goal), open = expanded === goal.id
       const unloaded = goal.sessionIds.filter(id => context.sessionIds.includes(id) && !Object.hasOwn(labels, id))
