@@ -45,7 +45,7 @@ const select = async (value: string) => act(async () => { const picker = dom.con
 const scrollTo = async (top: number) => act(async () => { const host = scroll(); expect(host).not.toBeNull(); host.scrollTop = top; host.dispatchEvent(new Event('scroll', { bubbles: true })) })
 const hideDocument = async (hidden: boolean) => act(async () => { Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' }); document.dispatchEvent(new Event('visibilitychange')) })
 async function render(visible = true, value = workspace) { await dom.render(<SurfaceToolDock workspace={value} visible={visible} />) }
-async function open() { await render(); await dom.click('[data-git-view="history"]'); expect(rows().length).toBeGreaterThan(0) }
+async function open() { await render(); await dom.click('[data-surface-mode="history"]'); expect(rows().length).toBeGreaterThan(0) }
 async function retry() { const button = dom.container.querySelector<HTMLButtonElement>('.git-history-error button') ?? dom.container.querySelector<HTMLButtonElement>('.git-history-footer button'); expect(button).not.toBeNull(); await act(async () => button!.click()) }
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })

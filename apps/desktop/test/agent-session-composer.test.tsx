@@ -1,7 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
-import { renderComponentBoundary } from './helpers/render-component-boundary'
-import { createElement } from 'react'
+import { renderComponentBoundary as captureComponentBoundary } from './helpers/render-component-boundary'
+import { createElement, isValidElement, type ComponentProps, type ReactElement } from 'react'
 import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentCatalogEntry } from '@agentmux/core'
@@ -9,6 +9,7 @@ import type { ComposerShortcut, SessionSnapshot } from '../src/shared/contracts.
 
 const fixture = vi.hoisted(() => ({
   session: undefined as SessionSnapshot | undefined,
+  resetHistory: vi.fn(),
   state: {
     sessions: [] as SessionSnapshot[],
     providerCatalog: [] as AgentCatalogEntry[],
@@ -27,6 +28,8 @@ const fixture = vi.hoisted(() => ({
     agentSteerQueues: {} as Record<string, Array<{ operationId: string; runId?: string; text: string; status: 'queued' | 'restoring' | 'deferred' | 'failed'; error?: string }>>,
     setAgentComposerDraft: vi.fn(),
     clearAgentComposerDraftIfUnchanged: vi.fn(),
+    recordAgentComposerHistory: vi.fn(),
+    recallAgentComposerHistory: vi.fn(),
     // Returns true = "the queue took it". The composer clears the draft only on true, so a mock that
     // returned undefined would silently exercise the refusal path in every test that queues.
     enqueueAgentSteer: vi.fn(() => true),
@@ -40,12 +43,25 @@ const fixture = vi.hoisted(() => ({
   }
 }))
 
-vi.mock('../src/renderer/src/store.js', () => ({
-  useAppStore: Object.assign(
-    (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
-    { getState: () => fixture.state }
-  )
-}))
+vi.mock('../src/renderer/src/store.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/renderer/src/store.js')>()
+  // Keep the real pure queue projections and history actions. Only the adapter's host state/actions
+  // are substituted; recording and recalling still use the production history owner.
+  fixture.resetHistory.mockImplementation(() => actual.useAppStore.setState({
+    agentComposerHistory: {}, agentComposerHistoryNavigation: {}
+  }))
+  fixture.state.recordAgentComposerHistory.mockImplementation((sessionId: string, text: string) =>
+    actual.useAppStore.getState().recordAgentComposerHistory(sessionId, text))
+  fixture.state.recallAgentComposerHistory.mockImplementation((sessionId: string, direction: 'older' | 'newer', draft: string) =>
+    actual.useAppStore.getState().recallAgentComposerHistory(sessionId, direction, draft))
+  return {
+    ...actual,
+    useAppStore: Object.assign(
+      (selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
+      { getState: () => fixture.state }
+    )
+  }
+})
 
 // The composer reaches for native capabilities (file picker, pasted-image persistence) that only the
 // desktop shell provides; the module itself resolves a build-time constant, so it is stubbed here.
@@ -64,7 +80,39 @@ import {
   agentComposerAvailability
 } from '../src/renderer/src/components/AgentSessionComposer.js'
 import type { AgentComposerProps, ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
+import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
+import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox.js'
+import { PosturePicker } from '../src/renderer/src/components/PosturePicker.js'
 import { parseComposerDraft } from '@agentmux/client-ui/composer-semantic-reference'
+
+function mailboxBoundary(props: ComponentProps<typeof AgentSessionComposer>): ReactElement<ComponentProps<typeof SessionMailbox>> {
+  const mailbox = captureComponentBoundary(AgentSessionComposer, props)
+  if (mailbox.type !== SessionMailbox) throw new Error('Expected the actual SessionMailbox adapter boundary')
+  return mailbox as ReactElement<ComponentProps<typeof SessionMailbox>>
+}
+
+// The adapter now returns SessionMailbox. Execute that real component's render prop under React,
+// rather than reading its wrapper props as if they were AgentComposer's callbacks.
+function renderComponentBoundary(Component: typeof AgentSessionComposer, props: ComponentProps<typeof AgentSessionComposer>): ReactElement<AgentComposerProps> {
+  if (Component !== AgentSessionComposer) throw new Error('Unexpected adapter under test')
+  const mailbox = mailboxBoundary(props)
+  return captureComponentBoundary((mailboxProps: ComponentProps<typeof SessionMailbox>) => {
+    const composer = SessionMailbox(mailboxProps)
+    if (!isValidElement<AgentComposerProps>(composer) || composer.type !== AgentComposer) {
+      throw new Error('Expected SessionMailbox to return its actual AgentComposer render prop')
+    }
+    return composer
+  }, mailbox.props)
+}
+
+function posturePicker(composer: ReactElement<AgentComposerProps>): ReactElement<ComponentProps<typeof PosturePicker>> | undefined {
+  const tool = composer.props.postureTool
+  if (tool === undefined) return undefined
+  if (!isValidElement<ComponentProps<typeof PosturePicker>>(tool) || tool.type !== PosturePicker) {
+    throw new Error('Expected the actual Provider posture picker')
+  }
+  return tool
+}
 
 // Errors cross the reportError seam as `unknown`; read them the way the store's banner does.
 function message(error: unknown): string {
@@ -108,6 +156,9 @@ afterEach(() => {
   fixture.state.config.composerShortcuts = []
   fixture.state.agentComposerDrafts = {}
   fixture.state.agentSteerQueues = {}
+  fixture.resetHistory()
+  fixture.state.recordAgentComposerHistory.mockClear()
+  fixture.state.recallAgentComposerHistory.mockClear()
   fixture.state.send.mockClear()
   fixture.state.interrupt.mockClear()
   fixture.state.setPosture.mockClear()
@@ -472,26 +523,22 @@ describe('AgentSessionComposer adapter', () => {
     })
     fixture.state.providerCatalog = [postureCatalogEntry()]
     fixture.state.sessions = [waiting]
-    const pending = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onSetPosture?: (modeId: string) => void; onAttach?: () => void; postureControl?: unknown }
-    }
+    const pending = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' })
 
     // 三条一起：Provider 确实声明了姿态（否则下面两条恒真）、附件仍在（证明不是整片收走）、
     // 而姿态被挡住。
-    expect(pending.props.postureControl, '这个 Provider 本来就没声明姿态，这条测试什么都没证明').toBeTruthy()
+    expect(fixture.state.providerCatalog[0]?.postureControl, '这个 Provider 本来就没声明姿态，这条测试什么都没证明').toBeTruthy()
     expect(pending.props.onAttach, '收得过头了——附件只改草稿，不该跟着一起消失').toBeTypeOf('function')
-    expect(pending.props.onSetPosture, '卡片待答时递出了姿态——点下去会被 writeAgentInput 拒掉').toBeUndefined()
+    expect(posturePicker(pending), '卡片待答时递出了姿态——点下去会被 writeAgentInput 拒掉').toBeUndefined()
 
     // 相反世界：卡片答完（没有 pendingInteraction）姿态必须回来，否则「永远不给」也能通过上一条。
     fixture.state.providerCatalog = [postureCatalogEntry()]
     fixture.state.sessions = [
       agentSession({ providerId: 'grok', status: { state: 'working', source: 'native-hook', observedAt: 2 } })
     ]
-    const clear = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { onSetPosture?: (modeId: string) => void }
-    }
-    expect(clear.props.onSetPosture, '没有卡片时姿态该是可用的').toBeTypeOf('function')
-    clear.props.onSetPosture?.('always-approve')
+    const clear = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' })
+    expect(posturePicker(clear)?.props.onSet, '没有卡片时姿态该是可用的').toBeTypeOf('function')
+    posturePicker(clear)?.props.onSet('always-approve')
     expect(fixture.state.setPosture).toHaveBeenCalledWith('agent-1', 'always-approve')
   })
 
@@ -545,11 +592,11 @@ describe('AgentSessionComposer adapter', () => {
     const text = `first deliberate execution from ${state}`
     fixture.state.agentComposerDrafts = { 'agent-1': text }
     const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { disabled: boolean; onSubmit?: () => void; onSetPosture?: (id: string) => void; onChange: (text: string) => void }
+      props: { disabled: boolean; onSubmit?: () => void; postureTool?: unknown; onChange: (text: string) => void }
     }
     expect(composer.props.disabled).toBe(false)
     expect(composer.props.onSubmit).toBeTypeOf('function')
-    expect(composer.props.onSetPosture).toBeUndefined()
+    expect(composer.props.postureTool).toBeUndefined()
     composer.props.onChange('draft edit without execution')
     expect(fixture.state.setAgentComposerDraft).toHaveBeenCalledWith('agent-1', 'draft edit without execution')
     expect(fixture.state.send).not.toHaveBeenCalled()
@@ -687,10 +734,8 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
   function deliverable(session: Extract<SessionSnapshot, { kind: 'agent' }>): unknown {
     fixture.state.sessions = [session]
     fixture.state.agentSteerQueues = { 'agent-1': [{ operationId: 'op-1', runId: 'run-1', text: 'steer me', status: 'queued' }] }
-    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { mailbox: { props: { queued: Array<{ deliverable: boolean }> } } }
-    }
-    return composer.props.mailbox.props.queued[0]?.deliverable
+    const mailbox = mailboxBoundary({ sessionId: 'agent-1' })
+    return mailbox.props.queued[0]?.deliverable
   }
 
   it('running 时为 true', () => {
@@ -703,10 +748,8 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
       { operationId: 'first', text: 'restore explicitly', status: 'restoring' },
       { operationId: 'old', runId: 'run-1', text: 'old binding is not replayable', status: 'deferred' }
     ] }
-    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { mailbox: { props: { queued: Array<{ id: string; deliverable: boolean }> } } }
-    }
-    expect(composer.props.mailbox.props.queued.map(entry => [entry.id, entry.deliverable])).toEqual([
+    const mailbox = mailboxBoundary({ sessionId: 'agent-1' })
+    expect(mailbox.props.queued.map(entry => [entry.id, entry.deliverable])).toEqual([
       ['first', true], ['old', false]
     ])
   })
@@ -742,10 +785,8 @@ describe('AgentSessionComposer 把队列可投递性如实交出去', () => {
     fixture.state.agentSteerQueues = {
       'agent-1': [{ operationId: 'op-1', runId: 'run-0', text: 'typed at the previous run', status: 'queued' }]
     }
-    const composer = renderComponentBoundary(AgentSessionComposer, { sessionId: 'agent-1' }) as unknown as {
-      props: { mailbox: { props: { queued: Array<{ deliverable: boolean }> } } }
-    }
-    expect(composer.props.mailbox.props.queued[0]?.deliverable).toBe(false)
+    const mailbox = mailboxBoundary({ sessionId: 'agent-1' })
+    expect(mailbox.props.queued[0]?.deliverable).toBe(false)
   })
 })
 

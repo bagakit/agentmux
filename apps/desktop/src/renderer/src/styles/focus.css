@@ -35,6 +35,7 @@
 .focus-project-lanes__status-rail { display: flex; align-items: center; flex: none; margin: 0 var(--sp-1) 0 auto; }
 .focus-project-lanes__status-rail > .focus-context-group__header { justify-content: center; width: 24px; padding: 0; color: var(--text-3); }
 .focus-project-lanes__status-rail > [data-bucket='disconnected'] { width: 32px; }
+.focus-project-lanes__status-rail > [data-visible-state='true'] { width: auto; padding: 0 var(--sp-2); }
 .focus-project-lanes__heading { display: flex; align-items: center; min-height: 26px; min-width: 0; gap: var(--sp-2); padding: 0 var(--sp-2); }
 .focus-project-lanes__axis { display: inline-flex; align-items: center; flex: 0 1 auto; max-width: 75%; gap: 4px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-project-lanes__label { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
@@ -52,15 +53,17 @@
 .focus-context-group__cards { grid-template-columns: repeat(var(--focus-card-columns, 1), minmax(0, 1fr)); }
 .focus-disconnected-projects__cards { grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); }
 .focus-context-group__cards > .focus-context { max-width: 320px; }
+.focus-context-group[data-focus-sparse='true'] { width: min(100%, 640px); }
+.focus-context-group[data-focus-sparse='true'] > .focus-context-group__cards > .focus-context { max-width: none; }
 .focus-context-group__cards > .focus-recovery-toggle { grid-column: 1 / -1; }
 .focus-context-group__header { display: flex; min-height: 24px; align-items: center; gap: var(--sp-1); padding: 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .focus-context-group__header strong { font-weight: 500; }
 .focus-context-group__header span { font-variant-numeric: tabular-nums; }
 .focus-context-group__bucket { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 0; }
 .focus-context-group__count { position: relative; top: -3px; display: inline-flex; align-items: center; justify-content: center; flex: none; min-width: 14px; height: 14px; padding: 0 3px; border-radius: 7px; background: color-mix(in srgb, currentColor 10%, transparent); font-size: 10px; line-height: 14px; font-weight: 500; }
-.focus-context-group[data-bucket='attention'] > .focus-context-group__header { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
-.focus-context-group[data-bucket='working'] > .focus-context-group__header { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
-.focus-context-group[data-bucket='results'] > .focus-context-group__header { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
+.focus-context-group[data-bucket='attention'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='attention'] { color: var(--amber); background: color-mix(in srgb, var(--amber) 5%, transparent); }
+.focus-context-group[data-bucket='working'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='working'] { color: var(--green); background: color-mix(in srgb, var(--green) 5%, transparent); }
+.focus-context-group[data-bucket='results'] > .focus-context-group__header, .focus-project-lanes__status-rail > [data-visible-state='true'][data-bucket='results'] { color: var(--blue); background: color-mix(in srgb, var(--blue) 5%, transparent); }
 .focus-context { width: 100%; min-width: 0; min-height: 52px; display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-1) var(--sp-2); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-context--compact { min-height: 28px; height: 28px; padding-top: 0; padding-bottom: 0; }
 .focus-context--compact .focus-context__detail { display: none; }
@@ -72,7 +75,12 @@
 .focus-context__copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
 .focus-context__identity { display: flex; align-items: baseline; min-width: 0; gap: var(--sp-2); }
 .focus-context__identity strong { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--fs-meta); font-weight: 600; }
-.focus-context__state { flex: none; }
+.focus-context__state { flex: none; display: inline-flex; align-items: center; }
+.focus-state-mark { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 16px; height: 16px; border-radius: 5px; color: var(--text-3); background: color-mix(in srgb, currentColor 9%, transparent); }
+.focus-state-mark[data-focus-state-icon='working'] { color: var(--green); }
+.focus-state-mark[data-focus-state-icon='results'] { color: var(--status-ink); }
+.focus-state-mark[data-focus-state-icon='attention'] { color: var(--amber); }
+.focus-state-mark[data-focus-state-icon='error'] { color: var(--red); }
 .focus-context[data-bucket='idle'] .focus-context__state { color: var(--text-3); }
 .focus-context[data-bucket='results'] .focus-context__state { color: var(--status-ink); }
 .focus-context__state small { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -110,7 +118,9 @@
 .focus-context-hover { position: fixed; z-index: var(--layer-popover); width: min(360px, calc(100vw - 20px)); max-height: min(520px, calc(100vh - 20px)); overflow: auto; overscroll-behavior: contain; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-lg); background: var(--surface-2); box-shadow: var(--elev-3), var(--hl-strong); color: var(--text-2); pointer-events: auto; user-select: text; font-size: var(--fs-body); line-height: 1.45; animation: focus-context-hover-enter 120ms ease-out; }
 .focus-context-hover header { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
 .focus-context-hover header strong { flex: 1; min-width: 0; color: var(--text); font-weight: 600; overflow-wrap: anywhere; }
-.focus-context-hover header > span { flex: none; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__state { display: flex; flex-direction: column; align-items: flex-end; gap: 2px; flex: 0 1 auto; min-width: 0; max-width: 55%; color: var(--text-3); font-size: var(--fs-micro); }
+.focus-context-hover__state-label { display: inline-flex; align-items: center; gap: 4px; }
+.focus-context-hover__state-time { font-variant-numeric: tabular-nums; text-align: right; overflow-wrap: anywhere; }
 .focus-context-hover p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
 .focus-context-hover__activity { color: var(--text-3); font-size: var(--fs-meta); }
 .focus-context-hover__recap { margin-top: 6px; }

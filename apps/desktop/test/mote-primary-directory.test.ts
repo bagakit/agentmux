@@ -1,7 +1,7 @@
 import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
-import { afterEach, expect, it } from 'vitest'
+import { basename, dirname, join } from 'node:path'
+import { afterEach, expect, it, vi } from 'vitest'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
@@ -14,7 +14,9 @@ async function fixture() {
   const host = { id: 'local', kind: 'local' as const }
   const topics = new ScratchTopics(), files = new WorkspaceFiles(() => host as never, { primaryMoteWorkspace: async () => workspace })
   const directory = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
-  const physical = join(await realpath(parent), 'motes', directory)
+  const primary = await topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)
+  const physical = primary.physicalDirectoryPath!
+  expect(physical).toBeTruthy()
   return { parent, workspace, topics, files, directory, physical }
 }
 it('uses the real idempotent primary owner and preserves nonempty SOUL, Wiki, avatars and user data on repeated ensure', async () => {
@@ -36,7 +38,7 @@ it('final real delete protects the primary root and ancestor through parent and 
   await expect(files.delete(outer, 'motes')).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
   await symlink(dirname(physical), join(parent, 'alias'))
   const alias = { ...workspace, id: 'other-alias', path: join(parent, 'alias') }
-  await expect(files.delete(alias, directory)).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
+  await expect(files.delete(alias, basename(physical))).rejects.toMatchObject({ code: 'PRIMARY_MOTE_PROTECTED' })
   expect(await readFile(join(physical, 'SOUL.md'))).toEqual(retained)
 })
 it('move refuses a protected source, ancestor and destination before the old atomic helper, with explicit primary reason', async () => {
@@ -93,4 +95,36 @@ it('the existing atomic move owner still moves internal files, custom Motes and 
   expect(await readFile(join(physical, 'renamed.txt'), 'utf8')).toBe('Original inner file')
   expect(await readFile(join(workspace.path, 'renamed-custom', 'SOUL.md'), 'utf8')).not.toBe('')
   await access(join(physical, 'SOUL.md'))
+})
+
+it('coalesces concurrent original primary creation and keeps distinct Mote identities separate', async () => {
+  const parent = await realpath(await mkdtemp(join(tmpdir(), 'mote-primary-concurrent-'))); roots.push(parent)
+  const path = join(parent, 'scratch'); await mkdir(path)
+  const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path, name: 'Space', kind: 'folder' as const }
+  const topics = new ScratchTopics()
+  const settled = await Promise.allSettled(Array.from({ length: 16 }, (_, index) => index % 2 ? topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID) : topics.ensure(workspace, PMO_TEAMS_TOPIC_ID)))
+  expect(settled.filter(result => result.status === 'rejected')).toHaveLength(0)
+  const results = settled.flatMap(result => result.status === 'fulfilled' ? [result.value] : [])
+  expect(results).toHaveLength(16)
+  expect(new Set(results.map(result => result.physicalDirectoryPath)).size).toBe(1)
+  expect(results.every(result => result.id === PMO_TEAMS_TOPIC_ID && Boolean(result.soul?.content))).toBe(true)
+  const original = results[0]!
+  await writeFile(join(original.physicalDirectoryPath!, 'SOUL.md'), '# Keep original personality\n')
+  const [primary, other] = await Promise.all([topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID), topics.ensureMote(workspace, 'view:separate')])
+  expect(primary.soul?.content).toBe('# Keep original personality\n')
+  expect(other.id).toBe('view:separate'); expect(other.physicalDirectoryPath).not.toBe(primary.physicalDirectoryPath)
+})
+
+it('releases a failed original ensure so an explicit fresh call can inspect the retained identity and user files', async () => {
+  const { workspace, topics, physical } = await fixture()
+  const failure = new Error('Original detail read unavailable')
+  const read = vi.spyOn(topics, 'read').mockRejectedValueOnce(failure)
+  try {
+    const failed = await Promise.allSettled([topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)])
+    expect(failed[0]).toMatchObject({ status: 'rejected', reason: failure })
+    await writeFile(join(physical, 'SOUL.md'), '# Retained after failed read\n')
+    await expect(topics.ensureMote(workspace, PMO_TEAMS_TOPIC_ID)).resolves.toMatchObject({
+      id: PMO_TEAMS_TOPIC_ID, physicalDirectoryPath: physical, soul: { content: '# Retained after failed read\n' }
+    })
+  } finally { read.mockRestore() }
 })

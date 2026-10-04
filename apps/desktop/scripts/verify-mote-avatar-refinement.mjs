@@ -8,7 +8,7 @@ assert.deepEqual(args.slice(0, 1), ['--slice']); assert.ok(['editor', 'motion'].
 const slice = args[1], evidence = join(repository, '.tmp/mote-avatar-refinement', slice + '-' + globalThis.crypto.randomUUID())
 await mkdir(evidence, { recursive: true })
 const hash = value => createHash('sha256').update(value).digest('hex')
-const product = ['components/SpaceIconPicker.tsx','components/MoteFaceEditor.tsx','components/MoteFace.tsx','components/MoteIdentityMotion.tsx','components/SpaceObjectIcon.tsx','components/settings/LiquidSelectionSurface.tsx','lib/mote-face-motion.ts','lib/mote-expression.ts','lib/session-state.ts','lib/session-events.ts','store.ts','styles/space-object-appearance.css'].map(file => 'apps/desktop/src/renderer/src/' + file)
+const product = ['components/SpaceIconPicker.tsx','components/MoteFaceEditor.tsx','components/MoteFace.tsx','components/MoteIdentityMotion.tsx','components/SpaceObjectIcon.tsx','components/LiquidSelectionSurface.tsx','lib/mote-face-motion.ts','lib/mote-expression.ts','lib/session-state.ts','lib/session-events.ts','store.ts','styles/space-object-appearance.css'].map(file => 'apps/desktop/src/renderer/src/' + file)
 product.push('apps/desktop/src/shared/mote-avatars.ts','apps/desktop/scripts/fixtures/mote-navigation-footer/paperdoll-entry.tsx')
 const files = await Promise.all(product.map(async path => ({ path, sha256: hash(await readFile(join(repository, path))) })))
 const candidate = join(evidence, 'candidate.json'); await writeFile(candidate, JSON.stringify({ schema:'agentmux.mote-avatar-refinement-candidate.v1', files }, null, 2))

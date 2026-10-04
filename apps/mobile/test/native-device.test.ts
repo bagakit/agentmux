@@ -1,3 +1,4 @@
+import { Blob as NodeBlob } from 'node:buffer'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { bindMobileViewport, bindNativeDevice, createNativePlatform, pickLocalAttachment, type NativeDevicePorts } from '../src/platform/native/device'
 import { createBrowserPlatform } from '../src/platform/browser'
@@ -62,16 +63,16 @@ describe('public OS ports used by the mobile shell', () => {
     expect(base.bindComposerFocus).toHaveBeenCalledTimes(2)
   })
 
-  it('selects one system file as metadata without reading its data/path or inventing an upload', async () => {
+  it('pins one bounded system file without exporting an OS path or inventing a Host receipt', async () => {
     const pickFiles = vi.fn().mockResolvedValueOnce({ files: [{ name: 'notes.txt', mimeType: 'text/plain', size: 30,
-      path: 'private://phone/file', data: 'must-not-export' }] })
+      path: 'private://phone/file', data: 'must-not-export', blob: new NodeBlob(['x'.repeat(30)]) }] })
     const ports = { filePicker: { pickFiles } as NativeDevicePorts['filePicker'] }
     const selected = await pickLocalAttachment(ports)
     expect(pickFiles).toHaveBeenCalledExactlyOnceWith({ limit: 1, readData: false })
-    expect(selected).toEqual({ id: expect.any(String), name: 'notes.txt', mimeType: 'text/plain', size: 30 })
+    expect(selected).toEqual({ id: expect.any(String), name: 'notes.txt', mimeType: 'text/plain', size: 30, revision: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), dataBase64: Buffer.from('x'.repeat(30)).toString('base64') })
     expect(selected!.id.length).toBeGreaterThan(0)
     pickFiles.mockResolvedValueOnce({ files: [] }); expect(await pickLocalAttachment(ports)).toBeNull()
-    pickFiles.mockResolvedValueOnce({ files: [{ name: 'bad.txt', mimeType: '', size: 30 }] })
+    pickFiles.mockResolvedValueOnce({ files: [{ name: '', mimeType: '', size: 30 }] })
     await expect(pickLocalAttachment(ports)).rejects.toThrow('尚未确认')
     pickFiles.mockResolvedValueOnce({ files: [{ name: 'a' }, { name: 'b' }] })
     await expect(pickLocalAttachment(ports)).rejects.toThrow('多个文件')

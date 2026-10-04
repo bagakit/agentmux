@@ -52,7 +52,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
     protocolGeneration: 18, runtimeIdPersistence: 'state_dir', capabilities: { 'services.planned_exec_upgrade_continuity': 1 } }
   const run = { id: 'original-run', pid: 12345, backend: 'pty', acceptedInputBytes: 2, outputBytes: 50 }
   let signalled = false, mapped = binaries[0]!, currentLock = lock
-  let extraLock = false, wrongInode = false, changeBirth = false
+  let extraLock = false, wrongInode = false, changeBirth = false, mappingReads = 0
   let insideImage: string | undefined, insideLock: string | undefined
   let version = 'ctxmuxd 0.1.0 (protocol 18, handoff opaque-public-declaration)\n'
   let outgoingVersion = version
@@ -60,7 +60,7 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
   let versionCalls = 0
   const fields = async (fd: string, path: string) => {
     const metadata = await lstat(path, { bigint: true })
-    return `f${fd}\ntREG\nD0x${metadata.dev.toString(16)}\ni${wrongInode && fd === 'txt' ? metadata.ino + 1n : metadata.ino}\nn${path}\n`
+    return `f${fd}\ntREG\nD0x${metadata.dev.toString(16)}\ni${wrongInode && fd === 'txt' && mappingReads > 1 ? metadata.ino + 1n : metadata.ino}\nn${path}\n`
   }
   hooks.live.mockResolvedValue('alive')
   hooks.exec.mockImplementation(async (executable: string, args: string[]) => {
@@ -75,10 +75,13 @@ async function fixture(ledger: 'stale' | 'missing' | 'invalid' = 'stale') {
       if (versionChange === 'inode') { const next = `${binaries[1]}.next`; await copyFile(binaries[1]!, next); await rename(next, binaries[1]!) }
       return { stdout: version }
     }
+    if (executable === '/usr/bin/codesign') return { stdout: '', stderr: `CDHash=${sha(await readFile(args.at(-1)!)).slice(0, 40)}\n` }
+    if (executable === '/usr/bin/python3') return { stdout: JSON.stringify({ valid: true, cdHash: sha(await readFile(mapped)).slice(0, 40) }) }
     if (executable === '/usr/bin/tar') return { stdout: '' }
     if (executable === '/bin/ps') return { stdout: changeBirth ? `${birth}-changed` : birth }
     if (executable === '/usr/sbin/lsof') {
       if (args.includes('-U')) return { stdout: `p${pid}\nu${uid}\nf7u\ntunix\nn${socket}\n` }
+      mappingReads++
       const stdout = `p${pid}\nu${uid}\n${await fields('txt', mapped)}${await fields('11u', currentLock)}${extraLock ? await fields('12u', currentLock) : ''}`
       if (insideImage) { mapped = insideImage; insideImage = undefined }
       if (insideLock) { currentLock = insideLock; insideLock = undefined }
@@ -126,9 +129,9 @@ it('rejects ambiguous state descriptors before any signal', async () => {
   const f = await fixture(); f.multipleLocks()
   await expect(f.prepare()).rejects.toThrow('no unique state.lock'); expect(f.signal).not.toHaveBeenCalled()
 })
-it('rejects a mapped filename whose OS inode does not match the actual file', async () => {
+it('rejects OS mapped-image inode drift between owner observations', async () => {
   const f = await fixture(); f.badImageInode()
-  await expect(f.prepare()).rejects.toThrow('same regular file'); expect(f.signal).not.toHaveBeenCalled()
+  await expect(f.prepare()).rejects.toThrow('file identities changed'); expect(f.signal).not.toHaveBeenCalled()
 })
 it.each(['image', 'state'] as const)('rejects %s drift inside one observation even while PID, birth and socket stay the same', async kind => {
   const f = await fixture(); await f.driftDuringObservation(kind)
@@ -212,7 +215,7 @@ it('refuses unequal public handoff declarations before owner extraction, signal 
   f.versionResponse('ctxmuxd 0.1.0 (protocol 18, handoff destination-generation)\n')
   await expect(f.prepare()).rejects.toThrow('Runtime handoff is unsupported: source-generation -> destination-generation')
   expect(f.signal).not.toHaveBeenCalled()
-  expect(hooks.exec.mock.calls.map(([command]) => command).sort()).toEqual([...f.binaries].sort())
+  expect(hooks.exec.mock.calls.map(([command]) => command).filter(command => command !== '/usr/bin/codesign').sort()).toEqual([...f.binaries].sort())
   expect(await readFile(f.receiptPath)).toEqual(receipt)
   expect(await readFile(f.binaries[0]!)).toEqual(Buffer.from('never-executed-private-image-0'))
 })
@@ -222,6 +225,6 @@ it('keeps the original service when a candidate has no verifiable public handoff
   f.versionResponse('ctxmuxd 0.1.0 (protocol 18)\n')
   await expect(f.prepare()).rejects.toThrow('declare its selected version, protocol and handoff')
   expect(f.signal).not.toHaveBeenCalled()
-  expect(hooks.exec.mock.calls.map(([command]) => command).sort()).toEqual([...f.binaries].sort())
+  expect(hooks.exec.mock.calls.map(([command]) => command).filter(command => command !== '/usr/bin/codesign').sort()).toEqual([...f.binaries].sort())
   expect(await readFile(f.receiptPath)).toEqual(receipt)
 })

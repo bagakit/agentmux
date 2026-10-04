@@ -1,3 +1,4 @@
+import { describeError } from '@agentmux/client-ui/error-presentation'
 /** Only explicit Core rejection facts can unlock a write after its RPC was dispatched. */
 export function deliveryOutcome(error: unknown, operation: 'prompt' | 'interaction'): 'rejected' | 'unknown' {
   if (!error || typeof error !== 'object') return 'unknown'
@@ -29,5 +30,6 @@ export function deliveryOutcome(error: unknown, operation: 'prompt' | 'interacti
 }
 
 export function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+  const value = describeError(error)
+  return `${value.message}${value.code ? ` [${value.code}]` : ''}${value.detail ? `\n${value.detail}` : ''}`
 }

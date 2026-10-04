@@ -13,7 +13,7 @@ export function WorkbenchEmptyState({ title, detail, guidance, diagnostic, actio
   return <FullPageLoadingSurface scope="region" phase="parked" eyebrow={title} title={title} detail={detail}
     className="workbench-empty-state" actions={actions}
     supplement={guidance ? <p className="full-page-loading__detail">{guidance}</p> : undefined}
-    details={diagnostic ? { summary: 'View details', content: <p className="full-page-loading__detail">{diagnostic}</p> } : undefined}>
+    {...(diagnostic ? { details: { summary: 'View details', content: <p className="full-page-loading__detail">{diagnostic}</p> } } : {})}>
     <div className="full-page-loading__heading">
       <h1>{title}</h1>
       <span className="full-page-loading__mark" aria-hidden="true"><PanelsTopLeft size={18} /></span>

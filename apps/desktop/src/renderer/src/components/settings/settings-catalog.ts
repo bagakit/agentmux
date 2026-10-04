@@ -2,17 +2,22 @@ import type { ComponentType } from 'react'
 import type { LucideIcon } from 'lucide-react'
 import type { AppConfig } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
+import type { SettingsPageId } from './settings-modules'
 
 export const SETTINGS_GROUPS = [
-  { id: 'preferences', title: 'Preferences' },
-  { id: 'resources', title: 'Resources' },
-  { id: 'connections', title: 'Connections' }
+  { id: 'preferences', title: 'Preferences', overviewColumn: 'left' },
+  { id: 'connections', title: 'Connections', overviewColumn: 'left' },
+  { id: 'toolkit', title: 'Mods', overviewColumn: 'left' },
+  { id: 'resources', title: 'Resources', overviewColumn: 'right' },
+  { id: 'work', title: 'Work', overviewColumn: 'right' },
+  { id: 'mote', title: 'Mote', overviewColumn: 'right' }
 ] as const
 
 export type SettingsPaneProps = {
   config: AppConfig
   onClose: () => void
   active: boolean
+  onNavigate(section: SettingsPageId): void
   executorId?: string | undefined
   toolId?: string | undefined
   navigationRequest?: SettingsNavigationRequest | undefined
@@ -30,18 +35,19 @@ export type SettingsModule = {
   Pane: ComponentType<SettingsPaneProps>
 }
 
-export type SettingsNavGroup<Module extends SettingsModule = SettingsModule> = {
-  id: typeof SETTINGS_GROUPS[number]['id']
-  title: string
-  items: Module[]
-}
+export type SettingsNavGroup<Module extends SettingsModule = SettingsModule> =
+  typeof SETTINGS_GROUPS[number] & { items: Module[] }
 
 /** All navigation surfaces derive from the same compiled contributions. */
 export function createSettingsCatalog<const Modules extends readonly SettingsModule[]>(modules: Modules) {
+  const orderedModules = SETTINGS_GROUPS.flatMap((group) =>
+    modules.filter((module) => module.group === group.id)
+  )
+
   function visibleSections(query: string): Modules[number][] {
     const normalized = query.trim().toLowerCase()
-    if (!normalized) return [...modules]
-    return modules.filter((module) =>
+    if (!normalized) return [...orderedModules]
+    return orderedModules.filter((module) =>
       `${module.title} ${module.description} ${module.keywords}`.toLowerCase().includes(normalized)
     )
   }

@@ -48,6 +48,8 @@ export type SpatialControlPorts = {
   preserveMovedFocus?(from: AgentMuxSpaceAddress): void
   recordRemovedTab?(tabId: string): void
 }
+/** Local UI context, separate from the public spatial request and user prompt. */
+export type SpatialControlOptions = { agentMuxNote?: string; recovery?: SpatialRequestBinding['recovery']; authorize?: () => boolean }
 
 class SpatialFailure extends Error {
   constructor(readonly issue: AgentMuxSpatialIssue) { super(issue.message) }
@@ -80,7 +82,8 @@ export function spatialCatalog(state: SpatialWorkbench, topics: readonly Scratch
   for (const tab of Object.values(state.tabs)) {
     const workspace = state.config?.workspaces.find(workspace => workspace.id === tab.workspaceId)
     const topic = tab.topicId ? topics.find(topic => topic.id === tab.topicId) : undefined
-    const source = topic ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : undefined
+    const source = topic && !(tab.topicPreparation && !tab.space && topic.readError)
+      ? topicSpatialAddress(state.config, topic, state.spaceZoneBindings, state.topicCategories) : undefined
     const referencedZoneId = tab.space?.zoneId ?? (workspace ? tab.topicId
       ? source?.zoneId ?? null
       : tab.workspaceId === SCRATCH_WORKSPACE_ID ? homeZoneId(directoryIdentity(workspace.hostId, workspace.path))
@@ -392,21 +395,31 @@ async function digest(input: unknown): Promise<string> {
   return [...new Uint8Array(bytes)].map(byte => byte.toString(16).padStart(2, '0')).join('')
 }
 async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTopicSnapshot[], binding: SpatialRequestBinding): Promise<AgentMuxSpaceMutationReport> {
-  const state = ports.get()
-  const catalog = spatialCatalog(state, topics)
-  const region = catalog.regions.find(item => item.regionId === binding.regionId && item.agentSessionId === binding.agentSessionId)
-  const requestedLocation = region ? addressOf(catalog, region.regionId, binding.target) : null
-  const to = requestedLocation ?? (region ? addressOf(catalog, region.regionId) : null)
-  const atTarget = Boolean(requestedLocation && requestedLocation.tabId === binding.tabId)
-  const snapshot = state.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === binding.agentSessionId && session.kind === 'agent' &&
-    (!binding.executionHostId || session.hostId === binding.executionHostId))
+  const currentLocation = () => {
+    const state = ports.get(), catalog = spatialCatalog(state, topics)
+    const region = catalog.regions.find(item => item.regionId === binding.regionId && item.agentSessionId === binding.agentSessionId)
+    const requested = region ? addressOf(catalog, region.regionId, binding.target) : null
+    return { state, catalog, to: requested ?? (region ? addressOf(catalog, region.regionId) : null), atTarget: Boolean(requested && requested.tabId === binding.tabId),
+      snapshot: state.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === binding.agentSessionId && session.kind === 'agent' && (!binding.executionHostId || session.hostId === binding.executionHostId)) }
+  }
+  let { state, catalog, to, atTarget, snapshot } = currentLocation()
   let agent: AgentMuxSpaceAgentFact | null = snapshot ? snapshotFact(snapshot) : null
   const issues: AgentMuxSpatialIssue[] = []
   if (binding.createAgent) {
     const hostId = binding.executionHostId ?? binding.resource?.hostId ?? snapshot?.hostId ?? catalog.zones.find(item => item.zoneId === binding.target.zoneId)?.hostId
-    if (hostId) try { agent = agentFact(await ports.creation(hostId, binding.agentSessionId), hostId) }
+    if (hostId) try {
+      const created = await ports.creation(hostId, binding.agentSessionId)
+      if (created.agentSessionId !== binding.agentSessionId) throw new Error('Creation read returned another Session identity.')
+      if (binding.recovery && created.creation?.createOperationId !== binding.requestId) throw new Error('Core has not confirmed this original creation operation identity. Its healthy Session is retained without attaching a replacement.')
+      agent = agentFact(created, hostId)
+      // Repair only the original reserved projection from the existing Core receipt.
+      // This read never repeats creation, input or lifecycle recovery.
+      const afterRead = currentLocation()
+      if (binding.recovery && afterRead.atTarget && !afterRead.snapshot) await ports.attach(binding.regionId, { created, projectionFailures: [] })
+    }
     catch (error) { issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', error)) }
   }
+  ;({ state, catalog, to, atTarget, snapshot } = currentLocation())
   const workspace = binding.resource && state.config?.workspaces.find(item => item.hostId === binding.resource!.hostId && item.path === binding.resource!.path)
   const source = binding.resource && state.config?.workspaces.find(item => item.id === binding.resource!.sourceWorkspaceId)
   const resource = binding.resource ? { projectId: source ? directoryIdentity(source.hostId, source.repoPath ?? source.path) : null,
@@ -430,7 +443,7 @@ const activeRequests = new Set<string>()
 /** Scoped intent correlation: repeated IDs and request inspection only read owners, never resume side effects. */
 export async function executeSpatialControl(ports: SpatialControlPorts,
   request: Extract<AgentMuxSpaceControlRequest, { operation: 'space.ls' | 'space.inspect' | 'agent.open' | 'space.mv' | 'space.bind' | 'space.unbind' }>,
-  signal?: AbortSignal): Promise<AgentMuxSpaceControlResult> {
+  signal?: AbortSignal, options?: SpatialControlOptions): Promise<AgentMuxSpaceControlResult> {
   let topics: readonly ScratchTopicSnapshot[] = []
   try { topics = await ports.topics() } catch { /* durable bindings remain discoverable with an explicit issue */ }
   let catalog = spatialCatalog(ports.get(), topics)
@@ -455,7 +468,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if ('requestId' in request.target) {
       const binding = ports.get().spatialRequests[request.target.requestId]
       return { operation: request.operation, catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [] },
-        request: { requestId: request.target.requestId, known: Boolean(binding), report: binding ? await reconcile(ports, topics, binding) : null } }
+        request: { requestId: request.target.requestId, known: Boolean(binding), report: binding && binding.operation !== 'agent.message' ? await reconcile(ports, topics, binding) : null } }
     }
     return { operation: request.operation, catalog: selectSpatialCatalog(catalog, request.target) }
   }
@@ -473,7 +486,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
   }
   try {
     const inputDigest = await digest({ operation, destination: request.destination, focus: request.focus,
-      ...(operation === 'agent.open' ? { content: request.content, caller: request.caller } : { fromRegionId: request.fromRegionId, expectedAgentSessionId: request.expectedAgentSessionId, fromLocation: request.fromLocation }) })
+      ...(operation === 'agent.open' ? { content: request.content, caller: request.caller, agentMuxNote: options?.agentMuxNote, recovery: options?.recovery } : { fromRegionId: request.fromRegionId, expectedAgentSessionId: request.expectedAgentSessionId, fromLocation: request.fromLocation }) })
     const existing = ports.get().spatialRequests[request.requestId]
     if (existing) {
       if (existing.inputDigest !== inputDigest) failure('SPACE_REQUEST_CONFLICT', 'This request ID is already bound to different input.')
@@ -483,6 +496,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     activeRequests.add(request.requestId)
     ownsAdmission = true
     if (signal?.aborted) failure('CONTROL_CANCELLED', 'The request ended before any side effect.')
+    if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed. No creation was dispatched.')
     if (!ports.get().config) failure('SPACE_CONFIG_UNAVAILABLE', 'The client configuration is not yet available.')
     if (request.destination.displayWorkspaceId) exactDisplayLayout(ports.get().layouts, request.destination.displayWorkspaceId, request.destination.groupId)
     let selfMove = false
@@ -583,8 +597,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
       ...(executionHostId ? { executionHostId } : {}),
+      ...(options?.recovery ? { recovery: options.recovery } : {}),
       ...(operation === 'agent.open' && request.content.kind === 'fork-agent' ? { forkSource: structuredClone(request.content.source) } : {}),
-      ...(from ? { from } : {}), target: destination ? { ...(destination.address.spaceId ? { spaceId: destination.address.spaceId } : {}), ...(destination.address.zoneId ? { zoneId: destination.address.zoneId } : {}), tabId: destination.address.tabId, regionId: destination.address.regionId, displayWorkspaceId: destination.address.displayWorkspaceId, groupId: destination.address.groupId } : { spaceId: request.destination.spaceId!,
+      ...(from ? { from } : {}), target: destination ? { ...(destination.address.spaceId ? { spaceId: destination.address.spaceId } : {}), ...(destination.address.zoneId ? { zoneId: destination.address.zoneId } : {}), tabId: destination.address.tabId, regionId: destination.anchor ?? destination.address.regionId, displayWorkspaceId: destination.address.displayWorkspaceId, groupId: destination.address.groupId } : { spaceId: request.destination.spaceId!,
         ...(request.destination.displayWorkspaceId ? { displayWorkspaceId: request.destination.displayWorkspaceId } : {}),
         ...(request.destination.groupId ? { groupId: request.destination.groupId } : {}) },
       ...(resourceReference ? { resource: resourceReference } : {}) }
@@ -637,6 +652,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (!report.save.localStorageWritten && binding.createAgent) return fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
     if (request.focus) ports.focus(target.address)
     if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session') {
+      if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
       const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
       const topicId = !executionWorkspace && zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
       const launchHostId = forkExecutionHostId ?? executionWorkspace?.hostId ?? zone.hostId
@@ -646,6 +662,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
         ...(request.content.kind === 'fork-agent' ? { forkSource: request.content.source, launchOptions: forkParent!.launchOptions } : {}),
         ...(!forkParent && topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
+        ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
       report.agent = agentFact({ ...launched.created, ...(launched.creation ? { creation: launched.creation } : {}) }, launchHostId)
       if (launched.created.agentSessionId !== sessionId) return fail('Core returned another Session; its healthy Run has been retained for inspection.', 'creation')

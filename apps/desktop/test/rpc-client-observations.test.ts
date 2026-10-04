@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AppConfig } from '../src/shared/contracts.js'
 import { SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, SCRATCH_TOPIC_WIKI_PATH } from '../src/shared/scratch-topics.js'
 import { directoryIdentity } from '../src/shared/space-addresses.js'
+import { moteDirectoryName } from '../src/main/scratch-directory-identity.mjs'
 import { ScratchTopics } from '../src/main/scratch-topics.js'
 import { SCRATCH_DIRECTORY_IDENTITY_PATH } from '../src/main/scratch-topic-directories.js'
 import { observeClientRpcSnapshot } from '../src/main/rpc-client-observations.js'
@@ -30,7 +31,7 @@ describe('public RPC client metadata from its original filesystem and config own
     const workspace = config.workspaces[2]!
     const topic = await owner.ensure(workspace, 'view:topic')
     const mote = await owner.ensureMote(workspace, 'view:mote')
-    const motePath = join(parent, 'motes', mote.directoryPath)
+    const motePath = join(parent, 'motes', moteDirectoryName(mote.id))
     const topicPath = join(parent, 'topics', topic.directoryPath)
     expect(mote.physicalDirectoryPath).toBe(motePath)
     expect(topic.physicalDirectoryPath).toBe(topicPath)
@@ -67,7 +68,7 @@ describe('public RPC client metadata from its original filesystem and config own
     const { config, owner, parent, root } = await fixture()
     const workspace = config.workspaces[2]!
     const mote = await owner.ensureMote(workspace, 'view:retained')
-    const physicalPath = join(parent, 'motes', mote.directoryPath)
+    const physicalPath = join(parent, 'motes', moteDirectoryName(mote.id))
     const identityPath = join(root, mote.directoryPath)
     const identityRecord = join(physicalPath, SCRATCH_DIRECTORY_IDENTITY_PATH)
     await mkdir(join(physicalPath, '.agentmux'), { recursive: true })

@@ -274,14 +274,14 @@ export function agentPromptDeliveryServiceOutcome(session: SessionSnapshot | und
     'screen-evidence-replaced': 'Screen confirmation was interrupted',
     'turn-end-unconfirmed': 'Confirming the previous turn ended',
     'input-unconfirmed': 'Confirming the original prompt input',
-    'immediate-context-unconfirmed': 'Confirming the native immediate input context'
+    'immediate-context-unconfirmed': 'Confirming the native execution context'
   }
   return {
     completed: false,
     step: {
       label: steps[session.terminalPromptDelivery.reason],
       degradedMode: session.terminalPromptDelivery.reason === 'immediate-context-unconfirmed'
-        ? 'Immediate execution is unconfirmed. The original message is kept. Review native pending input or draft, then retry this exact message; the terminal remains available.'
+        ? 'Immediate execution is unconfirmed. The original message is kept; ordinary input and the healthy Run remain available. Review native pending input or draft, then retry this same message.'
         : session.terminalPromptDelivery.reason === 'input-unconfirmed'
         ? 'Delivery is unknown. The original message is kept; retry continues the same input. The terminal remains available.'
         : session.terminalPromptDelivery.reason === 'turn-end-unconfirmed'

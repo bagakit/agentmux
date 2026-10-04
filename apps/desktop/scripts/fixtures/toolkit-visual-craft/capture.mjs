@@ -64,7 +64,7 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
         const originalProduct = rules.map(rule => rule.toString()).join('\n')
         for (const rule of rules) for (const declaration of rule.nodes ?? []) {
           if (declaration.type !== 'decl') continue
-          const hierarchy = rule.selector === ".toolkit-workbench:is([data-creation-empty='true'], [data-starting-point='true']) .toolkit-workbench__toolbar > .toolkit-workbench__create"
+          const hierarchy = rule.selector === ".toolkit-workbench[data-creation-empty='true'] .toolkit-workbench__toolbar > .toolkit-workbench__create"
           if (mutation === 'hierarchy' && hierarchy && declaration.prop === 'background') { declaration.value = 'linear-gradient(180deg, var(--green), var(--green-2))'; changed++ }
           if (mutation === 'palette' && declaration.value === 'var(--green)' && (declaration.prop === 'accent-color' || declaration.prop === 'color')) { declaration.value = 'var(--accent)'; changed++ }
           if (mutation === 'nameFocus' && rule.selector === '.toolkit-editor__name input:focus' && declaration.prop === 'outline') { declaration.value = '0px solid transparent'; changed++ }
@@ -86,7 +86,7 @@ export async function captureCraft({ root, evidence, bind, proofFiles, mode = 'c
       const scene = JSON.parse(await readFile(resolve(evidence, stage + '-scene.json'))); if (mutation) {
         assert.equal(scene.completed, false); assert.equal(scene.assertionName, mutation)
         assert.equal(scene.errorName, 'AssertionError', 'SpecificAssertionRED, never setup or compile failure')
-        const messages = { hierarchy: /Wide empty or starting-point toolbar New is quiet/u, palette: /checkbox\/radio consumes the defined brand green/u, nameFocus: /distinct two-pixel focus boundary/u }
+        const messages = { hierarchy: /Wide empty toolbar New is quiet/u, palette: /checkbox\/radio consumes the defined brand green/u, nameFocus: /distinct two-pixel focus boundary/u }
         assert.match(scene.failure, messages[mutation], 'The mutated product rule fails its specific computed-style oracle')
         assert.ok(receipt.loadedCSS.some(item => item.originalOwningRulesSHA256 !== item.consumedOwningRulesSHA256))
         receipt.specificAssertionRED = true

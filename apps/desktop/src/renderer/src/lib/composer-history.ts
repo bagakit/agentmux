@@ -9,6 +9,30 @@ export type HistoryState = {
   stash: string | null // the live draft, saved when the user first arrows up off it
 }
 
+export const MAX_COMPOSER_HISTORY_ENTRIES = 100
+export const MAX_COMPOSER_HISTORY_BYTES = 1024 * 1024
+const encoder = new TextEncoder()
+
+/** Editing preference only: evict oldest whole bodies, never alter a prompt or delivery fact. */
+function boundedHistory(entries: readonly string[]): readonly string[] {
+  let bytes = 0, start = entries.length
+  while (start > 0 && entries.length - start < MAX_COMPOSER_HISTORY_ENTRIES) {
+    const size = encoder.encode(entries[start - 1]!).byteLength
+    if (bytes + size > MAX_COMPOSER_HISTORY_BYTES) break
+    bytes += size
+    start--
+  }
+  return start === 0 ? entries : entries.slice(start)
+}
+
+/** Hydration validates only this optional editor cache; drafts and queued messages keep their owners. */
+export function restoreComposerHistory(value: unknown): Record<string, readonly string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).flatMap(([sessionId, entries]) =>
+    Array.isArray(entries) && entries.every(entry => typeof entry === 'string' && entry.trim() !== '')
+      ? [[sessionId, boundedHistory(entries)]] : []))
+}
+
 export const emptyHistory: HistoryState = { entries: [], cursor: 0, stash: null }
 
 // Record a just-submitted prompt. HIST_IGNORE_DUPS: skip a second copy of the newest entry. Empty /
@@ -17,7 +41,7 @@ export const emptyHistory: HistoryState = { entries: [], cursor: 0, stash: null 
 export function recordHistory(state: HistoryState, prompt: string): HistoryState {
   if (prompt.trim() === '') return state
   const newest = state.entries[state.entries.length - 1]
-  const entries = newest === prompt ? state.entries : [...state.entries, prompt]
+  const entries = boundedHistory(newest === prompt ? state.entries : [...state.entries, prompt])
   return { entries, cursor: entries.length, stash: null }
 }
 

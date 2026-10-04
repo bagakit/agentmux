@@ -94,7 +94,7 @@ async function captureCreation() {
   assert.ok(await evaluate(`Boolean(${element('[aria-label="Expand Browser"]')}) && Boolean(${element('[aria-label="Expand Note"]')})`))
   const original = await evaluate('launchpad.facts()'); await frame('default-executors-dark')
   await expandAgentIfCollapsed()
-  await evaluate('launchpad.motes()'); await paint(); await click(element('[aria-label="Choose Mote: Mote"]'))
+  await evaluate('launchpad.motes()'); await paint(); await click(element('[aria-label^="Choose Mote:"]'))
   await wait('Boolean(document.querySelector("[role=menuitem]"))'); await frame('mote-chooser-wide')
   await click(`[...document.querySelectorAll('[role="menuitem"]')].find(e=>e.textContent.includes('Design & implementation'))`)
   await viewport(720,660); await evaluate('launchpad.scene({split:true,long:true,theme:"light"})'); await paint(); await assertGeometry(); await frame('selected-mote-narrow-light')
@@ -159,7 +159,7 @@ async function capturePolish() {
   await click(element('[aria-label="Launch options"]'))
   await wait('getComputedStyle(document.querySelector(".launch-refine__panel")).visibility==="visible"')
   await frame('polish-options-dark'); await escape()
-  await evaluate('launchpad.motes()'); await paint(); await click(element('[aria-label="Choose Mote: Mote"]'))
+  await evaluate('launchpad.motes()'); await paint(); await click(element('[aria-label^="Choose Mote:"]'))
   await wait('Boolean(document.querySelector("[role=menuitem]"))'); await frame('polish-mote-chooser-dark')
   await click(`[...document.querySelectorAll('[role="menuitem"]')].find(e=>e.textContent.includes('Design & implementation'))`)
   await evaluate(`(()=>{window.launchpadBrowserMotion=[];const section=${element('[data-section="browser"]')};for(const kind of ['animationstart','transitionrun'])section.addEventListener(kind,event=>{window.launchpadBrowserMotion.push(...event.target.getAnimations().map(a=>({type:a.constructor.name,duration:a.effect.getComputedTiming().duration})))})})()`)
@@ -169,6 +169,9 @@ async function capturePolish() {
   assert.ok(motion.some(item=>Number(item.duration)>0&&Number(item.duration)<=300), 'Browser motion stays brief')
   await type(element('[aria-label="Browser address or search"]'), 'local agent runtime')
   await escape()
+  await evaluate(`${element('[data-section="browser"]')}.scrollIntoView({block:'nearest'})`); await paint()
+  const browserRow = await evaluate(`(()=>{const r=${element('[aria-label="Browser address or search"]')}.getBoundingClientRect();return{top:r.top,bottom:r.bottom,height:r.height,viewport:innerHeight}})()`)
+  assert.ok(browserRow.height>20&&browserRow.top>=0&&browserRow.bottom<=browserRow.viewport,'Expanded Browser row is fully visible after actual scrolling')
   await assertGeometry(); await frame('polish-browser-row-dark')
   const motionBeforeClose = await evaluate('window.launchpadBrowserMotion.length')
   await click(element('[aria-label="Collapse Browser"]'))
@@ -213,19 +216,20 @@ async function capturePolish() {
   assert.equal(facts.warmRun,original.warmRun); assert.equal(facts.calls.stops.length,0)
   assert.equal(facts.sourceDraft,original.sourceDraft); assert.ok(facts.drafts.note.includes('complete private draft'))
   report.scenarios.push({name:'Launcher default Executor catalog and entry polish on actual production Workbench',passed:true,original,expectedExecutors,defaultExecutors,motion,closingMotion,small,popup,after:durableFacts,reducedMotion:true})
-  report.expectedDurable={sections:durableFacts.sections,drafts:facts.drafts,tab:facts.tab,layout:facts.layout,sourceDraft:facts.sourceDraft,agentDrafts:facts.agentDrafts,activeWorkspaceId:facts.activeWorkspaceId}
+  report.expectedDurable={sections:durableFacts.sections,allSections:durableFacts.allSections,drafts:facts.drafts,tab:facts.tab,layout:facts.layout,sourceDraft:facts.sourceDraft,agentDrafts:facts.agentDrafts,activeWorkspaceId:facts.activeWorkspaceId}
   await fs.writeFile(path.join(evidence,'expected-durable.json'),JSON.stringify(report.expectedDurable,null,2))
   await fs.writeFile(path.join(profile,'boot.json'),JSON.stringify(await evaluate('launchpad.bootFacts()')))
 }
 async function restart() {
   const expected=JSON.parse(await fs.readFile(path.join(evidence,'expected-durable.json'),'utf8'))
   const facts=await evaluate('launchpad.facts()');const beforeSetup=await evaluate('launchpad.readBeforeFixtureSetup');assert.ok(beforeSetup);assert.deepEqual(beforeSetup.tabs[expected.tab.id],expected.tab,'Original Tab/Region split is read before any fixture setup');assert.deepEqual(beforeSetup.layouts[expected.activeWorkspaceId],expected.layout,'Original group and focus are read before any fixture setup');assert.equal(beforeSetup.sourceDraft,expected.sourceDraft);assert.equal(beforeSetup.activeWorkspaceId,expected.activeWorkspaceId);assert.deepEqual(facts.tab,expected.tab);assert.deepEqual(facts.layout,expected.layout);assert.deepEqual(facts.sections,expected.sections,'A new Electron process restores exact section preferences');assert.deepEqual(facts.drafts,expected.drafts,'A new Electron process restores complete Browser/Note drafts');if(expected.agentDrafts){assert.deepEqual(beforeSetup.agentDrafts,expected.agentDrafts,'Both original drafts read before fixture setup');assert.deepEqual(facts.agentDrafts,expected.agentDrafts)}
+  if(expected.allSections){assert.deepEqual(beforeSetup.sections,expected.allSections,'Project and Mote explicit preferences are read before setup');assert.deepEqual(facts.allSections,expected.allSections,'All real host explicit section preferences restore')}
   assert.equal(facts.persistenceIssue,null);assert.ok(await evaluate(`Boolean(${element('[aria-label="Restore Terminal"]')})`));assert.equal(await evaluate(`${element('[aria-label="Browser address or search"]')}.value`),expected.drafts.browser)
   await frame('renderer-profile-restart');report.durable={passed:true,expected,actual:{sections:facts.sections,drafts:facts.drafts,tab:facts.tab,layout:facts.layout,sourceDraft:facts.sourceDraft,activeWorkspaceId:facts.activeWorkspaceId},beforeFixtureSetup:beforeSetup,boundary:'Two separate Electron processes, same private Renderer profile. Section and utility-draft durability only. Native Core/ctxmux Run continuity is verified separately.'}
 }
 app.whenReady().then(async()=>{try{
   await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1180,height:850,webPreferences:{backgroundThrottling:false,sandbox:false,preload:path.join(__dirname,'preload.cjs'),additionalArguments:phase==='restart'?['--launchpad-boot='+path.join(profile,'boot.json')]:[]}})
-  win.webContents.on('console-message',(_e,_level,message)=>console.log('RENDERER '+message));await win.loadFile(html,{query:{phase}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await wait('Boolean(window.launchpad)')
-  if(suite==='mote-preference')await require('./mote-preference.cjs')({phase,win,evaluate,element,delay,wait,paint,viewport,click,escape,type,frame,assertGeometry,report,profile,evidence});else if(phase==='restart')await restart();else if(suite==='interaction-motion')await require('./motion.cjs')({win,evaluate,element,delay,wait,paint,viewport,click,escape,type,frame,assertGeometry,report,profile,evidence});else if(suite==='entry-polish')await capturePolish();else if(suite==='creation-handoff')await captureCreation();else await capture();report.passed=true
+  win.webContents.on('console-message',(_e,_level,message)=>console.log('RENDERER '+message));await win.loadFile(html,{query:{phase,suite}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true});await wait('Boolean(window.launchpad)')
+  if(phase==='restart')await restart();else if(suite==='terminal-host-mote')await require('./terminal-host.cjs').mote({win,evaluate,element,delay,wait,paint,viewport,click,escape,type,frame,assertGeometry,report,profile,evidence});else if(suite==='terminal-host')await require('./terminal-host.cjs')({win,evaluate,element,delay,wait,paint,viewport,click,escape,type,frame,assertGeometry,report,profile,evidence,capturePolish});else if(suite==='interaction-motion')await require('./motion.cjs')({win,evaluate,element,delay,wait,paint,viewport,click,escape,type,frame,assertGeometry,report,profile,evidence});else if(suite==='entry-polish')await capturePolish();else if(suite==='creation-handoff')await captureCreation();else await capture();report.passed=true
 }catch(error){report.failure={name:error.name,message:error.message,stack:error.stack}}
 finally{await fs.writeFile(path.join(evidence,phase+'-render.json'),JSON.stringify(report,null,2));win?.webContents.session.flushStorageData();win?.destroy();report.passed?app.quit():app.exit(1)}})

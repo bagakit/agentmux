@@ -46,7 +46,7 @@ export class DesktopControlIpcBridge {
 
   constructor(private readonly transport: DesktopControlTransport) {}
 
-  execute(request: AgentMuxControlRequest): Promise<AgentMuxControlResult>
+  execute(request: AgentMuxControlRequest, signal?: AbortSignal): Promise<AgentMuxControlResult>
   execute(request: MetricsRendererRequest, signal?: AbortSignal): Promise<MetricsRendererResult>
   execute(request: ContinuousProgressInputRequest, signal?: AbortSignal): Promise<ContinuousProgressInputResult>
   async execute(request: DesktopControlRequest, signal?: AbortSignal): Promise<DesktopControlResult> {

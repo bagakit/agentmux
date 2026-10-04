@@ -283,11 +283,11 @@ it('History covers original content without dropping the current in-flight card 
   vi.mocked(api.sessions.respondInteraction).mockImplementationOnce(async () => await new Promise<void>(resolve => {release=resolve}))
   await act(async () => card.querySelector<HTMLButtonElement>('.agent-interaction__options button')!.click())
   await openAgentHistory(container)
-  expect(container.querySelector('[aria-label="Conversation history"]')?.textContent).toContain('Original native message')
+  expect(container.querySelector('.activity-feed')?.textContent).toContain('Original native message')
   expect(container.querySelector('.agent-interaction')).toBe(card)
   expect(body.isConnected).toBe(true)
   expect(range.toString()).toBe('Original')
-  const close = container.querySelector<HTMLButtonElement>('.session-history__toolbar button')!
+  const close = container.querySelector<HTMLButtonElement>('button[aria-label="Return to Activity"]')!
   expect(close).not.toBeNull()
   await act(async () => close.click())
   expect(container.querySelector('.activity-feed .log-turn__body')).toBe(body)

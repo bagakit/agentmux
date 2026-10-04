@@ -39,6 +39,7 @@ export function editorPaneStoreState(): Record<string, unknown> {
     // 复制路径的用例在替身里走上生产里要等快照才走的那条分支。
     localHome: '',
     editorWordWrap: false,
+    editorMinimap: false,
     editorRegionModes: {},
     editorRegionDiffs: {},
     updateDocument: vi.fn(),
@@ -50,6 +51,7 @@ export function editorPaneStoreState(): Record<string, unknown> {
     attachPersistedFileDocument: vi.fn(),
     reportError: vi.fn(),
     toggleEditorWordWrap: vi.fn(),
+    toggleEditorMinimap: vi.fn(),
     setEditorRegionMode: vi.fn(),
     reloadRegionDiff: vi.fn()
   }
@@ -91,7 +93,8 @@ export function monacoKeybindingConstants(): {
  * 叫 state 的东西取了什么属性」——这样 onMount 回调里那些延迟读取也算进来，它们同样会在按键时炸。
  */
 export function storeKeysReadByEditorPane(): Set<string> {
-  const source = readFileSync(EDITOR_PANE_SOURCE, 'utf8')
+  const source = [EDITOR_PANE_SOURCE, new URL('../../src/renderer/src/components/FileSourceEditor.tsx', import.meta.url)]
+    .map(url => readFileSync(url, 'utf8')).join('\n')
   const keys = new Set<string>()
   for (const match of source.matchAll(/\bstate\.([A-Za-z_$][\w$]*)/g)) {
     keys.add(match[1]!)

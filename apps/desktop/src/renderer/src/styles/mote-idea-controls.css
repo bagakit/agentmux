@@ -1,0 +1,4 @@
+.mote-idea-controls__actions { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.mote-idea-controls__actions > span { color: var(--text-3); font-size: 11px; }
+.mote-idea-controls__actions .icon-button[aria-pressed="true"] { color: var(--accent); background: var(--surface-2); }
+.mote-idea-controls__arrangement { min-width: 0; padding-block: var(--sp-3); border-top: 1px solid var(--line-soft); }

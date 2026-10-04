@@ -20,8 +20,8 @@ const reference = { displayWorkspaceId: 'project', groupId: 'exact-second-group'
 let root: Root, container: HTMLDivElement, launch: ReturnType<typeof vi.fn>
 function Scene() {
   const state = useAppStore()
-  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, moteTopics), choice => state.selectExecutionFocusReference(choice, state.agentFocus.execution))
-  return createElement(GlobalFocusSurface, { presentation, regionOnly: true })
+  const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, moteTopics), choice => state.selectMainRegion(choice, state.workbenchSpaceSelection))
+  return <GlobalFocusSurface presentation={presentation} regionOnly />
 }
 const button = (label: string) => container.querySelector<HTMLButtonElement>(`.focus-toolbar [aria-label="${label}"]`)!
 const settle = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 25)) })
@@ -104,10 +104,12 @@ it('keeps the same newborn discussion and request when Mote preparation rejects 
 it('reports an unconfirmed retained occurrence without guessing a different same-SID Tab or creating a discussion', async () => {
   await act(async () => useAppStore.setState({ agentFocus: { ...useAppStore.getState().agentFocus, execution: { sessionId: executionAgent.id, history: [], reference: { ...reference, groupId: 'vanished-group' } } } }))
   const before = useAppStore.getState()
-  await click('View in Space'); await click('Chat about this tab with Mote')
+  expect(button('View in Space')).toBeNull(); expect(button('Chat about this tab with Mote')).toBeNull()
+  expect(container.querySelector('.focus-location-recovery')?.textContent).toContain('no longer confirmed')
+  expect(container.querySelector('[aria-label="Choose Focus location"]')).not.toBeNull()
   expect(useAppStore.getState().mainSurface).toBe('agents'); expect(useAppStore.getState().activeWorkspaceId).toBe(before.activeWorkspaceId)
   expect(useAppStore.getState().tabs).toBe(before.tabs); expect(discussions()).toHaveLength(0)
-  expect(useAppStore.getState().error).toContain('location is unconfirmed'); expect(launch).not.toHaveBeenCalled()
+  expect(launch).not.toHaveBeenCalled()
 })
 it.each(['ordinary', 'unconfirmed'] as const)('does not promote an %s Topic into a Mote or borrow another target', async kind => {
   const topicId = kind === 'ordinary' ? 'launcher:ordinary' : customMoteId

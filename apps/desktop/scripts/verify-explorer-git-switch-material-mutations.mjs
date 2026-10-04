@@ -1,23 +1,24 @@
 import { verifyRendererSourceMutations } from './lib/verify-renderer-source-mutations.mjs'
-const dock = 'apps/desktop/src/renderer/src/components/SurfaceToolDock.tsx'
+const modes = 'apps/desktop/src/renderer/src/components/SurfaceModeSwitch.tsx'
+const project = 'apps/desktop/src/renderer/src/components/ProjectFilesTool.tsx'
 await verifyRendererSourceMutations({
   name: ("explorer-git-switch-material-" + (globalThis.crypto.randomUUID()) + ""),
   tests: ['apps/desktop/test/explorer-git-switch-material.test.tsx'],
-  sources: [dock, 'apps/desktop/src/renderer/src/components/settings/LiquidSelectionSurface.tsx',
-    'apps/desktop/src/renderer/src/styles/source-control.css', 'apps/desktop/src/renderer/src/styles/settings-materials.css',
+  sources: [modes, project, 'apps/desktop/src/renderer/src/components/LiquidSelectionSurface.tsx',
+    'apps/desktop/src/renderer/src/styles/surface-mode-switch.css', 'apps/desktop/src/renderer/src/styles/liquid-selection.css',
     'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx'],
   mutations: [
-    { label: 'decorative-product-mount', file: dock,
-      before: '<LiquidSelectionSurface selected={bottomView} active={visible} targetAttribute="data-git-view" />',
+    { label: 'decorative-product-mount', file: modes,
+      before: '<LiquidSelectionSurface selected={value} active={active} targetAttribute="data-surface-mode" />',
       after: '<span aria-hidden="true" />' },
-    { label: 'actual-dock-visibility', file: dock,
-      before: 'selected={bottomView} active={visible} targetAttribute="data-git-view"',
-      after: 'selected={bottomView} active={true} targetAttribute="data-git-view"' },
-    { label: 'native-selection-owner', file: dock,
-      before: 'selected={bottomView} active={visible} targetAttribute="data-git-view"',
-      after: 'selected="branches" active={visible} targetAttribute="data-git-view"' },
-    { label: 'material-style-consumer', file: dock,
-      before: 'className="source-control-switch" role="tablist"',
-      after: 'className="source-control-unskinned" role="tablist"' }
+    { label: 'actual-dock-visibility', file: project,
+      before: 'value={view} options={VIEWS} onChange={setView} active={visible}',
+      after: 'value={view} options={VIEWS} onChange={setView} active={true}' },
+    { label: 'native-selection-owner', file: modes,
+      before: 'selected={value} active={active} targetAttribute="data-surface-mode"',
+      after: 'selected="branches" active={active} targetAttribute="data-surface-mode"' },
+    { label: 'material-style-consumer', file: modes,
+      before: 'className="surface-mode-switch" role="tablist"',
+      after: 'className="surface-mode-unskinned" role="tablist"' }
   ]
 })

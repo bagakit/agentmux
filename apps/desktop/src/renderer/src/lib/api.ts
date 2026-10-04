@@ -1,3 +1,5 @@
+import { unwrapSessionInputWriteResult } from '../../../shared/session-input-result'
+import { applyNotebookChange, emptyNotebookState, type NotebookObservation } from '@agentmux/core/notebook-catalog'
 import type {
   AgentExecutorConfig,
   AgentTimelineSnapshot,
@@ -29,6 +31,7 @@ import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { LAUNCH_OPTIONS_BY_PROVIDER_ID, describeLaunchOptions } from '@agentmux/core/launch-option'
 import { createRendererControlApi } from './control-api'
 import { createRendererSessionEvents } from './session-events'
+import { createRendererHistoryObservation } from './history-observation'
 import {
   DEFAULT_TOPIC_WIKI,
   MOTE_SOUL_PATH,
@@ -95,7 +98,7 @@ const mockExecutors: Record<string, AgentExecutorConfig> = Object.fromEntries(
 let mockConfig: AppConfig = {
   version: CONFIG_VERSION,
   hosts: [
-    { id: 'local', kind: 'local', label: 'This Mac' },
+    { id: 'local', kind: 'local', label: 'This Computer' },
     {
       id: 'studio',
       kind: 'ssh',
@@ -325,10 +328,22 @@ function requireMockBrowser(id: string): BrowserSnapshot {
 }
 
 
+
 let mockSpatialState:import('@agentmux/core/spatial-graph').AgentMuxSpatialState|null=null
 const mockSpatialListeners=new Set<(state:import('@agentmux/core/spatial-graph').AgentMuxSpatialState)=>void>()
+let mockNotebookState = emptyNotebookState()
+const mockNotebookListeners = new Set<(event: NotebookObservation) => void>()
 const mockApi: AgentMuxDesktopApi = {
   topics: { call: async () => { throw new Error('The original Topic filesystem owner is unavailable in the web preview. Open the Desktop to read or save Topic content.') } },
+  notebooks: {
+    read: async () => structuredClone(mockNotebookState),
+    apply: async input => {
+      mockNotebookState = applyNotebookChange(mockNotebookState, input, { kind: 'user', id: 'web-preview-user' }, Date.now())
+      for (const listener of mockNotebookListeners) listener({ state: structuredClone(mockNotebookState) })
+      return structuredClone(mockNotebookState)
+    },
+    onChange: listener => { mockNotebookListeners.add(listener); return () => mockNotebookListeners.delete(listener) }
+  },
   git: {
     projectIdentity: async (workspaceId) => {
       const workspace = mockConfig.workspaces.find(item => item.id === workspaceId)
@@ -359,11 +374,15 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   hosts: { check: async (host) => ({ input: structuredClone(host), outcome: host.kind === 'ssh' ? 'unsupported' : 'ready',
-    detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }) },
+    detail: host.kind === 'ssh' ? 'Remote Runs are not yet supported.' : 'CtxMux 0.1.0 · protocol 17' }),
+    upgradeCheck: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
+    upgrade: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') },
+    upgradeInspect: async () => { throw new Error('Remote Core maintenance requires the native desktop service. No remote operation was attempted.') }
+  },
   deviceManagement: {
-    link: async () => { throw new Error('Connection links require the original Mac Host.') },
-    ls: async () => { throw new Error('Device state requires the original Mac Host. This preview cannot read authorization.') },
-    revoke: async () => { throw new Error('Revoking a device requires confirmation on the original Mac.') }
+    link: async () => { throw new Error('Connection links require the original desktop Host.') },
+    ls: async () => { throw new Error('Device state requires the original desktop Host. This preview cannot read authorization.') },
+    revoke: async () => { throw new Error('Revoking a device requires confirmation on the original desktop.') }
   },
   demands: {
     list: async () => [...mockDemands.values()].map((demand) => structuredClone(demand)),
@@ -483,6 +502,8 @@ const mockApi: AgentMuxDesktopApi = {
     keepOneOfFanOut: async (input) => ({ keptWorkspaceId: input.keepWorkspaceId, outcomes: [] })
   },
   files: {
+    readPublic: async () => ({ resource: null, result: { status: 'unknown', code: 'FILE_RESOURCE_UNCONFIRMED', message: 'Original file discovery requires the connected desktop Host. The original reference is retained.' } }),
+    list: async () => { throw new Error('Project file discovery requires the connected desktop Host. Recent files remain available.') },
     readDirectory: async (_workspaceId, path) =>
       [...mockFiles.entries()]
         .filter(([entryPath]) => mockParent(entryPath) === path)
@@ -592,6 +613,12 @@ const mockApi: AgentMuxDesktopApi = {
       if (!mockFiles.has(path)) throw new Error(`Could not open ${path}`)
     },
     reveal: async () => {}
+  },
+  spaceObjects: {
+    appearance: async () => { throw new Error('Local image recognition requires the desktop filesystem owner.') },
+    previewAvatar: async () => { throw new Error('Avatar image processing is not available in the web preview.') },
+    saveAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') },
+    readAvatar: async () => { throw new Error('Avatar file storage is not available in the web preview.') }
   },
   scratch: {
     setMoteArchived: async () => { throw new Error('Mote archive writes require the original desktop filesystem owner. The current Mote is kept.') },
@@ -712,6 +739,8 @@ const mockApi: AgentMuxDesktopApi = {
     onNativeOverlayWarning: () => () => {},
     requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
+    spatialLinksReady: async () => {},
+    onSpatialLinkIssue: () => () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     listWorkspaceSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
@@ -783,13 +812,33 @@ const mockApi: AgentMuxDesktopApi = {
     }
   },
   continuousProgress: {
+    goals: async () => { throw new Error('Goal continuation facts require the original Desktop host.') },
+    prepareGoal: async () => { throw new Error('Goal continuation requires the original Desktop host.') },
+    initialGoalInput: async () => { throw new Error('Original Goal input inspection requires the Desktop host.') },
+    goalAction: async () => { throw new Error('Goal continuation actions require the original Desktop host.') },
     list: async () => [],
     create: async () => { throw new Error('Continuous progress requires the Desktop host.') },
     action: async () => { throw new Error('Continuous progress requires the Desktop host.') },
     pauseForInput: async () => {},
     onChanged: () => () => {}
   },
+  schedule: {
+    onChanged: () => () => {},
+    list: async () => { throw new Error('Arrangement discovery requires the connected desktop Host. Existing work is retained.') },
+    inspect: async () => { throw new Error('Arrangement inspection requires the connected desktop Host. The original reference is retained.') },
+    create: async () => { throw new Error('Saving an arrangement requires the connected desktop Host. The message is retained.') },
+    pause: async () => { throw new Error('Pausing an arrangement requires the connected desktop Host. Its state is unconfirmed.') },
+    resume: async () => { throw new Error('Resuming an arrangement requires the connected desktop Host. Its state is unconfirmed.') },
+    cancel: async () => { throw new Error('Cancelling an arrangement requires the connected desktop Host. Its state is unconfirmed.') }
+  },
   sessions: {
+    observeStorage: async (control) => ({
+      run: control.run,
+      runtime: { hostId: control.hostId, instanceId: 'preview-runtime', processId: null, buildIdentity: 'web-preview', protocolVersion: 22 },
+      observedAt: Date.now(),
+      status: 'unsupported',
+      message: 'The web preview has no Runtime storage owner. Storage capacity and persistence state are unknown.'
+    }),
     creation: async () => { throw new Error('A Core creation receipt requires the Desktop host.') },
     snapshot: async () => structuredClone(mockSnapshot),
     launchAgent: async (input) => {
@@ -870,6 +919,9 @@ const mockApi: AgentMuxDesktopApi = {
     })),
     historyPage: async () => {
       throw new Error('Native conversation history is unavailable in the web preview.')
+    },
+    historyResource: async () => {
+      throw new Error('Native conversation resources are unavailable in the web preview.')
     },
     confirmNativeSession: async () => {
       throw new Error('Native source confirmation requires the Core Session owner.')
@@ -957,9 +1009,11 @@ const mockApi: AgentMuxDesktopApi = {
         }))
       }
     },
+    recordDeliveryFailure: async record => ({ logId: record.logId, availability: 'unavailable', record: null, persistence: null, issue: 'Preview has no diagnostic Host.' }),
     submitPrompt: async (control, prompt) => {
       await mockApi.sessions.write(control, `${prompt.trim()}\r`, 'user')
     },
+    replyQuestion: async () => { throw new Error('Native question replies require the original Desktop Core.') },
     submitMessage: async () => { throw new Error('Authenticated Agent messaging requires the Desktop Runtime.') },
     respondInteraction: async (control, response) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
@@ -1305,9 +1359,19 @@ function requireDesktopApi(): AgentMuxDesktopApi {
   const preload: AgentMuxPreloadApi = window.agentmux
   return {
     ...preload,
+    scratch: { ...preload.scratch, listTopics: async workspaceId => {
+      const result = await preload.scratch.listTopics(workspaceId)
+      // Normalize only after the real bridge. Array custom fields are dropped
+      // by contextBridge, so the transport carries them in an explicit envelope.
+      return Object.assign(result.topics, result.issues.length ? { issues: result.issues } : {})
+    } },
     control: createRendererControlApi(preload.control),
     sessions: {
       ...preload.sessions,
+      write: (...args) => preload.sessions.write(...args).then(unwrapSessionInputWriteResult),
+      paste: (...args) => preload.sessions.paste(...args).then(unwrapSessionInputWriteResult),
+      submitPrompt: (...args) => preload.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult),
+      observeHistory: createRendererHistoryObservation(preload.sessions.observeHistory),
       onEvent: createRendererSessionEvents(preload.sessions.onEvent)
     }
   }

@@ -1,10 +1,10 @@
 import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { builtInAgentProviderLabel } from '@agentmux/core/provider-id'
-import type { SessionSnapshot } from '../../../shared/contracts'
+import type { AgentSessionNameMetadata, SessionSnapshot } from '../../../shared/contracts'
 import { assertUnreachableSurface } from './workbench-surface-kinds'
 import { firstPromptFromTimeline, tabDisplayName, titleWorkbenchSurface, type AgentNameFacts, type WorkbenchTab } from './workbench-tabs'
 
-function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[]): string {
+function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapshot[], metadata: Readonly<Record<string, AgentSessionNameMetadata>>): string {
   const surface = titleWorkbenchSurface(tab)
   switch (surface.kind) {
     case 'git-diff':
@@ -18,8 +18,9 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
         ? surface.title
         : surface.url === 'about:blank' ? 'New Tab' : surface.url
     case 'agent':
+      return sessions.find((session) => session.id === surface.sessionId)?.label ?? metadata[surface.sessionId]?.label ?? 'Agent · name unconfirmed'
     case 'terminal':
-      return sessions.find((session) => session.id === surface.sessionId)?.label ?? surface.sessionId
+      return sessions.find((session) => session.id === surface.sessionId)?.label ?? 'Terminal'
     default:
       return assertUnreachableSurface(surface)
   }
@@ -29,16 +30,18 @@ function tabSurfaceFallback(tab: WorkbenchTab, sessions: readonly SessionSnapsho
 export function workbenchAgentFactsFor(
   sessions: readonly SessionSnapshot[],
   agentNames: Readonly<Record<string, string>>,
-  timelines: Readonly<Record<string, AgentTimelineSnapshot>>
+  timelines: Readonly<Record<string, AgentTimelineSnapshot>>,
+  metadata: Readonly<Record<string, AgentSessionNameMetadata>> = {}
 ): (sessionId: string) => AgentNameFacts | null {
   const byId = new Map(sessions.map((session) => [session.id, session]))
   return (sessionId) => {
     const session = byId.get(sessionId)
-    return session?.kind === 'agent' ? {
+    const name = session?.kind === 'agent' ? session : metadata[sessionId]
+    return name || agentNames[sessionId] || firstPromptFromTimeline(timelines[sessionId]) ? {
       userName: agentNames[sessionId],
       firstPrompt: firstPromptFromTimeline(timelines[sessionId]),
-      fallbackLabel: session.label,
-      providerLabel: builtInAgentProviderLabel(session.providerId)
+      fallbackLabel: name?.label ?? 'Agent · name unconfirmed',
+      providerLabel: name ? builtInAgentProviderLabel(name.providerId) : 'Agent'
     } : null
   }
 }
@@ -47,11 +50,12 @@ export function workbenchTabDisplayName(
   tab: WorkbenchTab,
   sessions: readonly SessionSnapshot[],
   agentNames: Readonly<Record<string, string>>,
-  timelines: Readonly<Record<string, AgentTimelineSnapshot>>
+  timelines: Readonly<Record<string, AgentTimelineSnapshot>>,
+  metadata: Readonly<Record<string, AgentSessionNameMetadata>> = {}
 ): string {
   return tabDisplayName({
     tab,
-    fallback: tabSurfaceFallback(tab, sessions),
-    agentFactsFor: workbenchAgentFactsFor(sessions, agentNames, timelines)
+    fallback: tabSurfaceFallback(tab, sessions, metadata),
+    agentFactsFor: workbenchAgentFactsFor(sessions, agentNames, timelines, metadata)
   })
 }

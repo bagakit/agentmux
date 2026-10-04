@@ -3,19 +3,20 @@ import { verifyRendererSourceMutations } from './lib/verify-renderer-source-muta
 
 const base = 'apps/desktop/src/renderer/src/'
 const explorer = `${base}components/FileExplorer.tsx`
-const dock = `${base}components/SurfaceToolDock.tsx`
+const frame = `${base}components/WorkspaceFilesFrame.tsx`
+const modes = `${base}components/SurfaceModeSwitch.tsx`
 const branches = `${base}components/BranchesPanel.tsx`
 await verifyRendererSourceMutations({
   name: ("explorer-interactions-" + (globalThis.crypto.randomUUID()) + "-" + (randomUUID().slice(0, 8)) + ""),
   tests: ['apps/desktop/test/explorer-redesign.test.tsx'],
-  sources: [explorer, dock, branches, `${base}components/ChangesPanel.tsx`,
-    `${base}styles/dock.css`, `${base}styles/file-explorer.css`, `${base}styles/source-control.css`,
+  sources: [explorer, frame, modes, branches, `${base}components/ChangesPanel.tsx`,
+    `${base}styles/dock.css`, `${base}styles/file-explorer.css`, `${base}styles/source-control.css`, `${base}styles/surface-mode-switch.css`,
     'apps/desktop/test/helpers/composer-dom-fixture.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx'],
   mutations: [
-    { label: 'shared-header-actions', file: dock,
+    { label: 'shared-header-actions', file: frame,
       before: 'ref={setToolbarTarget}', after: 'ref={undefined}' },
-    { label: 'collapsed-recovery', file: dock,
-      before: 'const collapsed = resolveExplorerCollapsed(explorerCollapsedOverride, presentation.explorerCollapsedByDefault)',
+    { label: 'collapsed-recovery', file: frame,
+      before: 'const collapsed = resolveExplorerCollapsed(override, presentation.explorerCollapsedByDefault)',
       after: 'const collapsed = false' },
     { label: 'name-select-without-activation', file: explorer,
       before: 'onClick={(event) => { event.stopPropagation(); onSelect(event) }}',
@@ -38,7 +39,7 @@ await verifyRendererSourceMutations({
     { label: 'rename-rebound-path-context', file: explorer,
       before: '}, [workspaceId, workspacePath])',
       after: '}, [workspaceId])' },
-    { label: 'shared-header-project-path', file: dock,
+    { label: 'shared-header-project-path', file: frame,
       before: '<span title={displayPath(workspace.path, workspace.hostId)}>',
       after: '<span title={workspace.path}>' },
     { label: 'file-project-path-hover', file: explorer,
@@ -47,10 +48,10 @@ await verifyRendererSourceMutations({
     { label: 'worktree-path-deduplication', file: branches,
       before: "subtitle={worktree && worktree !== workspace.path ? displayPath(worktree, workspace.hostId) : null}",
       after: "subtitle={worktree ? displayPath(worktree, workspace.hostId) : null}" },
-    { label: 'git-keyboard-navigation', file: dock,
+    { label: 'git-keyboard-navigation', file: modes,
       before: 'tabs[next]!.click()', after: 'tabs[index]!.click()' },
-    { label: 'git-material-surface-connection', file: dock,
-      before: 'className="source-control-switch" role="tablist"',
-      after: 'className="source-control-disconnected" role="tablist"' }
+    { label: 'git-material-surface-connection', file: modes,
+      before: 'className="surface-mode-switch" role="tablist"',
+      after: 'className="surface-mode-disconnected" role="tablist"' }
   ]
 })

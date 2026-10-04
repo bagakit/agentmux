@@ -1,3 +1,4 @@
+import type { DemandContentReference } from '@agentmux/demand'
 import type { SessionSnapshot } from '../../../shared/contracts'
 import type { AgentMuxDemandDecision } from '@agentmux/core/control'
 import type { DemandActivity, DemandDecision } from '@agentmux/demand'
@@ -26,6 +27,7 @@ export type DemandRecord = {
   phaseIndex?: number | null
   activityLog?: string[]
   sessionIds: string[]
+  contentRefs?: DemandContentReference[]
   createdAt: number
   updatedAt: number
   source: 'default-topic' | 'session'

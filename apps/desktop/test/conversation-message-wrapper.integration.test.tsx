@@ -1,4 +1,5 @@
 import { fixtureCivil as _hygiene_fixtureCivil, fixtureClock as _hygiene_fixtureClock, fixtureIso as _hygiene_fixtureIso, fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
+import { activityReadingProps } from './helpers/activity-reading-props'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
@@ -8,7 +9,7 @@ import { parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '@agen
 import type { AgentMuxMessageEnvelope, AgentSessionHistoryPage } from '@agentmux/core'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { api } from '../src/renderer/src/lib/api'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
@@ -71,7 +72,7 @@ it('reads the same escaped packet from the built-in Claude reader through public
   expect(messages.map(message=>[message.rawId,message.author.kind])).toEqual([['actual-one','unknown'],['actual-two','unknown']])
   await act(async()=>root.render(<ActivityView sessionId={fixture.session.agentSessionId} capability="complete-events" displayState="done"
    items={[]} userMessages={messages} nativeHistoryPage={nativePage} />))
-  expect([...host.querySelectorAll('[data-native-record-id]')].map(el=>el.getAttribute('data-native-record-id'))).toEqual(['actual-one','actual-two'])
+  expect([...host.querySelectorAll('.activity-feed [data-native-record-id]')].map(el=>el.getAttribute('data-native-record-id'))).toEqual(['actual-one','actual-two'])
   expect([...host.querySelectorAll('.log-turn__citation-from')].map(el=>el.textContent)).toEqual(['User','User'])
   expect(fixture.controls.map(control=>control.mock.calls.length)).toEqual([0,0,0,0,0,0])
   expect(await fixture.bytes()).toEqual(fixture.before)
@@ -79,8 +80,8 @@ it('reads the same escaped packet from the built-in Claude reader through public
 })
 it('actual History shares this packet reading and keeps the exact native record IDs',async()=>{
  vi.spyOn(api.sessions,'historyPage').mockResolvedValue(page)
- await act(async()=>root.render(<SessionHistoryView control={{kind:'agent',hostId:'local',agentSessionId:'reader',run:{runId:'original-run'}}} visible label="Reader" themeId="graphite" fontSize={12} workspaceRoot={_hygiene_fixturePath("private")} openWorkspaceFile={vi.fn()} openHttpLink={vi.fn()} />))
- expect([...host.querySelectorAll<HTMLElement>('[data-history-item-id]')].map(e=>e.dataset.historyItemId)).toEqual(['input-one','input-two'])
+ await act(async()=>root.render(<ActivityView {...activityReadingProps({ control: {kind:'agent',hostId:'local',agentSessionId:'reader',run:{runId:'original-run'}}, visible: true, label: "Reader", workspaceRoot: _hygiene_fixturePath("private"), openWorkspaceFile: vi.fn(), openHttpLink: vi.fn() })} />))
+ expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(e=>e.dataset.nativeRecordId)).toEqual(['input-one','input-two'])
  expect(host.querySelectorAll('.log-turn__citation')).toHaveLength(2)
  expect(host.querySelector('.log-turn__text')?.textContent).not.toContain('bagakit-msg')
 })

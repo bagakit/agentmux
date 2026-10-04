@@ -278,7 +278,7 @@ describe('T-002: Radix Portal overlay families adoption', () => {
         <ConversationImage
           text="image.png"
           path={_hygiene_fixturePath("test/path/image.png")}
-          readPastedImage={fakeReadPastedImage}
+          readImage={fakeReadPastedImage}
         />
       )
     })

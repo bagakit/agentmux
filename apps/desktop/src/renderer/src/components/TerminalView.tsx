@@ -6,7 +6,7 @@ import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
-import { registerTerminalViewObservation } from '../lib/terminal-view-observation'
+import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { WebLinksAddon } from '@xterm/addon-web-links'
@@ -222,6 +222,7 @@ export function TerminalView({
   useLayoutEffect(() => {
     if (switchTarget) return tabSwitchObservation.registerTerminal(switchTarget, () => switchReaderRef.current?.() ?? null)
   }, [switchTarget, session.id, session.control.run.runId])
+  const inputGeometryRef = useRef<TerminalInputGeometry | null>(null)
   const refreshObservationRef = useRef<(() => Promise<void>) | null>(null)
   const onObservationRefreshRef = useRef(onObservationRefresh)
   onObservationRefreshRef.current = onObservationRefresh
@@ -799,6 +800,40 @@ export function TerminalView({
       replaying: replayingContinuation
     })
     switchReaderRef.current = readSwitch
+    const currentInputElement = (element: HTMLElement) =>
+      !disposed && terminalRef.current === terminal && visibleRef.current &&
+      terminal.element === element && element.isConnected && !element.closest('[hidden], [inert]')
+    const inputGeometry: TerminalInputGeometry = {
+      readOverlapTop(element, popup) {
+        if (!currentInputElement(element)) return undefined
+        const screen = element.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
+        const buffer = terminal.buffer.active, lineIndex = buffer.baseY + buffer.cursorY
+        const row = lineIndex - buffer.viewportY
+        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0) return undefined
+        const rowHeight = screen.height / terminal.rows
+        // Protect the actual current input and occupied bottom status rows.
+        // This is text geometry, not a Provider-specific footer interpretation.
+        const protectedRows = new Set([Math.max(0, terminal.rows - 2), terminal.rows - 1])
+        if (row >= 0 && row < terminal.rows) protectedRows.add(row)
+        let overlapTop: number | undefined
+        for (const protectedRow of protectedRows) {
+          const rowRect = new DOMRect(screen.left, screen.top + protectedRow * rowHeight, screen.width, rowHeight)
+          const currentLine = { viewportY: buffer.viewportY + protectedRow, getLine: (line: number) => buffer.getLine(line), getNullCell: () => buffer.getNullCell() }
+          if (terminalLinkReadoutOverlapsText(currentLine, terminal.cols, 1, rowRect, popup)) {
+            overlapTop = overlapTop === undefined ? rowRect.top : Math.min(overlapTop, rowRect.top)
+          }
+        }
+        return overlapTop
+      },
+      subscribe(element, onChange) {
+        if (!currentInputElement(element)) return () => {}
+        const changed = () => { if (currentInputElement(element)) onChange() }
+        const events = [terminal.onRender(changed), terminal.onCursorMove(changed), terminal.onScroll(changed)]
+        const releaseListeners = resourceOwners.acquireListeners(events.length)
+        return () => { for (const event of events) event.dispose(); releaseListeners() }
+      }
+    }
+    inputGeometryRef.current = inputGeometry
     let cursor = 0
     let resizeRevision = 0
     let liveGapRedrawPending = false
@@ -1475,6 +1510,7 @@ export function TerminalView({
       }
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
       if (switchReaderRef.current === readSwitch) switchReaderRef.current = null
+      if (inputGeometryRef.current === inputGeometry) inputGeometryRef.current = null
       clearTimeout(revealDeadline)
       clearLinkPreview()
       setLinkRequest((current) => {
@@ -1518,7 +1554,10 @@ export function TerminalView({
       regionId,
       sessionId: session.id,
       runId: session.control.run.runId
-    }, () => observationReaderRef.current?.())
+    }, () => observationReaderRef.current?.(), {
+      readOverlapTop: (element, popup) => inputGeometryRef.current?.readOverlapTop(element, popup),
+      subscribe: (element, onChange) => inputGeometryRef.current?.subscribe(element, onChange) ?? (() => {})
+    })
   }, [linkOrigin.regionId, session.id, session.control.run.runId])
 
   async function redrawCurrentScreen(): Promise<boolean> {

@@ -55,7 +55,9 @@ beforeEach(async () => {
     observe = (element: Element) => this.entry.observe(element)
     disconnect = () => this.entry.disconnect()
   })
-  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('focus-project-lanes__rows') ? measuredWidth : 0 })
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('focus-project-lanes__rows') ? Math.round(measuredWidth) : 0 })
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) { return this.classList.contains('focus-project-lanes__groups') ? new DOMRect(0, 0, measuredWidth, 600) : originalRect.call(this) })
   stylesheet = document.createElement('style'); stylesheet.textContent = '.focus-project-lanes__groups { padding: 2px; column-gap: 2px } .focus-context-group__cards { column-gap: 2px }'; document.head.append(stylesheet)
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
   const config = await api.config.get(), snapshot = await api.sessions.snapshot()
@@ -175,4 +177,33 @@ it('actual App Settings pauses the retained Focus lane width observer without re
   const compute = vi.spyOn(allocator, 'allocateFocusLaneColumns')
   await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, unrelated: 'Settings open' } })))
   expect(compute).not.toHaveBeenCalled(); expect(listObservers()).toHaveLength(1)
+})
+
+it('actual Global preserves the fractional group budget through its production measure at rounded-row and column thresholds', async () => {
+  measuredWidth = 1000.5; await seed(9, 1, 0); await mount()
+  const original = card('work-0'), state = useAppStore.getState(), drafts = state.agentComposerDrafts
+  const widths = () => ['working', 'results'].map(bucket => parseFloat(section(bucket).style.getPropertyValue('--focus-group-width')))
+  expect(groups().getBoundingClientRect().width).toBe(1000.5)
+  expect(groups().parentElement!.closest('.focus-project-lanes__rows')!.clientWidth).toBe(1001)
+  expect(widths()).toEqual([746.875, 247.625])
+  const list = listObservers(); expect(list).toHaveLength(1)
+  for (const width of [729, 729.5, 730, 730.5, 731, 999.5, 1000, 1000.5, 1000.75]) {
+    measuredWidth = width
+    await act(async () => list[0]!.callback([], {} as ResizeObserver))
+    expect(widths().reduce((sum, w) => sum + w, 2), 'actual group widths plus gap must fit the fractional content width').toBeLessThanOrEqual(width - 4)
+    expect(columns()).toEqual(width < 730 ? [0, 2, 1, 0] : [0, 3, 1, 0])
+    expect(groups().querySelectorAll('.focus-context')).toHaveLength(10)
+    expect(card('work-0')).toBe(original)
+  }
+  await act(async () => original.focus())
+  const compute = vi.spyOn(allocator, 'allocateFocusLaneColumns')
+  measuredWidth = 1000.625
+  await act(async () => list[0]!.callback([], {} as ResizeObserver))
+  expect(compute).toHaveBeenCalledOnce()
+  expect(widths().reduce((sum, w) => sum + w, 2)).toBeLessThanOrEqual(measuredWidth - 4)
+  expect(document.activeElement).toBe(original)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
+  expect(useAppStore.getState().sessions).toBe(state.sessions)
+  expect(useAppStore.getState().agentFocus).toBe(state.agentFocus)
+  expect(listObservers()).toHaveLength(1)
 })

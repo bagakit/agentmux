@@ -7,7 +7,7 @@ import type { AgentMuxSpatialGraph, AgentMuxSpatialState, SpatialJson } from '@a
 import type { TopicCategory, TopicMigrationPreview, TopicMigrationReceipt, TopicUnavailable } from '@agentmux/core/control'
 import type { ScratchTopicSnapshot, WorkspaceRecord } from '../shared/contracts'
 import { scratchTopicPhysicalPath, scratchTopicStorageRoots } from '../shared/scratch-topics'
-import type { TopicSpatialPort, TopicSpatialInspection } from './topic-knowledge'
+import type { TopicSpatialPort, TopicSpatialInspection, TopicSpatialIdentity } from './topic-knowledge'
 import { directoryIdentity } from '../shared/space-addresses'
 import { categoryResource, categorySpaceFact, categoriesFromSpatial, isKnowledgeTopic, topicContentSpaceId, topicContentZoneId,
   UNCLASSIFIED_TOPIC_CATEGORY_ID } from '../shared/topic-categories'
@@ -57,7 +57,7 @@ type Ports = {
 /** Host adapter over the existing Core spatial owner, shared by GUI and public CUI. */
 export class TopicSpatialOwner implements TopicSpatialPort {
   constructor(private readonly ports: Ports) {}
-  async inspect(topic: ScratchTopicSnapshot) {
+  async inspect(topic: TopicSpatialIdentity) {
     const workspace = this.ports.workspace()
     const state = await this.ports.state.read()
     if (state?.graph.spaces.some(space => space.kind === 'mote' && space.topicId === topic.id))

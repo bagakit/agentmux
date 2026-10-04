@@ -90,7 +90,7 @@ async function terminalPositive() {
   expect(reader, 'real History opens from original Header in Terminal').not.toBeNull()
   expect(reader!.hidden).toBe(false)
   expect(reader!.closest('.agent-terminal-stage')?.getAttribute('style') ?? '').not.toContain('display: none')
-  expect(reader!.querySelectorAll('[data-history-item-id]')).toHaveLength(1)
+  expect(reader!.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(1)
   expect(reader!.textContent).toContain('Actual native History content')
   const control = useAppStore.getState().sessions.find(s => s.id === ids[0] && s.kind === 'agent')!.control
   const readerCalls = history.mock.calls.filter(([, options]) => options === undefined)
@@ -107,7 +107,7 @@ function visibleReader() {
   expect(node, 'actual visible native reader').not.toBeNull()
   expect(node!.hidden).toBe(false)
   expect(node!.closest('.agent-terminal-stage')?.getAttribute('style') ?? '').not.toContain('display: none')
-  expect(node!.querySelectorAll('[data-history-item-id]')).toHaveLength(1)
+  expect(node!.querySelectorAll('.session-history [data-native-record-id]')).toHaveLength(1)
   return node!
 }
 function more() {

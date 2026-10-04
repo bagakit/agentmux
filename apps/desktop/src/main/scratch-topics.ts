@@ -1,12 +1,15 @@
 import { directoryIdentity } from '../shared/space-addresses.js'
 import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
-import { join, sep } from 'node:path'
-import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds } from './scratch-topic-directories.js'
+import { basename, dirname, join, sep } from 'node:path'
+import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
+import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
+import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { durableWriteFile, type AgentProviderId } from '@agentmux/core'
 import { nativeImage, type NativeImage } from 'electron'
-import { isMoteAvatarRef, MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
-import { decodeMoteAvatar, previewMoteAvatar, moteAvatarPng } from './mote-avatar-image.js'
+import { MOTE_AVATAR_OUTPUT_MAX_BYTES, type MoteAvatarInput, type MoteAvatarRef, type MoteAvatarImage } from '../shared/mote-avatars.js'
+import { decodeObjectAvatar, previewObjectAvatar, objectAvatarPng } from './object-avatar-image.js'
+import { readObjectAvatarFile, saveObjectAvatarFile } from './object-avatar-files.js'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import type { NameChangeAudit } from './name-change-audit.js'
 import {
@@ -22,9 +25,9 @@ import {
   DEFAULT_PMO_TEAMS_TOPIC_WIKI,
   MOTE_COORDINATION_ROLE,
   PMO_TEAMS_TOPIC_ID,
-  scratchTopicDirectoryName,
+  scratchTopicDirectoryName, scratchTopicIdFromDirectoryName,
   scratchTopicStorageRoots,
-  type ScratchTopicSnapshot
+  type ScratchTopicSnapshot, type ScratchTopicList, type ScratchDirectoryFact
 } from '../shared/scratch-topics.js'
 
 const TOPIC_TEMPLATE = `# Untitled Topic
@@ -213,12 +216,59 @@ export type PreparedScratchAgentTopic = {
 export class ScratchTopics {
   private readonly moteStateWrites = new Map<string, Promise<unknown>>()
   private readonly titleWrites = new Map<string, Promise<unknown>>()
+  private readonly pendingEnsures = new Map<string, Promise<ScratchTopicSnapshot>>()
   private nameAudit: NameChangeAudit | undefined
   setNameAudit(audit: NameChangeAudit): void { this.nameAudit = audit }
+  private directoryMaintenanceIssue: { directory: string; message: string; shortenMotes: boolean } | undefined
   constructor(private readonly createAvatarImage: (bytes: Buffer) => NativeImage = bytes => nativeImage.createFromBuffer(bytes)) {}
 
+  /** Advisory maintenance is a write operation; read/list and public discovery remain read-only. */
+  async normalizeDirectoryIdentities(workspace: WorkspaceRecord, options: DirectoryIdentityWriteOptions & { shortenMotes?: boolean } = {}): Promise<void> {
+    requireScratchWorkspace(workspace)
+    const issues: string[] = []
+    try {
+      if (options.shortenMotes) {
+        const maintenance = await migrateTopicDirectories({ scratchRoot: workspace.path, execute: true, motesOnly: true,
+          ...(options.helperPath ? { helperPath: options.helperPath } : {}) })
+        issues.push(...maintenance.issues.map(item => `${item.code}: ${item.message}`),
+          ...maintenance.objects.filter(item => item.issue).map(item => `${item.id}: ${item.issue!.code}: ${item.issue!.message}`))
+      }
+      const ids = await scratchStorageTopicIds(workspace.path)
+      issues.push(...ids.issues ?? [])
+      for (const topicId of ids) {
+        try {
+          const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+          if (resolved) {
+            const context = await scratchIdentityContext(workspace.path, topicId)
+            const existing = await inspectDirectoryIdentity(resolved, context)
+            if (existing) await normalizeDirectoryIdentity(resolved, context, options)
+            else await retainDirectoryIdentity(resolved, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, resolved) }, options)
+          }
+        } catch (error) { issues.push(`${topicId}: ${errorCode(error) ?? 'DIRECTORY_IDENTITY_UNCONFIRMED'}: ${error instanceof Error ? error.message : String(error)}`) }
+      }
+      if (issues.length) throw new Error('Directory identity maintenance is unconfirmed. Existing files, workfaces and healthy Agent input remain available. Restore storage access and retry directory identity repair. ' + issues.join(' · '))
+      if (!this.directoryMaintenanceIssue?.shortenMotes || options.shortenMotes) this.directoryMaintenanceIssue = undefined
+    } catch (error) {
+      // Service observation only: never an identity, filesystem catalog or per-object capability flag.
+      // A narrower metadata retry cannot replace an unconfirmed shortening operation.
+      if (!(this.directoryMaintenanceIssue?.directory === workspace.path && this.directoryMaintenanceIssue.shortenMotes && !options.shortenMotes))
+        this.directoryMaintenanceIssue = { directory: workspace.path, message: error instanceof Error ? error.message : String(error), shortenMotes: options.shortenMotes === true }
+      throw error
+    }
+  }
+
+  private async identityFact(workspace: WorkspaceRecord, topicId: string, directory: string): Promise<{ identityDirectoryPath?: string; readError?: string }> {
+    try { return { identityDirectoryPath: await scratchDirectoryIdentity(workspace.path, topicId, directory) } }
+    catch (error) {
+      return {
+        ...(error instanceof DirectoryIdentityUpgradeRequiredError ? { identityDirectoryPath: error.identityDirectoryPath } : {}),
+        readError: error instanceof Error ? error.message : String(error)
+      }
+    }
+  }
+
   private decodeAvatar(input: MoteAvatarInput): NativeImage {
-    return decodeMoteAvatar(input, this.createAvatarImage)
+    return decodeObjectAvatar(input, this.createAvatarImage)
   }
 
   private async avatarMoteDirectory(workspace: WorkspaceRecord, topicId: string): Promise<string> {
@@ -232,24 +282,31 @@ export class ScratchTopics {
     return resolved
   }
 
-  private async avatarDirectory(workspace: WorkspaceRecord, topicId: string, create = false): Promise<string> {
-    const directory = await this.avatarMoteDirectory(workspace, topicId)
-    const metadata = join(directory, '.agentmux'), assets = join(metadata, 'avatars')
-    if (create) { await ensureDirectory(metadata); await ensureDirectory(assets) }
-    else for (const path of [metadata, assets]) {
-      const info = await lstat(path)
-      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('The Mote avatar directory is not a regular directory.')
-    }
-    if (!(await realpath(assets)).startsWith(directory + sep)) throw new Error('The Mote avatar directory escapes its original object.')
-    return assets
-  }
-
   private async requireAvatarObject(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<void> {
     requireScratchWorkspace(workspace)
     const directory = await resolveScratchTopicDirectory(workspace.path, topicId)
-    if (!directory || directoryIdentity(workspace.hostId, await scratchDirectoryIdentity(workspace.path, topicId, directory)) !== objectKey) {
-      throw new Error('This Mote directory changed while editing. Reopen its avatar editor to use the current object.')
+    const identity = directory ? await this.identityFact(workspace, topicId, directory) : {}
+    if (identity.readError && !identity.identityDirectoryPath) throw new Error(identity.readError)
+    if (!directory || !identity.identityDirectoryPath || directoryIdentity(workspace.hostId, identity.identityDirectoryPath) !== objectKey) {
+      throw new Error('This original object directory changed while editing. Reopen its avatar editor to use the current object.')
     }
+  }
+
+  /** Exact appearance reads need neither the Wiki nor a full library/collaborator snapshot. */
+  async topicAppearanceIdentity(workspace: WorkspaceRecord, topicId: string, objectKey: string): Promise<
+    Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath'> & { physicalDirectoryPath: string }> {
+    await this.requireAvatarObject(workspace, topicId, objectKey)
+    const directory = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!directory || topicId === PMO_TEAMS_TOPIC_ID) throw new Error('Choose an existing ordinary Topic for its image.')
+    const context = await scratchIdentityContext(workspace.path, topicId)
+    if (context.roots.motes.includes(dirname(directory))) throw new Error('This target is a Mote. Its original avatar remains available.')
+    try {
+      await lstat(join(directory, MOTE_SOUL_PATH))
+      throw new Error('This target is a Mote. Its original avatar remains available.')
+    } catch (error) { if (errorCode(error) !== 'ENOENT') throw error }
+    const identity = await this.identityFact(workspace, topicId, directory)
+    if (!identity.identityDirectoryPath) throw new Error(identity.readError ?? 'The original Topic identity is unconfirmed.')
+    return { id: topicId, directoryPath: scratchTopicDirectoryName(topicId), identityDirectoryPath: identity.identityDirectoryPath, physicalDirectoryPath: directory }
   }
 
   private async readMoteArchive(directory: string, topicId: string): Promise<MoteArchiveState> {
@@ -301,46 +358,48 @@ export class ScratchTopics {
   async previewAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarImage> {
     await this.requireAvatarObject(workspace, topicId, objectKey)
     await this.avatarMoteDirectory(workspace, topicId)
-    return previewMoteAvatar(this.decodeAvatar(input))
+    return previewObjectAvatar(this.decodeAvatar(input))
   }
 
   async saveAvatar(workspace: WorkspaceRecord, topicId: string, input: MoteAvatarInput, objectKey: string): Promise<MoteAvatarRef> {
     await this.requireAvatarObject(workspace, topicId, objectKey)
     if (input?.mimeType !== 'image/png' || input.dataUrl.length > Math.ceil(MOTE_AVATAR_OUTPUT_MAX_BYTES / 3) * 4 + 22) throw new Error('Save a bounded PNG avatar crop.')
-    const png = moteAvatarPng(await this.decodeAvatar(input))
-    const ref: MoteAvatarRef = { kind: 'image', fileName: createHash('sha256').update(png).digest('hex') + '.png' }
-    const directory = await this.avatarDirectory(workspace, topicId, true), path = join(directory, ref.fileName)
-    let handle
-    try { handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600) }
-    catch (error) {
-      if (errorCode(error) !== 'EEXIST') throw error
-      await this.readAvatar(workspace, topicId, ref, objectKey)
-      return ref
-    }
-    try { await handle.writeFile(png); await handle.sync() }
-    catch (error) { await unlink(path).catch(() => {}); throw error }
-    finally { await handle.close() }
-    return ref
+    const png = objectAvatarPng(await this.decodeAvatar(input))
+    return await saveObjectAvatarFile(await this.avatarMoteDirectory(workspace, topicId), png)
   }
 
   async readAvatar(workspace: WorkspaceRecord, topicId: string, ref: MoteAvatarRef, objectKey: string): Promise<MoteAvatarImage> {
     await this.requireAvatarObject(workspace, topicId, objectKey)
-    if (!isMoteAvatarRef(ref)) throw new Error('The Mote avatar reference is invalid.')
-    const path = join(await this.avatarDirectory(workspace, topicId), ref.fileName)
-    const handle = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW)
-    let png: Buffer
-    try {
-      const info = await handle.stat()
-      if (!info.isFile() || info.size > MOTE_AVATAR_OUTPUT_MAX_BYTES) throw new Error('The Mote avatar is not a bounded regular file.')
-      png = await handle.readFile()
-    } finally { await handle.close() }
-    if (createHash('sha256').update(png).digest('hex') + '.png' !== ref.fileName) throw new Error('The Mote avatar bytes do not match their reference.')
+    const png = await readObjectAvatarFile(await this.avatarMoteDirectory(workspace, topicId), ref)
     const input: MoteAvatarInput = { mimeType: 'image/png', dataUrl: 'data:image/png;base64,' + png.toString('base64') }
-    const image = await this.decodeAvatar(input)
-    moteAvatarPng(image)
+    const image = this.decodeAvatar(input)
+    objectAvatarPng(image)
     return { dataUrl: input.dataUrl, ...image.getSize() }
   }
-  async list(workspace: WorkspaceRecord): Promise<ScratchTopicSnapshot[]> {
+  /** Current cwd only: no library scan, guessed hash ID, or saved Session change. */
+  async readForDirectory(workspace: WorkspaceRecord, directory: string): Promise<ScratchDirectoryFact | null> {
+    requireScratchWorkspace(workspace)
+    const name = basename(directory), longId = scratchTopicIdFromDirectoryName(name)
+    if (!longId && !/^[0-9a-f]{16}$/.test(name)) return null
+    const context = await scratchIdentityContext(workspace.path)
+    const allowed = longId ? Object.values(context.roots).flat() : context.roots.motes
+    if (!allowed.includes(dirname(directory))) return null
+    let topicId = longId
+    if (!topicId) {
+      const saved = await inspectDirectoryIdentity(directory, context)
+      if (!saved?.topicId || moteDirectoryName(saved.topicId) !== name) throw new Error('This cwd has no confirmed original Mote content ID. Repair the same directory record.')
+      topicId = saved.topicId
+    }
+    const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
+    if (!resolved) return null
+    const physicalDirectoryPath = await scratchDirectoryAddress(workspace.path, topicId, resolved)
+    const identity = await this.identityFact(workspace, topicId, physicalDirectoryPath)
+    const confirmedDirectoryPaths = await scratchConfirmedDirectoryPaths(workspace.path, topicId, resolved)
+    if (!confirmedDirectoryPaths.includes(directory)) return null
+    return { id: topicId, physicalDirectoryPath, ...identity, confirmedDirectoryPaths }
+  }
+
+  async list(workspace: WorkspaceRecord): Promise<ScratchTopicList> {
     requireScratchWorkspace(workspace)
     const topicIds = await scratchStorageTopicIds(workspace.path)
     const snapshots = await Promise.all(topicIds.map(async (topicId): Promise<ScratchTopicSnapshot | null> => {
@@ -355,7 +414,10 @@ export class ScratchTopics {
         }
       }
     }))
-    return snapshots.filter((snapshot): snapshot is ScratchTopicSnapshot => snapshot !== null)
+    const result: ScratchTopicList = snapshots.filter((snapshot): snapshot is ScratchTopicSnapshot => snapshot !== null)
+    const issues = [...topicIds.issues ?? [], ...(this.directoryMaintenanceIssue?.directory === workspace.path ? [this.directoryMaintenanceIssue.message] : [])]
+    if (issues.length) result.issues = [...new Set(issues)]
+    return result
   }
 
   async read(workspace: WorkspaceRecord, topicId: string): Promise<ScratchTopicSnapshot | null> {
@@ -364,53 +426,92 @@ export class ScratchTopics {
     const resolved = await resolveScratchTopicDirectory(workspace.path, topicId)
     if (!resolved) return null
     const physicalDirectoryPath = await scratchDirectoryAddress(workspace.path, topicId, resolved)
-    const identityDirectoryPath = await scratchDirectoryIdentity(workspace.path, topicId, physicalDirectoryPath)
-    const content = await readRegularFile(join(resolved, 'topic.md'))
-    const agentFiles = await readdir(join(resolved, '.agents'))
-    let soul: ScratchTopicSnapshot['soul']
-    try {
-      const content = await readRegularFile(join(resolved, MOTE_SOUL_PATH))
-      soul = { path: `${directoryName}/${MOTE_SOUL_PATH}`, content, version: wikiVersion(content) }
-    } catch (error) {
-      if (errorCode(error) !== 'ENOENT') throw error
+    const identity = await this.identityFact(workspace, topicId, physicalDirectoryPath)
+    const issues: string[] = identity.readError ? [identity.readError] : []
+    async function observe<T>(detail: string, read: () => Promise<T>): Promise<T | undefined> {
+      try { return await read() }
+      catch (error) { issues.push(`${detail}: ${error instanceof Error ? error.message : String(error)}`); return undefined }
     }
-    const copy = topicCopy(content)
-    const defaultWiki = topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI
-    const wiki = await readOptionalWiki(
-      join(resolved, SCRATCH_TOPIC_WIKI_PATH),
-      join(resolved, SCRATCH_TOPIC_WIKI_STATE_PATH),
-      defaultWiki
-    )
+    // Resource identity, personality, collaborator plaques and display copy are
+    // independent observations. A failed plaque read cannot hide a known Mote.
+    const [content, agentFiles, soulFact, wiki, confirmedDirectoryPaths] = await Promise.all([
+      observe('topic.md', () => readRegularFile(join(resolved, 'topic.md'))),
+      observe('.agents', () => readdir(join(resolved, '.agents'))),
+      observe(MOTE_SOUL_PATH, async () => {
+        try {
+          const content = await readRegularFile(join(resolved, MOTE_SOUL_PATH))
+          return { kind: 'mote' as const, soul: { path: `${directoryName}/${MOTE_SOUL_PATH}`, content, version: wikiVersion(content) } }
+        } catch (error) {
+          if (errorCode(error) === 'ENOENT') return { kind: 'topic' as const }
+          // Only the original regular SOUL file confirms kind when its contents
+          // are unavailable. A directory, symlink or failed stat proves nothing.
+          const info = await lstat(join(resolved, MOTE_SOUL_PATH)).catch(() => null)
+          if (info?.isFile() && !info.isSymbolicLink()) {
+            issues.push(`${MOTE_SOUL_PATH}: ${error instanceof Error ? error.message : String(error)}`)
+            return { kind: 'mote' as const }
+          }
+          throw error
+        }
+      }),
+      observe('Topic Wiki', () => readOptionalWiki(
+        join(resolved, SCRATCH_TOPIC_WIKI_PATH), join(resolved, SCRATCH_TOPIC_WIKI_STATE_PATH),
+        topicId === PMO_TEAMS_TOPIC_ID ? DEFAULT_PMO_TEAMS_TOPIC_WIKI : DEFAULT_TOPIC_WIKI)),
+      observe('directory addresses', () => scratchConfirmedDirectoryPaths(workspace.path, topicId, resolved))
+    ])
+    const kind = topicId === PMO_TEAMS_TOPIC_ID ? 'mote' : soulFact?.kind
     return {
-      id: topicId,
-      directoryPath: directoryName,
-      physicalDirectoryPath,
-      identityDirectoryPath,
+      id: topicId, directoryPath: directoryName, physicalDirectoryPath, ...identity,
+      ...(confirmedDirectoryPaths ? { confirmedDirectoryPaths } : {}),
       topicPath: `${directoryName}/topic.md`,
-      ...copy,
-      ...(soul ? { soul } : {}),
-      ...(soul || topicId === PMO_TEAMS_TOPIC_ID ? { moteArchive: await this.readMoteArchive(resolved, topicId) } : {}),
-      collaborators: agentFiles.flatMap((fileName) => collaborator(fileName) ?? []),
-      wiki: {
-        path: `${directoryName}/${SCRATCH_TOPIC_WIKI_PATH}`,
-        content: wiki.content,
-        version: wikiVersion(wiki.content),
-        source: wiki.source,
-        enabled: wiki.enabled,
-        updatedAt: wiki.updatedAt
-      }
+      ...(content === undefined ? { title: topicId, summary: '' } : topicCopy(content)),
+      ...(kind ? { kind } : {}),
+      ...(soulFact?.soul ? { soul: soulFact.soul } : {}),
+      ...(kind === 'mote' ? { moteArchive: await this.readMoteArchive(resolved, topicId) } : {}),
+      ...(issues.length ? { readError: issues.join('\n') } : {}),
+      collaborators: (agentFiles ?? []).flatMap((fileName) => collaborator(fileName) ?? []),
+      ...(wiki ? { wiki: {
+        path: `${directoryName}/${SCRATCH_TOPIC_WIKI_PATH}`, content: wiki.content,
+        version: wikiVersion(wiki.content), source: wiki.source, enabled: wiki.enabled, updatedAt: wiki.updatedAt
+      } } : {})
     }
   }
 
   async ensure(workspace: WorkspaceRecord, topicId: string, initialTitle?: string, mote = topicId === PMO_TEAMS_TOPIC_ID): Promise<ScratchTopicSnapshot> {
+    requireScratchWorkspace(workspace)
+    const key = JSON.stringify([workspace.hostId, workspace.path, topicId, mote])
+    const pending = this.pendingEnsures.get(key)
+    if (pending) return await pending
+    const job = this.ensureTopic(workspace, topicId, initialTitle, mote)
+    this.pendingEnsures.set(key, job)
+    try { return await job }
+    finally { if (this.pendingEnsures.get(key) === job) this.pendingEnsures.delete(key) }
+  }
+
+  private async ensureTopic(workspace: WorkspaceRecord, topicId: string, initialTitle: string | undefined, mote: boolean): Promise<ScratchTopicSnapshot> {
     requireScratchWorkspace(workspace)
     const directoryName = scratchTopicDirectoryName(topicId)
     const roots = scratchTopicStorageRoots(workspace.path)
     const root = mote ? roots.motes : roots.topics
     await ensureScratchStorageRoot(root)
     const existing = await resolveScratchTopicDirectory(workspace.path, topicId)
-    const absolutePath = existing ?? join(root, directoryName)
+    const absolutePath = existing ?? join(root, mote ? moteDirectoryName(topicId) : directoryName)
+    let created = false
+    if (!existing && mote) {
+      try { await mkdir(absolutePath, { mode: 0o700 }); created = true }
+      catch (error) { if (errorCode(error) !== 'EEXIST') throw error }
+      const context = await scratchIdentityContext(workspace.path, topicId, absolutePath)
+      if (!created) {
+        const saved = await inspectDirectoryIdentity(absolutePath, context)
+        if (!saved || saved.needsUpgrade || saved.topicId !== topicId) throw new Error('The Mote destination is not confirmed as this full content ID. Existing bytes are kept; inspect its original directory before retrying.')
+      } else await retainDirectoryIdentity(absolutePath, context)
+    }
     await ensureDirectory(absolutePath)
+    if (mote && existing) {
+      const context = await scratchIdentityContext(workspace.path, topicId)
+      const saved = await inspectDirectoryIdentity(absolutePath, context)
+      if (saved) await normalizeDirectoryIdentity(absolutePath, context)
+      else await retainDirectoryIdentity(absolutePath, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, absolutePath) })
+    }
     await Promise.all([
       ensureDirectory(join(absolutePath, 'outcome')),
       ensureDirectory(join(absolutePath, 'refs')),
@@ -510,13 +611,14 @@ This saved personality applies to this new Session. Recovery retains the Session
 Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Session, Project and Run facts take precedence over this personality.
 
 ${snapshot.soul.content}`] : []),
-        ...(snapshot.soul ? [MOTE_COORDINATION_ROLE] : []),
+        ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : []),
+        ...(snapshot.readError ? [`Some original context could not be read. Keep existing work and inspect the original files before relying on missing context:\n${snapshot.readError}`] : []),
         snapshot.wiki?.enabled
         ? topicPrompt(absolutePath, {
             content: snapshot.wiki.content,
             version: snapshot.wiki.version
-          }, snapshot.soul !== undefined)
-        : `Scratch Topic context:\nYour working directory is the filesystem-backed Topic at ${absolutePath}.\nTopic Wiki injection is disabled for this Topic.`
+          }, snapshot.kind === 'mote')
+        : `Scratch Topic context:\nYour working directory is the filesystem-backed Topic at ${absolutePath}.\n${snapshot.wiki ? 'Topic Wiki injection is disabled for this Topic.' : 'Topic Wiki could not be read; its contents and enabled state are unknown.'}`
       ].join('\n\n'),
       identityPath,
       identityCreated

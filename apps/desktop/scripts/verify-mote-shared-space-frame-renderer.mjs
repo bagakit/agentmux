@@ -22,7 +22,11 @@ const styleMoveTraceDiagnostic = process.argv.includes('--diagnostic-style-move-
 const preMoveStyleReadDiagnostic = process.argv.includes('--diagnostic-pre-move-style-read')
 const commitIntervalDiagnostic = process.argv.includes('--diagnostic-commit-interval')
 const noDisclosureOpenDiagnostic = process.argv.includes('--diagnostic-no-disclosure-open')
+const floatSpaceShortcut = process.argv.includes('--float-space-shortcut')
+const shortcutPointerDiagnostic = process.argv.includes('--diagnostic-shortcut-pointer-owner')
+assert.ok(!shortcutPointerDiagnostic || floatSpaceShortcut, 'Pointer-owner diagnostic requires the narrow shortcut fixture')
 const boundedReference = referenceCounterOnly || preMoveReadDiagnostic || styleMoveTraceDiagnostic || preMoveStyleReadDiagnostic || commitIntervalDiagnostic || noDisclosureOpenDiagnostic
+assert.ok(!floatSpaceShortcut || !(boundedReference || geometryDiagnostic || serviceHintDiagnostic), 'The floating shortcut journey cannot use a private diagnostic intervention')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const inputs = new Map(), styles = new Set(), watchedStyles = new Set()
 const localStyle = file => file?.startsWith(repository + '/') && file.endsWith('.css') && !file.includes('/node_modules/')
@@ -47,7 +51,7 @@ const binding = { name: 'bind-shared-frame-current-source', enforce: 'pre', asyn
   }
 } }
 let controlledApiTransforms = 0
-const result = { schema: 'agentmux.mote-shared-frame-renderer-proof.v1', passed: false, aestheticReview: 'not-performed', userRunTouched: false, acceptanceScope: noDisclosureOpenDiagnostic ? 'diagnostic-no-disclosure-open' : commitIntervalDiagnostic ? 'diagnostic-commit-interval' : preMoveStyleReadDiagnostic ? 'diagnostic-pre-move-style-read' : styleMoveTraceDiagnostic ? 'diagnostic-style-move-trace' : preMoveReadDiagnostic ? 'diagnostic-pre-move-layout-read' : referenceCounterOnly ? 'bounded-native-reference-counter' : 'complete-two-process-journey',
+const result = { schema: 'agentmux.mote-shared-frame-renderer-proof.v1', passed: false, aestheticReview: 'not-performed', userRunTouched: false, acceptanceScope: shortcutPointerDiagnostic ? 'diagnostic-shortcut-pointer-event-owner' : floatSpaceShortcut ? 'floating-space-shortcut-two-process-journey' : noDisclosureOpenDiagnostic ? 'diagnostic-no-disclosure-open' : commitIntervalDiagnostic ? 'diagnostic-commit-interval' : preMoveStyleReadDiagnostic ? 'diagnostic-pre-move-style-read' : styleMoveTraceDiagnostic ? 'diagnostic-style-move-trace' : preMoveReadDiagnostic ? 'diagnostic-pre-move-layout-read' : referenceCounterOnly ? 'bounded-native-reference-counter' : 'complete-two-process-journey',
   privateInterventions: { geometryDiagnostic, serviceHintDiagnostic, preMoveReadDiagnostic, styleMoveTraceDiagnostic, preMoveStyleReadDiagnostic, commitIntervalDiagnostic, noDisclosureOpenDiagnostic },
   phases: [], privateProfile: join(privateRoot, 'user-data'), cleanup: null,
   limitations: ['Only controlled public Session/API facts. Real ordinary initialize consumes durable workbench and requests exact retained Session/Run recovery in the second process; no Core/ctxmux/CLI survival claim.',
@@ -56,6 +60,7 @@ const result = { schema: 'agentmux.mote-shared-frame-renderer-proof.v1', passed:
 await mkdir(evidence, { recursive: true })
 try {
   for (const file of [import.meta.filename, join(desktop, 'scripts/probe-process.mjs'), ...['main.cjs', 'entry.mjs', 'index.html', 'scenario.md'].map(name => join(fixture, name))]) inputs.set(file, hash(await readFile(file)))
+  if (floatSpaceShortcut) inputs.set(join(fixture, 'float-space-shortcut.cjs'), hash(await readFile(join(fixture, 'float-space-shortcut.cjs'))))
   // Bind maintained public package exports to current Source, never a stale dist.
   const aliases = []
   for (const name of ['core', 'demand', 'layout']) {
@@ -112,6 +117,10 @@ try {
   result.stylesheets = Object.fromEntries([...styles].sort().map(file => [relative(repository, file), inputs.get(file)]))
   result.compiled = compiled; result.controlledApiTransforms = controlledApiTransforms
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
+  delete env.AGENTMUX_SHARED_FRAME_SHORTCUT_POINTER_DIAGNOSTIC
+  if (shortcutPointerDiagnostic) { env.AGENTMUX_SHARED_FRAME_SHORTCUT_POINTER_DIAGNOSTIC='1'; result.notAcceptance=true; result.diagnostic='Observe only the exact original native input pointer event and delegate Event.preventDefault unchanged while capturing its caller stack. Original private-window setup and strict input counter stay unchanged; one process, not UI or restart acceptance.' }
+  delete env.AGENTMUX_SHARED_FRAME_FLOAT_SPACE_SHORTCUT
+  if (floatSpaceShortcut) env.AGENTMUX_SHARED_FRAME_FLOAT_SPACE_SHORTCUT = '1'
   for (const key of ['AGENTMUX_SHARED_FRAME_GEOMETRY_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_SERVICE_HINT_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_PRE_MOVE_READ_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_STYLE_MOVE_TRACE_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_PRE_MOVE_STYLE_READ_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_COMMIT_INTERVAL_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_NO_DISCLOSURE_OPEN_DIAGNOSTIC', 'AGENTMUX_SHARED_FRAME_REFERENCE_COUNTER_ONLY']) delete env[key]
   if (geometryDiagnostic) { env.AGENTMUX_SHARED_FRAME_GEOMETRY_DIAGNOSTIC = '1'; result.diagnostic = 'Bounded original path through confirmed-reference cutover; no full journey or two-PID acceptance.' }
   if (serviceHintDiagnostic) { env.AGENTMUX_SHARED_FRAME_SERVICE_HINT_DIAGNOSTIC = '1'; result.diagnostic = 'Private service-details popover auto-to-hint override; bounded original reference/inner close/Escape/input counter only, no production or two-PID acceptance.' }
@@ -145,7 +154,7 @@ try {
     result.notAcceptance=true
     result.diagnostic='Only omit the original inner disclosure open/close interaction, retaining the original known/unknown/confirmation path, same nodes, strict presented styles and physical Group containment. Stop after first confirmation in one process. No style/DOM repair or production change; ablation, not product acceptance.'
   }
-  for (const phase of geometryDiagnostic || serviceHintDiagnostic || boundedReference ? ['seed'] : ['seed', 'restore']) {
+  for (const phase of shortcutPointerDiagnostic || geometryDiagnostic || serviceHintDiagnostic || boundedReference ? ['seed'] : ['seed', 'restore']) {
     for (const [file, digest] of Object.entries(compiled)) assert.equal(hash(await readFile(join(outDir, file))), digest, 'Both processes consume immutable compile: '+file)
     const logs = []
     const exit = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), join(outDir, 'index.html'), privateRoot, phase, evidence],
@@ -157,7 +166,7 @@ try {
     assert.equal(exit.exitCode, 0, phaseResult.app.failure?.message)
     assert.equal(phaseResult.app.passed, true)
   }
-  assert.equal(new Set(result.phases.map(one => one.app.pid)).size, boundedReference ? 1 : 2, boundedReference ? 'Bounded original-reference counter uses one private process, no restart claim' : 'Two independent real Electron processes')
+  assert.equal(new Set(result.phases.map(one => one.app.pid)).size, shortcutPointerDiagnostic || boundedReference ? 1 : 2, shortcutPointerDiagnostic || boundedReference ? 'Bounded original-reference counter uses one private process, no restart claim' : 'Two independent real Electron processes')
   for (const [file, digest] of inputs) assert.equal(hash(await readFile(file)), digest, 'Source unchanged during proof: '+relative(repository,file))
   result.passed = true
   await writeFile(join(evidence, 'review.md'), ['# Mote shared Space frame screenshots — independent review pending', '',

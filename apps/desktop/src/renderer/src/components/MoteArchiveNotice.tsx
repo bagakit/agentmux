@@ -21,7 +21,9 @@ export function useMoteArchiveAction(workspace: WorkspaceRecord | undefined) {
     setPending(topic.id); setFailure(null)
     try {
       if (!topic.moteArchive || topic.moteArchive.state === 'unknown') throw new Error('Refresh this Mote to confirm its archive state.')
-      await useAppStore.getState().setMoteArchived(workspace.id, topic.id, archived, topicSpaceIconTarget(workspace, topic).key, topic.moteArchive.version)
+      const target = topicSpaceIconTarget(workspace, topic, useAppStore.getState().spaceZoneBindings)
+      if (!target) throw new Error('The original Mote identity is unconfirmed. Its existing archive state and workface are kept; repair the same directory record.')
+      await useAppStore.getState().setMoteArchived(workspace.id, topic.id, archived, target.key, topic.moteArchive.version)
       return true
     }
     catch (error) { if (active.current && latest.current === captured && request.current === generation) setFailure({ topicId: topic.id, title: topic.title, action: archived ? 'Archive' : 'Restore', message: presentError(error), scope: captured }); return false }

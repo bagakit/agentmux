@@ -1,11 +1,12 @@
 const { fixtureIso: _hygiene_fixtureIso, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
-import { readFileSync } from 'node:fs'
+import { readFileSync, appendFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
+import { createWorkspaceLayout } from '@agentmux/layout'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
@@ -15,6 +16,11 @@ import * as projection from '../src/renderer/src/lib/focus-context'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { focusFilterOptions } from './fixtures/focus-filter-menu'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { mainFocusPresentation } from '../src/renderer/src/lib/focus-tab-projection'
+import { focusTimelineCurrentReference } from '../src/renderer/src/lib/focus-timeline-current'
+import { resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog } from '../src/renderer/src/lib/desktop-focus-navigation'
 
 // Global, Store, Lane, MainRow, grouping, parser and the open-only reader remain real.
 // Session painting and the separate Timeline do not prove native geometry or Run health here.
@@ -88,6 +94,10 @@ beforeEach(async () => {
   })
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
     return this.classList.contains('focus-project-lanes__rows') ? width : 0
+  })
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('focus-project-lanes__groups') ? new DOMRect(0, 0, width, 600) : originalRect.call(this)
   })
   Object.defineProperty(Element.prototype, 'scrollIntoView', { value: vi.fn(), configurable: true })
   style = document.createElement('style')
@@ -172,6 +182,61 @@ it('keeps a single card bounded and returns from the exact disconnected title en
   expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
 })
 
+it('puts the sole visible state into the project title once while preserving exact disconnected and local unknown facts', async () => {
+  const unknown = agent(A, 'running', 'run-process')
+  await seed([unknown, agent('offline-1', 'disconnected'), agent('offline-2', 'disconnected')]); await mount()
+  const group = section('idle'), title = lane().querySelector('.focus-project-lanes__title')!
+  expect(group.dataset.focusSparse).toBe('true')
+  expect(group.querySelector(':scope > .focus-context-group__header')).toBeNull()
+  const header = title.querySelector<HTMLElement>('[data-visible-state="true"]')!
+  expect(header).not.toBeNull(); expect(header.getAttribute('aria-label')).toContain('Activity unknown 1')
+  expect(header.textContent).toContain('Activity unknown'); expect(header.querySelector('.focus-context-group__count')?.textContent).toBe('1')
+  expect(title.querySelector('.focus-disconnected-entry')?.getAttribute('aria-label')).toBe('View disconnected contexts · 2')
+  expect(groups().querySelector('[data-bucket="disconnected"]')).toBeNull(); expect(card().dataset.activity).toBe('unknown')
+  const original = card(), parent = original.parentElement
+  await seed([unknown, agent(B, 'done'), agent('offline-1', 'disconnected'), agent('offline-2', 'disconnected')])
+  expect(card()).toBe(original); expect(card().parentElement).toBe(parent)
+  expect(section('idle').dataset.focusSparse).toBeUndefined(); expect(section('idle').querySelector(':scope > header')).not.toBeNull()
+  await seed([unknown]); expect(card()).toBe(original); expect(card().parentElement).toBe(parent); expect(section('idle').dataset.focusSparse).toBe('true')
+})
+
+it('keeps the actual rename input and exact menu target across 1 to 2 to 1 and a filtered single card', async () => {
+  await seed([agent(A)]); await mount()
+  const original = card(), parent = original.parentElement, group = parent!.parentElement, holder = group!.parentElement
+  await act(async () => original.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'F10', shiftKey: true })))
+  const menu = document.querySelector<HTMLElement>('.focus-context-menu')!; expect(menu).not.toBeNull(); expect(menu.dataset.agentSessionId).toBe(A)
+  await seed([agent(A), agent(B)]); expect(card()).toBe(original); expect(document.querySelector('.focus-context-menu')).toBe(menu)
+  await seed([agent(A)]); expect(card()).toBe(original); expect(document.querySelector('.focus-context-menu')).toBe(menu)
+  const rename = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent==='Rename Agent')!; expect(rename).not.toBeNull()
+  await act(async () => { rename.focus(); rename.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })) })
+  const editing = container.querySelector<HTMLInputElement>('.focus-context__rename')!; expect(editing).not.toBeNull()
+  await act(async () => { const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!; setter.call(editing, 'Original ongoing edit'); editing.dispatchEvent(new Event('input', { bubbles: true })); editing.setSelectionRange(3, 9) })
+  const caret = [editing.selectionStart,editing.selectionEnd]
+  await seed([agent(A), agent(B)]); expect(container.querySelector('.focus-context__rename')).toBe(editing); expect(editing.value).toBe('Original ongoing edit'); expect([editing.selectionStart,editing.selectionEnd]).toEqual(caret)
+  await seed([agent(A)]); expect(container.querySelector('.focus-context__rename')).toBe(editing); expect(editing.parentElement!.parentElement).toBe(parent); expect(parent!.parentElement).toBe(group); expect(group!.parentElement).toBe(holder)
+  await act(async () => editing.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })))
+  expect(card().parentElement).toBe(parent)
+  await seed([agent(A), agent(B)])
+  const search = container.querySelector<HTMLInputElement>('[aria-label="Search contexts"]')!
+  await act(async () => { const setter=Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!;setter.call(search,A);search.dispatchEvent(new Event('input',{bubbles:true})) })
+  expect(groups().querySelectorAll('.focus-context')).toHaveLength(1);expect(section('working').dataset.focusSparse).toBe('true');expect(card().parentElement).toBe(parent)
+})
+
+it('keeps a pinned hover record and zero unrelated cost through the single-card presentation transition', async () => {
+  await seed([agent(A)], { [A]: timeline(A,[message(A,'assistant_message','Original retained sparse reply',10)]) });await mount();await open()
+  const original=card(), reply=preview()!.querySelector('.focus-context-hover__recap p')!,range=document.createRange();range.selectNodeContents(reply);window.getSelection()!.removeAllRanges();window.getSelection()!.addRange(range)
+  const selection=window.getSelection()!.toString(), parent=original.parentElement
+  await act(async()=>useAppStore.setState(state=>({sessions:[...state.sessions,agent(B)]})))
+  expect(card()).toBe(original);expect(card().parentElement).toBe(parent);expect(preview()!.querySelector('.focus-context-hover__recap p')).toBe(reply);expect(window.getSelection()!.toString()).toBe(selection)
+  await act(async()=>useAppStore.setState(state=>({sessions:state.sessions.filter(session=>session.id!==B)})))
+  expect(card()).toBe(original);expect(preview()!.querySelector('.focus-context-hover__recap p')).toBe(reply)
+  const compute=vi.spyOn(allocation,'allocateFocusLaneColumns'),partition=vi.spyOn(projection,'groupFocusContexts'),history=vi.mocked(api.sessions.historyPage),catalogue=vi.spyOn(api.sessions,'historySources'),icons=vi.mocked(api.workspaces.appearance),before={renders:{...renders.cards},reads:history.mock.calls.length,icons:icons.mock.calls.length}
+  expect(before.renders[A]).toBeGreaterThan(0)
+  for(let i=0;i<50;i++)await act(async()=>useAppStore.setState(state=>({agentNames:{...state.agentNames,unrelated:`outside-${i}`}})))
+  expect(compute).not.toHaveBeenCalled();expect(partition).not.toHaveBeenCalled();expect(renders.cards).toEqual(before.renders);expect(history.mock.calls.length).toBe(before.reads);expect(icons.mock.calls.length).toBe(before.icons);expect(catalogue).not.toHaveBeenCalled();expect(card()).toBe(original)
+  if(process.env.AGENTMUX_SPARSE_PREFLIGHT_FACTS)appendFileSync(process.env.AGENTMUX_SPARSE_PREFLIGHT_FACTS,JSON.stringify({sparseCardCount:1,positiveCardRenders:before.renders[A],unrelatedAllocationDelta:compute.mock.calls.length,unrelatedPartitionDelta:partition.mock.calls.length,unrelatedReadDelta:history.mock.calls.length-before.reads,unrelatedIconDelta:icons.mock.calls.length-before.icons,unrelatedCatalogueDelta:catalogue.mock.calls.length,preservedRange:window.getSelection()!.toString()===selection})+'\n')
+})
+
 it('shows a complete wrapper body as the ordinary recap while raw aria/hover and unrecognized source bytes remain intact', async () => {
   const body = '已核 src/scroll-anchor.ts，保留原草稿与正文选区。'.repeat(20)
   const wrapped = ("[Message from Agent " + ('declared-'.repeat(25)) + ("]\n<bagakit-msg type=\"result\" name=\"Declared only\" time=\"" + _hygiene_fixtureIso(24112800000, "zone-second", 480) + "\">") + (body) + "</bagakit-msg>")
@@ -186,7 +251,9 @@ it('shows a complete wrapper body as the ordinary recap while raw aria/hover and
   // Row seam are bound here; compiled captures own physical two-line readability.
   expect(style.textContent).toMatch(/\.focus-context__recap > span\s*\{[^}]*-webkit-line-clamp:\s*2\s*;/u)
   expect(api.sessions.historyPage).not.toHaveBeenCalled(); await open()
-  expect(preview()?.querySelector('.focus-context-hover__recap p')?.textContent).toBe(excerpt(wrapped))
+  expect(preview()?.querySelector('.focus-context-hover__recap p')?.textContent).toBe(excerpt(body))
+  expect(useAppStore.getState().timelines[A]!.items[0]!.content).toBe(wrapped)
+  expect(card().getAttribute('aria-label')).toContain(excerpt(wrapped))
   expect(preview()?.textContent).toContain('Bash pnpm test --filter density'); expect(document.activeElement).toBe(input)
   expect(useAppStore.getState().timelines[A]).toBe(original); expect(original.items[0]!.content).toBe(wrapped); await escape()
   const unrecognized = [
@@ -205,7 +272,25 @@ it('shows a complete wrapper body as the ordinary recap while raw aria/hover and
 it('distinguishes idle completion without a result, unknown activity and a recorded result without changing state or selection identity', async () => {
   const sessions = [agent('idle-done', 'done'), agent('unknown', 'running', 'run-process'), agent('result', 'done')]
   await seed(sessions, { unknown: timeline('unknown', [message('unknown', 'assistant_message', 'Held reply, activity remains unknown', 2)]),
-    result: timeline('result', [message('result', 'assistant_message', 'Recorded result', 2)]) }); await mount()
+    result: timeline('result', [message('result', 'assistant_message', 'Recorded result', 2)]) })
+  const tab = createWorkbenchTab('density-exact-tab', { regionId: 'density-exact-region', workspaceId: 'density',
+    kind: 'agent', phase: 'attached', sessionId: 'unknown' })
+  const reference = { displayWorkspaceId: 'density', groupId: 'density-exact-group', tabId: tab.id, regionId: 'density-exact-region' }
+  useAppStore.setState({ tabs: { [tab.id]: tab }, layouts: { density: createWorkspaceLayout(reference.groupId, [tab.id]) },
+    activeWorkspaceId: 'density', workbenchSpaceSelection: null })
+  const initialState = useAppStore.getState()
+  const expectedChoice = resolveWorkbenchOccurrenceSelection(initialState, workbenchSelectionCatalog(initialState),
+    { workspaceId: reference.displayWorkspaceId, groupId: reference.groupId, tabId: reference.tabId, regionId: reference.regionId }, 'navigation')
+  function MainFocusFixture() {
+    const state = useAppStore(), catalog = workbenchSelectionCatalog(state)
+    const select = (target: typeof reference) => state.selectMainRegion(target, state.workbenchSpaceSelection)
+    const presentation = mainFocusPresentation(state.workbenchSpaceSelection, state.tabs, catalog, select)
+    const currentReference = focusTimelineCurrentReference(state.workbenchSpaceSelection,
+      state.workbenchSpaceSelection ? state.layouts[state.workbenchSpaceSelection.workspaceId] : undefined, state.tabs, catalog)
+    return createElement(GlobalFocusSurface, { presentation, currentReference, workspaceOpen: Boolean(state.workbenchSpaceSelection),
+      onSelectContext: state.focusExecutionSession, onSelectLocation: select })
+  }
+  await act(async () => root!.render(createElement(MainFocusFixture)))
   expect(card('idle-done').dataset).toMatchObject({ state: 'done', bucket: 'idle', activity: 'idle' })
   expect(card('unknown').dataset).toMatchObject({ state: 'running', bucket: 'idle', activity: 'unknown' })
   expect(card('result').dataset).toMatchObject({ state: 'done', bucket: 'results', activity: 'idle' })
@@ -219,6 +304,8 @@ it('distinguishes idle completion without a result, unknown activity and a recor
   const controls = sessions.map(session => session.control), draft = useAppStore.getState().agentComposerDrafts
   await act(async () => card('unknown').click())
   expect(useAppStore.getState().agentFocus.execution.sessionId).toBe('unknown'); expect(card('unknown').getAttribute('aria-pressed')).toBe('true')
+  expect(useAppStore.getState().agentFocus.execution.reference).toEqual(reference)
+  expect(useAppStore.getState().workbenchSpaceSelection).toEqual(expectedChoice)
   expect(card('result').dataset.bucket).toBe('results'); expect(useAppStore.getState().sessions.map(session => session.control)).toEqual(controls)
   expect(useAppStore.getState().agentComposerDrafts).toBe(draft)
 })
@@ -234,6 +321,12 @@ it('keeps pending, failure, connection and unconfirmed Mote service facts direct
   const connection = { ...agent('connection', 'disconnected'), processState: 'running' as const,
     status: { state: 'disconnected' as const, source: 'native-hook' as const, observedAt: 2, detail: 'Connection lost; current execution unconfirmed' } }
   const mote = { ...agent('unconfirmed', 'running', 'run-process'), workspacePath: _hygiene_fixturePath("unconfirmed-mote/topic--launcher--unconfirmed") }
+  // The original directory owner confirms this exact address, while its read
+  // error leaves Topic/Mote classification unknown; cwd spelling is not proof.
+  const scratch = { id: '__scratch__', name: 'Scratch', hostId: 'local', path: _hygiene_fixturePath("unconfirmed-mote"), kind: 'folder' as const }
+  const unknownTopic = { id: 'unconfirmed', title: 'Unconfirmed object', directoryPath: 'topic--launcher--unconfirmed', topicPath: 'topic--launcher--unconfirmed/topic.md', summary: '', confirmedDirectoryPaths: [mote.workspacePath], readError: 'Metadata read failed; object kind unknown', collaborators: [] }
+  vi.mocked(api.scratch.listTopics).mockResolvedValue([unknownTopic])
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces, scratch] }, scratchTopicSnapshots: { [scratch.id]: { scope: scratchTopicsScope(scratch), revision: 0, topics: [unknownTopic], error: null, reading: false } } })))
   const sessions = [permission, question, failure, connection, mote]
   await seed(sessions, Object.fromEntries(sessions.map(session => [session.id, timeline(session.id, [message(session.id, 'assistant_message', 'Old recap remains held', 2)])])))
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [...state.config!.workspaces,

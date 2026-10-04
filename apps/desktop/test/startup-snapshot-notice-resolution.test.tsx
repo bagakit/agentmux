@@ -8,14 +8,17 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
-import type { AppConfig, RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
+import type { AgentSessionNameMetadata, AppConfig, RuntimeEvent, RuntimeSnapshot } from '../src/shared/contracts'
 import type { AgentSessionHistoryDescriptor } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useAppStore } from '../src/renderer/src/store'
 import { TransientErrorNotice } from '../src/renderer/src/components/TransientErrorNotice'
 import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
-import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { desktopSpatialGraph, desktopWorkbenchFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'
+import { useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../src/renderer/src/lib/workbench-session-subscriptions'
+import { workbenchTabDisplayName } from '../src/renderer/src/lib/workbench-tab-presentation'
+import { regionSurfaceLabel } from '../src/renderer/src/lib/region-display-name'
 import { hydratePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
 
 const initial = useAppStore.getState()
@@ -32,7 +35,7 @@ const unknownEvent = (): RuntimeEvent => ({ type: 'core', hostId: 'local', event
 function Notices() {
   const state = useAppStore()
   return <TransientErrorNotice error={state.error} dismissed={state.errorDismissed} lastError={state.lastError}
-    onDismiss={state.dismissError} onReopen={state.reopenError} kind={state.errorNoticeContext?.kind ?? 'indeterminate'} />
+    summary={state.errorNoticeContext?.summary} onDismiss={state.dismissError} onReopen={state.reopenError} kind={state.errorNoticeContext?.kind ?? 'indeterminate'} />
 }
 let root: Root, element: HTMLDivElement, dispose: (() => void) | undefined, releasePending: (() => void) | undefined
 let spatialDirectory: string, spatial: AgentMuxSpatialStateStore
@@ -58,6 +61,10 @@ async function saveOriginalWorkbench(config = composerConfig, execution = true) 
     sessions: execution ? ids.map(id => composerSession(id)) : [] }, [])
   const saved = await spatial.commit({ expectedRevision: 0, graph })
   expect((await spatial.read())?.graph).toEqual(saved.graph)
+  // The current Core projection supplies exact Space/Zone metadata. Preserve that
+  // original receipt in the fixture rather than compare against a pre-Core Tab shape.
+  const originalProjection = desktopWorkbenchFromSpatial(saved.graph)
+  for (const tab of Object.values(original.tabs)) Object.assign(tab, { space: originalProjection.tabs[tab.id]!.space })
   expect(saved.graph.regions.map(region => region.agentSessionId)).toEqual(ids)
   expect(saved.graph.regions.map(region => region.execution?.hostId ?? null)).toEqual(execution ? ['local', 'local'] : [null, null])
 }
@@ -83,6 +90,8 @@ async function missingReferencesFixture(catalogue: AgentSessionHistoryDescriptor
 it('classifies original closed history before counting missing Runtime references and settles a removed reference', async () => {
   const f = await missingReferencesFixture([{ agentSessionId: ids[0]!, hostId: 'local', state: 'retired' }])
   expect(useAppStore.getState().error).toContain('1 saved Session reference(s) have no current Runtime facts')
+  expect((element.querySelector('.error-notice__summary')?.textContent ?? '')).toContain('1 saved Session')
+  expect(element.querySelector('.error-notice__original')?.textContent).toContain('no current Runtime facts')
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot?.sessionIds).toEqual([ids[1]])
   expect(useAppStore.getState().tabs).toEqual(f.tabs)
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(['healthy-neighbor'])
@@ -114,7 +123,10 @@ it('settles retained closed references from their own later Core catalogue witho
   await f.settle()
   expect(useAppStore.getState().error).toContain('Unrelated Provider discovery failure')
   expect(useAppStore.getState().error).not.toContain('no current Runtime facts')
-  expect(useAppStore.getState().errorNoticeContext).toBeNull()
+  expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeUndefined()
+  expect((element.querySelector('.error-notice__summary')?.textContent ?? '')).toContain('Startup checks')
+  expect((element.querySelector('.error-notice__summary')?.textContent ?? '')).not.toContain('saved Session')
+  expect(element.querySelector('.error-notice__original')?.textContent).toContain('Unrelated Provider discovery failure')
   expect(useAppStore.getState().tabs).toEqual(f.tabs)
   expect(f.recover).not.toHaveBeenCalled()
 })
@@ -125,10 +137,10 @@ afterEach(async () => {
     dispose?.(); dispose = undefined; root.unmount()
   })
   element.remove(); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
-  await rm(spatialDirectory, { recursive: true, force: true })
+  await rm(spatialDirectory, { recursive: true, force: true, maxRetries: 3, retryDelay: 25 })
 })
 async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial', options: {
-  foreignHost?: boolean; movedDisplay?: boolean; spatial?: 'absent' | 'missing-execution'
+  foreignHost?: boolean; movedDisplay?: boolean; spatial?: 'absent' | 'missing-execution'; initialSnapshot?: RuntimeSnapshot
 } = {}) {
   const config: AppConfig = options.foreignHost || options.movedDisplay ? { ...composerConfig,
     hosts: [...composerConfig.hosts, { id: 'foreign-host', kind: 'ssh', label: 'Other Host', hostname: 'private.invalid', user: 'fixture' }],
@@ -147,6 +159,13 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
   useAppStore.setState({ restoredWorkbench: { tabs, layouts: original.layouts }, loading: true,
     agentFocus: original.agentFocus, agentComposerDrafts: original.agentComposerDrafts, activeWorkspaceId: workspaceId })
   if (options.spatial !== 'absent') await saveOriginalWorkbench(config, options.spatial !== 'missing-execution')
+  else {
+    // Resource metadata is derived from the original configuration, not an execution
+    // confirmation. This case still leaves the durable Core graph absent.
+    const resource = desktopWorkbenchFromSpatial(desktopSpatialGraph({ ...useAppStore.getState(), config,
+      tabs, layouts: original.layouts, sessions: [] }, []))
+    for (const tab of Object.values(tabs)) Object.assign(tab, { space: resource.tabs[tab.id]!.space })
+  }
   let listener: (event: RuntimeEvent) => void = () => {}
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(callback => { listener = callback; return () => {} })
   let resolve!: (snapshot: RuntimeSnapshot) => void, reject!: (error: Error) => void
@@ -155,7 +174,7 @@ async function fixture(bufferedEvent = false, overflow?: 'complete' | 'partial',
   const snapshot = vi.spyOn(api.sessions, 'snapshot').mockImplementationOnce(async () => {
     if (overflow) for (let index = 0; index < 257; index += 1) listener(unknownEvent())
     else if (bufferedEvent) listener(unknownEvent())
-    return empty()
+    return options.initialSnapshot ?? empty()
   })
   if (overflow) snapshot.mockResolvedValueOnce(overflow === 'complete'
     ? complete() : { ...complete(), sessions: complete().sessions.slice(0, 1) })
@@ -336,4 +355,31 @@ it.each([false, true])('a dismissed startup notice cannot swallow a later ordina
   expect(useAppStore.getState()).toMatchObject({ error: f.warning, lastError: f.warning, errorDismissed: false })
   expect(element.querySelector('.error-notice')!.textContent).toContain(f.warning)
   f.retained()
+})
+
+
+it('restores names before Runtime facts using original execution Host even after display moved', async () => {
+  const metadata: AgentSessionNameMetadata[] = ids.map((agentSessionId,index) => ({agentSessionId,hostId:'local',providerId:'codex',executorId:'codex',workspacePath:_hygiene_fixturePath("repo"),label:index ? 'Retired · Project' : 'Codex · Project',state:index ? 'retired' : 'active'}))
+  metadata.push({...metadata[0]!,hostId:'foreign-host',label:'Wrong Host'})
+  const f = await fixture(false,undefined,{movedDisplay:true,initialSnapshot:{...empty(),sessionNameMetadata:metadata}})
+  let commits = 0
+  function OriginalNames() {
+    const tab = useAppStore(state => state.tabs['tab-original-a'])!
+    const sessions = useWorkbenchTabSessions(tab), names = useWorkbenchTabNameMetadata(tab)
+    commits += 1
+    return <div data-original-names>{workbenchTabDisplayName(tab,sessions,{}, {},names)} / {regionSurfaceLabel(tab.regions['region-original-a']!,sessions,names)}</div>
+  }
+  await act(async () => root.render(<OriginalNames />))
+  expect(element.querySelector('[data-original-names]')?.textContent).toBe('Codex · Project / Codex · Project')
+  expect(useAppStore.getState().sessions).toEqual([])
+  expect(useAppStore.getState().recoveryCandidates).toEqual([])
+  expect(useAppStore.getState().errorNoticeContext).not.toBeNull()
+  const persisted = useAppStore.persist.getOptions().partialize!(useAppStore.getState())
+  expect(persisted).not.toHaveProperty('sessionNameMetadata')
+  expect(persisted).not.toHaveProperty('sessionNameMetadataWarning')
+  const before = commits
+  await act(async () => useAppStore.setState({sessions:[composerSession('unrelated')]}))
+  expect(commits).toBe(before)
+  await f.settle({...complete(),sessionNameMetadata:metadata,sessions:[{...composerSession(ids[0]),label:'Canonical · Project'}]})
+  expect(element.querySelector('[data-original-names]')?.textContent).toBe('Canonical · Project / Canonical · Project')
 })

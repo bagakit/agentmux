@@ -15,10 +15,10 @@ export function SpaceDisclosure({ icon, expanded, label, disabled = false, onTog
 
 /** Categories share controls; member indentation expresses category ownership, not a directory. */
 export function SpaceSectionHeader({ label, count, icon, expanded, filtering, onToggle, onOpen,
-  createLabel, onCreate, createIcon, activity, selected = false, navigationId, parentNavigationId, collapsible = true }: {
+  createLabel, onCreate, createIcon, activity, actions, selected = false, navigationId, parentNavigationId, collapsible = true, iconTargetKey }: {
   label: string; count: number; icon: ReactNode; expanded: boolean; filtering: boolean;
   onToggle(): void; onOpen?: () => void; createLabel?: string; onCreate?: () => Promise<unknown>; createIcon?: ReactNode;
-  activity?: ReactNode; selected?: boolean; navigationId?: string; parentNavigationId?: string; collapsible?: boolean
+  activity?: ReactNode; actions?: ReactNode; selected?: boolean; navigationId?: string; parentNavigationId?: string; collapsible?: boolean; iconTargetKey?: string
 }) {
   const [busy, setBusy] = useState(false)
   const reportError = useAppStore((state) => state.reportError)
@@ -33,11 +33,12 @@ export function SpaceSectionHeader({ label, count, icon, expanded, filtering, on
     <button type="button" className={`space-section-label space-${label.toLowerCase()}-row`}
       aria-label={onOpen ? `${label} overview` : label} aria-current={selected ? 'page' : undefined}
       data-space-nav={navigationId ?? `space:${label.toLowerCase()}`} data-space-expanded={canCollapse && !filtering ? expanded : undefined}
-      data-space-parent={parentNavigationId}
+      data-space-parent={parentNavigationId} data-space-icon-target={iconTargetKey}
       disabled={!canCollapse && !onOpen} onClick={onOpen ?? (() => { if (!filtering) onToggle() })}>
       <strong>{label}</strong><small>{count}</small>
     </button>
     {activity}
+    {actions}
     {onCreate ? <button type="button" className="icon-button space-section-add" aria-label={createLabel} title={createLabel}
       disabled={busy} onClick={() => void create()}>{createIcon ?? <Plus size={13} />}</button> : null}
   </div>

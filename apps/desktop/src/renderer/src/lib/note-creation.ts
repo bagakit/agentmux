@@ -23,6 +23,9 @@ export type NoteCreationReceipt = {
   path: string
   status: 'pending' | 'written' | 'unknown' | 'error'
   write?: Exclude<WorkspaceFileWriteResult, { status: 'conflict' }>
+  notebook?: import('./notebook-library').NoteNotebookContext
+  notebookRegistered?: boolean
+  notebookIssue?: string | undefined
   revealed: boolean
   presentation?: { presentationId: string; entity: WorkbenchEntityReference; reference: WorkbenchProjectionSelection }
   launcher?: { tabId: string; regionId: string }
@@ -33,7 +36,7 @@ import type { ScratchTopicSnapshot } from '../../../shared/scratch-topics'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { directoryIdentity, homeZoneId, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, zoneContext } from './space-agent-control'
-import { zoneFileResource } from './zone-file-resource'
+import { zoneFileResource } from '../../../shared/zone-file-resource'
 import { groupIds } from '@agentmux/layout'
 
 export function noteCreationResourceMatches(config: AppConfig | null, target: NoteCreationTarget): boolean {
@@ -41,10 +44,11 @@ export function noteCreationResourceMatches(config: AppConfig | null, target: No
   return workspace?.hostId === target.hostId && workspace.path === target.workspacePath
 }
 
-export function noteFilePlacement(target: NoteCreationTarget, projection?: WorkbenchProjection): FileOpenPlacement | null {
+export function noteFilePlacement(target: NoteCreationTarget, projection?: WorkbenchProjection, launcher?: NoteCreationReceipt['launcher']): FileOpenPlacement | null {
   return target.zoneId && target.sourceSpaceId && target.displayWorkspaceId ? {
     displayWorkspaceId: target.displayWorkspaceId, space: { spaceId: target.sourceSpaceId, zoneId: target.zoneId },
-    resource: { hostId: target.hostId, path: target.workspacePath }, ...(projection ? { projection } : {})
+    resource: { hostId: target.hostId, path: target.workspacePath }, ...(projection ? { projection } : {}),
+    ...(projection?.presentationId === 'survey-workbench' && launcher ? { launcher } : {})
   } : null
 }
 
@@ -81,6 +85,6 @@ export function noteCreationTarget(state: Parameters<typeof spatialCatalog>[0], 
   const zone = catalog.zones.find(item => item.zoneId === (zoneId ?? defaultZoneId))
   if (!zone || zone.kind === 'unknown' || zone.workspaceId !== workspace.id || zone.hostId !== workspace.hostId || !zone.directoryPath) throw new Error('The Note Zone birth directory is unknown. Its draft and original target are retained.')
   const sourceSpaceId = zoneContext(state, topics, zone)
-  const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone)
+  const { directoryPath, relativeDirectory } = zoneFileResource(workspace, zone, '', topics)
   return { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath, relativeDirectory, zoneId: zone.zoneId, sourceSpaceId, displayWorkspaceId, groupId: input.groupId }
 }

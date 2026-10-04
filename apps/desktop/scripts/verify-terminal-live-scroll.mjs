@@ -27,13 +27,13 @@ const critical = [
   fileURLToPath(import.meta.url), path.join(desktop, 'scripts/probe-process.mjs'), instrument,
   ...['main.cjs', 'entry.tsx', 'index.html'].map(name => path.join(fixture, name)),
   path.join(desktop, 'src/renderer/src/components/TerminalView.tsx'), path.join(desktop, 'src/renderer/src/components/SessionPane.tsx'),
-  path.join(desktop, 'src/renderer/src/components/SessionHistoryView.tsx'), path.join(desktop, 'src/renderer/src/store.ts'),
+  path.join(desktop, 'src/renderer/src/components/ActivityView.tsx'), path.join(desktop, 'src/renderer/src/store.ts'),
   path.join(root, 'packages/client-ui/src/components/ConversationMessage.tsx'), path.join(root, 'packages/client-ui/src/styles/conversation-message.css'),
   path.join(root, 'packages/client-ui/src/components/ConversationToolTrace.tsx'), path.join(root, 'packages/client-ui/src/styles/conversation-tool-trace.css'),
   path.join(root, 'packages/client-ui/src/lib/activity-step-summary.ts'), path.join(desktop, 'src/renderer/src/styles/index.css'),
   path.join(desktop, 'src/renderer/src/lib/api.ts'), path.join(desktop, 'src/renderer/src/lib/session-events.ts'),
   path.join(desktop, 'src/renderer/src/lib/idle-agent-restore-policy.ts'), path.join(desktop, 'src/renderer/src/lib/terminal-theme.ts'),
-  path.join(desktop, 'src/shared/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/session-history.css'),
+  path.join(desktop, 'src/shared/terminal-palettes.ts'), path.join(desktop, 'src/renderer/src/styles/activity.css'),
   path.join(desktop, 'src/preload/index.ts'), path.join(desktop, 'src/shared/contracts.ts'), productPreload,
   core, ...['providers/codex.js', 'providers/codex-native-history.js', 'providers/codex-native-read.js', 'session-history.js', 'errors.js']
     .map(name => path.join(root, 'packages/core/dist', name)),
@@ -159,7 +159,7 @@ try {
       ...(i % 2 ? { content: [{ type: 'text', text: `Private persisted record ${i}. ` + 'Synthetic readable native text. '.repeat(35) }] }
         : { text: `**Private persisted record ${i}.** ` + 'Synthetic readable native text. '.repeat(35) }) }
   }))
-  // Native source items pass through the real Provider parser and SessionHistoryView. The record
+  // Native source items pass through the real Provider parser and ActivityView. The record
   // count/identity and the original continuous-reading assertions remain unchanged.
   items[60].item = { id: 'private-native-item-60', type: 'commandExecution', command: 'printf private-success',
     status: 'completed', exitCode: 0, aggregatedOutput: 'Private successful tool output.\n'.repeat(16) }

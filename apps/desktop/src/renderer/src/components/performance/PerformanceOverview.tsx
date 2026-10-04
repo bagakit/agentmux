@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, Code2, Cpu, Layers, Pause, Play, Settings2, X } from 'lucide-react'
-import { LiquidSelectionSurface } from '../settings/LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import type { MetricsSource, RunUsage } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 

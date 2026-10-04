@@ -31,6 +31,7 @@ import {
 import type { DirCache, TreeNode } from '../src/renderer/src/components/file-tree/file-explorer-types.js'
 import {
   fileExplorerDropDirectory,
+  createFileExplorerMoveIndex,
   fileExplorerMoveTargets,
   isFileExplorerMenuKey,
   planFileExplorerMove,
@@ -69,16 +70,31 @@ describe('file explorer move interaction', () => {
   it('resolves directory, file-row parent, root, and segment-aware menu targets', () => {
     expect(fileExplorerDropDirectory(node('src/lib', 0, true))).toBe('src/lib')
     expect(fileExplorerDropDirectory(node('src/lib/file.ts', 0))).toBe('src/lib')
-    expect(fileExplorerMoveTargets([
+    expect(fileExplorerMoveTargets(createFileExplorerMoveIndex([
       node('src', 0, true),
       node('src/app', 1, true),
       node('src/application', 1, true),
       node('lib', 0, true)
-    ], 'src/app')).toEqual([
+    ]), 'src/app')).toEqual([
       { path: '', label: 'Workspace Root' },
       { path: 'src/application', label: 'src/application' },
       { path: 'lib', label: 'lib' }
     ])
+  })
+
+  it('indexes a long loaded tree once and checks each destination without rescanning occupied paths', () => {
+    let pathReads = 0, occupiedIterations = 0
+    const nodes = Array.from({ length: 2000 }, (_, i) => ({
+      get path() { pathReads++; return `dir-${i}` }, isDirectory: true
+    }))
+    const index = createFileExplorerMoveIndex(nodes)
+    expect(pathReads).toBe(nodes.length)
+    const iterator = index.paths[Symbol.iterator].bind(index.paths)
+    index.paths[Symbol.iterator] = () => { occupiedIterations++; return iterator() }
+    const targets = fileExplorerMoveTargets(index, 'source.txt')
+    expect(targets).toHaveLength(nodes.length)
+    expect(pathReads).toBe(nodes.length)
+    expect(occupiedIterations).toBe(0)
   })
 
   it('plans one loaded-tree move and blocks invalid drop and menu destinations', () => {
@@ -89,29 +105,30 @@ describe('file explorer move interaction', () => {
       node('lib', 0, true),
       node('lib/app', 1, true)
     ]
-    expect(planFileExplorerMove(nodes, 'src/app/index.ts', 'lib')).toEqual({
+    const index = createFileExplorerMoveIndex(nodes)
+    expect(planFileExplorerMove(index, 'src/app/index.ts', 'lib')).toEqual({
       status: 'ready',
       sourcePath: 'src/app/index.ts',
       directoryPath: 'lib',
       destinationPath: 'lib/index.ts'
     })
-    expect(planFileExplorerMove(nodes, 'src/app/index.ts', 'src/app')).toEqual({
+    expect(planFileExplorerMove(index, 'src/app/index.ts', 'src/app')).toEqual({
       status: 'blocked', reason: 'same-parent'
     })
-    expect(planFileExplorerMove(nodes, 'src/app', 'src/app')).toEqual({
+    expect(planFileExplorerMove(index, 'src/app', 'src/app')).toEqual({
       status: 'blocked', reason: 'into-self'
     })
-    expect(planFileExplorerMove(nodes, 'src/app', 'src/app/nested')).toEqual({
+    expect(planFileExplorerMove(index, 'src/app', 'src/app/nested')).toEqual({
       status: 'blocked', reason: 'into-self'
     })
-    expect(planFileExplorerMove(nodes, 'src/app', 'lib')).toEqual({
+    expect(planFileExplorerMove(index, 'src/app', 'lib')).toEqual({
       status: 'blocked', reason: 'destination-exists'
     })
-    expect(fileExplorerMoveTargets(nodes, 'src/app').map((target) => target.path)).not.toContain('lib')
+    expect(fileExplorerMoveTargets(index, 'src/app').map((target) => target.path)).not.toContain('lib')
   })
 
   it('refreshes exactly both move parents on success and after an unknown receipt', async () => {
-    const refresh = vi.fn(async () => {})
+    const refresh = vi.fn(async (_path: string) => {})
     const move = vi.fn(async () => {})
     await runFileExplorerMove({
       sourcePath: 'src/app/index.ts',
@@ -483,7 +500,7 @@ describe('读失败在树上真的被画出来', () => {
     new URL('../src/renderer/src/components/FileExplorer.tsx', import.meta.url),
     'utf8'
   )
-  const dock = allStyles()
+  const dock = () => allStyles()
 
   it('行的失败判定来自那处纯函数，不是就地又读一遍 error', () => {
     expect(
@@ -513,7 +530,7 @@ describe('读失败在树上真的被画出来', () => {
     expect(explorer, '失败原因没有给用户看').toMatch(/title=\{loadFailure \?\? undefined\}/)
 
     // CSS 侧要真的有声明体，不能只有一个空选择器（本仓「CSS 守卫只查选择器名存在」那族）。
-    const rule = dock.match(/\.tree-row--load-failed \.tree-row__icon \{([^}]*)\}/)
+    const rule = dock().match(/\.tree-row--load-failed \.tree-row__icon \{([^}]*)\}/)
     expect(rule, 'dock.css 里没有失败图标的规则').not.toBeNull()
     expect(rule![1], '规则在场但没有改颜色，那条规则是死的').toMatch(/color:\s*var\(--red-text\)/)
   })

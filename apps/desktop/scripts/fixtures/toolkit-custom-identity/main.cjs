@@ -14,8 +14,9 @@ let win
 app.whenReady().then(async () => {
   try {
     Menu.setApplicationMenu(Menu.buildFromTemplate([{ label: 'Edit', submenu: [{ role: 'undo' }, { role: 'redo' }, { type: 'separator' }, { role: 'cut' }, { role: 'copy' }, { role: 'paste' }, { role: 'selectAll' }] }]))
-    const { ConfigStore, ConfigOwner, executeToolkitConfig, prepareToolkitConfig, findToolkitTool, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(ownerFile).href)
+    const { ConfigStore, DEFAULT_CONFIG, ConfigOwner, executeToolkitConfig, prepareToolkitConfig, findToolkitTool, AGENTMUX_CONTROL_SCHEMA_VERSION } = await import(pathToFileURL(ownerFile).href)
     const configPath = path.join(privateRoot, 'config.json'), store = new ConfigStore(configPath)
+    if (stage === 'control') await fs.writeFile(configPath, JSON.stringify(DEFAULT_CONFIG)) // Existing empty configuration, never a fresh-install seed.
     let current = await store.get()
     const owner = new ConfigOwner({ read: () => current, prepare: (before, next) => prepareToolkitConfig(before, next, async () => {}),
       save: async next => { const saved = await store.save(next); raw.saves.push({ definitions: saved.toolkit?.tools ?? [] }); return saved },
@@ -103,10 +104,8 @@ app.whenReady().then(async () => {
       await picture('320-light-custom-create.png', 320, 'light', 'blank-custom-draft')
       await button('Cancel new tool'); await until('window.identityScene.models().then(models=>models.length===0)')
       assert.deepEqual(owner.current.toolkit?.tools ?? [], [])
-      win.setContentSize(640, 980); await button('Starting points')
-      await picture('640-dark-starting-point.png', 640, 'dark', 'optional-starting-point')
-      assert.deepEqual(await read('window.identityScene.models()'), [])
-      await button('Use this starting point'); await until('window.identityScene.models().then(models=>models.length===1)')
+      win.setContentSize(640, 980); await button('New custom tool'); await until('window.identityScene.models().then(models=>models.length===1)')
+      await picture('640-dark-custom-draft.png', 640, 'dark', 'ordinary-custom-draft')
       const id = await read('document.querySelector("[data-tool-editor]").dataset.toolEditor')
       assert.ok(id.startsWith('tool-'))
       await text('.toolkit-editor__name input', 'Workspace summary')
@@ -115,7 +114,7 @@ app.whenReady().then(async () => {
       const work = path.join(privateRoot, 'workspace'); await fs.mkdir(work)
       await text('.toolkit-editor__fields input:not([type])', work)
       if (!await read('document.querySelector(".toolkit-editor__arguments").open')) await click('.toolkit-editor__arguments > summary')
-      await text('.toolkit-argument:nth-of-type(1) input', '--project'); await text('.toolkit-argument:nth-of-type(2) input', 'current')
+      await button('Add argument'); await button('Add argument'); await text('.toolkit-argument:nth-of-type(1) input', '--project'); await text('.toolkit-argument:nth-of-type(2) input', 'current')
       await click('.toolkit-editor__result-actions > summary'); await button('Add action')
       await text('.toolkit-editor__action-heading input', 'Open report'); await script("console.log('Report ready')\n")
       if (!await read('document.querySelector(".toolkit-editor__arguments").open')) await click('.toolkit-editor__arguments > summary')
@@ -123,7 +122,7 @@ app.whenReady().then(async () => {
       await button('Main script'); await button('Save tool')
       await until('document.querySelector(".toolkit-editor__status").textContent==="Saved"')
       const saved = findToolkitTool(owner.current, id)
-      assert.deepEqual(saved, { id, revision: saved.revision, name: 'Workspace summary', icon: 'zap', enabled: false, statusBar: 'icon', workspacePath: work, script: "console.log('Workspace summary')\n", args: ['--project', 'current'], actions: [{ id: saved.actions[0].id, label: 'Open report', script: "console.log('Report ready')\n", args: ['report.md'] }] })
+      assert.deepEqual(saved, { id, revision: saved.revision, name: 'Workspace summary', icon: 'zap', enabled: true, statusBar: 'icon', workspacePath: work, script: "console.log('Workspace summary')\n", args: ['--project', 'current'], actions: [{ id: saved.actions[0].id, label: 'Open report', script: "console.log('Report ready')\n", args: ['report.md'] }] })
       assert.deepEqual(await read(`window.identityProof.readTool(${JSON.stringify(id)})`), saved, 'Actual typed owner/current readback, not built CLI')
       await fs.writeFile(path.join(evidence, 'saved-custom.json'), JSON.stringify(saved, null, 2) + '\n')
       await picture('1480-light-custom-editor.png', 1480, 'light', 'repurposed-custom-editor')

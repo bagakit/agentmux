@@ -33,11 +33,11 @@
 
 /* A face is assembled and articulated, never replaced by frames. Pointer bones
    sit outside ambient/state bones, so looking around cannot erase live expression. */
-.mote-image-follow { display: inline-flex; align-items: center; justify-content: center; width: inherit; height: inherit; transform: translate(var(--mote-gaze-x, 0px), var(--mote-gaze-y, 0px)) rotate(var(--mote-head-turn, 0deg)); transition: transform 220ms cubic-bezier(.2,.7,.2,1); }
-.mote-face__neck { transform-box: view-box; transform-origin: 32px 52px; transform: rotate(var(--mote-head-turn, 0deg)); transition: transform 220ms cubic-bezier(.2,.7,.2,1); }
-.mote-face__gaze-follow { transform: translate(var(--mote-gaze-x, 0px), var(--mote-gaze-y, 0px)); transition: transform 160ms cubic-bezier(.2,.7,.2,1); }
-.mote-face__brow-follow { transform: translateY(var(--mote-brow-lift, 0px)); transition: transform 220ms ease-out; }
-.mote-face__mouth-follow { transform: translateX(var(--mote-mouth-shift, 0px)); transition: transform 220ms ease-out; }
+.mote-image-follow { display: inline-flex; align-items: center; justify-content: center; width: inherit; height: inherit; transform: translate(var(--mote-gaze-x, 0px), var(--mote-gaze-y, 0px)) rotate(var(--mote-head-turn, 0deg)); transition: transform 130ms cubic-bezier(.2,.7,.2,1); }
+.mote-face__neck { transform-box: view-box; transform-origin: 32px 52px; transform: rotate(var(--mote-head-turn, 0deg)); transition: transform 130ms cubic-bezier(.2,.7,.2,1); }
+.mote-face__gaze-follow { transform: translate(var(--mote-gaze-x, 0px), var(--mote-gaze-y, 0px)); transition: transform 90ms cubic-bezier(.2,.7,.2,1); }
+.mote-face__brow-follow { transform: translateY(var(--mote-brow-lift, 0px)); transition: transform 130ms ease-out; }
+.mote-face__mouth-follow { transform: translateX(var(--mote-mouth-shift, 0px)); transition: transform 130ms ease-out; }
 .mote-identity-motion[data-mote-motion="on"][data-mote-expression="identity"] .mote-face__brows,
 .mote-identity-motion[data-mote-motion="on"][data-mote-expression="idle"] .mote-face__brows { animation: mote-curiosity 14s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
 .mote-identity-motion[data-mote-motion="on"][data-mote-expression="identity"] .mote-face__mouth,
@@ -47,3 +47,36 @@
 @keyframes mote-soft-smile { 0%, 78%, 94%, 100% { transform: scaleX(1); } 83%, 88% { transform: scaleX(1.08); } }
 
 .mote-face { display:block; width:100%; height:100%; overflow:visible; }
+
+/* Occasional state gestures have their own bones, keeping native pointer and state poses composed. */
+.mote-face__gesture-head, .mote-face__gesture-eyes, .mote-face__gesture-gaze, .mote-face__gesture-brows, .mote-face__gesture-mouth { transform-box: fill-box; transform-origin: center; }
+.mote-identity-motion[data-mote-gesture="blink"] .mote-face__gesture-eyes { animation: mote-gesture-blink .45s ease-in-out; }
+.mote-identity-motion[data-mote-gesture="double-blink"] .mote-face__gesture-eyes { animation: mote-gesture-double-blink .9s ease-in-out; }
+.mote-identity-motion[data-mote-gesture="glance-left"] { --mote-gesture-look: -3px; }
+.mote-identity-motion[data-mote-gesture="glance-right"] { --mote-gesture-look: 3px; }
+.mote-identity-motion:is([data-mote-gesture="glance-left"], [data-mote-gesture="glance-right"]) .mote-face__gesture-gaze { animation: mote-gesture-glance 1.4s ease-in-out; }
+.mote-identity-motion:is([data-mote-gesture="curious"], [data-mote-gesture="ponder"]) .mote-face__gesture-head { animation: mote-gesture-tilt 1.5s ease-in-out; }
+.mote-identity-motion:is([data-mote-gesture="curious"], [data-mote-gesture="ponder"], [data-mote-gesture="attentive"]) .mote-face__gesture-brows { animation: mote-gesture-attentive 1.4s ease-in-out; }
+.mote-identity-motion[data-mote-gesture="smile"] .mote-face__gesture-mouth { animation: mote-gesture-smile 1.4s ease-in-out; }
+.mote-identity-motion:is([data-mote-gesture="doze"], [data-mote-gesture="nod"], [data-mote-gesture="wake"]) .mote-face__gesture-head { animation: mote-gesture-nod 1.5s ease-in-out; }
+.mote-identity-motion[data-mote-gesture="focus"] .mote-face__gesture-gaze { animation: mote-gesture-focus 1.4s ease-in-out; }
+.mote-identity-motion[data-mote-gesture] .space-object-icon__avatar,
+.mote-identity-motion[data-mote-gesture] .space-object-icon svg:not(.mote-face) { animation: mote-gesture-presence 1.5s ease-in-out; }
+.mote-identity-motion[data-mote-gaze="near"] .mote-face__gesture-gaze { animation: none; }
+.mote-identity-motion[data-mote-motion="off"] :is(.mote-face__gesture-head, .mote-face__gesture-eyes, .mote-face__gesture-gaze, .mote-face__gesture-brows, .mote-face__gesture-mouth) { animation: none; }
+@keyframes mote-gesture-blink { 0%, 100% { transform: scaleY(1); } 40%, 60% { transform: scaleY(.1); } }
+@keyframes mote-gesture-double-blink { 0%, 38%, 68%, 100% { transform: scaleY(1); } 18%, 22%, 50%, 54% { transform: scaleY(.1); } }
+@keyframes mote-gesture-glance { 0%, 100% { transform: translateX(0); } 30%, 65% { transform: translateX(var(--mote-gesture-look)); } }
+@keyframes mote-gesture-tilt { 0%, 100% { transform: rotate(0); } 35%, 65% { transform: rotate(-4deg); } }
+@keyframes mote-gesture-attentive { 0%, 100% { transform: translateY(0); } 30%, 65% { transform: translateY(-1px); } }
+@keyframes mote-gesture-smile { 0%, 100% { transform: scaleX(1); } 35%, 65% { transform: scaleX(1.15); } }
+@keyframes mote-gesture-nod { 0%, 100% { transform: translateY(0) rotate(0); } 40%, 60% { transform: translateY(1.5px) rotate(2deg); } }
+@keyframes mote-gesture-focus { 0%, 100% { transform: translate(0); } 30% { transform: translate(-2px, 1px); } 65% { transform: translate(2px, 1px); } }
+@keyframes mote-gesture-presence { 0%, 100% { transform: scale(1) rotate(0); } 35% { transform: scale(1.035) rotate(-2deg); } 65% { transform: scale(1.01) rotate(1deg); } }
+
+.mote-identity-motion[data-mote-visible="off"] :is(.mote-image-follow, .mote-face__neck, .mote-face__gaze-follow, .mote-face__brow-follow, .mote-face__mouth-follow) { transition: none; }
+@media (prefers-reduced-motion: reduce) {
+  .mote-identity-motion :is(.mote-image-follow, .mote-face__neck, .mote-face__gaze-follow, .mote-face__brow-follow, .mote-face__mouth-follow) { transition: none; }
+}
+
+.mote-identity-motion[data-mote-expression="sleep"] .mote-face__awake-eyes { display: none; }

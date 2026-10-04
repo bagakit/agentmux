@@ -7,7 +7,7 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { ContinuousProgressControl, type ContinuousProgressStatus } from './ContinuousProgressControl'
 import { ComposerPendingDelivery } from './ComposerPendingDelivery'
 import type { EditQueuedMessage } from './ComposerQueuedMessageEditor'
-import { ComposerOutbox, type ComposerQueuedMessage } from './ComposerOutbox'
+import { ComposerOutbox, type ComposerQueuedMessage, type ArchiveQueuedMessage } from './ComposerOutbox'
 import { useAppStore } from '../store'
 import { serviceNoticeFingerprint, useReadReceipts, type useServiceNotices } from '../lib/use-service-notices'
 import { useSessionUserMessages } from '../lib/session-user-messages'
@@ -21,15 +21,10 @@ import { speakerOf } from '../lib/conversation-speaker'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
+import { mailboxMessages, mailboxMessageIsIncoming, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
 
 type Folder = 'inbox' | 'outbox' | 'system' | 'progress'
 const FOLDERS: readonly Folder[] = ['inbox', 'outbox', 'system']
-
-type MailboxDisplayItem = AgentTimelineItem | AgentSessionUserMessage
-
-function isUserMessage(item: MailboxDisplayItem): item is AgentSessionUserMessage {
-  return 'source' in item && typeof item.source === 'object' && item.source !== null
-}
 
 function latestFirst(a: number | undefined, b: number | undefined) {
   if (a === undefined) return b === undefined ? 0 : 1
@@ -41,7 +36,7 @@ function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
   // Activity-only revisions must not rehash unchanged mail or hide its unread state.
   const signature = useMemo(() => JSON.stringify(items.map((item) => {
     if (isUserMessage(item)) {
-      return [item.id, item.author.kind === 'agent' ? item.author.agentSessionId : undefined, item.content, item.recordedAt, item.deliveryStatus]
+      return [item.source.kind === 'captured' ? item.source.submissionId : item.id, item.author.kind === 'agent' ? item.author.agentSessionId : undefined, item.content, item.recordedAt, item.deliveryStatus]
     }
     return [item.id, item.authorAgentSessionId, item.content, item.createdAt, item.status]
   })), [items])
@@ -60,8 +55,6 @@ function useMessageFingerprints(items: readonly MailboxDisplayItem[]) {
   }, [signature])
   return result?.signature === signature ? result.values : undefined
 }
-
-function messageKey(item: MailboxDisplayItem) { return `${isUserMessage(item) ? item.source.kind : 'timeline'}:${item.id}` }
 
 function MessageHistory({ mailboxOrigin, items, incoming, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation }: {
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
@@ -119,7 +112,7 @@ function SourceNotice({ title, message, action, onAction }: { title: string; mes
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onRemoveQueued, onMoveQueued, onSendQueued, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
+export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueued, onSendQueued, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false }: {
   children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
   pendingInteraction?: boolean
   onRevealMessage?: RevealMailboxMessage | undefined
@@ -132,7 +125,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   visible?: boolean
   control?: AgentSessionControl | undefined
   userMessages?: readonly AgentSessionUserMessage[] | undefined
-  onRemoveQueued?: (id: string) => void
+  onArchiveQueued?: ArchiveQueuedMessage | undefined
   onMoveQueued?: (id: string, direction: 'up' | 'down') => void
   onSendQueued?: (id: string) => void
   onCopyQueued?: (text: string) => Promise<boolean>
@@ -221,6 +214,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   }
   const [selection, setSelection] = useState<{ scope: string; folder: Folder; key: string } | null>(null)
   const body = useRef<HTMLDivElement>(null)
+  const explicitOutboxReveal = useRef<{ scope: string; operationId: string } | null>(null)
   const back = useRef<HTMLButtonElement>(null)
   const positions = useRef<Partial<Record<Folder, { scroll: number; key: string }>>>({})
   const focusAfter = useRef<'back' | 'row' | null>(null)
@@ -251,23 +245,16 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
 
   const effectiveUserMessages = propUserMessages ?? hookUserMessages
 
-  const messages = useMemo(() => timeline?.items.filter((item) => item.agentSessionId === timeline.agentSessionId &&
-    item.kind === 'user_message') ?? [], [timeline])
-  const incoming = useMemo(() => messages.filter((item) => item.authorAgentSessionId !== undefined), [messages])
-  const timelineSent = useMemo(() => messages.filter((item) => item.authorAgentSessionId === undefined), [messages])
-
-  const nativeSent = useMemo(() => {
-    if (!effectiveUserMessages) return []
-    return effectiveUserMessages.filter((item) => item.source.kind === 'native' && item.author.kind !== 'agent')
-  }, [effectiveUserMessages])
-
-  const sent = useMemo(() => {
-    return [...timelineSent, ...nativeSent]
-  }, [timelineSent, nativeSent])
+  const mailboxSessionId = effectiveControl?.agentSessionId ?? timeline?.agentSessionId
+  const messages = useMemo(() => timeline && timeline.agentSessionId === mailboxSessionId ? timeline.items.filter((item) => item.agentSessionId === mailboxSessionId &&
+    item.kind === 'user_message') : [], [timeline,mailboxSessionId])
+  const displayedMessages = useMemo(() => mailboxMessages(mailboxSessionId,timeline,effectiveUserMessages), [mailboxSessionId,timeline,effectiveUserMessages])
+  const incoming = useMemo(() => displayedMessages.filter(mailboxMessageIsIncoming), [displayedMessages])
+  const sent = useMemo(() => displayedMessages.filter(item => !mailboxMessageIsIncoming(item)), [displayedMessages])
 
   const fingerprints = useMessageFingerprints(incoming)
-  const receipts = useReadReceipts(`mail:${timeline?.agentSessionId ?? ''}`, fingerprints ?? {},
-    timeline !== undefined && fingerprints !== undefined)
+  const receipts = useReadReceipts(`mail:${mailboxSessionId ?? ''}`, fingerprints ?? {},
+    Boolean(mailboxSessionId) && (timeline !== undefined || propUserMessages !== undefined || effectiveUserMessages.length > 0) && fingerprints !== undefined)
   const unread = receipts.unread.length
   const notices = useMemo(() => [...system.notices].sort((a, b) => latestFirst(a.observedAt, b.observedAt)), [system.notices])
 
@@ -275,8 +262,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     return new Set(messages.filter((item) => item.status === 'complete').map((item) => item.id))
   }, [messages])
 
-  const pending = queued.filter((item) => !deliveredIds.has(item.id) && !deliveredIds.has(`prompt:${item.id}`))
-  const counts = { inbox: incoming.length, outbox: pending.length + sent.length, system: system.notices.length }
+  const pending = queued.filter((item) => !item.archived && !deliveredIds.has(item.id) && !deliveredIds.has(`prompt:${item.id}`))
+  const archived = queued.filter(item => item.archived).map(item => ({...item,confirmed: item.confirmed || deliveredIds.has(`prompt:${item.id}`)}))
+  const counts = { inbox: incoming.length, outbox: pending.length + archived.length + sent.length, system: system.notices.length }
   // Re-evaluate priority only on opening. A new arrival never moves the reader's selected folder.
   function openFolder(): Folder {
     return receipts.unread.length ? 'inbox' : system.unread.length ? 'system' : counts.outbox ? 'outbox' : 'inbox'
@@ -297,9 +285,9 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   }, [open, viewed, folder, receipts, system])
   const wanted = selection?.scope === scope && selection.folder === folder ? selection.key : null
   const selectedNotice = wanted && folder === 'system' ? notices.find(item => `notice:${item.id}:${serviceNoticeFingerprint(item)}` === wanted) : undefined
-  const selectedQueue = wanted && folder === 'outbox' ? pending.find(item => `queue:${item.id}` === wanted) : undefined
+  const selectedQueue = wanted && folder === 'outbox' ? [...pending,...archived].find(item => `queue:${item.id}` === wanted) : undefined
   const selectedMessage = wanted ? (folder === 'inbox' ? incoming : folder === 'outbox' ? sent : []).find(item => messageKey(item) === wanted) : undefined
-  const detail = Boolean(selectedNotice || selectedQueue || selectedMessage)
+  const detail = Boolean(selectedNotice || selectedMessage)
   useLayoutEffect(() => {
     if (previousScope.current !== scope) {
       previousScope.current = scope
@@ -310,7 +298,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       if (ownedFocus) document.getElementById(`${id}-${folder}-tab`)?.focus({ preventScroll: true })
       return
     }
-    if (selection && !detail) {
+    if (selection && !detail && !selectedQueue) {
       if (document.activeElement === document.body && lastReadingFocus.current) focusAfter.current = 'row'
       setSelection(null)
     }
@@ -326,7 +314,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       const row = saved ? Array.from(body.current?.querySelectorAll<HTMLButtonElement>('button[data-record-key]') ?? []).find(row => row.dataset.recordKey === saved.key) : null
       ;(row ?? document.getElementById(`${id}-${folder}-tab`))?.focus({ preventScroll: true })
     }
-  }, [open, detail, selection, scope, folder, id])
+  }, [open, detail, selectedQueue, selection, scope, folder, id])
   useLayoutEffect(() => {
     if (!open) return
     const panel = popover.current!, editor = trigger.current!.closest<HTMLElement>('.composer')
@@ -344,8 +332,19 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
     window.addEventListener('resize', measure)
     return () => { observer.disconnect(); window.removeEventListener('resize', measure) }
   }, [open])
+  useLayoutEffect(() => {
+    const intent = explicitOutboxReveal.current
+    if (!intent) return
+    if (intent.scope !== scope) { explicitOutboxReveal.current = null; return }
+    if (!open || folder !== 'outbox') return
+    explicitOutboxReveal.current = null
+    const row = Array.from(body.current?.querySelectorAll<HTMLElement>('.composer-mailbox__row[data-record-key]') ?? [])
+      .find(node => node.dataset.recordKey === `queue:${intent.operationId}`)
+    row?.closest<HTMLElement>('li[data-operation-id]')?.scrollIntoView({ block: 'nearest', inline: 'nearest' })
+  }, [open, folder, scope, selection])
   const mailboxLabel = `Mailbox: Inbox ${unread} unread, Outbox ${pending.length} pending, Notices ${system.unread.length} need attention${progressSession ? `. ${progressLabel}` : ''}`
   function showOutbox(operationId: string) {
+    explicitOutboxReveal.current = { scope, operationId }
     requestedFolder.current = 'outbox'
     pin(); chooseFolder('outbox')
     setSelection({ scope, folder: 'outbox', key: `queue:${operationId}` })
@@ -405,15 +404,22 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       {detail ? <div className="composer-mailbox__back"><button ref={back} type="button" className="composer-tool" onClick={leaveRecord}><ChevronLeft size={14} aria-hidden="true" />Back to {folderLabels[folder]}</button></div> : null}
       <div ref={body} className="composer-mailbox__content" onFocusCapture={event => { lastReadingFocus.current = event.target }}>
       <div id={`${id}-inbox`} role="tabpanel" aria-labelledby={`${id}-inbox-tab`} hidden={folder !== 'inbox'}>
-        {open && folder === 'inbox' ? timeline ? <MessageHistory mailboxOrigin={mailboxOrigin} items={incoming} incoming selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} /> : <MailboxEmpty title="Waiting for message history" /> : null}
+        {open && folder === 'inbox' ? mailboxSessionId && (timeline || propUserMessages || incoming.length) ? <MessageHistory mailboxOrigin={mailboxOrigin} items={incoming} incoming selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} /> : <MailboxEmpty title="Waiting for message history" /> : null}
       </div>
       <div id={`${id}-outbox`} role="tabpanel" aria-labelledby={`${id}-outbox-tab`} hidden={folder !== 'outbox'}>
         {open && folder === 'outbox' ? <>
           {!selectedMessage && pending.length ? <ComposerOutbox sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} queued={pending} pendingInteraction={pendingInteraction} selectedId={selectedQueue?.id ?? null}
-            onSelect={(key, event) => selectRecord(`queue:${key}`, event)} reading={reading}
-            {...(onRemoveQueued ? { onRemove: onRemoveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
+            onSelect={(key) => { focusAfter.current=null; setSelection({scope,folder:'outbox',key:`queue:${key}`}) }} reading={reading}
+            {...(onArchiveQueued ? { onArchive: onArchiveQueued } : {})} {...(onMoveQueued ? { onMove: onMoveQueued } : {})}
             {...(onEditQueued ? { onEdit: onEditQueued } : {})} sendImmediately={sendImmediately} {...(onSendQueued ? { onSend: onSendQueued } : {})} {...(onCopyQueued ? { onCopy: onCopyQueued } : {})} /> : null}
-          {!selectedQueue ? <section className="composer-mailbox__history" aria-label="Input history">
+          {!selectedMessage && archived.length ? <ComposerOutbox sessionId={mailboxSessionId} queued={archived} selectedId={selectedQueue?.id ?? null}
+            onSelect={(key) => { focusAfter.current=null; setSelection({scope,folder:'outbox',key:`queue:${key}`}) }} reading={reading}
+            {...(onArchiveQueued ? {onArchive:onArchiveQueued} : {})} {...(onCopyQueued ? {onCopy:onCopyQueued} : {})}
+            onHistory={operationId => {
+              const original=sent.find(item => !isUserMessage(item) && item.agentSessionId===mailboxSessionId && item.id===`prompt:${operationId}` && item.status==='complete')
+              if (original) setSelection({scope,folder:'outbox',key:messageKey(original)})
+            }} /> : null}
+          <section className="composer-mailbox__history" aria-label="Input history">
             {!selectedMessage ? <h3>History</h3> : null}
             {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
@@ -421,7 +427,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
             <MessageHistory mailboxOrigin={mailboxOrigin} items={sent} incoming={false} selectedKey={detail ? wanted : null} onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={effectiveControl?.agentSessionId ?? timeline?.agentSessionId} renderNavigation={renderNavigation} />
             {!selectedMessage && hasMore ? <div className="composer-mailbox__boundary"><span>Earlier native messages available.</span>
               <button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
-          </section> : null}
+          </section>
         </> : null}
       </div>
       <div id={`${id}-system`} role="tabpanel" aria-labelledby={`${id}-system-tab`} hidden={folder !== 'system'}>
@@ -445,5 +451,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       </div>
     </div>
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCopy={onCopyQueued} onEdit={onEditQueued} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery suppressed={open} anchorRef={trigger} queued={pending} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} sendImmediately={sendImmediately} onMore={showOutbox} /> : null) : mailbox
 }

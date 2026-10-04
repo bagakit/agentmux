@@ -3,6 +3,8 @@ import { App } from '@capacitor/app'
 import { Clipboard } from '@capacitor/clipboard'
 import { Keyboard } from '@capacitor/keyboard'
 import { FilePicker } from '@capawesome/capacitor-file-picker'
+import { Capacitor } from '@capacitor/core'
+import { FILE_UPLOAD_MAX_BYTES, fileUploadRevision, parseFileUploadIdentity } from '@agentmux/core/files'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 
 /** Only public OS capabilities. There is deliberately no credential/secret read method. */
@@ -33,18 +35,58 @@ export function createNativePlatform(base: ClientUiPlatform, ports: Pick<NativeD
   } }
 }
 
-export type LocalAttachment = { id: string; name: string; mimeType: string; size: number }
+export type LocalAttachment = { id: string; name: string; mimeType: string; size: number; revision: string; dataBase64: string }
 
-/** The system chooser owns access. Selection is local metadata, never a Host file or an upload receipt. */
-export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePicker'> = nativeDevicePorts): Promise<LocalAttachment | null> {
+async function boundedBytes(stream: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
+  const reader = stream.getReader(), chunks: Uint8Array[] = []
+  let length = 0
+  try {
+    for (;;) {
+      const part = await reader.read()
+      if (part.done) break
+      length += part.value.byteLength
+      if (length > FILE_UPLOAD_MAX_BYTES || length > size) throw new Error('附件在读取时变大；本次尚未上传，原会话与草稿保留。')
+      chunks.push(part.value)
+    }
+  } finally { await reader.cancel(); reader.releaseLock() }
+  if (length !== size) throw new Error('附件在读取时变化；本次尚未上传，请重新选择原文件。')
+  const bytes = new Uint8Array(length)
+  let offset = 0
+  for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength }
+  return bytes
+}
+function base64(bytes: Uint8Array): string {
+  let value = ''
+  for (let offset = 0; offset < bytes.length; offset += 32768) value += String.fromCharCode(...bytes.subarray(offset, offset + 32768))
+  return btoa(value)
+}
+
+/** The system chooser owns access; native paths stay on this device. Byte reads are bounded before upload. */
+export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePicker'> = nativeDevicePorts,
+  readNative: (path: string) => Promise<Response> = path => fetch(Capacitor.convertFileSrc(path))): Promise<LocalAttachment | null> {
   const result = await ports.filePicker.pickFiles({ limit: 1, readData: false })
   if (result.files.length === 0) return null
   if (result.files.length !== 1) throw new Error('系统文件选择返回了多个文件；这次附件尚未采用。')
   const file = result.files[0]!
-  if (!file.name || !Number.isSafeInteger(file.size) || file.size < 0 || !file.mimeType) {
+  if (!file.name || !Number.isSafeInteger(file.size)) {
     throw new Error('系统尚未确认附件的名称、类型或大小；这次附件尚未采用。')
   }
-  return { id: randomClientRequestId(), name: file.name, mimeType: file.mimeType, size: file.size }
+  const mimeType = file.mimeType || 'application/octet-stream'
+  // Reuse the public byte/format budget before reading a Blob or an OS-granted URI.
+  parseFileUploadIdentity({ hostId: 'local', agentSessionId: 'local-selection', expectedRun: { runId: 'local-selection' },
+    operationId: 'local-selection', name: file.name, mimeType, byteLength: file.size, revision: 'sha256:' + '0'.repeat(64) })
+  let stream: ReadableStream<Uint8Array> | null
+  if (file.blob) stream = file.blob.stream()
+  else {
+    if (!file.path) throw new Error('系统尚未提供所选文件的读取权限；本次尚未上传。')
+    const response = await readNative(file.path)
+    if (!response.ok) throw new Error('系统暂时无法读取原附件；本次尚未上传。')
+    stream = response.body
+  }
+  if (!stream) throw new Error('这台设备尚未提供有界文件读取；本次尚未上传，原消息仍可发送。')
+  const bytes = await boundedBytes(stream, file.size)
+  return { id: randomClientRequestId(), name: file.name, mimeType, size: bytes.byteLength,
+    revision: fileUploadRevision(bytes), dataBase64: base64(bytes) }
 }
 
 /** Observe OS lifecycle/keyboard only; closing these listeners cannot control a Host or a Run. */

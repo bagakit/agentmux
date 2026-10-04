@@ -17,8 +17,8 @@ export function workspaceZoneId(spaceId: string, workspaceId: string): string {
 export function homeZoneId(spaceId: string): string { return JSON.stringify([spaceId, 'home']) }
 
 /** A failed Host read cannot replace the durable original identity with a logical-path guess. */
-export function originalTopicAddress(workspace: WorkspaceRecord, topic: ScratchTopicSnapshot, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
-  if (topic.readError && !topic.identityDirectoryPath && !topic.physicalDirectoryPath) {
+export function originalTopicAddress(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath' | 'readError'>, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
+  if (topic.readError && !topic.identityDirectoryPath) {
     const original = Object.entries(bindings).filter(([, binding]) => binding.topicId === topic.id && binding.workspaceId === workspace.id);
     return original.length === 1 ? { spaceId: original[0]![1].spaceId, zoneId: original[0]![0] } : null;
   }
@@ -76,13 +76,20 @@ export type SpaceZoneBindings = Record<string, SpaceZoneBinding>
 export type SpatialRequestBinding = {
   requestId: string
   inputDigest: string
-  operation: 'agent.open' | 'space.mv'
+  operation: 'agent.open' | 'space.mv' | 'agent.message'
   tabId: string
   regionId: string
   agentSessionId: string
   createAgent: boolean
   /** Original Core owner, independent of any later display move. */
   executionHostId?: string
+  /** User's recovery choice. Correlation only; Core remains the creation/history owner. */
+  recovery?: {
+    hostId: string; agentSessionId: string; tabId: string; regionId: string
+    mode: 'takeover' | 'analyze'; historySource: 'captured' | 'native'; executorId?: string
+  }
+  /** An explicit message recipient reference, never a payload or delivery receipt. */
+  recoveryRecipient?: { hostId: string; agentSessionId: string; topicId: string; tabId: string; regionId: string }
   /** Exact source of this admitted fork, including before a new Session can be observed. */
   forkSource?: AgentMuxAgentForkSource
   from?: AgentMuxSpaceAddress

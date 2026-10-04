@@ -2,19 +2,25 @@ import { Info, X } from 'lucide-react'
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
 import { serviceNoticeFingerprint, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 import { useAppStore } from '../store'
+import { isImeCompositionKeyDown } from '../lib/ime-composition-keyboard-event'
 
 /** A presentation/read receipt owner. It never clears, retries or reclassifies the supplied facts. */
-export function ServiceNoticeDisclosure({ scope, notices, available = true, visible = true, title, children, actions, className }: {
+export function ServiceNoticeDisclosure({ scope, notices, available = true, complete = true, visible = true, title, persistentTitle = false, children, actions, inlineActions, className }: {
   scope: string
   notices: readonly ServiceNoticeItem[]
   available?: boolean
+  /** Subset consumers acknowledge their items; the complete owner clears resolved receipts. */
+  complete?: boolean
   visible?: boolean
   title?: string
+  /** Keep the source recognizable after acknowledgement without reopening its details. */
+  persistentTitle?: boolean
   children: ReactNode
   actions?: ReactNode
+  inlineActions?: ReactNode
   className?: string
 }) {
-  const inbox = useServiceNotices(scope, notices, available)
+  const inbox = useServiceNotices(scope, notices, available, complete)
   const id = useId()
   const trigger = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
@@ -88,17 +94,23 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, visi
   function rememberFocus() { previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null }
   return <div className={`service-disclosure${className ? ` ${className}` : ''}`} data-unread={inbox.unread.length > 0}
     data-kind={notices.some(item => item.notice.kind === 'process-degraded') ? 'process-degraded' : 'indeterminate'}
-    onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}>
+    onPointerDown={event => event.stopPropagation()} onClick={event => event.stopPropagation()}
+    onKeyDown={event => {
+      if (!open || event.key !== 'Escape' || isImeCompositionKeyDown(event)) return
+      event.preventDefault(); event.stopPropagation(); collapse()
+    }}>
     <button type="button" ref={trigger} className="service-disclosure__trigger"
       aria-label={`View service notice: ${heading}`} title={heading} aria-expanded={open} aria-controls={id}
       popoverTarget={id} popoverTargetAction="toggle"
       onPointerDown={rememberFocus} onClick={positionDetails}>
       <Info size={14} aria-hidden="true" />
-      {inbox.unread.length ? <span className="service-disclosure__summary" role="status" aria-live="polite">{heading}</span> : null}
+      {inbox.unread.length || persistentTitle ? <span className="service-disclosure__summary"
+        role={inbox.unread.length ? 'status' : undefined} aria-live={inbox.unread.length ? 'polite' : undefined}>{heading}</span> : null}
       {notices.length > 1 ? <span className="service-disclosure__count">{notices.length}</span> : null}
     </button>
     {inbox.unread.length ? <button type="button" className="service-disclosure__close" aria-label={`Collapse service notice: ${heading}`}
       title="Collapse service notice" onPointerDown={rememberFocus} onClick={collapse}><X size={14} /></button> : null}
+    {inlineActions ? <div className="service-disclosure__inline-actions">{inlineActions}</div> : null}
     {/* Details accompany the original workface and its existing auto-popover. */}
     <div ref={panel} id={id} popover="hint" className="service-disclosure__details" aria-label={heading}
       onToggle={event => {

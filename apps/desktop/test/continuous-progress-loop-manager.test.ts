@@ -130,3 +130,59 @@ it('propagates pause cancellation to an already queued Core submission', async (
     expect(bytes).toBe(0)
   } finally { release(); await manager.stop(); await rm(dir, { recursive: true, force: true }) }
 })
+
+it('retains one original Goal start through durable Manager reload and reconciles only its saved initial operation', async () => {
+  const { openDemandStore } = await import('@agentmux/demand')
+  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-goal-loop-'))
+  const store = new ContinuousProgressLoopStore(join(dir, 'loops.json')), goals = openDemandStore({ root: join(dir, 'goals') })
+  await goals.create({ id: 'original-goal', title: 'Original work', sessionIds: ['a'] })
+  await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
+  await goals.confirmAlignment('original-goal', 1)
+  let receipt: 'confirmed' | 'pending' | 'unconfirmed' = 'unconfirmed', sends = 0
+  const owner = { read: (id: string) => goals.get(id), inspectInitial: async () => receipt }
+  const manager = new ContinuousProgressLoopManager(store, async () => { sends++; return 'sent' }, () => 0, observedDone, undefined, owner)
+  const restored = new ContinuousProgressLoopManager(store, async () => { sends++; return 'sent' }, () => 0, observedDone, undefined, owner)
+  const target = { hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w") }
+  const input = { ...target, goalId: 'original-goal', alignmentRevision: 1, intervalMs: 10, operationId: 'original-start', prompt: 'Original work' }
+  try {
+    const prepared = await manager.prepareGoal(input)
+    expect((await store.load())[0]).toMatchObject({ loopId: prepared.loopId, status: 'paused', initialDelivery: { operationId: 'original-start', state: 'prepared' } })
+    await manager.initialGoalInput(target, prepared.loopId, 'original-start', 'begin')
+    await manager.stop(); await restored.start()
+    expect(await restored.prepareGoal(input)).toMatchObject({ loopId: prepared.loopId, initialDelivery: { operationId: 'original-start', state: 'unknown' } })
+    await expect(restored.initialGoalInput(target, prepared.loopId, 'original-start', 'begin')).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+    receipt = 'confirmed'
+    expect(await restored.initialGoalInput(target, prepared.loopId, 'original-start', 'confirm')).toMatchObject({ status: 'active', initialDelivery: { state: 'confirmed' } })
+    await expect(restored.prepareGoal({ ...input, prompt: 'Different work' })).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    expect((await restored.listGoals(input.goalId))).toHaveLength(1)
+    expect(sends).toBe(0)
+  } finally { await manager.stop(); await restored.stop(); await rm(dir, { recursive: true, force: true }) }
+})
+
+it('cancels original Goal initial admission when its real source owner becomes blocked, keeping the saved loop and execution identity', async () => {
+  const { openDemandStore } = await import('@agentmux/demand')
+  const dir = await mkdtemp(join(_hygiene_fixturePath("tmp"), 'agentmux-goal-source-'))
+  const store = new ContinuousProgressLoopStore(join(dir, 'loops.json')), goals = openDemandStore({ root: join(dir, 'goals') })
+  await goals.create({ id: 'original-goal', title: 'Original work', sessionIds: ['a'] })
+  await goals.proposeAlignment('original-goal', { summary: 'Original scope', criteria: [{ id: 'criterion', text: 'Observable result' }], openQuestions: [] })
+  await goals.confirmAlignment('original-goal', 1)
+  const manager = new ContinuousProgressLoopManager(store, async () => 'sent', () => 0, observedDone, undefined, {
+    read: id => goals.get(id), inspectInitial: async () => 'unconfirmed', subscribe: listener => goals.subscribe(snapshot => listener(snapshot.demands))
+  })
+  try {
+    const prepared = await manager.prepareGoal({ hostId: 'local', agentSessionId: 'a', providerId: 'codex', workspacePath: _hygiene_fixturePath("w"), goalId: 'original-goal', alignmentRevision: 1, intervalMs: 10, operationId: 'original-start', prompt: 'Original work' })
+    let entered = false
+    const sending = manager.submitGoalInitial({ hostId: 'local', agentSessionId: 'a' }, 'original-goal', prepared.loopId, 'original-start', prepared.initialDelivery!.prompt, prepared.initialDelivery!.condition,
+      async (isCurrent, signal) => {
+        entered = true
+        await goals.update('original-goal', { status: 'blocked' })
+        expect(signal.aborted).toBe(true)
+        expect(isCurrent()).toBe(false)
+        signal.throwIfAborted()
+      })
+    await expect(sending).rejects.toMatchObject({ name: 'AbortError' })
+    expect(entered).toBe(true)
+    expect(await manager.listGoals('original-goal')).toMatchObject([{ loopId: prepared.loopId, hostId: 'local', agentSessionId: 'a', status: 'paused', initialDelivery: { operationId: 'original-start', state: 'unknown' } }])
+    expect((await goals.get('original-goal'))?.sessionIds).toEqual(['a'])
+  } finally { await manager.stop(); await rm(dir, { recursive: true, force: true }) }
+})

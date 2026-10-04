@@ -1,6 +1,8 @@
 import { gitIgnoredNames } from './workspace-git-ignore.js'
+import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
+import type { FileNameListing } from '@agentmux/core'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName, scratchTopicStorageRoots } from '../shared/scratch-topics.js'
-import { resolveScratchTopicDirectory, scratchStorageTopicIds } from './scratch-topic-directories.js'
+import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchConfirmedDirectoryPaths } from './scratch-topic-directories.js'
 import { BOOKMARK_FILE_MAX_BYTES, isBinaryContent } from '../shared/bookmark-file.js'
 import { workspaceFilePreviewFormat, type WorkspaceFilePreviewReadOptions, type WorkspaceFilePreviewResult } from '../shared/workspace-file-preview.js'
 import { spawn } from 'node:child_process'
@@ -12,7 +14,7 @@ import type { Readable, Writable } from 'node:stream'
 import type { ExecutionHost } from '@agentmux/core'
 import {
   WORKSPACE_FILE_MAX_BYTES, WORKSPACE_FILE_MAX_READ_BYTES,
-  type WorkspaceFileByteRead, type WorkspaceFileByteReadOptions
+  type WorkspaceFileByteRead, type WorkspaceFileByteReadOptions, type WorkspaceFileReadBudget
 } from '../shared/workspace-file-bytes.js'
 import type {
   CreateWorkspacePathInput,
@@ -38,6 +40,7 @@ type LocalWorkerRequest =
   | { action: 'read'; name: string }
   | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string }
   | { action: 'list' }
+  | { action: 'list-files'; limit: number }
   | { action: 'reveal'; name: string | null }
   | { action: 'observe'; name: string }
   | {
@@ -107,11 +110,12 @@ export function workspaceFileObserverCount(): number {
 export const LOCAL_WORKER_SOURCE = String.raw`
 import { createHash, randomBytes } from 'node:crypto'
 import { watch } from 'node:fs'
-import { constants, link, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
-import { execFileSync } from 'node:child_process'
+import { constants, link, lstat, mkdir, open, readdir, readlink, realpath, rename, rm, stat, unlink } from 'node:fs/promises'
+import { execFileSync, spawn } from 'node:child_process'
 import { join, sep } from 'node:path'
 
 ${fileBytesAreBinary.toString()}
+${LOCAL_FILE_LIST_SOURCE}
 
 const request = JSON.parse(process.argv[1] ?? '')
 const expectedRoot = process.argv[2]
@@ -172,6 +176,7 @@ try {
     try { process.stdout.write(await handle.readFile()) } finally { await handle.close() }
   } else if (request.action === 'read-bytes') {
     const handle = await openRegularFile(request.name, constants.O_RDONLY)
+    let scannedBytes = 0
     try {
       const before = await handle.stat({ bigint: true })
       const totalBytes = Number(before.size)
@@ -192,6 +197,7 @@ try {
         const start = Math.max(position, request.offset), stop = Math.min(position + read.bytesRead, end)
         if (stop > start) chunk.copy(bytes, start - request.offset, start - position, stop - position)
         position += read.bytesRead
+        scannedBytes = position
       }
       const after = await handle.stat({ bigint: true })
       if (before.size !== after.size || before.mtimeNs !== after.mtimeNs || before.ctimeNs !== after.ctimeNs) {
@@ -206,7 +212,12 @@ try {
         returnedBytes: bytes.length, nextOffset: end < totalBytes ? end : null,
         readCost: { payloadBytes: position }
       }))
+    } catch (error) {
+      error.readCost = { payloadBytes: scannedBytes }
+      throw error
     } finally { await handle.close() }
+  } else if (request.action === 'list-files') {
+    process.stdout.write(JSON.stringify(await listFileNames(request.limit)))
   } else if (request.action === 'list') {
     const entries = await readdir('.', { withFileTypes: true })
     const ignored = new Set()
@@ -236,6 +247,11 @@ try {
         result.linkTarget = await readlink(entry.name)
         try { result.isDirectory = (await stat(entry.name)).isDirectory() }
         catch { result.linkIssue = 'unavailable' }
+      } else if (entry.isFile()) {
+        try {
+          const metadata = await lstat(entry.name)
+          if (metadata.isFile() && Number.isFinite(metadata.mtimeMs)) result.mtimeMs = metadata.mtimeMs
+        } catch { /* Unconfirmed metadata does not remove a listed file. */ }
       }
       return result
     }))))
@@ -353,6 +369,7 @@ try {
   process.stderr.write('${LOCAL_WORKER_ERROR}' + JSON.stringify({
     message: error instanceof Error ? error.message : String(error),
     code: error && typeof error === 'object' && 'code' in error ? error.code : null,
+    readCost: error && typeof error === 'object' && 'readCost' in error ? error.readCost : undefined,
     writeOutcomeUnknown: writePublished
   }) + '\n')
   process.exitCode = 1
@@ -477,8 +494,10 @@ async function runLocalWorker(
   cwd: string,
   root: string,
   request: LocalWorkerRequest,
-  input?: string | Uint8Array
+  input?: string | Uint8Array,
+  signal?: AbortSignal
 ): Promise<Buffer> {
+  signal?.throwIfAborted()
   const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   delete environment.NODE_OPTIONS
   const child = spawn(process.execPath, [
@@ -490,7 +509,8 @@ async function runLocalWorker(
   ], {
     cwd,
     env: environment,
-    stdio: ['pipe', 'pipe', 'pipe']
+    stdio: ['pipe', 'pipe', 'pipe'],
+    ...(signal ? { signal } : {})
   })
   const stdout: Buffer[] = []
   let stderr = ''
@@ -516,9 +536,10 @@ async function runLocalWorker(
       message: string
       code: string | null
       writeOutcomeUnknown?: boolean
+      readCost?: WorkspaceFileByteRead['readCost']
     }
     throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {},
-      detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {})
+      detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {}, detail.readCost ? { readCost: detail.readCost } : {})
   }
   throw Object.assign(new Error(
     `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
@@ -830,7 +851,11 @@ const REMOTE_DIRECTORY_ENTRY_SCRIPT = [
   'elif [ -f "$path" ]; then kind=f',
   'else continue',
   'fi',
-  "printf '%s\\0%s\\0' \"$name\" \"$kind\"",
+  'mtime=',
+  'if [ "$kind" = f ]; then',
+  'mtime=$(stat -c %Y -- "$path" 2>/dev/null) || mtime=$(stat -f %m "$path" 2>/dev/null) || mtime=',
+  'fi',
+  "printf '%s\\0%s\\0%s\\0' \"$name\" \"$kind\" \"$mtime\"",
   'done'
 ].join('\n')
 const REMOTE_DIRECTORY_READ_SCRIPT = [
@@ -959,6 +984,10 @@ export class WorkspaceFiles {
     const physicalPrimary = await resolveScratchTopicDirectory(primary.path, PMO_TEAMS_TOPIC_ID)
     const protectedAddress = physicalPrimary ?? resolve(await canonical(primary.path), primaryName)
     let protectedEntry = address === protectedAddress || protectedAddress.startsWith(address + sep)
+    if (physicalPrimary) for (const path of await scratchConfirmedDirectoryPaths(primary.path, PMO_TEAMS_TOPIC_ID, physicalPrimary)) {
+      const entry = resolve(await canonical(dirname(path)), basename(path))
+      if (address === entry || entry.startsWith(address + sep)) protectedEntry = true
+    }
     // The original config path must also remain reachable if it uses a backing-root alias.
     for (let entry = resolve(primary.path, primaryName); !protectedEntry && dirname(entry) !== entry; entry = dirname(entry)) {
       protectedEntry = address === resolve(await canonical(dirname(entry)), basename(entry))
@@ -1119,6 +1148,46 @@ export class WorkspaceFiles {
     })).toString('utf8')
   }
 
+  async listFiles(workspace: WorkspaceRecord, requestedPath = '.', limit = 20000, options?: { signal?: AbortSignal }): Promise<FileNameListing> {
+    options?.signal?.throwIfAborted()
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20000) throw new Error('File discovery limit must be between 1 and 20000')
+    const resource = { ...workspace }, host = this.hostFor(resource.hostId)
+    if (host.kind === 'local') {
+      const directory = await localReadablePath(resource, requestedPath)
+      return JSON.parse((await runLocalWorker(directory.target, directory.root, { action: 'list-files', limit }, undefined, options?.signal)).toString('utf8')) as FileNameListing
+    }
+    // Remote directory facts already enforce its Host/root and symlink boundaries. No second SSH codec.
+    const pending = [requestedPath], files: string[] = []
+    const base = requestedPath.split('/').filter(part => part && part !== '.').join('/')
+    const deadline = Date.now() + 10000
+    let visited = 0, partialReason: FileNameListing['partialReason'] = null
+    while (pending.length && !partialReason) {
+      options?.signal?.throwIfAborted()
+      if (Date.now() >= deadline || visited >= 128) { partialReason = 'budget'; break }
+      const directories = pending.splice(0, Math.min(4, 128 - visited)); visited += directories.length
+      const results = await Promise.allSettled(directories.map(path => this.readDirectory(resource, path)))
+      if (this.hostFor(resource.hostId) !== host) throw new Error('The original file discovery Host changed. Retry the original resource.')
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i]!
+        if (result.status === 'rejected') { partialReason = 'unreadable'; continue }
+        for (const entry of result.value) {
+          if (entry.ignored || entry.name === '.git') continue
+          if (entry.isDirectory) {
+            if (!entry.isSymlink) {
+              if (pending.length < 128 - visited) pending.push(entry.path)
+              else partialReason = partialReason || 'budget'
+            }
+            continue
+          }
+          if (entry.linkIssue) continue
+          if (files.length === limit) { partialReason = 'limit'; break }
+          files.push(base ? entry.path.slice(base.length + 1) : entry.path)
+        }
+      }
+    }
+    return { status: 'listed', files, complete: partialReason === null, omitted: 'git-ignored', partialReason }
+  }
+
   async readDirectory(
     workspace: WorkspaceRecord,
     requestedPath: string
@@ -1193,19 +1262,22 @@ export class WorkspaceFiles {
     }
     const fields = result.stdout.split('\0')
     const directory = fields.shift()!
-    if (!directory.startsWith('/') || !result.stdout.endsWith('\0') || fields.length % 2 !== 1) {
+    if (!directory.startsWith('/') || !result.stdout.endsWith('\0') || fields.length % 3 !== 1) {
       throw new Error(`Could not confirm the directory response for ${lexical} on ${host.label}. Retry this directory.`)
     }
     const entries: WorkspaceDirectoryEntry[] = []
-    for (let index = 0; index + 1 < fields.length; index += 2) {
+    for (let index = 0; index + 2 < fields.length; index += 3) {
       const name = fields[index]
       const kind = fields[index + 1]
       if (!name || !kind) continue
+      const timestamp = fields[index + 2] ?? ''
+      const mtimeMs = /^-?\d+(?:\.\d+)?$/.test(timestamp) ? Number(timestamp) * 1000 : NaN
       entries.push({
         name,
         path: relativeEntryPath(requestedPath, name),
         isDirectory: kind === 'd' || kind === 'ld',
         isSymlink: kind.startsWith('l'),
+        ...(kind === 'f' && Number.isFinite(mtimeMs) ? { mtimeMs } : {}),
         ...(kind === 'lb' ? { linkIssue: 'unavailable' as const } : {})
       })
     }
@@ -1214,7 +1286,11 @@ export class WorkspaceFiles {
     return sortDirectoryEntries(entries)
   }
 
-  async read(workspace: WorkspaceRecord, requestedPath: string): Promise<WorkspaceFileReadResult> {
+  async read(workspace: WorkspaceRecord, requestedPath: string, budget?: WorkspaceFileReadBudget): Promise<WorkspaceFileReadResult> {
+    budget?.signal?.throwIfAborted()
+    if (budget && (!Number.isSafeInteger(budget.maxFileBytes) || budget.maxFileBytes < 1 || budget.maxFileBytes > WORKSPACE_FILE_MAX_BYTES)) {
+      throw new Error('A bounded original file read requires a byte cap inside the existing transfer budget.')
+    }
     try {
       const host = this.hostFor(workspace.hostId)
       if (host.kind === 'local') {
@@ -1223,22 +1299,27 @@ export class WorkspaceFiles {
         // tell — path detection in the Renderer is pure-string. `resolved.target` is already the
         // root-confined realpath, so this stat classifies exactly the object the worker would open.
         if ((await stat(resolved.target)).isDirectory()) return { status: 'directory' }
-        const bytes = await runLocalWorker(dirname(resolved.target), resolved.root, {
+        const snapshot = budget ? await this.readByteRange(workspace, requestedPath, {
+          offset: 0, maxBytes: budget.maxFileBytes, maxFileBytes: budget.maxFileBytes, ...(budget.signal ? { signal: budget.signal } : {})
+        }) : null
+        if (snapshot) budget?.onReadCost?.(snapshot.readCost)
+        const bytes = snapshot ? Buffer.from(snapshot.bytes) : await runLocalWorker(dirname(resolved.target), resolved.root, {
           action: 'read',
           name: basename(resolved.target)
         })
         if (fileBytesAreBinary(bytes)) {
-          return { status: 'binary', path: requestedPath, revision: revisionFor(bytes), byteLength: bytes.byteLength }
+          return { status: 'binary', path: requestedPath, revision: snapshot?.revision ?? revisionFor(bytes), byteLength: bytes.byteLength }
         }
         return {
           status: 'read',
           document: {
             path: requestedPath,
-            content: bytes.toString('utf8'),
-            revision: revisionFor(bytes)
+            content: budget ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) : bytes.toString('utf8'),
+            revision: snapshot?.revision ?? revisionFor(bytes)
           }
         }
       }
+      if (budget) throw new Error('Bounded document search is unavailable for this remote original resource. Its ordinary file read remains available.')
       const path = await remoteReadablePath(host, workspace.path, requestedPath)
       // Ask once: if the target is a directory, exit 3 so the caller can reveal it; otherwise stream
       // it. Folding the classification into the same round-trip avoids a locale-fragile "Is a
@@ -1261,6 +1342,11 @@ export class WorkspaceFiles {
         document: { path: requestedPath, content: result.stdout, revision: revisionFor(bytes) }
       }
     } catch (error) {
+      if (budget) {
+        const readCost = (error as { readCost?: WorkspaceFileByteRead['readCost'] }).readCost
+        if (readCost) budget.onReadCost?.(readCost)
+        budget.signal?.throwIfAborted()
+      }
       if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ENOENT') {
         return { status: 'deleted' }
       }
@@ -1375,14 +1461,14 @@ export class WorkspaceFiles {
     }
   }
 
-  private async readByteRange(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number }): Promise<WorkspaceFileByteRead> {
+  private async readByteRange(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number; maxFileBytes?: number; signal?: AbortSignal }): Promise<WorkspaceFileByteRead> {
     if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
     const { offset, maxBytes } = options
     const resolved = await localExistingPathWithin(workspace, requestedPath)
     const document = JSON.parse((await runLocalWorker(dirname(resolved.target), resolved.root, {
-      action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: WORKSPACE_FILE_MAX_BYTES,
+      action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: options.maxFileBytes ?? WORKSPACE_FILE_MAX_BYTES,
       ...(options.expectedRevision !== undefined ? { expectedRevision: options.expectedRevision } : {})
-    })).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
+    }, undefined, options.signal)).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
     const { data, ...result } = document
     return { ...result, bytes: Buffer.from(data, 'base64') }
   }

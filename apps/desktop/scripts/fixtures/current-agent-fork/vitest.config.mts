@@ -8,6 +8,19 @@ const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any
   find: new RegExp('^' + (key === '.' ? '@agentmux/core' : '@agentmux/core/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
   replacement: resolve(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
+for (const name of ['demand', 'relay']) {
+  const workspaceManifest = JSON.parse(readFileSync(resolve(root, 'packages', name, 'package.json'), 'utf8'))
+  for (const [key, value] of Object.entries(workspaceManifest.exports) as [string, any][]) {
+    aliases.push({ find: new RegExp('^' + (key === '.' ? '@agentmux/' + name : '@agentmux/' + name + '/' + key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'),
+      replacement: resolve(root, 'packages', name, value.import.replace('./dist/', name === 'demand' ? './' : './src/').replace(/\.js$/, '.ts')) })
+  }
+}
+const clientUiManifest = JSON.parse(readFileSync(resolve(root, 'packages/client-ui/package.json'), 'utf8'))
+for (const [key, value] of Object.entries(clientUiManifest.exports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length) as [string, any][]) {
+  const name = key === '.' ? '@agentmux/client-ui' : '@agentmux/client-ui/' + key.slice(2)
+  aliases.push({ find: new RegExp('^' + name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)') + '$'),
+    replacement: resolve(root, 'packages/client-ui', typeof value === 'string' ? value : value.browser).replace('*', '$1') })
+}
 aliases.push({ find: /^@agentmux\/layout$/, replacement: resolve(root, 'packages/core/src/spatial-layout.ts') })
 const sdkRoot = resolve(root, 'packages/core/node_modules/@ctxmux/sdk')
 const sdkManifest = JSON.parse(readFileSync(resolve(sdkRoot, 'package.json'), 'utf8'))
@@ -22,11 +35,9 @@ const mutations: Record<string, [string, string, string]> = {
 }
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },
   plugins: [{ name: 'current-fork-owning-source', enforce: 'pre',
-    resolveId(id) { if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-fork-file-resource' },
-    load(id) { if (id === '\0unused-fork-file-resource') return 'export function zoneFileResource(){throw new Error("Unused unrelated file-resource leaf invoked in fork scene")}' },
     transform(source, id) {
       const path = relative(root, id.split('?')[0]!)
-      if (!path.startsWith('packages/core/src/') && !path.startsWith('apps/desktop/src/')) return
+      if (!/^packages\/(?:core|demand|relay|client-ui)\/src\//.test(path) && !path.startsWith('apps/desktop/src/')) return
       let code = source
       const mutation = process.env.AMX_FORK_MUTATION, change = mutation && mutations[mutation]
       if (mutation && !change) throw new Error('Unknown fork source mutation')

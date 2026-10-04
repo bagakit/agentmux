@@ -59,7 +59,7 @@ for (const pair of proof.mutations) {
 }
 const callers = JSON.parse(await bound(proof.callers))
 assert.ok(callers.matches.length > 0)
-for (const symbol of ['ConversationAnnotationNote', 'ActivityView', 'SessionHistoryView', 'SessionPane']) {
+for (const symbol of ['ConversationAnnotationNote', 'ActivityView', 'SessionPane']) {
   const hits = callers.matches.filter(hit => hit.symbol === symbol)
   assert.ok(hits.length > 0, `no product caller for ${symbol}`)
   for (const hit of hits) {

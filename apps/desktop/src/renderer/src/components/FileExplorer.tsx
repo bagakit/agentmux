@@ -20,18 +20,23 @@ import {
 import {
   ChevronDown,
   ChevronRight,
+  Check,
+  ChevronsDownUp,
+  Eye,
   FilePlus2,
   Folder,
   FolderOpen,
   FolderPlus,
   GripVertical,
+  GitBranch,
   LoaderCircle,
+  MoreHorizontal,
   RefreshCw,
   Search,
   TriangleAlert,
   X
 } from 'lucide-react'
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { createPortal } from 'react-dom'
 import { isFolderWorkspace, isScratchWorkspaceId } from '../../../shared/contracts'
 import { scratchTopicIdFromDirectoryName, scratchWorkspaceFilePath } from '../../../shared/scratch-topics'
@@ -39,8 +44,11 @@ import { api } from '../lib/api'
 import { applyWorkspacePathRebind } from '../lib/workspace-path-recovery'
 import { getFileTypeIcon } from '../lib/file-type-icons'
 import { documentKey } from '../lib/workbench-tabs'
-import { useAppStore } from '../store'
+import { fileNavigationSelection, useAppStore } from '../store'
+import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
 import { ConfirmationDialog } from './ConfirmationDialog'
+import * as DropdownMenu from './HoverDropdownMenu'
+import { projectFileExplorerRows } from './file-tree/file-explorer-visibility'
 import {
   isNavigationKey,
   resolveFileExplorerNavigationTarget
@@ -59,6 +67,7 @@ import { useGitStatus } from '../hooks/useGitStatus'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { fileExplorerContains } from '../lib/file-explorer-scope'
 import { createFileExplorerRowProjection } from './file-tree/file-explorer-row-projection'
+import { useFileTreeViewport } from './file-tree/useFileTreeViewport'
 import { refreshFileExplorer } from './file-tree/file-explorer-refresh'
 import { presentExpandedDir } from './file-tree/file-explorer-stale-dir-cache'
 import {
@@ -79,6 +88,7 @@ import { FileTreeContextMenu } from './file-tree/FileTreeContextMenu'
 import { isMacPlatform } from '../lib/host-platform'
 import { createDirectoryProjectInput } from '../lib/open-directory-as-project'
 import {
+  createFileExplorerMoveIndex,
   fileExplorerDropDirectory,
   fileExplorerMoveTargets,
   isFileExplorerMenuKey,
@@ -166,7 +176,7 @@ function FileTreeRow({
   onClick,
   onSelect,
   onCollapse,
-  onContextMenuOpen,
+  onContextMenuChange,
   onCopyPaths,
   onCreate,
   onToggle,
@@ -177,7 +187,7 @@ function FileTreeRow({
   onReveal,
   onViewFile,
   onMove,
-  moveTargets,
+  getMoveTargets,
   canOpenTerminal,
   canMove,
   dropDisabled,
@@ -206,7 +216,7 @@ function FileTreeRow({
   onClick: (event: React.MouseEvent) => void
   onSelect: (event: React.MouseEvent) => void
   onCollapse: () => void
-  onContextMenuOpen: () => void
+  onContextMenuChange: (open: boolean) => void
   onCopyPaths: (kind: 'absolute' | 'relative') => void
   onCreate: (kind: 'file' | 'directory') => void
   onToggle: () => void
@@ -217,7 +227,7 @@ function FileTreeRow({
   onReveal: () => void
   onViewFile: () => void
   onMove: (directoryPath: string) => void
-  moveTargets: readonly FileExplorerMoveTarget[]
+  getMoveTargets: () => readonly FileExplorerMoveTarget[]
   canOpenTerminal: boolean
   canMove: boolean
   dropDisabled: boolean
@@ -259,10 +269,8 @@ function FileTreeRow({
       isExpanded={expanded}
       isLocal={isLocal}
       selectionSize={selectionSize}
-      moveTargets={moveTargets}
-      onOpenChange={(open) => {
-        if (open) onContextMenuOpen()
-      }}
+      getMoveTargets={getMoveTargets}
+      onOpenChange={onContextMenuChange}
       onCreate={onCreate}
       onCopyPaths={onCopyPaths}
       onOpenTerminal={onOpenTerminal}
@@ -333,7 +341,12 @@ function FileTreeRow({
             className="tree-row__label"
             tabIndex={-1}
             title={canRename ? `${pathTitle}\nDouble-click to rename (F2)` : pathTitle}
-            onClick={(event) => { event.stopPropagation(); onSelect(event) }}
+            onClick={(event) => {
+              event.stopPropagation()
+              // The first click activates; the second belongs to inline Rename.
+              if (event.detail < 2) onClick(event)
+              else onSelect(event)
+            }}
             onDoubleClick={(event) => {
               event.stopPropagation()
               if (canRename && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey) onRename()
@@ -381,8 +394,9 @@ function FileExplorerRootDropTarget({ disabled, rootPath, rootLabel }: { disable
 }
 
 export function FileExplorer({
-  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal
+  revealRequest, createRequest, onCreateRequestHandled, toolbarTarget, workspaceId: requestedWorkspaceId, rootPath = '', rootLabel = 'Workspace Root', onOpenPath, onOpenTerminal, active = true
 }: {
+  active?: boolean
   onCreateRequestHandled?: (() => void) | undefined
   createRequest?: { requestId: number; parentPath: string } | undefined
   workspaceId?: string | undefined
@@ -395,15 +409,19 @@ export function FileExplorer({
   toolbarTarget?: HTMLElement | null | undefined
 }) {
   const workspaceId = useAppStore((state) => requestedWorkspaceId ?? state.activeWorkspaceId)
-  const workspace = useAppStore((state) =>
-    state.config?.workspaces.find((item) => item.id === workspaceId)
-  )
+  const workspace = useWorkspaceResource(workspaceId)
   const activePath = useAppStore((state) =>
     workspaceId && fileExplorerContains(rootPath, state.lastActiveFileByWorkspace[workspaceId] ?? '') ? state.lastActiveFileByWorkspace[workspaceId] : undefined
   )
-  const originalOpenFile = useAppStore((state) => state.openFile)
-  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) =>
-    onOpenPath ? onOpenPath(path) : originalOpenFile(path, groupId, location, resourceId ?? undefined)
+  const originalOpenFile = useAppStore((state) => state.openFileAndReveal)
+  const fileRevealRef = useRef<AbortController | null>(null)
+  const openFile = (path: string, groupId?: string, location?: { line: number; column?: number }, resourceId = workspaceId) => {
+    if (onOpenPath) return onOpenPath(path)
+    fileRevealRef.current?.abort()
+    const intent = new AbortController()
+    fileRevealRef.current = intent
+    return originalOpenFile(path, groupId, location, resourceId ?? undefined, intent.signal)
+  }
   const createPath = useAppStore((state) => state.createPath)
   const renamePath = useAppStore((state) => state.renamePath)
   const deletePath = useAppStore((state) => state.deletePath)
@@ -419,7 +437,7 @@ export function FileExplorer({
   // Source-control status projected straight onto the tree — no second copy of "what changed" in the
   // store, it consumes the same git:status the Changes panel does. The mapping from porcelain to a
   // per-node status is a pure function (lib/file-tree-git-status); this component only asks it.
-  const { status: gitStatus, refresh: refreshGitStatus } = useGitStatus(workspaceId ?? null)
+  const { status: gitStatus, refresh: refreshGitStatus } = useGitStatus(workspaceId ?? null, active)
   const gitStatusIndex = useMemo(() => {
     if (gitStatus?.kind !== 'git-repository') return buildFileTreeGitStatusIndex([])
     // The prefix comes from main, which asked git for it (`rev-parse --show-prefix`). It is NOT
@@ -429,13 +447,19 @@ export function FileExplorer({
     // filtering and paint one file's status onto a different, clean file.
     return buildFileTreeGitStatusIndex(gitStatus.changes, gitStatus.repoRelativePrefix)
   }, [gitStatus])
-  const workspaceFileRevision = useAppStore((state) => (
-    workspaceId ? (state.workspaceFileRevisions[workspaceId] ?? 0) : 0
-  ))
+  const observedRevision = useAppStore(state => active && workspaceId ? state.workspaceFileRevisions[workspaceId] ?? 0 : null)
+  const heldRevision = useRef({ workspaceId, value: observedRevision ?? (workspaceId ? useAppStore.getState().workspaceFileRevisions[workspaceId] ?? 0 : 0) })
+  if (observedRevision !== null) heldRevision.current = { workspaceId, value: observedRevision }
+  else if (heldRevision.current.workspaceId !== workspaceId) heldRevision.current = { workspaceId, value: workspaceId ? useAppStore.getState().workspaceFileRevisions[workspaceId] ?? 0 : 0 }
+  const workspaceFileRevision = heldRevision.current.value
   const explorerState = useAppStore((state) => (
     workspaceId ? state.fileExplorerStates[workspaceId] : undefined
   )) ?? EMPTY_EXPLORER_STATE
   const updateExplorerState = useAppStore((state) => state.updateFileExplorerState)
+  const showHidden = useAppStore(state => state.explorerShowHidden)
+  const showIgnored = useAppStore(state => state.explorerShowIgnored)
+  const toggleShowHidden = useAppStore(state => state.toggleExplorerShowHidden)
+  const toggleShowIgnored = useAppStore(state => state.toggleExplorerShowIgnored)
   const [query, setQuery] = useState('')
   const [inlineEdit, setInlineEdit] = useState<InlineEdit | null>(null)
   const editIntent = useRef(0)
@@ -444,19 +468,24 @@ export function FileExplorer({
   const [editPending, setEditPending] = useState(false)
   const editSubmissionRef = useRef<InlineEdit | null>(null)
   const workspacePath = workspace?.path ?? ''
+  useEffect(() => () => { fileRevealRef.current?.abort() }, [workspaceId, workspace?.hostId, workspacePath, rootPath])
   const editContextRef = useRef({ workspaceId, workspacePath, rootPath })
   editContextRef.current = { workspaceId, workspacePath, rootPath }
   const [deleteRequest, setDeleteRequest] = useState<{ node: TreeNode; workspaceId: string; rootPath: string } | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [relinking, setRelinking] = useState(false)
   const [activeDrag, setActiveDrag] = useState<FileExplorerDragData | null>(null)
+  const dragVisibilityRef = useRef<{ showHidden: boolean; showIgnored: boolean; query: string } | null>(null)
   const activeDragScopeRef = useRef<{ workspaceId: string | null; rootPath: string } | null>(null)
   const [scrollTarget, setScrollTarget] = useState<{
     path: string
     requestId: number
     focus: boolean
+    openMenu?: boolean
   } | null>(null)
   const treeRootRef = useRef<HTMLDivElement>(null)
+  const [focusedPath, setFocusedPath] = useState<string | null>(null)
+  const [menuPath, setMenuPath] = useState<string | null>(null)
   const lastRevealedPathRef = useRef<string | null>(null)
   const lastRevealRequestIdRef = useRef<number | null>(null)
   const autoRevealRequestIdRef = useRef(0)
@@ -464,7 +493,7 @@ export function FileExplorer({
   const expanded = useMemo(() => new Set([...explorerState.expandedPaths].filter(path => fileExplorerContains(rootPath, path))), [explorerState.expandedPaths, rootPath])
   const selection = useMemo(() => updateFileExplorerSelectionPaths(explorerState.selection, path => fileExplorerContains(rootPath, path) ? path : null), [explorerState.selection, rootPath])
   const selectedPath = selection.activePath
-  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath)
+  const tree = useWorkspaceFileTree(workspaceId ?? 'missing-workspace', expanded, rootPath, active)
   const isMac = useMemo(() => isMacPlatform(), [])
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const hoverExpandRef = useRef<{ path: string; timer: number } | null>(null)
@@ -472,10 +501,10 @@ export function FileExplorer({
   // 见 file-tree/file-explorer-refresh.ts：把结构与 git 状态收成一个动作，是因为它们分开时
   // 漏掉的那一半完全静默——#750 就是 git 那半边从来没人调。
   const refreshExplorer = useCallback(
-    async () => {
+    async (discover = true) => {
       await Promise.all([
         refreshFileExplorer({ refreshTree: tree.refreshTree, refreshGitStatus }),
-        workspaceId && isScratchWorkspaceId(workspaceId)
+        discover && workspaceId && isScratchWorkspaceId(workspaceId)
           ? useAppStore.getState().refreshScratchTopics(workspaceId, true)
           : Promise.resolve()
       ])
@@ -494,7 +523,8 @@ export function FileExplorer({
     }))
   }
 
-  function setSelection(update: SetStateAction<FileExplorerSelectionState>): void {
+  function setSelection(update: SetStateAction<FileExplorerSelectionState>, cancelPendingReveal = true): void {
+    if (cancelPendingReveal) fileRevealRef.current?.abort()
     if (!workspaceId) return
     updateExplorerState(workspaceId, (current) => ({
       ...current,
@@ -504,12 +534,16 @@ export function FileExplorer({
 
   useEffect(() => {
     clearHoverExpand()
+    observedFileRevisionRef.current = workspaceFileRevision
     setActiveDrag(null)
+    dragVisibilityRef.current = null
     activeDragScopeRef.current = null
     setDeleteRequest(null)
     lastRevealedPathRef.current = null
     lastRevealRequestIdRef.current = null
     setScrollTarget(null)
+    setFocusedPath(null)
+    setMenuPath(null)
     setInlineEdit(null)
     setEditError(null)
     setEditPending(false)
@@ -519,15 +553,15 @@ export function FileExplorer({
   }, [workspaceId, workspacePath, rootPath])
 
   useEffect(() => {
-    if (observedFileRevisionRef.current === workspaceFileRevision) return
+    if (!active || observedFileRevisionRef.current === workspaceFileRevision || tree.rootCache?.loading) return
     observedFileRevisionRef.current = workspaceFileRevision
-    void refreshExplorer()
-  }, [refreshExplorer, workspaceFileRevision])
+    if (tree.rootCache) void refreshExplorer(false)
+  }, [active, refreshExplorer, workspaceFileRevision, tree.rootCache?.loading])
 
   // Expand each relative Workspace ancestor without replacing an existing
   // multi-selection, then scroll after async reads project the target row.
   useEffect(() => {
-    if (!activePath || activePath === lastRevealedPathRef.current) return
+    if (!active || !activePath || activePath === lastRevealedPathRef.current) return
     lastRevealedPathRef.current = activePath
     const nextExplorerState = revealFileExplorerPath(explorerState, activePath)
     if (workspaceId && nextExplorerState !== explorerState) {
@@ -539,11 +573,11 @@ export function FileExplorer({
       requestId: autoRevealRequestIdRef.current,
       focus: false
     })
-  }, [activePath, explorerState, updateExplorerState, workspaceId])
+  }, [active, activePath, explorerState, updateExplorerState, workspaceId])
 
   useEffect(() => {
     if (
-      !revealRequest ||
+      !active || !revealRequest ||
       revealRequest.workspaceId !== workspaceId ||
       !fileExplorerContains(rootPath, revealRequest.path) ||
       revealRequest.requestId === lastRevealRequestIdRef.current
@@ -562,15 +596,7 @@ export function FileExplorer({
       requestId: revealRequest.requestId,
       focus: true
     })
-  }, [revealRequest, workspaceId, rootPath])
-
-  useEffect(() => {
-    if (!scrollTarget) return
-    const row = [...(treeRootRef.current?.querySelectorAll<HTMLElement>('[data-tree-path]') ?? [])]
-      .find((candidate) => candidate.dataset.treePath === scrollTarget.path)
-    if (scrollTarget.focus) row?.focus()
-    row?.scrollIntoView({ block: 'nearest' })
-  }, [scrollTarget, tree.dirCache])
+  }, [active, revealRequest, workspaceId, rootPath])
 
   // Continuous filesystem watch would need a cross-host owner. Until the mux
   // decision, refresh on application focus through the same Local/SSH IPC
@@ -578,25 +604,49 @@ export function FileExplorer({
   // 重获焦点这条路尤其要连 git 一起刷：用户切到终端里跑了 agent 或 git 命令，回到 AgentMux 时
   // 期待看到的正是"哪些文件被改了"，而那是 git 那半边的事。
   useEffect(() => {
+    if (!active) return
     const refreshOnFocus = () => void refreshExplorer()
     window.addEventListener('focus', refreshOnFocus)
     return () => window.removeEventListener('focus', refreshOnFocus)
-  }, [refreshExplorer])
+  }, [active, refreshExplorer])
 
   const rows = useMemo(
     () => flattenFileTree(tree.rootCache?.children ?? [], tree.dirCache, expanded),
     [expanded, tree.dirCache, tree.rootCache?.children]
   )
-  const visibleRows = useMemo(() => {
-    const normalized = query.trim().toLowerCase()
-    return normalized
-      ? rows.filter((node) => node.name.toLowerCase().includes(normalized) || node.path.toLowerCase().includes(normalized))
-      : rows
-  }, [query, rows])
+  const editPath = inlineEdit?.kind === 'rename' ? inlineEdit.node.path : inlineEdit?.parentPath
+  const retainedPaths = useMemo(() => [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path],
+    [editPath, menuPath, focusedPath, activeDrag?.path, scrollTarget?.path])
+  // Visibility changes in another consumer wait for the original pointer move to settle.
+  const dragVisibility = activeDrag ? dragVisibilityRef.current : null
+  const visibleRows = useMemo(() => projectFileExplorerRows(rows, dragVisibility?.showHidden ?? showHidden,
+    dragVisibility?.showIgnored ?? showIgnored, dragVisibility?.query ?? query, retainedPaths),
+  [dragVisibility, query, retainedPaths, rows, showHidden, showIgnored])
   const rowProjection = useMemo(
     () => createFileExplorerRowProjection(visibleRows),
     [visibleRows]
   )
+  const viewport = useFileTreeViewport(rowProjection, treeRootRef, retainedPaths,
+    `${workspaceId}\0${workspacePath}\0${rootPath}`)
+  useEffect(() => {
+    if (!active || !scrollTarget || !rowProjection.hasPath(scrollTarget.path)) return
+    viewport.scrollToPath(scrollTarget.path)
+    if (!scrollTarget.focus) return
+    const frame = requestAnimationFrame(() => {
+      const row = treeRootRef.current?.querySelector<HTMLElement>(
+        `[data-tree-path="${CSS.escape(scrollTarget.path)}"]`
+      )
+      row?.focus({ preventScroll: true })
+      if (row && scrollTarget.openMenu) {
+        const rect = row.getBoundingClientRect()
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left, clientY: rect.top }))
+      }
+    })
+    return () => cancelAnimationFrame(frame)
+  }, [active, scrollTarget, rowProjection, viewport.scrollToPath])
+  useEffect(() => {
+    if (active && editPath !== undefined) viewport.scrollToPath(editPath)
+  }, [active, editPath, viewport.scrollToPath])
   const selectedNode = selectedPath ? rowProjection.getRowByPath(selectedPath) : null
   const createParent = selectedNode?.isDirectory
     ? selectedNode.path
@@ -606,6 +656,10 @@ export function FileExplorer({
     [tree.dirCache]
   )
 
+  const moveIndex = useMemo(() => createFileExplorerMoveIndex(
+    rootPath ? [{ path: rootPath, isDirectory: true }, ...loadedTreeNodes] : loadedTreeNodes
+  ), [loadedTreeNodes, rootPath])
+
   function clearHoverExpand(): void {
     const pending = hoverExpandRef.current
     if (pending) window.clearTimeout(pending.timer)
@@ -614,7 +668,7 @@ export function FileExplorer({
 
   function isMoveDropDisabled(directoryPath: string): boolean {
     return !fileExplorerContains(rootPath, directoryPath) || (activeDrag !== null &&
-      planFileExplorerMove(loadedTreeNodes, activeDrag.path, directoryPath).status === 'blocked')
+      planFileExplorerMove(moveIndex, activeDrag.path, directoryPath).status === 'blocked')
   }
 
   async function movePath(sourcePath: string, destinationPath: string): Promise<void> {
@@ -628,7 +682,7 @@ export function FileExplorer({
   }
 
   async function movePathToDirectory(sourcePath: string, directoryPath: string): Promise<void> {
-    const plan = planFileExplorerMove(loadedTreeNodes, sourcePath, directoryPath)
+    const plan = planFileExplorerMove(moveIndex, sourcePath, directoryPath)
     if (plan.status === 'blocked') return
     await movePath(plan.sourcePath, plan.destinationPath)
   }
@@ -637,6 +691,7 @@ export function FileExplorer({
     const data = event.active.data.current as FileExplorerDragData | undefined
     if (data?.kind === 'file-explorer-path' && fileExplorerContains(rootPath, data.path)) {
       activeDragScopeRef.current = { workspaceId, rootPath }
+      dragVisibilityRef.current = { showHidden, showIgnored, query }
       setSelection(createSingleFileExplorerSelection(data.path))
       setActiveDrag(data)
     }
@@ -650,7 +705,7 @@ export function FileExplorer({
       drag?.kind !== 'file-explorer-path' ||
       activeDragScopeRef.current?.workspaceId !== workspaceId || activeDragScopeRef.current.rootPath !== rootPath ||
       directoryPath === null || !fileExplorerContains(rootPath, directoryPath) ||
-      planFileExplorerMove(loadedTreeNodes, drag.path, directoryPath).status === 'blocked' ||
+      planFileExplorerMove(moveIndex, drag.path, directoryPath).status === 'blocked' ||
       !directoryPath ||
       expanded.has(directoryPath)
     ) {
@@ -675,6 +730,7 @@ export function FileExplorer({
     activeDragScopeRef.current = null
     clearHoverExpand()
     setActiveDrag(null)
+    dragVisibilityRef.current = null
     if (drag?.kind !== 'file-explorer-path' || drop?.kind !== 'file-explorer-directory' || scope?.workspaceId !== workspaceId || scope.rootPath !== rootPath) return
     try {
       await movePathToDirectory(drag.path, drop.directoryPath)
@@ -685,6 +741,7 @@ export function FileExplorer({
 
   function toggle(node: TreeNode): void {
     if (!node.isDirectory) return
+    fileRevealRef.current?.abort()
     setExpanded((current) => {
       const next = new Set(current)
       if (next.has(node.path)) next.delete(node.path)
@@ -693,8 +750,30 @@ export function FileExplorer({
     })
   }
 
+  function collapseAll(): void {
+    fileRevealRef.current?.abort()
+    clearHoverExpand()
+    lastRevealedPathRef.current = activePath ?? null
+    setScrollTarget(null)
+    const retained = new Set<string>()
+    // An active edit/menu/move must keep its original row and parent available.
+    for (const path of [editPath, menuPath, activeDrag?.path]) {
+      if (path === null || path === undefined) continue
+      for (const ancestor of getRevealAncestorPaths(path)) retained.add(ancestor)
+      if (path === editPath && inlineEdit?.kind !== 'rename') retained.add(path)
+    }
+    if (activeDrag) for (const path of expanded) retained.add(path)
+    if (focusedPath && getRevealAncestorPaths(focusedPath).some(path => expanded.has(path) && !retained.has(path))) {
+      treeRootRef.current?.focus({ preventScroll: true })
+      setFocusedPath(null)
+    }
+    setExpanded(current => new Set([...current].filter(path => retained.has(path))))
+  }
+
   function beginCreate(kind: 'create-file' | 'create-directory', targetParent = createParent): void {
+    fileRevealRef.current?.abort()
     if (!workspaceId || editSubmissionRef.current) return
+    fileRevealRef.current = new AbortController()
     setExpanded((current) => new Set(current).add(targetParent))
     setInlineEdit({ id: ++editIntent.current, kind, parentPath: targetParent, workspaceId, workspacePath, rootPath })
     setEditValue('')
@@ -702,10 +781,10 @@ export function FileExplorer({
   }
 
   useEffect(() => {
-    if (createRequest && fileExplorerContains(rootPath, createRequest.parentPath)) {
+    if (active && createRequest && fileExplorerContains(rootPath, createRequest.parentPath)) {
       beginCreate('create-file', createRequest.parentPath); onCreateRequestHandled?.()
     }
-  }, [createRequest, workspaceId, rootPath])
+  }, [active, createRequest, workspaceId, rootPath])
 
   function pathsForContext(node: TreeNode): string[] {
     return selection.selectedPaths.has(node.path)
@@ -803,6 +882,7 @@ export function FileExplorer({
   }
 
   function beginRename(node: TreeNode): void {
+    fileRevealRef.current?.abort()
     if (!workspaceId || editSubmissionRef.current || !canRenameFileExplorerNode(workspaceId, node)) return
     setSelection(createSingleFileExplorerSelection(node.path))
     setInlineEdit({ id: ++editIntent.current, kind: 'rename', node, workspaceId, workspacePath, rootPath })
@@ -816,6 +896,12 @@ export function FileExplorer({
     if (!edit || editSubmissionRef.current || edit.workspaceId !== workspaceId || edit.workspacePath !== workspacePath || edit.rootPath !== rootPath) return
     if (!validName(name)) { setEditError('Enter a name without / or \\; . and .. are not file names.'); return }
     editSubmissionRef.current = edit
+    const navigation = fileNavigationSelection(useAppStore.getState())
+    const navigationIntent = fileRevealRef.current
+    const navigationSignal = navigationIntent?.signal
+    const releaseNavigation = edit.kind === 'create-file' ? useAppStore.subscribe(state => {
+      if (fileNavigationSelection(state) !== navigation) navigationIntent?.abort()
+    }) : () => {}
     setEditPending(true)
     setEditError(null)
     try {
@@ -833,15 +919,16 @@ export function FileExplorer({
         }, edit.workspaceId)
         await tree.refreshDir(edit.parentPath)
         if (editSubmissionRef.current === edit && editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath) {
-          setSelection(createSingleFileExplorerSelection(path))
+          setSelection(createSingleFileExplorerSelection(path), false)
+          if (edit.kind === 'create-file' && !navigationSignal?.aborted && fileNavigationSelection(useAppStore.getState()) === navigation) await openFile(path, undefined, undefined, createdIn)
         }
-        if (edit.kind === 'create-file' && (!onOpenPath || (editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath))) await openFile(path, undefined, undefined, createdIn)
       }
       setInlineEdit(current => current === edit ? null : current)
     } catch (error) {
       // The file owner reports transaction failure. Keep only this scope's draft retryable.
       if (editSubmissionRef.current === edit && editContextRef.current.workspaceId === edit.workspaceId && editContextRef.current.workspacePath === edit.workspacePath && editContextRef.current.rootPath === edit.rootPath) setEditError(presentError(error))
     } finally {
+      releaseNavigation()
       if (editSubmissionRef.current === edit) {
         editSubmissionRef.current = null
         setEditPending(false)
@@ -907,13 +994,7 @@ export function FileExplorer({
           node.path,
           event.shiftKey && currentIndex !== null ? 'range' : 'replace'
         ))
-        requestAnimationFrame(() => {
-          const row = treeRootRef.current?.querySelector<HTMLElement>(
-            `[data-tree-index="${resolved.targetIndex}"]`
-          )
-          row?.focus()
-          row?.scrollIntoView({ block: 'nearest' })
-        })
+        setScrollTarget({ path: node.path, requestId: ++autoRevealRequestIdRef.current, focus: true })
         return
       }
     }
@@ -923,15 +1004,7 @@ export function FileExplorer({
       : rowProjection.getRowAtIndex(currentIndex)
     if (isFileExplorerMenuKey(event) && actionNode) {
       event.preventDefault()
-      const row = treeRootRef.current?.querySelector<HTMLElement>(
-        `[data-tree-path="${CSS.escape(actionNode.path)}"]`
-      )
-      const rect = row?.getBoundingClientRect()
-      row?.dispatchEvent(new MouseEvent('contextmenu', {
-        bubbles: true,
-        clientX: rect?.left ?? 0,
-        clientY: rect?.top ?? 0
-      }))
+      setScrollTarget({ path: actionNode.path, requestId: ++autoRevealRequestIdRef.current, focus: true, openMenu: true })
     } else if ((event.key === 'Enter' || event.key === ' ') && actionNode) {
       event.preventDefault()
       actionNode.isDirectory ? toggle(actionNode) : void openFile(actionNode.path)
@@ -969,6 +1042,13 @@ export function FileExplorer({
     <button onClick={() => void refreshExplorer()} title="Refresh explorer">
       {tree.rootCache?.loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}
     </button>
+    <button onClick={collapseAll} title="Collapse all folders" aria-label="Collapse all folders"><ChevronsDownUp size={13} /></button>
+    <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" aria-label="Explorer options" title="Explorer options"><MoreHorizontal size={13} /></button></DropdownMenu.Trigger>
+      <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showHidden} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowHidden()}><Eye size={13} /><span>Show hidden files</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+        <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={showIgnored} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleShowIgnored()}><GitBranch size={13} /><span>Show Git ignored files</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
+      </DropdownMenu.Content></DropdownMenu.Portal>
+    </DropdownMenu.Root>
   </div>
   return (
     <section className={`file-explorer ${toolbarTarget !== undefined ? 'file-explorer--shared-header' : ''}`} data-file-workspace={workspaceId} data-file-root={rootPath}>
@@ -986,7 +1066,7 @@ export function FileExplorer({
         autoScroll
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
-        onDragCancel={() => { clearHoverExpand(); setActiveDrag(null) }}
+        onDragCancel={() => { clearHoverExpand(); setActiveDrag(null); dragVisibilityRef.current = null }}
         onDragEnd={(event) => void handleDragEnd(event)}
       >
         {new URLSearchParams(window.location.search).get('agentmux-file-editing-report') === '1'
@@ -998,11 +1078,22 @@ export function FileExplorer({
           aria-multiselectable="true"
           tabIndex={0}
           onKeyDown={handleTreeKeyDown}
+          onFocusCapture={event => setFocusedPath((event.target as HTMLElement).closest<HTMLElement>('[data-tree-path]')?.dataset.treePath ?? null)}
+          onBlurCapture={event => {
+            if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setFocusedPath(null)
+          }}
         >
-          <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
-          {createEdit?.parentPath === rootPath ? createRow : null}
-          {visibleRows.map((node, rowIndex) => (
-            <Fragment key={node.path}>
+          <div className="file-tree__prefix" ref={viewport.prefixRef}>
+            <FileExplorerRootDropTarget disabled={isMoveDropDisabled(rootPath)} rootPath={rootPath} rootLabel={rootLabel} />
+            {createEdit?.parentPath === rootPath ? createRow : null}
+          </div>
+          <div className="file-tree__rows" ref={viewport.rowsRef} style={{ height: viewport.virtualizer.getTotalSize() }}>
+          {viewport.virtualizer.getVirtualItems().map(item => {
+            const node = rowProjection.getRowAtIndex(item.index)!
+            const rowIndex = item.index
+            return <div className="file-tree__virtual-row" key={node.path} data-index={rowIndex}
+              ref={viewport.virtualizer.measureElement}
+              style={{ transform: `translateY(${item.start - viewport.scrollMargin}px)` }}>
               <FileTreeRow
             key={node.path}
             node={node}
@@ -1028,8 +1119,10 @@ export function FileExplorer({
             onEditValue={(value) => { setEditValue(value); setEditError(null) }}
             onCommitEdit={commitEdit}
             onCancelEdit={() => { setInlineEdit(null); setEditError(null) }}
-            onContextMenuOpen={() => {
-              if (!selection.selectedPaths.has(node.path)) {
+            onContextMenuChange={open => {
+              if (open) fileRevealRef.current?.abort()
+              setMenuPath(current => open ? node.path : current === node.path ? null : current)
+              if (open && !selection.selectedPaths.has(node.path)) {
                 setSelection(createSingleFileExplorerSelection(node.path))
               }
             }}
@@ -1051,8 +1144,8 @@ export function FileExplorer({
               setSelection(createSingleFileExplorerSelection(node.path))
               void movePathToDirectory(node.path, directoryPath).catch(() => {})
             }}
-            moveTargets={canRenameFileExplorerNode(workspaceId, node)
-              ? fileExplorerMoveTargets(rootPath ? [{ path: rootPath, isDirectory: true }, ...loadedTreeNodes] : loadedTreeNodes, node.path).filter(target => fileExplorerContains(rootPath, target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
+            getMoveTargets={() => canRenameFileExplorerNode(workspaceId, node)
+              ? fileExplorerMoveTargets(moveIndex, node.path).filter(target => fileExplorerContains(rootPath, target.path)).map(target => target.path === rootPath ? { ...target, label: rootLabel } : target)
               : []}
             onCollapse={() => setExpanded((current) => {
               const next = new Set(current)
@@ -1086,8 +1179,9 @@ export function FileExplorer({
             selectionSize={pathsForContext(node).length}
               />
               {createEdit?.parentPath === node.path ? createRow : null}
-            </Fragment>
-          ))}
+            </div>
+          })}
+          </div>
           {tree.rootError ? (
             <div className="tree-empty tree-empty--error">
               <strong>Could not read workspace</strong>
@@ -1103,7 +1197,7 @@ export function FileExplorer({
               </div>
             </div>
           ) : !tree.rootCache?.loading && visibleRows.length === 0 ? (
-            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : 'Create a file or folder to begin.'}</span></div>
+            <div className="tree-empty"><strong>{query ? 'No loaded files match' : rows.length ? 'No visible files' : rootPath ? 'This directory is empty' : 'Workspace is empty'}</strong><span>{query ? 'Expand more folders or change the search.' : rows.length ? 'Change file visibility in Explorer options.' : 'Create a file or folder to begin.'}</span></div>
           ) : null}
         </div>
         <DragOverlay dropAnimation={null}>
