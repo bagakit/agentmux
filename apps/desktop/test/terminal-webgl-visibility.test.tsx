@@ -1,5 +1,7 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
+import { tabSwitchObservation } from '../src/renderer/src/lib/tab-switch-observation'
+import { WorkbenchPresentationContext } from '../src/renderer/src/lib/workbench-presentation'
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
@@ -127,6 +129,8 @@ const session: SessionSnapshot = {
   control: { kind: 'terminal', hostId: 'local', runId: 'run-retained', run: { runId: 'run-retained' } }
 }
 const linkOrigin = { workspaceId: 'workspace', tabGroupId: 'group', tabId: 'tab', regionId: 'region' }
+const reference = { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' }
+const switchTarget = { ...reference, presentationId: 'space' }
 let root: Root | null = null
 
 beforeEach(() => {
@@ -153,7 +157,9 @@ afterEach(async () => {
 
 async function render(visible: boolean) {
   await act(async () => {
-    root!.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={linkOrigin} />)
+    root!.render(<WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null, reference, surface: 'space' }}>
+      <TerminalView session={session} themeId="graphite" interactiveResize={false} visible={visible} autoFocus={false} linkOrigin={linkOrigin} />
+    </WorkbenchPresentationContext.Provider>)
   })
   await act(async () => {
     await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain('before '))
@@ -169,6 +175,24 @@ async function hiddenOutput(data: string, startByte: number) {
     await vi.waitFor(() => expect(fixture.terminals[0]?.completed).toContain(data))
   })
 }
+
+it('reports a warm Terminal switch through its actual visibility hook without attaching again', async () => {
+  await render(true); await render(false)
+  const original = fixture.terminals[0], readySinceAt = rendererPerformance.snapshot().terminals[0]!.readySinceAt
+  const release = tabSwitchObservation.registerPlacement(switchTarget, () => true)
+  try {
+    tabSwitchObservation.begin(switchTarget, 'terminal', performance.now()); tabSwitchObservation.selected(switchTarget)
+    expect(tabSwitchObservation.snapshot().at(-1)!.terminal?.visible).toBe(false)
+    await render(true)
+    await vi.waitFor(() => expect(tabSwitchObservation.snapshot().at(-1)!.frameMs).not.toBeNull())
+    expect(rendererPerformance.snapshot().tabSwitches.at(-1)).toMatchObject({ state: 'observed', mode: 'terminal',
+      target: switchTarget, terminal: { sessionId: session.id, runId: session.control.run.runId, readySinceAt,
+        visible: true, revealed: true, liveReady: true, acceptsInput: true, readOnly: false, replaying: false } })
+    expect(tabSwitchObservation.snapshot().at(-1)!.inputReadyMs).not.toBeNull()
+    expect(fixture.terminals[0]).toBe(original); expect(fixture.attach).toHaveBeenCalledTimes(1)
+    expect(fixture.detach).not.toHaveBeenCalled()
+  } finally { release() }
+})
 
 it('releases only the GPU when hidden, parses ordered hidden bytes, and refreshes the same terminal on reveal', async () => {
   const beforeCosts = rendererPerformance.snapshot().terminalWrites.hidden.count

@@ -1,7 +1,9 @@
 import { rendererPerformance } from '../lib/renderer-performance'
+import { tabSwitchObservation } from '../lib/tab-switch-observation'
+import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
 import { useSessionLinkOpening } from '../lib/session-link-opening'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
-import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
+import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
@@ -205,6 +207,15 @@ export function TerminalView({
   const rootRef = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal | null>(null)
   const observationReaderRef = useRef<(() => AgentMuxTerminalViewObservation | undefined) | null>(null)
+  const switchReaderRef = useRef<(() => RendererTabSwitchTerminal | null) | null>(null)
+  const presentation = useWorkbenchBrowserPresentation()
+  const reference = presentation.reference
+  const switchTarget = useMemo(() => reference && linkOrigin.regionId ? { ...reference,
+    regionId: linkOrigin.regionId, presentationId: presentation.projection?.presentationId ?? presentation.surface ?? 'space' } : null,
+  [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, linkOrigin.regionId, presentation.projection?.presentationId, presentation.surface])
+  useLayoutEffect(() => {
+    if (switchTarget) return tabSwitchObservation.registerTerminal(switchTarget, () => switchReaderRef.current?.() ?? null)
+  }, [switchTarget, session.id, session.control.run.runId])
   const inputGeometryRef = useRef<TerminalInputGeometry | null>(null)
   const refreshObservationRef = useRef<(() => Promise<void>) | null>(null)
   const onObservationRefreshRef = useRef(onObservationRefresh)
@@ -271,6 +282,9 @@ export function TerminalView({
    */
   const [revealOverdue, setRevealOverdue] = useState(false)
   const [liveOutputReady, setLiveOutputReady] = useState(false)
+  useLayoutEffect(() => {
+    if (switchTarget) tabSwitchObservation.observe(switchTarget)
+  }, [switchTarget, visible, hydrating, liveOutputReady, readOnly, canControlRun])
   const [attachFailed, setAttachFailed] = useState(false)
   const [attachmentFailure, setAttachmentFailure] = useState<{ step: string; message: string } | null>(null)
   const [refreshingObservation, setRefreshingObservation] = useState(false)
@@ -759,6 +773,13 @@ export function TerminalView({
       }
     }
     observationReaderRef.current = readObservation
+    const readSwitch = (): RendererTabSwitchTerminal | null => disposed || terminalRef.current !== terminal ? null : ({
+      sessionId: session.id, runId: session.control.run.runId, readySinceAt,
+      visible: visibleRef.current && terminalRoot.isConnected && !terminalRoot.closest('[hidden], [inert]'),
+      revealed, liveReady: readyForLiveOutput, acceptsInput: acceptsCurrentInput(), readOnly: readOnlyRef.current,
+      replaying: replayingContinuation
+    })
+    switchReaderRef.current = readSwitch
     const currentInputElement = (element: HTMLElement) =>
       !disposed && terminalRef.current === terminal && visibleRef.current &&
       terminal.element === element && element.isConnected && !element.closest('[hidden], [inert]')
@@ -1466,6 +1487,7 @@ export function TerminalView({
         onObservationRefreshRef.current?.(null)
       }
       if (observationReaderRef.current === readObservation) observationReaderRef.current = null
+      if (switchReaderRef.current === readSwitch) switchReaderRef.current = null
       if (inputGeometryRef.current === inputGeometry) inputGeometryRef.current = null
       clearTimeout(revealDeadline)
       clearLinkPreview()

@@ -7,6 +7,6 @@ export function performanceFixture(): RendererPerformanceSnapshot {
     consumers: { composer: visibility(), sessionPane: visibility() }, sessionEvents: timing(),
     terminalWrites: { visible: timing(), hidden: timing(), bytes: 0, stringCodeUnits: 0 },
     inputDelay: { state: 'unsupported', reason: 'unsupported in fixture', durationThresholdMs: 16, timing: timing() },
-    longTasks: { state: 'unsupported', reason: 'unsupported in fixture', timing: timing() }, terminals: [], omittedTerminals: 0, unavailableTerminals: 0, slowEvents: [],
+    longTasks: { state: 'unsupported', reason: 'unsupported in fixture', timing: timing() }, terminals: [], omittedTerminals: 0, unavailableTerminals: 0, tabSwitches: [], tabSwitchesOmitted: 0, slowEvents: [],
     observerCost: { snapshots: timing(), performanceCallbacks: timing() } }
 }

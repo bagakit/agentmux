@@ -2,6 +2,7 @@ import { Component, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { createPortal } from 'react-dom'
 import { WorkbenchPresentationContext, type BrowserControlConfirmation } from '../lib/workbench-presentation'
 import { workbenchRegionProjectionSlotId } from '../lib/workbench-projection'
+import { tabSwitchObservation } from '../lib/tab-switch-observation'
 
 type ReadingRange = { start: Node; startOffset: number; end: Node; endOffset: number }
 type ReadingScroll = { element: HTMLElement; top: number; left: number }
@@ -139,6 +140,13 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
   const parking = useRef<HTMLDivElement>(null)
   const showHomeNotice = Boolean(homeNotice)
   const [noticeHome, setNoticeHome] = useState<HTMLElement | null>(null)
+  const switchTarget = useMemo(() => reference ? { ...reference, presentationId: projection?.presentationId ?? surface ?? 'space' } : null,
+    [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, reference?.regionId, projection?.presentationId, surface])
+  useLayoutEffect(() => {
+    if (!switchTarget || (kind === 'region') !== (projection?.entity.kind === 'region')) return
+    return tabSwitchObservation.registerPlacement(switchTarget, () => visible && host.isConnected &&
+      host.parentElement?.id === (targetId ?? homeId) && !host.closest('[hidden], [inert]'))
+  }, [switchTarget, kind, projection?.entity.kind, visible, host, targetId, homeId])
   useLayoutEffect(() => {
     const destinationId = targetId ?? homeId
     const attach = () => {
@@ -179,6 +187,7 @@ export function StableWorkbenchView({ homeId, targetId, primaryTabId, nativeRegi
       // Confirm the actual placement before describing it. Pending targets retain
       // the original View; a destination hint alone does not prove it moved.
       setNoticeHome(showHomeNotice && targetId !== null ? document.getElementById(homeId) : null)
+      if (switchTarget) tabSwitchObservation.observe(switchTarget)
       return true
     }
     // Keep the already-mounted view in its last host while a Focus slot arrives.

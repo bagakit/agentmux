@@ -86,6 +86,14 @@ const boundedArray = (max: number, parse: Parser): Parser => v => {
   if (!Array.isArray(v) || v.length > max) invalid()
   for (const item of v) parse(item)
 }
+const tabSwitchParser = record({ id: count,
+  target: record({ displayWorkspaceId: identity, groupId: identity, tabId: identity, regionId: identity, presentationId: identity }),
+  handlerAt: number, inputDelayMs: nullable(number), selectedMs: nullable(number), placedMs: nullable(number),
+  terminalMs: nullable(number), inputReadyMs: nullable(number), frameMs: nullable(number),
+  state: v => { if (!['pending', 'observed', 'superseded'].includes(v as string)) invalid() },
+  mode: v => { if (!['unknown', 'terminal', 'activity', 'other'].includes(v as string)) invalid() },
+  terminal: nullable(record({ sessionId: identity, runId: identity, readySinceAt: nullable(number),
+    visible: boolean, revealed: boolean, liveReady: boolean, acceptsInput: boolean, readOnly: boolean, replaying: boolean })) })
 const performanceParser = record({ startedAt: number, observedAt: number, recording: literal('bounded-lifetime'),
   selectorTiming: literal('counts-only'), writeTiming: literal('parser-callback-wall'),
   consumers: record({ composer: visibilityParser, sessionPane: visibilityParser }), sessionEvents: timingParser,
@@ -97,6 +105,7 @@ const performanceParser = record({ startedAt: number, observedAt: number, record
     visible: boolean, visibleSinceAt: nullable(number), readySinceAt: nullable(number), revealed: boolean, liveReady: boolean, acceptsInput: boolean,
     replaying: boolean, inFlightWrites: count, queuedItems: count, queuedBytes: count, pendingItems: count, pendingBytes: count,
     cols: count, rows: count, normalLines: count, alternateLines: count })), omittedTerminals: count, unavailableTerminals: count,
+  tabSwitches: boundedArray(16, tabSwitchParser), tabSwitchesOmitted: count,
   slowEvents: boundedArray(32, record({ kind: v => { if (!['session-event','terminal-write','long-task','input-delay'].includes(v as string)) invalid() },
     detail: text, observedAt: number, durationMs: number })),
   observerCost: record({ snapshots: timingParser, performanceCallbacks: timingParser }) })
