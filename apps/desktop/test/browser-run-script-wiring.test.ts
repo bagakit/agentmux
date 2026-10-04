@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from '../src/main/browser-operation-feedback.js'
-import { BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
+import { AgentMuxControlServer, BROWSER_PAGE_CAPABILITY_NAMES, browserPageCapabilityNames } from '@agentmux/core'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
+import { projectBrowserControlResult } from '../src/main/browser-completion-control.js'
 import { mkdtempSync } from 'node:fs'
 import { EventEmitter } from 'node:events'
 import { LocalExecutionHost } from '@agentmux/core'
@@ -13,7 +15,7 @@ import type { BrowserDownloadReceipt, BrowserDownloadChunk } from '../src/shared
 import vm from 'node:vm'
 import { readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { BrowserDemonstrationCapture } from '../src/main/browser-demonstration-capture.js'
 import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder } from '../src/main/browser-demonstration-recorder.js'
 import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../src/main/browser-task-assets.js'
@@ -163,7 +165,7 @@ vi.mock('../src/main/browser-page-dispatch.js', () => ({
 
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { BrowserViewManager, type BrowserProfileResolver } from '../src/main/browser-view-manager.js'
-import { BrowserOperationFileStore, BrowserOperationJournal } from '../src/main/browser-operation-journal.js'
+import { BrowserOperationFileStore, BrowserOperationJournal, type BrowserOperationJournalDocument } from '../src/main/browser-operation-journal.js'
 import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
 import { BrowserResultArtifactStore } from '../src/main/browser-result-artifact.js'
 import type { BrowserResultArtifactReference, BrowserResultArtifactChunk } from '../src/shared/browser-result-artifact.js'
@@ -1008,6 +1010,138 @@ describe('Browser RSI：manager 到真实 journal 的竖切', () => {
     const path = join(mkdtempSync(join(tmpdir(), 'agentmux-operation-wiring-')), 'operations.json')
     return { path, journal: new BrowserOperationJournal(new BrowserOperationFileStore(path)) }
   }
+
+  it('旧步骤缺口在 Main owner 拒绝整轮和单步，原页面仍可执行新操作', async () => {
+    const { path, journal: first } = fileJournal()
+    await first.start({ id: 'legacy-gap', browserId: 'b1', operator: { id: 'agent', name: 'Agent' }, summary: 'Original', url: 'https://example.invalid/' })
+    for (let index = 1; index <= 3; index++) {
+      await first.startStep('legacy-gap', { method: 'pressKey', label: 'Original key', replay: { method: 'pressKey', url: 'https://example.invalid/', args: ['ArrowDown'] } })
+      await first.finishStep('legacy-gap', index, { status: 'completed' })
+    }
+    await first.finish('legacy-gap', 'completed')
+    const document = JSON.parse(await readFile(path, 'utf8')) as BrowserOperationJournalDocument
+    document.operations[0]!.steps = document.operations[0]!.steps.slice(1)
+    await writeFile(path, JSON.stringify(document)) // An actual old retained tail, not a new empty identity.
+    const journal = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+    const { manager, contents } = await managerWithBrowser(journal)
+    const surviving = document.operations[0]!.steps.map(step => step.replay!)
+    const plan = { schema: 'agentmux.browser-replay.v1' as const, operationId: 'legacy-gap', url: 'https://example.invalid/', steps: surviving }
+    createDispatch.mockClear()
+    await expect(manager.replayPlan('legacy-gap')).rejects.toThrow(/incomplete/)
+    await expect(manager.runReplay('b1', plan)).rejects.toThrow(/incomplete/)
+    await expect(manager.runReplay('b1', { ...plan, steps: [surviving[0]!] })).rejects.toThrow(/incomplete/)
+    expect(createDispatch).not.toHaveBeenCalled()
+    expect(contents.isDestroyed()).toBe(false)
+    expect((await journal.get('legacy-gap'))?.steps.map(step => step.sequence)).toEqual([2, 3])
+    expect(await manager.runScript('b1', 'return "new work remains available"')).toMatchObject({ result: 'new work remains available', outcome: { kind: 'completed' } })
+  }, 30_000)
+
+  it('未知和停止的原操作不能通过调用者自制单步计划重放', async () => {
+    const { journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    await journal.start({ id: 'original-unknown', browserId: 'b1', operator: { id: 'agent', name: 'Agent' }, summary: 'Original', url: 'https://example.invalid/' })
+    await journal.startStep('original-unknown', { method: 'pressKey', label: 'Applied key', replay: { method: 'pressKey', url: 'https://example.invalid/', args: ['ArrowDown'] } })
+    await journal.finishStep('original-unknown', 1, { status: 'completed' })
+    const plan = { schema: 'agentmux.browser-replay.v1' as const, operationId: 'original-unknown', url: 'https://example.invalid/', steps: [{ method: 'pressKey', url: 'https://example.invalid/', args: ['ArrowDown'] }] }
+    for (const phase of ['indeterminate', 'stopped'] as const) {
+      await journal.finish('original-unknown', phase)
+      createDispatch.mockClear()
+      await expect(manager.runReplay('b1', plan)).rejects.toThrow(/stopped|unconfirmed/)
+      expect(createDispatch).not.toHaveBeenCalled()
+      expect(await journal.get('original-unknown')).toMatchObject({ id: 'original-unknown', phase })
+    }
+  })
+
+  it('真实 CLI 经公共 socket 与当前 Workbench 分支消费原 identity、整轮/单步和缺口拒绝', async () => {
+    const { path, journal } = fileJournal()
+    const { manager } = await managerWithBrowser(journal)
+    await journal.start({ id: 'cli-original', browserId: 'b1', operator: { id: 'agent', name: 'Agent' }, summary: 'Original', url: 'https://example.invalid/' })
+    for (let sequence = 1; sequence <= 2; sequence++) {
+      await journal.startStep('cli-original', { method: 'pressKey', label: 'Key', replay: { method: 'pressKey', url: 'https://example.invalid/', args: ['ArrowDown'] } })
+      await journal.finishStep('cli-original', sequence, { status: 'completed' })
+    }
+    await journal.finish('cli-original', 'completed')
+    for (let index = 0; index < 64; index++) {
+      const id = `cli-later-${index}`
+      await journal.start({ id, browserId: 'b1', operator: { id: 'agent', name: 'Agent' }, summary: 'Later', url: 'https://example.invalid/' })
+      await journal.finish(id, 'completed')
+    }
+    // Execute the unchanged production Control branch, rather than reimplementing its mode semantics.
+    const source = await readFile(join(process.cwd(), 'apps/desktop/src/renderer/src/store.ts'), 'utf8')
+    const from = source.indexOf("    if (request.operation === 'browser.history')")
+    const until = source.indexOf('    const state = get()', from)
+    expect(from).toBeGreaterThan(0); expect(until).toBeGreaterThan(from)
+    const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor
+    const execute = new AsyncFunction('request', 'api', 'controlFailure', 'requireActive', source.slice(from, until))
+    const api = { browser: {
+      listOperationHistory: () => manager.listOperationHistory(),
+      getOperation: (id: string) => manager.getOperation(id),
+      replayPlan: (id: string) => manager.replayPlan(id),
+      runReplay: (id: string, plan: Parameters<BrowserViewManager['runReplay']>[1]) => manager.runReplay(id, plan)
+    } }
+    const socketPath = join(dirname(path), 'control.sock')
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], execute: async request =>
+      projectBrowserControlResult(await execute(request, api, (code: string, message: string) => Object.assign(new Error(message), { code }), () => {})) })
+    await server.start()
+    const invoke = (args: string[]) => runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', ...args], objectCliEnvironment(dirname(path)))
+    const previousDispatch = createDispatch.getMockImplementation()!
+    createDispatch.mockImplementation(() => async name => name === 'pageInfo' ? { url: 'https://example.invalid/' } : null)
+    try {
+      const history = await invoke(['history', '--browser', 'b1'])
+      expect(history.code, history.stderr).toBe(0)
+      expect(JSON.parse(history.stdout).result.operations).toHaveLength(64)
+      expect(JSON.parse(history.stdout).result.operations.some((operation: { id: string }) => operation.id === 'cli-original')).toBe(false)
+      const inspect = await invoke(['inspect', '--operation-id', 'cli-original'])
+      expect(inspect.code, inspect.stderr).toBe(0)
+      expect(JSON.parse(inspect.stdout).result.runOperation).toMatchObject({ id: 'cli-original', steps: [{ sequence: 1 }, { sequence: 2 }] })
+      const preview = await invoke(['replay', '--browser', 'b1', '--operation-id', 'cli-original', '--preview'])
+      expect(preview.code, preview.stderr).toBe(0)
+      expect(JSON.parse(preview.stdout).result.plan.steps).toHaveLength(2)
+      for (const [mode, count] of [[['--run'], 2], [['--step', '2'], 1]] as const) {
+        const reply = await invoke(['replay', '--browser', 'b1', '--operation-id', 'cli-original', ...mode])
+        expect(reply.code, reply.stderr).toBe(0)
+        expect(JSON.parse(reply.stdout).result).toMatchObject({ result: { replayOf: 'cli-original', steps: count }, outcome: { kind: 'completed' }, runOperation: { replayOf: 'cli-original' } })
+      }
+      for (const barrier of ['unsafe', 'failed', 'no-contribution'] as const) {
+        const id = `cli-${barrier}`
+        await journal.start({ id, browserId: 'b1', operator: { id: 'agent', name: 'Agent' }, summary: 'Original barrier', url: 'https://example.invalid/' })
+        await journal.startStep(id, { method: 'pressKey', label: 'Safe-looking first step', replay: { method: 'pressKey', url: 'https://example.invalid/', args: ['ArrowDown'] } })
+        await journal.finishStep(id, 1, { status: 'completed' })
+        await journal.startStep(id, { method: barrier === 'unsafe' ? 'fillInput' : 'snapshot', label: 'Original barrier',
+          ...(barrier === 'unsafe' ? { replay: { method: 'fillInput', url: 'https://example.invalid/', args: ['private original input'] } } : {}) })
+        await journal.finishStep(id, 2, { status: barrier === 'failed' ? 'failed' : 'completed' })
+        await journal.finish(id, barrier === 'failed' ? 'failed' : 'completed')
+        const authoritative = await manager.replayPlan(id)
+        expect(authoritative?.steps).toHaveLength(2)
+        expect(authoritative?.steps[1]?.blockedReason).toBeTruthy()
+        createDispatch.mockClear()
+        // Even a direct IPC caller stripping the original barrier cannot dispatch an action.
+        const forged = { ...authoritative!, steps: authoritative!.steps.map(({ blockedReason: _blocked, ...step }) => step) }
+        await expect(manager.runReplay('b1', forged)).rejects.toThrow(/original.*requires review/i)
+        await expect(manager.runReplay('b1', { ...forged, steps: [forged.steps[0]!] })).rejects.toThrow(/original.*requires review/i)
+        for (const mode of [['--run'], ['--step', '1']]) {
+          const rejected = await invoke(['replay', '--browser', 'b1', '--operation-id', id, ...mode])
+          expect(rejected.code).toBe(1)
+          expect(JSON.parse(rejected.stderr).error.message).toMatch(/original.*requires review/i)
+        }
+        expect(createDispatch).not.toHaveBeenCalled()
+        expect((await journal.get(id))?.steps).toHaveLength(2)
+      }
+      const document = JSON.parse(await readFile(path, 'utf8')) as BrowserOperationJournalDocument
+      document.operations.find(operation => operation.id === 'cli-original')!.steps.shift()
+      await writeFile(path, JSON.stringify(document))
+      const restored = new BrowserOperationJournal(new BrowserOperationFileStore(path))
+      api.browser.replayPlan = id => restored.replayPlan(id)
+      createDispatch.mockClear()
+      for (const mode of [['--preview'], ['--run'], ['--step', '1']]) {
+        const reply = await invoke(['replay', '--browser', 'b1', '--operation-id', 'cli-original', ...mode])
+        expect(reply.code).toBe(1)
+        expect(JSON.parse(reply.stderr).error.message).toContain('incomplete')
+      }
+      expect(createDispatch).not.toHaveBeenCalled()
+      expect((await restored.get('cli-original'))?.steps.map(step => step.sequence)).toEqual([2])
+    } finally { createDispatch.mockImplementation(previousDispatch); await server.stop(); await rm(dirname(path), { recursive: true, force: true }) }
+  }, 30_000)
 
   it('子进程崩了：收据和 history 必须给出同一个结论，不能一个说别重试、一个说改完重跑', async () => {
     // 这是一次**真的**崩溃：脚本让自己的进程直接退出，不走结果帧那条路。
