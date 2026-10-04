@@ -30,7 +30,7 @@ import { createPortal } from 'react-dom'
 import { lazy, Suspense, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { recordForWorkbenchTab, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { Panel, PanelGroup, PanelResizeHandle, type ImperativePanelGroupHandle } from 'react-resizable-panels'
 import { BrowserPane } from './BrowserPane'
 import { ConfirmationDialog } from './ConfirmationDialog'
@@ -119,9 +119,10 @@ type SplitTarget = { groupId: string; direction: SplitDirection }
 
 function DragPreview({ tab }: { tab: WorkbenchTab }) {
   const sessions = useWorkbenchTabSessions(tab)
+  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
-  const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines)
+  const label = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata)
   return (
     <div className="tab-drag-preview">
       <GripVertical size={12} />
@@ -142,6 +143,7 @@ function SortableWorkbenchTab({
   const projection = useContext(WorkbenchProjectionContext)
   const mote = useContext(MoteWorkfaceContext)
   const sessions = useWorkbenchTabSessions(tab)
+  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   const dirtyDocuments = useAppStore((state) => state.dirtyDocuments)
@@ -175,7 +177,7 @@ function SortableWorkbenchTab({
   // The one place a tab's shown name is decided: the naming SSOT chain, fed the Store's own facts. It is
   // NOT `session.label` — that is only the chain's lowest tier (Provider·Workspace), overridden by a user
   // rename, a single Agent's own name, or the multi-Agent family name.
-  const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines)
+  const displayName = workbenchTabDisplayName(tab, sessions, agentNames, timelines, sessionNameMetadata)
   const copyableAgentSessionId = copyableAgentSessionIdForTab(tab)
   // 文件 Tab 才有路径复制与「在文件管理器中显示」；其余类型缺席，那三项整组不出现。workspaceRoot 用于把
   // 相对 path 接成绝对路径（走共用的 formatPathsForCopy 出口）；reveal 走 FileExplorer 同一条 api.files.reveal。
@@ -637,17 +639,18 @@ function WorkbenchRegionTree(props: {
   const { tab } = props
   const [dragging, setDragging] = useState(false)
   const sessions = useWorkbenchTabSessions(tab)
+  const sessionNameMetadata = useWorkbenchTabNameMetadata(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
   const swapTargets = useMemo(() => {
-    const agentFactsFor = workbenchAgentFactsFor(sessions, agentNames, timelines)
+    const agentFactsFor = workbenchAgentFactsFor(sessions, agentNames, timelines, sessionNameMetadata)
     return regionIds(tab.layout.root).flatMap((regionId) => {
       const region = tab.regions[regionId]
       if (!region) return []
       const facts = region.kind === 'agent' ? agentFactsFor(region.sessionId) : null
-      return [{ regionId, label: facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions) }]
+      return [{ regionId, label: facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions, sessionNameMetadata) }]
     })
-  }, [sessions, agentNames, timelines, tab.regions, tab.layout.root])
+  }, [sessions, agentNames, timelines, sessionNameMetadata, tab.regions, tab.layout.root])
   // Layout slots may collapse or move; original Region content remains keyed by
   // its durable identity until that Region is actually removed.
   return <>

@@ -15,6 +15,7 @@ import {
   type AgentMuxAgentMessageInput,
   type AgentMuxRpcCallContext,
   runtimeStorageUsage,
+  loadSessionHistorySources,
   agentInteractionResponseUnavailableReason,
   type AgentCapabilities,
   type AgentCatalogEntry,
@@ -47,6 +48,7 @@ import type {
   AgentLaunchInput,
   AgentSessionControl,
   AgentSessionRecoveryCandidate,
+  AgentSessionNameMetadata,
   AppConfig,
   HostConfig,
   RuntimeEvent,
@@ -668,6 +670,7 @@ export class RuntimeController {
   }
 
   async snapshot(config: AppConfig): Promise<RuntimeSnapshot> {
+    const sessionNames = this.readSessionNames(config)
     const hosts = [...this.hosts]
     const unobservedWarnings = new Map<string, RuntimeEndpointWarning>()
     const results = await Promise.allSettled(hosts.map(async ([hostId, { client, config: hostConfig }]) => {
@@ -770,11 +773,38 @@ export class RuntimeController {
       client.runtimeIdentity().ownership === 'unverified' ? [hostId] : []
     ))
     return {
+      ...await sessionNames,
       sessions, timelines: Object.fromEntries(timelineEntries), recoveryCandidates,
       ...(runtimeOwnershipWarnings.length > 0 ? { runtimeOwnershipWarnings } : {}),
       // A background connection can finish while another endpoint is being read. This cut still
       // did not observe that endpoint; keep its warning until the restored event's fresh resync.
       runtimeEndpointWarnings: [...new Map([...this.endpointWarnings, ...unobservedWarnings]).values()]
+    }
+  }
+
+  private async readSessionNames(config: AppConfig): Promise<Pick<RuntimeSnapshot, 'sessionNameMetadata' | 'sessionNameMetadataWarning'>> {
+    const localHostIds = new Set<string>(config.hosts.filter(host => host.kind === 'local').map(host => host.id))
+    if (localHostIds.size === 0) return {}
+    try {
+      // One catalogue read per complete snapshot, never per Host, label, or output event. The
+      // original store also covers stale bindings and retirement without consulting a live Run.
+      const sources = await loadSessionHistorySources(this.agentSessionStore)
+      const sessionNameMetadata = sources.flatMap((source): AgentSessionNameMetadata[] => {
+        if (!localHostIds.has(source.hostId) || !source.history) return []
+        const { providerId, executorId, workspacePath } = source.history
+        return [{
+          agentSessionId: source.agentSessionId, hostId: source.hostId, providerId, executorId, workspacePath,
+          state: source.state,
+          label: agentFallbackLabel(config, { hostId: source.hostId, providerId, executorId, workspacePath })
+        }]
+      })
+      return sessionNameMetadata.length > 0 ? { sessionNameMetadata } : {}
+    } catch (error) {
+      return { sessionNameMetadataWarning: {
+        code: error instanceof AgentMuxError ? error.code : 'SESSION_NAME_METADATA_UNAVAILABLE',
+        message: `Saved Session names could not be read: ${error instanceof Error ? error.message : String(error)}`,
+        recovery: 'Refresh the Session snapshot to retry reading the original Session store. Existing Agents remain available.'
+      } }
     }
   }
 

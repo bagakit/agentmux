@@ -16,6 +16,7 @@ import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
 export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWarning?: string | undefined } = {}) {
   const warning = useAppStore((state) => state.environmentWarning)
+  const nameMetadataWarning = useAppStore(state => state.sessionNameMetadataWarning)
   const hosts = useAppStore((state) => state.runtimeOwnershipWarnings)
   const endpointWarnings = useAppStore((state) => state.runtimeEndpointWarnings)
   const config = useAppStore((state) => state.config)
@@ -93,6 +94,11 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   // missing Session facts during recovery cannot prove that their placement problem resolved.
   const environmentInbox = useServiceNotices('global:environment', environment, warning !== undefined)
   const ownershipInbox = useServiceNotices('global:runtime-ownership', ownership, hosts !== undefined)
+  const nameMetadataInbox = useServiceNotices('global:session-names', nameMetadataWarning ? [{
+    id: 'metadata', cause: nameMetadataWarning.code, notice: {kind: 'indeterminate', notice: {
+      step: 'Reading saved Session names', mode: nameMetadataWarning.message, restore: nameMetadataWarning.recovery
+    }}
+  }] : [], !loading)
   const endpoints: ServiceNoticeItem[] = (endpointWarnings ?? []).map((warning) => runtimeEndpointNotice(warning,
     config?.hosts.find((host) => host.id === warning.hostId)?.label ?? warning.hostId,
     hostId => settings?.openHost(hostId)))
@@ -139,7 +145,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       restore: 'Close and reopen the floating panel. Existing Browser pages and Agents remain available.'
     } }
   }] : [], true)
-  const inboxes = [environmentInbox, ownershipInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
+  const inboxes = [environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox]
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, 0)
   const available = inboxes.every((inbox) => inbox.available)

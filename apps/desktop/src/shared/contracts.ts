@@ -1035,7 +1035,22 @@ export type SessionInputWriteResult = { ok: true } | { ok: false; error: {
   code: string; message: string; detail?: string; controlFailure?: AgentMuxControlFailure; logId?: string
 } }
 
+/** Reading identity only: `active` is a durable record state, never a process observation. */
+export type AgentSessionNameMetadata = {
+  agentSessionId: string
+  hostId: string
+  providerId: AgentProviderId
+  executorId: AgentExecutorId
+  workspacePath: string
+  label: string
+  state: 'active' | 'retired'
+}
+
 export type RuntimeSnapshot = {
+  /** Original local Core store metadata, independent of Runtime connection or recovery eligibility. */
+  sessionNameMetadata?: AgentSessionNameMetadata[]
+  /** A name read failed; this does not change any endpoint's connection or capabilities. */
+  sessionNameMetadataWarning?: { code: string; message: string; recovery: string }
   /** Connected hosts whose daemon launch provenance could not be verified. */
   runtimeOwnershipWarnings?: string[]
   /** These endpoints did not provide an authoritative complete projection. */

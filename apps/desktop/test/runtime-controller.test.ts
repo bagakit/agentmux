@@ -262,6 +262,7 @@ const runtimeFixture = vi.hoisted(() => {
 })
 
 vi.mock('@agentmux/core', async () => {
+  const { loadSessionHistorySources } = await import('../../../packages/core/src/agent-session-store.js')
   const { agentInteractionResponseUnavailableReason } = await import('@agentmux/core/agent-interaction-state')
   const { agentPromptPredecessor, validateAgentPromptCondition } = await import('@agentmux/core/prompt-condition')
   class AgentMuxError extends Error {
@@ -276,6 +277,7 @@ vi.mock('@agentmux/core', async () => {
   }
   return {
     AgentMuxError,
+    loadSessionHistorySources,
     agentInteractionResponseUnavailableReason,
     agentPromptPredecessor,
     validateAgentPromptCondition,
@@ -296,6 +298,7 @@ vi.mock('../src/main/host-factory.js', () => ({
     return created
   })
 }))
+vi.mock('electron', () => ({ app: {}, nativeImage: {} }))
 
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
