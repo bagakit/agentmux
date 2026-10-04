@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
-import { presentError } from '@agentmux/client-ui/error-presentation'
+import { describeError, presentError } from '@agentmux/client-ui/error-presentation'
+import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
+import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
+import { copyTextToClipboard } from '../lib/clipboard-copy'
+import { messageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 
 type Action = () => void | Promise<void>
-type Failure = { generation: number; message: string; retry?: () => void }
+type Failure = { generation: number; message: string; error: unknown; retry?: () => void }
 
 /** Local user actions own their feedback; delivery/Runtime facts remain with their existing owners. */
 export function useComposerFeedback(scope: string) {
@@ -20,7 +24,9 @@ export function useComposerFeedback(scope: string) {
   const isCurrent = () => mounted.current && currentScope.current.generation === generation
   function report(error: unknown, retry?: Action) {
     if (!isCurrent()) return
-    setFailure({ generation, message: presentError(error), ...(retry ? { retry: () => { void run(retry) } } : {}) })
+    const presented = presentError(error)
+    setFailure({ generation, message: presentMessageDeliveryFailure({ error, context: 'tool' }).state || presented,
+      error, ...(retry ? { retry: () => { void run(retry) } } : {}) })
   }
   async function run(action: Action): Promise<void> {
     setFailure(null)
@@ -30,9 +36,18 @@ export function useComposerFeedback(scope: string) {
 }
 
 export function ComposerFeedback({ failure, onDismiss }: { failure: Failure | null; onDismiss(): void }) {
-  return failure ? <div className="composer-feedback" role="alert">
-    <span>{failure.message}</span>
-    {failure.retry ? <button type="button" onClick={failure.retry}>Retry</button> : null}
-    <button type="button" onClick={onDismiss} aria-label="Dismiss message tool error">Dismiss</button>
-  </div> : null
+  const logId = failure ? describeError(failure.error).logId : undefined
+  const [log, setLog] = useState(() => logId ? messageDeliveryDiagnostics.get(logId) : undefined)
+  useEffect(() => {
+    const update = () => setLog(logId ? messageDeliveryDiagnostics.get(logId) : undefined)
+    update()
+    return messageDeliveryDiagnostics.subscribe(update)
+  }, [logId])
+  return failure ? <div className="composer-feedback"><MessageDeliveryFailure error={failure.error} context="tool"
+    logId={logId} log={log?.record.logId === logId ? log : undefined} copyText={async text => {
+      let issue: unknown
+      const copied = await copyTextToClipboard(text, error => { issue = error })
+      if (!copied) throw issue
+      return copied
+    }} onRetry={failure.retry} onDismiss={onDismiss} /></div> : null
 }

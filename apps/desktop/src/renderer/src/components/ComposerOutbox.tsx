@@ -1,5 +1,5 @@
 import type { PromptPreparationRetryProgress } from '../lib/prompt-preparation-retry'
-import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
+import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { messageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { MailboxLocationContext } from './MailboxLocationContext'
 import { useEffect, useRef, useState, type MouseEvent } from 'react'
@@ -82,13 +82,17 @@ function CopyQueuedMessage({ entry, onCopy }: { entry: ComposerQueuedMessage; on
     }}>{accepted ? <Check size={14} /> : accepted === false ? <TriangleAlert size={14} /> : <Copy size={14} />}</button>
 }
 
-function QueuedDeliveryLog({ logId, copy }: { logId: string; copy?: ((text: string) => Promise<boolean>) | undefined }) {
-  const [log, setLog] = useState(() => messageDeliveryDiagnostics.get(logId))
+function QueuedDeliveryFailure({ entry, copy }: { entry: ComposerQueuedMessage; copy?: ((text: string) => Promise<boolean>) | undefined }) {
+  const logId = entry.logId
+  const [log, setLog] = useState(() => logId ? messageDeliveryDiagnostics.get(logId) : undefined)
   useEffect(() => {
-    setLog(messageDeliveryDiagnostics.get(logId))
-    return messageDeliveryDiagnostics.subscribe(() => setLog(messageDeliveryDiagnostics.get(logId)))
+    const update = () => setLog(logId ? messageDeliveryDiagnostics.get(logId) : undefined)
+    update()
+    return messageDeliveryDiagnostics.subscribe(update)
   }, [logId])
-  return <DeliveryLogDetails logId={logId} log={log} copyText={copy ?? (async () => false)} />
+  return <MessageDeliveryFailure error={entry.error ?? '投递没有确认完成。'} errorCode={entry.errorCode}
+    logId={logId} log={log?.record.logId === logId ? log : undefined} inputUnconfirmed={entry.unconfirmed}
+    preparationReason={entry.preparationWait?.reason} copyText={copy ?? (async () => false)} />
 }
 
 export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive, onHistory, onMove, onSend, onCancelPreparation, onEdit, sendImmediately = false, reading, sessionId, pendingInteraction = false }: {
@@ -145,8 +149,7 @@ export function ComposerOutbox({ queued, selectedId, onSelect, onCopy, onArchive
           {ownFailure ? <p role="alert" className="composer-mailbox__risk">{ownFailure}</p> : null}
           {selected ? <MailboxLocationContext sessionId={sessionId} pending>{(_summary,executionDetails) => <article className="composer-outbox__inline" data-record-key={`queue:${entry.id}`}>
             {editingId === entry.id && onEdit ? <ComposerQueuedMessageEditor key={entry.id} entry={entry} onSave={onEdit} onCancel={() => setEditingId(null)} /> : null}
-            {!entry.preparationWait && (state.busy || entry.error || entry.unconfirmed || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed && !entry.error) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
-            {entry.logId ? <QueuedDeliveryLog logId={entry.logId} copy={onCopy} /> : null}
+            {entry.error || entry.logId || entry.unconfirmed ? <QueuedDeliveryFailure entry={entry} copy={onCopy} /> : !entry.preparationWait && (state.busy || !entry.deliverable || entry.archived) ? <p className={entry.archived && (entry.confirmed || !entry.unconfirmed) ? 'composer-mailbox__record-note' : 'composer-mailbox__risk'} data-kind={state.busy ? 'working' : 'attention'}>{state.detail}</p> : null}
             {entry.preparationWait ? <p className="composer-pending__retry" role="status">{state.detail}</p> : null}
             <ConversationMessage {...reading} compact recordedIdentity messageId={`queue:${entry.id}`} speaker={{role:'unknown',id:UNKNOWN_SPEAKER_ID}} content={entry.text}
               {...(entry.enqueuedAt === undefined ? {} : {createdAt:entry.enqueuedAt})} {...(onCopy ? {onCopy} : {})}

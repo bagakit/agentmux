@@ -11,8 +11,4 @@
 @import './conversation-native-thread.css';
 @import './conversation-avatar.css';
 @import './conversation-reactions.css';
-
-.delivery-log { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .65rem; min-width: 0; }
-.delivery-log code { overflow-wrap: anywhere; font-size: .8em; }
-.delivery-log small { flex-basis: 100%; opacity: .8; overflow-wrap: anywhere; }
-.delivery-log button { font: inherit; font-size: .85em; }
+@import './message-delivery-failure.css';

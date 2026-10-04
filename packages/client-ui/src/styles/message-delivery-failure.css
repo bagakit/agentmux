@@ -1,0 +1,23 @@
+.message-delivery-failure { min-width: 0; padding: 10px 12px; border-radius: var(--radius-sm, 6px); box-shadow: inset 0 0 0 1px var(--line); background: var(--surface-1); color: var(--text); font: var(--fs-meta, 12px)/1.5 var(--font-ui, sans-serif); }
+.message-delivery-failure__heading { display: flex; align-items: center; gap: 7px; }
+.message-delivery-failure__heading > svg { flex: 0 0 auto; color: var(--amber); }
+.message-delivery-failure__heading strong { font-size: var(--fs-meta, 12px); font-weight: 550; }
+.message-delivery-failure__state { margin-top: 5px; color: var(--text-2); overflow-wrap: anywhere; }
+.message-delivery-failure__next { margin: 3px 0 0; color: var(--text-3); overflow-wrap: anywhere; }
+.message-delivery-failure__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; margin-top: 9px; }
+.message-delivery-failure button, .message-delivery-failure .delivery-log button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; min-height: 26px; padding: 3px 7px; border: 0; border-radius: var(--radius-sm, 6px); background: var(--surface-2); color: var(--text-2); font: inherit; cursor: pointer; }
+.message-delivery-failure button:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
+.message-delivery-failure button:disabled { cursor: wait; opacity: .65; }
+.message-delivery-failure button:focus-visible, .message-delivery-failure summary:focus-visible, .message-delivery-failure pre:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.message-delivery-failure__actions [role='status'] { color: var(--text-3); font-size: var(--fs-micro, 11px); overflow-wrap: anywhere; }
+.message-delivery-failure__actions [data-copy-state='failed'] { flex-basis: 100%; color: var(--amber); }
+.message-delivery-failure .message-delivery-failure__dismiss { margin-left: auto; background: none; min-height: 24px; padding: 3px; color: var(--text-3); }
+.message-delivery-failure__details { margin-top: 9px; color: var(--text-3); font-size: var(--fs-micro, 11px); }
+.message-delivery-failure__details > summary { width: fit-content; cursor: pointer; }
+.message-delivery-failure__details[open] > summary { margin-bottom: 8px; }
+.message-delivery-failure__details pre { margin: 8px 0 0; max-height: 220px; overflow: auto; padding: 8px; border-radius: var(--radius-sm, 6px); background: var(--surface-0); color: var(--text-2); font: var(--fs-micro, 11px)/1.5 var(--font-mono, monospace); white-space: pre-wrap; overflow-wrap: anywhere; user-select: text; }
+.composer-feedback { min-width: 0; margin: 6px 0; }
+.delivery-log { display: flex; flex-wrap: wrap; align-items: center; gap: .35rem .65rem; min-width: 0; }
+.delivery-log code { overflow-wrap: anywhere; font-size: .8em; }
+.delivery-log small { flex-basis: 100%; opacity: .8; overflow-wrap: anywhere; }
+.delivery-log button { font: inherit; font-size: .85em; }
