@@ -241,19 +241,23 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
       {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'launcher').map(renderPlugin)}
       <nav className="surface-navigation" aria-label="Primary surfaces">
         <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
-          {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface').map(renderPlugin)}
+          <span className="surface-navigation__group-label" aria-hidden="true">Work</span>
+          {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'work').map(renderPlugin)}
         </div>
-        <button
-          type="button"
-          className="surface-navigation__slot"
-          aria-label="Settings"
-          title="Settings"
-          aria-expanded={settingsOpen}
-          data-settings-section="overview"
-          onClick={() => settingsOpen ? onCloseSettings?.() : settings.open('overview')}
-        >
-          <Settings2 className="surface-navigation__icon" size={14} aria-hidden="true" />
-        </button>
+        <div className="surface-navigation__utilities" role="group" aria-label="Survey and settings">
+          {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'survey').map(renderPlugin)}
+          <button
+            type="button"
+            className="surface-navigation__slot"
+            aria-label="Settings"
+            title="Settings"
+            aria-expanded={settingsOpen}
+            data-settings-section="overview"
+            onClick={() => settingsOpen ? onCloseSettings?.() : settings.open('overview')}
+          >
+            <Settings2 className="surface-navigation__icon" size={14} aria-hidden="true" />
+          </button>
+        </div>
       </nav>
       {activePlugin && tooltip ? (
         <WindowOverlayPortal layer="tooltip">
