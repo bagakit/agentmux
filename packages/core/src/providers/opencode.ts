@@ -6,6 +6,7 @@ import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
 import { catalog } from './shared.js'
+import { hookDeliverySource } from '../agent-hook-delivery.js'
 
 export { readOpenCodeSessionHistoryPage } from './opencode-native-history.js'
 
@@ -159,10 +160,11 @@ function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, 
  * 那个进程不继承 AgentMux 给 PTY 注入的 `AGENTMUX_HOOK_URL`/`AGENTMUX_HOOK_TOKEN`。
  *
  * 投递是 fire-and-forget 且**整体 catch**：插件跑在 Agent 的事件回路里，一次网络失败绝不能把用户的
- * 会话打断。丢事件比抛异常好。
+ * 会话打断。失败保留诊断，绝不抛入 Provider 事件回路。
  */
 function openCodePluginSource(endpoint: string, token: string): string {
   return `// AgentMux managed plugin. Generated — edits are overwritten on reinstall.
+${hookDeliverySource()}
 export async function server() {
   const endpoint = ${JSON.stringify(endpoint)}
   const token = ${JSON.stringify(token)}
@@ -170,20 +172,11 @@ export async function server() {
   return {
     event: async ({ event }) => {
       if (!events.has(event.type)) return
-      try {
-        await fetch(endpoint, {
-          method: 'POST',
-          headers: { authorization: 'Bearer ' + token, 'content-type': 'application/json' },
-          body: JSON.stringify({
-            receiptId: crypto.randomUUID(),
-            eventName: event.type,
-            payload: event.properties ?? {}
-          }),
-          signal: AbortSignal.timeout(2000)
-        })
-      } catch {
-        // 投递失败就丢这一条。绝不让状态上报打断用户的会话。
-      }
+      void sendHookReceipt(endpoint, token, JSON.stringify({
+        receiptId: crypto.randomUUID(), eventName: event.type, payload: event.properties ?? {}
+      })).catch((error) => {
+        console.error('[AgentMux Hook] delivery unconfirmed; Agent remains available:', error)
+      })
     }
   }
 }

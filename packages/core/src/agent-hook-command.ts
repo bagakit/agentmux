@@ -1,4 +1,5 @@
 import process from 'node:process'
+import { sendHookReceipt } from './agent-hook-delivery.js'
 import { randomUUID } from 'node:crypto'
 import {
   HOOK_PAYLOAD_USAGE_KEY,
@@ -227,28 +228,10 @@ export async function runAgentHookCommand(): Promise<void> {
       ...(eventName ? { eventName } : {}),
       payload
     }
-    let response: Response | null = null
-    let lastError: unknown
-    for (let attempt = 0; attempt < 2; attempt += 1) {
-      try {
-        response = await fetch(url, {
-          method: 'POST',
-          headers: {
-            authorization: `Bearer ${token}`,
-            'content-type': 'application/json'
-          },
-          body: JSON.stringify(bodyObj),
-          signal: AbortSignal.timeout(2_000)
-        })
-        if (response.ok) break
-        throw new Error(`AgentMux hook ingress rejected ${eventName ?? 'unknown'}: ${response.status}`)
-      } catch (error) {
-        lastError = error
-        response = null
-      }
-    }
-    if (!response?.ok && lastError) {
-      process.stderr.write(`[AgentMux Hook] ${lastError instanceof Error ? lastError.message : String(lastError)}\n`)
+    try {
+      await sendHookReceipt(url, token, JSON.stringify(bodyObj))
+    } catch (error) {
+      process.stderr.write(`[AgentMux Hook] receipt ${receiptId}: delivery unconfirmed; the Agent remains available. ${error instanceof Error ? error.message : String(error)}\n`)
     }
   }
 }
