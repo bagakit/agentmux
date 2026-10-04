@@ -1,5 +1,5 @@
 import { RetainedDocumentDraftNotice } from './RetainedDocumentDraftNotice'
-import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { AlertTriangle, Check, Code, Eye, FolderOpen, GitCompare, Map, MoreHorizontal, RefreshCw, Save, WrapText } from 'lucide-react'
 import { api } from '../lib/api'
 import { effectiveFileRegionMode } from '../lib/file-region-presentation'
@@ -15,6 +15,8 @@ import { EditorReleasedState } from './EditorReleasedState'
 import { loadFileSourceEditor } from '../lib/file-surface-loading'
 import type { FileEditorViewState } from './FileSourceEditor'
 import { useWorkspaceResource } from '../hooks/useWorkspaceResource'
+import { canFormatFile } from '../lib/file-formats/format-support'
+import { cancelFileRegionFormat, formatFileRegion, type FileFormatResult } from '../lib/file-formats/format-file-region'
 
 const FileSourceEditor = lazy(loadFileSourceEditor)
 const GitDiffCanvas = lazy(async () => ({ default: (await import('./GitDiffCanvas')).GitDiffCanvas }))
@@ -119,6 +121,18 @@ export function EditorPane({
   const monacoTheme = useMonacoTheme()
   const conflict = issue?.kind === 'changed' || issue?.kind === 'deleted'
   const sourceViewState = useRef<FileEditorViewState | null>(null)
+  const [formatResult, setFormatResult] = useState<FileFormatResult | { status: 'formatting'; message: string } | null>(null)
+  const formatRequest = useRef(0)
+  useEffect(() => {
+    setFormatResult(null)
+    return () => { ++formatRequest.current; cancelFileRegionFormat(surface.regionId) }
+  }, [surface.regionId, key, visible, regionMode])
+  function formatDraft(): void {
+    if (formatResult?.status === 'formatting') { cancelFileRegionFormat(surface.regionId); return }
+    const request = ++formatRequest.current
+    setFormatResult({ status: 'formatting', message: 'Formatting current draft…' })
+    void formatFileRegion(surface.regionId).then(result => { if (formatRequest.current === request) setFormatResult(result) })
+  }
 
   // A file Region restored from persistence arrives with no document behind it: the surface is only
   // {regionId,kind,workspaceId,path}, and every other way a file Region appears loads its document as
@@ -168,6 +182,7 @@ export function EditorPane({
                     : <span className="editor-header__status" role="status" aria-label="File saved">Saved</span>}
           <DropdownMenu.Root><DropdownMenu.Trigger asChild><button type="button" className="small-button editor-header__more" aria-label="File options" title="File options"><MoreHorizontal size={14} /></button></DropdownMenu.Trigger>
             <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu file-options-menu" align="end" sideOffset={6} collisionPadding={8}>
+              {regionMode === 'edit' && canFormatFile(document.path) ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={formatDraft}><Code size={13} /><span>{formatResult?.status === 'formatting' ? 'Cancel formatting' : 'Format document'}</span></DropdownMenu.Item> : null}
               <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={wordWrap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleWordWrap()}><WrapText size={13} /><span>Word wrap</span><kbd>Alt+Z</kbd><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
               {regionMode === 'edit' ? <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={minimap} onSelect={event => event.preventDefault()} onCheckedChange={() => toggleMinimap()}><Map size={13} /><span>Minimap</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem> : null}
               <DropdownMenu.CheckboxItem className="tab-context-menu__item" checked={regionMode === 'diff'} onSelect={event => event.preventDefault()} onCheckedChange={value => void setRegionMode(surface.regionId, surface.workspaceId, surface.path, value === true ? 'diff' : 'edit')}><GitCompare size={13} /><span>Diff against HEAD</span><DropdownMenu.ItemIndicator className="file-menu-check"><Check size={12} /></DropdownMenu.ItemIndicator></DropdownMenu.CheckboxItem>
@@ -178,6 +193,7 @@ export function EditorPane({
         </div>
       </header>
       <div className="editor-file-notices">
+        {formatResult?.message ? <div className="editor-file-notice" role={formatResult.status === 'failed' ? 'alert' : 'status'}>{formatResult.message}</div> : null}
         <RetainedDocumentDraftNotice tabId={tabId} surface={surface} />
         {issue ? (
           <div className={`editor-file-notice editor-file-notice--${issue.kind}`} role="alert">

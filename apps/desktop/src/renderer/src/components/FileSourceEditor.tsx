@@ -15,6 +15,9 @@ import { regionCaretFocusTargets } from '../lib/region-focus'
 import { desktopElementVisible } from '../lib/desktop-presentation'
 import { documentKey, type FileWorkbenchSurface } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
+import { cancelFileRegionFormat, formatFileRegion, registerFileRegionFormatter } from '../lib/file-formats/format-file-region'
+import { monacoFormatAdapter } from '../lib/file-formats/monaco-format-adapter'
+import { canFormatFile } from '../lib/file-formats/format-support'
 
 type MonacoStandaloneEditor = Parameters<OnMount>[0]
 type MonacoApi = Parameters<OnMount>[1]
@@ -43,16 +46,20 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
   const monacoTheme = useMonacoTheme()
   const typography = useEditorTypography()
   const editorRef = useRef<MonacoStandaloneEditor | null>(null)
+  const unregisterFormatter = useRef<(() => void) | null>(null)
   // Per-Region URIs keep a preview switch from disposing another Region's model.
   const modelPath = `agentmux-file:///${encodeURIComponent(surface.regionId)}/${encodeURIComponent(key)}`
   const visibleRef = useRef(visible)
   visibleRef.current = visible
   useLayoutEffect(() => () => {
+    unregisterFormatter.current?.()
+    unregisterFormatter.current = null
     const editor = editorRef.current
     if (!editor?.getModel()) return
     viewState.current = { modelPath, state: editor.saveViewState() }
     editorRef.current = null
   }, [modelPath, viewState])
+  useEffect(() => { if (!visible) cancelFileRegionFormat(surface.regionId) }, [visible, surface.regionId])
 
   // Consume a one-shot reveal target (set when the file was opened with a :line location, e.g. a
   // terminal path link). Both entry points call this: `onMount` handles the first open (Monaco
@@ -231,12 +238,35 @@ export function FileSourceEditor({ tabId, surface, visible = true, viewState }: 
     onChange={(value) => update(tabId, value ?? '', surface.regionId)}
     onMount={(editor, monaco) => {
       editorRef.current = editor
+      unregisterFormatter.current?.()
+      const unregister = registerFileRegionFormatter(surface.regionId, monacoFormatAdapter(editor, {
+        path: surface.path,
+        isLive: () => {
+          const current = useAppStore.getState().tabs[tabId]?.regions[surface.regionId]
+          return editorRef.current === editor && current?.kind === 'file' && current.workspaceId === surface.workspaceId && current.path === surface.path
+        },
+        read: () => {
+          const state = useAppStore.getState(), current = state.documents[key]
+          return current ? { content: current.content, generation: state.documentGenerations[key] ?? 0 } : null
+        },
+        observe: changed => useAppStore.subscribe((next, previous) => {
+          if (next.documents[key] !== previous.documents[key] || next.documentGenerations[key] !== previous.documentGenerations[key] ||
+            next.tabs[tabId]?.regions[surface.regionId] !== previous.tabs[tabId]?.regions[surface.regionId]) changed()
+        })
+      }))
+      unregisterFormatter.current = unregister
+      if (canFormatFile(surface.path)) editor.addAction({ id: 'agentmux.formatDocument', label: 'Format document',
+        contextMenuGroupId: '1_modification', contextMenuOrder: 1, run: async () => {
+          const result = await formatFileRegion(surface.regionId)
+          if (result.status !== 'formatted' && result.status !== 'unchanged' && result.status !== 'cancelled' && result.message) useAppStore.getState().reportError(new Error(result.message))
+        } })
       if (viewState.current?.modelPath === modelPath) {
         editor.restoreViewState(viewState.current.state)
       }
       // Monaco owns the editor lifetime. Clear only the instance that disposed itself so a
       // late dispose from an old Region cannot erase a newer editor reference after restore.
       editor.onDidDispose(() => {
+        unregister()
         if (editorRef.current === editor) editorRef.current = null
       })
       registerSaveShortcut(editor, monaco)
