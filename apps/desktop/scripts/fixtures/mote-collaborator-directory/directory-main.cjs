@@ -27,7 +27,7 @@ app.whenReady().then(async () => {
       await read(`directoryScene.view(${JSON.stringify(view)});directoryScene.theme(${light})`); await pause(250)
       const facts = await read(`(()=>{const roster=document.querySelector('[data-mote-directory-view]');const names=[...roster.querySelectorAll('[data-space-nav]')].map(n=>n.getAttribute('data-space-nav'));return {view:roster.dataset.moteDirectoryView,names,appearance:document.documentElement.dataset.appearance,portrait:roster.querySelector('.space-object-icon')?.getBoundingClientRect().width,archive:document.querySelector('[aria-label="Show archived Motes in Space"]').textContent,overflow:document.body.scrollWidth>innerWidth,...directoryScene.facts()}})()`)
       assert.equal(facts.view,view); assert.equal(facts.names.length,5); assert.equal(facts.archive,'1'); assert.equal(facts.overflow,false)
-      if (view === 'collaborators') assert.ok(facts.portrait>=54)
+      if (view === 'collaborators') assert.ok(facts.portrait>=32 && facts.portrait<54, 'Readable compact round portraits')
       assert.deepEqual(facts.drafts,original.drafts); assert.deepEqual(facts.selection,original.selection); assert.deepEqual(facts.forbidden,[])
       const file=`directory-${view}-${narrow?'narrow':'wide'}-${light?'light':'dark'}.png`
       await fs.writeFile(path.join(evidence,file),(await win.webContents.capturePage()).toPNG());result.images.push(file);result.operations.push({file,...facts})
