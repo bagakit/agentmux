@@ -283,7 +283,7 @@ describe('Pi provider', () => {
     it('投递不 await，且整体 catch', () => {
       // Pi 会 await 每个 handler，投递挂在事件回路上会让用户的会话等我们的网络；一次网络失败
       // 更不能把会话打断。
-      expect(mutation.content).toContain('void fetch(')
+      expect(mutation.content).toContain('void sendHookReceipt(')
       expect(mutation.content).toContain('.catch(')
     })
 

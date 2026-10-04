@@ -151,7 +151,7 @@ describe('OpenCode provider', () => {
       expect(content).toContain('receiptId')
       expect(content).toContain('eventName')
       expect(content).toContain('payload')
-      expect(content).toContain("'Bearer '")
+      expect(content).toContain('Bearer ${token}')
     })
 
     it('只投递声明过的事件', () => {
@@ -368,10 +368,11 @@ describe('每个铸出新 hook token 的站点都紧跟一次 managed hook 重�
     return { minted, reused }
   }
 
-  it('铸新 token 的站点有两个（launch 与 resume），复用旧 token 的有一个（恢复）', () => {
+  it('铸新 token 的站点有两个，三个恢复入口复用原凭证', () => {
     // 这条钉住分类本身。若哪天新增一条生命周期路径，它会先在这里红——那正是该去想
     // 「这条路铸新 token 吗、装不装」的时刻，而不是等到用户报「续跑后就不动了」。
-    expect(bindingSites()).toEqual({ minted: 2, reused: 1 })
+    // 冷启动、已确认创建收口与reopen观察恢复均复用durable token。
+    expect(bindingSites()).toEqual({ minted: 2, reused: 3 })
   })
 
   it('铸新 token 的站点数与装 hook 的站点数相等', () => {
