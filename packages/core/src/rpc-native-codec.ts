@@ -1,5 +1,6 @@
 import { parseDeliveryAttemptLookup } from './delivery-attempt.js'
 import { isDeepStrictEqual } from 'node:util'
+import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import { normalizeSessionHistoryPage } from './session-history.js'
 import { parseAgentContextParams } from './agent-context.js'
@@ -10,7 +11,7 @@ import { inspectNotebook, notebookFingerprint, parseNotebookState } from './note
 import { isTopicMethod, parseTopicParams, parseTopicResult } from './public-rpc-topics.js'
 import { isFileMethod, parseFileWriteParams, parseFileWriteResult, parseFileReadParams, parseFileReadResult, parseFileListParams, parseFileListResult } from './public-rpc-files.js'
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult } from './public-rpc-schedules.js'
-import { parseAgentMuxSpatialGraph } from './spatial-graph.js'
+import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseNameChangeRecord } from './display-label.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentSessionHistoryReadPage, type AgentSessionHistoryReadInput } from './session-history-reader.js'
@@ -94,6 +95,10 @@ function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSessi
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
   member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)
+  if (capabilities.providerFork !== undefined) {
+    const fork = record(capabilities.providerFork, ['current'])
+    if (fork.current !== true) fail()
+  }
   member(capabilities.replyCorrelation, ['none', 'native-turn-id', 'acp-turn-id'])
   const observation = record(p.observation)
   if (observation.process !== run.state) fail()
@@ -143,6 +148,20 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     switch (method) {
       case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
       case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>
+      case 'agent.native.confirm': {
+        record(p, ['session', 'confirmation', 'persisted', 'current'])
+        const request = parseAgentNativeSessionConfirmation(input), session = parseRpcAgentSession(p.session)
+        const confirmation = record(p.confirmation, ['operationId', 'run', 'previousNativeHandle', 'nativeHandle', 'observedAt', 'candidateObservedAt', 'previousInteraction', 'previousPromptSubmissionId'])
+        if (p.persisted !== true || session.agentSessionId !== request.agentSessionId || session.run.runId !== request.expectedRun.runId ||
+          confirmation.operationId !== request.operationId || runRef(confirmation.run).runId !== request.expectedRun.runId ||
+          confirmation.candidateObservedAt !== request.expectedObservationAt || !isDeepStrictEqual(confirmation.previousNativeHandle, request.expectedNativeHandle) ||
+          !isDeepStrictEqual(confirmation.nativeHandle, request.candidateNativeHandle)) fail()
+        bool(p.current)
+        const current = isDeepStrictEqual(session.nativeConfirmation, confirmation) && isDeepStrictEqual(session.nativeHandle, request.candidateNativeHandle)
+        if (p.current !== current || ![session.nativeConfirmation, ...(session.nativeConfirmationHistory ?? [])].some(value => isDeepStrictEqual(value, confirmation))) fail()
+        count(confirmation.observedAt)
+        break
+      }
       case 'agent.context': {
         const expected = parseAgentContextParams(input)
         record(p, ['hostId', 'sourceHostId', 'agentSessionId', 'descriptor', 'session', 'status', 'runtimeDiagnostics', 'captured', 'native', 'unavailable', 'nextCursor'])
@@ -155,9 +174,9 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         else if (descriptor.retiredAt !== undefined) fail()
         if (descriptor.pendingReopen !== undefined) { const pending = record(descriptor.pendingReopen, ['operationId']); if (pending.operationId !== undefined) string(pending.operationId) }
         if (descriptor.history !== undefined) {
-          const h = record(descriptor.history, ['providerId', 'executorId', 'workspacePath', 'createdAt', 'nativeHandle', 'observedNativeHandle'])
+          const h = record(descriptor.history, ['providerId', 'executorId', 'workspacePath', 'createdAt', 'nativeHandle', 'observedNativeHandle', 'previousNativeHandle'])
           for (const key of ['providerId', 'executorId', 'workspacePath']) string(h[key]); count(h.createdAt)
-          for (const key of ['nativeHandle', 'observedNativeHandle'] as const) if (h[key] !== undefined) {
+          for (const key of ['nativeHandle', 'observedNativeHandle', 'previousNativeHandle'] as const) if (h[key] !== undefined) {
             const handle = record(h[key], ['kind', 'providerId', 'adapterId', 'sessionId', 'transcriptPath'])
             member(handle.kind, ['provider', 'acp']); string(handle.sessionId)
             if (handle.kind === 'provider') { string(handle.providerId); if (handle.providerId !== h.providerId || handle.adapterId !== undefined) fail() }

@@ -76,6 +76,8 @@ export type AgentNativeHookSpecification = {
   /** Provider requires an exact Run process-native witness before promoting its native subject. */
   processNativeIdentity?: boolean
   resolveSubject?: (payload: Readonly<Record<string, unknown>>, context: AgentProviderHookNormalizationContext) => AgentHookSubject
+  /** Provider-declared transition triggers a fresh current-main witness; arrival is not identity proof. */
+  nativeSessionTransition?: (eventName: string, payload: Readonly<Record<string, unknown>>) => boolean
   /** Pure native Session membership/transition evidence; false preserves only observation. */
   matchesNativeSession?: (
     eventName: string,

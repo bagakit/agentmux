@@ -1,0 +1,90 @@
+import { fixturePath as _hygiene_fixturePath } from "./lib/fixture-values.mjs"
+import assert from 'node:assert/strict'
+import fs from 'node:fs/promises'
+import path from 'node:path'
+import { createHash } from 'node:crypto'
+import { createRequire } from 'node:module'
+import { execFile, fork } from 'node:child_process'
+import { promisify } from 'node:util'
+import { pathToFileURL } from 'node:url'
+import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+const root=path.resolve(import.meta.dirname,'../../..'),fixture=path.join(root,'apps/desktop/scripts/fixtures/current-agent-fork-ui')
+const evidence=path.resolve(process.argv[2]??path.join(root,'.bagakit/feature-tracker/features/f-2qy8fxfgc/artifacts/ui-verification'))
+const privateRoot=await fs.mkdtemp(_hygiene_fixturePath("tmp/amux-current-fork-ui-")),run=promisify(execFile),desktopRequire=createRequire(path.join(root,'apps/desktop/package.json'))
+const sha=value=>createHash('sha256').update(value).digest('hex')
+const owned=['lib/space-agent-control.ts','components/AgentCurrentForkControls.tsx','lib/agent-current-fork.ts','components/OpenDestinationBar.tsx','components/AgentRegionHeader.tsx','components/SessionPane.tsx','styles/agent-current-fork.css'].map(file=>'apps/desktop/src/renderer/src/'+file)
+const receipt={schema:'agentmux.current-fork-ui.v1',passed:false,visualReview:'pending-independent-review',sourceBefore:{},sourceAfter:{},mutations:[],productionConsumers:[],isolation:[
+ 'Current actual App/Store/SessionPane/Header/OpenDestinationBar and original executeSpatialControl owner run in an independent Electron with current source aliases; no shared dist is consumed.',
+ 'Actual RuntimeController/Hosted connector/Core/ctxmux/private CLI and filesystem Session/Spatial stores serve new-Tab and split creation. Native pointer and Escape input operate the actual product menu.',
+ 'The private IPC dispatcher calls production RuntimeController methods. Managed Hook config installation, history watch subscriptions are bounded fixture seams. No upstream authentication or user Runtime is used.',
+ 'Only the UI return receipt is lost after the actual owner finishes one fork; read-only space.inspect reconciles the retained operation without launch replay. Missing capability/native observation variants alter fixture snapshots, never Provider branches.',
+ 'T001 current source Core gate supplies two-protocol/public CLI/independent process restart evidence; this UI slice does not duplicate those tests. Full PNG visual review remains a separate required independent artifact.'
+]}
+await fs.mkdir(evidence,{recursive:true})
+const command=async(label,args,env={})=>{let value;try{const result=await run(path.join(root,'node_modules/.bin/vitest'),args,{cwd:root,env:{...process.env,...env},timeout:60000,maxBuffer:8*1024*1024});value={code:0,output:result.stdout+result.stderr}}catch(error){value={code:error.code,output:(error.stdout??'')+(error.stderr??'')}}await fs.writeFile(path.join(evidence,label+'.log'),value.output);return value}
+const files=async(directory)=>(await Promise.all((await fs.readdir(directory,{withFileTypes:true})).map(entry=>entry.isDirectory()?files(path.join(directory,entry.name)):/\.tsx?$/.test(entry.name)?[path.join(directory,entry.name)]:[]))).flat()
+let owner
+try{
+ receipt.sourceBefore=Object.fromEntries(await Promise.all(owned.map(async file=>[file,sha(await fs.readFile(path.join(root,file)))])))
+ const coreEvidence=path.resolve(process.env.AMX_FORK_UI_CORE_RECEIPT??path.join(root,'.bagakit/feature-tracker/features/f-2qy8fxfgc/artifacts/final-core-integration/receipt.json')),core=JSON.parse(await fs.readFile(coreEvidence,'utf8'));assert.equal(core.passed,true)
+ for(const file of ['packages/core/src/client.ts','packages/core/src/agent-fork.ts','packages/core/src/providers/codex.ts','packages/core/src/providers/claude.ts'])assert.equal(sha(await fs.readFile(path.join(root,file))),core.sourceCandidates[file],'T001 exact consumed Core source '+file)
+ assert.equal(sha(await fs.readFile(path.join(root,'apps/desktop/src/renderer/src/lib/space-agent-control.ts'))),core.sourceCandidates['apps/desktop/src/renderer/src/lib/space-agent-control.ts'],'T001 exact original spatial owner');receipt.coreEvidence={path:path.relative(root,coreEvidence),sha256:sha(await fs.readFile(coreEvidence)),passed:true,matchedCriticalCoreSource:true}
+ const config=path.join(fixture,'vitest.config.mts'),controlLoaded=path.join(evidence,'control-loaded.jsonl');await fs.writeFile(controlLoaded,'');const control=await command('control',['run','--config',config],{AMX_FORK_UI_LOADED:controlLoaded});assert.equal(control.code,0,control.output);assert.match(control.output,/Tests\s+[1-9]\d* passed/)
+ const changes=[
+ ['disconnect-entry','components/AgentCurrentForkControls.tsx','event.preventDefault(); begin()','event.preventDefault(); void 0','reuses five'],
+ ['drop-source-fence','lib/agent-current-fork.ts','if (!currentForkSourceMatches(review, session))','if (false)','four splits'],
+ ['drop-new-tab-location','lib/agent-current-fork.ts','zoneId: location.zoneId,','zoneId: "guessed-zone",','inspects exact original'],
+ ['drop-split-direction','lib/agent-current-fork.ts',"split: destination === 'up' ? 'above' : destination === 'down' ? 'below' : destination","split: 'left'","four splits"],
+ ['drop-retained-intent','lib/agent-current-fork.ts','return admitted.at(-1)?.[1].requestId ?? null','return null','retains exact admitted'],
+ ['drop-native-escape-cancel','components/AgentCurrentForkControls.tsx',"window.addEventListener('keydown', cancelOnEscape, true)",'void cancelOnEscape','cancels the reviewed intent before'],
+ ['block-inspection-during-dispatch','components/AgentCurrentForkControls.tsx','{ review: null, busy: false, dispatching: true }','{ review: null, busy: true, dispatching: true }','allows inspection during pending'],
+ ['overwrite-new-receipt-with-late-read','components/AgentCurrentForkControls.tsx','if (receiptRevision.current !== revision) return','if (false) return','allows inspection during pending'],
+ ['clear-unrelated-inspection-busy','components/AgentCurrentForkControls.tsx','dispatched ? { dispatching: false } : { busy: false }','{ dispatching: false, busy: false }','allows inspection during pending'],
+ ['downgrade-inspected-opened','components/AgentCurrentForkControls.tsx',"if (stateRef.current.report?.outcome !== 'opened' || result.outcome === 'opened')",'if (true)','keeps an inspected opened receipt'],
+ ['replay-inspection','components/AgentCurrentForkControls.tsx',"operation: 'space.inspect', target: { requestId: operationId }","operation: 'agent.open', content: { kind: 'fork-agent', source: {} }, destination: {}, focus: false","unknown receipt survives"]
+ ]
+ for(const[label,file,before,after,test]of changes){const mutation={label,file:'apps/desktop/src/renderer/src/'+file,before,after},mutationFile=path.join(evidence,'mutation.json'),loaded=path.join(evidence,label+'-loaded.jsonl');await fs.writeFile(mutationFile,JSON.stringify(mutation));await fs.writeFile(loaded,'');const red=await command(label,['run','--config',config,'-t',test],{AMX_FORK_UI_MUTATION:mutationFile,AMX_FORK_UI_LOADED:loaded});assert.ok(Number.isInteger(red.code)&&red.code>0,red.output);assert.match(red.output,/AssertionError/);assert.match(red.output,/Tests\s+[1-9]\d* failed/);const applied=(await fs.readFile(loaded,'utf8')).trim().split('\n').map(JSON.parse).filter(one=>one.file===mutation.file&&one.mutated);assert.ok(applied.length);assert.equal(applied[0].sourceSHA256,receipt.sourceBefore[mutation.file]);const green=await command(label+'-control',['run','--config',config,'-t',test]);assert.equal(green.code,0,green.output);receipt.mutations.push({...mutation,red:red.code,green:green.code,loaded:applied[0]});console.log('fork-ui mutation='+label+' killed')}
+ const manifest=JSON.parse(await fs.readFile(path.join(root,'packages/core/package.json'),'utf8'))
+ const aliases=Object.entries(manifest.exports).map(([key,value])=>({find:new RegExp('^'+(key==='.'?'@agentmux/core':'@agentmux/core/'+key.slice(2)).replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'$'),replacement:path.join(root,'packages/core',value.import.replace('./dist/','./src/').replace(/\.js$/,'.ts'))}))
+
+  const clientUiExports = JSON.parse(await fs.readFile(path.join(root, 'packages/client-ui/package.json'), 'utf8')).exports
+  for (const [key, value] of Object.entries(clientUiExports).sort(([a], [b]) => Number(a.includes('*')) - Number(b.includes('*')) || b.length - a.length)) {
+    const target = typeof value === 'string' ? value : value.browser
+    const name = key === '.' ? '@agentmux/client-ui' : '@agentmux/client-ui/' + key.slice(2)
+    const pattern = name.split('*').map(part => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('(.+)')
+    aliases.push({ find: new RegExp('^' + pattern + '$'), replacement: path.join(root, 'packages/client-ui', target).replace('*', '$1') })
+  }
+ aliases.push({find:/^@agentmux\/layout$/,replacement:path.join(root,'packages/core/src/spatial-layout.ts')},{find:/^@xterm\/xterm$/,replacement:path.join(root,'apps/desktop/scripts/fixtures/terminal-wheel/xterm-instrumented.ts')})
+ const consumed=new Map(),guard={name:'private-current-fork-unused-leaves',enforce:'pre',transform(code,id){if(id.startsWith(root+'/apps/desktop/src/')||id.startsWith(root+'/packages/core/src/')||id.startsWith(root+'/packages/client-ui/src/'))consumed.set(path.relative(root,id.split('?')[0]),sha(code))}}
+ const {build:buildRenderer}=await import(pathToFileURL(desktopRequire.resolve('vite')).href),{build:buildNode}=createRequire(path.join(root,'packages/core/package.json'))('esbuild'),renderer=path.join(evidence,'renderer')
+ await buildRenderer({configFile:false,root:fixture,base:'./',logLevel:'error',define:{__AGENTMUX_WEB_PREVIEW__:'true',__TERMINAL_WHEEL_UMD_URL__:'"unused"'},resolve:{alias:aliases},plugins:[guard],build:{target:'esnext',outDir:renderer,emptyOutDir:true,minify:false}})
+ receipt.compiledRenderer=Object.fromEntries(consumed)
+ for(const file of ['App.tsx','store.ts','components/SessionPane.tsx','components/AgentRegionHeader.tsx','components/OpenDestinationBar.tsx','components/AgentCurrentForkControls.tsx','lib/agent-current-fork.ts','lib/space-agent-control.ts'])assert.ok(consumed.has('apps/desktop/src/renderer/src/'+file),'Nonempty actual loaded product '+file)
+ const nodeAliases=Object.fromEntries(aliases.filter(alias=>alias.find.source.includes('@agentmux')&&!alias.find.source.includes('(')&&!alias.find.source.includes('client-ui')).map(alias=>[alias.find.source.slice(1,-1).replaceAll('\\/','/').replaceAll('\\.','.'),alias.replacement])),sdkPath=path.join(root,'packages/core/node_modules/@ctxmux/sdk'),sdk=JSON.parse(await fs.readFile(path.join(sdkPath,'package.json'),'utf8'));nodeAliases['@ctxmux/sdk']=path.join(sdkPath,sdk.exports['.'].import)
+ const nodePlugin={name:'fork-source-node',setup(build){build.onResolve({filter:/^@agentmux\/client-ui(?:\/|$)/},args=>{const selected=aliases.find(alias=>alias.find.test(args.path));if(!selected)throw new Error('Undeclared client-ui source export '+args.path);return{path:args.path.replace(selected.find,selected.replacement)}});build.onLoad({filter:/\.[cm]?[jt]sx?$/},async args=>{const code=await fs.readFile(args.path,'utf8');return{contents:code.replaceAll('import.meta.url',JSON.stringify(pathToFileURL(args.path).href)).replaceAll('import.meta.dirname',JSON.stringify(path.dirname(args.path))),loader:args.path.endsWith('.tsx')?'tsx':args.path.endsWith('.ts')?'ts':'js'}})}}
+ receipt.nodeBundles={}
+ for(const[name,file]of[['owner',path.join(root,'apps/desktop/scripts/fixtures/native-session-change/owner.ts')],['main',path.join(fixture,'main.ts')]]){const out=path.join(evidence,name+'.mjs'),built=await buildNode({absWorkingDir:root,entryPoints:[file],outfile:out,bundle:true,platform:'node',format:'esm',external:['electron'],conditions:['browser'],alias:nodeAliases,metafile:true,plugins:[nodePlugin],banner:{js:'import {createRequire as _privateRequire} from "node:module";const require=_privateRequire(import.meta.url);'},logLevel:'error'});receipt.nodeBundles[name]={sha256:sha(await fs.readFile(out)),inputs:Object.keys(built.metafile.inputs)}}
+ await fs.copyFile(path.join(root,'apps/desktop/scripts/fixtures/native-session-change/native-cli.mjs'),path.join(privateRoot,'native-cli.mjs'));await fs.chmod(path.join(privateRoot,'native-cli.mjs'),0o700);await fs.mkdir(path.join(privateRoot,'native'))
+ const env=Object.fromEntries(Object.entries(process.env).filter(([name])=>!name.startsWith('AGENTMUX_')&&!name.startsWith('CTXMUX_')&&name!=='ELECTRON_RUN_AS_NODE'));Object.assign(env,{AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'state'),AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'messages.ndjson')})
+ const ownerLogs=[];owner=fork(path.join(evidence,'owner.mjs'),[privateRoot],{cwd:root,env,stdio:['ignore','pipe','pipe','ipc']});owner.stdout.on('data',bytes=>ownerLogs.push(String(bytes)));owner.stderr.on('data',bytes=>ownerLogs.push(String(bytes)))
+ receipt.owner=await new Promise((resolve,reject)=>{const timer=setTimeout(()=>reject(new Error('Private owner startup timeout '+ownerLogs.join(''))),20000);owner.once('message',value=>{clearTimeout(timer);resolve(value)});owner.once('exit',code=>{clearTimeout(timer);reject(new Error('Private owner exited '+code+' '+ownerLogs.join('')))});owner.on('error',error=>ownerLogs.push(String(error)))});assert.equal(receipt.owner.ready,true)
+ receipt.electron=[];receipt.actual=[]
+ for(const phase of ['exercise','restore']){
+  const lines=[],phaseRoot=path.join(privateRoot,phase+'-process');await fs.mkdir(phaseRoot)
+  const processResult=await runProbeProcess(desktopRequire('electron'),[path.join(evidence,'main.mjs'),path.join(renderer,'index.html'),privateRoot,path.join(root,'apps/desktop/scripts/fixtures/native-session-change/preload.cjs'),evidence,process.execPath,phase],{temporaryRoot:phaseRoot,cwd:root,env,timeoutMs:90000,onLine:line=>{lines.push(line);process.stderr.write(line.slice(0,800)+'\n')}})
+  await fs.writeFile(path.join(evidence,phase+'-stderr.log'),lines.join('\n'));const actual=JSON.parse(await fs.readFile(path.join(evidence,phase+'-electron.json'),'utf8'));receipt.electron.push(processResult);receipt.actual.push(actual);assert.equal(processResult.exitCode,0);assert.equal(actual.passed,true,JSON.stringify(actual.failure));assert.ok(actual.screenshots.length>0)
+ }
+ assert.equal(new Set(receipt.actual.map(process=>process.pid)).size,2);assert.ok(receipt.actual.flatMap(process=>process.screenshots).length>=12)
+
+ const scanned=await files(path.join(root,'apps/desktop/src'));assert.ok(scanned.length)
+ for(const[symbol,definition]of[['useAgentCurrentForkControls',owned[1]],['currentForkRequest',owned[2]],['retainedCurrentForkOperation',owned[2]],['OpenDestinationBar',owned[3]]]){const callers=[];for(const file of scanned.filter(file=>file!==path.join(root,definition)))if(new RegExp('(?:\\b'+symbol+'\\s*\\(|<'+symbol+'\\b)').test(await fs.readFile(file,'utf8')))callers.push(path.relative(root,file));assert.ok(callers.length,'Definition-external production caller '+symbol);receipt.productionConsumers.push({symbol,callers})}
+ for(const file of ['packages/core/src/client.ts','packages/core/src/agent-fork.ts','packages/core/src/providers/codex.ts','packages/core/src/providers/claude.ts'])assert.equal(sha(await fs.readFile(path.join(root,file))),core.sourceCandidates[file],'Core candidate unchanged '+file);receipt.sourceAfter=Object.fromEntries(await Promise.all(owned.map(async file=>[file,sha(await fs.readFile(path.join(root,file)))])));assert.deepEqual(receipt.sourceAfter,receipt.sourceBefore);receipt.passed=true
+}catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};console.error(error)}
+finally{
+ const errors=[]
+ if(owner?.exitCode===null&&owner.connected)try{const stopped=new Promise(resolve=>owner.once('exit',resolve));owner.send({operation:'shutdown'});await Promise.race([stopped,new Promise((_,reject)=>setTimeout(()=>reject(new Error('Fork owner cleanup timed out')),15000))])}catch(error){errors.push(error.message);owner.kill('SIGTERM')}
+ try{await stopProbeProcesses(process.pid+1_000_000_000,privateRoot)}catch(error){errors.push(error.message)}
+ const remaining=await listProbeProcesses(-1,privateRoot);receipt.cleanup={errors,remaining,privateRootRemoved:false};if(!remaining.length){await fs.rm(privateRoot,{recursive:true,force:true});receipt.cleanup.privateRootRemoved=true}await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
+}
+assert.equal(receipt.passed,true,receipt.failure?.message);assert.deepEqual(receipt.cleanup.errors,[]);assert.deepEqual(receipt.cleanup.remaining,[])
+console.log(JSON.stringify({passed:true,receipt:path.join(evidence,'receipt.json'),visualReview:receipt.visualReview}))

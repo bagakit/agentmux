@@ -1,6 +1,7 @@
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentForkSource } from './agent-fork.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
 import { createHash } from 'node:crypto'
 import { appendFile, mkdir, open, readFile, readdir, stat, unlink } from 'node:fs/promises'
@@ -35,6 +36,7 @@ import type {
   AgentMuxStoredAgentSession,
   AgentPromptInputPlan,
   AgentNativeSessionHandle,
+  AgentNativeSessionConfirmationReceipt,
   AgentSessionHistoryMetadata,
   AgentSessionHistoryDescriptor,
   AgentStatus,
@@ -90,8 +92,13 @@ type AgentMuxLifecycleReservationBase = {
   expiresAt: number
 }
 
+/** Prepared before start; no Run or input is invented for this durable creation seed. */
+export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
+  'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
+  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'launchOptions'>
+
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
-  | { kind: 'create'; expectedRun?: never; stopOperation?: never }
+  | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
   | { kind: 'resume'; expectedRun: AgentMuxRunRef; stopOperation?: never }
   | { kind: 'reopen'; expectedRetirement: AgentMuxRetiredAgentSession; callerOperationId?: string; preparedSession?: AgentMuxStoredAgentSession; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
   | {
@@ -135,6 +142,8 @@ export type AgentMuxAgentSessionStore = {
     signal?: AbortSignal
   ): Promise<void>
   reserveLifecycle(reservation: AgentMuxLifecycleReservation): Promise<void>
+  prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>>
+  claimCreate(agentSessionId: string, operationId: string, intentDigest: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null>
   prepareReopen(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>>
   releaseReopenOwner(ownerId: string): Promise<void>
   claimReopen(agentSessionId: string, operationId: string, expectedRetiredAt: number, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> | null>
@@ -271,7 +280,12 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
       ? source.callerOperationId : undefined
     return { ...base, kind: 'reopen', expectedRetirement: retirement, ...(callerOperationId ? { callerOperationId } : {}), ...(preparedSession ? { preparedSession } : {}), ...(source.ownerReleased === true ? { ownerReleased: true } : {}) }
   }
-  if (source.kind === 'create') return { ...base, kind: 'create' }
+  if (source.kind === 'create') {
+    if (source.ownerReleased !== undefined && source.ownerReleased !== true) throw new AgentMuxError('Invalid create owner release.', 'INVALID_AGENT_SESSION_STORE')
+    const preparedCreation = source.preparedCreation === undefined ? undefined : normalizePreparedCreation(source.preparedCreation)
+    if (preparedCreation?.agentSessionId !== undefined && preparedCreation.agentSessionId !== base.agentSessionId) throw new AgentMuxError('Prepared creation names another Session.', 'INVALID_AGENT_SESSION_STORE')
+    return { ...base, kind: 'create', ...(preparedCreation ? { preparedCreation } : {}), ...(source.ownerReleased ? { ownerReleased: true as const } : {}) }
+  }
   if (source.kind === 'resume') return { ...base, kind: 'resume', expectedRun: expectedRun! }
   return { ...base, kind: 'stop', expectedRun: expectedRun!, stopOperation: stopOperation! }
 }
@@ -386,6 +400,8 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
   const providerId = string(source.providerId, 'history.providerId')
   const handle = source.nativeHandle === undefined ? undefined : nativeHandle(source.nativeHandle)
   const observed = source.observedNativeHandle === undefined ? undefined : nativeHandle(source.observedNativeHandle)
+  const previous = source.previousNativeHandle === undefined ? undefined : nativeHandle(source.previousNativeHandle)
+  if (previous && (previous.kind !== 'provider' || previous.providerId !== providerId)) throw new AgentMuxError('Previous history identity belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
   if (observed?.kind === 'provider' && observed.providerId !== providerId) throw new AgentMuxError('Observed history identity belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
   if (handle?.kind === 'provider' && handle.providerId !== providerId) {
     throw new AgentMuxError('History locator belongs to another Provider.', 'INVALID_AGENT_SESSION_STORE')
@@ -396,13 +412,15 @@ function normalizeHistoryMetadata(value: unknown): AgentSessionHistoryMetadata {
     workspacePath: string(source.workspacePath, 'history.workspacePath', MAX_PATH_BYTES),
     createdAt: timestamp(source.createdAt, 'history.createdAt'),
     ...(handle === undefined ? {} : { nativeHandle: handle }),
-    ...(observed === undefined ? {} : { observedNativeHandle: observed })
+    ...(observed === undefined ? {} : { observedNativeHandle: observed }),
+    ...(previous?.kind === 'provider' ? { previousNativeHandle: previous } : {})
   }
 }
 
 /** Project only reading identity, never Hook secrets, permissions or lifecycle controls. */
 export function sessionHistoryMetadata(session: AgentMuxStoredAgentSession): AgentSessionHistoryMetadata {
-  return normalizeHistoryMetadata(session)
+  return normalizeHistoryMetadata({ ...session,
+    ...(session.nativeConfirmation ? { previousNativeHandle: session.nativeConfirmation.previousNativeHandle } : {}) })
 }
 
 function retiredAgentSessions(value: unknown): AgentMuxRetiredAgentSession[] {
@@ -1208,6 +1226,55 @@ function promptInputIntent(value: unknown): NonNullable<NonNullable<AgentMuxStor
 }
 
 /** Public and durable Session facts share the same validation owner. */
+function nativeConfirmation(value: unknown): AgentNativeSessionConfirmationReceipt {
+  const p = record(value, 'nativeConfirmation')
+  if (Object.keys(p).some(key => !['operationId', 'run', 'previousNativeHandle', 'nativeHandle', 'observedAt', 'candidateObservedAt', 'previousInteraction', 'previousPromptSubmissionId'].includes(key))) {
+    throw new AgentMuxError('Invalid native confirmation receipt.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const previousNativeHandle = nativeHandle(p.previousNativeHandle), handle = nativeHandle(p.nativeHandle)
+  if (previousNativeHandle.kind !== 'provider' || handle.kind !== 'provider' ||
+    previousNativeHandle.providerId !== handle.providerId || previousNativeHandle.sessionId === handle.sessionId) {
+    throw new AgentMuxError('Native confirmation requires two exact Provider conversations.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  return { operationId: string(p.operationId, 'nativeConfirmation.operationId'), run: runRef(p.run),
+    previousNativeHandle, nativeHandle: handle, observedAt: timestamp(p.observedAt, 'nativeConfirmation.observedAt'),
+    candidateObservedAt: timestamp(p.candidateObservedAt, 'nativeConfirmation.candidateObservedAt'),
+    ...(p.previousInteraction === undefined ? {} : { previousInteraction: pendingInteraction(p.previousInteraction) }),
+    ...(p.previousPromptSubmissionId === undefined ? {} : { previousPromptSubmissionId: string(p.previousPromptSubmissionId, 'nativeConfirmation.previousPromptSubmissionId') }) }
+}
+
+function creationFact(value: unknown): NonNullable<AgentMuxAgentSession['creation']> {
+  const creation = record(value, 'creation'), initialPrompt = creation.initialPrompt
+  if (!['not-requested', 'confirmed', 'unconfirmed', 'unknown'].includes(String(initialPrompt)) ||
+    creation.agentMuxContext !== undefined && !['confirmed', 'unconfirmed', 'unknown'].includes(String(creation.agentMuxContext)) ||
+    creation.intentDigest !== undefined && (typeof creation.intentDigest !== 'string' || !/^[a-f0-9]{64}$/u.test(creation.intentDigest)) ||
+    creation.persistence !== undefined && creation.persistence !== 'unconfirmed') throw new AgentMuxError('Invalid creation receipt.', 'INVALID_AGENT_SESSION_STORE')
+  let failure: NonNullable<AgentMuxAgentSession['creation']>['failure']
+  if (creation.failure !== undefined) {
+    const p = record(creation.failure, 'creation.failure')
+    if (Object.keys(p).some(key => !['step', 'code', 'message'].includes(key)) || !['session-commit', 'hook-bind', 'handshake'].includes(String(p.step))) throw new AgentMuxError('Invalid creation failure step.', 'INVALID_AGENT_SESSION_STORE')
+    failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
+  }
+  return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+    ...(creation.agentMuxContext === undefined ? {} : { agentMuxContext: creation.agentMuxContext as 'confirmed' | 'unconfirmed' | 'unknown' }),
+    ...(creation.intentDigest === undefined ? {} : { intentDigest: creation.intentDigest as string }),
+    ...(creation.persistence === undefined ? {} : { persistence: 'unconfirmed' as const }), ...(failure ? { failure } : {}) }
+}
+
+function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
+  const p = record(value, 'prepared creation')
+  if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
+    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'launchOptions'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
+  const creation = creationFact(p.creation), forkedFrom = parseAgentForkSource(p.forkedFrom)
+  if (!creation.intentDigest || creation.persistence || creation.failure || creation.agentMuxContext !== 'unknown' ||
+    forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared fork intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
+  return { kind: 'agent', agentSessionId: string(p.agentSessionId, 'agentSessionId'), providerId: string(p.providerId, 'providerId'),
+    executorId: string(p.executorId, 'executorId'), hostId: string(p.hostId, 'hostId'), workspacePath: string(p.workspacePath, 'workspacePath', MAX_PATH_BYTES),
+    hookBindingId: string(p.hookBindingId, 'hookBindingId'), hookToken: string(p.hookToken, 'hookToken'), capabilityHash: string(p.capabilityHash, 'capabilityHash'),
+    createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, forkedFrom,
+    ...(p.launchOptions === undefined ? {} : { launchOptions: launchOptionSelection(p.launchOptions) }) }
+}
+
 export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
   const source = record(value, 'Agent Session')
   if (source.kind !== 'agent') {
@@ -1236,14 +1303,8 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       }
       return { run: runRef(fact.run), source: 'user' as const, observedAt: timestamp(fact.observedAt, 'reopenedFrom.observedAt') }
     })() }),
-    ...(source.creation === undefined ? {} : { creation: (() => {
-      const creation = record(source.creation, 'creation')
-      const initialPrompt = creation.initialPrompt
-      if (initialPrompt !== 'not-requested' && initialPrompt !== 'confirmed' && initialPrompt !== 'unconfirmed' && initialPrompt !== 'unknown') {
-        throw new AgentMuxError('Invalid initial creation delivery fact.', 'INVALID_AGENT_SESSION_STORE')
-      }
-      return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt }
-    })() }),
+    ...(source.forkedFrom === undefined ? {} : { forkedFrom: parseAgentForkSource(source.forkedFrom) }),
+    ...(source.creation === undefined ? {} : { creation: creationFact(source.creation) }),
     ...(source.terminalHandshake === undefined
       ? {}
       : { terminalHandshake: terminalHandshake(source.terminalHandshake, currentRun) }),
@@ -1330,10 +1391,22 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
       : { pendingInteraction: pendingInteraction(source.pendingInteraction) }),
     ...(source.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(source.nativeHandle) }),
     ...(source.observedNativeHandle === undefined ? {} : { observedNativeHandle: nativeHandle(source.observedNativeHandle) }),
+    ...(source.nativeSourceObservation === undefined ? {} : { nativeSourceObservation: (() => {
+      const p = record(source.nativeSourceObservation, 'nativeSourceObservation')
+      if (Object.keys(p).some(key => !['state', 'run', 'observedAt', 'reason'].includes(key)) ||
+        !['changed', 'unknown', 'ambiguous'].includes(String(p.state))) throw new AgentMuxError('Invalid native source observation.', 'INVALID_AGENT_SESSION_STORE')
+      return { state: p.state as 'changed' | 'unknown' | 'ambiguous', run: runRef(p.run),
+        observedAt: timestamp(p.observedAt, 'nativeSourceObservation.observedAt'), reason: string(p.reason, 'nativeSourceObservation.reason') }
+    })() }),
+    ...(source.nativeConfirmation === undefined ? {} : { nativeConfirmation: nativeConfirmation(source.nativeConfirmation) }),
+    ...(source.nativeConfirmationHistory === undefined ? {} : { nativeConfirmationHistory: (() => {
+      if (!Array.isArray(source.nativeConfirmationHistory)) throw new AgentMuxError('Native confirmation history must be an array.', 'INVALID_AGENT_SESSION_STORE')
+      return source.nativeConfirmationHistory.map(nativeConfirmation)
+    })() }),
     ...(source.nativeBinding === undefined ? {} : { nativeBinding: (() => {
       const binding = record(source.nativeBinding, 'nativeBinding')
-      if (!['native-hook', 'process-witness', 'semantic-resume-target'].includes(String(binding.source))) throw new AgentMuxError('Invalid native binding source.', 'INVALID_AGENT_SESSION_STORE')
-      return { source: binding.source as 'native-hook' | 'process-witness' | 'semantic-resume-target', run: runRef(binding.run), observedAt: timestamp(binding.observedAt, 'nativeBinding.observedAt') }
+      if (!['native-hook', 'process-witness', 'semantic-resume-target', 'user-confirmed'].includes(String(binding.source))) throw new AgentMuxError('Invalid native binding source.', 'INVALID_AGENT_SESSION_STORE')
+      return { source: binding.source as 'native-hook' | 'process-witness' | 'semantic-resume-target' | 'user-confirmed', run: runRef(binding.run), observedAt: timestamp(binding.observedAt, 'nativeBinding.observedAt') }
     })() }),
     ...(source.nativePromptPredecessor === undefined ? {} : { nativePromptPredecessor: (() => {
       const fact = record(source.nativePromptPredecessor, 'nativePromptPredecessor')
@@ -1353,12 +1426,25 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     throw new AgentMuxError('Native turn end observation exceeds the Session time.', 'INVALID_AGENT_SESSION_STORE')
   }
   if ((session.nativeBinding && (!session.nativeHandle || session.nativeBinding.run.runId !== session.run.runId || session.nativeBinding.observedAt > session.updatedAt)) ||
+    (session.nativeSourceObservation && (session.nativeSourceObservation.run.runId !== session.run.runId ||
+      session.nativeSourceObservation.observedAt > session.updatedAt || session.nativeSourceObservation.state === 'changed' && !session.observedNativeHandle)) ||
+    (session.nativeConfirmation && (session.nativeConfirmation.nativeHandle.providerId !== session.providerId ||
+      session.nativeConfirmation.observedAt > session.updatedAt || session.nativeConfirmation.candidateObservedAt > session.nativeConfirmation.observedAt ||
+      session.nativeConfirmation.previousInteraction && (session.nativeConfirmation.previousInteraction.request.agentSessionId !== session.agentSessionId ||
+        session.nativeConfirmation.previousInteraction.request.evidence.run?.runId !== session.nativeConfirmation.run.runId))) ||
     (session.observedNativeHandle?.kind === 'provider' && session.observedNativeHandle.providerId !== session.providerId) ||
     (session.semanticStatus?.aggregateActivityAt !== undefined && session.semanticStatus.aggregateActivityAt > session.updatedAt)) {
     throw new AgentMuxError('Native/activity facts do not match this Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (session.nativeHandle?.kind === 'provider'  && session.nativeHandle.providerId !== session.providerId) {
     throw new AgentMuxError('Native session handle provider does not match the Agent.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  const confirmations = [...(session.nativeConfirmationHistory ?? []), ...(session.nativeConfirmation ? [session.nativeConfirmation] : [])]
+  if (new Set(confirmations.map(value => value.operationId)).size !== confirmations.length || confirmations.some(value =>
+    value.nativeHandle.providerId !== session.providerId || value.observedAt > session.updatedAt || value.candidateObservedAt > value.observedAt ||
+    value.previousInteraction && (value.previousInteraction.request.agentSessionId !== session.agentSessionId ||
+      value.previousInteraction.request.evidence.run?.runId !== value.run.runId))) {
+    throw new AgentMuxError('Native confirmation history does not match this Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (
     session.hookReceipt &&
@@ -1685,6 +1771,24 @@ function assertPreparedReopen(retirement: AgentMuxRetiredAgentSession, session: 
   }
 }
 
+function preparedCreateReservation(current: AgentMuxLifecycleReservation | undefined,
+  requested: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation
+): Extract<AgentMuxLifecycleReservation, { kind: 'create' }> {
+  if (!current || current.kind !== 'create' || !sameReservationOwner(current, requested) || current.operationId !== requested.operationId) throw new AgentMuxError('Creation reservation changed before preparation.', 'STALE_AGENT_SESSION')
+  const preparedCreation = normalizePreparedCreation(seed)
+  if (preparedCreation.agentSessionId !== current.agentSessionId || current.preparedCreation && !isDeepStrictEqual(current.preparedCreation, preparedCreation)) throw new AgentMuxError('Prepared creation cannot change intent.', 'AGENT_FORK_OPERATION_CONFLICT')
+  return { ...current, preparedCreation }
+}
+
+function claimedCreateReservation(current: AgentMuxLifecycleReservation | undefined, operationId: string, intentDigest: string,
+  claim: AgentMuxLifecycleClaim): Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null {
+  if (!current) return null
+  if (current.kind !== 'create' || current.operationId !== operationId || current.preparedCreation?.creation?.intentDigest !== intentDigest) throw new AgentMuxError('The original fork creation intent changed or is still preparing.', 'AGENT_FORK_OPERATION_CONFLICT')
+  if (!current.ownerReleased && current.ownerId !== claim.ownerId && processIsAlive(current.ownerPid)) throw new AgentMuxError('The original creation owner is still active.', 'AGENT_SESSION_BUSY')
+  const { ownerReleased, ...retained } = current
+  return { ...retained, ownerId: claim.ownerId, ownerPid: claim.ownerPid, expiresAt: claim.expiresAt }
+}
+
 function preparedReopenReservation(current: AgentMuxLifecycleReservation | undefined,
   requested: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }>, session: AgentMuxStoredAgentSession
 ): Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> {
@@ -1726,6 +1830,11 @@ function assertLifecycleCommit(
   }
   if (!next || next.agentSessionId !== reservation.agentSessionId) {
     throw new AgentMuxError('Lifecycle commit does not match its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  if (reservation.kind === 'create' && reservation.preparedCreation) {
+    const { run, retiredRuns, creation, ...actual } = next
+    const { creation: intended, ...prepared } = reservation.preparedCreation
+    if (!isDeepStrictEqual(actual, prepared) || !isDeepStrictEqual(creation, intended) || retiredRuns.length) throw new AgentMuxError('Creation commit changed its prepared identity or intent.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'reopen') {
     const retirement = reservation.expectedRetirement, history = retirement.history
@@ -1855,9 +1964,22 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     return structuredClone(next)
   }
 
+  async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>> {
+    const next = preparedCreateReservation(this.reservations.get(reservation.agentSessionId), reservation, seed)
+    assertReservationPrecondition(next, [...this.sessions.values()], this.retiredAgentSessions)
+    this.reservations.set(next.agentSessionId, structuredClone(next))
+    return structuredClone(next)
+  }
+
+  async claimCreate(agentSessionId: string, operationId: string, intentDigest: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null> {
+    const next = claimedCreateReservation(this.reservations.get(agentSessionId), operationId, intentDigest, claim)
+    if (next) this.reservations.set(agentSessionId, structuredClone(next))
+    return next ? structuredClone(next) : null
+  }
+
   async releaseReopenOwner(ownerId: string): Promise<void> {
     for (const [id, reservation] of this.reservations) {
-      if (reservation.kind === 'reopen' && reservation.ownerId === ownerId) this.reservations.set(id, { ...reservation, ownerReleased: true })
+      if ((reservation.kind === 'reopen' || reservation.kind === 'create' && reservation.preparedCreation) && reservation.ownerId === ownerId) this.reservations.set(id, { ...reservation, ownerReleased: true })
     }
   }
 
@@ -1871,12 +1993,12 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     const claimed: AgentMuxLifecycleReservation[] = []
     for (const [agentSessionId, reservation] of this.reservations) {
       if (
-        !(reservation.kind === 'reopen' && reservation.ownerReleased) && reservation.ownerId !== claim.ownerId &&
+        !((reservation.kind === 'reopen' || reservation.kind === 'create') && reservation.ownerReleased) && reservation.ownerId !== claim.ownerId &&
         processIsAlive(reservation.ownerPid)
       ) continue
       const next = lifecycleReservation({
         ...reservation,
-        ...(reservation.kind === 'reopen' ? { ownerReleased: undefined } : {}),
+        ...(reservation.kind === 'reopen' || reservation.kind === 'create' ? { ownerReleased: undefined } : {}),
         ownerId: claim.ownerId,
         ownerPid: claim.ownerPid,
         expiresAt: claim.expiresAt
@@ -2288,11 +2410,33 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     return structuredClone(next!)
   }
 
+  async prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>> {
+    let next: Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | undefined
+    await this.enqueue(async () => {
+      const document = await this.read()
+      next = preparedCreateReservation(document.reservations.find(item => item.agentSessionId === reservation.agentSessionId), reservation, seed)
+      assertReservationPrecondition(next, document.sessions, document.retiredAgentSessions)
+      await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === reservation.agentSessionId ? next! : item) })
+    })
+    return structuredClone(next!)
+  }
+
+  async claimCreate(agentSessionId: string, operationId: string, intentDigest: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null> {
+    let next: Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null = null
+    await this.enqueue(async () => {
+      const document = await this.read()
+      next = claimedCreateReservation(document.reservations.find(item => item.agentSessionId === agentSessionId), operationId, intentDigest, claim)
+      if (next) await this.write({ ...document, reservations: document.reservations.map(item => item.agentSessionId === agentSessionId ? next! : item) })
+    })
+    return next ? structuredClone(next) : null
+  }
+
   async releaseReopenOwner(ownerId: string): Promise<void> {
     await this.enqueue(async () => {
       const document = await this.read()
-      if (!document.reservations.some(item => item.kind === 'reopen' && item.ownerId === ownerId)) return
-      await this.write({ ...document, reservations: document.reservations.map(item => item.kind === 'reopen' && item.ownerId === ownerId ? { ...item, ownerReleased: true } : item) })
+      const retained = (item: AgentMuxLifecycleReservation) => (item.kind === 'reopen' || item.kind === 'create' && item.preparedCreation) && item.ownerId === ownerId
+      if (!document.reservations.some(retained)) return
+      await this.write({ ...document, reservations: document.reservations.map(item => retained(item) ? { ...item, ownerReleased: true } : item) })
     })
   }
 
@@ -2312,12 +2456,12 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       const document = await this.read()
       claimed = document.reservations.flatMap((reservation) => {
         if (
-          !(reservation.kind === 'reopen' && reservation.ownerReleased) && reservation.ownerId !== claim.ownerId &&
+          !((reservation.kind === 'reopen' || reservation.kind === 'create') && reservation.ownerReleased) && reservation.ownerId !== claim.ownerId &&
           processIsAlive(reservation.ownerPid)
         ) return []
         return [lifecycleReservation({
           ...reservation,
-          ...(reservation.kind === 'reopen' ? { ownerReleased: undefined } : {}),
+          ...(reservation.kind === 'reopen' || reservation.kind === 'create' ? { ownerReleased: undefined } : {}),
           ownerId: claim.ownerId,
           ownerPid: claim.ownerPid,
           expiresAt: claim.expiresAt

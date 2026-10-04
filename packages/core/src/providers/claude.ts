@@ -1,5 +1,6 @@
 import { inspectHookDisableSetting } from './shared.js'
 import { readClaudeSessionHistoryPage } from './claude-native-history.js'
+import { discoverClaudeNativeSession } from './claude-native-session.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import { isAbsolute } from 'node:path'
 import { join, resolve } from 'node:path'
@@ -48,6 +49,8 @@ export const CLAUDE_HOOK_EVENTS = [
 ] as const
 
 export const CLAUDE_HOOKS: AgentNativeHookSpecification = {
+  nativeSessionTransition: (eventName, payload) => eventName === 'SessionStart' &&
+    ['startup', 'resume', 'clear', 'compact', 'fork'].includes(String(payload.source)),
   // 事件名随负载到达：Claude 一族的 stdin 负载带 `hook_event_name`（这也是 claude/codex 的配置都不带
   // `--event` 却照样能用的原因——事件名不在配置侧、在投递侧）。
   eventNameSource: { kind: 'payload', payloadKey: 'hook_event_name' },
@@ -117,6 +120,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
   return defineAgentProvider({
     planManagedHooks: ({ workspacePath }) => createClaudeManagedHookPlan(workspacePath),
     readSessionHistoryPage: readClaudeSessionHistoryPage,
+    discoverNativeSession: discoverClaudeNativeSession,
     observeSessionHistory: observeNativeJsonlHistory,
     catalog: catalog({
       composer: {"skillRoots": [".claude/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}, {"text": "/cost", "description": "Session usage"}, {"text": "/context", "description": "Context usage"}]},
@@ -128,6 +132,7 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
       capabilities: {
         terminal: true, timeline: 'complete-events', permission: 'respond',
         providerResume: true, replyCorrelation: 'none',
+        providerFork: { current: true },
         usage: { kind: 'native-transcript', transcriptFormat: 'claude-jsonl' }
       }
     }),
@@ -153,6 +158,9 @@ export function createClaudeProvider(defineAgentProvider: ProviderFactory): Agen
     hook: CLAUDE_HOOKS,
     inspectHookActivation: context => inspectHookDisableSetting(context, 'disableAllHooks'),
     launchOptions: CLAUDE_LAUNCH_OPTIONS,
+    buildForkArgs: (sessionId, _transcriptPath, prompt, args) => [
+      '--resume', sessionId, '--fork-session', ...args, ...(prompt ? [prompt] : [])
+    ],
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? [prompt] : [])
     ]

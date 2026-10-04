@@ -1149,6 +1149,9 @@ export async function registerIpc(args: {
   handle('sessions:setPosture', async (session: AgentSessionControl, modeId: string) => {
     await args.runtime.setPosture(session, modeId)
   })
+  handle('sessions:confirmNativeSession', async (session: AgentSessionControl, input: import('@agentmux/core').AgentMuxNativeSessionConfirmationInput) => (
+    args.runtime.confirmNativeSession(session, input)
+  ))
   handle('sessions:reconcile-reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>
     sessionReopenResult(() => args.runtime.reconcileRetiredSession(reference, expectedRetiredAt, operationId, config)))
   handle('sessions:reopen', async (reference: import('../shared/contracts.js').SessionHistoryReference, expectedRetiredAt: number, operationId: string) =>

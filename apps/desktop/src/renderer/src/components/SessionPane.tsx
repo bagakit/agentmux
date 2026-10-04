@@ -12,6 +12,7 @@ import { effectiveSessionViewMode, sessionPresentationById } from '../lib/sessio
 import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
+import { projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { CONNECTION_UNRECOVERABLE_DETAIL } from '../lib/session-state'
 import { sessionRecoveryClassName, sessionRecoveryState } from '../lib/session-recovery-banner'
 import { workspaceRootForPath } from '../lib/workbench-tabs'
@@ -47,6 +48,7 @@ import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { SessionRecap } from './SessionRecap'
 import { AgentRegionHeader } from './AgentRegionHeader'
+import { useAgentCurrentForkControls } from './AgentCurrentForkControls'
 import { SessionTakeoverSurface } from './SessionTakeoverSurface'
 import { takeoverExecution } from '../lib/session-takeover'
 import { executionHostProjection, regionExecutionHost } from '../lib/region-execution-host'
@@ -126,6 +128,7 @@ export function SessionPane({
       primaryPresentation.surface === 'mote' ? 'floating-pointer' : 'pointer', mailboxOrigin.tabGroupId)
   }
   const session = useObservedAppStore('sessionPane', observationVisible, (state) => sessionPresentationById(state.sessions).get(sessionId))
+  const currentConversationActions = useAgentCurrentForkControls({ session: session?.kind === 'agent' ? session : null, linkOrigin: mailboxOrigin, readOnly })
   const pendingLaunch = useObservedAppStore('sessionPane', observationVisible, (state) => state.pendingAgentLaunches[sessionId])
   const recoveryCandidate = useObservedAppStore('sessionPane', observationVisible, (state) => state.recoveryCandidates.find((candidate) => candidate.agentSessionId === sessionId))
   const nameMetadata = useObservedAppStore('sessionPane', observationVisible, state => sessionNameMetadataFor(state.sessionNameMetadata, sessionId, [
@@ -672,7 +675,12 @@ export function SessionPane({
     providerLabel: connectingExecutor?.label ?? (nameMetadata ? agentProviderLabel(nameMetadata.providerId) : 'Agent') })), executorLabel = agentInputExecutor ?? connectingExecutor?.label ?? 'Executor unknown') =>
     <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
-      regionId={linkOrigin.regionId} readOnly={readOnly} portalTargetId={headerPortalTargetId} onHistory={undefined} onTakeOver={onTakeOver} />
+      regionId={linkOrigin.regionId} readOnly={readOnly} portalTargetId={headerPortalTargetId} onHistory={undefined} onTakeOver={onTakeOver}
+      currentConversationActions={currentConversationActions}
+      nativeSession={session?.kind === 'agent' ? session : recoveryCandidate ? {
+        id: recoveryCandidate.agentSessionId, ...projectNativeSourceFacts(recoveryCandidate),
+        control: { kind: 'agent', hostId: recoveryCandidate.hostId, agentSessionId: recoveryCandidate.agentSessionId, run: recoveryCandidate.run }
+      } : undefined} />
   const launchFailures = pendingLaunch?.projectionFailures ?? []
   const launchNotice = (
     <div className={acceptedLaunch && launchFailures.length > 0 ? 'agent-launch-notice' : 'service-disclosure-home'}>
@@ -852,7 +860,7 @@ export function SessionPane({
   const activityShown = historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore
   if (activityShown) activityLifetime.current.opened = true
   const conversationReading = session.kind === 'agent' ? {
-    reference: session.control, identity: activitySourceKey, enabled: visible && !parked && activityShown,
+    reference: session.control, identity: activitySourceKey, nativeSourceFacts: session, enabled: visible && !parked && activityShown,
     opened: historyOpen || inlineHistory,
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined
@@ -921,6 +929,8 @@ export function SessionPane({
         executorLabel={session.kind === 'agent' ? agentInputExecutor! : 'Shell'} sessionId={session.id}
         sessionKind={session.kind} executionHost={regionExecutionHost(session, configuredExecutionHost)}
         regionId={linkOrigin.regionId} readOnly={readOnly}
+        {...(session.kind === 'agent' ? { nativeSession: session } : {})}
+        currentConversationActions={currentConversationActions}
         onTakeOver={onTakeOver}
         portalTargetId={headerPortalTargetId}
         onHistory={session.kind === 'agent' && !historyOpen && !inlineHistory ? () => openHistory() : undefined}
@@ -998,6 +1008,8 @@ export function SessionPane({
           ) : null}
         </div>
         {session.kind === 'agent' && session.pendingInteraction ? (
+          <div className="agent-interaction-source">
+          {session.nativeSourceObservation ? <p className="agent-interaction-source__notice">This request belongs to the retained native source, which is pending confirmation.</p> : null}
           <AgentInteractionCard
             key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}
             request={session.pendingInteraction}
@@ -1014,6 +1026,7 @@ export function SessionPane({
             disabled={!visible || session.processState !== 'running' || session.status.state === 'disconnected' || Boolean(session.pendingInteraction.evidence.run && session.pendingInteraction.evidence.run.runId !== session.control.run.runId)}
             onRespond={async (response) => await respondInteraction(session.id, response)}
           />
+          </div>
           ) : null}
       </div>
       <OpenDestinationPopover

@@ -5,6 +5,8 @@ import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { useAppStore } from '../store'
+import { nativeBindingKey } from '../../../shared/agent-native-source'
+import { sessionPresentationById } from './session-presentation'
 
 export type AgentSessionControlInput = AgentSessionControl
 
@@ -49,8 +51,7 @@ function makeSessionControlKey(control: AgentSessionControlInput): string {
   return `${encodeSegment(control.hostId)}:${encodeSegment(control.agentSessionId)}:${encodeSegment(control.run.runId)}`
 }
 
-function getOrCreateEntry(control: AgentSessionControlInput): SessionEntry {
-  const key = makeSessionControlKey(control)
+function getOrCreateEntry(control: AgentSessionControlInput, key: string): SessionEntry {
   let entry = sessionRegistry.get(key)
   if (!entry) {
     entry = {
@@ -205,9 +206,10 @@ function observeEntry(control: AgentSessionControlInput, entry: SessionEntry, re
 /** One typed read boundary for recent facts and each presentation's original-sequence window. */
 export async function readSessionConversationPage(
   reference: SessionHistoryReference,
-  options: { cursor?: string; source?: AgentSessionHistorySource; limit?: number } = {}
+  options: { cursor?: string; source?: AgentSessionHistorySource; limit?: number; nativeSource?: 'previous' } = {}
 ): Promise<AgentSessionHistoryPage> {
-  const page = await api.sessions.historyPage(reference, { limit: options.limit ?? 30, ...(options.cursor ? { cursor: options.cursor } : {}) })
+  const page = await api.sessions.historyPage(reference, { limit: options.limit ?? 30,
+    ...(options.cursor ? { cursor: options.cursor } : {}), ...(options.nativeSource ? { nativeSource: options.nativeSource } : {}) })
   if (page.agentSessionId !== reference.agentSessionId) throw new Error('Native page belongs to another Session.')
   if (options.source && !sameSource(options.source, page.source)) {
     throw changedSourceError('Native source changed. The current window is kept; refresh its source.')
@@ -363,7 +365,12 @@ export function useSessionUserMessages(
 } {
   const enabled = options?.enabled ?? true
   const isAgent = control?.kind === 'agent'
-  const sessionKey = isAgent && control ? makeSessionControlKey(control) : ''
+  const bindingKey = useAppStore(state => {
+    const session = control ? sessionPresentationById(state.sessions).get(control.agentSessionId) : undefined
+    return session?.kind === 'agent' && session.control.hostId === control?.hostId && session.control.run.runId === control?.run.runId
+      ? nativeBindingKey(session) : ''
+  })
+  const sessionKey = isAgent && control ? `${makeSessionControlKey(control)}:${bindingKey}` : ''
   const active = Boolean(enabled && sessionKey)
 
   const timeline = useAppStore((state) =>
@@ -379,7 +386,7 @@ export function useSessionUserMessages(
 
   useEffect(() => {
     if (!sessionKey || !control) return
-    const entry = getOrCreateEntry(control)
+    const entry = getOrCreateEntry(control, sessionKey)
     entry.consumerCount++
 
     return () => {
@@ -400,7 +407,7 @@ export function useSessionUserMessages(
   const subscribe = useCallback(
     (onStoreChange: () => void) => {
       if (!active || !control) return () => {}
-      const entry = getOrCreateEntry(control)
+      const entry = getOrCreateEntry(control, sessionKey)
       entry.subscribers.add(onStoreChange)
 
       return () => {

@@ -12,6 +12,7 @@
 - [状态标记与 Executor 叠加密度](#状态标记与-executor-叠加密度)
 - [状态、Browser 与 Scratch / Topic 密度](#状态browser-与-scratch--topic-密度)
 - [Executor identity 的统一密度](#executor-identity-的统一密度)
+- [原生会话变化的就地提示](#原生会话变化的就地提示)
 - [Claude Prompt 的提交反馈](#claude-prompt-的提交反馈)
 - [Hook 隔离提示的密度](#hook-隔离提示的密度)
 - [A2A 消息队列与身份信息密度](#a2a-消息队列与身份信息密度)
@@ -54,6 +55,12 @@
 - 自定义 Executor 图标是 Provider 图标内部的小型叠加，不能向外扩成第二圈。状态点只在 working、needs-user、blocked、disconnected 或明确 error 时显示，idle/正常停止不添加常驻装饰。
 - 信息面板使用现有 tooltip 的 micro/compact 字号和边距，内容分成身份、状态和一个小型设置动作；设置动作进入 Executor 模板设置，不把 Appearance 的控件复制进面板。
 - 既有头像的保留和 Reset 语义归交互合同「旧配置的 Executor 身份不能丢」；所有尺寸下的设置预览与实际身份图保持一致。
+
+## 原生会话变化的就地提示
+
+行为、原生来源资格与人工确认沿 [同一 Run 内的原生会话切换](../behavior/agent-capabilities-and-messaging.md#同一-run-内的原生会话切换)。该 Region 右上 Agent 信息入口用紧凑文字与轻量标记表达「来源变化」或「来源未确认」，不能只用颜色，也不将健康进程画成终局错误。完整旧／候选 ID、依据和确认范围放进原信息面，主工作面不堆机器字段或第二份身份卡。
+
+核对与采用准确候选的动作和原因成组，鼠标及键盘均可达；失败保留选择和服务说明，取消不写入。窄 Region 下文字可换行、长 ID 可按需完整读取和复制，操作命中区不能被挤出或遮住。提示不抢输入、不遮挡终端连续阅读，不因无关刷新自动消失；正常完全确认后保持安静。候选实际宽窄画面与确认／失败动作沿既有独立看图评审验收，采图或源码字段存在不能代签。
 
 ## Claude Prompt 的提交反馈
 

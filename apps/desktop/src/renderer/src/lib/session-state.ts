@@ -9,6 +9,7 @@ import type {
   SessionSnapshot
 } from '../../../shared/contracts'
 import { runInterruptionFact } from '../../../shared/contracts'
+import { nativeBindingKey, projectNativeSourceFacts } from '../../../shared/agent-native-source'
 import { configValuesEqual } from '../../../shared/config-edit'
 import type { AgentMuxAgentSession, AgentMuxEvidence, AgentMuxRunRef, AgentMuxAttachmentGapObservation, AgentMuxOutputGapCauses } from '@agentmux/core'
 import { agentInteractionResponseUnavailableReason } from '@agentmux/core/agent-interaction-state'
@@ -106,7 +107,7 @@ function acceptsAgentSessionTransition(
   incoming: AgentMuxAgentSession
 ): boolean {
   if (session.id !== incoming.agentSessionId) return false
-  if (sameRun(session.control.run, incoming.run) &&
+  if (sameRun(session.control.run, incoming.run) && nativeBindingKey(session) === nativeBindingKey(incoming) &&
     (incoming.semanticStatus?.currentActivityRevision ?? 0) < (session.semanticStatus?.currentActivityRevision ?? 0)) return false
   if (incoming.updatedAt < session.agentSessionUpdatedAt) return false
   if (incoming.updatedAt === session.agentSessionUpdatedAt) return sameRun(session.control.run, incoming.run)
@@ -152,6 +153,11 @@ export function runtimeDiagnosticNotice(
     if (current.length === 1) session = current[0]
   }
   const confirmed = run !== undefined ? session : undefined
+  // The exact Core source observation has its persistent Region service window.
+  // Do not duplicate that fact in an unrelated global error that survives its resolution.
+  // Missing facts and failed persistence still need the original diagnostic surface.
+  if (confirmed?.kind === 'agent' && confirmed.nativeSourceObservation?.run.runId === run?.runId &&
+    (core.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED' || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED')) return null
   const scope = session
     ? `${session.kind === 'agent' ? 'Agent' : 'Terminal'} "${session.label}" on host "${event.hostId}"`
     : core.agentSessionId
@@ -770,6 +776,10 @@ export function projectRuntimeEvent(
       terminalOutputChannel: _terminalOutputChannel,
       turnUsage: _turnUsage,
       nativeSessionId: _nativeSessionId,
+      nativeHandle: _nativeHandle,
+      observedNativeHandle: _observedNativeHandle,
+      nativeSourceObservation: _nativeSourceObservation,
+      nativeConfirmation: _nativeConfirmation,
       ...current
     } = item
     const semantic = currentAgentSemanticStatus(core.session.semanticStatus)
@@ -779,6 +789,7 @@ export function projectRuntimeEvent(
     const next = {
       ...current,
       providerId: core.session.providerId,
+      ...projectNativeSourceFacts(core.session),
       nativeService: sameRun(item.control.run, core.session.run) ? item.nativeService ?? null : null,
       ...(core.session.nativeHandle ? { nativeSessionId: core.session.nativeHandle.sessionId } : {}),
       hostId: core.session.hostId,
@@ -787,6 +798,9 @@ export function projectRuntimeEvent(
       agentSessionUpdatedAt: core.session.updatedAt,
       ...(core.session.creation ? { creation: structuredClone(core.session.creation) } : {}),
       promptSubmissionPredecessor: agentPromptPredecessor(core.session),
+      ...(nativeBindingKey(item) !== nativeBindingKey(core.session) && item.status.state !== 'disconnected' && !semantic
+        ? { status: projectRunProcessStatus({ state: item.processState, source: 'run-process', observedAt: core.session.updatedAt }) }
+        : {}),
       // Mirror the Core fact independently of the display freshness gate below.
       // An accepted snapshot may clear an idle epoch without a new observation.
       ...(core.session.semanticStatus

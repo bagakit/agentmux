@@ -10,6 +10,7 @@ import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, ty
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
 import { createHash, randomUUID } from 'node:crypto'
+import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import type { AgentMuxClient } from './client.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, agentMuxMessageTargetCandidates,
   type AgentMuxControlHost, type AgentMuxControlRequest, type AgentMuxControlResult,
@@ -45,7 +46,7 @@ import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMu
 /** A structural slice of the original public SDK; hosted clients need no private fields. */
 export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'reopenAgent' | 'reconcileAgentReopen' | 'agentSessions' | 'readAgentSessions' | 'sessionHistorySources' | 'sessionHistoryPage' | 'sessionHistoryResource' | 'sessionTimeline' | 'authorizeRetainedAgentCaller' | 'agentMessageQueuePath' |
-  'agentSession' | 'refreshAgentSession' | 'resolveAgentSession' | 'statusAgent' |
+  'agentSession' | 'refreshAgentSession' | 'confirmAgentNativeSession' | 'resolveAgentSession' | 'statusAgent' |
   'observeAgentOutput' | 'replySessionQuestion' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
@@ -100,6 +101,7 @@ const NATIVE_FIELDS = {
   'name.confirm': ['operationId'],
   whoami: [], 'agent.ls': ['agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'agent.inspect': ['target'],
+  'agent.native.confirm': ['agentSessionId', 'expectedRun', 'expectedNativeHandle', 'candidateNativeHandle', 'expectedObservationAt', 'operationId'],
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes'],
@@ -287,6 +289,16 @@ export class AgentMuxRpcService {
       }) as AgentMuxRpcResult<M>
     }
     await this.assertRuntimeFence(context)
+    if (method === 'agent.native.confirm') {
+      if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {
+        throw new AgentMuxError('Native conversation confirmation requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const input = parseAgentNativeSessionConfirmation(params), scope = await this.owner(input.agentSessionId)
+      if (scope.agentSessionId !== input.agentSessionId) throw new AgentMuxError('Native confirmation requires the exact Session ID.', 'INVALID_AGENT_NATIVE_CONFIRMATION')
+      context.signal?.throwIfAborted()
+      if (scope.client.forwardRpc) return await scope.client.forwardRpc('agent.native.confirm', input, context) as AgentMuxRpcResult<M>
+      return await scope.client.confirmAgentNativeSession(input) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.reopen' || method === 'agent.reopen.check') {
       if (context.caller !== undefined || !context.principal ||
         !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {

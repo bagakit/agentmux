@@ -362,15 +362,23 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
   return { tabs, layouts }
 }
 
-function agentFact(session: AgentMuxAgentSession): AgentMuxSpaceAgentFact {
+function agentFact(session: AgentMuxAgentSession, hostId: string): AgentMuxSpaceAgentFact {
   return { agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
-    executorId: session.executorId, hostId: session.hostId, cwd: session.workspacePath,
-    createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown' }
+    executorId: session.executorId, hostId, cwd: session.workspacePath,
+    createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
+    ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
+    ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
+    ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
+    ...(session.forkedFrom ? { forkedFrom: session.forkedFrom } : {}) }
 }
 function snapshotFact(session: Extract<SessionSnapshot, { kind: 'agent' }>): AgentMuxSpaceAgentFact {
   return { agentSessionId: session.id, runId: session.control.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId: session.hostId, cwd: session.workspacePath,
-    createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown' }
+    createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
+    ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
+    ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
+    ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
+    ...(session.forkedFrom ? { forkedFrom: session.forkedFrom } : {}) }
 }
 function addressOf(catalog: AgentMuxSpaceCatalog, regionId: string, target: LooseSelector = {}): AgentMuxSpaceAddress | null {
   const locations = catalog.locations.filter(location => location.regionId === regionId && match(target, location))
@@ -399,7 +407,7 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
       const created = await ports.creation(hostId, binding.agentSessionId)
       if (created.agentSessionId !== binding.agentSessionId) throw new Error('Creation read returned another Session identity.')
       if (binding.recovery && created.creation?.createOperationId !== binding.requestId) throw new Error('Core has not confirmed this original creation operation identity. Its healthy Session is retained without attaching a replacement.')
-      agent = agentFact(created)
+      agent = agentFact(created, hostId)
       // Repair only the original reserved projection from the existing Core receipt.
       // This read never repeats creation, input or lifecycle recovery.
       const afterRead = currentLocation()
@@ -417,6 +425,11 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
   if (agent?.initialPrompt === 'unconfirmed' || agent?.initialPrompt === 'unknown' && binding.createAgent) {
     issues.push(issue('first-prompt', 'INITIAL_PROMPT_UNCONFIRMED', 'Core has not confirmed the original first prompt protocol.'))
   }
+  if (agent?.forkedFrom && agent.agentMuxContext !== 'confirmed') {
+    issues.push(issue('identity-reminder', 'AGENTMUX_CONTEXT_UNCONFIRMED', 'The new Agent exists; its new AgentMux identity reminder has not been confirmed. Inspect the original creation operation without replaying input.'))
+  }
+  if (agent?.creationPersistence === 'unconfirmed' || agent?.creationFailure) issues.push(issue('creation',
+    agent.creationFailure?.code ?? 'AGENT_CREATION_UNCONFIRMED', agent.creationFailure?.message ?? 'The new Run is retained; its Session persistence is unconfirmed. Inspect the original creation operation without repeating it.'))
   const unchanged = binding.from && binding.target.tabId === binding.from.tabId && binding.target.regionId === binding.from.regionId
   return { requestId: binding.requestId, outcome: atTarget && agent && issues.length === 0 ? binding.operation === 'space.mv' ? unchanged ? 'unchanged' : 'moved' : 'opened' : 'unknown',
     from: binding.from ?? null, to, agent, resource, save: unsaved(Boolean(to)), issues }
@@ -487,6 +500,8 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     let sessionId: string
     let sourceSurface: AgentWorkbenchSurface | undefined
     let executorId: string | undefined
+    let forkParent: AgentMuxAgentSession | undefined
+    let forkExecutionHostId: string | undefined
     if (operation === 'space.mv') {
       const source = catalog.regions.find(item => item.regionId === request.fromRegionId)
       if (!source || source.kind !== 'agent' || source.agentSessionId !== request.expectedAgentSessionId) failure('SPACE_SOURCE_CHANGED', 'The source Region does not contain the expected Agent Session.')
@@ -512,6 +527,22 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       if (request.content.kind === 'new-agent') {
         executorId = request.content.executorId
         if (!ports.get().config!.executors[executorId]) failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact configured Executor ID.')
+      } else if (request.content.kind === 'fork-agent') {
+        const source = request.content.source
+        const parent = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === source.agentSessionId)
+        if (!parent) failure('AGENT_SESSION_UNKNOWN', 'The source Agent Session is not currently observed; its workbench is retained.')
+        if (!parent.capabilities.providerFork?.current) failure('AGENT_FORK_UNSUPPORTED', 'This Provider does not support forking its current conversation.')
+        forkParent = await ports.creation(parent.hostId, parent.id)
+        // Core owns server-local Session identity; the Desktop snapshot owns the route to that server.
+        forkExecutionHostId = parent.hostId
+        const handle = forkParent.nativeHandle
+        if (forkParent.agentSessionId !== source.agentSessionId || forkParent.run.runId !== source.expectedRun.runId ||
+          forkParent.nativeSourceObservation || handle?.kind !== 'provider' || handle.providerId !== source.expectedNativeHandle.providerId ||
+          handle.sessionId !== source.expectedNativeHandle.sessionId || handle.transcriptPath !== source.expectedNativeHandle.transcriptPath) {
+          failure('AGENT_FORK_SOURCE_CHANGED', 'The source conversation changed or is unconfirmed. Refresh its identity before this fork; the original Agent remains available.')
+        }
+        executorId = forkParent.executorId
+        if (!ports.get().config!.executors[executorId]) failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'The source Executor is no longer configured.')
       } else {
         const existingSession = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === sessionId)
         if (!existingSession) failure('AGENT_SESSION_UNKNOWN', 'The existing Agent Session is not currently observed.')
@@ -534,14 +565,15 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       if (from) destination = { ...destination, address: { ...destination.address, regionId: from.regionId } }
     }
     if (destination && ports.closing(destination.address.tabId) || from && ports.closing(from.tabId)) failure('SPACE_TARGET_CLOSING', 'An involved Tab is closing; existing contents were preserved.')
-    const executionHostId = operation === 'agent.open' && request.content.kind === 'new-agent'
+    const executionHostId = forkExecutionHostId ?? (operation === 'agent.open' && request.content.kind === 'new-agent'
       ? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
-      : ports.get().sessions.find(session => session.kind === 'agent' && session.id === sessionId)?.hostId
+      : ports.get().sessions.find(session => session.kind === 'agent' && session.id === sessionId)?.hostId)
     const binding: SpatialRequestBinding = { requestId: request.requestId, inputDigest, operation,
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
-      agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind === 'new-agent',
+      agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
       ...(executionHostId ? { executionHostId } : {}),
       ...(options?.recovery ? { recovery: options.recovery } : {}),
+      ...(operation === 'agent.open' && request.content.kind === 'fork-agent' ? { forkSource: structuredClone(request.content.source) } : {}),
       ...(from ? { from } : {}), target: destination ? { ...(destination.address.spaceId ? { spaceId: destination.address.spaceId } : {}), ...(destination.address.zoneId ? { zoneId: destination.address.zoneId } : {}), tabId: destination.address.tabId, regionId: destination.anchor ?? destination.address.regionId, displayWorkspaceId: destination.address.displayWorkspaceId, groupId: destination.address.groupId } : { spaceId: request.destination.spaceId!,
         ...(request.destination.displayWorkspaceId ? { displayWorkspaceId: request.destination.displayWorkspaceId } : {}),
         ...(request.destination.groupId ? { groupId: request.destination.groupId } : {}) },
@@ -582,6 +614,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (ports.closing(target.address.tabId)) failure('SPACE_TARGET_CLOSING', 'The target Tab is closing.')
     const zone = catalog.zones.find(item => item.zoneId === target.address.zoneId)
     if (!zone || !zone.hostId || !zone.directoryPath) failure('SPACE_RESOURCE_UNKNOWN', 'The original Zone resource is unavailable; its entity is retained.')
+    if (forkParent && zone.hostId !== forkExecutionHostId) failure('AGENT_FORK_HOST_MISMATCH', 'Choose a display destination on the source Host. The source execution directory is retained.')
     const surface: AgentWorkbenchSurface = sourceSurface ?? { kind: 'agent', phase: binding.createAgent ? 'launching' : 'attached',
       regionId: target.address.regionId, workspaceId: target.address.workspaceId, sessionId }
     const placement = applySpatialPlacement(ports.get(), topics, target, surface, from)
@@ -593,18 +626,20 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     report.save = await ports.save(true)
     if (!report.save.localStorageWritten && binding.createAgent) return fail('The target workbench could not be written; Agent creation has not been dispatched.', 'layout-save')
     if (request.focus) ports.focus(target.address)
-    if (binding.createAgent && operation === 'agent.open' && request.content.kind === 'new-agent') {
+    if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session') {
       if (options?.authorize && !options.authorize()) failure('RECOVERY_SOURCE_CHANGED', 'The original recovery selection changed after intent was saved. Its reserved identity is retained; creation was not dispatched.')
       const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
       const topicId = zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
-      const launched = await ports.launch({ executorId: executorId!, hostId: zone.hostId, workspacePath: topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
-          ? ports.get().config!.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!.path : zone.directoryPath,
+      const launchHostId = forkExecutionHostId ?? zone.hostId
+      const launched = await ports.launch({ executorId: executorId!, hostId: launchHostId, workspacePath: forkParent?.workspacePath ?? (topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
+          ? ports.get().config!.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!.path : zone.directoryPath),
         agentSessionId: sessionId, createOperationId: request.requestId,
-        ...(topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
+        ...(request.content.kind === 'fork-agent' ? { forkSource: request.content.source, launchOptions: forkParent!.launchOptions } : {}),
+        ...(!forkParent && topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID ? { scratchTopicId: topicId } : {}),
         ...(request.content.prompt === undefined ? {} : { prompt: request.content.prompt }),
         ...(options?.agentMuxNote === undefined ? {} : { agentMuxNote: options.agentMuxNote }),
         ...(request.caller && request.content.prompt !== undefined ? { initialMessage: { callerAgentSessionId: request.caller.agentSessionId, capability: request.caller.capability ?? '' } } : {}) })
-      report.agent = agentFact({ ...launched.created, ...(launched.creation ? { creation: launched.creation } : {}) })
+      report.agent = agentFact({ ...launched.created, ...(launched.creation ? { creation: launched.creation } : {}) }, launchHostId)
       if (launched.created.agentSessionId !== sessionId) return fail('Core returned another Session; its healthy Run has been retained for inspection.', 'creation')
       await ports.attach(target.address.regionId, launched)
       const landing = resolveSpatialCommit(ports.get().tabs, target.address.regionId, { kind: 'agent', sessionId })
@@ -615,6 +650,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       if (!report.to) report.issues.push(issue('layout', 'SPACE_PLACEMENT_UNKNOWN', 'The Agent is healthy, but its exact Region is no longer observed.'))
       for (const projection of launched.projectionFailures) report.issues.push(issue(projection.step, 'AGENT_DISPLAY_UNCONFIRMED', projection.message))
       if (report.agent.initialPrompt === 'unconfirmed' || report.agent.initialPrompt === 'unknown') report.issues.push(issue('first-prompt', 'INITIAL_PROMPT_UNCONFIRMED', 'Core has not confirmed the original first prompt protocol.'))
+      if (report.agent.forkedFrom && report.agent.agentMuxContext !== 'confirmed') report.issues.push(issue('identity-reminder', 'AGENTMUX_CONTEXT_UNCONFIRMED', 'The new Agent exists; its new AgentMux identity reminder has not been confirmed. Inspect this operation without replaying input.'))
+      if (report.agent.creationPersistence === 'unconfirmed' || report.agent.creationFailure) report.issues.push(issue('creation',
+        report.agent.creationFailure?.code ?? 'AGENT_CREATION_UNCONFIRMED', report.agent.creationFailure?.message ?? 'The new Run is retained; its Session persistence is unconfirmed. Inspect this operation without repeating it.'))
       if (signal?.aborted) report.issues.push(issue('control', 'CONTROL_RECEIPT_INTERRUPTED', 'The caller ended while the healthy Agent continued. Inspect the request ID.'))
       report.save = await ports.save(Boolean(report.to))
     } else if (!report.agent) {

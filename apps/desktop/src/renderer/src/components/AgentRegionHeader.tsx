@@ -5,9 +5,10 @@ import * as DropdownMenu from './HoverDropdownMenu'
 import { RegionMenuEntryView, useRegionMenuEntries } from './RegionContextMenu'
 import { HostBadge } from './HostBadge'
 import type { RegionExecutionHost } from '../lib/region-execution-host'
+import { useAgentNativeSourceControls, nativeSourceLabel, type AgentNativeSourceReference } from './AgentNativeSourceControls'
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions }: {
   name: string
   executorLabel: string
   sessionId: string
@@ -22,8 +23,11 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   /** One precise owner may present its existing controls in the Focus bar. */
   portalTargetId?: string | null
   resultReview?: ReactNode
+  currentConversationActions?: ReactNode
+  nativeSession?: AgentNativeSourceReference | undefined
 }) {
   const entries = useRegionMenuEntries()
+  const nativeSourceActions = useAgentNativeSourceControls({ session: nativeSession ?? null, readOnly })
   const home = useRef<HTMLDivElement>(null)
   const handoffFocus = useRef(false)
   const [host] = useState(() => {
@@ -59,8 +63,9 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     {resultReview}
     <DropdownMenu.Root>
       <DropdownMenu.Trigger className="agent-region-header__more"
-        aria-label={`More actions for ${name}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
+        aria-label={`More actions for ${name}${nativeSession && nativeSourceLabel(nativeSession) ? `; ${nativeSourceLabel(nativeSession)}` : ''}`} title={`${name}; ${executorLabel}; ${executionHost.label}`}
         onPointerDown={(event) => event.stopPropagation()}>
+        {nativeSession && nativeSourceLabel(nativeSession) ? <span className="agent-region-header__source" data-native-source-marker="">{nativeSourceLabel(nativeSession)}</span> : null}
         <MoreHorizontal size={14} />
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal><DropdownMenu.Content className="tab-context-menu agent-region-menu"
@@ -77,6 +82,8 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
           <span>Host ID: {executionHost.id ?? 'Unknown'}</span>
           <span>Directory: {executionHost.cwd || 'Unknown'}</span>
         </DropdownMenu.Label>
+        {nativeSourceActions}
+        {currentConversationActions}
         {onHistory || onTakeOver || onRefreshObservation || entries.length > 0 ? <DropdownMenu.Separator className="tab-context-menu__separator" /> : null}
         {onTakeOver && !readOnly && sessionKind === 'agent' ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => {
           handoffFocus.current = true

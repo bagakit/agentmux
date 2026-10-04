@@ -2,6 +2,8 @@ import { readControlJsonInput } from './cli-json-input.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
 import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
+import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
+import { parseAgentForkSource } from './agent-fork.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseFileReadCommand } from './agentmux-cli-files.js'
@@ -222,15 +224,20 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.history.resource', '--input FILE|-', 'Read one exact recorded image at its original Host without operating a Run.', { '--input': 'data' },
     async f => parseSessionHistoryResourceParams(await readControlJsonInput(value(f, '--input', true)!, 'Recorded image')) as unknown as Record<string, unknown>,
     'JSON requires hostId, agentSessionId, source {providerId,nativeSessionId}, recordId, partIndex and expectedReference; preserve turnId when recorded. Locate these facts with agent.history --source native. maxBytes can only reduce the fixed 16 MiB cap. The Host rereads the exact original record and image part; expectedReference grants no arbitrary path access. File and raster data references may yield MIME/base64 bytes; opaque/HTTP or unavailable images retain their reference and readable reason. No network fetch or Run operation occurs.'),
+  command('agent.native.confirm', '--input FILE|-', 'Explicitly adopt this exact Run’s witnessed current native conversation; inspect the Session first.',
+    { '--input': 'data' }, async f => ({ ...parseAgentNativeSessionConfirmation(await readControlJsonInput(value(f, '--input', true)!, 'Native confirmation')) }),
+    'JSON requires agentSessionId, expectedRun, expectedNativeHandle, candidateNativeHandle, expectedObservationAt and operationId. Native locators and observation time come from agent.inspect. No Run is started or restarted; repeat the same operationId to reconcile its durable receipt.'),
   command('agent.context', '--host ID --session ID [--cursor TOKEN] [--limit N]', 'Read all available original context sources, complete entries and diagnostics without controlling the Agent.',
     { '--host': 'data', '--session': 'data', '--cursor': 'data', '--limit': 'value' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ...fields(f, { '--cursor': 'cursor' }), ...numbers(f, { '--limit': 'limit' }) }),
     'Both saved Core work and native conversation are included automatically. Follow nextCursor with the same exact Host and Session; limit bounds entries per source, never text length. Unavailable sources are reported alongside readable material. local means this Core Host, including on a remote machine. Read-only requests and cancellation never stop the original Run.'),
-  command('agent.open', '(--executor ID|--session ID) <destination> [--prompt TEXT] [--focus] [--operation-id ID]', 'Open an Agent at an explicit Space/Zone/Tab/Region; default is background.',
-    { ...DESTINATION, '--executor': 'data', '--session': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean', '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data', '--project': 'data', '--source-workspace': 'data' }, f => {
-      const selected = one(f, ['--executor', '--session'], 'Agent open')
+  command('agent.open', '(--executor ID|--session ID|--fork-from ID --fork-source FILE|-) <destination> [--prompt TEXT] [--focus] [--operation-id ID]', 'Open or natively fork an Agent at an explicit Space/Zone/Tab/Region; default is background.',
+    { ...DESTINATION, '--executor': 'data', '--session': 'data', '--fork-from': 'data', '--fork-source': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean', '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data', '--project': 'data', '--source-workspace': 'data' }, async f => {
+      const selected = one(f, ['--executor', '--session', '--fork-from'], 'Agent open')
       const resourceOptions = ['--path', '--branch', '--new-branch', '--directory', '--project', '--source-workspace'].filter(flag => f.values.has(flag))
       const dest = destination(f)
       if (selected === '--session' && (f.values.has('--prompt') || f.booleans.has('--new-zone'))) invalid('--session cannot supply an initial prompt or create a Zone.')
+      if (selected !== '--fork-from' && f.values.has('--fork-source')) invalid('--fork-source requires --fork-from.')
+      if (selected === '--fork-from' && f.booleans.has('--new-zone')) invalid('Fork retains the source execution directory; choose an existing display destination.')
       if (!f.booleans.has('--new-zone')) {
         if (resourceOptions.length || f.booleans.has('--worktree')) invalid('Project/resource options require --new-zone.')
       } else {
@@ -244,10 +251,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
           Object.assign(dest, { newZone: { kind: 'directory', projectId, ...source, path: id(f, '--directory') } })
         }
       }
-      return { ...operation(f), content: selected === '--executor'
+      const fork = selected === '--fork-from' ? parseAgentForkSource(await readControlJsonInput(value(f, '--fork-source', true)!, 'Fork source')) : undefined
+      if (fork && fork.agentSessionId !== id(f, '--fork-from', true)) invalid('--fork-from must match the exact Session in --fork-source.')
+      return { ...operation(f), content: fork ? { kind: 'fork-agent', source: fork, ...fields(f, { '--prompt': 'prompt' }) } : selected === '--executor'
         ? { kind: 'new-agent', executorId: id(f, selected), ...fields(f, { '--prompt': 'prompt' }) }
         : { kind: 'agent-session', agentSessionId: id(f, selected, true) }, destination: dest, focus: focus(f) }
-    }, `Use --zone ZONE --new-tab for an existing Zone. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; its Host and directory determine execution. Space is a presentation and cannot choose or change an existing Session Host or cwd. No existing Tab anchor is required. ${SAVE_NOTICE}`),
+    }, `Use --zone ZONE --new-tab for an existing Zone. For current native fork, inspect the source first: --fork-source JSON carries agentSessionId, expectedRun and expectedNativeHandle from agent.inspect. --fork-from names that exact Session. The Provider must support current-session native fork; a new Session and Region are created with a new amux identity reminder. The source Host/cwd are retained. Repeat --operation-id to read the original outcome; never resend uncertain input. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; its Host and directory determine execution. Space is a presentation and cannot choose or change an existing Session Host or cwd. No existing Tab anchor is required. ${SAVE_NOTICE}`),
   command('agent.rename', '--session ID --name-revision N (--name TEXT|--clear)', 'Edit the exact Session display name at its observed revision.', { '--session': 'data', '--name': 'data', '--clear': 'boolean', '--name-revision': 'value', ...OP }, f => ({ ...operation(f), agentSessionId: id(f, '--session', true), name: name(f), expectedNameRevision: Number(value(f, '--name-revision', true)) }), SAVE_NOTICE),
   command('agent.view', '--session ID [--mode terminal|activity]', 'Read or change all presentations of one exact SID without taking focus.', { '--session': 'data', '--mode': 'value', ...OP }, f => ({ agentSessionId: id(f, '--session', true), ...fields(f, { '--mode': 'mode' }), ...(f.values.has('--mode') ? operation(f) : {}) }), 'Without --mode this is read-only. A known durable Agent projection remains usable while Core facts are unknown; no healthy Run is stopped.'),
   { ...command('agent.output', '--session ID [--after-byte N] [--follow]', 'Read replay or follow ordered raw output bytes, with cursor and Gap facts.', { '--session': 'data', '--after-byte': 'value', '--follow': 'boolean' }, f => ({ agentSessionId: id(f, '--session'), ...numbers(f, { '--after-byte': 'afterByte' }), follow: f.booleans.has('--follow') }), 'Replay and live bytes use bounded base64 notifications, never reconstructed terminal text. Without --follow, the reader ends after replay. Ctrl-C cancels this reader, not the Agent Run.'), stream: true },

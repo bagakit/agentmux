@@ -4,7 +4,7 @@ import {relative,resolve} from 'node:path'
 import {defineConfig} from 'vitest/config'
 const root=resolve(import.meta.dirname,'../../../../..')
 const changes: Record<string,Array<[string,string,string]>>={
- 'skip-current':[['packages/core/src/client.ts',"const wantsCurrent = handle === undefined || purpose === 'observe' || options.refreshNativeSource === true",'const wantsCurrent = handle === undefined']],
+ 'skip-current':[['packages/core/src/client.ts',"const wantsCurrent = !options.nativeSource && (handle === undefined || purpose === 'observe' || options.refreshNativeSource === true)",'const wantsCurrent = handle === undefined']],
  'split-page-source':[['packages/core/src/client.ts',".filter(resource => !resource.controller.signal.aborted && resource.binding?.transient)",'.filter(() => false)']],
  'retain-old-fence':[['packages/core/src/client.ts',"transient = false\n        assertWitness = undefined\n        return true","return true"]],
  'ignore-pid':[['packages/core/src/client.ts','run.pid !== firstRun.pid','false']],

@@ -182,12 +182,18 @@ function moveClusterFocus(event: React.KeyboardEvent<HTMLDivElement>): void {
  */
 export function OpenDestinationBar({
   canSplit,
-  onSelect
+  onSelect,
+  allowedDestinations = OPEN_DESTINATIONS,
+  accessibleContext = 'Choose where to open the link'
 }: {
   canSplit: boolean
   onSelect(destination: OpenDestination): void
+  /** Content owners reuse the original direction geometry and keyboard behavior. */
+  allowedDestinations?: readonly OpenDestination[]
+  accessibleContext?: string
 }) {
-  const firstEnabled = OPEN_DESTINATION_BAR_ITEMS.findIndex(
+  const items = OPEN_DESTINATION_BAR_ITEMS.filter(item => allowedDestinations.includes(item.destination))
+  const firstEnabled = items.findIndex(
     (item) => !(openDestinationNeedsRegion(item.destination) && !canSplit)
   )
 
@@ -195,10 +201,10 @@ export function OpenDestinationBar({
     <div
       className="open-destination-bar__cluster"
       role="toolbar"
-      aria-label="Choose where to open the link"
+      aria-label={accessibleContext}
       onKeyDown={moveClusterFocus}
     >
-      {OPEN_DESTINATION_BAR_ITEMS.map((item, index) => {
+      {items.map((item, index) => {
         const Icon = item.icon
         const needsRegion = openDestinationNeedsRegion(item.destination)
         const disabled = needsRegion && !canSplit

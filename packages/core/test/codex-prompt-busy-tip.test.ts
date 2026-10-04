@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixtureDisplayPath, fixturePath } from './helpers/fixture-values.js'
 import { describe, expect, it } from 'vitest'
 import { AgentTerminalScreen } from '../src/agent-terminal-screen.js'
 import { inspectCodexPromptExecution } from '../src/providers/codex-prompt-execution.js'
@@ -12,7 +12,7 @@ import { AgentMuxError } from '../src/errors.js'
 const header = '\x1b[13;1H\x1b[1m•\x1b[13;3H\x1b[22m\x1b[2mWorking (4h 15m 48s • \x1b[22m\x1b[1mesc\x1b[22m\x1b[2m to interrupt)'
 const tip = '\x1b[14;3H└ \x1b[22m\x1b[1mTip:\x1b[22m You can resume a previous conversation by running codex resume'
 const composer = '\x1b[17;1H\x1b[1m›\x1b[17;3H\x1b[22m\x1b[2mAsk Codex to do anything\x1b[22m'
-const footer = ("\u001b[19;3HGPT-6.1-Sol xhigh · " + (upstreamFixtureDisplayPath("project")) + " · Main [default]")
+const footer = ("\u001b[19;3HGPT-6.1-Sol xhigh · " + (fixtureDisplayPath("project")) + " · Main [default]")
 const shortcut = '\x1b[20;3H\x1b[1m?\x1b[22m\x1b[2m for shortcuts\x1b[22m'
 const warning = '\x1b[24;3H\x1b[22m\x1b[1m?\x1b[22m for shortcuts' +
   '\x1b[24;95H⚠\x1b[24;97H4 warnings\x1b[24;108H·\x1b[24;110H\x1b[1mf2\x1b[24;113H\x1b[22mto\x1b[24;116Hview'
@@ -63,9 +63,10 @@ describe('the native busy header and its subordinate tip', () => {
 async function controlledClient(output: string, authenticatedTurn = true) {
   const store = new AgentMuxMemoryAgentSessionStore()
   await store.compareAndSwap(null, { kind: 'agent', agentSessionId: 'busy-tip', providerId: 'tip-control', executorId: 'control',
-    hostId: 'local', workspacePath: upstreamFixturePath("private/tip-control"), run: { runId: 'original-run' }, retiredRuns: [],
+    hostId: 'local', workspacePath: fixturePath("private/tip-control"), run: { runId: 'original-run' }, retiredRuns: [],
     hookBindingId: 'control-binding', hookToken: 'control-token', createdAt: 1, updatedAt: 1 })
   const original = new AgentProviderRegistry().get('codex')
+  const { providerFork: _fork, ...capabilities } = original.catalog.capabilities
   const screen = new AgentTerminalScreen(120, 24)
   const draw = async (pane: string, cursorColumn = 3) => {
     const bytes = Buffer.from(frame(pane, cursorColumn))
@@ -74,7 +75,7 @@ async function controlledClient(output: string, authenticatedTurn = true) {
   await draw(output)
   let working = true, cursor = 0
   const writes: Array<{ operationId: string; data: string; expectedByte: number }> = []
-  const provider = defineAgentProvider({ catalog: { ...original.catalog, capabilities: { ...original.catalog.capabilities, promptExecution: {immediate: 'interrupt-before-input'} }, id: 'tip-control', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
+  const provider = defineAgentProvider({ catalog: { ...original.catalog, capabilities: { ...capabilities, promptExecution: {immediate: 'interrupt-before-input'} }, id: 'tip-control', hookStrategy: { kind: 'native', installation: 'unmanaged' } },
     buildArgs: (_, args) => [...args], hook: { rules: [] }, terminalPromptRender: original.terminalPromptRender!,
     planPromptInput: (prompt, context) => ({...original.planPromptInput(prompt), ...(context?.execution === 'immediate' ? {prepare: {refresh: '\x1b[I',interrupt: '\x1b',endEvent: 'Interrupt'}} : {})}), inspectPromptExecution: inspectCodexPromptExecution,
     preparePromptExecutionTransport: async () => ({ nativeSourceId: 'original-source', verifyCurrentTransport: async () => true }),
@@ -87,7 +88,7 @@ async function controlledClient(output: string, authenticatedTurn = true) {
     kernel: Record<string, unknown>; screenEvidence: { wait: (...args: unknown[]) => Promise<number>; generation: () => number } }
   await owner.registry.load('local')
   const run = () => ({ nativeService: null, runId: 'original-run', lifecycleOperationId: null,
-    program: 'control', args: [], workspacePath: upstreamFixturePath("private/tip-control"), pid: 123, state: { type: 'running' as const },
+    program: 'control', args: [], workspacePath: fixturePath("private/tip-control"), pid: 123, state: { type: 'running' as const },
     cols: 120, rows: 24, latestOutputBytes: screen.throughByte, firstAvailableByte: 0, acceptedInputBytes: cursor })
   owner.kernel.isConnected = () => true
   owner.kernel.identity = () => ({ daemonInstanceId: 'tip-control', protocolVersion: 1, buildIdentity: 'control' })
