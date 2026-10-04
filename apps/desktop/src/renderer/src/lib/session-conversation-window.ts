@@ -17,15 +17,28 @@ export type ConversationReading = {
   readCaptured?: boolean
   returnLabel?: string
 }
+type PagePosition = { cursor: string | null; limit: number; first: string | null; last: string | null; count: number; next: string | null }
+type WindowPart = { index: number; page: AgentSessionHistoryPage; bytes: number; headBytes: number }
 type ReadingWindow = {
   page: AgentSessionHistoryPage
+  parts: WindowPart[]
+  positions: PagePosition[]
+  positionBytes: number
+  head: WindowPart
+  records: Map<string, { part: number; offset: number }>
+  mode: 'current' | 'earlier'
   newerOutside: boolean
   /** The first raw record actually displayed before earlier navigation, never a time/body match. */
-  boundary?: { recordId: string; confirmed: boolean } | null
+  boundary: { recordId: string; confirmed: boolean } | null
 }
+export type ConversationReadingIntent = 'current' | 'seed' | 'earlier' | 'newer' | 'live'
 const PAGE_COUNT = 3
-const RECORD_COUNT = 400
+const PAGE_LIMIT = 100
+const RECORD_COUNT = 1200
 const PAGE_BYTES = 12 * 1024 * 1024
+const byteError = 'This original-sequence window and its return positions exceed their byte budget. The displayed records and return path are kept.'
+const positionError = 'The original page range changed. The displayed records and return path are kept; use Current to refresh.'
+const protectedError = 'Move your reading position or clear the selection before changing this window. Your reading position, selected content, records and cursor are kept.'
 
 export function conversationReadingAnchor(viewport: HTMLElement): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
@@ -92,17 +105,48 @@ export function restoreConversationAnchor(viewport: HTMLElement, anchor: Reading
   if (bounds.height > 0 && rect.height > 0) viewport.scrollTop += rect.top - bounds.top - anchor.offset
 }
 
-function preserveRecords(page: AgentSessionHistoryPage, before: AgentSessionHistoryPage | null): AgentSessionHistoryPage {
-  const old = new Map(before?.items.map(item => [item.id, item]))
-  return { ...page, items: page.items.map(item => {
-    const original = old.get(item.id)
-    return original && JSON.stringify(original) === JSON.stringify(item) ? original : item
-  }) }
+function sameSource(a: AgentSessionHistoryPage, b: AgentSessionHistoryPage): boolean {
+  return a.agentSessionId === b.agentSessionId && a.source.providerId === b.source.providerId && a.source.nativeSessionId === b.source.nativeSessionId
+}
+function recordBytes(item: AgentSessionHistoryPage['items'][number]): number { return JSON.stringify(item).length * 2 }
+function position(page: AgentSessionHistoryPage, cursor: string | null): PagePosition {
+  return { cursor, limit: PAGE_LIMIT, first: page.items[0]?.id ?? null, last: page.items.at(-1)?.id ?? null, count: page.items.length, next: page.nextCursor }
+}
+function verifies(page: AgentSessionHistoryPage, expected: PagePosition): boolean {
+  return page.items.length === expected.count && page.items[0]?.id === (expected.first ?? undefined)
+    && page.items.at(-1)?.id === (expected.last ?? undefined) && page.nextCursor === expected.next
+}
+function part(page: AgentSessionHistoryPage, index: number, before?: ReadingWindow): WindowPart {
+  let bytes = 0
+  const items = page.items.map(item => {
+    const at = before?.records.get(item.id)
+    const original = at ? before!.parts[at.part]!.page.items[at.offset] : undefined
+    const size = recordBytes(item); bytes += size
+    return original && (original === item || JSON.stringify(original) === JSON.stringify(item)) ? original : item
+  })
+  return { index, page: { ...page, items }, bytes, headBytes: 0 }
+}
+function assemble(parts: WindowPart[], positions: PagePosition[], head: WindowPart, mode: ReadingWindow['mode'],
+  boundary: ReadingWindow['boundary'], newerOutside: boolean, trim: 'earlier' | 'newer' | null, positionBytes: number): ReadingWindow {
+  const count = () => parts.reduce((sum, p) => sum + p.page.items.length, 0) + (parts.some(p => p.index === 0) ? 0 : head.page.items.length)
+  while (count() > RECORD_COUNT && parts.length > 1 && trim) parts = trim === 'earlier' ? parts.slice(1) : parts.slice(0, -1)
+  if (count() > RECORD_COUNT) throw new Error(byteError)
+  const bytes = parts.reduce((sum, p) => sum + p.bytes - p.headBytes, head.bytes) + positionBytes
+  if (bytes > PAGE_BYTES) throw new Error(byteError)
+  const records = new Map<string, { part: number; offset: number }>()
+  parts.forEach((p, index) => p.page.items.forEach((item, offset) => {
+    if (records.has(item.id)) throw new Error(positionError)
+    records.set(item.id, { part: index, offset })
+  }))
+  const oldest = parts.at(-1)!
+  const page = { ...oldest.page, items: [...parts].reverse().flatMap(p => p.page.items) }
+  return { page, parts, positions, positionBytes, head, records, mode, newerOutside,
+    boundary: boundary ? { ...boundary, confirmed: boundary.confirmed || records.has(boundary.recordId) } : null }
 }
 
 /** Local navigation only. Recent shared facts/observation, Provider parsing and opaque cursors keep their owners. */
 export function useSessionConversationWindow(reading: ConversationReading | undefined, recent: AgentSessionHistoryPage | null,
-  beforeCommit: (page: AgentSessionHistoryPage, intent: 'current' | 'earlier', currentOriginal?: AgentSessionHistoryPage) => boolean,
+  beforeCommit: (page: AgentSessionHistoryPage, intent: ConversationReadingIntent, currentOriginal?: AgentSessionHistoryPage) => boolean,
   contextItems?: AgentSessionHistoryPage['items']) {
   const currentContext = useMemo(() => recent && contextItems ? { ...recent, items: contextItems } : recent, [recent, contextItems])
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
@@ -121,99 +165,172 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     return () => { active = false }
   }, [key, reading?.enabled, reading?.readCaptured])
   const stateRef = useRef(state); stateRef.current = state
-  const generation = useRef(0), pending = useRef(false), retry = useRef<'current' | 'earlier'>('current')
+  const generation = useRef(0), pending = useRef(false), retry = useRef<'current' | 'seed' | 'earlier' | 'newer'>('seed')
+  const appliedRecent = useRef<AgentSessionHistoryPage | null>(null)
+  const automaticSeedBlocked = useRef(false)
   const window = state.key === key ? state.window : null
-  const historicalPage = useMemo(() => window?.page ?? null, [window])
-  const page = historicalPage ?? currentContext
-  const newerOutside = useMemo(() => {
-    if (!window) return false
-    if (window.newerOutside) return true
-    const currentTail = recent?.items.at(-1)
-    if (!currentTail || recent!.agentSessionId !== reading?.reference.agentSessionId
-      || recent!.agentSessionId !== window.page.agentSessionId
-      || recent!.source.providerId !== window.page.source.providerId
-      || recent!.source.nativeSessionId !== window.page.source.nativeSessionId) return false
-    const retained = window.page.items.find(item => item.id === currentTail.id)
-    return !retained || JSON.stringify(retained) !== JSON.stringify(currentTail)
-  }, [window, recent, reading?.reference.agentSessionId])
+  const page = window?.page ?? currentContext
   const pageRef = useRef(page); pageRef.current = page
   function update(next: typeof state) { stateRef.current = next; setState(next) }
-  async function read(direction: 'current' | 'earlier'): Promise<void> {
+  async function read(direction: 'current' | 'seed' | 'earlier' | 'newer'): Promise<void> {
     const start = live.current
     if (!start.reading?.enabled || pending.current) return
     const before = stateRef.current.key === start.key ? stateRef.current.window : null
     const displayed = pageRef.current
-    const baseline = direction === 'earlier' ? before?.page ?? start.recent : null
-    if (baseline && !baseline.nextCursor) return
+    const navigation = before && (direction === 'earlier' || direction === 'newer')
+    if (navigation && direction === 'earlier' && !before.page.nextCursor) return
+    if (navigation && direction === 'newer' && before.parts[0]!.index === 0) return
     const attempt = ++generation.current
     pending.current = true; retry.current = direction
     update({ key: start.key, window: before, loading: true, error: null })
     const current = () => generation.current === attempt && live.current.key === start.key && live.current.reading?.enabled
+      && (!start.recent || !live.current.recent || sameSource(start.recent, live.current.recent))
     try {
-      const source = baseline?.source
-      const pages: AgentSessionHistoryPage[] = []
-      let cursor = baseline?.nextCursor ?? undefined
-      let bytes = 0
-      const count = PAGE_COUNT
-      for (let i = 0; i < count; i++) {
-        const next = await readSessionConversationPage(start.reading.reference, {
-          ...(cursor ? { cursor } : {}), ...(source ?? pages[0]?.source ? { source: source ?? pages[0]!.source } : {}) })
+      let parts = navigation ? [...before.parts] : []
+      const positions = navigation ? [...before.positions] : []
+      let positionBytes = navigation ? before.positionBytes : 0
+      let head = navigation ? before.head : undefined
+      if (navigation && direction === 'earlier' && before.mode === 'current') {
+        // Freeze the real current head, including continuous live updates already read in this epoch.
+        // This is a snapshot object, never another null-cursor request.
+        head = { ...parts[0]!, headBytes: parts[0]!.bytes }
+        parts[0] = head
+        const frozen = position(head.page, null)
+        positionBytes += (JSON.stringify(frozen).length - JSON.stringify(positions[0]).length) * 2
+        positions[0] = frozen
+      }
+      let index = navigation ? direction === 'earlier' ? parts.at(-1)!.index + 1 : parts[0]!.index - 1 : 0
+      let cursor = navigation && direction === 'earlier' ? parts.at(-1)!.page.nextCursor : null
+      const source = navigation ? before.page.source : direction === 'seed' ? start.recent?.source : undefined
+      let incomingBytes = 0
+      for (let i = 0; i < PAGE_COUNT; i++) {
+        const expected = positions[index]
+        const input = expected?.cursor ?? cursor
+        const next = index === 0 && head ? head.page : await readSessionConversationPage(start.reading.reference, {
+          limit: expected?.limit ?? PAGE_LIMIT, ...(input ? { cursor: input } : {}),
+          ...(source ?? parts[0]?.page.source ? { source: source ?? parts[0]!.page.source } : {}) })
         if (!current()) return
-        bytes += JSON.stringify(next.items).length * 2
-        if (bytes > PAGE_BYTES) throw new Error('This original-sequence window exceeds its byte budget. The displayed records are kept.')
-        pages.unshift(next); cursor = next.nextCursor ?? undefined
-        if (!cursor) break
+        if (expected && !verifies(next, expected)) throw new Error(positionError)
+        const nextPart = index === 0 && head ? head : part(next, index, before ?? undefined)
+        incomingBytes += nextPart.bytes
+        if (incomingBytes > PAGE_BYTES) throw new Error(byteError)
+        if (!head) { head = nextPart; head.headBytes = head.bytes }
+        if (!expected) {
+          const entry = position(next, input)
+          positions.push(entry); positionBytes += JSON.stringify(entry).length * 2
+        }
+        if (direction === 'newer' && navigation) parts.unshift(nextPart)
+        else parts.push(nextPart)
+        if (navigation && direction === 'newer') {
+          if (index === 0) break
+          index--
+        } else {
+          cursor = next.nextCursor
+          if (!cursor) break
+          index++
+        }
       }
-      const first = pages[0]!
-      const nextPage = preserveRecords({ ...first, nextCursor: cursor ?? null,
-        items: [...pages.flatMap(page => page.items), ...(baseline?.items ?? [])].slice(0, RECORD_COUNT)
-      }, pageRef.current)
-      const nextWindow: ReadingWindow = { page: nextPage,
-        newerOutside: Boolean(baseline && nextPage.items.at(-1)?.id !== baseline.items.at(-1)?.id) }
-      if (direction === 'earlier') {
-        const boundary = before && 'boundary' in before ? before.boundary : displayed
-          && displayed.agentSessionId === nextPage.agentSessionId
-          && displayed.source.providerId === nextPage.source.providerId
-          && displayed.source.nativeSessionId === nextPage.source.nativeSessionId
-          && displayed.items[0] ? { recordId: displayed.items[0].id, confirmed: false } : null
-        nextWindow.boundary = boundary ? { ...boundary,
-          confirmed: boundary.confirmed || nextPage.items.some(item => item.id === boundary.recordId) } : null
-      }
-      if (JSON.stringify(nextPage.items).length * 2 > PAGE_BYTES) throw new Error('This original-sequence window exceeds its byte budget. The displayed records are kept.')
-      if (!live.current.beforeCommit(nextPage, direction, direction === 'earlier' && !before ? start.recent ?? undefined : undefined)) throw new Error('Move your reading position or clear the selection before changing this window. Your reading position, selected content, records and cursor are kept.')
+      if (!head || !parts.length) throw new Error('No original conversation page was returned. The displayed records are kept.')
+      const boundary = navigation && direction === 'earlier' ? before.boundary ?? (displayed && sameSource(displayed, parts[0]!.page) && displayed.items[0]
+        ? { recordId: displayed.items[0].id, confirmed: false } : null) : navigation ? before.boundary : null
+      const nextWindow = assemble(parts, positions, head, navigation && !(direction === 'newer' && parts[0]!.index === 0) ? 'earlier' : 'current', boundary,
+        navigation ? parts[0]!.index > 0 : false, navigation ? direction as 'earlier' | 'newer' : null, positionBytes)
+      if (!live.current.beforeCommit(nextWindow.page, direction, !before ? start.recent ?? undefined : undefined)) throw new Error(protectedError)
+      appliedRecent.current = navigation && direction === 'newer' ? null : start.recent
+      automaticSeedBlocked.current = false
       update({ key: start.key, window: nextWindow, loading: false, error: null })
     } catch (cause) {
       if (current()) update({ key: start.key, window: before, loading: false, error: presentError(cause) })
     } finally {
-      if (generation.current === attempt) pending.current = false
+      if (generation.current === attempt) {
+        pending.current = false
+        if (live.current.key === start.key && live.current.reading?.enabled && stateRef.current.loading)
+          update({ ...stateRef.current, loading: false, error: 'Native source changed. The current window is kept; use Current to refresh.' })
+      }
     }
   }
   function showCurrent(): void {
     if (!live.current.reading?.enabled) return
-    const latest = live.current.currentContext
-    if (latest && live.current.beforeCommit(latest, 'current')) {
-      generation.current++; pending.current = false
-      update({ key, window: null, loading: false, error: null })
-    } else if (!latest) void read('current')
-    else update({ ...stateRef.current, error: 'The current window is kept to preserve selected content.' })
+    generation.current++; pending.current = false; automaticSeedBlocked.current = false
+    void read('current')
   }
   useEffect(() => {
-    generation.current++; pending.current = false
+    generation.current++; pending.current = false; appliedRecent.current = null; automaticSeedBlocked.current = false
     update({ key, window: null, loading: false, error: null })
   }, [key])
   useEffect(() => {
     if (!reading?.enabled) {
       generation.current++; pending.current = false
-      if (stateRef.current.loading) update({ ...stateRef.current, loading: false })
+      if (stateRef.current.loading) update({ ...stateRef.current, loading: false,
+        error: automaticSeedBlocked.current ? 'Current reading paused while hidden. The displayed records are kept; use Current or Retry.' : stateRef.current.error })
       return
     }
-    if (reading.opened && !stateRef.current.window) void read('current')
-  }, [key, reading?.enabled, reading?.opened])
+    if (!stateRef.current.window) void read('seed')
+  }, [key, reading?.enabled])
+  // Only the original continuous shared page can extend a current tail; sparse presentation facts cannot.
+  useEffect(() => {
+    const before = stateRef.current.key === key ? stateRef.current.window : null
+    if (!reading?.enabled || !recent || !before || before.mode !== 'current' || pending.current || appliedRecent.current === recent) return
+    appliedRecent.current = recent
+    if (!sameSource(recent, before.page)) {
+      update({ ...stateRef.current, error: 'Native source changed. The current window is kept; use Current to refresh.' }); return
+    }
+    const tail = before.page.items.at(-1)?.id
+    const tailAt = tail ? recent.items.findIndex(item => item.id === tail) : -1
+    if (tailAt < 0 && !before.records.has(recent.items.at(-1)?.id ?? '')) {
+      if (tail && !before.newerOutside) update({ ...stateRef.current, window: { ...before, newerOutside: true } })
+      return
+    }
+    const changed = new Map<number, Map<number, AgentSessionHistoryPage['items'][number]>>()
+    let changedBytes = 0, changedHeadBytes = 0
+    for (const item of recent.items) {
+      const at = before.records.get(item.id)
+      if (!at) continue
+      const original = before.parts[at.part]!.page.items[at.offset]!
+      if (original === item || JSON.stringify(original) === JSON.stringify(item)) continue
+      if (!changed.has(at.part)) changed.set(at.part, new Map())
+      changed.get(at.part)!.set(at.offset, item)
+    }
+    const appended = tailAt < 0 ? [] : recent.items.slice(tailAt + 1)
+    if (!changed.size && !appended.length) return
+    const parts = before.parts.map((p, index) => {
+      const changes = changed.get(index)
+      if (!changes && (index !== 0 || !appended.length)) return p
+      changedBytes = 0; changedHeadBytes = 0
+      const items = p.page.items.map((item, offset) => {
+        const incoming = changes?.get(offset)
+        if (!incoming) return item
+        const oldSize = recordBytes(item); changedBytes += recordBytes(incoming) - oldSize
+        if (p.index === 0 && before.head.page.items[offset] === item) changedHeadBytes -= oldSize
+        return incoming
+      })
+      if (index === 0) { items.push(...appended); changedBytes += appended.reduce((sum, item) => sum + recordBytes(item), 0) }
+      return { ...p, page: { ...p.page, items }, bytes: p.bytes + changedBytes, headBytes: p.headBytes + changedHeadBytes }
+    })
+    if (parts[0]!.page.items.length > PAGE_LIMIT * PAGE_COUNT) {
+      if (!automaticSeedBlocked.current) { automaticSeedBlocked.current = true; void read('seed') }
+      else if (!before.newerOutside) update({ ...stateRef.current, window: { ...before, newerOutside: true } })
+      return
+    }
+    try {
+      const next = assemble(parts, before.positions, before.head, 'current', before.boundary, false, 'newer', before.positionBytes)
+      if (!live.current.beforeCommit(next.page, 'live')) throw new Error(protectedError)
+      update({ ...stateRef.current, window: next })
+    } catch (cause) { update({ ...stateRef.current, error: presentError(cause), window: { ...before, newerOutside: true } }) }
+  }, [key, reading?.enabled, recent, state.window])
+  const newerOutside = useMemo(() => {
+    if (!window) return false
+    if (window.newerOutside) return true
+    const currentTail = recent?.items.at(-1)
+    if (!currentTail || !sameSource(window.page, recent!)) return false
+    const at = window.records.get(currentTail.id)
+    const retained = at ? window.parts[at.part]!.page.items[at.offset] : undefined
+    return !retained || (retained !== currentTail && JSON.stringify(retained) !== JSON.stringify(currentTail))
+  }, [window, recent])
   useEffect(() => () => { generation.current++; pending.current = false }, [])
-  return { page, captured: captured?.key === key ? captured.items : null, capturedError: captured?.key === key ? captured.error : null, historical: Boolean(window), loading: state.key === key && state.loading, error: state.key === key ? state.error : null,
-    historyBoundary: window?.boundary?.confirmed ? {
-      beforeRecordId: window.page.items.some(item => item.id === window.boundary!.recordId) ? window.boundary.recordId : null
-    } : null,
-    newerOutside, hasMore: Boolean(page?.nextCursor),
-    readEarlier: () => void read('earlier'), retry: () => void read(retry.current), showCurrent }
+  return { page, captured: captured?.key === key ? captured.items : null, capturedError: captured?.key === key ? captured.error : null,
+    historical: window?.mode === 'earlier', loading: state.key === key && state.loading, error: state.key === key ? state.error : null,
+    historyBoundary: window?.boundary?.confirmed && window.records.has(window.boundary.recordId) ? { beforeRecordId: window.boundary.recordId } : null,
+    newerOutside, hasNewer: Boolean(window && window.parts[0]!.index > 0), hasMore: Boolean(page?.nextCursor),
+    readEarlier: () => void read('earlier'), readNewer: () => void read('newer'), retry: () => { automaticSeedBlocked.current = false; void read(retry.current) }, showCurrent }
 }

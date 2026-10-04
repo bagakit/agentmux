@@ -14,7 +14,7 @@ export type ConversationProcessProps = {
 }
 
 export type ConversationProcessRenderer = (props: ConversationProcessProps) => ReactNode
-export type ConversationRecordBoundary = { beforeRecordId: string | null; content: ReactNode }
+export type ConversationRecordBoundary = { beforeRecordId: string; content: ReactNode }
 
 /** Source order only. Group identity remembers IDs, never another copy of record content. */
 export function ConversationRecordSequence({
@@ -74,7 +74,6 @@ export function ConversationRecordSequence({
     }
   }
   flush()
-  if (recordBoundary?.beforeRecordId === null) rows.push(<Fragment key={JSON.stringify([sourceKey, 'boundary'])}>{recordBoundary.content}</Fragment>)
   useLayoutEffect(() => { committed.current = { source: sourceKey, groups } })
   return <>{rows}</>
 }
