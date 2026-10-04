@@ -4,7 +4,7 @@
 .file-data-preview__bar .small-button { font-size:var(--fs-meta); min-height:24px; }
 .file-data-preview__bar [aria-pressed='true'] { background:var(--surface-3); color:var(--text); }
 .file-data-preview__search { display:flex; align-items:center; gap:var(--sp-3); flex:1; min-width:90px; max-width:260px; color:var(--text-3); }
-.file-data-preview__search input { min-width:0; width:100%; border:0; background:transparent; color:var(--text); outline:none; font:inherit; }
+.file-data-preview__search input { min-width:0; width:100%; padding:3px 8px; border:0; background:transparent; color:var(--text); outline:none; font:inherit; }
 .file-data-preview__search:focus-within { color:var(--text); }
 .file-data-preview__scroll { flex:1; min-width:0; min-height:0; overflow:auto; overscroll-behavior:contain; }
 .file-data-preview table { border-collapse:separate; border-spacing:0; width:max-content; min-width:100%; font-size:var(--fs-meta); }
