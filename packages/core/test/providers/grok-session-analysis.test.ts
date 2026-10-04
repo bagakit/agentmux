@@ -1,5 +1,6 @@
-import { fixturePath as upstreamFixturePath } from '../helpers/fixture-values.js'
+import { fixturePath } from '../helpers/fixture-values.js'
 import { constants } from 'node:fs'
+import { spawn } from 'node:child_process'
 import { mkdir, mkdtemp, open, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -7,7 +8,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../../src/client.js'
 import { AgentProviderRegistry } from '../../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
-import { SESSION_HISTORY_MAX_PAGE_BYTES } from '../../src/session-history.js'
+import { SESSION_HISTORY_MAX_PAGE_BYTES, normalizeSessionHistoryPage } from '../../src/session-history.js'
+import { projectSessionUserMessages, sessionHistoryTextForReading } from '../../src/session-user-messages.js'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '../../src/control-host.js'
 import {
   encodeCwdDirname,
   slugify,
@@ -187,7 +190,7 @@ describe('Grok session history analysis and reader', () => {
       const cwd1 = 'home//Documents/開発プロジェクト/機能追加/テスト環境/ソースコード/main-branch'
       expect(encodeCwdDirname(cwd1)).toBe('main-branch-6aaeefdde2a621aa')
 
-      const cwd2 = ("home//Library/Mobile Documents/com~apple~CloudDocs/项目文件/深层嵌套目录/更深层次的/工作区域" + (upstreamFixturePath("project")))
+      const cwd2 = 'home//Library/Mobile Documents/com~apple~CloudDocs/项目文件/深层嵌套目录/更深层次的/工作区域/project'
       expect(encodeCwdDirname(cwd2)).toBe('project-5a22eee5d15e14bd')
 
       const cwd3 = 'home//Library/CloudStorage/OneDrive-대한민국회사/프로젝트/개발환경/소스코드/백엔드/서비스/my-app'
@@ -284,7 +287,7 @@ describe('Grok session history analysis and reader', () => {
 
     it('rejects arbitrary transcriptPath that is not chat_history.jsonl or updates.jsonl', async () => {
       const f = await createGrokFixture('{"type":"user","content":[]}\n', {
-        customHandlePath: upstreamFixturePath("tmp/arbitrary/directory/or/file.txt")
+        customHandlePath: fixturePath("tmp/arbitrary/directory/or/file.txt")
       })
       await expect(f.client.sessionHistoryPage('grok-test-agent')).rejects.toMatchObject({
         code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE'
@@ -293,7 +296,7 @@ describe('Grok session history analysis and reader', () => {
 
     it('rejects prefix-chat_history.jsonl matching only as a suffix', async () => {
       const f = await createGrokFixture('{"type":"user","content":[]}\n', {
-        customHandlePath: upstreamFixturePath("tmp/session/prefix-chat_history.jsonl")
+        customHandlePath: fixturePath("tmp/session/prefix-chat_history.jsonl")
       })
       await expect(f.client.sessionHistoryPage('grok-test-agent')).rejects.toMatchObject({
         code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE'
@@ -302,7 +305,7 @@ describe('Grok session history analysis and reader', () => {
 
     it('rejects prefix-updates.jsonl matching only as a suffix', async () => {
       const f = await createGrokFixture('{"type":"user","content":[]}\n', {
-        customHandlePath: upstreamFixturePath("tmp/session/prefix-updates.jsonl")
+        customHandlePath: fixturePath("tmp/session/prefix-updates.jsonl")
       })
       await expect(f.client.sessionHistoryPage('grok-test-agent')).rejects.toMatchObject({
         code: 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE'
@@ -1017,5 +1020,159 @@ describe('Grok session history analysis and reader', () => {
         env: {}
       })
     })
+  })
+})
+
+
+describe('Grok native whole-user-query reading projection', () => {
+  const summaryData = { info: { id: '019e37f4-5135-7b63-a4ab-6d13aa6bf532', cwd: 'home//workspace' } }
+  const wrap = (body: string) => `<user_query>\n${body}\n</user_query>`
+  async function readingFixture(rows: unknown[]) { return createGrokFixture(jsonl(rows), { summaryData }) }
+  const reading = (part: import('../../src/types.js').AgentSessionHistoryContentPart) => {
+    expect(part.kind).toBe('text')
+    if (part.kind !== 'text') throw new Error('Expected nonempty original text')
+    return sessionHistoryTextForReading(part)
+  }
+
+  it('projects the proven outer wrapper once, preserves exact original text and does not invent identity', async () => {
+    const body = '\n## Plan 🙂\n\n  Keep indentation\r\n<user_query>literal nested content</user_query>\n', raw = wrap(body)
+    const f = await readingFixture([{ type: 'user', prompt_index: 77, content: raw }])
+    const page = await f.client.sessionHistoryPage('grok-test-agent')
+    expect(page.items).toHaveLength(1)
+    expect(page.items[0]).toEqual({ id: 'grok-record:0', kind: 'user-message', contentParts: [
+      { kind: 'text', text: raw, readingRange: { start: 13, end: raw.length - 14 } }
+    ] })
+    expect(reading(page.items[0]!.contentParts[0]!)).toBe(body)
+    const messages = projectSessionUserMessages({ agentSessionId: 'grok-test-agent', historyPage: page })
+    expect(messages).toHaveLength(1)
+    expect(messages[0]).toMatchObject({ author: { kind: 'unknown' }, content: body, source: {
+      kind: 'native', providerId: 'grok', nativeSessionId: summaryData.info.id, recordId: 'grok-record:0'
+    }, contentParts: page.items[0]!.contentParts })
+    expect(messages[0]!.recordedAt).toBeUndefined()
+    for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+    expect(await f.bytes()).toEqual(f.before)
+  })
+
+  it.each([
+    'Literal <user_query>kept intact</user_query>',
+    '> <user_query>\n> quoted\n> </user_query>',
+    '```xml\n<user_query>\ncode\n</user_query>\n```',
+    '<user_query>\nincomplete',
+    '<user_query>tight</user_query>',
+    '<user_query>\nbody\n</user_query>\ntrailing source',
+    'prefix\n<user_query>\nbody\n</user_query>'
+  ])('keeps an authored literal unchanged: %s', async raw => {
+    const f = await readingFixture([{ type: 'user', content: raw }])
+    const page = await f.client.sessionHistoryPage('grok-test-agent')
+    expect(page.items[0]!.contentParts).toEqual([{ kind: 'text', text: raw }])
+    expect(reading(page.items[0]!.contentParts[0]!)).toBe(raw)
+    expect(await f.bytes()).toEqual(f.before)
+  })
+
+  it('keeps synthetic, assistant and array structure unchanged while preserving a literal inner envelope', async () => {
+    const raw = wrap('native body'), literal = wrap(raw)
+    const rows = [{ type: 'user', synthetic_reason: 'recovery', content: raw },
+      { type: 'assistant', content: raw }, { type: 'user', content: [{ type: 'text', text: raw }, { type: 'image', url: 'image.png' }] },
+      { type: 'user', synthetic_reason: 'human', content: literal }]
+    const f = await readingFixture(rows), page = await f.client.sessionHistoryPage('grok-test-agent')
+    expect(page.items).toHaveLength(4)
+    expect(page.items.map(item => item.kind)).toEqual(['activity', 'assistant-message', 'user-message', 'user-message'])
+    for (const item of page.items.slice(0, 3)) expect(item.contentParts[0]).toEqual({ kind: 'text', text: raw })
+    expect(page.items[2]!.contentParts[1]).toEqual({ kind: 'resource', resourceType: 'image', reference: 'image.png' })
+    expect(reading(page.items[3]!.contentParts[0]!)).toBe(raw)
+    expect(await f.bytes()).toEqual(f.before)
+  })
+
+  it('preserves opaque paging and original byte-offset identity for projected source records', async () => {
+    const first = JSON.stringify({ type: 'user', content: wrap('older body') }), second = JSON.stringify({ type: 'user', content: wrap('newer body') })
+    const f = await createGrokFixture(first + '\n' + second + '\n', { summaryData })
+    const newest = await f.client.sessionHistoryPage('grok-test-agent', { limit: 1 })
+    expect(newest.items[0]!.id).toBe(`grok-record:${Buffer.byteLength(first + '\n')}`)
+    expect(reading(newest.items[0]!.contentParts[0]!)).toBe('newer body')
+    expect(newest.nextCursor).toBeTypeOf('string')
+    const older = await f.client.sessionHistoryPage('grok-test-agent', { limit: 1, cursor: newest.nextCursor! })
+    expect(older.items[0]!.id).toBe('grok-record:0')
+    expect(reading(older.items[0]!.contentParts[0]!)).toBe('older body')
+    expect(older.nextCursor).toBeNull()
+    expect(await f.bytes()).toEqual(f.before)
+  })
+
+  it('keeps the existing captured channel/device through the one user-message projector', async () => {
+    const f = await readingFixture([{ type: 'user', content: wrap('Native source stays unknown') }])
+    const device = { hostId: 'origin-host', deviceId: 'origin-device', name: 'Actual source device' }
+    for (const [index, sourceChannel] of (['terminal', 'message-tool', 'cli', 'api', 'agent-message', 'reaction', 'question-reply'] as const).entries()) {
+      await f.store.applyTimelineMutation({ type: 'append', agentSessionId: 'grok-test-agent', item: {
+        id: `input-${index}`, kind: 'user_message', agentSessionId: 'grok-test-agent', source: 'user', status: 'complete',
+        title: 'Existing captured input', content: `Original input ${index}`, sourceChannel, sourceDevice: device,
+        createdAt: 100 + index, updatedAt: 100 + index
+      } })
+    }
+    const before = await f.bytes(), timeline = await f.client.sessionTimeline('grok-test-agent'),
+      historyPage = await f.client.sessionHistoryPage('grok-test-agent')
+    const projected = projectSessionUserMessages({ agentSessionId: 'grok-test-agent', historyPage, timeline })
+    expect(projected).toHaveLength(8)
+    expect(projected[0]!.source).toEqual({ kind: 'native', providerId: 'grok', nativeSessionId: summaryData.info.id, recordId: 'grok-record:0' })
+    expect(projected[0]!.author).toEqual({ kind: 'unknown' })
+    for (const item of timeline.items) expect(projected.find(message => message.rawId === item.id)?.source).toEqual({
+      kind: 'captured', submissionId: item.id, channel: item.sourceChannel, device
+    })
+    for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+    expect(await f.bytes()).toEqual(before)
+  })
+
+  it('normalizes only bounded UTF-16 spans without replacing original body', () => {
+    const source = { providerId: 'grok', nativeSessionId: 'normalization-source' }, raw = wrap('🙂')
+    const page = { source, nextCursor: null, items: [{ id: 'record', kind: 'user-message',
+      contentParts: [{ kind: 'text', text: raw, readingRange: { start: 13, end: 15 } }] }] }
+    const item = normalizeSessionHistoryPage(source, page, 1).items[0]!
+    expect(item.contentParts).toEqual(page.items[0]!.contentParts)
+    expect(reading(item.contentParts[0]!)).toBe('🙂')
+    for (const readingRange of [{ start: -1, end: 15 }, { start: 13, end: raw.length + 1 },
+      { start: 15, end: 13 }, { start: 13.1, end: 15 }, { start: '13', end: 15 }, null, []]) {
+      expect(() => normalizeSessionHistoryPage(source, { ...page, items: [{ ...page.items[0],
+        contentParts: [{ kind: 'text', text: raw, readingRange }] }] }, 1)).toThrow('invalid native history page')
+    }
+  })
+
+  it('reads a legal 3 MiB input without duplicating the body or increasing the 4 MiB budget', async () => {
+    const body = 'x'.repeat(3 * 1024 * 1024), raw = wrap(body)
+    const f = await readingFixture([{ type: 'user', content: raw }])
+    const page = await f.client.sessionHistoryPage('grok-test-agent', { limit: 1 })
+    expect(SESSION_HISTORY_MAX_PAGE_BYTES).toBe(4 * 1024 * 1024)
+    expect(page.items[0]!.contentParts[0]).toEqual({ kind: 'text', text: raw, readingRange: { start: 13, end: raw.length - 14 } })
+    expect(reading(page.items[0]!.contentParts[0]!)).toBe(body)
+    expect(Buffer.byteLength(JSON.stringify(page))).toBeLessThan(SESSION_HISTORY_MAX_PAGE_BYTES)
+    expect(await f.bytes()).toEqual(f.before)
+    for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+  })
+
+  it('preserves both reading span and original source through the registered RPC and actual compiled CLI', async () => {
+    const raw = wrap('Public body 🙂'), f = await readingFixture([{ type: 'user', content: raw }])
+    const socket = join(f.root, 'control.sock'), server = new AgentMuxControlServer({ coreClients: () => [{ hostId: 'local', client: f.client }] }, socket)
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+    try {
+      const input = { hostId: 'local', agentSessionId: 'grok-test-agent', source: 'native' as const, limit: 1 }
+      const publicPage = await rpc.call('agent.history', input)
+      expect(publicPage.items).toHaveLength(1)
+      const entry = publicPage.items[0]!
+      expect(entry.kind).toBe('item')
+      if (entry.kind !== 'item' || !('contentParts' in entry.item)) throw new Error('Expected original native item')
+      expect(entry.item.contentParts).toEqual([{ kind: 'text', text: raw, readingRange: { start: 13, end: raw.length - 14 } }])
+      const cli = process.env.AGENTMUX_GROK_QUERY_CLI ?? join(import.meta.dirname, '../../bin/agentmux')
+      const result = await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+        const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !name.startsWith('AGENTMUX_') && !name.startsWith('CTXMUX_')))
+        const child = spawn(process.execPath, [cli, '--endpoint', `unix:${socket}`, 'agent', 'history', '--host', 'local',
+          '--session', 'grok-test-agent', '--source', 'native', '--limit', '1'], { env, stdio: ['ignore', 'pipe', 'pipe'] })
+        let stdout = '', stderr = ''
+        child.stdout.on('data', value => { stdout += value }); child.stderr.on('data', value => { stderr += value })
+        child.once('error', reject); child.once('close', code => resolve({ code, stdout, stderr }))
+      })
+      expect(result.code, result.stderr).toBe(0)
+      expect(result.stderr).toBe('')
+      expect(JSON.parse(result.stdout)).toMatchObject({ ok: true, operation: 'agent.history', result: publicPage })
+      for (const control of f.controls) expect(control).not.toHaveBeenCalled()
+      expect(await f.bytes()).toEqual(f.before)
+    } finally { await rpc.dispose(); await server.stop() }
   })
 })
