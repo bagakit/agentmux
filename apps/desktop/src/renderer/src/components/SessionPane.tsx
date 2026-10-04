@@ -8,7 +8,7 @@ import { cloneElement, useCallback, useEffect, useId, useMemo, useRef, useState,
 import { agentRegionExecution, useAppStore } from '../store'
 import { sessionNameMetadataFor } from '../lib/session-name-metadata'
 import { useShallow } from 'zustand/react/shallow'
-import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
+import { createFirstPromptSelector, createSessionViewModeSelector, effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
 import type { AgentMuxRunExitReason, AgentSessionUserMessage } from '@agentmux/core'
 import { TERMINAL_FONT_SIZE_DEFAULT } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
@@ -19,7 +19,7 @@ import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
 import { agentSessionIdsOfUserMessages, createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
-import { currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
+import { createConversationSpeakerFactsSelector, currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
 import { AgentSessionComposer } from './AgentSessionComposer'
@@ -54,7 +54,7 @@ import { takeoverExecution } from '../lib/session-takeover'
 import { executionHostProjection, regionExecutionHost } from '../lib/region-execution-host'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
 import { useWorkbenchBrowserPresentation, workbenchSessionStageHostId, type WorkbenchViewTarget } from '../lib/workbench-presentation'
-import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { agentDisplayName } from '../lib/workbench-tabs'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { moteConversationIdentity, useMoteConversationOwner } from '../lib/mote-conversation-identity'
 import { agentStartupRecoveryDecision, agentStartupRecoveryDetail } from '../lib/idle-agent-restore-policy'
@@ -164,6 +164,8 @@ export function SessionPane({
     visible || presentations.some(target => target.visible !== false))
   const timeline = useObservedAppStore('sessionPane', observationVisible, (state) => state.timelines[sessionId]?.items ?? NO_TIMELINE_ITEMS)
   const timelineSnapshot = useObservedAppStore('sessionPane', observationVisible, (state) => state.timelines[sessionId])
+  const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
+  const firstPrompt = useObservedAppStore('sessionPane', observationVisible, firstPromptSelector)
   const userName = useObservedAppStore('sessionPane', observationVisible, (state) => state.agentNames?.[sessionId])
   const appendAgentComposerDraft = useObservedAppStore('sessionPane', observationVisible, (state) => state.appendAgentComposerDraft)
   const terminalThemeId = useObservedAppStore('sessionPane', observationVisible, (state) => state.config?.appearance.terminalTheme)
@@ -177,7 +179,8 @@ export function SessionPane({
   const terminalFontSize = useObservedAppStore('sessionPane', observationVisible,
     (state) => state.config?.appearance.terminalFontSize ?? TERMINAL_FONT_SIZE_DEFAULT
   )
-  const viewMode = useObservedAppStore('sessionPane', observationVisible, state => effectiveSessionViewMode(state, sessionId))
+  const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
+  const viewMode = useObservedAppStore('sessionPane', observationVisible, viewModeSelector)
   const activitySourceKey = session?.kind === 'agent' ? JSON.stringify([session.control.hostId, session.id, session.control.run.runId]) : sessionId
   const activityLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
   const activityContent = useRef<ReactElement<ComponentProps<typeof ActivityView>> | null>(null)
@@ -373,7 +376,7 @@ export function SessionPane({
   const agentInputIdentity = session?.kind === 'agent'
     ? agentDisplayName({
         userName,
-        firstPrompt: firstPromptFromTimeline(timelineSnapshot),
+        firstPrompt,
         fallbackLabel: session.label,
         providerLabel: agentProviderLabel(session.providerId)
       })
@@ -384,17 +387,8 @@ export function SessionPane({
   // Observe only identity facts for the Agents actually represented in this reading surface.
   // Output/status from unrelated Sessions cannot refresh these descriptors or read sender goals.
   const speakerIds = useMemo(() => [...new Set([sessionId, ...agentSessionIdsOfUserMessages(userMessages)])], [sessionId, userMessages])
-  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, useShallow(state => activityDemand ? speakerIds.flatMap(id => {
-    const sender = sessionPresentationById(state.sessions).get(id)
-    if (!sender || sender.kind !== 'agent') return [id, state.agentNames[id]]
-    const workspaces = state.config?.workspaces ?? []
-    const workspace = workspaces.find(item => item.hostId === sender.hostId && item.path === sender.workspacePath)
-    const projectRoot = workspace ? workspaces.find(item => item.hostId === workspace.hostId &&
-      item.path === (workspace.repoPath ?? workspace.path) && item.kind === 'folder') : undefined
-    return [id, state.agentNames[id], sender.label, sender.providerId, sender.hostId, sender.workspacePath,
-      firstPromptFromTimeline(state.timelines[id]), workspace?.id, workspace?.repoPath, workspace?.branch,
-      workspace?.name, projectRoot?.id, projectRoot?.name]
-  }) : []))
+  const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds, activityDemand), [speakerIds, activityDemand])
+  const speakerFacts = useObservedAppStore('sessionPane', observationVisible, useShallow(speakerFactsSelector))
   const describeSpeaker = useMemo(() => {
     const original = createSpeakerResolver({
       lookupAgent: (id) => {

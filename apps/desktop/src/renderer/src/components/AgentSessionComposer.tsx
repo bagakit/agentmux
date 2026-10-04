@@ -2,8 +2,8 @@ import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-obser
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
-import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { useEffect, useRef, type ReactNode } from 'react'
+import { createFirstPromptSelector, createSessionViewModeSelector, sessionPresentationById } from '../lib/session-presentation'
+import { useEffect, useMemo, useRef, type ReactNode } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -25,7 +25,7 @@ import { copyTextToClipboard } from '../lib/clipboard-copy'
 import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
-import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { agentDisplayName } from '../lib/workbench-tabs'
 import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
@@ -101,19 +101,22 @@ export function AgentSessionComposer({
   const session = useObservedAppStore('composer', visible, (state) => sessionPresentationById(state.sessions).get(sessionId))
   const lifecycleFailure = useObservedAppStore('composer', visible, state => state.errorNoticeContext?.lifecycle)
   const lifecycleMessage = useObservedAppStore('composer', visible, state => state.error ?? state.lastError)
-  const viewMode = useObservedAppStore('composer', visible, state => effectiveSessionViewMode(state, sessionId))
+  const viewModeSelector = useMemo(() => createSessionViewModeSelector(sessionId), [sessionId])
+  const viewMode = useObservedAppStore('composer', visible, viewModeSelector)
   const setViewMode = useObservedAppStore('composer', visible, (state) => state.setViewMode)
   const userName = useObservedAppStore('composer', visible, (state) => state.agentNames?.[sessionId])
   const timeline = useObservedAppStore('composer', visible, (state) => state.timelines?.[sessionId])
-  const firstPrompt = useObservedAppStore('composer', visible, (state) => firstPromptFromTimeline(state.timelines?.[sessionId]))
+  const firstPromptSelector = useMemo(() => createFirstPromptSelector(sessionId), [sessionId])
+  const firstPrompt = useObservedAppStore('composer', visible, firstPromptSelector)
   const displayName = session?.kind === 'agent' ? agentDisplayName({
     userName, firstPrompt, fallbackLabel: tabName || session.label, providerLabel: agentProviderLabel(session.providerId)
   }) : undefined
-  const workspace = useObservedAppStore('composer', visible, (state) =>
-    state.config?.workspaces.find((item) =>
-      session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
-    )
-  )
+  const config = useObservedAppStore('composer', visible, state => state.config)
+  const topicSnapshots = useObservedAppStore('composer', visible, state => state.scratchTopicSnapshots)
+  const topics = useMemo(() => scratchTopicsForConfig(config, topicSnapshots), [config, topicSnapshots])
+  const workspace = useMemo(() => config?.workspaces.find(item =>
+    session?.kind === 'agent' && workspaceOwnsSessionPath(item, session, topics)
+  ), [config, topics, session?.kind, session?.hostId, session?.workspacePath])
   const activeFile = useObservedAppStore('composer', visible, (state) =>
     workspace ? state.lastActiveFileByWorkspace[workspace.id] : undefined
   )

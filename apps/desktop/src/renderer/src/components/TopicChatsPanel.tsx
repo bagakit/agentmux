@@ -10,7 +10,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
 import { TopicKnowledgePanel } from './TopicKnowledgePanel'
-import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 
 /** The secondary directory reads the same original Zone projection as the workbench. */
 export function TopicChatsPanel({ workspace, topic, visible }: { workspace: WorkspaceRecord; topic: ScratchTopicSnapshot; visible: boolean }) {

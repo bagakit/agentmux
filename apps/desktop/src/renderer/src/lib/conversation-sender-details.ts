@@ -21,6 +21,39 @@ type SpeakerSnapshot = {
   spaceObjectIcons?: Readonly<SpaceIconOverrides>
 }
 
+/** The reading surface's identity dependencies, scoped to its actual speakers. */
+export function createConversationSpeakerFactsSelector(speakerIds: readonly string[], active: boolean) {
+  let previous: readonly unknown[] | undefined
+  let value: readonly unknown[] = []
+  return (state: { sessions: readonly SessionSnapshot[]; config: AppConfig | null;
+    agentNames: Readonly<Record<string, string>>; timelines: Readonly<Record<string, AgentTimelineSnapshot>> }): readonly unknown[] => {
+    if (!active) return value
+    const sessions = sessionPresentationById(state.sessions)
+    const facts: unknown[] = [state.config?.workspaces]
+    for (const id of speakerIds) {
+      const sender = sessions.get(id)
+      const timeline = state.timelines[id]
+      facts.push(state.agentNames[id], sender?.kind, sender?.label, sender?.hostId, sender?.workspacePath,
+        sender?.kind === 'agent' ? sender.providerId : undefined,
+        timeline, timeline?.revision, timeline?.items, timeline?.items.length)
+    }
+    if (previous && facts.every((fact, i) => fact === previous![i])) return value
+    previous = facts
+    value = speakerIds.flatMap(id => {
+      const sender = sessions.get(id)
+      if (!sender || sender.kind !== 'agent') return [id, state.agentNames[id]]
+      const workspaces = state.config?.workspaces ?? []
+      const workspace = workspaces.find(item => item.hostId === sender.hostId && item.path === sender.workspacePath)
+      const projectRoot = workspace ? workspaces.find(item => item.hostId === workspace.hostId &&
+        item.path === (workspace.repoPath ?? workspace.path) && item.kind === 'folder') : undefined
+      return [id, state.agentNames[id], sender.label, sender.providerId, sender.hostId, sender.workspacePath,
+        firstPromptFromTimeline(state.timelines[id]), workspace?.id, workspace?.repoPath, workspace?.branch,
+        workspace?.name, projectRoot?.id, projectRoot?.name]
+    })
+    return value
+  }
+}
+
 /** Cheap current identity only. Complete sender details and goals remain an explicit disclosure read. */
 export function currentConversationSpeakerMetadata(sessionId: string, snapshot: SpeakerSnapshot):
   (Omit<ConversationSenderDetails, 'goals'> & { mote?: MoteConversationIdentity }) | undefined {
