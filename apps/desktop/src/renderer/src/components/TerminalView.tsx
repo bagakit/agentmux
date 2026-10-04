@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { rendererPerformance } from '../lib/renderer-performance'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
@@ -1909,7 +1910,7 @@ export function TerminalView({
           {searchOpen ? (
             <div className="terminal-search" role="search">
               <Search size={13} />
-              <input
+              <TextInput
                 ref={searchInputRef}
                 value={searchQuery}
                 placeholder="Find"
