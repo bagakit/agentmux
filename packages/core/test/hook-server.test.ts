@@ -37,7 +37,8 @@ describe('AgentHookServer', () => {
         payload: { tool_name: 'Bash', tool_input: { command: 'pnpm test' } }
       })
     })
-    expect(response.status).toBe(204)
+    expect(response.status).toBe(202)
+    expect(await response.json()).toMatchObject({ stage: 'pending_run', accepted: 'memory' })
     expect(events).toHaveLength(0)
     await binding.bindRun('daemon-1')
     expect(events).toHaveLength(1)
@@ -74,7 +75,7 @@ describe('AgentHookServer', () => {
       },
       body: JSON.stringify({ receiptId: 'receipt-bare-1', eventName: 'Stop' })
     })
-    expect(response.status).toBe(204)
+    expect(response.status).toBe(202)
     await binding.bindRun('daemon-2')
     expect(events).toHaveLength(1)
     expect(Object.hasOwn(events[0]!, 'payload')).toBe(false)
@@ -236,8 +237,8 @@ describe('AgentHookServer', () => {
       },
       body: JSON.stringify({ receiptId })
     })
-    expect((await request('before-0')).status).toBe(204)
-    expect((await request('before-1')).status).toBe(204)
+    expect((await request('before-0')).status).toBe(202)
+    expect((await request('before-1')).status).toBe(202)
 
     const bind = binding.bindRun('run-order')
     await started
@@ -329,8 +330,8 @@ describe('AgentHookServer', () => {
       body: JSON.stringify({ receiptId: 'oversized', payload: { value: 'x'.repeat(128 * 1024) } })
     })
 
-    expect(response.status).toBe(400)
-    expect(await response.json()).toEqual({ error: 'invalid_hook_envelope' })
+    expect(response.status).toBe(413)
+    expect(await response.json()).toMatchObject({ error: 'HOOK_BODY_TOO_LARGE', accepted: false, retryable: false })
   })
 
   it('caps unbound events and bound delivery work independently', async () => {
@@ -357,7 +358,7 @@ describe('AgentHookServer', () => {
     })
 
     for (let index = 0; index < 8; index += 1) {
-      expect((await request(`unbound-${index}`)).status).toBe(204)
+      expect((await request(`unbound-${index}`)).status).toBe(202)
     }
     expect((await request('unbound-overflow')).status).toBe(429)
     const bind = binding.bindRun('run-bounded')
