@@ -202,8 +202,7 @@
 .survey-notebook-page-row:hover .notebook-add-child, .survey-notebook-page-row:focus-within .notebook-add-child { opacity: 1; }
 .notebook-tree-spacer { width: 8px; flex: none; }
 .notebook-name-input { width: 100%; min-width: 0; font: inherit; letter-spacing: inherit; border: 0; padding: 0; background: transparent; color: inherit; border-radius: 3px; }
-.notebook-name-input:hover { box-shadow: 0 1px 0 var(--line-soft); }
-.notebook-name-input:focus-visible { outline: 0; box-shadow: 0 1px 0 var(--text-3); }
+.notebook-name-input:hover:not(:focus-visible) { box-shadow: 0 1px 0 var(--line-soft); }
 
 .notebook-directory-views { display: flex; flex: none; gap: var(--sp-2); }
 .notebook-directory-views button { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); flex: 1; min-width: 0; min-height: 26px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
@@ -220,7 +219,6 @@
 .notebook-create-dialog .notebook-create-description { margin: 8px 0 22px; color: var(--text-3); font-size: 12px; }
 .notebook-create-dialog label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; color: var(--text-2); }
 .notebook-create-dialog input { width: 100%; box-sizing: border-box; padding: 10px 11px; border: 1px solid var(--line-soft); border-radius: 7px; background: var(--surface-2); color: var(--text); font: inherit; }
-.notebook-create-dialog input:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 .notebook-create-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 22px; }
 .notebook-create-issue { font-size: 12px; line-height: 1.6; color: var(--text-2); overflow-wrap: anywhere; }
 
