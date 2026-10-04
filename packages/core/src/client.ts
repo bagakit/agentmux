@@ -88,7 +88,8 @@ import {
 } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
-import { parseSessionHistoryResourceOptions, readRecordedImage, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
+import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
+import { readRecordedImage } from './session-history-resource-read.js'
 import { removeHostColorSignals } from './terminal-environment-policy.js'
 import { deriveAgentSessionId, mintAgentSessionId } from './agent-session-id.js'
 import {

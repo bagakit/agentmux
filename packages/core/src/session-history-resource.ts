@@ -1,8 +1,6 @@
-import { constants } from 'node:fs'
-import { open, stat } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
+import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import type { AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadOptions, AgentSessionHistoryResourceReadResult } from './types.js'
 
 export const SESSION_HISTORY_IMAGE_MAX_BYTES = 16 * 1024 * 1024
@@ -48,87 +46,50 @@ export function parseSessionHistoryResourceParams(value: unknown): AgentSessionH
 }
 
 type Read = Extract<AgentSessionHistoryResourceReadResult['result'], { status: 'read' }>
-function unavailable(code: string, message: string): Extract<AgentSessionHistoryResourceReadResult['result'], { status: 'unavailable' }> {
+export function unavailable(code: string, message: string): Extract<AgentSessionHistoryResourceReadResult['result'], { status: 'unavailable' }> {
   return { status: 'unavailable', code, message }
 }
-function imageHeader(bytes: Buffer): { mimeType: Read['mimeType']; width: number; height: number } | null {
-  if (bytes.length >= 33 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
-    bytes.readUInt32BE(8) === 13 && bytes.toString('ascii', 12, 16) === 'IHDR')
-    return { mimeType: 'image/png', width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
-  if (bytes.length >= 10 && ['GIF87a', 'GIF89a'].includes(bytes.toString('ascii', 0, 6)))
-    return { mimeType: 'image/gif', width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) }
+function imageHeader(bytes: Uint8Array): { mimeType: Read['mimeType']; width: number; height: number } | null {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const matches = (offset: number, value: readonly number[]) => value.every((byte, index) => bytes[offset + index] === byte)
+  const ascii = (start: number, end: number) => String.fromCharCode(...bytes.subarray(start, end))
+  const uint24 = (offset: number) => bytes[offset]! | bytes[offset + 1]! << 8 | bytes[offset + 2]! << 16
+  if (bytes.length >= 33 && matches(0, [137, 80, 78, 71, 13, 10, 26, 10]) &&
+    view.getUint32(8) === 13 && ascii(12, 16) === 'IHDR')
+    return { mimeType: 'image/png', width: view.getUint32(16), height: view.getUint32(20) }
+  if (bytes.length >= 10 && ['GIF87a', 'GIF89a'].includes(ascii(0, 6)))
+    return { mimeType: 'image/gif', width: view.getUint16(6, true), height: view.getUint16(8, true) }
   if (bytes[0] === 255 && bytes[1] === 216) {
     for (let offset = 2; offset + 4 <= bytes.length;) {
       if (bytes[offset] !== 255) break
       const marker = bytes[offset + 1]!
       if (marker === 255) { offset++; continue }
-      const length = bytes.readUInt16BE(offset + 2)
+      const length = view.getUint16(offset + 2)
       if (length < 2 || offset + 2 + length > bytes.length) break
       if ([192, 193, 194, 195, 197, 198, 199, 201, 202, 203, 205, 206, 207].includes(marker) && length >= 8)
-        return { mimeType: 'image/jpeg', height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) }
+        return { mimeType: 'image/jpeg', height: view.getUint16(offset + 5), width: view.getUint16(offset + 7) }
       offset += length + 2
     }
   }
-  if (bytes.length >= 30 && bytes.toString('ascii', 0, 4) === 'RIFF' && bytes.toString('ascii', 8, 12) === 'WEBP') {
-    const format = bytes.toString('ascii', 12, 16)
-    if (format === 'VP8X') return { mimeType: 'image/webp', width: bytes.readUIntLE(24, 3) + 1, height: bytes.readUIntLE(27, 3) + 1 }
-    if (format === 'VP8 ' && bytes.subarray(23, 26).equals(Buffer.from([157, 1, 42])))
-      return { mimeType: 'image/webp', width: bytes.readUInt16LE(26) & 0x3fff, height: bytes.readUInt16LE(28) & 0x3fff }
+  if (bytes.length >= 30 && ascii(0, 4) === 'RIFF' && ascii(8, 12) === 'WEBP') {
+    const format = ascii(12, 16)
+    if (format === 'VP8X') return { mimeType: 'image/webp', width: uint24(24) + 1, height: uint24(27) + 1 }
+    if (format === 'VP8 ' && matches(23, [157, 1, 42]))
+      return { mimeType: 'image/webp', width: view.getUint16(26, true) & 0x3fff, height: view.getUint16(28, true) & 0x3fff }
     if (format === 'VP8L' && bytes[20] === 47) {
-      const dimensions = bytes.readUInt32LE(21)
+      const dimensions = view.getUint32(21, true)
       return { mimeType: 'image/webp', width: (dimensions & 0x3fff) + 1, height: ((dimensions >>> 14) & 0x3fff) + 1 }
     }
   }
   return null
 }
-function imageBytes(bytes: Buffer, maxBytes: number, declaredMime?: string): AgentSessionHistoryResourceReadResult['result'] {
+export function imageBytes(bytes: Uint8Array, maxBytes: number, declaredMime?: string): AgentSessionHistoryResourceReadResult['result'] {
   if (!bytes.length || bytes.length > maxBytes) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The recorded image is empty or exceeds this read’s byte budget. Its reference is kept.')
   const image = imageHeader(bytes)
   if (!image || declaredMime !== undefined && declaredMime !== image.mimeType) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'The recorded bytes are not a supported PNG, JPEG, GIF or WebP image. Its reference is kept.')
   if (image.width < 1 || image.height < 1 || image.width > MAX_DIMENSION || image.height > MAX_DIMENSION || image.width * image.height > MAX_PIXELS)
     return unavailable('AGENT_SESSION_HISTORY_RESOURCE_DECODE_BUDGET', 'The recorded image exceeds the 16384 pixel side or 32 megapixel decode budget. Its reference is kept.')
-  return { status: 'read', mimeType: image.mimeType, dataBase64: bytes.toString('base64'), byteLength: bytes.length }
-}
-
-/** Only the newly located true part supplies reference. No arbitrary caller path reaches this read. */
-export async function readRecordedImage(reference: string, maxBytes: number, signal: AbortSignal): Promise<AgentSessionHistoryResourceReadResult['result']> {
-  signal.throwIfAborted()
-  if (reference.startsWith('data:')) {
-    // Bound encoded length before allocation; accept canonical raster base64 only.
-    const match = /^data:(image\/(?:png|jpeg|gif|webp));base64,([A-Za-z0-9+/]*={0,2})$/u.exec(reference)
-    if (!match) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'This recorded inline image is not canonical raster base64. Its reference is kept.')
-    const encoded = match[2]!
-    if (encoded.length > Math.ceil(maxBytes / 3) * 4) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The recorded inline image exceeds this read’s byte budget. Its reference is kept.')
-    const bytes = Buffer.from(encoded, 'base64')
-    if (bytes.toString('base64') !== encoded) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_FORMAT_UNSUPPORTED', 'This recorded inline image has invalid base64. Its reference is kept.')
-    return imageBytes(bytes, maxBytes, match[1])
-  }
-  if (!isAbsolute(reference)) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_REFERENCE_UNSUPPORTED', 'This opaque or remote image reference has no local byte source. No network request was made; its reference is kept.')
-  let file: Awaited<ReturnType<typeof open>> | undefined
-  try {
-    // Nonblocking open lets us reject FIFO/device targets before reading; /var symlinks remain valid.
-    file = await open(reference, constants.O_RDONLY | constants.O_NONBLOCK)
-    const before = await file.stat({ bigint: true })
-    if (!before.isFile()) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_NOT_FILE', 'The recorded image path is not a regular file. Its reference is kept.')
-    if (before.size < 1n || before.size > BigInt(maxBytes)) return unavailable('AGENT_SESSION_HISTORY_RESOURCE_TOO_LARGE', 'The recorded image is empty or exceeds this read’s byte budget. Its reference is kept.')
-    const bytes = Buffer.alloc(Number(before.size))
-    let offset = 0
-    while (offset < bytes.length) {
-      signal.throwIfAborted()
-      const read = await file.read(bytes, offset, bytes.length - offset, offset)
-      if (!read.bytesRead) break
-      offset += read.bytesRead
-    }
-    signal.throwIfAborted()
-    const after = await file.stat({ bigint: true }), named = await stat(reference, { bigint: true })
-    if (offset !== bytes.length || ['dev', 'ino', 'size', 'mtimeNs', 'ctimeNs'].some(key => before[key as keyof typeof before] !== after[key as keyof typeof after]) ||
-      named.dev !== after.dev || named.ino !== after.ino)
-      return unavailable('AGENT_SESSION_HISTORY_RESOURCE_CHANGED', 'The exact recorded file changed during reading. Retry this resource; its reference is kept.')
-    return imageBytes(bytes, maxBytes)
-  } catch (error) {
-    signal.throwIfAborted()
-    return unavailable('AGENT_SESSION_HISTORY_RESOURCE_UNAVAILABLE', error instanceof Error ? error.message : String(error))
-  } finally { await file?.close() }
+  return { status: 'read', mimeType: image.mimeType, dataBase64: encodeBase64(bytes), byteLength: bytes.length }
 }
 
 export function parseSessionHistoryResourceResult(value: unknown, expected: AgentSessionHistoryResourceParams): AgentSessionHistoryResourceResult {
@@ -148,8 +109,10 @@ export function parseSessionHistoryResourceResult(value: unknown, expected: Agen
     rpcRecord(result, ['status', 'mimeType', 'dataBase64', 'byteLength'], code)
     if (typeof result.dataBase64 !== 'string' || result.dataBase64.length > Math.ceil((expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES) / 3) * 4 ||
       !Number.isSafeInteger(result.byteLength) || (result.byteLength as number) < 1) invalid('Resource bytes exceed their read budget.', code)
-    const bytes = Buffer.from(result.dataBase64, 'base64')
-    if (bytes.length !== result.byteLength || bytes.toString('base64') !== result.dataBase64 ||
+    let bytes: Uint8Array
+    try { bytes = decodeBase64(result.dataBase64) }
+    catch { invalid('Recorded resource bytes or MIME are invalid.', code) }
+    if (bytes.length !== result.byteLength || encodeBase64(bytes) !== result.dataBase64 ||
       imageBytes(bytes, expected.maxBytes ?? SESSION_HISTORY_IMAGE_MAX_BYTES, String(result.mimeType)).status !== 'read') invalid('Recorded resource bytes or MIME are invalid.', code)
   } else invalid('Resource read has an unknown status.', code)
   return p as AgentSessionHistoryResourceResult
