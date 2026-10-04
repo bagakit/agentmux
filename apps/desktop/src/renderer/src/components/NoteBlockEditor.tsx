@@ -88,41 +88,60 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     for (let depth = $from.depth; depth > 0; depth--) { if ($from.node(depth).attrs.blockId) { id = $from.node(depth).attrs.blockId; break } }
     if (!id) id = editor.state.doc.nodeAt(editor.state.selection.from)?.attrs.blockId ?? null
     setSelected(id)
-    if (id && !transaction.getMeta('noteSelectionRestore') && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
+    if (id && !transaction.getMeta('noteSelectionRestore') && !editor.isDestroyed && editor.view.hasFocus()) props.current.onSelectedBlock?.({ noteId: props.current.note.noteId, blockId: id })
   }, onUpdate({ editor }) {
     const current = props.current, raw = JSON.stringify({ ...current.note, content: editor.getJSON() }, null, 2) + '\n'
     const read = readNoteDocument(raw)
     if (read.status === 'invalid') { current.onIssue(read.message); return }
     current.onIssue(null)
     current.onChange(raw)
-    if (editor.view.hasFocus()) {
+    if (!editor.isDestroyed && editor.view.hasFocus()) {
       const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId ?? editor.state.doc.nodeAt(selection.from)?.attrs.blockId
       if (typeof blockId === 'string') current.onSelectedBlock?.({ noteId: current.note.noteId, blockId })
     }
   } }, [note.noteId])
 
   useEffect(() => {
-    if (!editor || JSON.stringify(editor.getJSON()) === JSON.stringify(note.content)) return
-    const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId, offset = selection.$from.parentOffset
-    editor.chain().setMeta('noteSelectionRestore', true).setContent(note.content, { emitUpdate: false }).run()
-    if (typeof blockId === 'string') editor.state.doc.descendants((node, pos) => {
-      if (node.attrs.blockId === blockId && node.isTextblock) { editor.chain().setMeta('noteSelectionRestore', true).setTextSelection(pos + 1 + Math.min(offset, node.content.size)).run(); return false }
-    })
+    if (!editor) return
+    const syncContent = () => {
+      if (editor.isDestroyed || JSON.stringify(editor.getJSON()) === JSON.stringify(note.content)) return
+      const selection = editor.state.selection, blockId = selection.$from.parent.attrs.blockId, offset = selection.$from.parentOffset
+      editor.chain().setMeta('noteSelectionRestore', true).setContent(note.content, { emitUpdate: false }).run()
+      if (typeof blockId === 'string') editor.state.doc.descendants((node, pos) => {
+        if (node.attrs.blockId === blockId && node.isTextblock) { editor.chain().setMeta('noteSelectionRestore', true).setTextSelection(pos + 1 + Math.min(offset, node.content.size)).run(); return false }
+      })
+    }
+    syncContent()
+    editor.on('mount', syncContent)
+    return () => { editor.off('mount', syncContent) }
   }, [editor, note.content])
   useEffect(() => {
-    const handle: NoteEditorHandle | null = editor ? { editor, focusBlock(blockId, focus = true) {
-      let position: number | null = null, textblock = false
-      editor.state.doc.descendants((node, pos) => { if (node.attrs.blockId === blockId) { position = node.isTextblock ? pos + 1 : pos; textblock = node.isTextblock; return false } })
-      if (position === null) return false
-      const selection = editor.chain().setMeta('noteSelectionRestore', true)
-      if (textblock) selection.setTextSelection(position); else selection.setNodeSelection(position)
-      selection.run()
-      if (!focus) return true
-      editor.view.focus()
-      return editor.view.dom === document.activeElement || editor.view.dom.contains(document.activeElement)
-    } } : null
-    if (typeof handleRef === 'function') { handleRef(handle); return () => { handleRef(null) } }
-    if (handleRef) { handleRef.current = handle; return () => { handleRef.current = null } }
+    const publish = (handle: NoteEditorHandle | null) => {
+      if (typeof handleRef === 'function') handleRef(handle)
+      else if (handleRef) handleRef.current = handle
+    }
+    const detach = () => publish(null)
+    if (!editor) { detach(); return }
+    const attach = () => {
+      // An Editor identity may survive without its view. Re-publish on every
+      // real mount so retained restore/reveal/focus requests can resume.
+      if (editor.isDestroyed) { detach(); return }
+      publish({ editor, focusBlock(blockId, focus = true) {
+        if (editor.isDestroyed) return false
+        let position: number | null = null, textblock = false
+        editor.state.doc.descendants((node, pos) => { if (node.attrs.blockId === blockId) { position = node.isTextblock ? pos + 1 : pos; textblock = node.isTextblock; return false } })
+        if (position === null) return false
+        const selection = editor.chain().setMeta('noteSelectionRestore', true)
+        if (textblock) selection.setTextSelection(position); else selection.setNodeSelection(position)
+        selection.run()
+        if (!focus) return true
+        editor.view.focus()
+        return editor.view.dom === document.activeElement || editor.view.dom.contains(document.activeElement)
+      } })
+    }
+    editor.on('mount', attach).on('unmount', detach).on('destroy', detach)
+    attach()
+    return () => { editor.off('mount', attach).off('unmount', detach).off('destroy', detach); detach() }
   }, [editor, handleRef])
   const formatting = useEditorState({ editor, selector: ({ editor }) => ({
     heading: editor?.isActive('heading', { level: 1 }) ?? false,

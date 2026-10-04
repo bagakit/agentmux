@@ -32,6 +32,8 @@ import { liveVisibleAreas } from './window-visible-area.js'
 import { prepareWindowWorkbenchForQuit, registerWindowStatePersistence, reportWorkbenchQuitFailure } from './window-state-persistence.js'
 import { foregroundActionsForSecondInstance, instanceRoleFromLock } from './single-instance.js'
 import { singleFlight } from './single-flight.js'
+import { runOwnerDisposals } from './owner-disposal.js'
+import { reportQuitDisposalFailure } from './quit-disposal-failure.js'
 import { SpatialLinkIngress, receiveSpatialLinkArguments } from './spatial-link-ingress.js'
 import { topFrameNavigationGuard, topFrameOrigin } from './top-frame-navigation.js'
 import { windowOpenOutcome, windowSecurityWebPreferences } from './window-security.js'
@@ -121,24 +123,14 @@ function startPrimaryInstance(): void {
 
   function disposeOwners(): Promise<void> {
     if (!ownerDisposal) {
-      ownerDisposal = (async () => {
-        await progressLoops.stop()
-        const disposeRegisteredIpc = disposeIpc
-        disposeIpc = null
-        rendererUpdates?.dispose()
-        const failures: unknown[] = []
-        try {
-          await disposeRegisteredIpc?.()
-        } catch (error) {
-          failures.push(error)
-        }
-        try {
-          await runtime.dispose()
-        } catch (error) {
-          failures.push(error)
-        }
-        if (failures.length > 0) throw new AggregateError(failures, 'Desktop owner disposal failed')
-      })()
+      const disposeRegisteredIpc = disposeIpc
+      disposeIpc = null
+      ownerDisposal = runOwnerDisposals([
+        { owner: 'continuous-progress', dispose: () => progressLoops.stop() },
+        { owner: 'renderer-updates', dispose: () => rendererUpdates?.dispose() },
+        { owner: 'desktop-ipc', dispose: () => disposeRegisteredIpc?.() },
+        { owner: 'runtime', dispose: () => runtime.dispose() }
+      ], 'Desktop owner disposal failed')
     }
     return ownerDisposal
   }
@@ -505,7 +497,14 @@ function startPrimaryInstance(): void {
       catch (error) { reportWorkbenchQuitFailure(window, error); return }
     }
     try { await disposeOwners() }
-    catch (error) { await exitAfterFailure(error); return }
+    catch (error) {
+      reportQuitDisposalFailure(error, {
+        persistDiagnostic: crashLog.appendSync.bind(crashLog),
+        stderr: process.stderr,
+        appVersion: app.getVersion(),
+        pid: process.pid
+      })
+    }
     allowingQuit = true
     app.quit()
   })

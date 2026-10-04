@@ -1551,36 +1551,33 @@ export async function registerIpc(args: {
   }, desktopBusinessSocketPath())
   await control.start()
   return async () => {
+    acceptingControl = false
     await runOwnerDisposals([
-      async () => { acceptingControl = false; disposeSpatial(); disposeNotebook()
-    disposeToolkitIpc(); await toolkit.dispose() },
-      () => {
-        acceptingControl = false
-        args.spatialLinks?.unavailable()
-        args.window.webContents.off('destroyed', closeMetrics)
-        metrics.dispose()
-        ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl)
-        disposeProgressInput()
-        disposeProgressChanges()
-        controlBridge.dispose()
-      },
-      async () => await control.stop(),
-      () => detach(),
-      () => {
-        historyObservations.dispose()
-        releaseResourceObservation()
-      },
-      () => notifier.dispose(),
-      () => { browsers.onNativeInput = undefined; nativeChrome.dispose() },
-      async () => await externalBrowsers.dispose(),
-      () => browsers.dispose(),
-      async () => await browserInputHistory.flush(),
-      async () => await browserProfiles.dispose(),
-      async () => await fileObservations.dispose(),
-      async () => await files.dispose(),
-      () => {
-        for (const channel of channels) ipcMain.removeHandler(channel)
-      }
+      { owner: 'spatial', dispose: () => disposeSpatial() },
+      { owner: 'notebook', dispose: () => disposeNotebook() },
+      { owner: 'toolkit-ipc', dispose: () => disposeToolkitIpc() },
+      { owner: 'toolkit', dispose: () => toolkit.dispose() },
+      { owner: 'spatial-links', dispose: () => args.spatialLinks?.unavailable() },
+      { owner: 'metrics-listener', dispose: () => { args.window.webContents.off('destroyed', closeMetrics) } },
+      { owner: 'metrics', dispose: () => metrics.dispose() },
+      { owner: 'control-listener', dispose: () => { ipcMain.removeListener(CONTROL_RESPONSE_CHANNEL, acceptControl) } },
+      { owner: 'progress-input', dispose: () => disposeProgressInput() },
+      { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
+      { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
+      { owner: 'control-server', dispose: () => control.stop() },
+      { owner: 'runtime-attachment', dispose: () => detach() },
+      { owner: 'history-observations', dispose: () => historyObservations.dispose() },
+      { owner: 'resource-observation', dispose: () => releaseResourceObservation() },
+      { owner: 'notifier', dispose: () => notifier.dispose() },
+      { owner: 'browser-native-input', dispose: () => { browsers.onNativeInput = undefined } },
+      { owner: 'native-chrome', dispose: () => nativeChrome.dispose() },
+      { owner: 'external-browsers', dispose: () => externalBrowsers.dispose() },
+      { owner: 'browsers', dispose: () => browsers.dispose() },
+      { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
+      { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
+      { owner: 'file-observations', dispose: () => fileObservations.dispose() },
+      { owner: 'workspace-files', dispose: () => files.dispose() },
+      ...channels.map(channel => ({ owner: `ipc-handler:${channel}`, dispose: () => ipcMain.removeHandler(channel) }))
     ], 'Failed to dispose Desktop IPC owners.')
   }
 }

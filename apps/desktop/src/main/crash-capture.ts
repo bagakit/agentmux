@@ -17,6 +17,7 @@ export type CrashKind =
   | 'render-process-gone'
   | 'child-process-gone'
   | 'startup-failure'
+  | 'quit-disposal-failure'
 
 /**
  * 这次崩溃是否致命到主进程本身。为真时接线层必须留证后 fail-fast——挂上 process 处理器会抑制
@@ -52,6 +53,7 @@ export type CrashEventInput =
       appVersion: string
       pid: number
     }
+  | { kind: 'quit-disposal-failure'; error: unknown; appVersion: string; pid: number }
 
 /**
  * 归一后的崩溃记录。summary 是一眼能读懂的一句话，detail 承载栈或 URL 这种可能很长、也可能没有的补充。
@@ -82,8 +84,33 @@ function messageOf(value: unknown): string {
   }
 }
 
+/** Expand only error relationships, with bounded traversal and per-node text. No user data or Run state is read. */
 function stackOf(value: unknown): string | undefined {
-  return value instanceof Error && typeof value.stack === 'string' ? value.stack : undefined
+  if (!(value instanceof Error)) return undefined
+  if (!(value instanceof AggregateError) && value.cause === undefined) return value.stack
+  const seen = new Set<object>()
+  const lines: string[] = []
+  let nodes = 0
+  function visit(error: unknown, path: string, depth: number): void {
+    if (nodes >= 32) return
+    nodes += 1
+    if (depth > 8) { lines.push(`${path}: [error depth truncated]`); return }
+    if (error && typeof error === 'object') {
+      if (seen.has(error)) { lines.push(`${path}: [circular or repeated error]`); return }
+      seen.add(error)
+    }
+    const text = error instanceof Error ? error.stack ?? messageOf(error) : messageOf(error)
+    lines.push(`${path}: ${clampField(text, 4 * 1024)}`)
+    if (error instanceof Error && error.cause !== undefined) visit(error.cause, `${path}.cause`, depth + 1)
+    if (error instanceof AggregateError) {
+      for (let index = 0; index < error.errors.length; index += 1) {
+        if (nodes >= 32) { lines.push(`${path}.errors: [error nodes truncated]`); break }
+        visit(error.errors[index], `${path}.errors[${index}]`, depth + 1)
+      }
+    }
+  }
+  visit(value, 'error', 0)
+  return lines.join('\n')
 }
 
 /**
@@ -133,6 +160,13 @@ export function crashRecordFrom(input: CrashEventInput, nowMs: number): CrashRec
       const named = input.details.serviceName ?? input.details.name
       return buildRecord(at, input.kind, `${type} ${reason} (exit ${exitCode})`, named)
     }
+    case 'quit-disposal-failure':
+      return {
+        ...buildRecord(at, input.kind, `quit dispose-owners: ${messageOf(input.error)}`, stackOf(input.error)),
+        phase: 'dispose-owners',
+        appVersion: input.appVersion,
+        pid: input.pid
+      }
     case 'startup-failure': {
       const record = buildRecord(at, input.kind, `startup ${input.phase}: ${messageOf(input.error)}`, stackOf(input.error))
       return {

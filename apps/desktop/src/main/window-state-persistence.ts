@@ -70,17 +70,18 @@ export function registerWindowStatePersistence(
   return dispose
 }
 
-/** One bounded preparation for this actual workbench window, before IPC or Runtime disposal. */
-export async function prepareWindowWorkbenchForQuit(window: BrowserWindow): Promise<void> {
+/** One bounded checkpoint of this actual workbench; failure does not establish Renderer death. */
+export async function prepareWindowWorkbench(window: BrowserWindow, intent: 'reload' | 'quit'): Promise<void> {
   if (window.isDestroyed() || window.webContents.isDestroyed() || window.webContents.isCrashed()) return
+  const contents = window.webContents
   let timer: ReturnType<typeof setTimeout> | undefined
   let onGone: () => void = () => {}
   const rendererGone = new Promise<void>((resolve) => { onGone = resolve })
-  window.webContents.once('render-process-gone', onGone)
+  contents.once('render-process-gone', onGone)
   try {
     await Promise.race([
-      window.webContents.executeJavaScript('window.agentmuxPrepareRendererUpdate("quit")').catch((error: unknown) => {
-        if (window.webContents.isDestroyed() || window.webContents.isCrashed()) return
+      contents.executeJavaScript(`window.agentmuxPrepareRendererUpdate(${JSON.stringify(intent)})`).catch((error: unknown) => {
+        if (contents.isDestroyed() || contents.isCrashed()) return
         throw error
       }),
       rendererGone,
@@ -90,8 +91,13 @@ export async function prepareWindowWorkbenchForQuit(window: BrowserWindow): Prom
     ])
   } finally {
     clearTimeout(timer)
-    window.webContents.removeListener('render-process-gone', onGone)
+    contents.removeListener('render-process-gone', onGone)
   }
+}
+
+/** Ordinary Quit keeps its existing checkpoint before IPC or Runtime disposal. */
+export function prepareWindowWorkbenchForQuit(window: BrowserWindow): Promise<void> {
+  return prepareWindowWorkbench(window, 'quit')
 }
 
 /** Keep the original window and healthy Runs when the presentation save step is unconfirmed. */

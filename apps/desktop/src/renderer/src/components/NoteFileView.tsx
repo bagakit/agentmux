@@ -22,7 +22,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const [handle, setHandle] = useState<NoteEditorHandle | null>(null)
   const attachHandle = useCallback((value: NoteEditorHandle | null) => { setHandle(value) }, [])
   useEffect(() => {
-    if (!restoredBlock || !handle) { setRestoreIssue(null); return }
+    if (!restoredBlock || !handle || handle.editor.isDestroyed) { setRestoreIssue(null); return }
     if (read.status === 'valid' && read.note.noteId === restoredBlock.noteId && handle.editor.view.hasFocus()) {
       const selection = handle.editor.state.selection
       let selected = handle.editor.state.doc.nodeAt(selection.from)?.attrs.blockId
@@ -36,7 +36,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   }, [read, restoredBlock, handle])
   useEffect(() => {
     if (!revealBlock || read.status !== 'valid' || read.note.noteId !== revealBlock.noteId) return
-    if (!handle) return
+    if (!handle || handle.editor.isDestroyed) return
     if (handle.focusBlock(revealBlock.blockId, false)) { setIssue(null); onRevealed?.() }
     else setIssue('The requested block is not available in the original Note. Its exact target is retained.')
   }, [read, revealBlock, onRevealed, handle])
