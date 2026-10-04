@@ -2565,7 +2565,6 @@ export class AgentMuxClient {
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string): Promise<AgentCapabilitySnapshot> {
-    this.requireConnected()
     return await this.providers.get(providerId).probeCapabilities(
       { hasExecutable },
       commandOverride
@@ -2581,7 +2580,6 @@ export class AgentMuxClient {
    * （那正是那次误报要防的）。启动路径仍走 `probeAgent().installed`（=== 'available'），行为不变。
    */
   async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string): Promise<AgentMuxExecutorProbeResult> {
-    this.requireConnected()
     // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
     // 不在这里重抄一份 commandOverride/catalog 的取舍（重抄一份就是第二处会漂移的命令解析）。
     let resolvedCommand: string | null = null
