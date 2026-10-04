@@ -9,7 +9,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { WindowOverlayPortal } from './WindowOverlayHost'
 
 export type BrowserAddressInputHandle = { submit(): void }
-type Props = Omit<ComponentPropsWithoutRef<'input'>, 'value' | 'onChange' | 'onSubmit' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'> & {
+type Props = Omit<ComponentPropsWithoutRef<typeof TextInput>, 'value' | 'onChange' | 'onSubmit' | 'onCompositionStart' | 'onCompositionUpdate' | 'onCompositionEnd'> & {
   value: string
   onValueChange(value: string): void
   onSubmit(value: string): void
