@@ -27,6 +27,7 @@ function fixture() {
   }, replay: [], gap: null, terminal: { type: 'not-requested' }, resizeRevision: 0 }
   const core = {
     connect: vi.fn(async () => {}),
+    connectRuntime: vi.fn(async () => {}),
     onEvent: vi.fn((listener: (event: AgentMuxClientEvent) => void) => { eventListener = listener; return () => {} }),
     runtimeIdentity: () => ({ hostId: 'local', instanceId: 'original-daemon', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123, ownership: 'owned' as const }),
     catalog: () => [], agentSessions: () => [], agentMessageQueuePath: () => fixturePath("original-store/messages.ndjson"),
@@ -250,7 +251,7 @@ describe('semantic Host observation consumers', () => {
       const result = await service.call('runtime.invoke', { fence, consumerId: 'consumer-a', invocation: { method: 'listRuns', args: [] } })
       expect(decodeHostedValue(result)).toEqual({ value: [expect.objectContaining({ runId: 'original-run', pid: 421, state: 'running' })] })
       expect(kernel.connect).toHaveBeenCalledTimes(2 + RECONNECT_MAX_ATTEMPTS)
-      expect(kernel.list).toHaveBeenCalledTimes(4)
+      expect(kernel.list).toHaveBeenCalledTimes(2) // Exact list reads no longer repeat whole Session recovery.
       expect(kernel.stop.mock.calls).toEqual([])
     } finally { await consumer.dispose(); await service.dispose(); await core.dispose() }
   })

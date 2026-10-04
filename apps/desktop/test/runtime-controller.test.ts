@@ -51,6 +51,7 @@ const runtimeFixture = vi.hoisted(() => {
       }
       this.connected = true
     })
+    readonly connectRuntime = vi.fn(async () => { this.connected = true })
     readonly dispose = vi.fn(async () => {})
     readonly submitAgentMessage = vi.fn(async () => {})
     eventListener: ((event: unknown) => void) | null = null
@@ -435,6 +436,36 @@ describe('RuntimeController configuration transaction', () => {
       expect(client.stopAgent).not.toHaveBeenCalled()
       expect(client.stopTerminal).not.toHaveBeenCalled()
     } finally { await controller.dispose() }
+  })
+
+  it('keeps exact terminal input, paste and control available with a persistent pending observation window', async () => {
+    const controller = await configuredController(), client = runtimeFixture.FakeClient.instances[0]!
+    const control: SessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'original-agent', run: { runId: 'original-run' } }
+    let release!: () => void
+    const pending = new Promise<void>(resolve => { release = resolve })
+    client.connect.mockClear()
+    client.connectRuntime.mockClear()
+    client.connect.mockImplementation(() => pending)
+    Object.assign(client, { pasteAgent: vi.fn(async () => {}), signalAgent: vi.fn(async () => {}) })
+    const diag = { code: 'CTXMUX_CONNECTION_OBSERVATION_PENDING', message: 'Original terminal is available; Session observation pending. Retry observation.' }
+    client.eventListener?.({ type: 'connection-state', state: 'restored', diagnostic: diag, evidence: { source: 'run-process', observedAt: 1 } })
+    let input: Promise<void> | undefined
+    try {
+      let written = false
+      input = controller.write(control, 'original input', 'user').then(() => { written = true })
+      void input.catch(() => {})
+      await vi.waitFor(() => expect(written).toBe(true))
+      await input
+      await controller.paste(control, 'original paste', 'terminal paste')
+      await controller.interrupt(control)
+      expect(client.connect).not.toHaveBeenCalled()
+      expect(client.connectRuntime).toHaveBeenCalledTimes(3)
+      expect(client.writeAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' }, data: 'original input', source: 'user' })
+      expect((client as any).pasteAgent).toHaveBeenCalledExactlyOnceWith({ agentSessionId: 'original-agent', expectedRun: { runId: 'original-run' }, text: 'original paste', terminalData: 'terminal paste' })
+      expect(controller.endpointWarningSnapshot()).toContainEqual(expect.objectContaining({ hostId: 'local', code: diag.code, message: diag.message }))
+      client.eventListener?.({ type: 'connection-state', state: 'restored', evidence: { source: 'run-process', observedAt: 2 } })
+      expect(controller.endpointWarningSnapshot()).toEqual([])
+    } finally { release(); await input?.catch(() => {}); await controller.dispose() }
   })
 
   it('retains the original Host and working input when the Provider catalog read fails', async () => {
