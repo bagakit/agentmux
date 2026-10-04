@@ -18,13 +18,13 @@ export function ConversationRulerControls({ window, onWindow, untimed, onSelect,
     </Menu.Root> : null}
     <Menu.Root modal={false} onOpenChange={open => { if (open) onOpen() }}>
       <Menu.Trigger asChild><button type="button" className="conversation-ruler__window"
-        title="Loaded records around your reading position; changes this overview only"
+        title="Recorded time around your reading position; larger ranges load earlier records asynchronously"
         aria-label={`History window: ${window === 'all' ? 'All' : window}`}><Clock3 size={11}/>{window === 'all' ? 'All' : window}<ChevronDown size={10}/></button></Menu.Trigger>
       <Menu.Portal><Menu.Content className="tab-context-menu" align="end" sideOffset={5}>
         <Menu.Label className="conversation-axis__menu-heading">Around your reading position</Menu.Label>
         <Menu.RadioGroup value={window} onValueChange={value => onWindow(value as RulerWindow)}>
           {(Object.keys(RULER_WINDOWS) as RulerWindow[]).map(value => <Menu.RadioItem key={value} value={value} className="tab-context-menu__item">
-            {value === 'all' ? 'All loaded records' : `${value} reading window`}
+            {value === 'all' ? 'All · bounded reading' : `${value} reading window`}
           </Menu.RadioItem>)}
         </Menu.RadioGroup>
       </Menu.Content></Menu.Portal>

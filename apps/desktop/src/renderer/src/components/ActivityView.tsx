@@ -33,7 +33,7 @@ import type { ReadPastedImage } from '@agentmux/client-ui/components/Conversatio
 import { Ruler } from './ConversationRuler'
 export { Ruler } from './ConversationRuler'
 import { ConversationRulerControls } from './ConversationRulerControls'
-import { conversationRulerRecords, conversationRulerWindow, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
+import { RULER_WINDOWS, conversationRulerRecords, conversationRulerWindow, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
@@ -429,6 +429,7 @@ export function ActivityView({
   const [showJump, setShowJump] = useState(false)
   const returnRef = useRef<HTMLButtonElement>(null)
   const edgeRef = useRef({ earlier: false, newer: false, programmaticTop: null as number | null })
+  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const readingWindow = useSessionConversationWindow(conversationReading, recentNativePage ?? null, (page, intent, currentOriginal) => {
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
     if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal)) return false
@@ -438,7 +439,7 @@ export function ActivityView({
       edgeRef.current.earlier = false; edgeRef.current.newer = false
     }
     return true
-  }, nativeContextItems)
+  }, nativeContextItems, RULER_WINDOWS[rulerWindow])
   const handleReadingKey = (event: KeyboardEvent<HTMLDivElement>): void => {
     const interactive = event.target instanceof Element && event.target.closest('input, textarea, select, button, a, [contenteditable]:not([contenteditable="false"]), [role="slider"], [role="button"], [role="textbox"], [role="combobox"], [role="menu"]')
     if (!event.defaultPrevented && !interactive) {
@@ -526,7 +527,6 @@ export function ActivityView({
   }, [unifiedItems])
   const rulerRecords = useMemo(() => conversationRulerRecords(sessionId, nativeHistoryPage, unifiedItems),
     [sessionId, nativeHistoryPage, unifiedItems])
-  const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const [visible, setVisible] = useState<Set<string>>(new Set())
   const ruler = useMemo(() => conversationRulerWindow(rulerRecords, rulerWindow, visible), [rulerRecords, rulerWindow, visible])
   const activity = useMemo(() => projectAgentActivityHistory(items), [items])
@@ -595,7 +595,7 @@ export function ActivityView({
     const newer = el.scrollHeight - el.clientHeight - nextTop <= distance
     if (!earlier) edges.earlier = false
     if (!newer) edges.newer = false
-    if (!conversationReading?.enabled || readingWindow.loading) return
+    if (!conversationReading?.enabled || readingWindow.loading && !readingWindow.coverageLoading) return
     if (direction < 0 && earlier && !edges.earlier && readingWindow.hasMore) {
       edges.earlier = true; readingWindow.readEarlier()
     } else if (direction > 0 && newer && !edges.newer && readingWindow.hasNewer) {
@@ -805,7 +805,7 @@ export function ActivityView({
     <div className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
         {readingWindow.hasMore ? (
-          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading || !conversationReading.enabled}
+          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
             onClick={readingWindow.readEarlier}><ChevronUp size={12} aria-hidden="true" />Earlier</button>
         ) : null}
         {readingWindow.hasEarlierNavigation || conversationReading.opened || readingWindow.newerOutside || readingWindow.error ? (
@@ -1042,7 +1042,7 @@ export function ActivityView({
       /> : null}
       {readingWindow.historical || readingWindow.newerOutside ? <div className="activity-feed__read-notice activity-feed__newer-edge" data-conversation-current-entry>
         <span role="status" aria-live="polite">{readingWindow.error ?? (readingWindow.newerOutside ? 'Current records updated or outside this window.' : 'Viewing earlier records.')} {readingWindow.hasNewer ? '较新记录可向下滚动继续读取' : ''}</span>
-        {readingWindow.hasNewer ? <button type="button" className="small-button" disabled={readingWindow.loading || !conversationReading?.enabled} onClick={readingWindow.readNewer}>Newer</button> : null}
+        {readingWindow.hasNewer ? <button type="button" className="small-button" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading?.enabled} onClick={readingWindow.readNewer}>Newer</button> : null}
         <button type="button" className="small-button" disabled={!conversationReading?.enabled} onClick={readingWindow.showCurrent}>Show latest messages</button>
       </div> : null}
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator /> : null}
