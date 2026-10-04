@@ -91,7 +91,7 @@ describe('independent input and activity retention in the same timeline', () => 
       .toEqual([...tools, ...inputs])
   }, 30_000)
 
-  it('reopens and compacts a mixed snapshot above 4 MiB while below the 8 MiB total bound', async () => {
+  it('reopens and compacts a large mixed snapshot', async () => {
     const { path, timelinePath } = await fileStore()
     const history = [...items('sent', 30, 'user_message'), ...items('tool', 30)]
       .map((entry) => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
@@ -108,26 +108,27 @@ describe('independent input and activity retention in the same timeline', () => 
       .toEqual([...history, next])
   }, 30_000)
 
-  it('rejects a file above 8 MiB before replay even when its snapshot shape is valid', async () => {
+  it('reads a valid retained snapshot above the former 8 MiB cumulative ceiling', async () => {
     const { path, timelinePath } = await fileStore()
-    await writeFile(timelinePath, JSON.stringify({ ...snapshot([item('valid')]), padding: 'x'.repeat(8 * 1024 * 1024) }) + '\n')
-    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId))
-      .rejects.toMatchObject({ code: 'INVALID_AGENT_TIMELINE_STORE' })
+    const history = items('tool', 90).map(entry => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
+    const document = JSON.stringify(snapshot(history)) + '\n'
+    expect(Buffer.byteLength(document)).toBeGreaterThan(8 * 1024 * 1024)
+    await writeFile(timelinePath, document)
+    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).resolves.toMatchObject({ items: history })
+    expect(await readFile(timelinePath, 'utf8')).toBe(document)
   })
 
-  it('rejects compacted snapshots above 8 MiB without replacing the prior durable history', async () => {
+  it('crosses the former 8 MiB cumulative ceiling while preserving the prior history and new mutation', async () => {
     const { path, timelinePath } = await fileStore()
-    const history = items('tool', 81).map((entry) => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
-    const next = item('overflow', 'user_message', 'x'.repeat(100 * 1024))
+    const history = items('tool', 81).map(entry => ({ ...entry, content: 'x'.repeat(100 * 1024) }))
+    const next = item('after-growth', 'user_message', 'x'.repeat(100 * 1024))
     const document = JSON.stringify(snapshot(history)) + '\n'
     expect(Buffer.byteLength(document)).toBeLessThan(8 * 1024 * 1024)
     expect(Buffer.byteLength(JSON.stringify(snapshot([...history, next])))).toBeGreaterThan(8 * 1024 * 1024)
     await writeFile(timelinePath, document)
     const reopened = new AgentMuxFileAgentSessionStore(path)
-    await expect(reopened.applyTimelineMutation({ type: 'append', agentSessionId, item: next }))
-      .rejects.toMatchObject({ code: 'AGENT_TIMELINE_STORE_LIMIT' })
-    expect(await readFile(timelinePath, 'utf8')).toBe(document)
-    expect((await new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).items).toEqual(history)
+    await expect(reopened.applyTimelineMutation({ type: 'append', agentSessionId, item: next })).resolves.toMatchObject({ changed: true })
+    await expect(new AgentMuxFileAgentSessionStore(path).loadTimeline(agentSessionId)).resolves.toMatchObject({ items: [...history, next] })
   }, 30_000)
 
   it('keeps the independent 128 KiB mutation bound', () => {
