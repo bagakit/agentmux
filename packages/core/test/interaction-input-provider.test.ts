@@ -6,11 +6,11 @@ import { inspectCodexInteractionTarget } from '../src/providers/codex-interactio
 import { AgentProviderRegistry, type AgentProviderInteractionResponseContext } from '../src/agent-provider.js'
 import type { AgentMuxInteractionRequest, AgentTerminalScreenSnapshot } from '../src/types.js'
 
-const native = vi.hoisted(() => ({ owners: [22] as number[], birth: 'writer-birth', image: 'writer-image', rootBirth: 'root-birth', path: '', device: 0n, inode: 0n, reads: 0, closed: 0 }))
+const native = vi.hoisted(() => ({ owners: [22] as number[], birth: 'writer-birth', image: 'writer-descriptor', descriptor: '8', rootBirth: 'root-birth', path: '', device: 0n, inode: 0n, reads: 0, closed: 0 }))
 vi.mock('../src/agent-native-process.js', async importOriginal => ({
   ...await importOriginal<typeof import('../src/agent-native-process.js')>(),
   nativeProcessBirth: async (pid: number) => pid === 11 ? native.rootBirth : native.birth,
-  nativeProcessFiles: async () => { native.reads++; return native.owners.map(processId => ({ processId, path: native.path, device: native.device, inode: native.inode, access: 'w' })) },
+  nativeProcessFiles: async () => { native.reads++; return native.owners.map(processId => ({ processId, path: native.path, device: native.device, inode: native.inode, descriptor: native.descriptor, access: 'w' })) },
   openNativeProcessImage: async () => ({ identity: native.image, assertCurrent: async () => {}, file: { close: async () => { native.closed++ } } })
 }))
 let directory: string | undefined
@@ -25,7 +25,7 @@ async function fixture() {
   const invocation = { type: 'response_item', payload: { type: 'function_call', call_id: 'exact-call', name: 'exec_command', arguments: JSON.stringify({ cmd: 'printf private', sandbox_permissions: 'require_escalated' }) } }
   await writeFile(path, [JSON.stringify({ type: 'session_meta', payload: { id: 'native-session' } }), JSON.stringify(invocation), ''].join('\n'))
   const source = await stat(path, { bigint: true })
-  Object.assign(native, { owners: [22], birth: 'writer-birth', image: 'writer-image', rootBirth: 'root-birth', path, device: source.dev, inode: source.ino, reads: 0, closed: 0 })
+  Object.assign(native, { owners: [22], birth: 'writer-birth', image: 'writer-descriptor', descriptor: '8', rootBirth: 'root-birth', path, device: source.dev, inode: source.ino, reads: 0, closed: 0 })
   const request: AgentMuxInteractionRequest = { kind: 'permission', id: 'exact-request', agentSessionId: 'agent', title: 'private approval', nativeToolCallId: 'exact-call', toolName: 'exec_command', toolInput: invocation.payload.arguments,
     options: [{ id: 'allow-once', label: 'Allow once', kind: 'allow-once' }], evidence: { source: 'native-hook', observedAt: 1, run: { runId: 'run' }, hookReceiptId: 'hook' } }
   const response = { kind: 'permission' as const, requestId: request.id, decision: { outcome: 'selected' as const, optionId: 'allow-once' } }
@@ -54,7 +54,7 @@ describe('Provider exact native typed input target', () => {
   it('binds the outstanding native call and current approval pane, and never caches completion authority', async () => {
     const f = await fixture(), prepared = await f.prepare(f.context, f.request, f.response)
     expect(prepared?.plan.data).toBe('1'); expect(prepared?.target).toMatchObject({ requestId: 'exact-request', nativeToolCallId: 'exact-call', inputByte: 5 })
-    expect(native.closed).toBeGreaterThan(0)
+    expect(native.closed).toBe(0)
     await appendFile(f.path, JSON.stringify({ type: 'response_item', payload: { type: 'function_call_output', call_id: 'exact-call', output: 'complete' } }) + '\n')
     expect(await prepared!.verifyCurrentTarget({ ...f.context, nativeSourceId: prepared!.target.nativeSourceId })).toBe(false)
   })
@@ -71,11 +71,11 @@ describe('Provider exact native typed input target', () => {
     expect((await result)?.target.frame.outputThroughByte).toBe(200)
   })
 
-  it.each(['writer-pid', 'writer-birth', 'writer-image', 'root-birth', 'multiple-writers', 'source'] as const)('refuses changed %s before any new typed input', async kind => {
+  it.each(['writer-pid', 'writer-birth', 'writer-descriptor', 'root-birth', 'multiple-writers', 'source'] as const)('refuses changed %s before any new typed input', async kind => {
     const f = await fixture(), prepared = await f.prepare(f.context, f.request, f.response)
     if (kind === 'writer-pid') native.owners = [33]
     if (kind === 'writer-birth') native.birth = 'changed'
-    if (kind === 'writer-image') native.image = 'changed'
+    if (kind === 'writer-descriptor') native.descriptor = 'changed'
     if (kind === 'root-birth') native.rootBirth = 'changed'
     if (kind === 'multiple-writers') native.owners = [22, 33]
     if (kind === 'source') { await rm(f.path); await writeFile(f.path, JSON.stringify({ type: 'session_meta', payload: { id: 'other-session' } }) + '\n') }

@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { open } from 'node:fs/promises'
 import { isAbsolute } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
-import { nativeProcessBirth, nativeProcessFiles, openNativeProcessImage } from '../agent-native-process.js'
+import { nativeProcessBirth, nativeProcessFiles } from '../agent-native-process.js'
 import type { AgentProvider, AgentProviderPromptExecutionContext } from '../agent-provider.js'
 import { readCodexPromptExecutionEvidence } from './codex-prompt-execution-evidence.js'
 
@@ -17,7 +17,7 @@ export function createCodexPromptTransportPreparation(
         handle?.kind !== 'provider' || handle.providerId !== 'codex' || !handle.transcriptPath || !isAbsolute(handle.transcriptPath)) return null
     const rootPid = context.processId, sourceId = context.nativeSourceId, path = handle.transcriptPath
     const rootBirth = await nativeProcessBirth(rootPid, context.signal)
-    let writer: { pid: number; birth: string; image: string } | undefined
+    let writer: { pid: number; birth: string; descriptors: string[] } | undefined
     const readWriter = async (current: AgentProviderPromptExecutionContext): Promise<'pending' | 'current' | 'changed'> => {
       current.signal?.throwIfAborted()
       if (current.processId !== rootPid || JSON.stringify(current.nativeHandle) !== JSON.stringify(handle) ||
@@ -34,14 +34,10 @@ export function createCodexPromptTransportPreparation(
       if (owners.length === 0) return writer ? 'changed' : 'pending'
       const signal = current.signal ?? context.signal
       const pid = owners[0]!, birth = await nativeProcessBirth(pid, signal)
-      const image = await openNativeProcessImage(pid, signal)
-      try {
-        const candidate = { pid, birth, image: image.identity }
-        if (writer && (writer.pid !== candidate.pid || writer.birth !== candidate.birth || writer.image !== candidate.image)) return 'changed'
-        await image.assertCurrent(signal)
-        if (await nativeProcessBirth(pid, signal) !== birth) return 'changed'
-        writer ??= candidate
-      } finally { await image.file.close() }
+      const descriptors = files.map(entry => entry.descriptor)
+      if (writer && (writer.pid !== pid || writer.birth !== birth || !descriptors.some(descriptor => writer!.descriptors.includes(descriptor)))) return 'changed'
+      if (await nativeProcessBirth(pid, signal) !== birth || await nativeProcessBirth(rootPid, signal) !== rootBirth) return 'changed'
+      writer ??= { pid, birth, descriptors }
       return 'current'
     }
     for (;;) {

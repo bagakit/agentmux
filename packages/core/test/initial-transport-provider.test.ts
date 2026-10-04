@@ -6,14 +6,14 @@ import { createCodexPromptTransportPreparation } from '../src/providers/codex-pr
 import { readCodexPromptExecutionEvidence } from '../src/providers/codex-prompt-execution-evidence.js'
 import type { AgentProviderPromptExecutionContext } from '../src/agent-provider.js'
 
-const native = vi.hoisted(() => ({ owners: [22] as number[], birth: 'writer-birth', image: 'writer-image', rootBirth: 'root-birth', path: '',
+const native = vi.hoisted(() => ({ owners: [22] as number[], birth: 'writer-birth', image: 'writer-descriptor', descriptor: '8', rootBirth: 'root-birth', path: '',
   device: 0n, inode: 0n, reads: 0 }))
 vi.mock('../src/agent-native-process.js', async importOriginal => ({
   ...await importOriginal<typeof import('../src/agent-native-process.js')>(),
   nativeProcessBirth: async (pid: number) => pid === 11 ? native.rootBirth : native.birth,
   nativeProcessFiles: async () => {
     native.reads++
-    return native.owners.map(processId => ({ processId, path: native.path, device: native.device, inode: native.inode, access: 'w' }))
+    return native.owners.map(processId => ({ processId, path: native.path, device: native.device, inode: native.inode, descriptor: native.descriptor, access: 'w' }))
   },
   openNativeProcessImage: async () => ({ identity: native.image, assertCurrent: async () => {}, file: { close: async () => {} } })
 }))
@@ -24,7 +24,7 @@ async function fixture() {
   const path = join(directory, 'native.jsonl')
   await writeFile(path, JSON.stringify({ type: 'session_meta', payload: { id: 'native-session' } }) + '\n')
   const source = await stat(path, { bigint: true })
-  Object.assign(native, { owners: [22], birth: 'writer-birth', image: 'writer-image', rootBirth: 'root-birth', path,
+  Object.assign(native, { owners: [22], birth: 'writer-birth', image: 'writer-descriptor', descriptor: '8', rootBirth: 'root-birth', path,
     device: source.dev, inode: source.ino, reads: 0 })
   const signal = new AbortController().signal
   const context: AgentProviderPromptExecutionContext & { signal: AbortSignal } = { processId: 11, args: [], workspacePath: directory,
@@ -55,12 +55,12 @@ describe('Provider startup transport observation', () => {
     expect(native.reads).toBeGreaterThan(1)
   })
 
-  it.each(['writer-pid', 'writer-birth', 'writer-image', 'root-birth', 'multiple-writers', 'source'])(
+  it.each(['writer-pid', 'writer-birth', 'writer-descriptor', 'root-birth', 'multiple-writers', 'source'])(
     'rejects changed %s on the final current observation', async kind => {
       const f = await fixture(), prepared = await createCodexPromptTransportPreparation(async () => true)(f.context)
       if (kind === 'writer-pid') native.owners = [33]
       if (kind === 'writer-birth') native.birth = 'another-birth'
-      if (kind === 'writer-image') native.image = 'another-image'
+      if (kind === 'writer-descriptor') native.descriptor = 'another-descriptor'
       if (kind === 'root-birth') native.rootBirth = 'another-root-birth'
       if (kind === 'multiple-writers') native.owners = [22, 33]
       if (kind === 'source') { await rm(f.path); await writeFile(f.path, JSON.stringify({ type: 'session_meta', payload: { id: 'another-session' } }) + '\n') }
