@@ -16,11 +16,7 @@ import { AGENT_COMMAND_GROUP_LABEL, composerShortcutForBareWord, composerShortcu
 import { composerSubmitMode } from '../lib/composer-submit-mode'
 import {
   caretAtFirstLine,
-  caretAtLastLine,
-  emptyHistory,
-  navigateHistory,
-  recordHistory,
-  type HistoryState
+  caretAtLastLine
 } from '../lib/composer-history'
 import { isDuplicateResubmit, recordSubmit, RESUBMIT_WINDOW_MS, type LastSubmit } from '../lib/composer-resubmit-guard'
 import { useAppStore, agentSteerCanEdit, agentSteerExecution, type AgentSteerQueueEntry } from '../store'
@@ -47,9 +43,8 @@ export type AgentComposerAvailability = {
 /** One shared identity for "no queue", so the selector returns a stable reference when empty. */
 const EMPTY_QUEUE: readonly AgentSteerQueueEntry[] = Object.freeze([])
 
-// History and the resubmit guard survive a Composer remount within the same application run.
+// The resubmit guard survives a Composer remount within the same application run.
 // Drafts remain owned by the store; transient operation feedback stays with the mounted Composer.
-const historyBySession = new Map<string, HistoryState>()
 const lastSubmitBySession = new Map<string, LastSubmit>()
 
 
@@ -186,7 +181,7 @@ export function AgentSessionComposer({
     feedback.dismiss()
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
-    historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
+    useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
   function queue(): void {
@@ -201,7 +196,7 @@ export function AgentSessionComposer({
     clearAgentComposerDraftIfUnchanged(sessionId, text)
     void useAppStore.getState().flushAgentSteerQueue(sessionId)
     lastSubmitBySession.set(sessionId, recordSubmit(value, Date.now()))
-    historyBySession.set(sessionId, recordHistory(historyBySession.get(sessionId) ?? emptyHistory, value))
+    useAppStore.getState().recordAgentComposerHistory(sessionId, value)
   }
 
   // Shell-style up/down history recall. The multiline resolution: recall only fires at the line boundary
@@ -212,10 +207,7 @@ export function AgentSessionComposer({
   function historyRecall(direction: 'older' | 'newer', draft: string, caret: number): string | null {
     if (direction === 'older' && !caretAtFirstLine(draft, caret)) return null
     if (direction === 'newer' && !caretAtLastLine(draft, caret)) return null
-    const result = navigateHistory(historyBySession.get(sessionId) ?? emptyHistory, direction, draft)
-    if (!result) return null
-    historyBySession.set(sessionId, result.state)
-    return result.value
+    return useAppStore.getState().recallAgentComposerHistory(sessionId, direction, draft)
   }
 
 
