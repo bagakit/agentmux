@@ -24,7 +24,10 @@ import { requestPmoTeamsTopicFloatingOpen } from '../lib/pmo-teams-topic-floatin
 import { isMacPlatform } from '../lib/host-platform'
 import { executionFocusSessionId } from '../lib/agent-focus'
 import { sessionPresentationById } from '../lib/session-presentation'
-import { topicIdForSession, workspaceForSession } from '../lib/workbench-tabs'
+import { topicIdForSession, workspaceForSession, type WorkbenchTab } from '../lib/workbench-tabs'
+import { recordForWorkbenchTab, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
+import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
+import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { topicSpaceIconTarget } from '../lib/space-object-appearance'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
@@ -32,6 +35,25 @@ import { WorkspaceWorkbench } from './WorkspaceWorkbench'
 import { WorkbenchPresentationContext, type WorkbenchViewTargets } from '../lib/workbench-presentation'
 import { ServiceWindowNotice } from './ServiceWindowNotice'
 import { groupIds, regionIds } from '@agentmux/layout'
+
+function FocusLocationChoice({ reference, tab, workspaceName, groupIndex, regionIndex, onSelect }: {
+  reference: WorkbenchProjectionSelection
+  tab: WorkbenchTab | undefined
+  workspaceName: string
+  groupIndex: number
+  regionIndex: number
+  onSelect: () => void
+}) {
+  const sessions = useWorkbenchTabSessions(tab)
+  const names = useAppStore(useShallow(state => recordForWorkbenchTab(state.agentNames, tab)))
+  const timelines = useAppStore(useShallow(state => recordForWorkbenchTab(state.timelines, tab)))
+  return <button type="button" className="small-button focus-location-choice" onClick={onSelect}
+    title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
+    <strong>{tab ? workbenchTabDisplayName(tab, sessions, names, timelines) : 'Original work surface'}</strong>
+    <small>{workspaceName}{' · '}{groupIndex >= 0 ? `Group ${groupIndex + 1}` : 'Original Group'}
+      {' · '}{regionIndex >= 0 ? `Region ${regionIndex + 1}` : 'Original Region'}</small>
+  </button>
+}
 
 export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTargets, regionOnly, onToggleRegion, workspaceOpen, onCloseWorkspace, onSelectContext, onSelectLocation, visible: hostVisible = true }: {
   visible?: boolean
@@ -65,7 +87,7 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
   const selectedTab = projection?.selection.length === 1 ? tabs[projection.selection[0]!.tabId] ?? null : null
   const activeSurface = projection?.selection[0] && selectedTab?.regions[projection.selection[0].regionId]
   const shownSessionId = activeSurface && (activeSurface.kind === 'agent' || activeSurface.kind === 'terminal') ? activeSurface.sessionId : null
-  const showWorkspace = workspaceOpen ?? Boolean(projection || presentation?.issue || selectedId)
+  const showWorkspace = workspaceOpen ?? Boolean(projection || presentation?.unselected || presentation?.issue || selectedId)
   const selectedSessionIds = useMemo(() => selectedId ? [selectedId] : [], [selectedId])
   const sessions = useAppStore(useShallow(state => selectedTab ? [] : selectedSessionIds.flatMap(id => { const session = sessionPresentationById(state.sessions).get(id); return session ? [session] : [] })))
   const executionHistory = useAppStore((state) => state.agentFocus.execution.history)
@@ -297,8 +319,13 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
         if (event.key === 'End') { event.preventDefault(); adjustWorkspaceRatio(0.76) }
       }}
     /><aside className="global-session-workspace" aria-label="Focus workspace">
-      {selectedTab && projection
-        ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab.id}>
+      {projection
+        ? <div className="focused-tab-workspace" data-focus-tab-id={selectedTab?.id}
+          data-focus-zone-id={projection.entity.kind === 'zone' ? projection.entity.zoneId : undefined}>
+          {directoryIssue ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+            step: 'Focus work surface directory', mode: directoryIssue,
+            restore: 'The original work surface remains available. Retry its directory to confirm current positions.'
+          } }} /> : null}
           <WorkspaceWorkbench workspaceId={projection.displayWorkspaceId} projection={projection}
             viewOwnership="projection" viewTargets={viewTargets} visible />
         </div>
@@ -312,16 +339,15 @@ export function GlobalFocusSurface({ presentation, directoryIssue = null, viewTa
               const layout = layouts[reference.displayWorkspaceId], tab = tabs[reference.tabId]
               const groupIndex = layout ? groupIds(layout.root).indexOf(reference.groupId) : -1
               const regionIndex = tab ? regionIds(tab.layout.root).indexOf(reference.regionId) : -1
-              return <button type="button" className="small-button focus-location-choice" key={JSON.stringify(reference)} onClick={() => onSelectLocation ? onSelectLocation(reference) : selectedId ? focusExecutionSession(selectedId, reference) : undefined}
-                title={`${reference.displayWorkspaceId} / ${reference.groupId} / ${reference.tabId} / ${reference.regionId}`}>
-                <strong>{tab?.name ?? reference.tabId}</strong>
-                <small>{config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? reference.displayWorkspaceId}
-                  {' · '}{groupIndex >= 0 ? `Group ${groupIndex + 1}` : reference.groupId}
-                  {' · '}{regionIndex >= 0 ? `Region ${regionIndex + 1}` : reference.regionId}</small>
-              </button>
+              return <FocusLocationChoice key={JSON.stringify(reference)} reference={reference} tab={tab}
+                workspaceName={config?.workspaces.find(workspace => workspace.id === reference.displayWorkspaceId)?.name ?? 'Original Space'}
+                groupIndex={groupIndex} regionIndex={regionIndex}
+                onSelect={() => onSelectLocation ? onSelectLocation(reference) : selectedId ? focusExecutionSession(selectedId, reference) : undefined} />
             })}</div> : null}
           </div>
-          : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
+          : presentation?.unselected ? <div className="global-session-workspace__empty" data-focus-unselected>
+            <strong>Choose a work surface</strong><span>Select a context or Region to continue here.</span>
+          </div> : <><AgentTopologySummary sessionIds={selectedSessionIds} sessions={sessions} tabs={tabs} config={config} /><SessionObservationRegions sessionIds={selectedSessionIds} contextId={`agent:${selectedId}`} /></>}
     </aside></> : null}
     </div>
     <RecentFocusTimeline entries={executionHistory} currentSessionId={selectedId} contexts={executionRows} lanes={allLanes} hierarchy={facts} onSelect={focusExecutionSession} historyWindowRequest={historyWindowRequest} catalogue={catalogue} />

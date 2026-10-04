@@ -635,6 +635,7 @@ function WorkbenchRegionTree(props: {
   regionTarget?: WorkbenchViewTarget | undefined
 }) {
   const { tab } = props
+  const [dragging, setDragging] = useState(false)
   const sessions = useWorkbenchTabSessions(tab)
   const agentNames = useAppStore(useShallow((state) => recordForWorkbenchTab(state.agentNames, tab)))
   const timelines = useAppStore(useShallow((state) => recordForWorkbenchTab(state.timelines, tab)))
@@ -647,60 +648,26 @@ function WorkbenchRegionTree(props: {
       return [{ regionId, label: facts ? agentDisplayName(facts) : regionSurfaceLabel(region, sessions) }]
     })
   }, [sessions, agentNames, timelines, tab.regions, tab.layout.root])
-  return <WorkbenchRegionNode {...props} node={tab.layout.root} nodePath="" swapTargets={swapTargets} />
+  // Layout slots may collapse or move; original Region content remains keyed by
+  // its durable identity until that Region is actually removed.
+  return <>
+    <WorkbenchRegionNode tab={tab} node={tab.layout.root} nodePath="" surfaceVisible={props.surfaceVisible} onDragging={setDragging} />
+    {regionIds(tab.layout.root).filter(regionId => tab.regions[regionId]).map(regionId =>
+      <WorkbenchRegionLeaf key={regionId} {...props} node={{ type: 'leaf', regionId }} swapTargets={swapTargets}
+        interactiveResize={props.interactiveResize || dragging} />)}
+  </>
 }
 
-function WorkbenchRegionNode({
-  node,
-  nodePath,
-  tab,
-  swapTargets,
-  groupId,
-  surfaceVisible,
-  nativeSurfacesVisible,
-  interactiveResize,
-  headerPortalTargetId = null,
-  regionTarget
-}: {
+function WorkbenchRegionNode({ node, nodePath, tab, surfaceVisible, onDragging }: {
   node: WorkbenchRegionLayoutNode
   nodePath: string
   tab: WorkbenchTab
-  swapTargets: RegionSwapTargets
-  groupId: string | undefined
   surfaceVisible: boolean
-  nativeSurfacesVisible: boolean
-  interactiveResize: boolean
-  headerPortalTargetId?: string | null
-  regionTarget?: WorkbenchViewTarget | undefined
+  onDragging: (active: boolean) => void
 }) {
-  if (node.type === 'leaf') {
-    return (
-      <WorkbenchRegionLeaf
-        node={node}
-        tab={tab}
-        swapTargets={swapTargets}
-        groupId={groupId}
-        surfaceVisible={surfaceVisible}
-        nativeSurfacesVisible={nativeSurfacesVisible}
-        interactiveResize={interactiveResize}
-        headerPortalTargetId={headerPortalTargetId}
-        regionTarget={regionTarget}
-      />
-    )
-  }
-  return (
-    <WorkbenchRegionBranch
-      node={node}
-      nodePath={nodePath}
-      tab={tab}
-      swapTargets={swapTargets}
-      groupId={groupId}
-      surfaceVisible={surfaceVisible}
-      nativeSurfacesVisible={nativeSurfacesVisible}
-      interactiveResize={interactiveResize}
-      regionTarget={regionTarget}
-    />
-  )
+  return node.type === 'leaf'
+    ? <WorkbenchRegionSlot regionId={node.regionId} />
+    : <WorkbenchRegionBranch node={node} nodePath={nodePath} tab={tab} surfaceVisible={surfaceVisible} onDragging={onDragging} />
 }
 
 // 一格（leaf）单独成组件：消费键盘关格意图的 effect、以及「关这一格要不要确认」的决定，都得跑在组件顶层
@@ -714,14 +681,16 @@ function confirmedRegionTarget(regionTarget: WorkbenchViewTarget | undefined, ta
     scope.catalog.locations.some(location => sameWorkbenchProjectionSelection(location, reference))
     ? regionTarget : undefined
 }
+function WorkbenchRegionSlot({ regionId }: { regionId: string }) {
+  const parent = useWorkbenchBrowserPresentation()
+  return <div id={`${parent.tabHostId}:region:${regionId}`} className="workbench-region-slot" />
+}
 function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProps) {
   const parent = useWorkbenchBrowserPresentation()
   const target = confirmedRegionTarget(regionTarget, props.tab.id, props.node.regionId)
   const homeId = `${parent.tabHostId}:region:${props.node.regionId}`
   const visible = target ? target.visible !== false : props.surfaceVisible
-  return <>
-    <div id={homeId} className="workbench-region-slot" />
-    <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
+  return <StableWorkbenchView kind="region" nativeRegionId={props.node.regionId} homeId={homeId} targetId={target?.hostId ?? null} active={target?.active ?? parent.active}
       visible={visible}
       retainedRegionId={target?.retainedRegionId ?? parent.retainedRegionId}
       surface={target?.surface ?? parent.surface}
@@ -732,7 +701,6 @@ function WorkbenchRegionLeaf({ regionTarget, ...props }: WorkbenchRegionLeafProp
       <WorkbenchRegionContent {...props} primaryPresentationHostId={target?.hostId ?? parent.tabHostId} surfaceVisible={visible} nativeSurfacesVisible={target ? visible : props.nativeSurfacesVisible}
         headerPortalTargetId={target?.headerPortalTargetId ?? props.headerPortalTargetId} />
     </StableWorkbenchView>
-  </>
 }
 
 function WorkbenchRegionContent({
@@ -988,26 +956,18 @@ function WorkbenchRegionBranch({
   node,
   nodePath,
   tab,
-  swapTargets,
-  groupId,
   surfaceVisible,
-  nativeSurfacesVisible,
-  interactiveResize,
-  regionTarget
+  onDragging
 }: {
   node: Extract<WorkbenchRegionLayoutNode, { type: 'split' }>
   nodePath: string
   tab: WorkbenchTab
-  swapTargets: RegionSwapTargets
-  groupId: string | undefined
   surfaceVisible: boolean
-  nativeSurfacesVisible: boolean
-  interactiveResize: boolean
-  regionTarget?: WorkbenchViewTarget | undefined
+  onDragging: (active: boolean) => void
 }) {
   const updateRegionSplitRatio = useAppStore((state) => state.updateRegionSplitRatio)
   const [dragging, setDragging] = useState(false)
-  const terminalResizeSuspended = interactiveResize || dragging
+  useEffect(() => () => { if (dragging) onDragging(false) }, [dragging, onDragging])
   const commitRef = useRef((ratio: number) => (
     updateRegionSplitRatio(tab.workspaceId, tab.id, nodePath, ratio)
   ))
@@ -1033,12 +993,8 @@ function WorkbenchRegionBranch({
           node={node.first}
           nodePath={nodePath ? `${nodePath}.first` : 'first'}
           tab={tab}
-          swapTargets={swapTargets}
-          groupId={groupId}
           surfaceVisible={surfaceVisible}
-          nativeSurfacesVisible={nativeSurfacesVisible}
-          interactiveResize={terminalResizeSuspended}
-          regionTarget={regionTarget}
+          onDragging={onDragging}
         />
       </Panel>
       <PanelResizeHandle
@@ -1047,6 +1003,7 @@ function WorkbenchRegionBranch({
         onDragging={(active) => {
           committer.setDragging(active)
           setDragging(active)
+          onDragging(active)
         }}
       />
       <Panel defaultSize={(1 - node.ratio) * 100} minSize={MIN_SPLIT_PERCENT}>
@@ -1054,12 +1011,8 @@ function WorkbenchRegionBranch({
           node={node.second}
           nodePath={nodePath ? `${nodePath}.second` : 'second'}
           tab={tab}
-          swapTargets={swapTargets}
-          groupId={groupId}
           surfaceVisible={surfaceVisible}
-          nativeSurfacesVisible={nativeSurfacesVisible}
-          interactiveResize={terminalResizeSuspended}
-          regionTarget={regionTarget}
+          onDragging={onDragging}
         />
       </Panel>
     </PanelGroup>

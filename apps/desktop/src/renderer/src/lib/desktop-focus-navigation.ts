@@ -209,19 +209,26 @@ export function desktopSelection(state: DesktopSelectionState, catalog: AgentMux
 export function desktopSpaceSelectionAfterClose(choice: AgentMuxDesktopSpaceSelection | null,
   topology: Pick<DesktopSelectionState, 'tabs' | 'layouts'>,
   closed: { workspaceId: string; tabId: string; groupId?: string; regionId?: string }): AgentMuxDesktopSpaceSelection | null {
-  if (!choice || choice.workspaceId !== closed.workspaceId || choice.tabId !== closed.tabId ||
-    (closed.groupId && choice.groupId !== closed.groupId) || (closed.regionId && choice.regionId !== closed.regionId)) return choice
+  if (!choice || choice.tabId !== closed.tabId ||
+    (closed.regionId && choice.regionId !== closed.regionId)) return choice
   const layout = topology.layouts[choice.workspaceId]
   const previousGroup = layout?.groups.find(group => group.id === choice.groupId)
   const previousTab = choice.tabId ? topology.tabs[choice.tabId] : undefined
   if (previousGroup?.tabOrder.includes(choice.tabId!) && previousTab &&
     (!choice.regionId || previousTab.regions[choice.regionId])) return choice
   const parent = { ...choice, tabId: null, groupId: null, regionId: null }
-  const activeGroup = layout?.groups.find(group => group.id === layout.activeGroupId)
-  const activeTab = activeGroup?.activeTabId ? topology.tabs[activeGroup.activeTabId] : undefined
-  if (!activeGroup || !activeTab || !choice.zoneId || activeTab.space?.zoneId !== choice.zoneId) return parent
-  return { ...choice, tabId: activeTab.id, groupId: activeGroup.id,
-    regionId: activeTab.regions[activeTab.layout.activeRegionId] ? activeTab.layout.activeRegionId : null }
+  // Region/entity removal applies to every display occurrence. A placement close
+  // only affects its addressed Group; another surviving display keeps its choice.
+  if (!closed.regionId && previousTab && (choice.workspaceId !== closed.workspaceId ||
+    (closed.groupId && choice.groupId !== closed.groupId))) return choice
+  const successor = closed.regionId && previousGroup?.tabOrder.includes(choice.tabId!)
+    ? previousTab
+    : previousGroup?.activeTabId ? topology.tabs[previousGroup.activeTabId] : undefined
+  if (!previousGroup || !successor || (successor.id !== choice.tabId &&
+    (!choice.zoneId || successor.space?.zoneId !== choice.zoneId))) return parent
+  const regionId = successor.layout.activeRegionId
+  if (!successor.regions[regionId]) return parent
+  return { ...choice, tabId: successor.id, groupId: previousGroup.id, regionId }
 }
 
 /** Missing discovery/Runtime snapshots retain this exact durable choice; they never select a peer. */
