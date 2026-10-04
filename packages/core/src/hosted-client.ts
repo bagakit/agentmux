@@ -237,6 +237,21 @@ export async function connectHostedAgentMux(options: {
       void initialReady.catch(() => {})
       const timer = setTimeout(() => rejectInitial(new AgentMuxError('Runtime initial observation did not complete; the saved workbench is retained.', 'CONTROL_TIMEOUT')), 60_000)
       let acquired: AgentMuxHostedSubscription | undefined
+      let releasing: Promise<void> | undefined
+      const releaseAcquired = (): Promise<void> => {
+        if (!acquired) return Promise.resolve()
+        // Cache before invoking the transport: dispose may synchronously call onEnd.
+        return releasing ??= Promise.resolve().then(() => acquired!.dispose())
+      }
+      const endObservation = (error: unknown): void => {
+        if (ended) return
+        ended = true; rejectInitial(error)
+        if (epoch !== eventEpoch || disposed) return
+        stream = undefined; loseHistories()
+        connectionState('lost', error)
+        // Only this failed observation is released. Retained Sessions and healthy Runs survive.
+        void releaseAcquired().catch(connectionFailure).finally(reconnect)
+      }
       try {
         acquired = await rpc.subscribe('runtime.events', { consumerId, fence: expected }, {
           onInitial: value => {
@@ -272,21 +287,15 @@ export async function connectHostedAgentMux(options: {
                 }
                 emit(received.event)
               }
-            } catch (error) { rejectInitial(error); if (initialSeen) { ended = true; stream = undefined; loseHistories(); connectionState('lost', error); reconnect() } }
+            } catch (error) { rejectInitial(error); if (initialSeen) endObservation(error) }
           },
-          onEnd: error => {
-            if (ended) return
-            ended = true; rejectInitial(error ?? new AgentMuxError('Host observation ended.', 'RUNTIME_UNAVAILABLE'))
-            if (epoch !== eventEpoch || disposed) return
-            stream = undefined; loseHistories()
-            connectionState('lost', error ?? new Error('The Host event subscription ended.')); reconnect()
-          }
+          onEnd: error => endObservation(error ?? new AgentMuxError('Host observation ended.', 'RUNTIME_UNAVAILABLE'))
         })
         await initialReady
-      } catch (error) { await acquired?.dispose(); throw error }
+      } catch (error) { await releaseAcquired(); throw error }
       finally { clearTimeout(timer) }
-      if (disposed || ended || epoch !== eventEpoch) { await acquired!.dispose(); requireObservation() }
-      stream = acquired!
+      if (disposed || ended || epoch !== eventEpoch) { await releaseAcquired(); requireObservation() }
+      stream = { dispose: releaseAcquired }
       reconnectDelay = 100
       reconnectAttempts = 0
       try {

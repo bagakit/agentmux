@@ -12,6 +12,8 @@ import type { AgentMuxDoctorReport } from './doctor.js'
 import type { FollowOutput } from './session-output-follow.js'
 import { AGENTMUX_RPC_DEVICE_METHODS } from './public-rpc-device.js'
 import type { AgentMuxRpcDeviceMethod, AgentMuxRpcDeviceParameterMap, AgentMuxRpcDeviceResultMap } from './public-rpc-device.js'
+import { AGENTMUX_RPC_HOST_SETTINGS_METHODS } from './public-rpc-host-settings.js'
+import type { HostSettingsParameterMap, HostSettingsResultMap, HostSettingsMethod } from './public-rpc-host-settings.js'
 
 /** Canonical public names and their existing business owner. No wire aliases. */
 export const AGENTMUX_RPC_CONTROL_METHODS = {
@@ -149,7 +151,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = TopicParameterMap & HostSettingsParameterMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'space.state': Record<string, never>
   'space.commit': import('./spatial-state.js').AgentMuxSpatialCommit
   'space.resolve': import('./spatial-state.js').AgentMuxSpatialResolve
@@ -182,7 +184,7 @@ type NativeParams = TopicParameterMap & AgentMuxRpcDeviceParameterMap & AgentMux
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = TopicResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = TopicResultMap & HostSettingsResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'space.state': { state: import('./spatial-state.js').AgentMuxSpatialState | null }
   'space.commit': { state: import('./spatial-state.js').AgentMuxSpatialState }
   'space.resolve': ReturnType<typeof import('./spatial-state.js').resolveSpatialRegion>
@@ -217,8 +219,8 @@ type NativeResult = TopicResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHosted
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = TopicParameterMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | TopicMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = TopicParameterMap & HostSettingsParameterMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | TopicMethod | HostSettingsMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -235,6 +237,7 @@ export type AgentMuxRpcSpacePresentation = {
 export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...AGENTMUX_RPC_TOPIC_METHODS,
   ...AGENTMUX_RPC_DEVICE_METHODS,
+  ...AGENTMUX_RPC_HOST_SETTINGS_METHODS,
   ...AGENTMUX_HOSTED_RPC_METHODS,
   'space.state': 'short', 'space.commit': 'long', 'space.resolve': 'short', 'name.history': 'short', 'name.confirm': 'long',
   whoami: 'short', 'agent.ls': 'short', 'agent.inspect': 'short', 'agent.native.confirm': 'long', 'agent.context': 'long', 'agent.reopen': 'long', 'agent.reopen.check': 'long',

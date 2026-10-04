@@ -187,7 +187,7 @@ it('reports unsupported and partial mounting through the public client while ret
   const attach = f.ports.attach
   f.ports.attach = async () => { throw new Error('Private client mount unavailable after Core creation') }
   const request = { operationId: 'fork-partial-mount', content: { kind: 'fork-agent' as const, source: f.source },
-    destination: { tabId: 'original-tab', regionId: 'original-region', split: 'below' as const }, focus: false }
+    destination: { tabId: 'original-tab', regionId: 'original-region', split: 'down' as const }, focus: false }
   const result = await f.rpc.call('agent.open', request)
   expect(result.outcome).toBe('partial'); expect(result.agent?.agentSessionId).toBeTruthy()
   const forkId = result.agent!.agentSessionId

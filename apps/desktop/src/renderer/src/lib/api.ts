@@ -762,6 +762,11 @@ const mockApi: AgentMuxDesktopApi = {
       }))
   },
   executors: {
+    discover: async (hostId) => ({ routeHostId: hostId, runtimeId: `preview:${hostId}`, executors: Object.entries(mockConfig.executors).map(([executorId, config]) => ({
+      executorId, label: config.label, providerId: config.providerId, command: config.providerId,
+      source: 'provider-default' as const, configRevision: `preview:${hostId}:${executorId}`, availability: 'unknown' as const
+    })) }),
+    register: async () => { throw new Error('Saving a Host Executor requires the Desktop host.') },
     detect: async (executorId, hostId) => {
       const executor = Object.hasOwn(mockConfig.executors, executorId) ? mockConfig.executors[executorId] : undefined
       const host = mockConfig.hosts.find((item) => item.id === hostId)

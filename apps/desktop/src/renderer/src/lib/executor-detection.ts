@@ -2,6 +2,9 @@ import type { AgentExecutorConfig, ExecutorDetectionInput, HostConfig } from '..
 import type { ExecutorDetectionState } from '../store'
 
 type ExecutableInput = Pick<AgentExecutorConfig, 'providerId' | 'command'>
+export function executorDetectionKey(hostId: string, executorId: string): string {
+  return `${hostId}\0${executorId}`
+}
 
 /** Only fields used by this executable check participate; launch options and labels do not. */
 export function executorDetectionMatches(

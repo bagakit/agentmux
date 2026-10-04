@@ -1,7 +1,6 @@
 import { Check, ChevronDown } from 'lucide-react'
 import { useContext, useState } from 'react'
-import type { ExecutorDetectionState } from '../store'
-import type { ConfiguredExecutor } from '../lib/executors'
+import type { ExecutorChoice } from '../lib/executors'
 import { executorDetectionLabel } from '../lib/executor-detection'
 import { AgentAvatar } from './AgentAvatar'
 import { agentProviderLabel } from './AgentProviderIcon'
@@ -10,7 +9,7 @@ import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
 
 /** The same configured, Host-scoped choices in the Launcher and an existing workface. */
 export function AgentExecutorPicker({ executors, selected, onSelect, active = true, disabled = false }: {
-  executors: readonly (ConfiguredExecutor & { detection?: ExecutorDetectionState | undefined })[]
+  executors: readonly ExecutorChoice[]
   selected: string | null
   onSelect(id: string): void
   active?: boolean

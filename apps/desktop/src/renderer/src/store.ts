@@ -53,11 +53,14 @@ import { clampProjectRailWidth, PROJECT_RAIL_DEFAULT_WIDTH } from './lib/project
 import { clampSurveySidebarWidth, SURVEY_SIDEBAR_DEFAULT_WIDTH } from './lib/survey-sidebar-width'
 import { requireSpaceIconSelection, restoreSpaceIconOverrides, type SpaceIconChoice, type SpaceIconOverrides } from './lib/space-object-appearance'
 import { create } from 'zustand'
-import { currentExecutorDetection, executorDetectionMatches } from './lib/executor-detection'
+import { currentExecutorDetection, executorDetectionMatches, executorDetectionKey } from './lib/executor-detection'
+export { executorDetectionKey } from './lib/executor-detection'
+import { executorsForHost } from './lib/executors'
 import { lifecycleFailureBelongsTo, type AgentLifecycleFailure } from './lib/agent-lifecycle-feedback'
 import { persist } from 'zustand/middleware'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
+import { configValuesEqual } from '../../shared/config-edit'
 import {
   AGENTMUX_CONTROL_ERROR_CODES,
   type AgentMuxArrangeMode,
@@ -371,6 +374,13 @@ export type HostCheckState = {
   detail?: string
   observedAt?: number
 }
+export type HostExecutorInventoryState = {
+  state: Exclude<AsyncCheckState, 'missing'>
+  input: HostConfig
+  result?: import('../../shared/contracts').HostExecutorInventory
+  detail?: string
+  observedAt?: number
+}
 
 /** Attributes of the one current/last transient notice, never a second Agent status record. */
 export type ErrorNoticeContext = {
@@ -510,6 +520,7 @@ type AppState = {
   fileExplorerStates: Record<string, FileExplorerViewState | undefined>
   viewModes: Record<string, ViewMode>
   executorDetections: Record<string, ExecutorDetectionState>
+  hostExecutorInventories: Record<string, HostExecutorInventoryState>
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   agentComposerDrafts: Record<string, string>
@@ -841,6 +852,7 @@ type AppState = {
     update: (current: FileExplorerViewState) => FileExplorerViewState
   ): void
   detectExecutors(hostId: string): Promise<void>
+  discoverHostExecutors(hostId: string): Promise<void>
   checkHost(host: HostConfig): Promise<void>
   /**
    * 打开一个文件面。
@@ -1290,10 +1302,6 @@ export function recoveryCandidateSession(
   }
 }
 
-export function executorDetectionKey(hostId: string, executorId: string): string {
-  return `${hostId}\0${executorId}`
-}
-
 /**
  * store 的五态 {@link AsyncCheckState} → Control 线上的四态可用性——**唯一一处映射。**
  *
@@ -1316,6 +1324,7 @@ export function executorAvailabilityFromCheckState(state: AsyncCheckState | unde
 }
 
 const detectionRequestIds = new Map<string, symbol>()
+const hostExecutorRequests = new Map<string, symbol>()
 const hostCheckRequestIds = new Map<string, number>()
 const timelineResyncs = new Map<string, { requested: boolean; promise: Promise<void> }>()
 
@@ -2733,6 +2742,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   editorRegionModes: {},
   editorRegionDiffs: {},
   executorDetections: {},
+  hostExecutorInventories: {},
   hostChecks: {},
   browserAnnotationsByBrowserId: {},
   agentComposerDrafts: {},
@@ -5483,9 +5493,35 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
     }))
   },
+  async discoverHostExecutors(hostId) {
+    const host = get().config?.hosts.find(host => host.id === hostId)
+    if (!host) return
+    const prior = get().hostExecutorInventories[hostId]
+    if (prior?.state === 'checking' && configValuesEqual(prior.input, host)) return
+    const request = Symbol(), input = structuredClone(host)
+    hostExecutorRequests.set(hostId, request)
+    const retained = prior && configValuesEqual(prior.input, input) ? prior.result : undefined
+    set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: {
+      input, state: 'checking', ...(retained ? { result: retained } : {})
+    } } }))
+    const current = () => hostExecutorRequests.get(hostId) === request &&
+      configValuesEqual(get().config?.hosts.find(item => item.id === hostId), input)
+    try {
+      const result = await api.executors.discover(hostId)
+      if (!current()) return
+      if (result.routeHostId !== hostId) throw new Error('Executor inventory belongs to another Host. Refresh the exact execution target.')
+      set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: { input, state: 'ready', result, observedAt: Date.now() } } }))
+    } catch (error) {
+      if (!current()) return
+      set(state => ({ hostExecutorInventories: { ...state.hostExecutorInventories, [hostId]: {
+        input, state: 'error', ...(retained ? { result: retained } : {}), detail: presentError(error), observedAt: Date.now()
+      } } }))
+    }
+  },
   async detectExecutors(hostId) {
     const config = get().config, host = config?.hosts.find(host => host.id === hostId)
     if (!config || !host) return
+    if (host.kind === 'ssh') return await get().discoverHostExecutors(hostId)
     const targets = Object.entries(config.executors).filter(([executorId, executor]) =>
       currentExecutorDetection(get().executorDetections[executorDetectionKey(hostId, executorId)], executorId, executor, host)?.state !== 'checking'
     ).map(([executorId, executor]) => {
@@ -6757,11 +6793,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const submittedNames = originalNames &&
       (originalNames.agentName.trim() || undefined) === requestedNames.agentName &&
       (originalNames.tabName.trim() || undefined) === requestedNames.tabName ? originalNames : undefined
-    const providerId = state.config?.executors[executorId]?.providerId
+    const executor = executorsForHost(state.config, workspace.hostId, state.executorDetections, state.hostExecutorInventories[workspace.hostId]).find(item => item.id === executorId)
+    const providerId = executor?.providerId
     const originalOptions = providerId ? state.launcherOptionDrafts[regionId]?.[providerId] : undefined
     const submittedOptions = originalOptions && launchOptions && shallow(originalOptions, launchOptions) ? originalOptions : undefined
     const launchNote = agentMuxNote ?? state.agentComposerNotes[regionId]
     const sessionId = mintAgentSessionId()
+    const createOperationId = crypto.randomUUID()
     const priorFailure = lifecycleFailureBelongsTo(state.errorNoticeContext?.lifecycle, { regionId })
       ? state.errorNoticeContext : null
     const pendingSurface: AgentWorkbenchSurface = {
@@ -6785,10 +6823,12 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       },
       pendingAgentLaunches: {
         ...current.pendingAgentLaunches,
-        [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, prompt,
+        [sessionId]: { events: [], overflowed: false, request: { executorId, hostId: workspace.hostId, workspacePath: workspace.path, createOperationId, prompt,
           ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }) } }
       }
     }))
+    let dispatchStarted = false
+    let creationObserved = false
     try {
       if (scratchTopicId && targetTab.topicPreparation === 'mote') {
         await api.scratch.ensureMote(workspace.id, scratchTopicId)
@@ -6803,8 +6843,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           return { tabs: { ...current.tabs, [tab.id]: preparedTab }, workspaceFileRevisions: bumpWorkspaceFileRevision(current.workspaceFileRevisions, workspace.id) }
         })
       }
+      dispatchStarted = true
       const launched = await api.sessions.launchAgent({
         executorId,
+        ...(executor?.executorRevision ? { executorRevision: executor.executorRevision } : {}),
         hostId: workspace.hostId,
         workspacePath: workspace.path,
         ...(scratchTopicId ? { scratchTopicId } : {}),
@@ -6812,60 +6854,37 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         prompt,
         ...(launchNote === undefined ? {} : { agentMuxNote: launchNote }),
         agentSessionId: sessionId,
-        createOperationId: crypto.randomUUID()
+        createOperationId
       })
-      if (
-        launched.created.agentSessionId !== sessionId
-      ) {
-        try {
-          await api.sessions.stop({ kind: 'agent', hostId: launched.created.hostId, agentSessionId: launched.created.agentSessionId, run: launched.created.run })
-          set((current) => discardPendingAgentLaunch(current, sessionId))
-        } catch (cleanupError) {
-          let timelineGapSessionId: string | undefined
-          set((current) => {
-            const reduced = reduceDetachedAgentLaunch(current, launched)
-            timelineGapSessionId = reduced.timelineGapSessionId
-            return reduced.state
-          })
-          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-          throw Object.assign(
-            new Error(`Agent launch result mismatched its requested Session and cleanup failed: ${presentError(cleanupError)}`),
-            { code: 'AGENT_LAUNCH_CLEANUP_FAILED', cause: cleanupError }
-          )
-        }
-        throw new Error('Agent launch result does not match its requested Session identity')
-      }
-      const result = await get().canonicalizeAgentLaunch(launched)
-      if (!result) {
-        // Only the pending launch owner disappeared. Missing display information does not
-        // establish that the Session ended; cancellation stays on its existing failure path.
-        throw Object.assign(new Error('Agent launch owner disappeared during creation.'), {
-          code: 'CONTROL_OWNER_LOST'
+      creationObserved = true
+      if (launched.created.agentSessionId !== sessionId) {
+        let timelineGapSessionId: string | undefined
+        set((current) => {
+          const reduced = reduceDetachedAgentLaunch(current, launched)
+          timelineGapSessionId = reduced.timelineGapSessionId
+          return reduced.state
+        })
+        if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+        throw Object.assign(new Error('Core returned a different Session. Its healthy Run is retained; inspect the creation operation before any retry.'), {
+          code: 'AGENT_LAUNCH_IDENTITY_MISMATCH'
         })
       }
-      const control: SessionControl = { kind: 'agent', hostId: result.created.hostId, agentSessionId: result.created.agentSessionId, run: result.created.run }
+      const canonical = await get().canonicalizeAgentLaunch(launched)
+      const result = canonical ?? launched
       const launchOwner = findWorkbenchRegion(get().tabs, regionId)
-      if (
-        !ownsSessionLaunch(launchOwner?.surface, 'agent', sessionId) ||
-        (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))
-      ) {
-        try {
-          await api.sessions.stop(control)
-          set((current) => discardPendingAgentLaunch(current, sessionId))
-        } catch (cleanupError) {
-          let timelineGapSessionId: string | undefined
-          set((current) => {
-            const reduced = reduceDetachedAgentLaunch(current, result)
-            timelineGapSessionId = reduced.timelineGapSessionId
-            return reduced.state
-          })
-          if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
-          throw Object.assign(
-            new Error(`Agent launch owner disappeared and cleanup failed: ${presentError(cleanupError)}`),
-            { code: 'AGENT_LAUNCH_CLEANUP_FAILED', cause: cleanupError }
-          )
-        }
-        return
+      if (!canonical || !ownsSessionLaunch(launchOwner?.surface, 'agent', sessionId) ||
+        (launchOwner && !workbenchViewCloseAllowsView(get().closingWorkbenchViews, launchOwner.tab.id))) {
+        // Display disappearance is observation loss. Explicit close plans retain their original owner.
+        let timelineGapSessionId: string | undefined
+        set((current) => {
+          const reduced = reduceDetachedAgentLaunch(current, result)
+          timelineGapSessionId = reduced.timelineGapSessionId
+          return reduced.state
+        })
+        if (timelineGapSessionId) void get().resyncTimeline(timelineGapSessionId)
+        throw Object.assign(new Error('The Agent was created, but its requested display is no longer observed. Its healthy Run is retained; inspect the creation operation.'), {
+          code: 'CONTROL_OWNER_LOST'
+        })
       }
       let timelineGapSessionId: string | undefined
       set((current) => {
@@ -6920,12 +6939,20 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         set({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
       }
     } catch (error) {
+      const ownerFailure = error as { controlFailure?: import('@agentmux/core').AgentMuxControlFailure } | null
+      if (dispatchStarted && (creationObserved || ownerFailure?.controlFailure?.disposition !== 'not_applied')) {
+        // A rejected invoke can arrive after start. Only a structured owner not_applied fact
+        // permits a new-launch surface; accepted creation survives later display failures.
+        const retained = Object.assign(new Error(`${presentError(error)} Original creation ${createOperationId}, Session ${sessionId}. Inspect this identity without starting or sending again.`),
+          { code: (error as { code?: string } | null)?.code ?? 'AGENT_CREATION_UNCONFIRMED',
+            agentSessionId: sessionId, createOperationId,
+            controlFailure: ownerFailure?.controlFailure?.disposition === 'unknown' ? ownerFailure.controlFailure
+              : { disposition: 'unknown' as const, confirmedInputBytes: null } })
+        get().reportError(retained, { kind: 'indeterminate', lifecycle: { step: 'launch', regionId, tabId } })
+        throw retained
+      }
       if (!ownsSessionLaunch(findWorkbenchRegion(get().tabs, regionId)?.surface, 'agent', sessionId)) {
         set((current) => discardPendingAgentLaunch(current, sessionId))
-        if ((error as { code?: unknown } | null)?.code === 'AGENT_LAUNCH_CLEANUP_FAILED') {
-          get().reportError(error)
-          throw error
-        }
         return
       }
       set((current) => reduceSessionLaunchFailed(current, regionId, 'agent', sessionId,

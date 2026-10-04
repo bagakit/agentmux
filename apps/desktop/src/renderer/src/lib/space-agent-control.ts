@@ -1,4 +1,4 @@
-import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { zoneFileResource } from './zone-file-resource'
 import type { AgentMuxAgentSession } from '@agentmux/core'
 import type {
   AgentMuxSpaceAddress, AgentMuxSpaceAgentFact, AgentMuxSpaceRegionFact, AgentMuxSpaceCatalog, AgentMuxSpaceControlRequest,
@@ -8,7 +8,7 @@ import type {
 import { mintAgentSessionId } from '@agentmux/core/agent-session-id'
 import { addTabOrThrow, addTabOccurrence, createWorkspaceLayout, findGroupForTab, groupIds, regionIds,
   removeTab, replaceLeaf, type WorkspaceLayout } from '@agentmux/layout'
-import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot } from '../../../shared/contracts'
+import type { AgentLaunchInput, AgentLaunchResult, AppConfig, ScratchTopicSnapshot, SessionSnapshot, WorkspaceRecord } from '../../../shared/contracts'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { projectResourceWorkspace, spatialSources, topicSpatialAddress, workspaceZoneId, homeZoneId, directoryIdentity, type SpaceZoneBindings, type SpatialRequestBinding,
   type SpaceZoneResourceInput, type SpaceZoneResourceResult } from '../../../shared/space-addresses'
@@ -317,14 +317,14 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
     }
   }
   const address = target.address
-  const placed = { ...surface, workspaceId: address.workspaceId, regionId: address.regionId }
+  const placed = { ...surface, regionId: address.regionId }
   if (target.kind === 'new-tab') {
     if (tabs[address.tabId]) failure('SPACE_TARGET_CHANGED', 'The reserved Tab ID already exists.')
     const catalog = spatialCatalog(state, topics), zone = catalog.zones.find(zone => zone.zoneId === address.zoneId)!
     const sourceSpaceId = zoneContext(state, topics, zone)
     const workspace = state.config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
     const sourceTopic = zone.kind === 'home' && workspace ? topics.find(topic => topicContentZoneId(workspace, topic) === zone.zoneId)?.id : undefined
-    tabs[address.tabId] = { ...createWorkbenchTab(address.tabId, placed),
+    tabs[address.tabId] = { ...createWorkbenchTab(address.tabId, placed), workspaceId: address.workspaceId,
       space: { spaceId: sourceSpaceId, zoneId: address.zoneId! }, ...(sourceTopic ? { topicId: sourceTopic } : {}) }
     let layout = layouts[address.displayWorkspaceId] ?? createWorkspaceLayout(address.groupId)
     const groupId = address.groupId
@@ -340,7 +340,7 @@ export function applySpatialPlacement(state: SpatialWorkbench, topics: readonly 
     if (!tab || !target.anchor || !tab.regions[target.anchor]) failure('SPACE_TARGET_CHANGED', 'The target Region disappeared before placement.')
     if (target.kind === 'split') {
       const oldActive = tab.layout.activeRegionId
-      const direction = target.split === 'above' ? 'up' : target.split === 'below' ? 'down' : target.split!
+      const direction = target.split!
       const next = addWorkbenchRegion(tab, target.anchor, direction, placed)
       if (next === tab) failure('SPACE_TARGET_CHANGED', 'The split could not be applied.')
       tabs[tab.id] = { ...next, layout: { ...next.layout, activeRegionId: oldActive } }
@@ -363,6 +363,8 @@ function agentFact(session: AgentMuxAgentSession, hostId: string): AgentMuxSpace
   return { agentSessionId: session.agentSessionId, runId: session.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId, cwd: session.workspacePath,
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
+    ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
+    ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
     ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
     ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
     ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
@@ -372,6 +374,8 @@ function snapshotFact(session: Extract<SessionSnapshot, { kind: 'agent' }>): Age
   return { agentSessionId: session.id, runId: session.control.run.runId, providerId: session.providerId,
     executorId: session.executorId, hostId: session.hostId, cwd: session.workspacePath,
     createOperationId: session.creation?.createOperationId ?? null, initialPrompt: session.creation?.initialPrompt ?? 'unknown',
+    ...(session.creation?.executorRevision ? { executorRevision: session.creation.executorRevision } : {}),
+    ...(session.creation?.initialMessageOrigin ? { initialMessageOrigin: session.creation.initialMessageOrigin } : {}),
     ...(session.creation?.agentMuxContext ? { agentMuxContext: session.creation.agentMuxContext } : {}),
     ...(session.creation?.persistence ? { creationPersistence: session.creation.persistence } : {}),
     ...(session.creation?.failure ? { creationFailure: session.creation.failure } : {}),
@@ -394,11 +398,12 @@ async function reconcile(ports: SpatialControlPorts, topics: readonly ScratchTop
   const requestedLocation = region ? addressOf(catalog, region.regionId, binding.target) : null
   const to = requestedLocation ?? (region ? addressOf(catalog, region.regionId) : null)
   const atTarget = Boolean(requestedLocation && requestedLocation.tabId === binding.tabId)
-  const snapshot = state.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === binding.agentSessionId && session.kind === 'agent')
+  const snapshot = state.sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.id === binding.agentSessionId && session.kind === 'agent' &&
+    (!binding.executionHostId || session.hostId === binding.executionHostId))
   let agent: AgentMuxSpaceAgentFact | null = snapshot ? snapshotFact(snapshot) : null
   const issues: AgentMuxSpatialIssue[] = []
   if (binding.createAgent) {
-    const hostId = snapshot?.hostId ?? binding.executionHostId ?? binding.resource?.hostId ?? catalog.zones.find(item => item.zoneId === binding.target.zoneId)?.hostId
+    const hostId = binding.executionHostId ?? binding.resource?.hostId ?? snapshot?.hostId ?? catalog.zones.find(item => item.zoneId === binding.target.zoneId)?.hostId
     if (hostId) try { agent = agentFact(await ports.creation(hostId, binding.agentSessionId), hostId) }
     catch (error) { issues.push(issue('creation-read', 'AGENT_CREATION_UNKNOWN', error)) }
   }
@@ -485,6 +490,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     let sessionId: string
     let sourceSurface: AgentWorkbenchSurface | undefined
     let executorId: string | undefined
+    let executionWorkspace: WorkspaceRecord | undefined
     let forkParent: AgentMuxAgentSession | undefined
     let forkExecutionHostId: string | undefined
     if (operation === 'space.mv') {
@@ -511,7 +517,16 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
       sessionId = request.content.kind === 'agent-session' ? request.content.agentSessionId : mintAgentSessionId()
       if (request.content.kind === 'new-agent') {
         executorId = request.content.executorId
-        if (!ports.get().config!.executors[executorId]) failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact configured Executor ID.')
+        const executionWorkspaceId = request.content.executionWorkspaceId
+        if (executionWorkspaceId !== undefined) {
+          if (request.destination.newZone) failure('SPACE_EXECUTION_RESOURCE_CONFLICT', 'Choose an existing execution Workspace or create a new Zone resource.')
+          const matches = ports.get().config!.workspaces.filter(workspace => workspace.id === executionWorkspaceId)
+          if (matches.length !== 1) failure('SPACE_EXECUTION_WORKSPACE_UNKNOWN', 'The exact execution Workspace is unavailable or ambiguous; no layout or resource was changed.')
+          executionWorkspace = structuredClone(matches[0]!)
+          if (!executionWorkspace.path || ports.get().config!.hosts.filter(host => host.id === executionWorkspace!.hostId).length !== 1) {
+            failure('SPACE_EXECUTION_WORKSPACE_UNKNOWN', 'The execution Workspace has no exact configured Host and directory; no layout or resource was changed.')
+          }
+        }
       } else if (request.content.kind === 'fork-agent') {
         const source = request.content.source
         const parent = ports.get().sessions.find((session): session is Extract<SessionSnapshot, { kind: 'agent' }> => session.kind === 'agent' && session.id === source.agentSessionId)
@@ -538,6 +553,13 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     let destination: Destination | undefined
     const resourceInput = request.destination.newZone
     let resourceReference: SpatialRequestBinding['resource']
+    if (executionWorkspace) {
+      resourceReference = { hostId: executionWorkspace.hostId, path: executionWorkspace.path,
+        kind: executionWorkspace.kind === 'worktree' ? 'worktree' : 'directory', branch: executionWorkspace.branch ?? null, sourceWorkspaceId: executionWorkspace.id }
+      report.resource = { projectId: directoryIdentity(executionWorkspace.hostId, executionWorkspace.repoPath ?? executionWorkspace.path),
+        sourceWorkspaceId: executionWorkspace.id, workspaceId: executionWorkspace.id, hostId: executionWorkspace.hostId,
+        path: executionWorkspace.path, kind: resourceReference.kind, branch: resourceReference.branch }
+    }
     if (resourceInput) {
       const space = catalog.spaces.find(item => item.spaceId === request.destination.spaceId)
       if (!space || !request.destination.spaceId || request.destination.zoneId || request.destination.tabId || request.destination.regionId || request.destination.split) failure('SPACE_NEW_ZONE_TARGET', 'A new Zone requires one exact Space and no child target.')
@@ -551,8 +573,12 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     }
     if (destination && ports.closing(destination.address.tabId) || from && ports.closing(from.tabId)) failure('SPACE_TARGET_CLOSING', 'An involved Tab is closing; existing contents were preserved.')
     const executionHostId = forkExecutionHostId ?? (operation === 'agent.open' && request.content.kind === 'new-agent'
-      ? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
+      ? executionWorkspace?.hostId ?? resourceReference?.hostId ?? catalog.zones.find(zone => zone.zoneId === destination?.address.zoneId)?.hostId
       : ports.get().sessions.find(session => session.kind === 'agent' && session.id === sessionId)?.hostId)
+    if (operation === 'agent.open' && request.content.kind === 'new-agent' &&
+      ports.get().config!.hosts.find(host => host.id === executionHostId)?.kind === 'local' && !ports.get().config!.executors[executorId!]) {
+      failure('AGENT_EXECUTOR_NOT_CONFIGURED', 'Choose the exact saved local Executor template ID.')
+    }
     const binding: SpatialRequestBinding = { requestId: request.requestId, inputDigest, operation,
       tabId: destination?.address.tabId ?? mint.tabId, regionId: destination?.address.regionId ?? mint.regionId,
       agentSessionId: sessionId, createAgent: operation === 'agent.open' && request.content.kind !== 'agent-session',
@@ -600,7 +626,7 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (!zone || !zone.hostId || !zone.directoryPath) failure('SPACE_RESOURCE_UNKNOWN', 'The original Zone resource is unavailable; its entity is retained.')
     if (forkParent && zone.hostId !== forkExecutionHostId) failure('AGENT_FORK_HOST_MISMATCH', 'Choose a display destination on the source Host. The source execution directory is retained.')
     const surface: AgentWorkbenchSurface = sourceSurface ?? { kind: 'agent', phase: binding.createAgent ? 'launching' : 'attached',
-      regionId: target.address.regionId, workspaceId: target.address.workspaceId, sessionId }
+      regionId: target.address.regionId, workspaceId: executionWorkspace?.id ?? target.address.workspaceId, sessionId }
     const placement = applySpatialPlacement(ports.get(), topics, target, surface, from)
     if (from && !request.focus) ports.preserveMovedFocus?.(from)
     // Record the known removal before patch synchronously captures the durable graph.
@@ -612,9 +638,9 @@ export async function executeSpatialControl(ports: SpatialControlPorts,
     if (request.focus) ports.focus(target.address)
     if (binding.createAgent && operation === 'agent.open' && request.content.kind !== 'agent-session') {
       const resourceWorkspace = ports.get().config?.workspaces.find(workspace => workspace.id === zone.workspaceId)
-      const topicId = zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
-      const launchHostId = forkExecutionHostId ?? zone.hostId
-      const launched = await ports.launch({ executorId: executorId!, hostId: launchHostId, workspacePath: forkParent?.workspacePath ?? (topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
+      const topicId = !executionWorkspace && zone.kind === 'home' && resourceWorkspace ? topics.find(topic => topicContentZoneId(resourceWorkspace, topic) === zone.zoneId)?.id : undefined
+      const launchHostId = forkExecutionHostId ?? executionWorkspace?.hostId ?? zone.hostId
+      const launched = await ports.launch({ executorId: executorId!, hostId: launchHostId, workspacePath: forkParent?.workspacePath ?? executionWorkspace?.path ?? (topicId && target.address.workspaceId === SCRATCH_WORKSPACE_ID
           ? ports.get().config!.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)!.path : zone.directoryPath),
         agentSessionId: sessionId, createOperationId: request.requestId,
         ...(request.content.kind === 'fork-agent' ? { forkSource: request.content.source, launchOptions: forkParent!.launchOptions } : {}),

@@ -2,6 +2,9 @@ import type { ToolkitRunPort } from './toolkit-run-port.js'
 import { randomUUID } from 'node:crypto'
 import {
   AgentMuxError,
+  hostAgentCreationIntent,
+  deriveAgentSessionId,
+  type AgentMuxHostAgentCreateInput,
   agentPromptPredecessor,
   validateAgentPromptCondition,
   type AgentPromptCondition,
@@ -625,6 +628,23 @@ export class RuntimeController {
     return [...catalog.values()]
   }
 
+  async discoverExecutors(hostId: string): Promise<import('../shared/contracts.js').HostExecutorInventory> {
+    const host = this.hosts.get(hostId)
+    if (!host) throw new AgentMuxError('The exact execution Host is not configured.', 'UNKNOWN_HOST')
+    await host.client.connect()
+    const inventory = await host.client.listHostExecutors({ refresh: true })
+    if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed while reading its Executor inventory. Refresh this Host.', 'EXECUTOR_HOST_CHANGED')
+    return { routeHostId: hostId, ...inventory }
+  }
+
+  async configureExecutor(hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput): Promise<import('../shared/contracts.js').HostExecutorConfiguration> {
+    const host = this.hosts.get(hostId)
+    if (!host) throw new AgentMuxError('The exact execution Host is not configured.', 'UNKNOWN_HOST')
+    await host.client.connect()
+    if (this.hosts.get(hostId) !== host) throw new AgentMuxError('The execution Host changed before saving its Executor. Inspect this Host before another explicit save.', 'EXECUTOR_HOST_CHANGED')
+    return { routeHostId: hostId, ...await host.client.configureHostExecutor(input) }
+  }
+
   async detect(executorId: AgentExecutorId, hostId: string, config: AppConfig): Promise<ExecutorDetection> {
     const executor = Object.hasOwn(config.executors, executorId) ? config.executors[executorId] : undefined
     if (!executor) throw Object.assign(new Error(`Agent Executor not found: ${executorId}`), { code: 'SETTING_RESOURCE_NOT_FOUND' })
@@ -819,6 +839,9 @@ export class RuntimeController {
   }
 
   async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
+    if (!request.forkSource && config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh') {
+      return await this.launchAdmittedAgent(request, config)
+    }
     if (this.executorConfigReservations.has(request.executorId)) {
       throw Object.assign(new Error(`Executor “${request.executorId}” is being changed. Retry this new launch after its save completes.`), { code: 'SETTING_RESOURCE_IN_USE' })
     }
@@ -834,9 +857,12 @@ export class RuntimeController {
 
   private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
-      const executor = Object.hasOwn(config.executors, request.executorId) ? config.executors[request.executorId] : undefined
-      if (!executor) throw new Error(`Missing Agent Executor configuration: ${request.executorId}`)
       const client = await this.connectedClient(request.hostId)
+      const remoteCreation = config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh' && !request.forkSource
+      const inventory = remoteCreation ? await client.listHostExecutors() : undefined
+      const selected = inventory?.executors.find(executor => executor.executorId === request.executorId)
+      const executor = remoteCreation ? selected : Object.hasOwn(config.executors, request.executorId) ? config.executors[request.executorId] : undefined
+      if (!executor) throw new AgentMuxError(`Missing Executor on the selected Host: ${request.executorId}`, 'EXECUTOR_UNKNOWN')
       let preparedTopic: PreparedScratchAgentTopic | null = null
       let created: AgentLaunchResult['created']
       let creation: AgentLaunchResult['creation']
@@ -856,17 +882,40 @@ export class RuntimeController {
         }
         // Topic 说明是 AgentMux 自己的话，作为 agentMuxNote 交给 Core 的出口署名进信封；
         // 用户的真实请求原样留在 prompt（user 段）。desktop 不自己拼信封，也不再把两者混成一段。
-        const receipt = await client.createAgentWithDelivery({
+        const hostIntent: AgentMuxHostAgentCreateInput | undefined = remoteCreation ? {
+          executorId: request.executorId, executorRevision: request.executorRevision ?? selected!.configRevision,
+          workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
+          createOperationId: request.createOperationId ?? randomUUID(),
+          ...([preparedTopic?.prompt, request.agentMuxNote].some(note => note?.trim()) ? { agentMuxNote: [preparedTopic?.prompt, request.agentMuxNote].filter(note => note?.trim()).join('\n\n') } : {}),
+          ...(request.prompt === undefined ? {} : { prompt: request.prompt }),
+          ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
+          ...(request.cols === undefined ? {} : { cols: request.cols }), ...(request.rows === undefined ? {} : { rows: request.rows })
+        } : undefined
+        if (hostIntent) {
+          hostIntent.agentSessionId = request.agentSessionId ?? await deriveAgentSessionId(hostIntent.createOperationId!)
+          if (request.initialMessage) {
+            const source = await this.authorizedCallerHost({ agentSessionId: request.initialMessage.callerAgentSessionId, capability: request.initialMessage.capability })
+            if (request.initialMessage.threadId) hostIntent.threadId = request.initialMessage.threadId
+            // Only the authoritative source sees its capability. The target consumes a signed,
+            // one-creation admission against its explicitly registered source public key.
+            hostIntent.initialMessageAdmission = await source.client.attestAgentCreation({
+              caller: { agentSessionId: request.initialMessage.callerAgentSessionId, capability: request.initialMessage.capability },
+              target: { runtimeId: inventory!.runtimeId, intentDigest: hostAgentCreationIntent(hostIntent) }
+            })
+          }
+        }
+        const localExecutor = !remoteCreation ? config.executors[request.executorId]! : undefined
+        const receipt = hostIntent ? await client.createHostAgentWithDelivery(hostIntent) : await client.createAgentWithDelivery({
           providerId: executor.providerId,
           executorId: request.executorId,
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
-          args: executor.args,
+          args: localExecutor!.args,
           env: {
-            ...executor.env,
+            ...localExecutor!.env,
             ...(preparedTopic ? { AGENTMUX_WIKI_DIR: preparedTopic.absolutePath } : {})
           },
-          injectAgentMuxGuide: executor.injectAgentMuxGuide,
-          commandOverride: executor.command,
+          injectAgentMuxGuide: localExecutor!.injectAgentMuxGuide,
+          commandOverride: localExecutor!.command,
           ...([preparedTopic?.prompt, request.agentMuxNote].some(note => note?.trim()) ? { agentMuxNote: [preparedTopic?.prompt, request.agentMuxNote].filter(note => note?.trim()).join('\n\n') } : {}),
           ...(request.launchOptions === undefined ? {} : { launchOptions: request.launchOptions }),
           ...(request.agentSessionId === undefined ? {} : { agentSessionId: request.agentSessionId }),
@@ -877,7 +926,8 @@ export class RuntimeController {
           ...(request.cols === undefined ? {} : { cols: request.cols }),
           ...(request.rows === undefined ? {} : { rows: request.rows })
         })
-        created = receipt.session
+        // Core's local Host is relative to that Core. Desktop controls use this client's route.
+        created = { ...receipt.session, hostId: request.hostId }
         creation = receipt.creation
       } catch (error) {
         try {
@@ -951,8 +1001,7 @@ export class RuntimeController {
 
   async agentCreation(hostId: string, agentSessionId: string) {
     const client = await this.connectedClient(hostId)
-    const session = client.agentSession(agentSessionId)
-    return await client.refreshAgentSession(agentSessionId, session.run)
+    return { ...await client.inspectAgentCreation(agentSessionId), hostId }
   }
 
   async sessionHistorySources() {
@@ -1618,7 +1667,9 @@ export class RuntimeController {
       }
       return result
     }
-    const executor = requireSessionExecutor(config, stored)
+    // Target-owned Sessions reattach without a local template or a fresh command probe.
+    // Core resolves its own Executor only if Level B recovery needs a new native Run.
+    const executor = stored.creation?.executorRevision ? undefined : requireSessionExecutor(config, stored)
     const scratch = config.workspaces.find((workspace) => (
       workspace.id === SCRATCH_WORKSPACE_ID && workspace.hostId === control.hostId
     ))
@@ -1629,12 +1680,9 @@ export class RuntimeController {
       agentSessionId: control.agentSessionId,
       expectedRun: control.run,
       operationId,
-      args: executor.args,
-      env: {
-        ...executor.env,
-        ...(scratchTopicId ? { AGENTMUX_WIKI_DIR: stored.workspacePath } : {})
-      },
-      commandOverride: executor.command
+      ...(executor ? { args: executor.args, env: {
+        ...executor.env, ...(scratchTopicId ? { AGENTMUX_WIKI_DIR: stored.workspacePath } : {})
+      }, commandOverride: executor.command } : {})
     })
     if (result.kind === 'conflict' && result.reason === 'session-run-changed' && result.currentRun) {
       // A prior recovery whose reply was lost may already own the canonical Run.
@@ -1812,12 +1860,16 @@ export class RuntimeController {
 
   /** Core is the authority for managed caller capabilities; the renderer never authenticates them. */
   async authorizeAgentCaller(input: { agentSessionId: string; capability: string }): Promise<void> {
+    await this.authorizedCallerHost(input)
+  }
+
+  private async authorizedCallerHost(input: { agentSessionId: string; capability: string }): Promise<RuntimeHost> {
     const hosts = [...this.hosts.values()]
     let lastError: unknown
     for (const host of hosts) {
       try {
         await host.client.authorizeAgentCaller(input.capability, input.agentSessionId)
-        return
+        return host
       } catch (error) { lastError = error }
     }
     throw lastError instanceof Error ? lastError : new AgentMuxError('Agent caller capability could not be verified.', 'AGENT_CAPABILITY_INVALID')

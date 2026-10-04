@@ -6,7 +6,7 @@ import { parseAgentForkSource } from './agent-fork.js'
 import { AGENTMUX_AGENT_MESSAGING_GUIDANCE } from './agent-messaging-guidance.js'
 import { parseSettingsCommand } from './settings-cli.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
-import { SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
+import { isSplitDirection, SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
 import type { AgentMuxRpcParams } from './public-rpc.js'
 
 type FlagKind = 'boolean' | 'value' | 'data'
@@ -89,7 +89,11 @@ const GOAL_FILTERS = { '--project': 'data', '--session': 'data', '--goal': 'data
 const FILTER_FIELDS = { '--project': 'projectId', '--workspace': 'workspaceId', '--topic': 'topicId', '--session': 'agentSessionId', '--goal': 'goalId', '--executor': 'executorId', '--status': 'status' }
 const selector = (f: Flags) => fields(f, { '--space': 'spaceId', '--zone': 'zoneId', '--tab': 'tabId', '--region': 'regionId', '--display-workspace': 'displayWorkspaceId', '--group': 'groupId' })
 const filters = (f: Flags) => ({ ...fields(f, FILTER_FIELDS), ...numbers(f, { '--since': 'since', '--limit': 'limit' }) })
-const destination = (f: Flags) => ({ ...selector(f), ...(f.booleans.has('--new-tab') ? { newTab: true } : {}), ...fields(f, { '--split': 'split' }) })
+const destination = (f: Flags) => {
+  const split = value(f, '--split')
+  if (split !== undefined && !isSplitDirection(split)) invalid('--split requires left, right, up or down.')
+  return { ...selector(f), ...(f.booleans.has('--new-tab') ? { newTab: true } : {}), ...(split === undefined ? {} : { split }) }
+}
 const focus = (f: Flags) => f.booleans.has('--focus')
 const targetSession = (session: string) => session === 'self' ? { kind: 'self' } : { kind: 'agent-session', agentSessionId: session }
 const name = (f: Flags): string | null => {
@@ -203,9 +207,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.context', '--host ID --session ID [--cursor TOKEN] [--limit N]', 'Read all available original context sources, complete entries and diagnostics without controlling the Agent.',
     { '--host': 'data', '--session': 'data', '--cursor': 'data', '--limit': 'value' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ...fields(f, { '--cursor': 'cursor' }), ...numbers(f, { '--limit': 'limit' }) }),
     'Both saved Core work and native conversation are included automatically. Follow nextCursor with the same exact Host and Session; limit bounds entries per source, never text length. Unavailable sources are reported alongside readable material. local means this Core Host, including on a remote machine. Read-only requests and cancellation never stop the original Run.'),
-  command('agent.open', '(--executor ID|--session ID|--fork-from ID --fork-source FILE|-) <destination> [--prompt TEXT] [--focus] [--operation-id ID]', 'Open or natively fork an Agent at an explicit Space/Zone/Tab/Region; default is background.',
-    { ...DESTINATION, '--executor': 'data', '--session': 'data', '--fork-from': 'data', '--fork-source': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean', '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data', '--project': 'data', '--source-workspace': 'data' }, async f => {
+  command('agent.open', '(--executor ID [--execution-workspace ID]|--session ID|--fork-from ID --fork-source FILE|-) <destination> [--prompt TEXT] [--focus] [--operation-id ID]', 'Open or natively fork an Agent at an explicit Space/Zone/Tab/Region; default is background.',
+    { ...DESTINATION, '--executor': 'data', '--execution-workspace': 'data', '--session': 'data', '--fork-from': 'data', '--fork-source': 'data', '--prompt': 'data', '--new-zone': 'boolean', '--worktree': 'boolean', '--path': 'data', '--branch': 'data', '--new-branch': 'data', '--directory': 'data', '--project': 'data', '--source-workspace': 'data' }, async f => {
       const selected = one(f, ['--executor', '--session', '--fork-from'], 'Agent open')
+      if (f.values.has('--execution-workspace') && (selected !== '--executor' || f.booleans.has('--new-zone'))) invalid('--execution-workspace requires --executor and an existing display destination, without --new-zone.')
       const resourceOptions = ['--path', '--branch', '--new-branch', '--directory', '--project', '--source-workspace'].filter(flag => f.values.has(flag))
       const dest = destination(f)
       if (selected === '--session' && (f.values.has('--prompt') || f.booleans.has('--new-zone'))) invalid('--session cannot supply an initial prompt or create a Zone.')
@@ -227,9 +232,9 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       const fork = selected === '--fork-from' ? parseAgentForkSource(await readControlJsonInput(value(f, '--fork-source', true)!, 'Fork source')) : undefined
       if (fork && fork.agentSessionId !== id(f, '--fork-from', true)) invalid('--fork-from must match the exact Session in --fork-source.')
       return { ...operation(f), content: fork ? { kind: 'fork-agent', source: fork, ...fields(f, { '--prompt': 'prompt' }) } : selected === '--executor'
-        ? { kind: 'new-agent', executorId: id(f, selected), ...fields(f, { '--prompt': 'prompt' }) }
+        ? { kind: 'new-agent', executorId: id(f, selected), ...fields(f, { '--prompt': 'prompt', '--execution-workspace': 'executionWorkspaceId' }) }
         : { kind: 'agent-session', agentSessionId: id(f, selected, true) }, destination: dest, focus: focus(f) }
-    }, `Use --zone ZONE --new-tab for an existing Zone. For current native fork, inspect the source first: --fork-source JSON carries agentSessionId, expectedRun and expectedNativeHandle from agent.inspect. --fork-from names that exact Session. The Provider must support current-session native fork; a new Session and Region are created with a new amux identity reminder. The source Host/cwd are retained. Repeat --operation-id to read the original outcome; never resend uncertain input. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; its Host and directory determine execution. Space is a presentation and cannot choose or change an existing Session Host or cwd. No existing Tab anchor is required. ${SAVE_NOTICE}`),
+    }, `Use --zone ZONE --new-tab for an existing Zone. For a new Agent, --execution-workspace WORKSPACE chooses the exact saved execution Host and directory independently of the display destination, including --region REGION --split down on the local screen. It requires --executor and cannot be combined with --new-zone. For current native fork, inspect the source first: --fork-source JSON carries agentSessionId, expectedRun and expectedNativeHandle from agent.inspect. --fork-from names that exact Session. The Provider must support current-session native fork; a new Session and Region are created with a new amux identity reminder. The source Host/cwd are retained. Repeat --operation-id to read the original outcome; never resend uncertain input. New resources require --project PROJECT --space SPACE --new-zone, then --worktree --path PATH (--branch BRANCH|--new-branch BRANCH) or --directory PATH. --source-workspace WORKSPACE resolves an explicit source within the Project when necessary. Project is an execution resource; its Host and directory determine execution. Space is a presentation and cannot choose or change an existing Session Host or cwd. No existing Tab anchor is required. ${SAVE_NOTICE}`),
   command('agent.rename', '--session ID --name-revision N (--name TEXT|--clear)', 'Edit the exact Session display name at its observed revision.', { '--session': 'data', '--name': 'data', '--clear': 'boolean', '--name-revision': 'value', ...OP }, f => ({ ...operation(f), agentSessionId: id(f, '--session', true), name: name(f), expectedNameRevision: Number(value(f, '--name-revision', true)) }), SAVE_NOTICE),
   command('agent.view', '--session ID [--mode terminal|activity]', 'Read or change all presentations of one exact SID without taking focus.', { '--session': 'data', '--mode': 'value', ...OP }, f => ({ agentSessionId: id(f, '--session', true), ...fields(f, { '--mode': 'mode' }), ...(f.values.has('--mode') ? operation(f) : {}) }), 'Without --mode this is read-only. A known durable Agent projection remains usable while Core facts are unknown; no healthy Run is stopped.'),
   { ...command('agent.output', '--session ID [--after-byte N] [--follow]', 'Read replay or follow ordered raw output bytes, with cursor and Gap facts.', { '--session': 'data', '--after-byte': 'value', '--follow': 'boolean' }, f => ({ agentSessionId: id(f, '--session'), ...numbers(f, { '--after-byte': 'afterByte' }), follow: f.booleans.has('--follow') }), 'Replay and live bytes use bounded base64 notifications, never reconstructed terminal text. Without --follow, the reader ends after replay. Ctrl-C cancels this reader, not the Agent Run.'), stream: true },
@@ -341,8 +346,12 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     settings(`settings.${resource}.delete`, '<id> [--input <file|->]', 'Delete using optional complete expected fields.', 1)
   ]),
   settings('settings.executors.refresh', '<id> --host <id>', 'Refresh one Executor availability observation.', 1),
+  settings('settings.executors.discover', '--host <id>', 'Discover registered and supported default Executors on the exact target Host.'),
+  settings('settings.executors.register', '<id> --host <id> --input <file|->', 'Save an explicit Executor configuration on its executing Host.', 1),
   settings('settings.hosts.ls', '', 'List actual configured Hosts.'),
   settings('settings.hosts.test', '<id>|--input <file|->', 'Test an exact saved Host or a complete draft.', 1),
+  settings('settings.hosts.trusted-sources', '--host <id>', 'Read this Host creation authority and explicitly trusted source keys.'),
+  settings('settings.hosts.trust-source', '--host <id> --input <file|->', 'Trust one explicit source Runtime key; requires a transport-approved user.'),
   settings('settings.workspaces.register', '--input <file|->', 'Register an existing directory; this does not run Git, focus or start an Agent.'),
   settings('settings.browser-links.ls', '', 'List remembered system-application link choices.'),
   settings('settings.browser-links.forget', '<scheme>|--input <file|->', 'Forget one exact remembered scheme decision.', 1),

@@ -18,6 +18,12 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
   }
   if (resource === 'executors' || resource === 'prompts') {
     const method = `settings.${resource}.${action}`
+    if (resource === 'executors' && action === 'discover' && args.length === 4 && id === '--host' && args[3]?.length) {
+      return { method, params: { hostId: args[3], refresh: true } }
+    }
+    if (resource === 'executors' && action === 'register' && args.length === 7 && id?.length && args[3] === '--host' && args[4]?.length && args[5] === '--input') {
+      return { method, params: { executorId: id, hostId: args[4], input: await input(args[6]!) } }
+    }
     if (action === 'ls' && args.length === 2) return { method, params: {} }
     if (!id?.length) invalid('An exact resource ID is required.')
     if (resource === 'executors' && action === 'refresh' && args.length === 5 && args[3] === '--host' && args[4]?.length) {
@@ -31,6 +37,12 @@ export async function parseSettingsCommand(args: readonly string[]): Promise<Set
     return { method, params: { id, input: value } }
   }
   if (resource === 'hosts') {
+    if (action === 'trusted-sources' && args.length === 4 && id === '--host' && args[3]?.length) {
+      return { method: 'settings.hosts.trusted-sources', params: { hostId: args[3] } }
+    }
+    if (action === 'trust-source' && args.length === 6 && id === '--host' && args[3]?.length && args[4] === '--input') {
+      return { method: 'settings.hosts.trust-source', params: { hostId: args[3], input: await input(args[5]!) } }
+    }
     if (action === 'ls' && args.length === 2) return { method: 'settings.hosts.ls', params: {} }
     if (action === 'test' && args.length === 3 && id?.length) return { method: 'settings.hosts.test', params: { id } }
     if (action === 'test' && args.length === 4 && id === '--input') return { method: 'settings.hosts.test', params: { input: await input(args[3]!) } }

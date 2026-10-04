@@ -1,4 +1,4 @@
-import { fixturePath as upstreamFixturePath, fixtureDisplayPath as upstreamFixtureDisplayPath } from './helpers/fixture-values.js'
+import { fixturePath, fixturePath as upstreamFixturePath } from './helpers/fixture-values.js'
 import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import { objectCliReceipt } from './helpers/object-cli-receipt.js'
 import { spawn } from 'node:child_process'
@@ -19,16 +19,16 @@ const spaceId = JSON.stringify(['local', `${upstreamFixturePath("directory with 
 const zoneId = JSON.stringify([spaceId, 'workspace', 'ws-target'])
 const address = { spaceId, zoneId, workspaceId: 'ws-target', displayWorkspaceId: 'ws-target', tabId: 'tab-target', groupId: 'group-target', regionId: 'region-target' }
 const catalog: AgentMuxSpaceCatalog = {
-  spaces: [{ spaceId, kind: 'folder', name: 'Target', hostId: 'local', directoryPath: upstreamFixturePath("repo"), projectId: ("[\"local\",\"" + (upstreamFixturePath("repo")) + "\"]") }],
-  zones: [{ zoneId, workspaceId: 'ws-target', kind: 'worktree', hostId: 'local', directoryPath: upstreamFixturePath("worktree"), branch: 'task' }],
+  spaces: [{ spaceId, kind: 'folder', name: 'Target', hostId: 'local', directoryPath: fixturePath("repo"), projectId: ("[\"local\",\"" + (fixturePath("repo")) + "\"]") }],
+  zones: [{ zoneId, workspaceId: 'ws-target', kind: 'worktree', hostId: 'local', directoryPath: fixturePath("worktree"), branch: 'task' }],
   tabs: [{ zoneId, workspaceId: 'ws-target', tabId: 'tab-target', name: null, regionIds: ['region-target'] }],
-  regions: [{ tabId: 'tab-target', regionId: 'region-target', kind: 'agent', agentSessionId: 'agent-target', runId: 'run-target', execution: { hostId: 'original-host', cwd: upstreamFixturePath("original-cwd") } }],
+  regions: [{ tabId: 'tab-target', regionId: 'region-target', kind: 'agent', agentSessionId: 'agent-target', runId: 'run-target', execution: { hostId: 'original-host', cwd: fixturePath("original-cwd") } }],
   bindings: [{ spaceId, zoneId }], locations: [address]
 }
 function report(requestId: string, outcome: AgentMuxSpaceMutationReport['outcome'] = 'opened'): AgentMuxSpaceMutationReport {
   return { requestId, outcome, from: outcome === 'moved' ? { ...address, tabId: 'original-tab' } : null, to: address,
     agent: { agentSessionId: 'agent-target', runId: 'run-target', providerId: 'codex', executorId: 'saved-executor', hostId: 'original-host',
-      cwd: upstreamFixturePath("original-cwd"), createOperationId: 'creation-op', initialPrompt: 'confirmed' }, resource: null,
+      cwd: fixturePath("original-cwd"), createOperationId: 'creation-op', initialPrompt: 'confirmed' }, resource: null,
     save: { layoutApplied: true, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'unconfirmed', reason: null }, issues: [] }
 }
 
@@ -36,7 +36,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
   let root: string, server: AgentMuxControlServer, seen: AgentMuxControlRequest[]
   let outcome: AgentMuxSpaceMutationReport['outcome'], failOwner: boolean, inspectKnown: boolean
   beforeEach(async () => {
-    root = await mkdtemp(upstreamFixtureDisplayPath("tmp/amx-space-cli-"))
+    root = await mkdtemp(fixturePath("tmp/amx-space-cli-"))
     seen = []; outcome = 'opened'; failOwner = false; inspectKnown = true
     server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], async execute(request): Promise<AgentMuxControlResult> {
       seen.push(request)
@@ -59,7 +59,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
       if (request.operation === 'open.browser') return { operation: request.operation,
         region: { kind: 'browser', workspaceId: 'ws', tabId: 'tab', regionId: 'browser', browserId: 'browser-id' } }
       if (request.operation === 'list.projects') return { operation: request.operation, projects: [{ projectId: spaceId, name: 'Repository group',
-        hostId: 'local', path: upstreamFixturePath("repo"), kind: 'git', repoPath: upstreamFixturePath("repo"), branch: null, activeAgentSessionIds: ['agent-target'] }] }
+        hostId: 'local', path: fixturePath("repo"), kind: 'git', repoPath: fixturePath("repo"), branch: null, activeAgentSessionIds: ['agent-target'] }] }
       throw new Error(`Unexpected private operation: ${request.operation}`)
     } })
     await server.start()
@@ -118,13 +118,13 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
   })
 
   it('transports a non-Git directory Zone and precise parent selectors without rewriting the path', async () => {
-    json(await run(['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--new-zone', '--project', 'project-target', '--directory', upstreamFixturePath("existing $DIR/ ")]))
-    json(await run(['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--zone', zoneId, '--tab', 'parent-tab', '--region', 'anchor', '--split', 'above']))
+    json(await run(['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--new-zone', '--project', 'project-target', '--directory', ((fixturePath("existing")) + " $DIR/ ")]))
+    json(await run(['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--zone', zoneId, '--tab', 'parent-tab', '--region', 'anchor', '--split', 'up']))
     expect(seen).toEqual([
       { schemaVersion: 5, requestId: expect.any(String), operation: 'agent.open', content: { kind: 'new-agent', executorId: 'saved-executor' },
-        destination: { spaceId, newTab: true, newZone: { projectId: 'project-target', kind: 'directory', path: upstreamFixturePath("existing $DIR/ ") } }, focus: false },
+        destination: { spaceId, newTab: true, newZone: { projectId: 'project-target', kind: 'directory', path: ((fixturePath("existing")) + " $DIR/ ") } }, focus: false },
       { schemaVersion: 5, requestId: expect.any(String), operation: 'agent.open', content: { kind: 'new-agent', executorId: 'saved-executor' },
-        destination: { spaceId, zoneId, tabId: 'parent-tab', regionId: 'anchor', split: 'above' }, focus: false }
+        destination: { spaceId, zoneId, tabId: 'parent-tab', regionId: 'anchor', split: 'up' }, focus: false }
     ])
   })
 
@@ -132,7 +132,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
     json(await run(['agent', 'open', '--session', 'agent-target', '--zone', zoneId]))
     const moved = json(await run(['space', 'mv', '--from-region', 'source-region', '--expect-session', 'agent-target', '--zone', zoneId, '--new-tab', '--operation-id', 'move-id']))
     expect(moved).toMatchObject({ operation: 'space.mv', result: { outcome: 'moved', from: { regionId: 'source-region' },
-      agent: { agentSessionId: 'agent-target', runId: 'run-target', hostId: 'original-host', cwd: upstreamFixturePath("original-cwd") } } })
+      agent: { agentSessionId: 'agent-target', runId: 'run-target', hostId: 'original-host', cwd: fixturePath("original-cwd") } } })
     expect(seen).toEqual([
       { schemaVersion: 5, requestId: expect.any(String), operation: 'agent.open', content: { kind: 'agent-session', agentSessionId: 'agent-target' }, destination: { zoneId, newTab: true }, focus: false },
       { schemaVersion: 5, requestId: 'move-id', operation: 'space.mv', fromRegionId: 'source-region', expectedAgentSessionId: 'agent-target', destination: { zoneId, newTab: true }, focus: false }
@@ -150,7 +150,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
   it.each(['partial', 'unknown'] as const)('retains a %s move report without issuing a lifecycle or resend operation', async state => {
     outcome = state
     const receipt = json(await run(['space', 'mv', '--from-region', 'source-region', '--expect-session', 'agent-target', '--zone', zoneId]), 1)
-    expect(receipt).toMatchObject({ operation: 'space.mv', result: { outcome: state, agent: { agentSessionId: 'agent-target', runId: 'run-target', cwd: upstreamFixturePath("original-cwd") } } })
+    expect(receipt).toMatchObject({ operation: 'space.mv', result: { outcome: state, agent: { agentSessionId: 'agent-target', runId: 'run-target', cwd: fixturePath("original-cwd") } } })
     expect(seen.map(request => request.operation)).toEqual(['space.mv'])
   })
 
@@ -189,7 +189,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
 
   it('keeps real Project discovery separate from Space resource references', async () => {
     const projects = json(await run(['app', 'snapshot', '--include', 'projects']))
-    expect(projects.result.projects).toEqual([expect.objectContaining({ projectId: spaceId, repoPath: upstreamFixturePath("repo") })])
+    expect(projects.result.projects).toEqual([expect.objectContaining({ projectId: spaceId, repoPath: fixturePath("repo") })])
     const spaces = json(await run(['space', 'ls', '--zone', zoneId]))
     expect(spaces.result.catalog.zones).toEqual(catalog.zones)
     expect(spaces.result).not.toHaveProperty('projects')
@@ -203,16 +203,16 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
     ['agent', 'open', '--executor', 'saved-executor'],
     ['agent', 'open', '--executor', 'saved-executor', '--session', 'agent-target', '--zone', zoneId],
     ['agent', 'open', '--session', 'agent-target', '--zone', zoneId, '--prompt', 'forbidden'],
-    ['agent', 'open', '--session', 'agent-target', '--space', spaceId, '--new-zone', '--project', 'project-target', '--directory', upstreamFixturePath("existing")],
+    ['agent', 'open', '--session', 'agent-target', '--space', spaceId, '--new-zone', '--project', 'project-target', '--directory', fixturePath("existing")],
     ['agent', 'open', '--executor', 'saved-executor', '--zone', zoneId, '--zone', zoneId],
     ['agent', 'open', '--executor', 'saved-executor', '--zone', zoneId, '--split', 'right'],
     ['agent', 'open', '--executor', 'saved-executor', '--region', 'occupied', '--new-tab'],
     ['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--worktree'],
-    ['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--new-zone', '--project', 'project-target', '--worktree', '--path', upstreamFixturePath("tmp"), '--branch', 'a', '--new-branch', 'b'],
+    ['agent', 'open', '--executor', 'saved-executor', '--space', spaceId, '--new-zone', '--project', 'project-target', '--worktree', '--path', fixturePath('temporary'), '--branch', 'a', '--new-branch', 'b'],
     ['space', 'inspect', '--operation-id', 'id', '--region', 'region-target'],
     ['space', 'inspect'], ['space', 'ls', '--region', 'region-target'],
     ['space', 'mv', '--from-region', 'source-region', '--zone', zoneId],
-    ['space', 'mv', '--from-region', 'source-region', '--expect-session', 'agent-target', '--space', spaceId, '--new-zone', '--project', 'project-target', '--directory', upstreamFixturePath("tmp")]
+    ['space', 'mv', '--from-region', 'source-region', '--expect-session', 'agent-target', '--space', spaceId, '--new-zone', '--project', 'project-target', '--directory', fixturePath('temporary')]
   ])('rejects grammar %j before any owner operation', async (...args) => {
     const output = await run(args)
     expect(output.code).toBe(1); expect(output.stdout).toBe('')
@@ -254,7 +254,7 @@ describe('public built Agent-first Space CLI uses one private Control owner', ()
     { content: { kind: 'new-agent', executorId: 'executor', extra: true } },
     { content: { kind: 'agent-session', agentSessionId: 'session', prompt: 'forbidden' } },
     { destination: { zoneId, newTab: true, regionId: 'region' } },
-    { destination: { spaceId, newZone: { projectId: 'project-target', kind: 'directory', path: upstreamFixturePath("dir"), branch: 'forbidden' } } },
+    { destination: { spaceId, newZone: { projectId: 'project-target', kind: 'directory', path: fixturePath("dir"), branch: 'forbidden' } } },
     { destination: { zoneId, extra: true } }, { focus: 1 }, { extra: true }
   ])('rejects malformed public transport %j without entering the owner', async overrides => {
     expect(() => parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'malformed', operation: 'agent.open', content: { kind: 'new-agent', executorId: 'executor' }, destination: { zoneId }, focus: false, ...overrides })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
@@ -268,11 +268,13 @@ describe('strict Space Control transport has bounded exact identities and comple
   it('preserves exact nested keys and all mutation facts without claiming flush durability', () => {
     expect(parseAgentMuxControlRequest(input)).toEqual({ ...input, destination: { zoneId, newTab: true } })
     expect(parseAgentMuxControlReceipt(receipt(report('req')))).toEqual(receipt(report('req')))
+    const confirmed = { ...report('req'), save: { ...report('req').save, diskDurability: 'confirmed' } }
+    expect(parseAgentMuxControlReceipt(receipt(confirmed))).toEqual(receipt(confirmed))
     expect(() => parseAgentMuxControlRequest({ ...input, operation: 'open.agent' })).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
   })
   it.each([
     { ...report('req'), requestId: 'wrong-request' },
-    { ...report('req'), save: { ...report('req').save, diskDurability: 'confirmed' } },
+    { ...report('req'), save: { ...report('req').save, diskDurability: 'claimed' } },
     { ...report('req'), agent: { ...report('req').agent, initialPrompt: 'accepted' } },
     { ...report('req'), to: { ...address, regionId: 'self' } },
     { ...report('req'), issues: [{ step: 'target', code: 'AMBIGUOUS', message: 'Choose', recovery: 'Select a Zone', candidates: [{ zoneId, extra: true }] }] },

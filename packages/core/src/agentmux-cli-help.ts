@@ -16,7 +16,12 @@ with the least disturbance. Use the registered --region and --split destination 
 
 agentmux agent open --executor EXECUTOR --region REGION --split right --prompt TASK --operation-id OPERATION
 
-Before opening a configured executor, use agentmux settings executors ls to find its exact ID.
+Before opening a local template, use agentmux settings executors ls to find its exact ID.
+For a remote execution target, use agentmux settings executors discover --host HOST and
+choose that Host's Executor ID. For a new remote Agent below the local view, select its saved
+Workspace independently: agentmux agent open --executor EXECUTOR --execution-workspace WORKSPACE
+--region REGION --split down --prompt TASK --operation-id OPERATION.
+Split directions are left, right, up and down.
 Opening a split and navigating to an existing Tab are separate operations.
 
 ## Move a Region into its own Tab

@@ -28,6 +28,7 @@ import { AgentMuxRpcError, rpcFailure } from './public-rpc-frame.js'
 import { isAgentMuxRpcDeviceMethod, parseAgentMuxRpcDeviceParams, parseAgentMuxRpcDeviceResult,
   type AgentMuxRpcDeviceAdministration } from './public-rpc-device.js'
 import { rpcControlRequest, rpcControlResult, assertControlResultTarget, rpcRecord, rpcString, rpcText, rpcCount } from './rpc-business-codec.js'
+import { isHostSettingsMethod, parseHostSettingsParams, parseHostSettingsResult, type HostSettingsMethod } from './public-rpc-host-settings.js'
 import { AGENTMUX_RPC_CONTROL_METHODS, AGENTMUX_RPC_NATIVE_METHODS, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcCredentials,
   type AgentMuxRpcSnapshotParams, type AgentMuxRpcSnapshot, type AgentMuxRpcStreamMethod,
@@ -40,7 +41,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
   'observeAgentOutput' | 'submitAgentMessage' | 'startDiscussion' | 'checkDeliveries' |
   'ackDeliveryBatch' | 'openDispatch' | 'showDispatch' | 'recordDispatchEvent' |
   'catalog' | 'connect' | 'inspectManagedHooks' | 'probeAgent' | 'probeExecutorAvailability' |
-  'runtimeDiagnostics' | 'runtimeIdentity'> & {
+  'runtimeDiagnostics' | 'runtimeIdentity' | 'agentCreationAuthority' | 'listTrustedCreationSources' | 'trustCreationSource' | 'listHostExecutors' | 'configureHostExecutor'> & {
     runtimeOwnerIdentity?: import('./hosted-client-contract.js').AgentMuxHostedClient['runtimeOwnerIdentity']
     forwardRpc?: import('./hosted-client-contract.js').AgentMuxHostedForwardRpc
     handOff(...args: Parameters<AgentMuxClient['handOff']>):
@@ -100,7 +101,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'executorId', 'status', 'since', 'limit'],
   'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | TopicMethod | HostSettingsMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -262,6 +263,7 @@ export class AgentMuxRpcService {
     if (Object.hasOwn(AGENTMUX_HOSTED_RPC_METHODS, method)) {
       const hosted = await this.hosted(method, params, context)
       return await hosted.owner.call(method, hosted.params, {
+        ...(context.principal ? { principal: context.principal } : {}),
         ...(context.signal ? { signal: context.signal } : {}),
         ...(this.ports.operationSource?.(context) ? { sourceDevice: this.ports.operationSource!(context) } : {}),
         ...(this.ports.recordDeviceOperation ? { recordDeviceOperation: this.ports.recordDeviceOperation } : {}),
@@ -269,6 +271,38 @@ export class AgentMuxRpcService {
       }) as AgentMuxRpcResult<M>
     }
     await this.assertRuntimeFence(context)
+    if (isHostSettingsMethod(method)) {
+      const input = parseHostSettingsParams(method, params)
+      if (method === 'settings.hosts.trust-source' &&
+          (context.caller !== undefined || context.principal?.kind !== 'user')) {
+        throw new AgentMuxError('Creation-source trust requires a transport-approved user without a managed Agent caller.', 'CONTROL_PERMISSION_DENIED')
+      }
+      await this.authenticated(context)
+      const targets = (await this.clients()).filter(entry => entry.hostId === input.hostId)
+      if (targets.length !== 1) throw new AgentMuxError('The exact route Host is unknown or ambiguous.', targets.length ? 'AMBIGUOUS_AGENT_SESSION' : 'UNKNOWN_HOST')
+      context.signal?.throwIfAborted()
+      const client = targets[0]!.client
+      await client.connect()
+      if (method === 'settings.executors.discover') {
+        const query = parseHostSettingsParams('settings.executors.discover', params)
+        const result = { routeHostId: query.hostId, ...await client.listHostExecutors({ refresh: query.refresh ?? true }) }
+        return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+      }
+      if (method === 'settings.executors.register') {
+        const query = parseHostSettingsParams('settings.executors.register', params)
+        const result = { routeHostId: query.hostId, ...await client.configureHostExecutor({ executorId: query.executorId, ...query.input }) }
+        return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+      }
+      const authority = await client.agentCreationAuthority()
+      const result = method === 'settings.hosts.trusted-sources'
+        ? { routeHostId: input.hostId, authority, sources: await client.listTrustedCreationSources() }
+        : { routeHostId: input.hostId, authority, source: client.runtimeOwnerIdentity
+          // A Hosted call carries input only. The target transport supplies its own principal.
+          ? await client.trustCreationSource((input as import('./public-rpc-host-settings.js').HostSettingsParameterMap['settings.hosts.trust-source']).input)
+          : await client.trustCreationSource((input as import('./public-rpc-host-settings.js').HostSettingsParameterMap['settings.hosts.trust-source']).input,
+              { kind: 'user', id: rpcString(context.principal!.id, 'Transport principal') }) }
+      return parseHostSettingsResult(method, result, input) as AgentMuxRpcResult<M>
+    }
     if (method === 'agent.native.confirm') {
       if (context.caller !== undefined || !context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id) {
         throw new AgentMuxError('Native conversation confirmation requires a transport-approved user or device.', 'CONTROL_PERMISSION_DENIED')

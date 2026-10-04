@@ -114,14 +114,14 @@ export function moveSessionViewToWorkspace(input: MoveSessionViewInput): MoveSes
     }
   }
 
-  // No target View can host it yet — create one. The projection keeps its Session identity and takes on
-  // the target workspace as its DISPLAY identity only; the Session's own workspacePath is never touched.
+  // The Agent surface keeps its execution resource Workspace. The Tab owns the new display Workspace;
+  // the Session's own workspacePath is never touched. Terminal surfaces retain their existing semantics.
   const landing: SessionSurface = {
     ...sourceSurface,
     regionId: input.mint.regionId,
-    workspaceId: input.targetWorkspaceId
+    workspaceId: sourceSurface.kind === 'agent' ? sourceSurface.workspaceId : input.targetWorkspaceId
   }
-  tabs[input.mint.tabId] = createWorkbenchTab(input.mint.tabId, landing)
+  tabs[input.mint.tabId] = { ...createWorkbenchTab(input.mint.tabId, landing), workspaceId: input.targetWorkspaceId }
   const targetLayout = layouts[input.targetWorkspaceId]
   layouts = {
     ...layouts,

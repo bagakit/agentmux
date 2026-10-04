@@ -139,8 +139,53 @@ describe('创建成功后缺失显示快照保留已确认事实', () => {
     await useAppStore.getState().launchAgent('codex', prompt, 'pane', { tabId: launcher.id, regionId })
     const state = useAppStore.getState(), surface = state.tabs[launcher.id]!.regions[regionId]!
     if (surface.kind !== 'agent') throw new Error('Missing Agent Region')
-    expect(state.pendingAgentLaunches[surface.sessionId]?.request).toEqual({ executorId: 'codex', prompt })
+    expect(state.pendingAgentLaunches[surface.sessionId]?.request).toEqual({ executorId: 'codex', prompt, hostId: 'local', workspacePath: _hygiene_fixturePath("repo"), createOperationId: expect.any(String) })
     expect(state.pendingAgentLaunches[surface.sessionId]?.created?.agentSessionId).toBe(surface.sessionId)
     expect(state.pendingAgentLaunches[surface.sessionId]?.overflowed).toBe(false)
   })
+  it.each(['display-lost', 'different-session'] as const)('retains a confirmed healthy Run when %s without inferred stop or resend', async mode => {
+    const launcher = launcherFixture(), regionId = launcher.layout.activeRegionId
+    const stop = vi.spyOn(api.sessions, 'stop').mockResolvedValue(undefined)
+    let actualId = ''
+    const start = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      actualId = mode === 'different-session' ? 'different-healthy-session' : input.agentSessionId!
+      const session = agentSession(actualId)
+      if (mode === 'display-lost') useAppStore.setState({ tabs: {} })
+      return { created: { kind: 'agent', agentSessionId: actualId, providerId: session.providerId,
+        executorId: session.executorId, hostId: session.hostId, workspacePath: session.workspacePath,
+        run: session.control.run, retiredRuns: [], createdAt: 1, updatedAt: 1 }, projectionFailures: [],
+        session, timeline: { agentSessionId: actualId, revision: 0, items: [] } }
+    })
+    await expect(useAppStore.getState().launchAgent('codex', 'once', 'pane', { tabId: launcher.id, regionId })).rejects.toMatchObject({
+      code: mode === 'display-lost' ? 'CONTROL_OWNER_LOST' : 'AGENT_LAUNCH_IDENTITY_MISMATCH'
+    })
+    expect(stop).not.toHaveBeenCalled()
+    expect(start).toHaveBeenCalledTimes(1)
+    expect(useAppStore.getState().sessions).toEqual(expect.arrayContaining([expect.objectContaining({ id: actualId, processState: 'running' })]))
+    expect(useAppStore.getState().error).toContain('retained')
+  })
+  it.each(['unknown', 'not_applied', 'transport'] as const)('saves the original operation before dispatch and restores a Launcher only for owner not_applied (%s)', async outcome => {
+    const launcher = launcherFixture(), regionId = launcher.layout.activeRegionId
+    let originalId = '', originalOperation = ''
+    const start = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => {
+      originalId = input.agentSessionId!; originalOperation = input.createOperationId!
+      expect(useAppStore.getState().pendingAgentLaunches[originalId]!.request).toMatchObject({
+        hostId: input.hostId, workspacePath: input.workspacePath, createOperationId: originalOperation, prompt: 'once'
+      })
+      throw outcome === 'transport' ? new Error('IPC disconnected before receipt') : Object.assign(new Error('Owner outcome'), {
+        code: outcome === 'not_applied' ? 'KNOWN_REFUSAL' : 'CONTROL_TIMEOUT', controlFailure: { disposition: outcome, confirmedInputBytes: null }
+      })
+    })
+    await expect(useAppStore.getState().launchAgent('codex', 'once', 'pane', { tabId: launcher.id, regionId })).rejects.toThrow()
+    expect(originalOperation).toBeTruthy(); expect(start).toHaveBeenCalledTimes(1)
+    if (outcome === 'not_applied') {
+      expect(useAppStore.getState().tabs[launcher.id]!.regions[regionId]!.kind).toBe('launcher')
+      expect(useAppStore.getState().pendingAgentLaunches[originalId]).toBeUndefined()
+    } else {
+      expect(useAppStore.getState().tabs[launcher.id]!.regions[regionId]).toMatchObject({ kind: 'agent', phase: 'launching', sessionId: originalId })
+      expect(useAppStore.getState().pendingAgentLaunches[originalId]!.request?.createOperationId).toBe(originalOperation)
+      expect(useAppStore.getState().error).toContain(originalOperation)
+    }
+  })
+
 })

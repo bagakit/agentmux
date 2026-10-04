@@ -6,6 +6,7 @@ import type { DesktopControlRequest } from '../shared/contracts'
 import { contextBridge, ipcRenderer, webFrame } from 'electron'
 import { unwrapSessionReopenResult } from '../shared/session-reopen-result'
 import { unwrapSessionInputWriteResult } from '../shared/session-input-result'
+import { unwrapSessionAgentLaunchResult, unconfirmedSessionAgentLaunch } from '../shared/session-agent-launch-result'
 import type { AgentExecutorId, AgentMuxControlRequest, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentSessionHistoryPageOptions } from '@agentmux/core'
 import {
   AGENT_ATTENTION_ACTIVATE_CHANNEL,
@@ -252,7 +253,9 @@ const api: AgentMuxPreloadApi = {
     list: () => ipcRenderer.invoke('providers:list')
   },
   executors: {
-    detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId)
+    detect: (executorId: AgentExecutorId, hostId: string) => ipcRenderer.invoke('executors:detect', executorId, hostId),
+    discover: (hostId: string) => ipcRenderer.invoke('executors:discover', hostId),
+    register: (hostId: string, input: import('@agentmux/core').AgentMuxHostExecutorConfigureInput) => ipcRenderer.invoke('executors:register', hostId, input)
   },
   control: {
     onRequest(listener) {
@@ -288,7 +291,12 @@ const api: AgentMuxPreloadApi = {
   sessions: {
     creation: (hostId: string, agentSessionId: string) => ipcRenderer.invoke('sessions:creation', hostId, agentSessionId),
     snapshot: () => ipcRenderer.invoke('sessions:snapshot'),
-    launchAgent: (input: AgentLaunchInput) => ipcRenderer.invoke('sessions:launchAgent', input),
+    launchAgent: async (input: AgentLaunchInput) => {
+      let result: import('../shared/contracts').SessionAgentLaunchResult
+      try { result = await ipcRenderer.invoke('sessions:launchAgent', input) }
+      catch (error) { throw unconfirmedSessionAgentLaunch(input, error) }
+      return unwrapSessionAgentLaunchResult(result)
+    },
     launchTerminal: (input: TerminalLaunchInput) => ipcRenderer.invoke('sessions:launchTerminal', input),
     historySources: () => ipcRenderer.invoke('sessions:historySources'),
     confirmNativeSession: (session, input) => ipcRenderer.invoke('sessions:confirmNativeSession', session, input),

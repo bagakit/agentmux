@@ -286,7 +286,8 @@ export function addWorkbenchRegion(
   direction: SplitDirection,
   surface: WorkbenchSurface
 ): WorkbenchTab {
-  if (surface.workspaceId !== tab.workspaceId || tab.regions[surface.regionId]) return tab
+  // An Agent's resource Workspace belongs to its execution Host, independently of this Tab's Zone.
+  if (surface.kind !== 'agent' && surface.workspaceId !== tab.workspaceId || tab.regions[surface.regionId]) return tab
   const split = splitWorkbenchRegion(tab.layout, targetRegionId, direction, surface.regionId)
   if (split === tab.layout) return tab
   // #470「在某个方向打开任意多个并自动布局」：三个追加入口（GUI 分屏、控制协议 open.split、
