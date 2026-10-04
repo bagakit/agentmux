@@ -48,7 +48,7 @@ export function noteFilePlacement(target: NoteCreationTarget, projection?: Workb
   return target.zoneId && target.sourceSpaceId && target.displayWorkspaceId ? {
     displayWorkspaceId: target.displayWorkspaceId, space: { spaceId: target.sourceSpaceId, zoneId: target.zoneId },
     resource: { hostId: target.hostId, path: target.workspacePath }, ...(projection ? { projection } : {}),
-    ...(projection?.presentationId === 'survey-workbench' && launcher ? { launcher } : {})
+    ...((projection?.presentationId === 'survey-workbench' || projection?.presentationId === 'recall-workbench') && launcher ? { launcher } : {})
   } : null
 }
 

@@ -129,7 +129,7 @@ export function NewTabSurface({
   const inputRegionActive = useAppStore(state => {
     if (!tabId || !regionId) return tabId === undefined && regionId === undefined
     if (state.tabs[tabId]?.regions[regionId]?.kind !== 'launcher') return false
-    const reference = presentation.surface === 'mote' ? presentation.reference : mainRegionReference(state.workbenchSpaceSelection)
+    const reference = (presentation.surface === 'mote' || presentation.surface === 'recall') ? presentation.reference : mainRegionReference(state.workbenchSpaceSelection)
     return reference ? reference.tabId === tabId && reference.regionId === regionId
       : !presentation.surface && state.tabs[tabId]?.layout.activeRegionId === regionId
   })
@@ -178,7 +178,7 @@ export function NewTabSurface({
   const detecting = inventory?.state === 'checking' || executors.some((executor) => executor.detection?.state === 'checking')
   const savedSections = useLauncherState(state => workspace ? state.sections[workspace.id] : undefined)
   const sections = { ...DEFAULT_LAUNCHER_SECTIONS,
-    terminal: presentation.surface === 'mote' || presentation.surface === 'survey' || presentation.survey ? 'collapsed' as const : 'expanded' as const,
+    terminal: presentation.surface === 'mote' || presentation.surface === 'recall' || presentation.surface === 'survey' || presentation.survey ? 'collapsed' as const : 'expanded' as const,
     ...savedSections }
   const persistenceIssue = useLauncherState(state => state.persistenceIssue)
   const saveSection = useLauncherState(state => state.setSection)

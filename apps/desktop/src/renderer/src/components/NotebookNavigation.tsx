@@ -23,7 +23,7 @@ export function NotebookNavigation({ notebooks, pages, selectedId, selectedNoteI
   const members = pages.filter(page => page.notebookId === book.notebookId)
   const rows = notebookPageRows(pages, book.notebookId, query, collapsed, archived)
   return <div className="survey-notebook-navigation" aria-label="Notebook navigation" data-notebook-id={book.notebookId}>
-    <button className="survey-notebook-back" aria-label="Back to Survey" onClick={onBack}><ArrowLeft size={14} /><span>Survey</span></button>
+    <button className="survey-notebook-back" aria-label="Back to Recall" onClick={onBack}><ArrowLeft size={14} /><span>Recall</span></button>
     <div className="survey-notebook-heading">
       <button className="survey-item survey-notebook-item" title={book.name} aria-label={`Notebook directory: ${book.name}`} aria-current={!selectedNoteId ? 'page' : undefined} onClick={() => onSelect(book.notebookId)}>
         <BookOpen size={16} /><strong>{book.name}</strong>

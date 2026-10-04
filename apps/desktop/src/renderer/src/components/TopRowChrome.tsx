@@ -48,7 +48,7 @@ export function TopRowLeadingChrome() {
     && toolsOpen
     && mainSurface === 'workbench' && Boolean(workspace)
   const chromeOwnedOutsideMain = projectRailOpen || toolDockOwnsChrome
-  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey') && chromeOwnedOutsideMain
+  const globalSurfaceNeedsTrafficLightInset = (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey' || mainSurface === 'recall') && chromeOwnedOutsideMain
   return (
     <div
       className={`top-row-leading-chrome ${chromeOwnedOutsideMain ? '' : 'top-row-leading-chrome--compact'}${globalSurfaceNeedsTrafficLightInset ? ' top-row-leading-chrome--global-inset' : ''}`}
@@ -128,6 +128,7 @@ export function TopBreadcrumb() {
   if (mainSurface === 'agents') {
     return <div className="breadcrumbs"><strong>Focus</strong><span className="breadcrumbs__sep" aria-hidden>/</span><span>Recent execution contexts</span></div>
   }
+  if (mainSurface === 'recall') return <div className="breadcrumbs"><strong>Recall</strong></div>
   if (mainSurface === 'survey') {
     return <div className="breadcrumbs"><strong>Survey</strong></div>
   }
@@ -243,7 +244,7 @@ export function SurfaceSwitch({ settingsOpen = false, onCloseSettings }: {
         <div className="surface-navigation__surfaces" role="group" aria-label="Work surfaces">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'work').map(renderPlugin)}
         </div>
-        <div className="surface-navigation__utilities" role="group" aria-label="Survey and settings">
+        <div className="surface-navigation__utilities" role="group" aria-label="Recall, Survey and settings">
           {SURFACE_NAVIGATION_PLUGINS.filter((plugin) => plugin.kind === 'surface' && plugin.navigationContext === 'survey').map(renderPlugin)}
           <button
             type="button"

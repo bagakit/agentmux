@@ -13,17 +13,17 @@ async function saveNotes(value: Required<NotesPreferences>, expected: Required<N
 }
 
 export const notesSettingsModule = {
-  id: 'notes', group: 'work', title: 'Notes', icon: NotebookPen,
+  id: 'notes', group: 'work', title: 'Recall', icon: NotebookPen,
   description: 'A comfortable reading space for your notebooks and pages.',
-  keywords: 'work notes note notebook notebooks pages quick notes 随手记 knowledge reading font size width wide',
+  keywords: 'recall directory folder storage path work notes note notebook notebooks pages quick notes 随手记 knowledge reading font size width wide',
   savedSummary: config => { const saved = resolveNotesPreferences(config.notes); return `${saved.fontSize} px · ${saved.contentWidth === 'wide' ? 'Wide' : 'Standard'}` },
   Pane({ config, onClose }) {
     return <NotesSettingsPane preferences={config.notes} onSave={saveNotes} onOpenNotes={() => {
         onClose()
         const state = useAppStore.getState()
-        state.setSurveyNotebook(DEFAULT_NOTEBOOK_ID)
-        state.setSurveyZoneSelection(null)
-        state.setMainSurface('survey')
+        state.setRecallNotebook(DEFAULT_NOTEBOOK_ID)
+        state.setRecallZoneSelection(null)
+        state.setMainSurface('recall')
       }} />
   }
 } as const satisfies SettingsModule

@@ -39,12 +39,12 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   async function move() {
     await operation.run({ kind: 'move', noteId: page.noteId, notebookId: destination, parentNoteId: parentId || null }, () => {
       const state = useAppStore.getState()
-      if (state.surveyNoteId === page.noteId) state.setSurveyNotebook(destination, page.noteId)
+      if (state.recallNoteId === page.noteId) state.setRecallNotebook(destination, page.noteId)
       setPanel(null)
     })
   }
   async function openSource(source: NotebookPage['sources'][number]) {
-    const before = useAppStore.getState(), heldSelection = before.surveyZoneSelection
+    const before = useAppStore.getState(), heldSelection = before.recallZoneSelection
     if (sourceCreation.current && sourceCreation.current.sourceId !== source.sourceId) { setSourceIssue('The previous source page is still opening. Retry that same source; your Note and links are kept.'); return }
     sourceCreation.current ??= { sourceId: source.sourceId, prepared: null }; setSourceIssue(null)
     try {
@@ -52,8 +52,8 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
         onPrepared(prepared) { sourceCreation.current = { sourceId: source.sourceId, prepared } } })
       sourceCreation.current = null
       const now = useAppStore.getState()
-      if (now.mainSurface !== before.mainSurface || now.surveyZoneSelection !== heldSelection || now.surveyNoteId !== before.surveyNoteId) return
-      now.setSurveyNotebook(null); now.setMainSurface('survey'); now.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
+      if (now.mainSurface !== before.mainSurface || now.recallZoneSelection !== heldSelection || now.recallNoteId !== before.recallNoteId) return
+      now.setMainSurface('survey'); now.setSurveyZoneSelection({ zoneId: created.zone.zoneId, selection: [created.reference], active: created.reference })
     } catch (error) { setSourceIssue(presentError(error)) }
   }
   const archiveRoot = library ? notebookPageArchiveRoot(library.pages, page.noteId) : undefined
@@ -61,7 +61,7 @@ export function NotebookPageDetails({ page }: { page: NotebookPage }) {
   const events = library?.trail.filter(event => event.noteId === page.noteId).slice().reverse() ?? []
   const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored' }
   return <header className="notebook-page-heading" aria-label="Page details">
-    <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setSurveyNotebook(page.notebookId); state.setSurveyZoneSelection(null); state.setMainSurface('survey') }}>{book?.name ?? page.notebookId}<ChevronRight size={12} /></button>
+    <button className="notebook-breadcrumb" onClick={() => { const state = useAppStore.getState(); state.setRecallNotebook(page.notebookId); state.setRecallZoneSelection(null); state.setMainSurface('recall') }}>{book?.name ?? page.notebookId}<ChevronRight size={12} /></button>
     <input className="notebook-page-title" aria-label="Page title" value={title} placeholder="Untitled note" disabled={operation.busy || Boolean(operation.issue)}
       onFocus={() => setEditing(true)} onChange={event => setTitle(event.target.value)} onBlur={() => { setEditing(false); if (cancelTitle.current) { cancelTitle.current = false; return } void rename() }}
       onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); event.currentTarget.blur() } if (event.key === 'Escape') { cancelTitle.current = true; setTitle(page.title); event.currentTarget.blur() } }} />

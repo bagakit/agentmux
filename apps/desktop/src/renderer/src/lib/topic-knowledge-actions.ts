@@ -54,10 +54,10 @@ export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise
     const library = await api.notebooks.read()
     if (!library.notebooks[source.notebookId]) throw new Error('The original notebook is not confirmed. Its source reference is kept.')
     const current = useAppStore.getState()
-    if (current.mainSurface !== state.mainSurface || current.surveyNotebookId !== state.surveyNotebookId || current.surveyNoteId !== state.surveyNoteId || current.surveyZoneSelection !== state.surveyZoneSelection || current.workbenchSpaceSelection !== state.workbenchSpaceSelection) return
-    useAppStore.getState().setSurveyZoneSelection(null)
-    useAppStore.getState().setSurveyNotebook(source.notebookId)
-    useAppStore.getState().setMainSurface('survey')
+    if (current.mainSurface !== state.mainSurface || current.recallNotebookId !== state.recallNotebookId || current.recallNoteId !== state.recallNoteId || current.recallZoneSelection !== state.recallZoneSelection || current.workbenchSpaceSelection !== state.workbenchSpaceSelection) return
+    useAppStore.getState().setRecallZoneSelection(null)
+    useAppStore.getState().setRecallNotebook(source.notebookId)
+    useAppStore.getState().setMainSurface('recall')
     return
   }
   if (source.kind === 'url') return api.ui.openExternal(source.url)
