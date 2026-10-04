@@ -190,10 +190,9 @@
 .notebook-page-directory button>svg:last-child { opacity: 0; }
 .notebook-page-directory button:hover>svg:last-child { opacity: .7; }
 .notebook-find { display: flex; gap: 8px; align-items: center; color: var(--text-3); }
-.notebook-find input { min-width: 0; width: 100%; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; outline: 0; }
-.notebook-find input:focus-visible { box-shadow: 0 1px 0 var(--text-3); }
-.notebook-find--sidebar { padding: 7px 10px 5px 25px; }
-.notebook-find--directory { margin-top: 29px; padding-bottom: 12px; border-bottom: 1px solid var(--line-soft); }
+.notebook-find input { min-width: 0; width: 100%; padding: 2px 6px; border: 0; background: transparent; color: var(--text-2); font: inherit; font-size: 12px; outline: 0; }
+.notebook-find--sidebar { padding: 6px 10px 4px 25px; }
+.notebook-find--directory { margin-top: 29px; padding-bottom: 10px; border-bottom: 1px solid var(--line-soft); }
 .notebook-find--directory + .notebook-page-directory { margin-top: 0; border-top: 0; }
 .notebook-no-results { font-size: 12px; color: var(--text-3); padding: 8px; }
 .survey-notebook-page-row { display: flex; align-items: center; min-width: 0; }
