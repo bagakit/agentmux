@@ -39,6 +39,11 @@ function count(value: unknown, nullable = false): void { if (!(nullable && value
 function bool(value: unknown): void { if (typeof value !== 'boolean') fail() }
 function member(value: unknown, values: readonly unknown[]): void { if (!values.includes(value)) fail() }
 function array(value: unknown, consume: (item: unknown) => void): void { if (!Array.isArray(value)) return fail(); for (const item of value) consume(item) }
+function promptExecution(value: unknown): void {
+  if (value === undefined) return
+  const capability = record(value, ['immediate'])
+  member(capability.immediate, ['interrupt-before-input', 'native-steer'])
+}
 function runRef(value: unknown): Record<string, unknown> { const run = record(value, ['runId']); string(run.runId); return run }
 function issues(value: unknown, source = false): void {
   array(value, item => { const issue = record(item, source ? ['source', 'code', 'message', 'recovery'] : ['code', 'message', 'recovery'])
@@ -68,7 +73,7 @@ export function parseRpcHostedBootstrap(value: unknown): Record<string, unknown>
   array(p.sessions, session => parseRpcAgentSession(session))
   array(p.catalog, item => { const entry = record(item)
     for (const key of ['id', 'label', 'executable', 'expectedProcess']) string(entry[key])
-    record(entry.capabilities); array(entry.launchOptions, option => record(option))
+    promptExecution(record(entry.capabilities).promptExecution); array(entry.launchOptions, option => record(option))
   })
   return p
 }
@@ -85,6 +90,7 @@ function status(value: unknown, expected?: ReturnType<typeof normalizeAgentSessi
   for (const key of ['observedAt', 'latestOutputBytes']) count(run[key])
   count(run.acceptedInputBytes, true)
   const capabilities = record(p.capabilities)
+  promptExecution(capabilities.promptExecution)
   if (capabilities.terminal !== true) fail()
   member(capabilities.timeline, ['unavailable', 'complete-events', 'streaming'])
   member(capabilities.permission, ['none', 'observe', 'respond']); bool(capabilities.providerResume)

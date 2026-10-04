@@ -299,3 +299,14 @@ it('refuses a never-dispatched legacy intent whose original explicit choice is u
     stage: 'retry-validation', error: { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' } })
   expect(view.element.textContent).toContain('原消息最初的执行选择无法核实')
 })
+
+
+it('consumes declared native steer for explicit Mobile send', async () => {
+ const f = consumer()
+ expect(f.client.catalog().find(p => p.id === 'codex')!.capabilities.promptExecution).toEqual({immediate: 'native-steer'})
+ const view = await mount(<MobileConversationSurface {...f.options} />)
+ await paste(view.element, body)
+ await click(button(view.element, 'Send'))
+ await settled(() => expect(f.submit).toHaveBeenCalledOnce())
+ expect(f.submit.mock.calls[0]![0]).toMatchObject({prompt: body,execution: 'immediate',allowUncertainTurn: true})
+})

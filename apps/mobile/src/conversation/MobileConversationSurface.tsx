@@ -25,7 +25,7 @@ function promptExecutionFor(client: AgentMuxHostedClient, session: AgentMuxAgent
   try {
     const provider = client.catalog().find(entry => entry.id === session.providerId)
     if (!provider) return { execution: 'default' as const, supported: undefined, issue: '公共能力目录未包含原 Session 的 Provider。' }
-    const supported = provider.capabilities.promptExecution?.immediate === 'interrupt-before-input'
+    const supported = provider.capabilities.promptExecution?.immediate === 'interrupt-before-input' || provider.capabilities.promptExecution?.immediate === 'native-steer'
     return { execution: supported ? 'immediate' as const : 'default' as const, supported }
   } catch (error) {
     return { execution: 'default' as const, supported: undefined, issue: `公共能力目录读取失败：${errorMessage(error)}` }

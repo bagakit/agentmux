@@ -319,3 +319,21 @@ it('releases the admission diagnostic when a synchronous subscriber removes the 
   expect(messageDeliveryDiagnostics.get(first.logId!)!.record).toEqual(firstRecord)
   expect(inspectReported(first.logId!).record).toEqual(firstRecord)
 })
+
+
+it('consumes native steer for a fresh manual draft and the original mounted pending action', async () => {
+ const session = composerSession()
+ session.capabilities.promptExecution = {immediate: 'native-steer'}
+ useAppStore.setState({sessions: [session], agentSteerQueues: {}, agentComposerDrafts: {[sid]: body + '\nNative steer choice'}})
+ vi.mocked(api.sessions.refresh).mockResolvedValue(session)
+ const submit = vi.spyOn(api.sessions, 'submitPrompt').mockRejectedValueOnce(refusal('native steer controlled refusal')).mockResolvedValue()
+ await dom.render(<AgentSessionComposer sessionId={sid} />)
+ await click(action(dom.container, 'Send'))
+ await settled(() => expect(submit).toHaveBeenCalledOnce())
+ const first = structuredClone(queue()[0]!)
+ expect(first.execution).toBe('immediate')
+ expect(submit.mock.calls[0]![4]).toMatchObject({execution: 'immediate'})
+ await click(action(card(first.operationId), '立即发送这条待发消息'))
+ await settled(() => expect(submit).toHaveBeenCalledTimes(2))
+ expect(submit.mock.calls[1]!.slice(0,5)).toEqual(submit.mock.calls[0]!.slice(0,5))
+})

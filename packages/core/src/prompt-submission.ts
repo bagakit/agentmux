@@ -558,16 +558,45 @@ export class AgentPromptSubmissionCoordinator {
       )
     }
 
-    if (Boolean(plan.prepare) !== (execution === 'immediate')) {
+    const provider = this.deps.providers.get(session.providerId)
+    const immediateStrategy = provider.catalog.capabilities.promptExecution?.immediate
+    const frozen = session.promptCompletionAdmission
+    const rejoiningFrozenPlan = frozen?.submissionId === submissionId && frozen.intent !== undefined &&
+      sameRun(frozen.intent.run, session.run) && frozen.intent.prompt === prompt &&
+      (frozen.intent.execution ?? 'default') === execution &&
+      promptMessageIdentity(frozen.intent.message) === promptMessageIdentity(message) &&
+      JSON.stringify(frozen.intent.plan) === JSON.stringify(plan)
+    const nativeSteer = execution === 'immediate' && !plan.prepare && (immediateStrategy === 'native-steer' || rejoiningFrozenPlan)
+    if (execution === 'default' ? Boolean(plan.prepare) :
+        !nativeSteer && !(plan.prepare && (immediateStrategy === 'interrupt-before-input' || rejoiningFrozenPlan))) {
       throw new AgentMuxError('Provider preparation does not match this single prompt execution authorization.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     }
-    const provider = this.deps.providers.get(session.providerId)
     const nativeContext: AgentProviderPromptExecutionContext = { args: run.args, workspacePath: session.workspacePath,
       ...(session.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
       ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
     if (session.nativePromptPredecessor?.run.runId === session.run.runId &&
       session.retiredRuns.at(-1)?.runId === session.nativePromptPredecessor.previousRun.runId) {
       Object.assign(nativeContext, { nativePromptPredecessor: session.nativePromptPredecessor })
+    }
+    if (nativeSteer && !rejoiningFrozenPlan) {
+      // Native steering needs the current target and writable source, not a new
+      // redraw, an interrupt receipt or a completed-turn epoch. Read the already
+      // authoritative complete pane while preserving the original input fence.
+      const preparationSignal = AbortSignal.any([AbortSignal.timeout(8_000), ...(signal ? [signal] : []), ...(renderSignal ? [renderSignal] : [])])
+      const context = { ...nativeContext, signal: preparationSignal }
+      try {
+        const evidence = await provider.readPromptExecutionEvidence?.(context)
+        if (!evidence) throw new AgentMuxError('The current native input source is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        await this.deps.screenEvidence.wait(session, run.latestOutputBytes, false,
+          screen => Boolean(provider.inspectPromptExecution) && provider.inspectPromptExecution!(screen.snapshot(), 'native-steer') !== 'unavailable',
+          { timeoutMs: 8_000, requireCompleteFrame: true, signal: preparationSignal,
+            timeoutMessage: 'The current native composer is unconfirmed; ordinary terminal input remains available.',
+            terminalMessage: 'The original Agent Run ended before native steering.' })
+        if (!await provider.verifyPromptExecutionTransport?.({ ...context, nativeSourceId: evidence.sourceId })) {
+          throw new AgentMuxError('The current native input transport is unconfirmed.', 'AGENT_PROMPT_IMMEDIATE_TRANSPORT_UNCONFIRMED')
+        }
+        preparationSignal.throwIfAborted()
+      } catch (error) { throw promptPreparationFailure(error) }
     }
     let preparation: NonNullable<AgentMuxAgentSession['terminalPromptSubmission']>['prepare']
     let preparationGeneration: number | undefined
@@ -797,7 +826,8 @@ export class AgentPromptSubmissionCoordinator {
           })
         )
       }
-      uncertainTurn = plan.prepare ? false : assertTurnBoundary(stored, existing !== undefined || stored.promptCompletionAdmission !== undefined)
+      // A declared steer continues the active turn; it does not invent a turn-end fact.
+      uncertainTurn = plan.prepare || nativeSteer ? false : assertTurnBoundary(stored, existing !== undefined || stored.promptCompletionAdmission !== undefined)
       if (plan.prepare && (preparationGeneration !== this.deps.screenEvidence.generation(session.agentSessionId) || !preparation || (!preparation.nativeSourceId && preparation.previousReceiptId !== stored.hookReceipt?.id))) {
         throw new AgentMuxError('Native context changed before immediate admission.', 'AGENT_PROMPT_IMMEDIATE_CONTEXT_UNCONFIRMED')
       }
