@@ -18,6 +18,8 @@ import {
   EDITOR_FONT_SIZE_MAX,
   PROJECT_RAIL_DENSITY_IDS,
   MOTE_DIRECTORY_VIEW_IDS,
+  MOTE_DIRECTORY_AVATAR_SIZE_MIN,
+  MOTE_DIRECTORY_AVATAR_SIZE_MAX,
   SCRATCH_WORKSPACE_ID,
   SCRATCH_WORKSPACE_NAME,
   TERMINAL_THEME_IDS,
@@ -280,6 +282,7 @@ const configSchema = z
     // 不补盘。成员来自 import 进来的元组（schema-enum-ssot.test.ts），未知字符串一律判失败。
     projectRailDensity: z.enum(PROJECT_RAIL_DENSITY_IDS).optional(),
     moteDirectoryView: z.enum(MOTE_DIRECTORY_VIEW_IDS).optional(),
+    moteDirectoryAvatarSize: z.number().int().min(MOTE_DIRECTORY_AVATAR_SIZE_MIN).max(MOTE_DIRECTORY_AVATAR_SIZE_MAX).optional(),
     // 复制路径给绝对地址还是缩写 `~`。`.optional()` 同 `appLinkSchemes`（后加字段，既有磁盘 config
     // 没有它，写成必需会让整块判失败）——且**不回填**：缺席与默认（缩写）同义，补盘只是白写；读处
     // 一律 `=== true` 判绝对档，落盘只在用户勾了绝对路径时发生。

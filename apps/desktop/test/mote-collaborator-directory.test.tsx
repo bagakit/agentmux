@@ -101,3 +101,65 @@ it('actual Settings panel retains dirty choice on real save failure and saves on
   expect(f.owner.current.copyPathsAsAbsolute).toBe(true)
   expect(f.owner.current.workspaces).toEqual([scratchWorkspace])
 })
+
+it('configured portrait size reaches the original directory without replacing identities, selection, drafts or Runs', async () => {
+  seed(); await dom.render(tree())
+  const roster = dom.container.querySelector<HTMLElement>(selector)!, before = useAppStore.getState()
+  const rows = [...roster.querySelectorAll('[data-space-nav]')]
+  expect(roster.style.getPropertyValue('--mote-directory-avatar-size')).toBe('36px')
+  for (const moteDirectoryAvatarSize of [48, 24]) {
+    await act(async () => useAppStore.setState({ config: { ...before.config!, moteDirectoryAvatarSize } }))
+    expect(roster.style.getPropertyValue('--mote-directory-avatar-size')).toBe(`${moteDirectoryAvatarSize}px`)
+    expect([...roster.querySelectorAll('[data-space-nav]')]).toEqual(rows)
+    for (const key of ['tabs', 'layouts', 'sessions', 'agentComposerDrafts', 'workbenchSpaceSelection'] as const) expect(useAppStore.getState()[key]).toBe(before[key])
+  }
+  expect(rows[1]?.getAttribute('title')).toContain('Analyst with a long persistent name')
+})
+async function moveSize(value: number): Promise<void> {
+  const range = dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')!
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(range, String(value))
+    range.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+it('original Settings previews size locally, retains failed draft and saves it durably with concurrent other settings intact', async () => {
+  const f = await configOwnerFixture(), publish = f.publish.getMockImplementation()!
+  f.publish.mockImplementation(config => { publish(config); useAppStore.getState().setConfig(config) })
+  useAppStore.setState({ config: f.owner.current })
+  const save = vi.spyOn(api.config, 'save').mockImplementation((next, expected) => f.owner.edit(expected, next))
+  await dom.render(<SettingsPanel initialSection="mote" onClose={() => {}} />)
+  expect(dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')?.value).toBe('36')
+  await moveSize(44)
+  expect(dom.container.querySelector('output')?.textContent).toBe('44px')
+  expect((dom.container.querySelector('.mote-directory-settings') as HTMLElement).style.getPropertyValue('--mote-directory-avatar-size')).toBe('44px')
+  expect(f.owner.current.moteDirectoryAvatarSize).toBeUndefined()
+  f.save.mockRejectedValueOnce(new Error('disk full'))
+  await dom.click('.settings-pane-actions button')
+  expect(dom.container.querySelector('[role="alert"]')?.textContent).toBe('disk full')
+  expect(dom.container.querySelector('output')?.textContent).toBe('44px')
+  await act(async () => f.owner.update(c => ({ ...c, copyPathsAsAbsolute: true, moteDirectoryView: 'list' })))
+  expect(dom.container.querySelector<HTMLInputElement>('[value="list"]')?.checked).toBe(true)
+  await dom.click('.settings-pane-actions button')
+  await act(async () => { await save.mock.results.at(-1)!.value })
+  expect((await f.disk()).moteDirectoryAvatarSize).toBe(44)
+  expect(f.owner.current.copyPathsAsAbsolute).toBe(true)
+  expect(f.owner.current.moteDirectoryView).toBe('list')
+  await dom.render(<div />)
+  useAppStore.setState({ config: await f.store.get() })
+  await dom.render(<SettingsPanel initialSection="mote" onClose={() => {}} />)
+  expect(dom.container.querySelector<HTMLInputElement>('.mote-directory-size input')?.value).toBe('44')
+})
+it('a concurrent size edit rejects the stale save and preserves the local draft and original authoritative value', async () => {
+  const f = await configOwnerFixture(), publish = f.publish.getMockImplementation()!
+  f.publish.mockImplementation(config => { publish(config); useAppStore.getState().setConfig(config) })
+  useAppStore.setState({ config: f.owner.current })
+  vi.spyOn(api.config, 'save').mockImplementation((next, expected) => f.owner.edit(expected, next))
+  await dom.render(<SettingsPanel initialSection="mote" onClose={() => {}} />)
+  await moveSize(44)
+  await act(async () => f.owner.update(c => ({ ...c, moteDirectoryAvatarSize: 40 })))
+  await dom.click('.settings-pane-actions button')
+  expect(dom.container.querySelector('[role="alert"]')).not.toBeNull()
+  expect(dom.container.querySelector('output')?.textContent).toBe('44px')
+  expect(f.owner.current.moteDirectoryAvatarSize).toBe(40)
+  expect((await f.disk()).moteDirectoryAvatarSize).toBe(40)
+})
