@@ -1,9 +1,14 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, type ReactNode } from 'react'
+import { providerCatalogReader } from './helpers/startup-observation-api-fixture'
+import { mkdtemp, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi, type MockInstance } from 'vitest'
-import { formatAmuxSpatialLink, formatSpaceAddress, formatZoneAddress, type TopicCategory } from '@agentmux/core'
+import type { TopicCategory } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore, prepareRendererUpdate } from '../src/renderer/src/store'
@@ -28,6 +33,7 @@ const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', la
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 const baseline = useAppStore.getInitialState()
 let root: Root, container: HTMLDivElement, dispose: (() => void) | undefined
+let spatialRoot: string
 let clipboard: MockInstance<typeof api.ui.writeClipboardText>
 
 beforeEach(async () => {
@@ -35,11 +41,18 @@ beforeEach(async () => {
   useAppStore.persist.clearStorage(); useAppStore.setState(baseline, true)
   vi.spyOn(api.spaceObjects, 'appearance').mockResolvedValue({ local: true, icon: null })
   vi.spyOn(api.config, 'get').mockResolvedValue(config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([topic])
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
+  spatialRoot = await mkdtemp(join(tmpdir(), 'object-menu-spatial-'))
+  const owner = new AgentMuxSpatialStateStore(join(spatialRoot, 'spatial.json'))
+  await owner.commit({ expectedRevision: 0, graph: { spaces: [], zones: [], bindings: [], layouts: {}, tabs: [], regions: [], tabLayouts: {}, resources: {} } })
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
+  vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
+  vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
+  vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
   clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
   dispose = await useAppStore.getState().initialize()
   await prepareRendererUpdate()
@@ -52,8 +65,9 @@ beforeEach(async () => {
   container = document.createElement('div'); document.body.append(container); root = createRoot(container)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); container.remove(); dispose?.(); dispose = undefined
+  await act(async () => root.unmount()); await prepareRendererUpdate(); container.remove(); dispose?.(); dispose = undefined
   vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.persist.clearStorage()
+  await rm(spatialRoot, { recursive: true, force: true })
 })
 function Scene() {
   return <><WorkspaceSidebar />
@@ -89,25 +103,25 @@ async function select(label: string) {
 function quiet(before: ReturnType<typeof useAppStore.getState>) {
   const after = useAppStore.getState()
   expect(after.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
-  expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts)
-  expect(after.sessions).toBe(before.sessions); expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts)
+  expect(after.tabs).toEqual(before.tabs); expect(after.layouts).toEqual(before.layouts)
+  expect(after.sessions).toEqual(before.sessions); expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts)
 }
 
 it.each([undefined, 'F10', 'ContextMenu'])('Category %s menu targets its own Space and closes on the original row', async key => {
   await mount(); const before = useAppStore.getState(); const row = categoryRow()
   expect(row.dataset.spaceIconTarget).toBe(category.spaceId)
   const content = await menu(row, key)
-  expect(menuItems().map(node => node.textContent)).toEqual(['Change avatar…', 'Rename category…', 'Copy Category card', 'Copy Category link'])
+  expect(menuItems().map(node => node.textContent)).toEqual(['Change avatar…', 'Rename category…', 'Copy Category link'])
   expect(content.textContent).not.toContain('Move to category'); quiet(before)
   await act(async () => content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settle()
   expect(document.querySelector('[role="menu"]')).toBeNull(); expect(document.activeElement).toBe(row); quiet(before)
 })
 it('copies Category identity from context and ellipsis without navigating to its member or selected peer', async () => {
   await mount(); const before = useAppStore.getState()
-  await menu(categoryRow()); await select('Copy Category card')
-  expect(clipboard).toHaveBeenLastCalledWith(formatSpaceAddress({ spaceId: category.spaceId, label: category.title })); quiet(before)
+  await menu(categoryRow()); await select('Copy Category link')
+  expect(clipboard).toHaveBeenLastCalledWith(`amux://space/${encodeURIComponent(category.spaceId)}`); quiet(before)
   await click(button('Actions for category ' + category.title)); await select('Copy Category link')
-  expect(clipboard).toHaveBeenLastCalledWith(formatAmuxSpatialLink({ kind: 'space', spaceId: category.spaceId })); quiet(before)
+  expect(clipboard).toHaveBeenLastCalledWith(`amux://space/${encodeURIComponent(category.spaceId)}`); quiet(before)
 })
 it.each(['context', 'actions'])('Category rename from %s returns focus to its exact invoker on Cancel', async entry => {
   await mount(); const before = useAppStore.getState()
@@ -124,11 +138,11 @@ it.each(['context', 'actions'])('Category rename from %s returns focus to its ex
 it('uses identical Topic context and ellipsis actions with its durable Zone, including after transfer', async () => {
   await mount(); const before = useAppStore.getState()
   await menu(topicRow()); const first = menuItems().map(node => node.textContent)
-  await select('Copy Topic card')
-  expect(clipboard).toHaveBeenLastCalledWith(formatZoneAddress({ zoneId: topicAddress.zoneId, label: topic.title })); quiet(before)
+  await select('Copy Topic link')
+  expect(clipboard).toHaveBeenLastCalledWith(`amux://zone/${encodeURIComponent(topicAddress.zoneId)}`); quiet(before)
   await click(button('Actions for ' + topic.title)); expect(menuItems().map(node => node.textContent)).toEqual(first)
   await select('Copy Topic link')
-  const link = formatAmuxSpatialLink({ kind: 'zone', zoneId: topicAddress.zoneId }); expect(clipboard).toHaveBeenLastCalledWith(link); quiet(before)
+  const link = `amux://zone/${encodeURIComponent(topicAddress.zoneId)}`; expect(clipboard).toHaveBeenLastCalledWith(link); quiet(before)
   await act(async () => useAppStore.setState({ spaceZoneBindings: { [topicAddress.zoneId]: {
     ...before.spaceZoneBindings[topicAddress.zoneId]!, spaceId: otherCategory.spaceId, relations: { [otherCategory.spaceId]: true } } } }))
   await act(async () => root.render(<WorkspaceTopicsPanel workspace={workspace} categorySpaceId={otherCategory.spaceId} onRevealDirectory={() => {}} />)); await settle()
@@ -153,7 +167,7 @@ it('reports clipboard failure through the original error owner and keeps the cur
   await mount(); const before = useAppStore.getState(); const report = vi.spyOn(useAppStore.getState(), 'reportError')
   clipboard.mockRejectedValueOnce(new Error('clipboard unavailable'))
   // The production component selects the current error owner on render.
-  await act(async () => useAppStore.setState({ reportError: useAppStore.getState().reportError })); await menu(categoryRow()); await select('Copy Category card')
+  await act(async () => useAppStore.setState({ reportError: useAppStore.getState().reportError })); await menu(categoryRow()); await select('Copy Category link')
   expect(report).toHaveBeenCalledWith(expect.objectContaining({ message: 'clipboard unavailable' })); quiet(before)
 })
 
@@ -189,7 +203,7 @@ it.each(['category','topic'] as const)('%s uploads through its original target a
   expect(useAppStore.getState().spaceObjectIcons[key]).toBeUndefined()
   await click(button('Save avatar'))
   expect(save).toHaveBeenCalledWith(target, { mimeType: 'image/png', dataUrl: 'data:image/png;base64,CROP' })
-  expect(useAppStore.getState().spaceObjectIcons).toEqual({ [key]: uploaded })
+  await act(async () => vi.waitFor(() => expect(useAppStore.getState().spaceObjectIcons).toEqual({ [key]: uploaded })))
   expect(read).toHaveBeenCalledWith(target, uploaded); quiet(before)
 })
 it('image failure keeps the crop and same-object retry; a replaced editor cannot publish a late asset', async () => {

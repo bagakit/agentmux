@@ -208,7 +208,7 @@ describe('每个复制入口与菜单注入点都转发给出口', () => {
     //     它们从 `terminal.buffer.active` 取文本，不问选区服务死活，所以 TUI 开着鼠标上报、
     //     xterm 自禁选区、`copySelection` 恒空时，这两条是用户仅剩的复制手段。删掉任一条，
     //     那个场景下的复制就彻底没了。
-    //   · `writeClipboardText` 是终端右键身份簇（Message this Agent / Copy Session Address，
+    //   · `writeClipboardText` 是终端右键身份簇（Message this Agent / Copy Agent Link，
     //     `terminal-identity-menu.ts`）注入给 `terminalIdentityMenuActions` 的写剪贴板回调，
     //     它把 Agent 身份文本落到同一个出口——终端画布这一格复制自身身份的唯一一条路（#901111f6）。
     // 前两条路径逐字相同（同名端口、同一层），故它们之间对调不可观测——见上面「不保证」。

@@ -1,12 +1,12 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it, vi } from 'vitest'
-import { parseAgentMuxControlRequest, formatAmuxSpatialLink, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
+import { parseAgentMuxControlRequest, formatAmuxObjectLink, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
 import { focusFacts } from '../../../packages/core/test/fixtures/desktop-focus-facts'
 import { SpatialLinkIngress, receiveSpatialLinkArguments } from '../src/main/spatial-link-ingress'
 import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 
-const space = (spaceId: string) => formatAmuxSpatialLink({ kind: 'space', spaceId })
-const zone = (zoneId: string) => formatAmuxSpatialLink({ kind: 'zone', zoneId })
+const space = (spaceId: string) => formatAmuxObjectLink({ kind: 'space', spaceId })
+const zone = (zoneId: string) => formatAmuxObjectLink({ kind: 'zone', zoneId })
 const settled = async () => { await new Promise(resolve => setImmediate(resolve)) }
 function ports() {
   const requests: AgentMuxControlFocusRequest[] = [], signals: AbortSignal[] = []
@@ -14,7 +14,8 @@ function ports() {
     if (request.operation !== 'focus') throw new Error('Expected an exact focus request.')
     expect(parseAgentMuxControlRequest(request)).toEqual(request)
     requests.push(request); signals.push(signal)
-    return { ...focusFacts(request), presentation: { provenance: 'observed' as const, state: 'main-visible' as const,
+    return { ...focusFacts(request), navigation: { ...focusFacts(request).navigation,
+      ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }) }, presentation: { provenance: 'observed' as const, state: 'main-visible' as const,
       tabId: null, regionId: null, blockers: [] } }
   })
   return { requests, signals, execute, report: vi.fn() }
@@ -43,7 +44,7 @@ describe('the single native spatial link ingress', () => {
   })
   it('rejects a malformed or unsupported URI and reports recovery without executing it or losing the current workface', async () => {
     const ingress = new SpatialLinkIngress(), p = ports()
-    ingress.receive(zone('valid-but-old')); ingress.receive('amux://agent/unconfirmed-route')
+    ingress.receive(zone('valid-but-old')); ingress.receive('amux://run/unconfirmed-route')
     ingress.ready(p.execute, p.report); await settled()
     expect(p.execute).not.toHaveBeenCalled(); expect(p.report).toHaveBeenCalledTimes(1)
     expect(p.report.mock.calls[0]![0]).toContain('current workface is kept')
@@ -103,8 +104,75 @@ it('reports an interrupted original link once on readiness without replaying the
   ingress.unavailable(); expect(p.signals[0]!.aborted).toBe(true)
   ingress.ready(p.execute, p.report); await settled()
   expect(p.report).toHaveBeenCalledTimes(1); expect(p.report.mock.calls[0]![0]).toContain('interrupted before confirmation')
-  expect(p.report.mock.calls[0]![0]).toContain('retry the exact Space or Zone link')
+  expect(p.report.mock.calls[0]![0]).toContain('retry the exact object link')
   finish(focusFacts(original)); await settled()
   ingress.ready(p.execute, p.report); await settled()
   expect(p.execute).toHaveBeenCalledTimes(1); expect(p.report).toHaveBeenCalledTimes(1)
+})
+
+
+function agentCatalog(locations: number) {
+  return { spaces: [], zones: [], tabs: [], bindings: [],
+    regions: [{ regionId: 'R', tabId: 'T', kind: 'agent' as const, agentSessionId: 'original SID', runId: 'original-run', execution: { hostId: 'local', cwd: _hygiene_fixturePath("original") } }],
+    locations: Array.from({ length: locations }, (_, index) => ({ regionId: 'R', tabId: 'T', groupId: 'G' + index,
+      workspaceId: 'execution-workspace', displayWorkspaceId: 'display-workspace', spaceId: null, zoneId: null })) }
+}
+
+it.each(['cold', 'warm'])('opens a %s Agent link at its one exact position with an original SID condition', async mode => {
+  const ingress = new SpatialLinkIngress(), p = ports()
+  p.execute.mockImplementationOnce(async request => {
+    expect(request.operation).toBe('space.ls')
+    return { operation: 'space.ls', catalog: agentCatalog(1) }
+  })
+  if (mode === 'warm') ingress.ready(p.execute, p.report)
+  ingress.receive('amux://agent/original%20SID')
+  if (mode === 'cold') { expect(p.execute).not.toHaveBeenCalled(); ingress.ready(p.execute, p.report) }
+  await settled()
+  expect(p.requests).toHaveLength(1)
+  expect(p.requests[0]).toMatchObject({ operation: 'focus', inputPolicy: 'preserve', expectedAgentSessionId: 'original SID',
+    target: { kind: 'space', regionId: 'R', tabId: 'T', displayWorkspaceId: 'display-workspace', groupId: 'G0' } })
+  expect(p.execute).toHaveBeenCalledTimes(2)
+  expect(p.report).not.toHaveBeenCalled()
+})
+
+it.each([0, 2])('keeps the current workface for %i Agent display candidates without guessing or replacing a Session', async count => {
+  const ingress = new SpatialLinkIngress(), p = ports()
+  p.execute.mockImplementationOnce(async () => ({ operation: 'space.ls', catalog: agentCatalog(count) }))
+  ingress.ready(p.execute, p.report); ingress.receive('amux://agent/original%20SID'); await settled()
+  expect(p.execute).toHaveBeenCalledTimes(1)
+  expect(p.requests).toEqual([])
+  expect(p.report).toHaveBeenCalledTimes(1)
+  expect(p.report.mock.calls[0]![0]).toContain(`${count} confirmed display candidates`)
+  expect(p.report.mock.calls[0]![0]).toContain("amux agent inspect --session='original SID'")
+  expect(p.report.mock.calls[0]![0]).toContain('existence and health are not determined')
+  if (count === 2) {
+    expect(p.report.mock.calls[0]![0]).toContain('G0')
+    expect(p.report.mock.calls[0]![0]).toContain('G1')
+  }
+})
+
+it.each([{ kind: 'region' as const, regionId: 'exact/region' }, { kind: 'tab' as const, tabId: 'exact/tab' }])('opens an exact $kind link without converting it to an Agent identity', async target => {
+  const ingress = new SpatialLinkIngress(), p = ports(); ingress.ready(p.execute, p.report)
+  ingress.receive(formatAmuxObjectLink(target)); await settled()
+  const { kind, ...selector } = target
+  expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', ...selector }])
+  expect(p.requests[0]!.expectedAgentSessionId).toBeUndefined()
+  expect(p.execute).toHaveBeenCalledTimes(1)
+})
+
+it('does not focus an old Agent location when a newer intent arrives during discovery', async () => {
+  const ingress = new SpatialLinkIngress(), p = ports()
+  let finish!: (result: AgentMuxControlResult) => void
+  let discoverySignal!: AbortSignal
+  p.execute.mockImplementationOnce(async (_request, signal) => {
+    discoverySignal = signal
+    return await new Promise(resolve => { finish = resolve })
+  })
+  ingress.ready(p.execute, p.report); ingress.receive('amux://agent/original%20SID')
+  ingress.receive(zone('newer')); await settled()
+  expect(discoverySignal.aborted).toBe(true)
+  finish({ operation: 'space.ls', catalog: agentCatalog(1) }); await settled()
+  expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'newer' }])
+  expect(p.execute).toHaveBeenCalledTimes(2)
+  expect(p.report).not.toHaveBeenCalled()
 })

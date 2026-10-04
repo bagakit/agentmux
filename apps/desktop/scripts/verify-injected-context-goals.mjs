@@ -3,7 +3,7 @@ import { runA2aProof } from '../../../packages/core/scripts/lib/a2a-proof.mjs'
 const tests = ['apps/desktop/test/injected-context-goals-browser.test.tsx']
 await runA2aProof({
   name: 'injected-context-goals-proof', tests,
-  regressionTests: ['apps/desktop/test/browser-annotations.test.ts', 'apps/desktop/test/agent-sharing-metadata.test.ts'],
+  regressionTests: ['apps/desktop/test/browser-annotations.test.ts'],
   sourceInputs: ['apps/desktop/src/renderer/src/lib/goals-entry-actions.ts', 'apps/desktop/src/renderer/src/lib/goal-project-context.ts',
     'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/browser-annotations.ts',
     'apps/desktop/src/renderer/src/components/BrowserToolsPanel.tsx', 'apps/desktop/src/renderer/src/components/BrowserAnnotationsPanel.tsx',

@@ -31,7 +31,7 @@ app.whenReady().then(async () => { try {
     const empty=g.rows.find(e=>e.id==='recap-b');assert.ok(empty);assert.equal(empty.detail.text,'No activity details observed')
     await shot('cards-'+width+'.png','original cards + minimum160 + compact28')
   }
-  await mouse(row('recap-b'),'right'); await menuSettled(); assert.deepEqual(await menuItems(),['Message this Agent','Copy Session Address'])
+  await mouse(row('recap-b'),'right'); await menuSettled(); assert.deepEqual(await menuItems(),['Rename Agent','Copy Agent Link','Stop Agent'])
   result.pointerMenu={bounds:await rect('.focus-context-menu'),sessionId:await read('document.querySelector(".focus-context-menu").dataset.agentSessionId')};assert.equal(result.pointerMenu.sessionId,'recap-b')
   await shot('pointer-menu-360.png','same-name second SID exact original Session menu')
   await mouse('.focus-context-menu [role=menuitem]:last-child');await until('menu selected',()=>read('!document.querySelector(".focus-context-menu")'))

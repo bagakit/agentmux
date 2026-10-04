@@ -156,7 +156,7 @@ describe('组件把这些值渲染出去', () => {
    * 这个节点是不是长在一次 `xs.map(...)` 迭代里——即它是**数据驱动的动态列表项**，而不是一行写死
    * 标签的静态菜单项。
    *
-   * 身份那一簇（Message this Agent / Copy Session Address）是 `identityActions.map(...)` 画出来的
+   * 身份那一簇（Message this Agent / Copy Agent Link）是 `identityActions.map(...)` 画出来的
    * （`terminal-identity-menu.ts` 的数据 → JSX），它们**没有键位**：注册表里根本没有对应的和弦，
    * 是右键菜单专属入口，其接线由 `terminal-context-menu-identity.test.ts` 单独守。所以按**结构**把
    * 它们从这张「每行读自己那个 action 键位」的判据里排除——按结构（在不在 `.map` 里）而不是按标签

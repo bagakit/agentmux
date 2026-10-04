@@ -217,7 +217,7 @@ it('foreign and nonfirst Group presentations select their own exact occurrence t
       expect(contexts).toEqual([frame])
       await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelectorAll('.region-context-menu')).toHaveLength(1) })
       const menu = document.querySelector<HTMLElement>('.region-context-menu')!
-      expect(menu.textContent).toContain('Copy Session Address')
+      expect(menu.textContent).toContain('Copy Agent Link')
       await act(async () => menu.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
     } finally { document.removeEventListener('contextmenu', onContext) }
     await act(async () => useAppStore.setState({ activeWorkspaceId: scene.workspace.id }))

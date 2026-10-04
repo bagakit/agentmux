@@ -1,5 +1,6 @@
 import { webcrypto } from 'node:crypto'
 import { vi } from 'vitest'
+import { providerCatalogReader } from './startup-observation-api-fixture'
 import type { ScratchTopicSnapshot } from '../../src/shared/scratch-topics'
 import { api } from '../../src/renderer/src/lib/api'
 import { useAppStore } from '../../src/renderer/src/store'
@@ -10,7 +11,7 @@ export async function initializeSpatialControlFixture(topics: ScratchTopicSnapsh
   if (!arranged.config) throw new Error('Arrange the explicit configuration before spatial Control.')
   vi.stubGlobal('crypto', webcrypto)
   vi.spyOn(api.config, 'get').mockResolvedValue(arranged.config)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockImplementation(providerCatalogReader())
   vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(topics)
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({

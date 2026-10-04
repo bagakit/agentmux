@@ -7,7 +7,7 @@ import { join, resolve } from 'node:path'
 import { AgentMuxControlServer } from '../../../packages/core/dist/control-host.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { formatAmuxSpatialLink, parseAmuxSpatialLink, parseAgentMuxControlRequest, type TopicCategory } from '@agentmux/core'
+import { formatAmuxObjectLink, parseAmuxObjectLink, parseAgentMuxControlRequest, type TopicCategory } from '@agentmux/core'
 import type { AppConfig, ScratchTopicSnapshot } from '../src/shared/contracts'
 import { directoryIdentity, originalTopicAddress } from '../src/shared/space-addresses'
 import { api } from '../src/renderer/src/lib/api'
@@ -15,6 +15,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { spatialCatalog } from '../src/renderer/src/lib/space-agent-control'
 import { DesktopFocusFailure, resolveDesktopSpaceSelection } from '../src/renderer/src/lib/desktop-focus-navigation'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { SpatialLinkIngress } from '../src/main/spatial-link-ingress'
 import { SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 
 const initial = useAppStore.getState()
@@ -77,8 +78,8 @@ describe('original Space focus resolver and control owner', () => {
   })
   it('resolves a copied original Zone after a Category transfer and rejects real multiple parents without guessing', () => {
     const { state } = arrange(1), target = originalTopicAddress(workspace, topics[0]!, {})!
-    const raw = formatAmuxSpatialLink({ kind: 'zone', zoneId: target.zoneId })
-    const parsed = parseAmuxSpatialLink(raw); expect(parsed.kind).toBe('zone')
+    const raw = formatAmuxObjectLink({ kind: 'zone', zoneId: target.zoneId })
+    const parsed = parseAmuxObjectLink(raw); expect(parsed.kind).toBe('zone')
     const moved = { ...state, spaceZoneBindings: { ...state.spaceZoneBindings, [target.zoneId]: { ...state.spaceZoneBindings[target.zoneId]!, relations: { [work.spaceId]: false, [ideas.spaceId]: true } } } }
     expect(resolveDesktopSpaceSelection(moved, spatialCatalog(moved, [topics[0]!]), { zoneId: target.zoneId })).toMatchObject({ spaceId: ideas.spaceId, zoneId: target.zoneId, topicId: topics[0]!.id })
     const shared = { ...moved, spaceZoneBindings: { ...moved.spaceZoneBindings, [target.zoneId]: { ...moved.spaceZoneBindings[target.zoneId]!, relations: { [work.spaceId]: true, [ideas.spaceId]: true } } } }
@@ -165,4 +166,114 @@ describe('original Space focus resolver and control owner', () => {
     expect(useAppStore.getState().mainSurface).toBe(state.mainSurface); expect(useAppStore.getState().workbenchSpaceSelection).toBeNull()
     expect(useAppStore.getState().tabs).toBe(state.tabs); expect(subscribe).toHaveBeenCalledTimes(1)
   })
+})
+
+
+it.each([false, true])('opens an Agent URI via the original service/Store and guards against a replaced occupant (replace=%s)', async replace => {
+  vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve(import.meta.dirname, '../../../packages/core/bin/agentmux'))
+  const { state, catalog } = arrange(1)
+  const originalRegion = catalog.regions.find(region => region.agentSessionId === 'healthy:view:one')!
+  expect(originalRegion).toBeDefined()
+  const beforeSelection = useAppStore.getState().workbenchSpaceSelection
+  const beforeTabs = useAppStore.getState().tabs
+  const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-agent-link-"))
+  const requests: unknown[] = []
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'control.sock'), coreClients: () => [], execute: async request => {
+    requests.push(request)
+    return await useAppStore.getState().executeControl(request)
+  } })
+  await server.start()
+  try {
+    const link = formatAmuxObjectLink({ kind: 'agent', agentSessionId: 'healthy:view:one' })
+    expect(link).toBe('amux://agent/healthy%3Aview%3Aone')
+    const parsed = parseAmuxObjectLink(link)
+    expect(parsed.kind).toBe('agent')
+    if (parsed.kind !== 'agent') throw new Error('Expected semantic Agent URI')
+    const discovery = await runCompiledObjectCli(['space', 'ls'], objectCliEnvironment(root))
+    expect(discovery.code, discovery.stderr).toBe(0)
+    const discovered = JSON.parse(discovery.stdout).result.catalog
+    const location = discovered.locations.find((candidate: { regionId: string }) => candidate.regionId === originalRegion.regionId)
+    expect(location).toBeDefined()
+    if (replace) {
+      const originalTab = useAppStore.getState().tabs[originalRegion.tabId]!
+      useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [originalTab.id]: { ...originalTab,
+        regions: { ...originalTab.regions, [originalRegion.regionId]: { ...originalTab.regions[originalRegion.regionId]!, sessionId: 'replacement-session' } } } } })
+    }
+    const output = await runCompiledObjectCli(['space', 'focus', '--region', location.regionId,
+      '--display-workspace', location.displayWorkspaceId, '--group', location.groupId,
+      '--expect-session', parsed.agentSessionId], objectCliEnvironment(root))
+    // The Store is intentionally unmounted; actual DOM/input remain unconfirmed.
+    expect(output.code, output.stderr).toBe(1)
+    const body = JSON.parse(output.stdout || output.stderr)
+    expect(body.ok).toBe(true)
+    expect(body.result.navigation.expectedAgentSessionId).toBe(parsed.agentSessionId)
+    if (replace) {
+      expect(body.result.navigation.state).toBe('rejected')
+      expect(body.result.issues.map((issue: { code: string }) => issue.code)).toContain('AGENT_LOCATION_CHANGED')
+      expect(useAppStore.getState().workbenchSpaceSelection).toBe(beforeSelection)
+      expect(useAppStore.getState().tabs[originalRegion.tabId]!.regions[originalRegion.regionId]).toMatchObject({ sessionId: 'replacement-session' })
+    } else {
+      expect(body.result.navigation.state).toBe('applied')
+      expect(body.result.navigation.selection.space).toMatchObject({ regionId: originalRegion.regionId, tabId: originalRegion.tabId })
+      expect(useAppStore.getState().tabs).toEqual(beforeTabs)
+    }
+    expect(requests).toEqual([expect.objectContaining({ operation: 'space.ls' }), expect.objectContaining({ operation: 'focus', expectedAgentSessionId: parsed.agentSessionId })])
+    expect(useAppStore.getState().sessions).toBe(state.sessions)
+    expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+  } finally { await server.stop(); await rm(root, { recursive: true }) }
+}, 30_000)
+
+it('routes an Agent link through the real Main ingress and Store without invoking lifecycle actions', async () => {
+  const { state } = arrange(1)
+  const ingress = new SpatialLinkIngress(), seen: string[] = [], reports: string[] = []
+  let settled!: () => void
+  const completed = new Promise<void>(resolve => { settled = resolve })
+  ingress.receive('amux://agent/healthy%3Aview%3Aone')
+  ingress.ready(async (request, signal) => {
+    seen.push(request.operation)
+    const result = await useAppStore.getState().executeControl(request, signal)
+    if (request.operation === 'focus') settled()
+    return result
+  }, message => reports.push(message))
+  await completed
+  await new Promise(resolve => setImmediate(resolve))
+  expect(seen).toEqual(['space.ls', 'focus'])
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: 'chat:view:one', regionId: 'region:view:one' })
+  expect(useAppStore.getState().tabs).toEqual(state.tabs)
+  expect(useAppStore.getState().sessions).toBe(state.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
+  expect(reports).toHaveLength(1)
+  expect(reports[0]).toContain('presentation: unknown')
+})
+
+
+it('reports the original Agent link unconfirmed if its occupant changes during the final persistence await', async () => {
+  vi.spyOn(api.config, 'get').mockResolvedValue(config)
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] })
+  vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  const dispose = await useAppStore.getState().initialize()
+  expect(useAppStore.getState().loading).toBe(false)
+  dispose()
+  const { state, catalog } = arrange(1)
+  const region = catalog.regions.find(item => item.agentSessionId === 'healthy:view:one')!
+  const reachedFlush = new Promise<void>(resolve => {
+    vi.mocked(api.ui.requestStorageFlush).mockImplementationOnce(async () => {
+      const tab = useAppStore.getState().tabs[region.tabId]!
+      useAppStore.setState({ tabs: { ...useAppStore.getState().tabs, [tab.id]: { ...tab,
+        regions: { ...tab.regions, [region.regionId]: { ...tab.regions[region.regionId]!, sessionId: 'later-session' } } } } })
+      resolve()
+    })
+  })
+  const result = await state.executeControl(parseAgentMuxControlRequest({ schemaVersion: 5, requestId: 'flush-race', operation: 'focus',
+    target: { kind: 'space', regionId: region.regionId }, inputPolicy: 'preserve', expectedAgentSessionId: 'healthy:view:one' }))
+  await reachedFlush
+  expect(result.operation).toBe('focus')
+  if (result.operation !== 'focus') throw new Error('Expected focus')
+  expect(result.navigation.state).toBe('unconfirmed')
+  expect(result.navigation.expectedAgentSessionId).toBe('healthy:view:one')
+  expect(result.issues.map(issue => issue.code)).toContain('AGENT_LOCATION_CHANGED')
+  expect(useAppStore.getState().tabs[region.tabId]!.regions[region.regionId]).toMatchObject({ sessionId: 'later-session' })
+  expect(useAppStore.getState().sessions).toBe(state.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(state.agentComposerDrafts)
 })

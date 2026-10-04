@@ -321,8 +321,9 @@ async function selection(label,width,input='mouse') {
   for(const event of events){assert.equal(event.label,label==='Split'?'Split Down':label);assert.equal(event.owner,leftId);assert.equal(event.open,true);assert.equal(event.active,rightId)}
   if(input!=='keyboard')assert.equal(events[0].pointerType,input)
   assert.deepEqual(after.sessions,before.sessions);assert.equal(after.draft,before.draft)
-  if(label==='Copy Region Address'){
-    assert.equal(after.clipboard.length,before.clipboard.length+1);assert.equal(after.clipboard.at(-1),before.regionAddress)
+  if(label==='Copy Region Link'||label==='Copy Agent Link'){
+    const expected=label==='Copy Region Link'?`amux://region/${encodeURIComponent(leftId)}`:`amux://agent/${encodeURIComponent(before.tab.regions[leftId].sessionId)}`
+    assert.equal(after.clipboard.length,before.clipboard.length+1);assert.equal(after.clipboard.at(-1),expected)
     assert.equal(after.active,rightId)
   }else if(label==='Split'){
     const root=after.tab.layout.root;assert.equal(root.type,'split');assert.deepEqual(root.second,{type:'leaf',regionId:rightId})
@@ -347,6 +348,10 @@ app.whenReady().then(async()=>{
     }
     else if(probe==='name'){await seed(640);result.names=await identity()}
     else if(probe==='target')await selection('Split',320)
+    else if(probe==='links'){
+      for(const width of [640,320])for(const label of ['Copy Agent Link','Copy Region Link'])for(const input of ['mouse','touch','keyboard'])await selection(label,width,input)
+      assert.equal(result.selections.length,12)
+    }
     else if(probe.startsWith('swap-'))result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
     else{
       for(const width of [640,420,320])for(const mode of ['terminal','activity','history','cold','notice','search','readonly']){
@@ -365,8 +370,8 @@ app.whenReady().then(async()=>{
         const png=await capture(`${width}-${mode}`);result.frames.push({width,mode,names,entries,before,hover,keyboard,after,hit,png,menuPng})
       }
       assert.equal(result.frames.length,21)
-      for(const width of [640,320])for(const label of ['Copy Region Address','Split','Move to New Tab'])await selection(label,width)
-      await selection('Copy Region Address',320,'touch');await selection('Copy Region Address',320,'keyboard')
+      for(const width of [640,320])for(const label of ['Copy Region Link','Split','Move to New Tab'])await selection(label,width)
+      await selection('Copy Region Link',320,'touch');await selection('Copy Region Link',320,'keyboard')
       assert.equal(result.selections.length,8)
       result.swap=await swapProof({win,evaluate,waitFor,painted,open,close,click,point,key,geometry,capture,probe,report:value=>result.swap=value})
     }

@@ -417,15 +417,15 @@ async function headerScenes(layoutOnly = false) {
   await evaluate('qualityProbe.focusNeighbor()')
   await painted()
   const labels = await evaluate(`[...document.querySelectorAll('.agent-region-menu [role="menuitem"]')].map(e=>e.innerText.trim())`)
-  assert.ok(labels.length > 0 && labels.includes('Copy Region Address'), 'Actual precise Region menu consumer must be present')
+  assert.ok(labels.length > 0 && labels.includes('Copy Region Link'), 'Actual precise Region menu consumer must be present')
   result.headerMenuTrace = []
   for (let n = 0; n < labels.length + 2; n++) {
-    if (await evaluate(`document.activeElement?.innerText.trim()==='Copy Region Address'`)) break
+    if (await evaluate(`document.activeElement?.innerText.trim()==='Copy Region Link'`)) break
     await key('ArrowDown','ArrowDown',40)
     await delay(35)
     result.headerMenuTrace.push(await evaluate(`({active:document.activeElement?.outerHTML.slice(0,300),selected:qualityProbe.facts().tab.layout.activeRegionId})`))
   }
-  assert.equal(await evaluate(`document.activeElement?.innerText.trim()`), 'Copy Region Address')
+  assert.equal(await evaluate(`document.activeElement?.innerText.trim()`), 'Copy Region Link')
   const count = await evaluate('qualityProbe.facts().clipboard.length')
   await key('Enter','Enter',13,'\r'); await waitFor(`qualityProbe.facts().clipboard.length>${count}`)
   const copied = await evaluate('qualityProbe.facts()')

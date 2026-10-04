@@ -53,7 +53,7 @@ describe('single-line session tab projection', () => {
     expect(workspaceWorkbenchSource).toContain('pane-action pane-action--stop')
     // Tab 菜单仍提供 Session 身份的复制；它现在产出的是自足的**地址**而非裸 id
     // （见 agent-address.ts），所以这里跟着标签走。
-    expect(workbenchTabMenuSource).toContain('Copy Session Address')
+    expect(workbenchTabMenuSource).toContain('Copy Agent Link')
   })
 
   it('makes stopping the default Agent Tab close action while preserving an explicit background option', () => {
