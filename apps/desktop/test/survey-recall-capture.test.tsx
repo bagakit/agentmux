@@ -66,6 +66,7 @@ it('the mounted Save finding action saves through production owners and offers a
   await act(async () => useLauncherState.getState().setDraft(target.draftId, 'note', 'A mounted finding'))
   await act(async () => (document.querySelector('.survey-recall-capture .primary-button') as HTMLButtonElement).click())
   expect(api.files.createPublic).toHaveBeenCalledOnce()
+  expect(JSON.parse([...body.values()][0]!.content).content.content[0].content[0].text).toBe('A mounted finding')
   expect(Object.values(catalog.pages)[0]!.sources).toEqual([target.source])
   expect(document.body.textContent).toContain('Saved to 随手记.')
   expect(document.body.textContent).toContain('Open in Recall')
