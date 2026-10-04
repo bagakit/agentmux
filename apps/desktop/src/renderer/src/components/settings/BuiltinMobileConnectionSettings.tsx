@@ -7,7 +7,7 @@ import { SettingsNavigation } from '../SettingsNavigation'
 import { MOBILE_CONNECTION_TOOL_ID } from '../../../../shared/toolkit-preferences'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 
 export function BuiltinMobileConnectionSettings({ preferences, active, onSave }: {
   preferences: MobileConnectionPreferences

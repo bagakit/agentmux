@@ -1,54 +1,32 @@
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
-import { TopicNavigationPanel } from './TopicNavigationPanel'
-import { TopicKnowledgeCapture } from './TopicKnowledgeEditor'
-import { selectedKnowledgeSources } from '../lib/topic-knowledge-actions'
-import { useScratchTopics } from '../hooks/useScratchTopics'
-import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath, scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
-import { directoryIdentity } from '../../../shared/space-addresses'
-import { isKnowledgeTopicInBindings } from '../../../shared/topic-categories'
-import { MoteDetailsPanel } from './MoteDetailsPanel'
-import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { AgentContextContent } from './AgentContextContent'
 import { useShallow } from 'zustand/react/shallow'
 import { agentContextForSession, FOCUS_COLUMNS, groupFocusContexts, focusNeutralGroupSummary, type FocusColumn } from '../lib/focus-context'
-import { useMoteWorkfaceScope } from '../lib/mote-workface'
-import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import {
   ArrowUpRight,
   Bot,
-  ChevronDown,
-  ChevronRight,
   FolderGit2,
   NotebookText,
-  Plus,
-  RadioTower,
-  RefreshCw
+  Plus
 } from 'lucide-react'
-import { memo, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useContext, useMemo } from 'react'
 import type {
   SessionSnapshot,
   WorkspaceRecord
 } from '../../../shared/contracts'
 import { isScratchWorkspaceId } from '../../../shared/contracts'
-import { workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import {
   contentSlotPresentation,
-  resolveExplorerCollapsed,
   resolveWorkspaceTools,
   workspaceAgentSessions,
   type WorkspaceTool
 } from '../lib/surface-tool-dock'
 import { CONTEXT_PRESSURE_HINT, contextPressure, contextUsedPercent } from '../lib/agent-usage'
 import { useAppStore } from '../store'
-import { usePathDisplay } from '../hooks/usePathDisplay'
-import { useGitHistory } from '../hooks/useGitHistory'
-import { BranchesPanel } from './BranchesPanel'
-import { ChangesPanel } from './ChangesPanel'
-import { GitHistoryPanel } from './GitHistoryPanel'
-import { LiquidSelectionSurface } from './settings/LiquidSelectionSurface'
-import { FileExplorer, type FileExplorerRevealRequest } from './FileExplorer'
+import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { WorkspaceFilesTool } from './WorkspaceFilesTool'
+import { scratchTopicIdFromWorkspacePath } from '../../../shared/scratch-topics'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels'
 
 type ToolDefinition<T extends string> = {
   id: T
@@ -60,184 +38,6 @@ type ToolDefinition<T extends string> = {
 const WORKSPACE_TOOL_META: Record<WorkspaceTool, Omit<ToolDefinition<WorkspaceTool>, 'id'>> = {
   'files-branches': { label: 'Files + Branches', description: 'Browse the selected worktree', icon: FolderGit2 },
   agents: { label: 'Agents', description: 'Find Agents that remain available after their Tab closes', icon: Bot }
-}
-
-export function WorkspaceFilesTool({
-  workspace,
-  isScratch,
-  visible,
-  topicId,
-  onOpenPath,
-  onOpenTerminal,
-  reference
-}: {
-  workspace: WorkspaceRecord
-  isScratch: boolean
-  visible: boolean
-  topicId?: string | undefined
-  reference?: WorkbenchProjectionSelection | null | undefined
-  onOpenPath?: ((path: string) => Promise<unknown>) | undefined
-  onOpenTerminal?: ((path: string) => Promise<unknown>) | undefined
-}) {
-  const mote = useMoteWorkfaceScope(workspace.id, topicId, visible)
-  const choice = useAppStore(state => state.workbenchSpaceSelection?.workspaceId === workspace.id ? state.workbenchSpaceSelection : null)
-  const scratch = useAppStore(state => state.config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID))
-  const { topics: knownTopics } = useScratchTopics(scratch?.id ?? null, visible)
-  const bindings = useAppStore(state => state.spaceZoneBindings)
-  const selectedTopicId = topicId ?? choice?.topicId
-  const knowledgeTopic = !mote && selectedTopicId ? knownTopics?.find(topic => topic.id === selectedTopicId && isKnowledgeTopicInBindings(topic, bindings)) : undefined
-  const topicRoot = knowledgeTopic && scratch ? scratchTopicLogicalPath(scratch, knowledgeTopic) : null
-  const canCollectKnowledge = !mote && (!selectedTopicId || Boolean(knowledgeTopic && topicRoot !== null))
-  const categories = useAppStore(state => state.topicCategories)
-  const category = !mote ? categories.find(category => category.spaceId === choice?.spaceId) : undefined
-  // Retain the requested Category even while its description is unavailable.
-  const categorySpaceId = !mote && choice?.spaceId && choice.spaceId !== directoryIdentity(workspace.hostId, workspace.path) ? choice.spaceId : undefined
-  const [capture, setCapture] = useState<ReturnType<typeof selectedKnowledgeSources>>(null)
-  const materials = useMoteMaterialsActions(mote)
-  const [createFileRequest, setCreateFileRequest] = useState<{ requestId: number; parentPath: string }>()
-  const presentation = contentSlotPresentation(isScratch)
-  const displayPath = usePathDisplay()
-  const [toolbarTarget, setToolbarTarget] = useState<HTMLDivElement | null>(null)
-  const explorerCollapsedOverride = useAppStore((state) => state.explorerCollapsed[workspace.id])
-  const setExplorerCollapsed = useAppStore((state) => state.setExplorerCollapsed)
-  // 解析一次、读写复用：折叠态既决定渲染哪一支（读），又是 toggle 写入的取反基准（写）。分开算两次
-  // 就是本仓踩过的「读的 key 与写的 key 漂移」——所以这里只有这一个 const，写入点直接取反它。
-  const collapsed = resolveExplorerCollapsed(explorerCollapsedOverride, presentation.explorerCollapsedByDefault)
-  const [explorerRevealRequest, setExplorerRevealRequest] = useState<FileExplorerRevealRequest>()
-  const explorerRevealRequestId = useRef(0)
-  // The content slot's bottom half is Branches by default (unchanged behavior); a real project can
-  // switch it to Source Control changes. Scratch never shows this — it renders Topics instead.
-  const [bottomView, setBottomView] = useState<'branches' | 'changes' | 'history'>('branches')
-  // Completed pages survive a file-tree split or collapse in their original owner.
-  const history = useGitHistory(workspace, visible && !presentation.showTopics && !mote && bottomView === 'history')
-
-  function revealDirectoryInExplorer(path: string): void {
-    explorerRevealRequestId.current += 1
-    setExplorerRevealRequest({
-      workspaceId: workspace.id,
-      path,
-      requestId: explorerRevealRequestId.current
-    })
-  }
-
-  const bottomHalf = mote ? <MoteDetailsPanel key={mote.topic.id} scope={mote} reference={reference} active={visible}
-    onOpenPath={onOpenPath ?? materials.open} onCreateNote={() => {
-      setExplorerCollapsed(workspace.id, false)
-      setCreateFileRequest({ requestId: ++explorerRevealRequestId.current, parentPath: mote.rootPath })
-    }} /> : presentation.showTopics ? (
-    <TopicNavigationPanel workspace={workspace} topic={knowledgeTopic} selectedTopicId={selectedTopicId}
-      topics={knownTopics ?? []} categorySpaceId={categorySpaceId} visible={visible} onRevealDirectory={revealDirectoryInExplorer} />
-  ) : (
-    <div className="content-slot-source-control">
-      <div className="source-control-switch" role="tablist" aria-label="Source control view" onKeyDown={(event) => {
-        if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
-        const tabs = [...event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
-        const index = tabs.indexOf(event.target as HTMLButtonElement)
-        if (index < 0 || tabs.length === 0) return
-        event.preventDefault()
-        const next = event.key === 'Home' ? 0 : event.key === 'End' ? tabs.length - 1 : (index + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length
-        tabs[next]!.focus()
-        tabs[next]!.click()
-      }}>
-        <LiquidSelectionSurface selected={bottomView} active={visible} targetAttribute="data-git-view" />
-        <button
-          type="button"
-          role="tab"
-          data-git-view="branches"
-          aria-selected={bottomView === 'branches'}
-          tabIndex={bottomView === 'branches' ? 0 : -1}
-          className={bottomView === 'branches' ? 'selected' : ''}
-          onClick={() => setBottomView('branches')}
-        >
-          Branches
-        </button>
-        <button
-          type="button"
-          role="tab"
-          data-git-view="changes"
-          aria-selected={bottomView === 'changes'}
-          tabIndex={bottomView === 'changes' ? 0 : -1}
-          className={bottomView === 'changes' ? 'selected' : ''}
-          onClick={() => setBottomView('changes')}
-        >
-          Changes
-        </button>
-        <button
-          type="button"
-          role="tab"
-          data-git-view="history"
-          aria-selected={bottomView === 'history'}
-          tabIndex={bottomView === 'history' ? 0 : -1}
-          className={bottomView === 'history' ? 'selected' : ''}
-          onClick={() => setBottomView('history')}
-        >
-          History
-        </button>
-      </div>
-      {bottomView === 'branches' && <BranchesPanel workspace={workspace} />}
-      {bottomView === 'changes' && <ChangesPanel workspace={workspace} />}
-      <div className="source-control-history" hidden={bottomView !== 'history'}>
-        <GitHistoryPanel workspace={workspace} history={history} />
-      </div>
-    </div>
-  )
-
-  return (
-    <div className="workspace-tool-explorer">
-      <TopicKnowledgeCapture target={capture} onClose={() => setCapture(null)} />
-      <div className="workspace-tool-context workspace-tool-context--collapsible workspace-tool-context--explorer">
-        <button
-          type="button"
-          className="workspace-tool-context__toggle"
-          // Explorer 的折叠总归一个 chevron 控件，沿用左栏分组头那套（chevron 朝下＝展开、朝右＝收起，
-          // aria-expanded 跟着真实状态）。它常驻在这条 context bar 上而不是塞进 FileExplorer 自己的
-          // header：折叠后 FileExplorer 根本不渲染，把 toggle 放进它就再也收不回来。
-          aria-expanded={!collapsed}
-          aria-label={collapsed ? 'Show file tree' : 'Hide file tree'}
-          title={collapsed ? 'Show file tree' : 'Hide file tree'}
-          onClick={() => setExplorerCollapsed(workspace.id, !collapsed)}
-        >
-          {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-        </button>
-        <span title={displayPath(workspace.path, workspace.hostId)}>
-          <strong>{mote ? mote.topic.title : category?.title ?? knowledgeTopic?.title ?? workspace.name}</strong>
-          {!mote && (isScratch || workspace.branch) ? <small>{isScratch ? 'Knowledge' : workspace.branch}</small> : null}
-        </span>
-        {workspace.hostId !== 'local' ? (
-          <em><RadioTower size={11} /> {workspace.hostId}</em>
-        ) : null}
-        <div className="workspace-tool-context__actions">
-          {canCollectKnowledge ? <button type="button" className="icon-button" aria-label="Collect sources in a knowledge topic" title="Collect sources in a knowledge topic" onClick={() => { try { const target = selectedKnowledgeSources(workspace.id); if (target) setCapture(target); else throw new Error('Choose a file, page or discussion to collect its reference in a knowledge topic.') } catch (error) { useAppStore.getState().reportError(error) } }}><NotebookText size={13} /></button> : null}
-          <div ref={setToolbarTarget} />
-        </div>
-      </div>
-      {collapsed ? (
-        // 折叠＝没有可切分的第二块，所以整块直接由 bottomHalf 占满，不渲染 PanelGroup / 把手（见评审
-        // §2.3.1：折叠态不进 react-resizable-panels，否则折叠状态会有 store 与库两个源）。「可拖但无意义
-        // 的死把手」因此不可能存在——把手根本没被渲染。
-        <div className="workspace-tools-collapsed">{bottomHalf}</div>
-      ) : (
-        <PanelGroup
-          direction="vertical"
-          className="workspace-tools-split"
-          key={presentation.showTopics ? 'content-slot-topics' : 'content-slot-branches'}
-        >
-          <Panel defaultSize={presentation.fileTreeDefaultSize} minSize={presentation.fileTreeMinSize}>
-            {selectedTopicId && !mote && topicRoot === null ? <div className="surface-inline-error" role="status">The selected object's file root is not confirmed. Its original workface is kept.
-              {scratch ? <button type="button" className="icon-button" aria-label="Retry directory discovery" title="Retry directory discovery" onClick={() => void useAppStore.getState().refreshScratchTopics(scratch.id, true)}><RefreshCw size={13} /></button> : null}</div> :
-              <FileExplorer active={visible} key={workspace.id + (mote?.topic.id ?? '')} revealRequest={explorerRevealRequest} toolbarTarget={toolbarTarget}
-                workspaceId={workspace.id} rootPath={mote ? mote.rootPath : topicRoot ?? ''}
-                rootLabel={mote ? mote.topic.title : knowledgeTopic?.title ?? workspace.name} createRequest={createFileRequest} onCreateRequestHandled={() => setCreateFileRequest(undefined)}
-                onOpenPath={mote ? onOpenPath ?? materials.open : onOpenPath} onOpenTerminal={mote ? onOpenTerminal ?? materials.terminal : onOpenTerminal} />}
-          </Panel>
-          <PanelResizeHandle className="workspace-tools-resize-handle" />
-          <Panel defaultSize={100 - presentation.fileTreeDefaultSize} minSize={20}>
-            {bottomHalf}
-          </Panel>
-        </PanelGroup>
-      )}
-    </div>
-  )
 }
 
 const AGENT_GROUP_LABELS: Record<FocusColumn, string> = { attention: 'Needs You', working: 'Working', results: 'Results', idle: 'Idle / Unknown', disconnected: 'Disconnected' }

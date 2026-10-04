@@ -10,7 +10,7 @@ import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { ComposerTextarea } from '../ComposerTextarea'
 import { agentProviderLabel } from '../AgentProviderIcon'
 import { useResourceDrafts } from './use-resource-drafts'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { describeAgentDisplayState } from '../../../../shared/agent-state-presentation'
 
 const promptName = (prompt: ComposerShortcut) => prompt.label.trim() || prompt.keyword.trim() || 'Untitled prompt'

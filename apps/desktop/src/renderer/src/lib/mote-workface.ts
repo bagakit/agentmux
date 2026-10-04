@@ -15,7 +15,6 @@ export const MoteWorkfaceContext = createContext<(MoteWorkfaceScope & {
 
 /** Mote identity owns its files, independently of a member Zone's display Workspace. */
 export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTopicId?: string, active = true): MoteWorkfaceScope | null {
-  const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const topicId = useAppStore(state => {
     if (explicitTopicId) return explicitTopicId
     const choice = state.workbenchSpaceSelection
@@ -23,9 +22,11 @@ export function useMoteWorkfaceScope(workspaceId: string | undefined, explicitTo
     const layout = workspaceId ? state.layouts[workspaceId] : undefined
     return layout ? activeTopicIdFromLayout(layout, state.tabs) : null
   })
-  const { topics } = useScratchTopics(workspace?.id ?? null, active)
-  const bindings = useAppStore(state => state.spaceZoneBindings)
+  const workspace = useAppStore(state => topicId ? state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID) : undefined)
+  const { topics } = useScratchTopics(topicId ? workspace?.id ?? null : null, active)
+  const bindings = useAppStore(state => topicId ? state.spaceZoneBindings : null)
   const origin = useMemo(() => {
+    if (!bindings || !topicId || !workspace) return undefined
     const origins = Object.entries(bindings).filter(([zoneId, origin]) => origin.topicId === topicId &&
       origin.contentKind === 'mote' && origin.workspaceId === workspace?.id && zoneId === homeZoneId(origin.spaceId)).map(([, origin]) => origin)
     return origins.length === 1 ? origins[0] : undefined

@@ -23,7 +23,7 @@ import { TopicCategoryDialog } from '../src/renderer/src/components/TopicCategor
 import { SpaceTopicsTree } from '../src/renderer/src/components/SpaceTopicsTree'
 import { WorkspaceTopicsPanel } from '../src/renderer/src/components/WorkspaceTopicsPanel'
 import { WorkspaceWorkbench } from '../src/renderer/src/components/WorkspaceWorkbench'
-import { WorkspaceFilesTool } from '../src/renderer/src/components/SurfaceToolDock'
+import { WorkspaceFilesTool } from '../src/renderer/src/components/WorkspaceFilesTool'
 import { createWorkbenchTab, fileTabId, documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { selectedKnowledgeSources, moveKnowledgeTopic, openKnowledgeSource } from '../src/renderer/src/lib/topic-knowledge-actions'
 import { desktopBindingsFromSpatial } from '../src/renderer/src/lib/desktop-spatial-state'

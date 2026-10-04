@@ -6,7 +6,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { ToolkitIcon } from '../toolkit/ToolkitIcon'
 import type { ToolkitPackageDescriptor } from '../toolkit/use-toolkit-packages'
 import { ConfirmationDialog } from '../ConfirmationDialog'
-import { LiquidSelectionSurface } from './LiquidSelectionSurface'
+import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './use-toolkit-drafts'
 
