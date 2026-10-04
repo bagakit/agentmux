@@ -19,7 +19,7 @@ export type ConversationReading = {
 }
 type ReadingWindow = { page: AgentSessionHistoryPage; newerOutside: boolean }
 const PAGE_COUNT = 3
-const RECORD_COUNT = 90
+const RECORD_COUNT = 400
 const PAGE_BYTES = 12 * 1024 * 1024
 
 export function conversationReadingAnchor(viewport: HTMLElement): ReadingAnchor | null {
@@ -137,7 +137,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       const pages: AgentSessionHistoryPage[] = []
       let cursor = baseline?.nextCursor ?? undefined
       let bytes = 0
-      const count = baseline ? before ? 1 : Math.max(1, Math.floor((RECORD_COUNT - baseline.items.length) / 30)) : PAGE_COUNT
+      const count = PAGE_COUNT
       for (let i = 0; i < count; i++) {
         const next = await readSessionConversationPage(start.reading.reference, {
           ...(cursor ? { cursor } : {}), ...(source ?? pages[0]?.source ? { source: source ?? pages[0]!.source } : {}) })

@@ -1,6 +1,7 @@
 import { CapturedConversationMessage } from '@agentmux/client-ui/components/CapturedConversationMessage'
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
-import { ArrowLeft, ChevronRight, FileText, Info, LoaderCircle, Pencil, Search } from 'lucide-react'
+import { ArrowLeft, ChevronRight, FileText, Info, Pencil, Search } from 'lucide-react'
+import { WorkflowStatusGlyph } from '@agentmux/client-ui/components/WorkflowObservation'
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type KeyboardEvent } from 'react'
 import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentTimelineItem } from '../../../shared/contracts'
@@ -341,12 +342,12 @@ type UserMessageReadState = {
   onReadEarlier: (trigger: HTMLButtonElement) => void
 }
 
-function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefined }) {
-  if (!read || (!read.loading && !read.error && !read.observationError && !read.windowFrozen && !read.windowIncomplete && !read.hasMore)) return null
+function UserMessageReadNotice({ read, showEarlier = true }: { read: UserMessageReadState | undefined; showEarlier?: boolean }) {
+  if (!read || (!read.loading && !read.error && !read.observationError && !read.windowFrozen && !read.windowIncomplete && !(showEarlier && read.hasMore))) return null
   return (
     <div className="activity-feed__read-notice" role="status">
       <span>
-        {read.loading ? <><LoaderCircle size={12} className="spin" /> Reading native inputs…</> : read.error
+        {read.loading ? <><WorkflowStatusGlyph status="running" /> Reading native inputs…</> : read.error
           ? `Native input read failed: ${read.error.message}. Existing messages are kept.`
           : read.windowFrozen ? 'Native source changed. The current reading window is kept. Read latest records to open a new window.'
           : read.observationError ? `Automatic native updates are unavailable: ${read.observationError.message}. The current reading window is kept; Refresh retries the source.`
@@ -355,7 +356,7 @@ function UserMessageReadNotice({ read }: { read: UserMessageReadState | undefine
       </span>
       {read.error ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>Retry</button> : null}
       {!read.error && (read.windowFrozen || read.observationError) ? <button type="button" className="small-button" disabled={read.loading} onClick={read.onRetry}>{read.windowFrozen ? 'Read latest records' : 'Refresh'}</button> : null}
-      {read.hasMore || read.windowIncomplete ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
+      {showEarlier && (read.hasMore || read.windowIncomplete) ? <button type="button" className="small-button" onClick={(event) => read.onReadEarlier(event.currentTarget)}>Read earlier records</button> : null}
     </div>
   )
 }
@@ -764,9 +765,9 @@ export function ActivityView({
         aria-label={`Return to ${conversationReading.returnLabel ?? 'Activity'}`} onClick={conversationReading.onClose}>
         <ArrowLeft size={12} /> Return</button> : null}
       <span>{readingWindow.historical ? 'Earlier records' : 'Conversation'}</span>
-      {readingWindow.loading ? <LoaderCircle className="spin" size={12} aria-label="Reading records" /> : null}
+      {readingWindow.loading && !ruler.items.length ? <span role="status" aria-live="polite" className="activity-feed__reading-status"><WorkflowStatusGlyph status="running" /> Reading records…</span> : null}
       {readingWindow.historical ? <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.showCurrent}>Current</button> : null}
-      {(readingWindow.historical ? readingWindow.hasMore : Boolean(userMessageRead?.hasMore || userMessageRead?.windowIncomplete || conversationReading.opened)) ?
+      {!(nativeHistoryPage && ruler.items.length) && (readingWindow.historical ? readingWindow.hasMore : Boolean(userMessageRead?.hasMore || userMessageRead?.windowIncomplete || conversationReading.opened)) ?
         <button type="button" className="small-button" disabled={readingWindow.loading || !conversationReading.enabled} onClick={readingWindow.readEarlier}>Earlier</button> : null}
       {readingAction}
     </div> : null}
@@ -775,7 +776,7 @@ export function ActivityView({
     {readingWindow.error ? <div role="status" className="activity-feed__read-notice"><span>{readingWindow.error}</span>
       <button type="button" className="small-button" disabled={readingWindow.loading} onClick={readingWindow.retry}>Retry</button></div> : null}
     {readingWindow.newerOutside ? <div role="status" className="activity-feed__read-notice">More recent records remain available via Current.</div> : null}
-    {!readingWindow.historical ? <UserMessageReadNotice read={userMessageRead ? { ...userMessageRead,
+    {!readingWindow.historical ? <UserMessageReadNotice showEarlier={!conversationReading || !nativeHistoryPage || !ruler.items.length} read={userMessageRead ? { ...userMessageRead,
       onReadEarlier: conversationReading ? readingWindow.readEarlier : userMessageRead.onReadEarlier } : undefined} /> : null}
   </>
 
@@ -914,6 +915,7 @@ export function ActivityView({
         scale={scale}
         selectedIndex={rulerSelectedIndex < 0 ? null : rulerSelectedIndex}
         band={band}
+        {...(conversationReading ? { reading: { loading: readingWindow.loading, hasMore: readingWindow.hasMore, enabled: conversationReading.enabled, onReadEarlier: readingWindow.readEarlier } } : {})}
         recentFraction={ruler.recentFraction}
         activity={activity.segments}
         controls={close => <ConversationRulerControls window={rulerWindow} onWindow={setRulerWindow}
