@@ -7,6 +7,8 @@ import { homedir } from 'node:os'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
+import { FileDiagramRenderer } from './file-diagram-renderer.js'
+import { FileBuilds } from './file-builds.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
 import { TopicSearchHistoryOwner } from './topic-search-history.js'
 import type { SpatialLinkIngress } from './spatial-link-ingress.js'
@@ -232,6 +234,7 @@ export async function registerIpc(args: {
   if (initialBindingError) args.runtime.reportBindingSaveFailure(initialRuntime, initialBindingError)
   let releaseExecutorConfigEdit: (() => void) | undefined
   let toolkit: ToolkitOwner
+  let fileBuilds: FileBuilds | undefined
   const configOwner = new ConfigOwner({
     nameAudit,
     read: () => config,
@@ -248,6 +251,10 @@ export async function registerIpc(args: {
     },
     publish: (saved) => {
       const paletteChanged = saved.appearance.terminalTheme !== config.appearance.terminalTheme
+      for (const previous of config.workspaces) {
+        const next = saved.workspaces.find(item => item.id === previous.id)
+        if (!next || next.hostId !== previous.hostId || next.path !== previous.path) fileBuilds?.invalidateWorkspace(previous.id)
+      }
       config = saved
       toolkit.configurationChanged()
       releaseExecutorConfigEdit?.()
@@ -273,7 +280,9 @@ export async function registerIpc(args: {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
   const htmlPreviews = new HtmlFilePreviews(files, id => config.workspaces.find(item => item.id === id))
-  const releaseHtmlPreviews = () => htmlPreviews.releaseAll()
+  const diagramPreviews = new FileDiagramRenderer()
+  const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
+  const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
   const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, _inPlace: boolean, mainFrame: boolean) => {
     if (mainFrame) releaseHtmlPreviews()
   }
@@ -700,6 +709,36 @@ export async function registerIpc(args: {
     requireTrustedSender('files:releaseHtmlPreview', event)
     if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('HTML preview requires the original application frame.')
     htmlPreviews.release(id)
+  })
+  handleWithEvent('files:renderDiagram', async (event, request: import('../shared/file-diagram').FileDiagramRequest) => {
+    requireTrustedSender('files:renderDiagram', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
+    return await diagramPreviews.render(request)
+  })
+  handleWithEvent('files:cancelDiagram', async (event, id: string) => {
+    requireTrustedSender('files:cancelDiagram', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('Diagram preview requires the original application frame.')
+    diagramPreviews.cancel(id)
+  })
+  handleWithEvent('files:build', async (event, workspaceId: string, request: import('../shared/file-build').FileBuildRequest) => {
+    requireTrustedSender('files:build', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    return await builds.start(workspace(config, workspaceId), request)
+  })
+  handleWithEvent('files:inspectBuild', async (event, id: string) => {
+    requireTrustedSender('files:inspectBuild', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    return builds.inspect(id)
+  })
+  handleWithEvent('files:cancelBuild', async (event, id: string) => {
+    requireTrustedSender('files:cancelBuild', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    return await builds.cancel(id)
+  })
+  handleWithEvent('files:releaseBuild', async (event, id: string) => {
+    requireTrustedSender('files:releaseBuild', event)
+    if (event.senderFrame !== args.window.webContents.mainFrame) throw new Error('File build requires the original application frame.')
+    await builds.release(id)
   })
   handle('files:readBookmark', async (workspaceId: string, path: string) => {
     // 书签读这条走字节而不是 `files.read` 的 string：二进制 `.webloc` 过 utf8 会坏。种类由路径判，
@@ -1617,6 +1656,8 @@ export async function registerIpc(args: {
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
       { owner: 'html-previews', dispose: () => htmlPreviews.dispose() },
+      { owner: 'file-builds', dispose: () => builds.dispose() },
+      { owner: 'diagram-previews', dispose: () => diagramPreviews.dispose() },
       { owner: 'html-preview-listeners', dispose: () => {
         args.window.webContents.off('render-process-gone', releaseHtmlPreviews)
         args.window.webContents.off('did-start-navigation', releaseNavigatedHtmlPreviews)

@@ -1560,6 +1560,13 @@ export type AgentMuxDesktopApi = {
     /** Read-only current HTML buffer and confined relative assets, isolated from the host renderer. */
     openHtmlPreview(workspaceId: string, path: string, content: string): Promise<{ id: string; url: string }>
     releaseHtmlPreview(id: string): Promise<void>
+    /** CPU-heavy DOM engines own a disposable renderer for this request only. */
+    renderDiagram(request: import('./file-diagram').FileDiagramRequest): Promise<import('./file-diagram').FileDiagramResult>
+    cancelDiagram(id: string): Promise<void>
+    build(workspaceId: string, request: import('./file-build').FileBuildRequest): Promise<import('./file-build').FileBuildSnapshot>
+    inspectBuild(id: string): Promise<import('./file-build').FileBuildSnapshot | undefined>
+    cancelBuild(id: string): Promise<import('./file-build').FileBuildSnapshot | undefined>
+    releaseBuild(id: string): Promise<void>
     /**
      * 读一份书签文件（`.webloc`/`.url`），一次拿齐 `openFile` 要的两件事：`url`（拿去导航，取不出＝
      * `null`，调用方退回把文件当文本打开）和 `binary`（这份文件本身是不是二进制）。书签读走这条而不是

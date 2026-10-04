@@ -15,6 +15,16 @@
 .file-preview__controls { display:flex; align-items:center; gap:var(--sp-2); }
 .file-preview__controls output { min-width:5ch; text-align:center; color:var(--text-2); font-size:var(--fs-meta); font-variant-numeric:tabular-nums; }
 .file-preview__controls [aria-pressed="true"] { color:var(--text); background:var(--surface-3); font-weight:600; box-shadow:inset 0 -2px var(--text-2); }
+.file-drawio-preview__pages { flex:none; justify-content:center; padding:var(--sp-2) var(--sp-4); border-bottom:1px solid var(--line-soft); background:var(--surface-1); }
+.file-build-preview { display:flex; flex-direction:column; height:100%; min-width:0; min-height:0; color:var(--text); font-size:var(--fs-meta); line-height:1.5; }
+.file-build-preview__actions { flex:none; display:flex; flex-wrap:wrap; align-items:center; gap:var(--sp-3); padding:var(--sp-3) var(--sp-4); }
+.file-build-preview__actions strong { font-weight:600; }
+.file-build-preview__actions [role="status"] { color:var(--text-2); }
+.file-build-preview__help { flex:none; margin:0; padding:0 var(--sp-4) var(--sp-4); color:var(--text-2); }
+.file-build-preview__log { flex:none; padding:0 var(--sp-4) var(--sp-3); color:var(--text-2); }
+.file-build-preview__log summary { cursor:pointer; }
+.file-build-preview__log pre { max-height:240px; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font-size:var(--fs-micro); }
+.file-build-preview__artifact { display:flex; flex:1; min-width:0; min-height:0; }
 .file-media { flex:1; min-width:0; min-height:0; overflow:auto; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:var(--sp-5); padding:var(--sp-6); }
 .file-media audio { width:min(100%, 560px); }
 .file-media video { width:100%; max-height:calc(100% - 32px); object-fit:contain; }
