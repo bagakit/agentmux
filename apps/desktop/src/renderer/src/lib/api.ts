@@ -765,6 +765,7 @@ const mockApi: AgentMuxDesktopApi = {
     requestStorageFlush: async () => {},
     rendererUpdateReady: async () => {},
     spatialLinksReady: async () => {},
+    openObjectLink: async () => { throw new Error('Object link navigation requires the desktop app. Open its original work surface in Desktop and retry.') },
     onSpatialLinkIssue: () => () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },

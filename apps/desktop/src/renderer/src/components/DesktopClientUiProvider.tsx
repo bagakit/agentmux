@@ -8,6 +8,7 @@ import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { ProjectIcon } from './ProjectIcon'
 import { SemanticIcon } from './semantic-icons'
 import { resolveOverlayContainer } from './WindowOverlayHost'
+import { InlineAgentLink } from './InlineAgentLink'
 
 /** Focus intents are Desktop workface facts; a shared editor only registers its own DOM target. */
 export function bindDesktopComposerFocus(target: HTMLElement, focus: () => boolean): () => void {
@@ -50,7 +51,8 @@ const desktopPlatform: ClientUiPlatform = {
   renderMessageAvatar: input => <ConversationMessageAvatar {...input} />,
   renderProjectIcon: project => <ProjectIcon workspaceId={project.workspaceId} name={project.name} />,
   renderProjectLabel: project => <SenderProject project={project} />,
-  renderIcon: (name, size) => <SemanticIcon name={name} size={size} />
+  renderIcon: (name, size) => <SemanticIcon name={name} size={size} />,
+  renderAgentLink: reference => <InlineAgentLink {...reference} />
 }
 
 /** Electron IO, the Desktop identity surface and its workface focus policy stay in this client. */

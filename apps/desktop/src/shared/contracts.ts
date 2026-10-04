@@ -1614,6 +1614,8 @@ export type AgentMuxDesktopApi = {
     requestStorageFlush(): Promise<void>
     rendererUpdateReady(token: string): Promise<void>
     spatialLinksReady(): Promise<void>
+    /** Submit an internal object-link intent; later navigation issues use onSpatialLinkIssue. */
+    openObjectLink(url: string): Promise<void>
     onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(): Promise<string | null>
     listAgentSkills(sessionId: string): Promise<import('@agentmux/core').AgentSkill[]>

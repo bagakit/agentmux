@@ -249,6 +249,7 @@ const api: AgentMuxPreloadApi = {
     requestStorageFlush: () => ipcRenderer.invoke('ui:requestStorageFlush'),
     rendererUpdateReady: (token: string) => ipcRenderer.invoke('ui:rendererUpdateReady', token),
     spatialLinksReady: () => ipcRenderer.invoke('ui:spatialLinksReady'),
+    openObjectLink: (url: string) => ipcRenderer.invoke('ui:openObjectLink', url),
     onSpatialLinkIssue(listener) {
       const wrapped = (_event: Electron.IpcRendererEvent, message: string): void => { if (typeof message === 'string') listener(message) }
       ipcRenderer.on('ui:spatialLinkIssue', wrapped)
