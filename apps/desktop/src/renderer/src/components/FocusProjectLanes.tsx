@@ -9,9 +9,10 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { useAppStore } from '../store'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 
-export function FocusProjectLanes({ lanes, selectedProjectKey, onSelect, renderLane, rowsRef, recentProjects = [], onRead }: {
+export function FocusProjectLanes({ lanes, selectedProjectKey, currentLaneId, onSelect, renderLane, rowsRef, recentProjects = [], onRead }: {
   rowsRef?: Ref<HTMLDivElement>
   lanes: readonly FocusProjectLane[]; selectedProjectKey: string
+  currentLaneId?: string | null | undefined
   onSelect(projectKey: string): void; renderLane(lane: FocusProjectLane, heading: ReactNode): ReactNode
   recentProjects?: readonly FocusRetainedProject[]; onRead?(project: FocusRetainedProject): void
 }) {
@@ -20,10 +21,10 @@ export function FocusProjectLanes({ lanes, selectedProjectKey, onSelect, renderL
   const hosts = useAppStore(state => state.config?.hosts)
   return <section className="focus-project-lanes" aria-label="Project contexts">
     <div className="focus-project-lanes__rows" ref={rowsRef}>
-      {lanes.map(lane => <article className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
+      {lanes.map(lane => <article className={`focus-project-lanes__row${selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId) ? ' is-selected' : ''}`} data-focus-current={currentLaneId === lane.id || undefined} data-project-id={lane.projectId} data-project-key={focusProjectKey(lane.hostId, lane.projectId)} data-lane-id={lane.id} data-recovery={lane.recovery ?? undefined} key={lane.id}>
         <div className="focus-project-lanes__track">{renderLane(lane,
         <span className="focus-project-lanes__heading">
-          <button type="button" className="focus-project-lanes__axis" aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={`${lane.name} · ${lane.activeAgentIds.length} live · ${displayPath(lane.path, lane.hostId)}`} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
+          <button type="button" className="focus-project-lanes__axis" aria-current={currentLaneId === lane.id ? 'location' : undefined} aria-pressed={selectedProjectKey === focusProjectKey(lane.hostId, lane.projectId)} title={`${lane.name} · ${lane.activeAgentIds.length} live · ${displayPath(lane.path, lane.hostId)}`} onClick={() => onSelect(focusProjectKey(lane.hostId, lane.projectId))}>
             {lane.objectKind === 'topic' || lane.objectKind === 'mote'
               ? <><SpaceObjectIcon kind={lane.objectKind} name={lane.labels.at(-1)!} topicGlyph manualIcon={lane.objectIconKey ? icons[lane.objectIconKey] ?? null : null} avatarWorkspaceId={lane.workspaceId} avatarTopicId={lane.topicId ?? undefined} avatarObjectKey={lane.objectIconKey} /><span className="focus-project-lanes__label"><strong>{lane.labels.at(-1)}</strong></span></>
               : <>{lane.projectWorkspaceId ? <ProjectIcon workspaceId={lane.projectWorkspaceId} name={lane.labels[0]!} /> : null}

@@ -57,7 +57,7 @@ export const WorkspaceAgentsTool = memo(function WorkspaceAgentsTool({
   const names = useAppStore(useShallow(state => Object.fromEntries(scoped.map(session => [session.id, state.agentNames[session.id]]))))
   const percentById = useMemo(() => Object.fromEntries(scoped.map(session => [session.id, contextUsedPercent(session.turnUsage?.context)])), [scoped])
   const groups = useMemo(() => groupFocusContexts(scoped.map(session => agentContextForSession(session, timelines[session.id], names[session.id], workspace,
-    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics))).sort((a, b) => (b.lastActivityAt ?? 0) - (a.lastActivityAt ?? 0))), [scoped, timelines, names, workspace, topics])
+    scratchTopicIdFromWorkspacePath(workspace.path, session.workspacePath, topics)))), [scoped, timelines, names, workspace, topics])
   const openFocus = useAppStore(state => state.setMainSurface)
   const count = scoped.length
 

@@ -37,6 +37,8 @@
 .focus-project-lanes__status-rail > [data-bucket='disconnected'] { width: 32px; }
 .focus-project-lanes__status-rail > [data-visible-state='true'] { width: auto; padding: 0 var(--sp-2); }
 .focus-project-lanes__heading { display: flex; align-items: center; min-height: 26px; min-width: 0; gap: var(--sp-2); padding: 0 var(--sp-2); }
+.focus-project-lanes__row[data-focus-current='true'] .focus-project-lanes__heading { background: color-mix(in srgb, var(--text) 6%, transparent); box-shadow: inset 2px 0 var(--text-2); }
+.focus-project-lanes__row[data-focus-current='true'] .focus-project-lanes__label strong { color: var(--text); font-weight: 600; }
 .focus-project-lanes__axis { display: inline-flex; align-items: center; flex: 0 1 auto; max-width: 75%; gap: 4px; min-width: 0; padding: 2px 0; border: 0; background: transparent; color: var(--text-2); text-align: left; cursor: pointer; }
 .focus-project-lanes__label { display: inline-flex; align-items: center; gap: 3px; min-width: 0; }
 .focus-project-lanes__label strong { overflow: hidden; text-overflow: ellipsis; font-size: var(--fs-micro); white-space: nowrap; font-weight: 500; }

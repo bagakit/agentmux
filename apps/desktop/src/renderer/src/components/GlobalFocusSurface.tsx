@@ -145,6 +145,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const trimmedQuery = query.trim()
   const search = trimmedQuery.toLocaleLowerCase()
   const laneByContext = new Map(allLanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
+  // The common Region choice is independent of both the project filter and Agent MRU.
+  const resourceLaneIds = new Set(currentSurface && currentSurface.kind !== 'agent' && currentSurface.kind !== 'terminal'
+    ? laneContexts.filter(context => context.workspace?.id === currentSurface.workspaceId
+      && context.workspace.hostId === context.hostId
+      && context.topicId === (tabs[currentReference!.tabId]?.topicId ?? null))
+      .flatMap(context => { const lane = laneByContext.get(context.id); return lane ? [lane.id] : [] }) : [])
+  const currentLaneId = currentContext ? laneByContext.get(currentContext.id)?.id ?? null
+    : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
   const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
     ((row.kind === 'agent' && row.id.includes(trimmedQuery)) || `${row.name} ${row.detail} ${row.recap?.text ?? ''} ${row.stateLabel} ${row.workspacePath} ${laneByContext.get(row.id)?.name ?? row.workspaceName} ${row.providerId ?? ''}`.toLocaleLowerCase().includes(search)))
   const filtered = matching.filter(row => bucketFilter === 'all' || columnFor(row) === bucketFilter)
@@ -304,10 +312,10 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       {executionRows.length === 0 && retainedProjects.length === 0 ? <div className="global-agents-empty" role="status"><Users size={20} /><strong>No execution contexts yet</strong><span>Open an Agent from a Workspace to make it appear here.</span></div> : <div className="global-board-columns" aria-label="Global execution contexts">
         <div className="focus-project-board">
           <WorkbenchPresentationContext.Provider value={{ active: visible && !disconnectedExpanded, retainedRegionId: null }}><div className="focus-project-board__live" data-empty={!hasBoardLanes || undefined} hidden={disconnectedExpanded} inert={disconnectedExpanded}>
-            {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
+            {hasBoardLanes ? <FocusProjectLanes lanes={boardLanes} recentProjects={recentProjects} onRead={readProjectHistory} selectedProjectKey={project} currentLaneId={currentLaneId} onSelect={setProject} renderLane={laneRows} rowsRef={boardRowsRef} /> : null}
             {filtered.length === 0 && filteredRetainedProjects.length === 0 ? <p className="focus-project-lanes__empty">No matching contexts</p> : null}
           </div></WorkbenchPresentationContext.Provider>
-          <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={shownSessionId} projectKey={project} expanded={disconnectedExpanded} canReturn reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} /></WorkbenchPresentationContext.Provider>
+          <WorkbenchPresentationContext.Provider value={{ active: visible, retainedRegionId: null }}><FocusDisconnectedProjects lanes={disconnectedLanes} contexts={disconnectedContexts} visibleIds={filteredIds} selectedId={shownSessionId} currentLaneId={currentLaneId} projectKey={project} expanded={disconnectedExpanded} canReturn reveal={disconnectedReveal} fallbackFocus={searchRef} onExpand={openDisconnected} onClose={closeDisconnected} onClearFilters={clearFilters} onProject={setProject} onSelect={focusExecutionSession} /></WorkbenchPresentationContext.Provider>
           <FocusRetainedProjects projects={pastProjects} total={retainedProjects.filter(item => !item.recent).length} onRead={readProjectHistory} />
         </div>
       </div>}
