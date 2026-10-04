@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { currentDisplayNameRevision } from '../store'
@@ -20,7 +21,7 @@ export function SurveyZoneItem({ zone, title, glyph, selected, activity, editing
   const beginEdit = () => { ++editGeneration.current; setDraft(title); onEdit?.(true) }
   return <div className="survey-item-row" data-survey-zone-id={zone.zoneId} data-selected={selected}>
     {editing ? <form className="survey-item-name" onSubmit={async event => { event.preventDefault(); if (saving.current) return; saving.current = true; const generation = editGeneration.current, baseline = revision.current; try { if (await onRename?.(draft, baseline.revision) && revision.current === baseline) { ++baseline.revision; if (generation === editGeneration.current) { ++editGeneration.current; onEdit?.(false) } } } finally { saving.current = false } }}>
-      <input autoFocus aria-label="Exploration name" value={draft} placeholder="Name this exploration" onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onFocus={event => event.target.select()}
+      <TextInput autoFocus aria-label="Exploration name" value={draft} placeholder="Name this exploration" onChange={event => { ++editGeneration.current; setDraft(event.target.value) }} onFocus={event => event.target.select()}
         onKeyDown={event => { if (event.key === 'Escape') { event.preventDefault(); ++editGeneration.current; onEdit?.(false) } }} />
       <button type="submit" aria-label="Save exploration name">✓</button>
       <button type="button" aria-label="Cancel rename" onClick={() => { ++editGeneration.current; onEdit?.(false) }}>×</button>
