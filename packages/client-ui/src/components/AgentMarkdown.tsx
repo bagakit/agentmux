@@ -23,6 +23,7 @@ type InlineContext = {
   homeDir: string
   sourcePath?: string
   documentMode: boolean
+  inputMode: boolean
   readOnly: boolean
   inLink?: boolean
 }
@@ -111,6 +112,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
   if (node.kind === 'heading') {
     const Heading = context.documentMode ? (['h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as const)[node.level - 1] ?? 'h6' : 'p'
     return <Heading className="md-heading" data-level={node.level} data-md-anchor={node.anchor} tabIndex={context.documentMode && !context.readOnly ? -1 : undefined}>
+      {context.inputMode && node.sourceMarker ? `${node.sourceMarker}${node.children.length ? ' ' : ''}` : null}
       <Inline nodes={node.children} context={context} /></Heading>
   }
   if (node.kind === 'code') return <pre className="md-block-code" {...(node.language ? { 'data-language': node.language } : {})}><code>{node.text}</code></pre>
@@ -140,7 +142,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
 
 /** Shared safe content renderer. Document mode retains document semantics; the Host retains IO. */
 export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
-  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, readOnly = false, renderWorkspaceImage, outline = false }: {
+  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false, renderWorkspaceImage, outline = false }: {
   content: string
   className?: string
   openHttpLink?: OpenHttpLink
@@ -150,6 +152,8 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   homeDir?: string
   sourcePath?: string
   documentMode?: boolean
+  /** Incoming Markdown keeps source heading markers and compact body-sized typography. */
+  inputMode?: boolean
   /** File document navigation. Conversations and inert previews never mount an outline. */
   outline?: boolean
   /** Selectable preview prose without link actions, resource reads or document navigation. */
@@ -157,14 +161,15 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   /** Root-confined path resolved against the document. A linked image must return noninteractive phrasing content. */
   renderWorkspaceImage?: RenderWorkspaceImage
 }) {
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, readOnly,
+  const isInput = inputMode && !documentMode
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly,
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...(!readOnly && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}) }
-  if (!documentMode && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
+  if (!documentMode && !isInput && !looksLikeMarkdown(content)) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
   const document = documentMode && outline && !readOnly ? parseAgentMarkdownDocument(content) : null
   const blocks = document?.blocks ?? parseAgentMarkdown(content)
   if (!blocks.length && !documentMode) return <p className={className ? `${className} md-paragraph` : 'md-paragraph'}><TextWithFileReferences text={content} context={context} /></p>
-  return <div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : ''}`}>
+  return <div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
     {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
     {blocks.map((block, index) => <Block key={index} node={block} context={context} />)}
   </div>

@@ -1,5 +1,6 @@
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryMessagePhase, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
+import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { Check, ChevronRight, Copy, CornerDownRight } from 'lucide-react'
 import { memo, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
@@ -133,11 +134,13 @@ export function ConversationMessage({
   const isSystemContext = speaker?.role === 'system'
   const systemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
   const isIncoming = speaker?.role === 'human' || isPeerAgent
+  const inputMarkdown = isIncoming || recordedIdentity && speaker?.role === 'unknown'
   const files = useMemo(() => speaker?.role === 'agent' && !isPeerAgent && !compact && messagePhase !== 'progress' && status === 'complete' && openWorkspaceFile
     ? conversationFiles(parts, workspaceRoot, homeDir) : [],
   [speaker?.role, isPeerAgent, compact, messagePhase, status, openWorkspaceFile, content, workspaceRoot, homeDir])
-  const prefix = useMemo(() => (isIncoming || recordedIdentity && speaker?.role === 'unknown') && parts[0]?.kind === 'text' ? parseAgentMuxMessagePrefix(parts[0].text) : null,
-    [isIncoming, recordedIdentity, speaker?.role, parts[0]?.kind, parts[0]?.kind === 'text' ? parts[0].text : undefined])
+  const firstText = parts[0]?.kind === 'text' ? sessionHistoryTextForReading(parts[0]) : undefined
+  const prefix = useMemo(() => inputMarkdown && firstText !== undefined ? parseAgentMuxMessagePrefix(firstText) : null,
+    [inputMarkdown, firstText])
   const isDeclaredSender = prefix !== null && !prefix.declaredContexts && recordedSpeaker?.role === 'unknown'
   const [systemContextOpen, setSystemContextOpen] = useState(false)
   const systemContentId = useId()
@@ -240,6 +243,10 @@ export function ConversationMessage({
     return JSON.stringify([part.kind, callId, occ])
   }
 
+  const showOrigin = Boolean(inputOrigin && !isSystemContext && (showInputSource || inputSource?.kind === 'captured' && inputSource.device))
+  const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
+    prefix && !prefix.declaredContexts && !isDeclaredSender || prefix?.packet && (!isDeclaredSender || !agentReference))
+
   return (
     <div
       className="log-turn"
@@ -262,45 +269,42 @@ export function ConversationMessage({
         {avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
       </span>
       <div className="log-turn__head">
-        {isSystemContext ? <button type="button" className="log-turn__system-toggle"
-          aria-label={systemContextOpen ? '收起系统记录' : '展开系统记录'}
-          aria-expanded={systemContextOpen} aria-controls={hasContent ? systemContentId : undefined}
-          disabled={!hasContent} onClick={() => setSystemContextOpen(open => !open)}>
-          {hasContent ? <ChevronRight size={12} aria-hidden="true" /> : null}
-          <span className="log-turn__system-title">{recordTitle || '系统记录'}</span>
-          {systemSummary ? <span className="log-turn__system-summary">{systemSummary}</span> : null}
-        </button> : <span className="log-turn__sender">
-          <span className="log-turn__who">{agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
-          {agentReference ? <span className="log-turn__sender-id" data-copy-state={idCopyState}>
-            <code>{agentReference.speaker.id}</code>
-            <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
-              aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
-              onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
-              {idCopyState === 'copied' ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
-            </button>
-            {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
-          </span> : null}
-        </span>}
-        {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
-        {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
-        {isPeerAgent ? <span className="log-turn__sender-kind">Agent</span> : null}
-        {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
-        {status === 'streaming' ? (
-          <span className="log-row__chip" role="status">{platform.renderIcon('working', 12)}Streaming</span>
-        ) : null}
-        {status === 'failed' ? (
-          <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span>
-        ) : null}
-        {status === 'unverified' ? (
-          <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
-        ) : null}
-        {inputOrigin && !isSystemContext && (showInputSource || inputSource?.kind === 'captured' && Boolean(inputSource.device)) ? <span className="log-turn__input-source" title={inputOrigin.title}>
-          <CornerDownRight size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
+        <div className="log-turn__title">
+          {isSystemContext ? <button type="button" className="log-turn__system-toggle"
+            aria-label={systemContextOpen ? '收起系统记录' : '展开系统记录'}
+            aria-expanded={systemContextOpen} aria-controls={hasContent ? systemContentId : undefined}
+            disabled={!hasContent} onClick={() => setSystemContextOpen(open => !open)}>
+            {hasContent ? <ChevronRight size={12} aria-hidden="true" /> : null}
+            <span className="log-turn__system-title">{recordTitle || '系统记录'}</span>
+            {systemSummary ? <span className="log-turn__system-summary">{systemSummary}</span> : null}
+          </button> : <span className="log-turn__sender">
+            <span className="log-turn__who">{agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
+            {agentReference ? <span className="log-turn__sender-id" data-copy-state={idCopyState}>
+              <code>{agentReference.speaker.id}</code>
+              <button type="button" className="log-turn__id-copy" title={idCopyState === 'copied' ? 'Agent ID copied' : idCopyState === 'failed' ? 'Copy Agent ID failed; retry' : 'Copy Agent ID'}
+                aria-label={idCopyState === 'copied' ? 'Agent ID copied' : 'Copy Agent ID'}
+                onClick={() => { void copyValue(agentReference.speaker.id, 'agent-id') }}>
+                {idCopyState === 'copied' ? <Check size={12} aria-hidden="true" /> : <Copy size={12} aria-hidden="true" />}
+              </button>
+              {idCopyState === 'failed' ? <span className="log-turn__id-copy-error" role="alert">Copy failed · retry</span> : null}
+            </span> : null}
+          </span>}
+          {isPeerAgent ? <span className="log-turn__sender-kind">Agent</span> : null}
+          {recordTitle && !isSystemContext ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
+          {status === 'streaming' ? (
+            <span className="log-row__chip" role="status">{platform.renderIcon('working', 12)}Streaming</span>
+          ) : null}
+          {status === 'failed' ? (
+            <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span>
+          ) : null}
+          {status === 'unverified' ? (
+            <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
+          ) : null}
+        </div>
         {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
           ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
           {renderClock(createdAt)}
         </span>}
-        {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
         {hasCopyContent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
           {messageActions}
           {copyState === 'failed' ? (
@@ -312,9 +316,16 @@ export function ConversationMessage({
         </span> : null}
         {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity ? <ConversationInputDetails messageId={messageId} source={inputSource} executionHostId={executionHostId} speaker={recordedSpeaker}
           declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{messageDetails}</ConversationInputDetails> : null}
+      </div>
+      {hasMetadata ? <div className="log-turn__meta">
+        {described?.project ? <span className="log-turn__context" title={`${described.project.name}${described.project.branch ? ` · ${described.project.branch}` : ''} · Current project`}>{described.project.name}{described.project.branch ? <span> · {described.project.branch}</span> : null}</span> : null}
+        {isDeclaredSender ? <span className="log-turn__sender-kind" title="Source written in the message header; recorded authorship is unchanged">Declared source</span> : null}
+        {showOrigin && inputOrigin ? <span className="log-turn__input-source" title={inputOrigin.title}>
+          <CornerDownRight size={11} aria-hidden="true" /><span>{inputOrigin.caption}</span></span> : null}
+        {located ? <span className="log-turn__location" role="status">已定位此消息</span> : null}
         {prefix && !prefix.declaredContexts && !isDeclaredSender ? <span className="log-turn__declared-source">Message header: {prefix.sourceLabel}</span> : null}
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
-      </div>
+      </div> : null}
       {hasContent && (!isSystemContext || systemContextOpen) ? (
         <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
@@ -326,15 +337,16 @@ export function ConversationMessage({
                 <pre>{context.raw}</pre>
               </details>) : null}
               {index === 0 && prefix?.declaredContexts && prefix.body.length === 0 ? null : index === 0 && prefix?.packet ? prefix.packet.parts.map((packetPart, packetIndex) => packetPart.kind === 'text'
-              ? <MemoizedAgentMarkdown key={packetIndex} className="log-turn__packet-text" content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+              ? <MemoizedAgentMarkdown key={packetIndex} className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
               : <blockquote key={packetIndex} className="log-turn__citation"><span className="log-turn__citation-from">{packetPart.from}</span>
                 {packetPart.reference ? <code className="log-turn__citation-ref">{packetPart.reference}</code> : null}
-                <MemoizedAgentMarkdown className="log-turn__packet-text" content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
+                <MemoizedAgentMarkdown className="log-turn__packet-text" inputMode={inputMarkdown} content={packetPart.text} workspaceRoot={workspaceRoot} homeDir={homeDir}
                   {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></blockquote>) : <MemoizedAgentMarkdown
               content={index === 0 && prefix
                 ? prefix.declaredContexts ? prefix.body.replace(/^(?:\r?\n){1,2}/u, '') : prefix.body
-                : part.text}
+                : sessionHistoryTextForReading(part)}
+              inputMode={inputMarkdown}
               workspaceRoot={workspaceRoot}
               homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
