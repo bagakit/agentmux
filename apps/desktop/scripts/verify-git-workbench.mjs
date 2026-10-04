@@ -89,17 +89,21 @@ async function launch(label) {
   const main = await connectCdp(await waitFor(`${label} Main inspector`, () => { alive(); return mainUrl }))
   await main.call('Runtime.enable')
   const home = privateHome
-  const ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } })
+  let ready
+  try { ready = await waitFor(`${label} ready`, async () => { alive(); try { return JSON.parse(await readFile(readyFile, 'utf8')) } catch (error) { if (error.code === 'ENOENT') return null; throw error } }) }
+  catch (error) {
+    receipt.startup = await main.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); return {ready:e.app.isReady(),singleInstance:e.app.hasSingleInstanceLock(),userData:e.app.getPath('userData'),windows:e.BrowserWindow.getAllWindows().map(w=>({id:w.id,url:w.webContents.getURL(),visible:w.isVisible()}))} })()`)
+    throw error
+  }
   const endpoint = new URL(await waitFor(`${label} Renderer debugger`, () => { alive(); return rendererUrl }))
   const target = await waitFor(`${label} Renderer target`, async () => (await (await fetch(`http://${endpoint.host}/json/list`)).json()).find(item => item.type === 'page' && item.url.startsWith('file:')))
   const cdp = await connectCdp(target.webSocketDebuggerUrl); await cdp.call('Runtime.enable')
-  await main.evaluate(`(() => { const e = process.getBuiltinModule('module').createRequire(${JSON.stringify(join(desktopRoot, 'package.json'))})('electron'); const w = e.BrowserWindow.getAllWindows()[0]; w.show(); w.focus(); e.app.focus({steal: true}); return w.isVisible() })()`)
+  cdp.nativeMain = main
   await waitFor(`${label} trusted UI`, () => cdp.evaluate('Boolean(window.agentmux && document.querySelector(".project-list"))'))
-  await waitFor(`${label} native visible document`, () => cdp.evaluate('document.visibilityState === "visible"'))
+  await activate(cdp)
   const nativeHome = await cdp.evaluate('(async () => (await window.agentmux.sessions.snapshot()).localHome)()')
   assert.equal(nativeHome, privateHome)
   receipt[label] = { pid: child.pid, home, nativeHome, ready, origin: await cdp.evaluate('({href:location.href,origin:location.origin})') }
-  cdp.nativeMain = main
   return { child, main, cdp }
 }
 async function click(cdp, expression, button = 'left') {
@@ -269,6 +273,14 @@ try {
   receipt.autoload.originalPageRemaining = point.originalScrollHeight - receipt.autoload.scrollTop - receipt.autoload.viewport
   assert.ok(receipt.autoload.originalPageRemaining > 0, 'Prefetch must happen before the ORIGINAL page edge, regardless of appended height')
   await capture(first.cdp, 'commit-dark-scrolled')
+  // Use the real Tab menu to retain a nontrivial split layout across the two ordinary processes.
+  await click(first.cdp, selectors(`[data-workbench-tab-id="${fixed.tabId}"]`), 'right')
+  await waitFor('move Tab submenu', () => first.cdp.evaluate(`(() => { const e = Array.from(document.querySelectorAll('[role="menuitem"]')).find(e => e.textContent.includes('Move Tab to New Group')); if (!e) return false; e.focus(); return document.activeElement === e })()`))
+  await first.cdp.call('Input.dispatchKeyEvent', {type:'keyDown',key:'ArrowRight',code:'ArrowRight'})
+  await first.cdp.call('Input.dispatchKeyEvent', {type:'keyUp',key:'ArrowRight',code:'ArrowRight'})
+  await click(first.cdp, `${selectors('[role="menuitem"]')}.filter(e => e.textContent === 'New Group Right')`)
+  const splitState = await waitFor('durable split from real Tab menu', async () => { const current = await state(); return current.graph.layouts[workspaceId]?.groups.length === 2 ? current : null })
+  assert.equal(splitState.graph.layouts[workspaceId].root.type, 'split')
   const originalState = await state(); receipt.originalState = originalState
   const gitState = async () => ({ head:(await git('rev-parse','HEAD')).trim(), status:await git('status','--porcelain=v1'), index:digest(await readFile(join(workspacePath,'.git/index'))) })
   assert.deepEqual(await gitState(), unchanged, 'Every UI and public read retained HEAD, index and dirty worktree')
@@ -286,7 +298,7 @@ try {
   await waitFor('same fixed commit reread', () => second.cdp.evaluate(`document.querySelector('.git-workbench__target')?.textContent.includes(${JSON.stringify(mergeOid.slice(0, 12))})`))
   await control('space.focus', { inputPolicy: 'preserve', target: { kind: 'space', regionId: fixed.regionId } })
   receipt.restoredCanvas = await monaco(second.cdp, '', 'fixed commit body', fixed.regionId)
-  await capture(second.cdp, 'restored-diff-dark-wide')
+  await capture(second.cdp, 'restored-diff-dark-wide', 1600)
   assert.deepEqual(await gitState(), moved, 'Restored fixed reads retain the intentionally moved HEAD and original dirty worktree')
   receipt.secondExit = await normalQuit(second)
   receipt.identityAfter = await identity(); assert.deepEqual(receipt.identityAfter, receipt.identityBefore)
