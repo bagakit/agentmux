@@ -21,6 +21,8 @@ import {
   type AgentExecutorId,
   type AgentProviderId,
   type AgentSessionHistoryPage,
+  type AgentSessionHistoryResourceRequest,
+  type AgentSessionHistoryResourceReadResult,
   type AgentSessionHistoryObservation,
   type AgentSessionHistoryObservationHandle,
   type AgentMuxClientEvent,
@@ -1011,6 +1013,34 @@ export class RuntimeController {
       throw new Error(`History page belongs to another Session: ${page.agentSessionId}`)
     }
     return page
+  }
+
+  async sessionHistoryResource(
+    control: SessionHistoryReference,
+    input: AgentSessionHistoryResourceRequest,
+    config: AppConfig
+  ): Promise<AgentSessionHistoryResourceReadResult> {
+    if (typeof control.agentSessionId !== 'string' || !control.agentSessionId) throw new Error('Conversation resource requires an Agent Session.')
+    if (this.hostReconfigurationReservations.has(control.hostId)) throw new Error(`Runtime host is being reconfigured: ${control.hostId}`)
+    const host = this.hosts.get(control.hostId)
+    if (!host) throw new Error(`Runtime host is not configured: ${control.hostId}`)
+    const descriptor = (await host.client.sessionHistorySources()).find(entry => entry.agentSessionId === control.agentSessionId)
+    if (!descriptor?.history) throw new Error('No native history locator was retained for this Session.')
+    const executor = requireSessionExecutor(config, descriptor.history)
+    // Renderer supplies a recorded locator, never an invocation or an arbitrary file read.
+    const result = await host.client.sessionHistoryResource(control.agentSessionId, {
+      source: input.source, recordId: input.recordId, partIndex: input.partIndex, expectedReference: input.expectedReference,
+      ...(input.turnId === undefined ? {} : { turnId: input.turnId }),
+      ...(input.maxBytes === undefined ? {} : { maxBytes: input.maxBytes }),
+      commandOverride: executor.command, args: executor.args, env: executor.env
+    })
+    if (this.hosts.get(control.hostId) !== host) throw new Error('History host configuration changed while reading. Reopen conversation history.')
+    if (result.agentSessionId !== control.agentSessionId || result.source.providerId !== input.source.providerId ||
+      result.source.nativeSessionId !== input.source.nativeSessionId || result.recordId !== input.recordId ||
+      result.turnId !== input.turnId || result.partIndex !== input.partIndex || result.reference !== input.expectedReference) {
+      throw new Error('History resource response belongs to another recorded target.')
+    }
+    return result
   }
 
   async observeSessionHistory(
