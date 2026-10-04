@@ -11,7 +11,7 @@
 
 ## 执行 Agent 焦点历史与 PMO 上下文隔离
 
-Space、Focus、Goals 的共同导航及其与 Survey、左下 Mote 面板的选择边界只见[Work、Survey 与 Mote 的导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)。本节的执行与协调焦点是 Session 语义范围，不代替 Work 的通用空间选择。执行 Agent 与 PMO Teams Agent 保持各自身份与历史；打开或切换 PMO Teams 不得改写执行 Agent，也不得把 PMO Session 放进执行 Agent 的历史。
+Space、Focus、Goals 的共同导航及其与 Survey、Recall、左下 Mote 面板的选择边界只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。本节的执行与协调焦点是 Session 语义范围，不代替 Work 的通用空间选择。执行 Agent 与 PMO Teams Agent 保持各自身份与历史；打开或切换 PMO Teams 不得改写执行 Agent，也不得把 PMO Session 放进执行 Agent 的历史。
 
 执行 Agent 的语义焦点由同一 execution focus 入口承载：当前 Session 和真实聚焦事件共用同一份有界持久化记录。最近上下文入口按最近使用顺序从该记录派生，同一个 Session 只出现一次；时间音轨保留记录中的真实重访位置，不以最新位置覆盖旧事件，也不回填从前未保留的事件。真实执行 Agent 在任一合法呈现中的明确打开、选中或跨表面定位，继续通过这一入口记录真实语义聚焦，包括 Survey 中的合法呈现；语义记录本身不导航或覆盖 Work、Survey、Mote 面板的空间选择。单纯切换表面只读取原记录，不另猜一个“最近变化的 Session”，无 Agent 内容或协调 Session 的空间选择不冒充执行聚焦事件。历史可以被 Agents 界面作为可操作的最近上下文入口，也作为只读上下文提供给 PMO Teams；PMO 只能观察这份执行上下文，不能把自己的交互写回去。
 
@@ -101,7 +101,7 @@ Focus 顶部用同一条操作栏分别承载左侧过滤与右侧当前工作�
 
 与 Mote 讨论引用点击时正在显示的准确 Tab 身份，完整 Tab 多格或同一 Session 多位置也不改成 Agent 名称寻址；显式只查看 Region 时仍引用其所在的准确 Tab，不新增 Region 命名合同。讨论复用已有真实 Mote 的讨论、输入与公开 Core 能力，以及既有 Tab 寻址与检视表示；不另造发送系统、影子 Mote 或按名称猜收件人。源 Tab 和原 Mote 的未发送草稿保持独立，已创建的讨论沿其原输入 owner 保留请求；准备、配置或投递未确认时如实给出原目标与保留的请求，不冒称已发送或已回复。只有显式操作可以建立讨论或提交请求，悬停不发送；后来的选择、关闭与主动焦点优先，迟到结果不改投目标、不重开已关闭的浮层，也不抢回原主工作面。 用户要求 Chat 下拉选择任一 Mote 并记住选择。Focus Chat 收件偏好只保存明确选择的准确 Mote 身份，沿现 Mote UI 持久 owner，与浮窗当前目标独立；未明确选择时保现有浮窗目标解析，选择后跨执行上下文、页面与普通重启仍用同一身份。下拉查看与选择只改 UI 偏好，不打开／改投浮窗、创建讨论、发送请求或控制 Run；点击 Chat 才固定本次收件 Mote 和正在展示的准确 Tab，沿原讨论 producer。选择变化／浮窗换目标不改已开始请求的收件人，重复 pending 点击仍受原锁保护，迟到结果不抢后来焦点或重开面。选项来自同一 Scratch 文件快照的真实 Mote，归档对象明确标识仍可明确选择；普通 Topic 不混入，已存目标缺失、读取失败或身份未确认时保原身份并明确该次未发送，不静默借默认／同名／其他 Mote，也不重建目录或 Session。其他已确认对象与原健康工作面仍可用。偏好保存失败保本窗口选择与原能力，沿同 owner 给可读非阻塞说明，重选同一准确身份也可重试保存，不冒重启后已记住。
 
-Focus 预览只有一个 durable Agent Region、原 Tab/Group owner 与 Session 归属明确且非只读时，当前身份与原格控制合在同一顶部操作带，不再重复一行身份。History、观察刷新和精确格动作仍由原 owner 执行；多格、Agent 与 File/Browser 混合格、归属未知和只读观察保留原 Header。关闭 Focus 仍只收起观察投影，单格不增加关 Tab、X 或生命周期动作；多格原关闭入口与未保存确认保持可达并绑定原精确 Region，不以名称或当前焦点猜目标。
+Focus 中单格、多格、混合格、只读或原归属待确认时，Agent／Terminal 名称、执行 Host 和该格菜单统一留在原 Region 内，由同一 SessionPane/Header 呈现；不因 Region 数量把身份或动作移到顶部工具栏。顶部保原准确 Tab 身份及 Tab 操作，Tab 与 Agent 命名边界仍按本节既有合同。History、观察刷新和精确格动作沿原 owner，原正文、选区、草稿、读取和较晚主动焦点保持。关闭 Focus 只收起观察投影，单格不增加关 Tab、X 或生命周期动作；多格原关闭入口与未保存确认保持可达并绑定原精确 Region，不以名称或当前焦点猜目标。
 
 Focus 窄分栏中的搜索与筛选入口须可辨认，当前项目、状态及完整值可按需读取且原可选集合保持；缩窄和悬停不夺取当前输入，显式筛选后的焦点沿同一控件交还并让后来主动焦点优先，不另持一份筛选条件。
 
@@ -150,7 +150,7 @@ Focus 当前输入来源的自动观察不可用或阅读窗已冻结时，原�
 
 用户进一步希望「如果那个 Agent 自己还执行了的话，在 timeline 上也可以去关联起来」。消息与发送者执行的关联只消费公开 Core 已核的原 message/source、Session 与发送 Run 引用；Run 改变或引用缺席时不把旧消息关联到新执行。可展示同一 Run 的真实在线／working 观察，不用正文、近邻时间或关注事件猜因果，不把投递回执当执行、回复或完成。只有作者身份时仍可查看发送者当前 Context，但不能把当前工作说成本条消息的执行结果。不创建第二份历史或关系注册表。
 
-Focus、Space、Goals 的共享导航只引用[Work 导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)。切换表面、选择泳道条目、调整比例、收起音轨时，原 Tab、Region、Session、Run 与健康工作面保持；Focus 与 Space 之间不能因 portal 目的地变化重挂载已存在的终端、Browser 或编辑器。分割树与原组地址仍归 durable Workbench，Focus 只改变投影。目标暂未出现或恢复事实未就绪时保留原内容与可见说明，自动尝试接管，不以空白或删除身份代替恢复；每条正常分割分组及其非选中 Tab 都必须保持可恢复。
+Focus、Space、Goals 的共享导航只引用[Work 导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。切换表面、选择泳道条目、调整比例、收起音轨时，原 Tab、Region、Session、Run 与健康工作面保持；Focus 与 Space 之间不能因 portal 目的地变化重挂载已存在的终端、Browser 或编辑器。分割树与原组地址仍归 durable Workbench，Focus 只改变投影。目标暂未出现或恢复事实未就绪时保留原内容与可见说明，自动尝试接管，不以空白或删除身份代替恢复；每条正常分割分组及其非选中 Tab 都必须保持可恢复。
 
 执行 Agent 在任一合法呈现中的显式语义聚焦，包括在 Space、Survey 中点击或键盘进入 Region、从 Focus/Goals/Quick Switcher/Topic 定位时，复用本节同一 execution focus 写入入口；该语义记录不覆盖各导航上下文的空间选择，一般空间选择继续由前述导航 owner 负责。最近上下文入口对同一 Session 只显示一个最近位置；同一 Session 内切 Activity/Terminal 不重复记录切换、不创建第二份历史。重启先恢复历史、当前 Session 和原 Tab/Region，再尝试续接。
 

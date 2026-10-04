@@ -348,7 +348,7 @@ Runtime snapshot 为空、恢复握手超时、Provider 探测失败或布局暂
 
 ## 跨主视图的 Session 上下文连续性
 
-Focus、Space、Goals 的共享目标，以及 Survey、左下 Mote 面板的独立选择与恢复范围，只见[Work、Survey 与 Mote 的导航上下文](spaces-and-layout.md#worksurvey-与-mote-的导航上下文)。Session 关联存在时继续同一身份及准确原展示引用；切换只改变主视图投影，不创建第二个 Session、Run 或 Region，也不改变 Agent 的工作目录。
+Focus、Space、Goals 的共享目标，以及 Survey、Recall、左下 Mote 面板的独立选择与恢复范围，只见[Work、Survey、Recall 与 Mote 的导航上下文](spaces-and-layout.md#worksurveyrecall-与-mote-的导航上下文)。Session 关联存在时继续同一身份及准确原展示引用；切换只改变主视图投影，不创建第二个 Session、Run 或 Region，也不改变 Agent 的工作目录。
 
 如果 Session 已经结束、恢复中或暂时不可定位，切换不能清空当前工作面，也不能猜测一个新 Session；沿用现有服务窗和恢复事实说明当前状态。在所属导航上下文重新打开或明确跨上下文进入同一 Session，继续同一身份和已确认的准确展示引用；多个位置仍沿原消歧合同，不猜首位置或关联 Goal。
 
