@@ -1,9 +1,11 @@
+import { ClientDeliveryDiagnostics, startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
+import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDetails'
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentMuxInteractionResponse } from '@agentmux/core'
-import { agentPromptCondition } from '@agentmux/core/prompt-condition'
+import { agentPromptCondition, validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import {
   AgentComposer, AgentInteractionCard, ClientUiProvider, NativeProcessObservation, ConversationMessage, ConversationView,
@@ -31,6 +33,14 @@ function promptExecutionFor(client: AgentMuxHostedClient, session: AgentMuxAgent
 }
 function originalPromptRequest(session: AgentMuxAgentSession | null | undefined, agentSessionId: string | null,
   attempt: PromptAttempt | undefined) {
+  if (attempt?.request && attempt.phase !== 'sending' && attempt.phase !== 'confirmed' && attempt.operationId && attempt.draft.trim()) {
+    const saved = attempt.request
+    if (!session || session.agentSessionId !== agentSessionId || session.run.runId !== attempt.runId) return undefined
+    const condition = validateAgentPromptCondition(saved.condition)
+    return { agentSessionId: session.agentSessionId, operationId: attempt.operationId, ...condition,
+      prompt: expandSemanticReferences(attempt.draft), authorHuman: true as const, execution: saved.execution,
+      ...(saved.explicit ? { allowUncertainTurn: true as const } : {}) }
+  }
   const admission = session?.promptCompletionAdmission, intent = admission?.intent, message = intent?.message
   if (!session || session.agentSessionId !== agentSessionId || !attempt || attempt.phase !== 'unknown'
     || !attempt.operationId || !attempt.runId || session.run.runId !== attempt.runId
@@ -76,6 +86,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }, [reading.page, reading.timeline, reading.olderWindow, visible])
   const draftKey = JSON.stringify(['draft', agentSessionId])
   const [local] = useState(createLocalDrafts)
+  const [diagnostics] = useState(() => new ClientDeliveryDiagnostics())
   const drafts = useRef(local.drafts)
   const attempts = useRef(local.attempts)
   const responses = useRef(local.responses)
@@ -100,7 +111,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     // A receipt belongs to its captured operation, including after navigating elsewhere.
     if (drafts.current.get(key) === original.draft) drafts.current.set(key, '')
     local.save()
-    redraw(value => value + 1)
+    if (mounted.current) redraw(value => value + 1)
   }
   useEffect(() => {
     const pending = attempts.current.get(draftKey)
@@ -119,66 +130,118 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     if (receipt) confirmPrompt(draftKey, pending)
   }, [reading.timeline, reading.session, agentSessionId, draftKey, revision])
 
+  const diagnosticOwner = (originalClient: AgentMuxHostedClient | null): string | null => {
+    const identity = originalClient?.runtimeOwnerIdentity?.()
+    return identity ? `runtime:${identity.runtimeId}` : null
+  }
+  const reportDiagnostics = (originalClient: AgentMuxHostedClient | null) => {
+    const owner = diagnosticOwner(originalClient)
+    if (owner && originalClient?.forwardRpc) void diagnostics.sync(owner, record => originalClient.forwardRpc!(
+      'message.delivery.report', { hostId: 'local', record }))
+  }
+  useEffect(() => diagnostics.subscribe(() => redraw(value => value + 1)), [diagnostics])
+  useEffect(() => { if (connection.state === 'connected') reportDiagnostics(client) }, [client, connection.state])
+  async function retainFailure(original: PromptAttempt, seed: DeliveryAttemptSeed, error: unknown, stage: string,
+    originalClient: AgentMuxHostedClient | null, key: string, retry: boolean) {
+    const owner = original.request?.runtimeId ? `runtime:${original.request.runtimeId}` : diagnosticOwner(originalClient)
+    const log = await diagnostics.failed(seed, error, stage, owner)
+    reportDiagnostics(originalClient)
+    // A refusal of this click cannot settle an older unknown logical message.
+    original.phase = original.inputRequested === false ? 'rejected'
+      : retry && original.phase !== 'rejected' ? 'unknown' : deliveryOutcome(error, 'prompt')
+    original.logId = log.record.logId
+    original.message = errorMessage(error)
+    if (attempts.current.get(key) === original) local.save()
+    if (mounted.current) redraw(value => value + 1)
+  }
   async function submit(explicit = true): Promise<void> {
     const existing = attempts.current.get(draftKey)
-    if (!available || !client || !agentSessionId || !reading.session || !draft.trim()
-      || existing?.phase === 'sending' || existing?.phase === 'unknown') return
-    const originalClient = client, originalId = agentSessionId, originalKey = draftKey
-    // No write has been dispatched if Core's authoritative condition cannot be obtained.
-    let condition: ReturnType<typeof agentPromptCondition>, originalSession: AgentMuxAgentSession
-    try { originalSession = originalClient.agentSession(originalId); condition = agentPromptCondition(originalSession) }
-    catch (error) {
-      attempts.current.set(originalKey, { operationId: '', runId: null, draft, phase: 'rejected', message: `尚未发送：${errorMessage(error)}` })
-      local.save()
-      redraw(value => value + 1); return
+    if (existing?.phase === 'sending' || !draft.trim()) return
+    if (existing?.phase === 'unknown' && existing.draft !== draft) {
+      const seed = startDeliveryAttempt({ agentSessionId, operationId: null,
+        hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(draft) })
+      await retainFailure(existing, seed, Object.assign(new Error(
+        '上一条消息的发送结果尚未核实，当前正文已不同。本次未发送；两份正文均保留，可用“重试原请求”续做原消息。'),
+        { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' }), 'editor-validation', client, draftKey, true)
+      return
     }
-    const capability = explicit ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
-    setInputCapability({ sessionId: originalId, runId: condition.expectedRun.runId, ...capability })
-    const original: PromptAttempt = { operationId: randomClientRequestId(), runId: condition.expectedRun.runId, draft, phase: 'sending', message: '正在发送输入…' }
+    if (existing?.phase === 'unknown' || existing?.phase === 'rejected' && existing.draft === draft) { await retryOriginalPrompt(); return }
+    const originalClient = client, originalId = agentSessionId, originalKey = draftKey
+    const original: PromptAttempt = { operationId: randomClientRequestId(), runId: reading.session?.run.runId ?? null,
+      draft, phase: 'sending', message: '正在发送输入…', inputRequested: false,
+      originalRuntimeId: originalClient?.runtimeOwnerIdentity?.()?.runtimeId ?? null, explicit }
+    let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
+      hostId: reading.session?.hostId ?? null, prompt: expandSemanticReferences(draft) })
     attempts.current.set(originalKey, original)
-    local.save()
-    redraw(value => value + 1)
+    let stage = 'client-validation'
     try {
+      if (!available || !originalClient || !originalId) throw Object.assign(new Error(
+        `原会话当前不能投递：${connection.issue ?? connection.message}${reading.disconnected ? '；会话连接已断开' : ''}。草稿已保留，可继续点击发送重试。`), { code: 'CONTROL_UNAVAILABLE' })
+      const originalSession = originalClient.agentSession(originalId), condition = agentPromptCondition(originalSession)
+      const capability = explicit ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
+      setInputCapability({ sessionId: originalId, runId: condition.expectedRun.runId, ...capability })
+      original.runId = condition.expectedRun.runId
+      original.request = { condition: structuredClone(condition), execution: capability.execution, explicit,
+        runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
+      seed = Object.freeze({ ...seed, expectedRunId: original.runId, afterSubmissionId: condition.afterSubmissionId,
+        conditionAvailable: true, execution: capability.execution })
+      local.save(); redraw(value => value + 1)
+      stage = 'core-submit'
+      original.inputRequested = true; local.save()
       await originalClient.submitAgentPrompt({ agentSessionId: originalId, operationId: original.operationId,
         prompt: expandSemanticReferences(original.draft), authorHuman: true, ...condition,
-        // Explicit Send/Cmd+Enter authorizes this input only; plain Enter keeps its original semantics.
         ...(explicit ? { allowUncertainTurn: true, ...(capability.execution === 'immediate' ? { execution: 'immediate' as const } : {}) } : {}) })
-      if (!mounted.current) return
       confirmPrompt(originalKey, original, capability.execution === 'immediate' ? 'Core 已确认立即执行输入。' : 'Core 已确认普通输入。')
-      if (current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
-    } catch (error) {
-      if (!mounted.current) return
-      if (attempts.current.get(originalKey) !== original) return
-      original.phase = deliveryOutcome(error, 'prompt')
-      original.message = original.phase === 'unknown'
-        ? `回执未知；草稿已保留，不会自动重投这条输入。请刷新核对原会话。${errorMessage(error)}`
-        : `Core 已拒绝这条输入，草稿已保留。${errorMessage(error)}`
-      local.save()
-      redraw(value => value + 1)
-    }
+      if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
+    } catch (error) { await retainFailure(original, seed, error, stage, originalClient, originalKey, false) }
   }
 
   async function retryOriginalPrompt(): Promise<void> {
     const original = attempts.current.get(draftKey)
-    if (!available || !client || !agentSessionId || original?.phase !== 'unknown') return
+    if (!original || original.phase === 'sending' || original.phase === 'confirmed') return
     const originalClient = client, originalId = agentSessionId, originalKey = draftKey
+    let seed = startDeliveryAttempt({ agentSessionId: originalId, operationId: original.operationId,
+      hostId: reading.session?.hostId ?? null, condition: original.request?.condition,
+      ...(original.request ? { execution: original.request.execution } : {}), prompt: expandSemanticReferences(original.draft) })
+    const previousPhase = original.phase
+    let stage = 'retry-validation'
     try {
-      // Re-read at the action boundary; the UI projection alone cannot authorize a stale retry.
-      const input = originalPromptRequest(originalClient.agentSession(originalId), originalId, original)
-      if (!input) throw new Error('Core 当前不能确认一致的原请求；原输入与当前草稿保留，请刷新核对。')
-      original.phase = 'sending'
-      original.message = '正在核对并续做原请求…'
+      if (!available || !originalClient || !originalId) throw Object.assign(new Error(
+        `原会话当前不能投递：${connection.issue ?? connection.message}。原输入与当前草稿保留，可再次重试。`), { code: 'CONTROL_UNAVAILABLE' })
+      const originalRuntimeId = original.request?.runtimeId ?? original.originalRuntimeId
+      if (originalRuntimeId && originalClient.runtimeOwnerIdentity?.()?.runtimeId !== originalRuntimeId) {
+        throw Object.assign(new Error('当前连接不属于原消息的 Runtime；不会把原消息发往另一个 Host。'), { code: 'STALE_AGENT_SESSION' })
+      }
+      const originalSession = originalClient.agentSession(originalId)
+      // Only a locally known never-requested intent may obtain its first condition
+      // after reconnect. Legacy missing facts and unknown dispatched input cannot.
+      if (!original.request && original.inputRequested === false) {
+        if (originalSession.agentSessionId !== originalId || original.runId !== null && originalSession.run.runId !== original.runId) {
+          throw Object.assign(new Error('原消息的 Session 或 Run 已变化；本次未请求输入。'), { code: 'STALE_AGENT_SESSION' })
+        }
+        if (original.explicit === undefined) throw Object.assign(new Error(
+          '原消息最初的执行选择无法核实；本次未请求输入，原消息保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+        const condition = agentPromptCondition(originalSession), capability = original.explicit
+          ? promptExecutionFor(originalClient, originalSession) : { execution: 'default' as const }
+        original.runId = condition.expectedRun.runId
+        original.request = { condition: structuredClone(condition), execution: capability.execution, explicit: original.explicit,
+          runtimeId: originalClient.runtimeOwnerIdentity?.()?.runtimeId ?? null }
+        local.save()
+      }
+      const input = originalPromptRequest(originalSession, originalId, original)
+      if (!input) throw Object.assign(new Error('原 Session、Run 或投递条件无法完整核实；本次未请求输入，原消息保留。'), { code: 'AGENT_PROMPT_INPUT_UNCONFIRMED' })
+      seed = Object.freeze({ ...seed, expectedRunId: input.expectedRun.runId,
+        afterSubmissionId: input.afterSubmissionId, conditionAvailable: true, execution: input.execution })
+      original.phase = 'sending'; original.message = '正在核对并续做原请求…'
       local.save(); redraw(value => value + 1)
+      stage = 'core-submit'
+      original.inputRequested = true; local.save()
       await originalClient.submitAgentPrompt(input)
-      if (!mounted.current || attempts.current.get(originalKey) !== original) return
       confirmPrompt(originalKey, original)
-      if (current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
+      if (mounted.current && current.current.client === originalClient && current.current.agentSessionId === originalId) void reading.refresh()
     } catch (error) {
-      if (!mounted.current || attempts.current.get(originalKey) !== original) return
-      // A refused retry says nothing about the earlier attempt, even with this call's CF0.
-      original.phase = 'unknown'
-      original.message = `原请求结果仍未确认；原正文与当前草稿保留，不会自动重投。${errorMessage(error)}`
-      local.save(); redraw(value => value + 1)
+      original.phase = previousPhase
+      await retainFailure(original, seed, error, stage, originalClient, originalKey, true)
     }
   }
 
@@ -234,7 +297,6 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     onSelectAnnotation: ({ messageId, quote }: Parameters<NonNullable<ConversationMessageProps['onSelectAnnotation']>>[0]) =>
       appendQuote(`引用会话 ${JSON.stringify(agentSessionId)}，消息 ${JSON.stringify(messageId)}：\n${quote.split('\n').map(line => `> ${line}`).join('\n')}`)
   }
-  const blocked = attempt?.phase === 'sending' || attempt?.phase === 'unknown'
   return <ClientUiProvider platform={platform}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前不能发送；草稿与阅读保留。' : ''}</p> : null}
@@ -314,16 +376,16 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           </aside> : null}
         <AgentComposer tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal} />} mailbox={<MobileMailbox session={session} connected={connection.state === 'connected'} messages={captured} platform={platform} describeSpeaker={describeSpeaker}
           refresh={() => { void reading.refresh() }} {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />} value={draft} disabled={false} placeholder={available ? '发消息' : '离线草稿'}
-          onChange={setDraft} {...(available && !blocked ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
+          onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           {...(onAttach ? { onAttach } : {})} {...(readPastedImage ? { readPastedImage } : {})}
           />
         {attempt && attempt.phase !== 'confirmed' ? <aside className="mobile-send-status" data-phase={attempt.phase} aria-live="polite">
           <div className="mobile-send-status__summary">
             <span>{attempt.phase === 'sending' ? '正在发送…' : attempt.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
-            {available && originalPromptRequest(session, agentSessionId, attempt) ? <button type="button" onClick={() => { void retryOriginalPrompt() }}>重试原请求</button> : null}
+            {attempt.phase !== 'sending' ? <button type="button" onClick={() => { void retryOriginalPrompt() }}>重试原请求</button> : null}
             {attempt.phase !== 'sending' ? <button type="button" onClick={() => { void reading.refresh() }}>刷新</button> : null}
             {attempt.phase !== 'sending' && onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
-            {attempt.phase !== 'sending' ? <details><summary>详情</summary><p>{attempt.message}</p></details> : null}
+            {attempt.phase !== 'sending' ? <><p role="alert">{attempt.message}</p>{attempt.logId ? <DeliveryLogDetails log={diagnostics.get(attempt.logId)} logId={attempt.logId} copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} /> : null}</> : null}
           </div>
         </aside> : null}
       </div>

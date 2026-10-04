@@ -1,3 +1,6 @@
+import { startDeliveryAttempt, type DeliveryAttemptSeed } from '@agentmux/client-ui/delivery-diagnostics'
+import { deliveryFailure } from '@agentmux/core/delivery-attempt'
+import { recordMessageDeliveryFailure } from './lib/message-delivery-diagnostics'
 import { readAgentPresentation, readSpatialAppearance, readSurveyPresentation } from './lib/mobile-presentation'
 import { scratchTopicsForConfig } from './lib/scratch-topic-snapshots'
 import { conversationReplySourceKey, type ConversationReplySource } from '@agentmux/core/prompt-reaction'
@@ -403,7 +406,10 @@ export type ErrorNoticeContext = {
 // a semantic resume from silently consuming messages addressed to its predecessor.
 export const MAX_AGENT_STEER_QUEUE_ENTRIES = 100
 // Only asynchronous control lives here; queue contents and delivery reasons stay in Store.
-const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string> }>()
+const agentSteerDrains = new Map<string, { promise: Promise<void>; wake: boolean; explicitSteers: Set<string>; submitted: Set<string>; failures: Map<string, unknown> }>()
+type SteerDeliveryAttempt = { seed: DeliveryAttemptSeed; stage: string; diagnostic?: { logId: string; notice: string } }
+// A click's diagnostic follows its one ordered consumer; it never grants input.
+const manualSteerAttempts = new Map<string, SteerDeliveryAttempt>()
 
 
 export type AgentSteerReaction = { code: string; replySource: ConversationReplySource }
@@ -426,6 +432,7 @@ export type AgentSteerQueueEntry = {
   status: 'queued' | 'restoring' | 'deferred' | 'failed'
   error?: string
   errorCode?: string
+  logId?: string
   /** Restart pauses execution authority independently of the original delivery failure. */
   awaitingExplicitSend?: true
   /** Retain this exact intent and its delivery facts outside active queue consumption. */
@@ -447,7 +454,7 @@ function pendingSteerRecord(entry: AgentSteerQueueEntry, inFlightId?: string, ph
     phase: entry.operationId === inFlightId ? phase ?? 'preparing' : null,
     editable: !confirmed && agentSteerCanEdit(entry, inFlightId),
     delivery: confirmed ? 'confirmed' : entry.promptCondition === null ? 'not-submitted' : 'unconfirmed',
-    errorCode: entry.errorCode ?? null, error: entry.error ?? null, archived: entry.archived === true }
+    errorCode: entry.errorCode ?? null, error: entry.error ?? null, ...(entry.logId ? { logId: entry.logId } : {}), archived: entry.archived === true }
 }
 
 /** One admission and its labels share the original execution choice, including unknown old input. */
@@ -8138,22 +8145,60 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Rearranging intent grants no execution permission and does not wake the consumer.
   },
   async sendQueuedAgentSteer(sessionId, operationId) {
-    const entry = get().agentSteerQueues[sessionId]?.find((item) => item.operationId === operationId)
-    if (entry?.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'This original message is archived. Restore it before explicitly choosing Send; no input was requested.')
-    const session = get().sessions.find((item) => item.id === sessionId)
-    if (!entry || session?.kind !== 'agent' || entry.runId !== undefined &&
-      !steerEntryTargetsRun(entry, session.control.run.runId)) return 'unconfirmed'
-    set((state) => ({ agentSteerQueues: { ...state.agentSteerQueues,
-      [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
-        if (item.operationId !== operationId || !item.awaitingExplicitSend) return item
-        const { awaitingExplicitSend: _pause, ...pending } = item
-        return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
-      }) } }))
-    // Manual retry uses the same ordered consumer and the entry's original operation identity.
-    const pending = get().flushAgentSteerQueue(sessionId, operationId)
-    const originalDrain = agentSteerDrains.get(sessionId)
-    await pending
-    return originalDrain?.submitted.has(operationId) ? 'submitted' : 'unconfirmed'
+    const entry = get().agentSteerQueues[sessionId]?.find(item => item.operationId === operationId)
+    const session = get().sessions.find(item => item.id === sessionId)
+    const attemptKey = JSON.stringify([sessionId, operationId])
+    const admission = manualSteerAttempts.get(attemptKey)
+    const seed = admission?.stage === 'queue-admission' ? admission.seed : startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
+      operationId, hostId: session?.hostId ?? null, condition: entry?.promptCondition,
+      ...(entry?.execution ? { execution: entry.execution } : {}),
+      ...(entry ? { prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text } : {}) })
+    const attempt: SteerDeliveryAttempt = admission?.stage === 'queue-admission' ? admission : { seed, stage: 'queue-validation' }
+    attempt.stage = 'queue-validation'
+    try {
+      if (!entry) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is no longer in the pending queue.')
+      if (entry.archived) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived. Restore it before choosing Send.')
+      if (get().agentSteerInFlight[sessionId] === operationId) throw controlFailure('AGENT_PROMPT_SUBMISSION_BUSY', 'This original message already has an active send attempt. Its original input is kept.')
+      if (session?.kind !== 'agent') throw controlFailure('UNKNOWN_AGENT_SESSION', 'The original Agent Session is unavailable. No replacement or input was created.')
+      if (entry.runId !== undefined && !steerEntryTargetsRun(entry, session.control.run.runId)) {
+        throw controlFailure('STALE_AGENT_SESSION', `The message belongs to Run ${entry.runId}; the Session now points to Run ${session.control.run.runId}. The original message will not be sent to another Run.`)
+      }
+      manualSteerAttempts.set(attemptKey, attempt)
+      set(state => ({ agentSteerQueues: { ...state.agentSteerQueues,
+        [sessionId]: state.agentSteerQueues[sessionId]!.map(item => {
+          if (item.operationId !== operationId || !item.awaitingExplicitSend) return item
+          const { awaitingExplicitSend: _pause, ...pending } = item
+          return { ...pending, status: item.status === 'restoring' ? 'restoring' : 'queued' }
+        }) } }))
+      attempt.stage = 'ordered-queue'
+      const pending = get().flushAgentSteerQueue(sessionId, operationId)
+      const originalDrain = agentSteerDrains.get(sessionId)
+      await pending
+      if (originalDrain?.submitted.has(operationId) || confirmedSteerDelivery(get().timelines[sessionId], sessionId, operationId)) return 'submitted'
+      if (originalDrain?.failures.has(operationId)) throw originalDrain.failures.get(operationId)
+      throw controlFailure('AGENT_PROMPT_INPUT_UNCONFIRMED', 'The original selection left the ordered consumer without a confirmed submission. No new operation was created; inspect the original queue and retry this message.')
+    } catch (error) {
+      const failure = describeError(error)
+      const diagnostic = attempt.diagnostic ?? await recordMessageDeliveryFailure(attempt.seed, error, attempt.stage)
+      const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ''}${failure.detail ? `\n${failure.detail}` : ''}`
+      const message = `${reason}\nlogid: ${diagnostic.logId}\n${diagnostic.notice}`
+      set(state => {
+        const queue = state.agentSteerQueues[sessionId]
+        if (!queue) return state
+        return { agentSteerQueues: { ...state.agentSteerQueues, [sessionId]: queue.map(item =>
+          item.operationId === operationId && item.text === entry?.text && item.agentMuxNote === entry?.agentMuxNote && item.sourceChannel === entry?.sourceChannel
+            ? { ...item, awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
+                ...(failure.code ? { errorCode: failure.code } : {}), status: 'deferred' as const } : item) } }
+      })
+      // The failure is visible in the original record and action feedback. Explicit retry
+      // remains available; this refusal never grants a background wake permission.
+      const controlFailure = deliveryFailure(error).controlFailure
+      throw Object.assign(new Error(message), { ...(failure.code ? { code: failure.code } : {}),
+        ...(failure.detail ? { detail: failure.detail } : {}), ...(controlFailure ? { controlFailure } : {}),
+        cause: error, logId: diagnostic.logId })
+    } finally {
+      if (manualSteerAttempts.get(attemptKey) === attempt) manualSteerAttempts.delete(attemptKey)
+    }
   },
   flushAgentSteerQueue(sessionId, explicitOperationId) {
     set((state) => reconcileDeliveredSteers(state, sessionId))
@@ -8181,7 +8226,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const selectedIds = (get().agentSteerQueues[sessionId] ?? []).filter(entry =>
       !entry.archived && !entry.awaitingExplicitSend && entry.promptCondition === null && entry.execution !== undefined)
       .map(entry => entry.operationId)
-    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>() }
+    const drain = { promise: Promise.resolve(), wake: false, explicitSteers: new Set<string>([...selectedIds, ...(requested ? [requested] : [])]), submitted: new Set<string>(), failures: new Map<string, unknown>() }
     drain.promise = Promise.resolve().then(async () => {
       try {
         for (;;) {
@@ -8189,9 +8234,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Every await can change the queue, Run, connection or interaction. Never retain a tail.
           const state = get()
           let session = state.sessions.find((item) => item.id === sessionId)
-          if (session?.kind !== 'agent') return
+          const refuseSelections = (code: AgentMuxControlErrorCode, reason: string) => {
+            for (const id of drain.explicitSteers) drain.failures.set(id, controlFailure(code, reason))
+          }
+          if (session?.kind !== 'agent') { refuseSelections('UNKNOWN_AGENT_SESSION', 'The original Agent Session disappeared before queue dispatch.'); return }
           const sessionHostId = session.hostId
-          if (state.runtimeEndpointWarnings?.some((warning) => warning.hostId === sessionHostId && warning.availability !== 'connected')) return
+          const endpointIssue = state.runtimeEndpointWarnings?.find(warning => warning.hostId === sessionHostId && warning.availability !== 'connected')
+          if (endpointIssue && drain.explicitSteers.size === 0) { refuseSelections('CONTROL_UNAVAILABLE', `Original Host ${sessionHostId} endpoint is ${endpointIssue.availability}: ${endpointIssue.message}`); return }
           const currentRunId = session.control.run.runId
           const pendingEntries = state.agentSteerQueues[sessionId]?.filter(item =>
             !item.archived && !item.awaitingExplicitSend &&
@@ -8200,8 +8249,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // explicit requests retain their author order in this one queue, including across awaits.
           const entry = pendingEntries?.find(item => drain.explicitSteers.has(item.operationId)) ??
             pendingEntries?.find(item => item.promptCondition === null && item.execution !== undefined) ?? pendingEntries?.[0]
-          if (!entry) return
-          if (entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
+          if (!entry) { refuseSelections('CONTROL_REQUEST_CONFLICT', 'The selected original message is archived, paused or belongs to a different Run before dispatch.'); return }
+          if (!drain.explicitSteers.has(entry.operationId) && entry.runId !== undefined && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) {
+            refuseSelections('CONTROL_UNAVAILABLE', session.pendingInteraction ? 'The original Agent is waiting for an interaction response. Answer it before retrying this message.' : `Original Run ${session.control.run.runId} is ${session.processState}; Agent status is ${session.status.state}${session.status.detail ? `: ${session.status.detail}` : ''}`)
+            return
+          }
           // The set joins active callers; only a known unsubmitted original selection can
           // outlive it. Unknown/historical or boot-paused inputs never gain auto-retry authority.
           const explicitAttempt = drain.explicitSteers.delete(entry.operationId) ||
@@ -8225,6 +8277,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           let attemptRunId = entry.runId
           let attemptCondition = entry.promptCondition
           let attemptExecution = entry.execution
+          const deliveryAttempt = manualSteerAttempts.get(JSON.stringify([sessionId, entry.operationId])) ?? {
+            seed: startDeliveryAttempt({ agentSessionId: attemptSessionId, operationId: entry.operationId, hostId: attemptHostId,
+              condition: entry.promptCondition, ...(entry.execution ? { execution: entry.execution } : {}),
+              prompt: composeAgentPrompt(entry.text, entry.agentMuxNote).text }), stage: 'queue-preparation'
+          } as SteerDeliveryAttempt
           const matchesAttempt = (item: AgentSteerQueueEntry) =>
             !item.archived && item.operationId === entry.operationId && item.runId === attemptRunId &&
             item.text === entry.text && item.agentMuxNote === entry.agentMuxNote &&
@@ -8244,6 +8301,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                   if (item.operationId !== entry.operationId) return item
                   return { ...item, status: 'restoring' }
                 }) } }))
+              deliveryAttempt.stage = 'session-recovery'
               const recovered = await get().recoverSession(sessionId, entry.operationId)
               if (!recovered || recovered.kind !== 'agent' || recovered.processState !== 'running') {
                 throw new Error(get().sessions.find(item => item.id === sessionId)?.status.detail ??
@@ -8263,6 +8321,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             let pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             if (!pending) return
             if (pending.status === 'restoring') {
+              deliveryAttempt.stage = 'queue-persistence'
               await flushMessageWorkbench(explicitlyBound)
               // The exact binding precedes dispatch. Electron's void flush request is not fsync.
               set((current) => {
@@ -8277,22 +8336,23 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             }
             pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             session = get().sessions.find(item => item.id === sessionId)
-            if (!pending || session?.kind !== 'agent') return
+            if (!pending || session?.kind !== 'agent') { if (explicitAttempt) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message or Agent Session changed during preparation.'); return }
             if (!steerEntryTargetsRun(pending, session.control.run.runId)) throw new Error(
               'The bound Run changed before dispatch. The delivery result is unknown; this message will not be sent to another Run.')
-            if (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected') return
+            if (!explicitAttempt && (!steerQueueCanDrainNow(session) || session.status.state === 'disconnected')) return
             if (pending.promptCondition === undefined) throw new Error(
               'The original message delivery condition is unknown. This message is kept; compose a new message or use the terminal.')
             if (pending.promptCondition === null) {
               // Queue tails bind only as they reach dispatch. The public refresh reads Core's
               // admission identity; activity status and timeline receipts cannot replace it.
+              deliveryAttempt.stage = 'condition-refresh'
               const fresh = await api.sessions.refresh(session.control)
               if (fresh.kind !== 'agent' || fresh.hostId !== attemptHostId || fresh.control.hostId !== attemptHostId ||
                 fresh.control.agentSessionId !== attemptSessionId || fresh.control.run.runId !== pending.runId) throw new Error(
                 'The original Session binding changed before message preparation. Your message is kept without dispatch.')
               const condition = validateAgentPromptCondition({ expectedRun: fresh.control.run,
                 afterSubmissionId: fresh.promptSubmissionPredecessor })
-              if (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected') return
+              if (!explicitAttempt && (!steerQueueCanDrainNow(fresh) || fresh.status.state === 'disconnected')) return
               if (!explicitAttempt && fresh.status.state === 'working') return
               const execution = explicitAttempt ? (pending.execution ?? 'default') : 'default'
               if (execution === 'immediate' && fresh.capabilities.promptExecution?.immediate !== 'interrupt-before-input') {
@@ -8305,10 +8365,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
               attemptCondition = condition
               preparedHere = true
             }
+            deliveryAttempt.stage = 'queue-persistence'
             await flushMessageWorkbench(explicitlyBound)
             pending = get().agentSteerQueues[sessionId]?.find(item => item.operationId === entry.operationId)
             session = get().sessions.find(item => item.id === sessionId)
-            if (!pending || session?.kind !== 'agent') return
+            if (!pending || session?.kind !== 'agent') { if (explicitAttempt) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The selected original message or Agent Session changed during preparation.'); return }
             const condition = validateAgentPromptCondition(pending.promptCondition)
             if (session.hostId !== attemptHostId || session.control.hostId !== attemptHostId ||
               session.control.agentSessionId !== attemptSessionId || !matchesAttempt(pending) ||
@@ -8320,12 +8381,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             // After this invocation, even a BUSY/error can belong to another client joining
             // this exact operation. Only Core receipts can settle it; never reconstruct input.
             attemptExecution = pending.execution
+            deliveryAttempt.seed = Object.freeze({ ...deliveryAttempt.seed, expectedRunId: condition.expectedRun.runId,
+              afterSubmissionId: condition.afterSubmissionId, conditionAvailable: true, execution: pending.execution ?? 'default' })
+            deliveryAttempt.stage = 'core-submit'
             dispatchStarted = true
             await api.sessions.submitPrompt(session.control, pending.text, pending.operationId, condition,
               explicitAttempt ? { allowUncertainTurn: true,
                 ...(pending.execution === 'immediate' ? { execution: 'immediate' as const } : {}) }
                 : pending.execution === 'immediate' ? { execution: 'immediate' } : undefined,
               pending.origin === 'manual', pending.agentMuxNote, pending.sourceChannel, pending.goalContinuation ? { goalId: pending.goalContinuation.goalId, loopId: pending.goalContinuation.loopId } : undefined)
+            deliveryAttempt.stage = 'receipt-confirmation'
             if (pending.goalContinuation) await api.continuousProgress.initialGoalInput({ hostId: session.control.hostId, agentSessionId: session.control.agentSessionId, providerId: session.providerId, workspacePath: session.workspacePath }, pending.goalContinuation.loopId, pending.operationId, 'confirm')
             drain.submitted.add(entry.operationId)
             set((current) => {
@@ -8343,8 +8408,11 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
             if (!get().agentSteerQueues[sessionId]?.some(item =>
               drain.explicitSteers.has(item.operationId))) return
           } catch (error) {
+            drain.failures.set(entry.operationId, error)
             const failure = describeError(error)
-            const message = failure.detail ? `${failure.message}\n${failure.detail}` : failure.message
+            deliveryAttempt.diagnostic = await recordMessageDeliveryFailure(deliveryAttempt.seed, error, deliveryAttempt.stage)
+            const diagnostic = deliveryAttempt.diagnostic
+            const reason = `${failure.message}${failure.code ? ` [${failure.code}]` : ''}${failure.detail ? `\n${failure.detail}` : ''}`
             // A newly prepared condition is local until the real input API is invoked.
             // Storage/read failures before that boundary cannot make delivery unknown.
             // Error names after invocation cannot prove that no other client admitted it.
@@ -8364,7 +8432,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
                     if (!matchesAttempt(item)) return item
                     const { errorCode: _oldCode, ...retained } = item
                     return { ...retained, ...(unadmitted ? { promptCondition: null } : {}),
-                      status: item.status === 'restoring' ? 'restoring' : 'deferred', error: message,
+                      status: item.status === 'restoring' ? 'restoring' : 'deferred', awaitingExplicitSend: true as const, error: reason, logId: diagnostic.logId,
                       ...(failure.code ? { errorCode: failure.code } : {}) }
                   })
                 }
@@ -8400,9 +8468,21 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   send(sessionId, text, onRejected, origin, agentMuxNote, options) {
     // Admission transfers ownership from draft to queue; transport completion is a separate fact.
-    const operationId = admitAgentSteer(sessionId, text, onRejected, undefined, origin, agentMuxNote, options)
-    if (operationId === false) return false
-    void get().flushAgentSteerQueue(sessionId, operationId)
+    const operationId = crypto.randomUUID(), session = get().sessions.find(item => item.id === sessionId)
+    const seed = startDeliveryAttempt({ agentSessionId: session?.kind === 'agent' ? session.control.agentSessionId : sessionId,
+      operationId, hostId: session?.hostId ?? null, prompt: composeAgentPrompt(text, agentMuxNote).text })
+    const reject = (error: unknown) => {
+      const failure = describeError(error)
+      void recordMessageDeliveryFailure(seed, error, 'queue-admission').then(diagnostic => {
+        const message = `${failure.message}${failure.code ? ` [${failure.code}]` : ''}${failure.detail ? `\n${failure.detail}` : ''}\nlogid: ${diagnostic.logId}\n${diagnostic.notice}`
+        const show = onRejected ?? get().reportError
+        show(Object.assign(new Error(message), { cause: error,
+          ...(failure.code ? { code: failure.code } : {}), logId: diagnostic.logId }))
+      })
+    }
+    if (admitAgentSteer(sessionId, text, reject, operationId, origin, agentMuxNote, options) === false) return false
+    manualSteerAttempts.set(JSON.stringify([sessionId, operationId]), { seed, stage: 'queue-admission' })
+    void get().sendQueuedAgentSteer(sessionId, operationId).catch(error => (onRejected ?? get().reportError)(error))
     return true
   },
   async respondInteraction(sessionId, response) {

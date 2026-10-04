@@ -1,3 +1,4 @@
+import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
 import { SpaceObjectImages } from './space-object-images.js'
 import type { SpaceObjectImageTarget, ObjectAvatarInput, ObjectAvatarRef } from '../shared/object-avatars.js'
 import { TopicKnowledgeOwner } from './topic-knowledge.js'
@@ -259,6 +260,7 @@ export async function registerIpc(args: {
   const files = args.workspaceFiles ?? new WorkspaceFiles((id) => args.runtime.executionHost(id), {
     primaryMoteWorkspace: async () => config.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
   })
+  const deliveryAttempts = { hostId: 'local', store: new DeliveryAttemptStore(join(app.getPath('userData'), 'client-delivery-attempts')) }
   const demands = args.demands ?? openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const worktrees = new WorktreeService((id) => args.runtime.executionHost(id), { save: (next, expected) => configOwner.edit(expected, next) })
   const git = new GitService((id) => args.runtime.executionHost(id))
@@ -1090,6 +1092,15 @@ export async function registerIpc(args: {
     if (text.length > 0) pauseUserProgress(session, 'Paused for your paste.')
     return await sessionInputWriteResult(() => args.runtime.paste(session, text, terminalData))
   })
+  handleWithEvent('sessions:recordDeliveryFailure', async (event, input: DeliveryAttempt) => {
+    requireTrustedSender('sessions:recordDeliveryFailure', event)
+    const record = parseDeliveryAttempt(input)
+    if (record.source !== 'client' || record.observation !== undefined || record.reporter !== undefined) {
+      throw new AgentMuxError('Client reports cannot author Core Input or authenticated identity.', 'CONTROL_PERMISSION_DENIED')
+    }
+    return await deliveryAttempts.store.record({ ...record,
+      reporter: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}`, receivedAt: Date.now(), routeHostId: deliveryAttempts.hostId } })
+  })
   handleWithEvent('sessions:submitPrompt', async (
     event,
     session: AgentSessionControl,
@@ -1461,6 +1472,7 @@ export async function registerIpc(args: {
   const detach = args.runtime.attach(args.window.webContents)
   const rpcHttp = agentMuxRpcHttpOptions()
   const control = new AgentMuxControlServer({
+    deliveryAttempts,
     execute: executeControl,
     nameHistory: query => desktopNameHistory(spatialState, demands, query),
     spatialState,

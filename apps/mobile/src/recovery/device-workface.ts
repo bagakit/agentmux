@@ -1,3 +1,5 @@
+import { validateDeliveryLogId } from '@agentmux/core/delivery-attempt'
+import { validateAgentPromptCondition } from '@agentmux/core/prompt-condition'
 import { isLocalNetworkHost } from '@agentmux/relay/offer'
 import type { PromptAttempt, ResponseAttempt } from '../conversation/local-drafts'
 
@@ -80,9 +82,29 @@ export function parseDraftRecord(value: unknown): DraftRecord {
   const drafts = entries(v.drafts), attempts = entries(v.attempts), responses = entries(v.responses)
   for (const [, draft] of drafts) if (!body(draft)) throw invalid()
   for (const [, item] of attempts) {
-    const attempt = record(item, ['operationId', 'runId', 'draft', 'phase'])
+    const keys = ['operationId', 'runId', 'draft', 'phase']
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'request')) keys.push('request')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'logId')) keys.push('logId')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'inputRequested')) keys.push('inputRequested')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'originalRuntimeId')) keys.push('originalRuntimeId')
+    if (item && typeof item === 'object' && Object.hasOwn(item, 'explicit')) keys.push('explicit')
+    const attempt = record(item, keys)
     if (!id(attempt.operationId) || !(attempt.runId === null || id(attempt.runId))
       || !body(attempt.draft) || !phase(attempt.phase)) throw invalid()
+    if (attempt.logId !== undefined) validateDeliveryLogId(attempt.logId)
+    if (attempt.inputRequested !== undefined && typeof attempt.inputRequested !== 'boolean') throw invalid()
+    if (attempt.explicit !== undefined && typeof attempt.explicit !== 'boolean') throw invalid()
+    if (attempt.originalRuntimeId !== undefined && !(attempt.originalRuntimeId === null || id(attempt.originalRuntimeId))) throw invalid()
+    if (attempt.request !== undefined) {
+      const r = record(attempt.request, ['condition', 'execution', 'explicit', 'runtimeId'])
+      const c = record(r.condition, ['expectedRun', 'afterSubmissionId'])
+      record(c.expectedRun, ['runId'])
+      const condition = validateAgentPromptCondition(c)
+      if (!id(condition.expectedRun.runId) || condition.expectedRun.runId !== attempt.runId ||
+          !(condition.afterSubmissionId === null || id(condition.afterSubmissionId)) ||
+          !['default', 'immediate'].includes(r.execution as string) || typeof r.explicit !== 'boolean' ||
+          !(r.runtimeId === null || id(r.runtimeId))) throw invalid()
+    }
   }
   for (const [, item] of responses) if (!phase(record(item, ['phase']).phase)) throw invalid()
   return structuredClone(value) as DraftRecord

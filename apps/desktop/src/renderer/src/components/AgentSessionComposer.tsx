@@ -1,7 +1,8 @@
+import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { PosturePicker } from './PosturePicker'
 import { effectiveSessionViewMode, sessionPresentationById } from '../lib/session-presentation'
-import { useRef, type ReactNode } from 'react'
+import { useEffect, useRef, type ReactNode } from 'react'
 import type { ComposerInsert, ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import { AgentContextUsage } from './AgentContextUsage'
 import { AgentComposerTools } from './AgentComposerTools'
@@ -28,7 +29,7 @@ import { AgentComposer } from '@agentmux/client-ui/components/AgentComposer'
 import { AgentIdentity } from './AgentIdentity'
 import { agentProviderLabel } from './AgentProviderIcon'
 import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
-import { useComposerFeedback } from './ComposerFeedback'
+import { ComposerFeedback, useComposerFeedback } from './ComposerFeedback'
 import { sessionServiceNotices } from '../lib/session-service-notices'
 import { SessionMailbox } from './SessionMailbox'
 import { confirmedSteerDelivery } from '../lib/steer-queue-delivery'
@@ -82,6 +83,7 @@ export function AgentSessionComposer({
   visible?: boolean
 }) {
   const insertionRef = useRef<ComposerInsertionHandle>(null)
+  useEffect(() => { void reportMessageDeliveryDiagnostics() }, [])
   const feedback = useComposerFeedback(sessionId)
   const text = useAppStore((state) => state.agentComposerDrafts[sessionId] ?? '')
   const setAgentComposerDraft = useAppStore((state) => state.setAgentComposerDraft)
@@ -284,6 +286,7 @@ export function AgentSessionComposer({
           deliverable: session?.kind === 'agent' && (entry.runId === undefined ||
             steerQueueCanEverDrain(session.processState) && steerEntryTargetsRun(entry, session.control.run.runId)),
           ...(entry.errorCode ? { errorCode: entry.errorCode } : {}),
+          ...(entry.logId ? { logId: entry.logId } : {}),
           ...(entry.error ? { error: entry.error } : {}),
         }))}
         {...(!readOnly ? { onArchiveQueued: async (operationId: string, expectedText: string, archived: boolean) => {
@@ -292,7 +295,7 @@ export function AgentSessionComposer({
         onMoveQueued={(operationId, direction) => moveAgentSteer(sessionId, operationId, direction)}
         sendImmediately={session?.kind === 'agent' && queuedEntries.some(entry => agentSteerExecution(entry, session.capabilities) === 'immediate')}
         pendingInteraction={session?.kind === 'agent' && Boolean(session.pendingInteraction)}
-        {...(!disabled && !readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
+        {...(!readOnly ? { onSendQueued: (operationId: string) => { void feedback.run(async () => { await sendQueuedAgentSteer(sessionId, operationId) }) } } : {})}
         {...(!disabled && !readOnly ? { onEditQueued: async (id: string, expectedText: string, nextText: string) => {
           feedback.dismiss()
           try { useAppStore.getState().editQueuedAgentSteer(sessionId, id, expectedText, nextText) }
@@ -302,6 +305,7 @@ export function AgentSessionComposer({
     >
     {(mailbox, pending) => (
     <AgentComposer key={sessionId} aboveInput={pending} mailbox={mailbox}
+      feedback={<ComposerFeedback failure={feedback.failure} onDismiss={feedback.dismiss} />}
       readPastedImage={(path) => api.ui.readPastedImage(path)}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}

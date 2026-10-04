@@ -376,6 +376,7 @@ const api: AgentMuxPreloadApi = {
     detach: (attachmentId: string) => ipcRenderer.invoke('sessions:detach', attachmentId),
     write: (session: SessionControl, data: AgentMuxRunInputData, source: AgentMuxAgentWriteInput['source']) => ipcRenderer.invoke('sessions:write', session, data, source),
     paste: (session: SessionControl, text: string, terminalData: string) => ipcRenderer.invoke('sessions:paste', session, text, terminalData),
+    recordDeliveryFailure: record => ipcRenderer.invoke('sessions:recordDeliveryFailure', record),
     submitPrompt: (session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation) =>
       ipcRenderer.invoke('sessions:submitPrompt', session, prompt, operationId, condition, choice, authorHuman, agentMuxNote, sourceChannel, goalContinuation),
     replyQuestion: (session, input) => ipcRenderer.invoke('sessions:replyQuestion', session, input),

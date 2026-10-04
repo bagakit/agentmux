@@ -249,7 +249,7 @@ function rawText(cause: unknown): string {
 }
 
 /** A string field off a caught value, only when it is actually a non-empty string. */
-function stringField(cause: unknown, key: 'code' | 'detail'): string | undefined {
+function stringField(cause: unknown, key: 'code' | 'detail' | 'logId'): string | undefined {
   if (typeof cause !== 'object' || cause === null) return undefined
   const value = (cause as Record<string, unknown>)[key]
   return typeof value === 'string' && value.length > 0 ? value : undefined
@@ -268,6 +268,7 @@ export type PresentedError = {
   code?: string
   /** Any diagnostic detail the error carried, if reachable on this side. */
   detail?: string
+  logId?: string
 }
 
 /**
@@ -287,12 +288,14 @@ export function describeError(cause: unknown): PresentedError {
   const message = unwrapZodIssueMessages(deframed) ?? deframed
   const code = stringField(cause, 'code')
   const detail = stringField(cause, 'detail')
+  const logId = stringField(cause, 'logId')
   return {
     // raw is carried unchanged: this is the promise that the diagnosable original is not swallowed.
     raw,
     message,
     ...(code ? { code } : {}),
-    ...(detail ? { detail } : {})
+    ...(detail ? { detail } : {}),
+    ...(logId ? { logId } : {})
   }
 }
 

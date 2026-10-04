@@ -1001,6 +1001,7 @@ const mockApi: AgentMuxDesktopApi = {
         }))
       }
     },
+    recordDeliveryFailure: async record => ({ logId: record.logId, availability: 'unavailable', record: null, persistence: null, issue: 'Preview has no diagnostic Host.' }),
     submitPrompt: async (control, prompt) => {
       await mockApi.sessions.write(control, `${prompt.trim()}\r`, 'user')
     },
