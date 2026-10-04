@@ -201,19 +201,20 @@ it('actual SessionPane→Activity supplies the shared question callback without 
   expect(reads.mock.calls.length).toBe(count);
   expect(useAppStore.getState().agentComposerDrafts['question-session']).toBe('ORIGINAL UNSENT');
 });
-it('actual SessionPane→History keeps the same shared card and typed reply while original Activity remains mounted', async () => {
+it('actual SessionPane→History reuses the same shared question card and preserves its original Activity body', async () => {
   const {
     send
   } = await setup();
   const activityCard = activeCard(),
     body = container.querySelector('[data-native-record-id="native-async-call"] .log-turn__body')!;
+  await fill(activityCard.querySelector('textarea')!, 'History exact answer');
   await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'History')!.click());
   await flush();
   const historyCard = activeCard();
-  expect(historyCard).not.toBe(activityCard);
+  expect(historyCard).toBe(activityCard);
+  expect(historyCard.querySelector('textarea')!.value).toBe('History exact answer');
   expect(activityCard.isConnected).toBe(true);
   expect(body.isConnected).toBe(true);
-  await fill(historyCard.querySelector('textarea')!, 'History exact answer');
   const submit = historyCard.querySelector<HTMLButtonElement>('.agent-question__footer button');
   expect(submit).not.toBeNull();
   await act(async () => submit!.click());
