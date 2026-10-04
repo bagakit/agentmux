@@ -782,7 +782,7 @@ export function ActivityView({
 
   if (capability === 'unavailable' && !hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
-      <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+      <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.hasMore && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
         {readNotice}
         {fileReferenceNotice}
@@ -794,7 +794,7 @@ export function ActivityView({
   }
   if (!hasUserMessages && !hasNativeRecords && showEmptyState(displayState, hasItems ? items : [])) {
     return (
-      <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+      <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.hasMore && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
         {readNotice}
         {fileReferenceNotice}
@@ -808,7 +808,7 @@ export function ActivityView({
   // 比慢更糟——用户会以为自己没发出去，然后再发一遍。
   if (!hasUserMessages && !hasItems && !hasNativeRecords) {
     return (
-      <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+      <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.hasMore && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
         {readNotice}
         {fileReferenceNotice}
@@ -901,7 +901,7 @@ export function ActivityView({
   }
 
   return (
-    <div className="activity-feed" onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
+    <div className="activity-feed" data-workbench-reading-scroll onKeyDown={handleReadingKey} data-mote-conversation={moteConversation ? 'true' : undefined} ref={setFeedEl}
         onWheel={event => { if (event.deltaY < 0 && conversationReading?.enabled && readingWindow.hasMore && event.currentTarget.scrollTop <= 80) readingWindow.readEarlier() }}>
       {readNotice}
         {fileReferenceNotice}

@@ -10,6 +10,7 @@ export type ExecutionFocusPresentation = {
   projection: WorkbenchProjection | null
   issue: string | null
   references: readonly WorkbenchProjectionSelection[]
+  unselected?: boolean
 }
 
 /** Main presentation consumes the durable Desktop choice, independently of Agent MRU. */
@@ -21,8 +22,24 @@ export function mainFocusPresentation(
   level: 'tab' | 'region' = 'tab'
 ): ExecutionFocusPresentation {
   if (!choice) return { projection: null, issue: null, references: [] }
+  // A parent with no selected leaf is a normal navigation choice, not an
+  // unconfirmed Region. Keep all original members without selecting a peer.
+  if (catalog && !choice.tabId && !choice.regionId && choice.zoneId &&
+    catalog.zones.some(zone => zone.zoneId === choice.zoneId && zone.kind !== 'unknown' && !zone.issue) &&
+    (choice.spaceId === null
+      ? !catalog.bindings.some(binding => binding.zoneId === choice.zoneId)
+      : catalog.bindings.some(binding => binding.zoneId === choice.zoneId && binding.spaceId === choice.spaceId))) {
+    return { projection: { entity: { kind: 'zone', zoneId: choice.zoneId },
+      presentationId: 'focus-workbench', displayWorkspaceId: choice.workspaceId,
+      catalog, selectionMode: 'occurrence', selection: [], onSelect }, issue: null, references: [] }
+  }
+  if (catalog && !choice.tabId && !choice.zoneId &&
+    catalog.spaces.some(space => space.spaceId === choice.spaceId && !space.issue)) {
+    return { projection: null, issue: null, references: [], unselected: true }
+  }
   const references = catalog?.locations.filter(location => location.displayWorkspaceId === choice.workspaceId &&
-    location.spaceId === choice.spaceId && location.zoneId === choice.zoneId).map(location => ({
+    location.spaceId === choice.spaceId && location.zoneId === choice.zoneId &&
+    location.tabId === choice.tabId && (!choice.regionId || location.regionId === choice.regionId)).map(location => ({
       displayWorkspaceId: location.displayWorkspaceId, groupId: location.groupId, tabId: location.tabId, regionId: location.regionId })) ?? []
   const reference = mainRegionReference(choice)
   if (!catalog || !reference || !tabs[reference.tabId]?.regions[reference.regionId] ||
