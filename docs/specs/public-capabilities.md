@@ -49,6 +49,8 @@
 
 项目文件名发现沿同一 Files owner：`file ls` CLI → `file.list` → `WorkspaceFiles.listFiles`；结果只含名称、原资源与 complete／partial 原因，应用 Git 忽略规则且不递归目录链接，不读正文或改变焦点。名称相对请求的目录；使用 `file open --zone` 继续时，将原 `file ls --path` 的目录前缀与名称拼接为 Zone 相对路径（默认 `.` 可省略）。未知观察保留原精确打开能力。
 
+编辑器当前草稿的动作由 [`space-control` 类型](../../packages/core/src/space-control.ts)和[严格 parser](../../packages/core/src/space-control-parser.ts)定义。`file.view` 沿原 FileRegion 模式 owner；`file.format` 从 [Renderer control 消费](../../apps/desktop/src/renderer/src/store.ts)进入 [`format-file-region`](../../apps/desktop/src/renderer/src/lib/file-formats/format-file-region.ts)，与 File 动作共享同一可撤销草稿编辑。`file.build`／`file.build.inspect`／`file.build.cancel` 进入 [`build-file-region`](../../apps/desktop/src/renderer/src/lib/file-formats/build-file-region.ts) 与 Main [`FileBuilds`](../../apps/desktop/src/main/file-builds.ts)，准确绑定原 Region、build ID、Host 与草稿版本；公开回执含日志和产物元数据，PDF bytes 留在宿主。以上动作不隐式保存、切焦点或因打开 Preview 自动启动编译器。
+
 ### 文件上传与输入边界
 
 设备选择的图片与普通文件沿同一[公共文件类型与 codec](../../packages/core/src/public-rpc-files.ts)提供 `file.upload`／`file.upload.inspect`，CLI 为 `file upload [inspect] --input FILE|-`。公共服务先确认准确原 Host／Session／Run，再委托 Main 注入的 [FileUploadOwner](../../apps/desktop/src/main/file-upload-owner.ts)保存至 Host 指定私有位置并读回；原操作不可覆盖，未知核对不重传。手机 [MobileAttachments](../../apps/mobile/src/conversation/MobileAttachments.tsx) 消费同一回执，再借[共享文件引用插入](../../packages/client-ui/src/lib/composer-file-reference.ts)进入原 Composer；上传本身不发送消息，Core 输入与 Runtime 仍归原 owner。
