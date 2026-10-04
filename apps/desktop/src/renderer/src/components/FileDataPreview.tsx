@@ -1,3 +1,4 @@
+import { TextInput } from '@agentmux/client-ui/input'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { ChevronLeft, ChevronRight, ChevronsUpDown, Search } from 'lucide-react'
 import type { Node } from 'jsonc-parser'
@@ -61,7 +62,7 @@ function DelimitedContent({ content, delimiter }: { content: string; delimiter: 
   const labels = header ? parsed.rows[0]! : []
   return <section className="file-data-preview file-data-preview--table" aria-label={delimiter === '\t' ? 'TSV preview' : 'CSV preview'}>
     <div className="file-data-preview__bar">
-      <label className="file-data-preview__search"><Search size={12} aria-hidden="true" /><input aria-label="Filter table rows" placeholder="Filter rows" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
+      <label className="file-data-preview__search"><Search size={12} aria-hidden="true" /><TextInput aria-label="Filter table rows" placeholder="Filter rows" value={query} onChange={event => { setQuery(event.target.value); setPage(0) }} /></label>
       <button className="small-button" aria-pressed={header} onClick={() => { setHeader(value => !value); setPage(0) }}><ChevronsUpDown size={12} />Header row</button>
     </div>
     <div className="file-data-preview__scroll" tabIndex={0} aria-label="Table content">
