@@ -78,16 +78,43 @@ async function external(patch: Partial<typeof f.owner.current>) {
 }
 
 describe('Goals common actions through the mounted product and durable config owner', () => {
-  it('shows two complete default requests, one brand image and the real Goals collection without inventing a project', async () => {
+  it('shows two complete default requests with semantic art and retains the original action when art fails', async () => {
     await mount()
     const requests = [...dom.container.querySelectorAll('.goals-entry__request')].map(node => node.textContent)
     expect(requests).toEqual(['我还不知道能做什么，可以了解我并给我建议吗？', '我有一些点子，我们开始尝试一个项目'])
-    expect(dom.container.querySelectorAll('.goals-common__heading img')).toHaveLength(1)
+    expect(dom.container.querySelectorAll('.goals-common__heading img')).toHaveLength(0)
+    const images = [...dom.container.querySelectorAll<HTMLImageElement>('.goals-common__art')]
+    expect(images, 'The real product consumes semantic artwork for each visible CTA').toHaveLength(2)
+    expect(images[0]!.src).toContain('goal-understand.png')
+    expect(images[1]!.src).toContain('goal-ideas.png')
+    for (const image of images) {
+      expect(image.alt).toBe('')
+      expect(image.getAttribute('aria-hidden')).toBe('true')
+      expect(image.hasAttribute('tabindex')).toBe(false)
+    }
+    await act(async () => images[1]!.dispatchEvent(new Event('error')))
+    expect(images[1]!.hidden).toBe(true)
+    expect(action('builtin:ideas')!.querySelector('.goals-entry__request')!.textContent).toBe(requests[1])
     expect(dom.container.querySelector('.goals-common__heading')!.textContent).toContain('常用操作')
     expect(dom.container.querySelector('.goals-collection')).not.toBeNull()
     expect(action('builtin:next')).toBeNull()
     await act(async () => action('builtin:ideas')!.click())
     expect(openTopic).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: '我有一些点子，我们开始尝试一个项目', executorId: 'codex' } })
+    expect(createTopic).not.toHaveBeenCalled()
+  })
+
+  it('uses the three builtin images and one neutral image for any authored prompt without changing its body or target', async () => {
+    await external({ workspaces: [scratch, { id: 'art-project', name: '真实项目', hostId: 'local', path: _hygiene_fixturePath("repo/art-project"), kind: 'folder' }],
+      goalsCommonActions: { items: [{ kind: 'builtin', id: 'understand' }, { kind: 'builtin', id: 'ideas' }, { kind: 'builtin', id: 'next' }, { kind: 'prompt', id: 'notes' }], collapsed: false } })
+    useAppStore.setState({ activeWorkspaceId: 'art-project' })
+    await mount(); await click('全部操作（4）')
+    for (const [key, asset] of [['builtin:understand', 'goal-understand'], ['builtin:ideas', 'goal-ideas'], ['builtin:next', 'goal-next'], ['prompt:notes', 'goal-custom']] as const) {
+      expect(action(key)!.querySelector<HTMLImageElement>('.goals-common__art')!.src).toContain(`${asset}.png`)
+    }
+    expect(action('builtin:next')!.querySelector('.goals-common__facts')!.textContent).toContain('真实项目')
+    expect(action('prompt:notes')!.querySelector('.goals-entry__request')!.textContent).toBe(prompts[1]!.body)
+    await act(async () => action('prompt:notes')!.click())
+    expect(openTopic).toHaveBeenCalledExactlyOnceWith(PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, { newTab: true, reveal: false, initialRequest: { prompt: prompts[1]!.body, executorId: 'codex' } })
     expect(createTopic).not.toHaveBeenCalled()
   })
 
