@@ -10,6 +10,7 @@ import {
 } from '../src/renderer/src/lib/service-window-notice.js'
 import {
   CONNECTION_LOST_DETAIL,
+  CONNECTION_RETRYING_DETAIL,
   CONNECTION_UNRECOVERABLE_DETAIL
 } from '../src/renderer/src/lib/session-state.js'
 import type { SessionSnapshot } from '../src/shared/contracts.js'
@@ -305,6 +306,14 @@ const retryingAndAlive = agentSession({
 })
 
 describe('失联的两类文案（Activity 视图下唯一的失联出口）', () => {
+  it('describes low-frequency recovery and an immediate retry on the original identity', () => {
+    const session = agentSession({ state: 'disconnected', processState: 'running', detail: CONNECTION_RETRYING_DETAIL })
+    const notice = serviceNoticeToRender(classifyServiceNotice(agentSessionServiceOutcome(session)))!.notice
+    expect(notice.mode).toContain('every 30 seconds')
+    expect(notice.restore).toContain('retry immediately on its original identity')
+    expect(session.control).toMatchObject({ agentSessionId: 's', run: { runId: 'r' } })
+  })
+
   it('放弃重连后不再说「Reconnecting」——终局不许顶着暂时的皮', () => {
     // 这是本条的样板。把判据从 detail 上摘掉（两类共用同一份文案）时它变红。
     const rendered = serviceNoticeToRender(

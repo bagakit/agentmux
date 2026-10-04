@@ -4,6 +4,7 @@ import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
 import { reduceRuntimeEvent } from '../src/renderer/src/lib/session-state.js'
 import {
   CONNECTION_LOST_DETAIL,
+  CONNECTION_RETRYING_DETAIL,
   CONNECTION_UNRECOVERABLE_DETAIL
 } from '../src/renderer/src/lib/session-state.js'
 
@@ -52,7 +53,7 @@ function stateWith(sessions: SessionSnapshot[]) {
 
 function connectionState(
   hostId: string,
-  connectionState: 'lost' | 'restored' | 'unrecoverable',
+  connectionState: 'lost' | 'restored' | 'retrying' | 'unrecoverable',
   observedAt: number
 ): RuntimeEvent {
   return {
@@ -96,10 +97,15 @@ describe('Renderer connection-state projection', () => {
     expect(byId.get('a-2')).toBe('running')
   })
 
+  it('keeps the original sessions while describing cancellable low-frequency recovery', () => {
+    const state = stateWith([agent({ id: 'a-1', hostId: 'local' })])
+    const next = reduceRuntimeEvent(state, connectionState('local', 'retrying', 9))
+    expect(next.sessions.map(session => session.id)).toEqual(state.sessions.map(session => session.id))
+    expect(next.sessions[0]!.status.detail).toBe(CONNECTION_RETRYING_DETAIL)
+  })
+
   it('unrecoverable 也必须置 disconnected——判死了却还挂着 running 是最坏的谎话', () => {
-    // 抖动预算用尽时 Core **不再发 lost**，直接发 unrecoverable（检查点前移，见 client 的
-    // handleConnectionLost）。只认 lost 的话，连接已经判死、整屏 Agent 还显示在跑，用户会继续
-    // 往一个不存在的连接里发消息。把这条 reducer 分支改回 `core.state !== 'lost'` 就会红。
+    // An explicit intervention phase still carries unavailable connection observation.
     const state = stateWith([agent({ id: 'a-1', hostId: 'local' })])
 
     const next = reduceRuntimeEvent(state, connectionState('local', 'unrecoverable', 9))

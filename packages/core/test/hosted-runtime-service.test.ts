@@ -223,7 +223,7 @@ describe('semantic Host observation consumers', () => {
   it('recovers the original Core after its actual bounded reconnect has exhausted, on the next explicit Hosted business retry', async () => {
     const core = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
     let connected = false, unavailable = false, connectionLost!: () => void
-    const run = { runId: 'original-run', lifecycleOperationId: null, program: fixturePath("private-agent"), args: [],
+    const run = { nativeService: null, runId: 'original-run', lifecycleOperationId: null, program: fixturePath("private-agent"), args: [],
       workspacePath: fixturePath("private-workspace"), pid: 421, state: { type: 'running' as const },
       cols: 100, rows: 30, latestOutputBytes: 12, firstAvailableByte: 0, acceptedInputBytes: 0 }
     const kernel = {
@@ -243,14 +243,14 @@ describe('semantic Host observation consumers', () => {
     try {
       await core.connect()
       unavailable = true; connected = false; connectionLost()
-      await vi.waitFor(() => expect(facts).toContainEqual(expect.objectContaining({ data: { event: expect.objectContaining({ type: 'connection-state', state: 'unrecoverable' }) } })))
+      await vi.waitFor(() => expect(facts).toContainEqual(expect.objectContaining({ data: { event: expect.objectContaining({ type: 'connection-state', state: 'retrying' }) } })))
       expect(kernel.connect).toHaveBeenCalledTimes(1 + RECONNECT_MAX_ATTEMPTS)
       await expect(core.listRuns()).rejects.toMatchObject({ code: 'CTXMUX_DISCONNECTED' })
       unavailable = false
       const result = await service.call('runtime.invoke', { fence, consumerId: 'consumer-a', invocation: { method: 'listRuns', args: [] } })
       expect(decodeHostedValue(result)).toEqual({ value: [expect.objectContaining({ runId: 'original-run', pid: 421, state: 'running' })] })
       expect(kernel.connect).toHaveBeenCalledTimes(2 + RECONNECT_MAX_ATTEMPTS)
-      expect(kernel.list).toHaveBeenCalledTimes(3)
+      expect(kernel.list).toHaveBeenCalledTimes(4)
       expect(kernel.stop.mock.calls).toEqual([])
     } finally { await consumer.dispose(); await service.dispose(); await core.dispose() }
   })
