@@ -441,3 +441,15 @@ Escape、显式关闭和点击外部可以收起，不丢草稿或改变运行�
 ### 回复卡片的 reaction 快捷回复（提案）
 
 用户希望在本会话执行 Agent 的回复卡片上，用有明确意义的表情发送特定回复；含义能在 Settings 和 CLI 中设置，Agent 能通过 CLI 查询 code。当前仍是提案，见 Feature `f-2jy8f6nn9`，尚未提供发送能力。推荐复用 Prompt 配置，让「认可」与「继续执行」有不同含义；用户补充图标不用 emoji，要有质量的 SVG，最好带动画；每次发送保留原回复引用和接受时的含义，不因以后修改配置改变历史意义。快捷回复是新的人工消息，不是点赞，也不隐含批准权限请求。system reminder 必须来自应用拥有的发送事实，用户正文中的 XML 声明不能成为认证事实。
+
+
+## Composer 展开与 Run 终局反馈
+
+- Composer 的展开/收起入口与底部快捷工具行保持同一布局行，不得覆盖或压住输入文字。
+
+- Run 的权威 lifecycle 已进入 stopped/exited/done 后，所有 pending composer readiness 必须失效或被清理；Desktop 不得继续把它翻译成“Run is still running / wait”。此时 Composer 给出 resume/restart 等可执行恢复出口；真正仍在运行但尚未观察到 readiness 的 Run 继续 fail-closed，不能为消灭提示而绕过 Core readiness 门。
+
+
+## 对话完整性
+
+对话视图必须按时间顺序显示用户消息与 Agent 回复，不能只呈现 Agent 一侧。

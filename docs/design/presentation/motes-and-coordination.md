@@ -32,7 +32,7 @@
 
 - 讨论导航沿原 Tab 控件使用 `Discussions`／`New discussion`，正文沿原作者、时间与内容层级呈现平面紧凑消息；准确原 Mote 的发言用同一持久名／头像可辨，不把每条消息包成浮起卡片、重复请求标题或额外身份栏。公共 Tab/Region 导航在正常与窄窗中为正文保留真实宽度，不盖住作者头像或截断消息；二级内容按需进入，不以新的列表排布改变原 Tab 导航。其它作者与未知来源的真实表达继续保留。讨论、Session 与作者资格、原正文 owner 和慢资料读取不抢晚焦点的行为唯一见交互 SSOT 同名章节。
 
-- 用户继续反馈弹窗被浮窗遮挡、常用功能按键不生效及改名入口难找。通用层级、命中、焦点／Escape 与准确原目标合同只见交互 SSOT[《浮层让位默认成立，而不是逐个接线》](../behavior/spaces-and-layout.md#浮层让位默认成立而不是逐个接线)和本节 Mote 合同；视觉需亲看实际前后景完整画面及真实控件命中，不能用抬 z-index、截图命令成功或扩大菜单堆满动作冒称完成。对象菜单与局部改名沿原紧凑控件语言，名称、动作和失败提示可读，不新增独立 Mote title。
+- 用户继续反馈弹窗被浮窗遮挡、常用功能按键不生效及改名入口难找。通用层级、命中、焦点／Escape 与准确原目标合同只见交互 SSOT[《浮层让位默认成立，而不是逐个接线》](../behavior/browser-workface.md#浮层让位与输入层级)和本节 Mote 合同；视觉需亲看实际前后景完整画面及真实控件命中，不能用抬 z-index、截图命令成功或扩大菜单堆满动作冒称完成。对象菜单与局部改名沿原紧凑控件语言，名称、动作和失败提示可读，不新增独立 Mote title。
 
 
 - 用户进一步认为 hover 面板「离按钮太远」、信息冗余、整合不好，title 行没必要，多个 Mote 却只看到一个。临时面直接贴近 footer 按钮上方，以一档小间距建立关系；靠边时在视口内夹紧，不把原保存浮窗的远处坐标当作 hover 锚点，不另显示重复 tooltip。
@@ -49,7 +49,7 @@
 
 > 产品交互与 Owner 边界见
 > [`agentmux-desktop-interaction.md`](../agentmux-desktop-interaction.md)；导航与会话栏需求见
-> [顶部与项目栏](../behavior/spaces-and-layout.md#顶部与项目栏)；`agentmux-project-rail-navigation.md`（本机过程资料：`docs/plans/agentmux-project-rail-navigation.md`）。
+> [顶部与项目栏](spaces-and-layout.md#顶部与项目栏)；`agentmux-project-rail-navigation.md`（本机过程资料：`docs/plans/agentmux-project-rail-navigation.md`）。
 
 本文只保存当前视觉规则、密度预算和控件 Owner。历史实现步骤、来源记录、截图流水和过期数值不属于设计真相。
 

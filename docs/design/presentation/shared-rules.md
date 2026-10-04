@@ -28,7 +28,7 @@
 
 ## 范围与基础约束
 
-Agent／Region／Tab／Category／Topic 的对象分享直接复制链接，菜单使用清楚的 Copy … Link 名称，同一对象不并列重复的名片或消息复制动作；沿既有菜单密度、图标与键盘焦点，不新增装饰或说明面。File／Browser 上下文分享保留原紧凑外框与正文阅读格式；身份、链接、命令发现及来源唯一引用[交互合同《寻址与复制》](../behavior/spaces-and-layout.md#寻址与复制)。普通路径、URL、选区及终端内容继续沿原复制语汇。
+Agent／Region／Tab／Category／Topic 的对象分享直接复制链接，菜单使用清楚的 Copy … Link 名称，同一对象不并列重复的名片或消息复制动作；沿既有菜单密度、图标与键盘焦点，不新增装饰或说明面。File／Browser 上下文分享保留原紧凑外框与正文阅读格式；身份、链接、命令发现及来源唯一引用[交互合同《寻址与复制》](../behavior/public-control.md#对象地址分享与方向)。普通路径、URL、选区及终端内容继续沿原复制语汇。
 
 Provider 完整性（Session 分析、对话模式与 trace 观察）的行为与能力边界统一见 [交互合同《Provider 能力对齐与移植边界》](../behavior/agent-capabilities-and-messaging.md#provider-能力对齐与移植边界)。同类消息、资源与观察事实沿既有公共组件呈现；缺口与流程降级沿既有服务窗表达，不能逐家制造另一套控件语言。 合法空或被遮蔽 reasoning 仍沿既有 trace 折叠可达，opaque 数据不铺成正文，不增加常驻控件；真实性只定义在该交互合同。
 
@@ -342,7 +342,7 @@ macOS Dock 的系统徽标只显示当前待用户处理数，零时不显示；
 - Tab 名称始终单行；过长省略，空间不足时由 Pane 内横向 overflow 解决。
 - Surface 明度和状态色必须保持足够对比；不可只靠颜色区分选中、危险或不可用。
 - 共享状态点（`.status--{state} .status__dot`，StatusDot 与 Attention Bar 的 StatusCount 同源复用）中，"需要你"（`waiting`/`blocked`）必须带**形状**而非仅靠颜色：琥珀圆点内嵌 `?` 字形，使其在色盲与快速一瞥下仍与其他琥珀含义可辨。`disconnected` 是掉线而非请求关注，从琥珀让出、改用中性空心环，令琥珀唯一地表示"需要你"。5px 角标（Tab 角、Rail 行）容不下字形也无需字形——颜色加角落位置已足够区分，字形只在全尺寸状态点上浮现。
-- **Agent 字母牌**（叠压头像簇里同 provider 多个 Agent 的判别器，行为约束见 [交互合同](../behavior/spaces-and-layout.md#寻址与复制) 那条"多个 Agent 并排且只有图标时"）：与项目字母牌共享字形与几何语汇——`--fs-micro`、`font-weight: 640`、`line-height: 1`、`overflow: hidden`（emoji 比字母宽，会撑破格子），色相走既有派生并在规则里**声明**默认值（不藏进 `var()` 兜底，全表守卫读的是声明）。不为 Agent 新挑尺寸或配色，保持既有 Provider/会话身份语言。Space 自动对象身份的低彩度约束只见[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)，不改变 Agent 头像的既有派生色相。
+- **Agent 字母牌**（叠压头像簇里同 provider 多个 Agent 的判别器，可见判别见[对应呈现合同](spaces-and-layout.md#agent-头像簇的可见判别)）：与项目字母牌共享字形与几何语汇——`--fs-micro`、`font-weight: 640`、`line-height: 1`、`overflow: hidden`（emoji 比字母宽，会撑破格子），色相走既有派生并在规则里**声明**默认值（不藏进 `var()` 兜底，全表守卫读的是声明）。不为 Agent 新挑尺寸或配色，保持既有 Provider/会话身份语言。Space 自动对象身份的低彩度约束只见[《Project Rail 与 Topic 行密度》](spaces-and-layout.md#project-rail-与-topic-行密度)，不改变 Agent 头像的既有派生色相。
   - **10px 不需要豁免，它就是刻度的最小值。** 曾在此写过「字母受 10px 下限约束、须先放大头像格」——那是把「低于 10px 需要具名豁免」错记成「10px 需要豁免」。事实：字号刻度含 10（`--fs-micro`），而 `FONT_SIZE_EXCEPTIONS` 被恒等断言冻结在 7px 且每条都必须真画 `content` 字形，所以字母**根本走不到也不需要**那条豁免路；`.project-rail-row__icon[data-monogram]` 正是在 **16px** 格子里画 10px 字母，一直合规。**头像格不必为字母放大**。这条更正的意义不止于本条：涉及尺寸的约束必须从刻度与守卫的断言反推，"我记得有个下限"不是判据。
   - **一个格子里放第二个记号，本仓的既有答案是角标溢出而非扩容。** 注意力那枚 `?`/`!` 就是这么做的（8px 见方、探出格外），因此第二个记号不以牺牲品牌图标为代价。字母若落在这个位置，须先解决与注意力角标的占位冲突（两者不能同时在同一角），这是一个**取位**决定，不是尺寸决定——裁决见下条。
 
