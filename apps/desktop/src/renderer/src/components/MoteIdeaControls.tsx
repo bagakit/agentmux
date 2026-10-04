@@ -1,3 +1,4 @@
+import { ComposerTextarea } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
 import { Clock3, Pencil, Sparkles, ThumbsDown, ThumbsUp } from 'lucide-react'
 import type { FileDocument } from '@agentmux/core'
@@ -51,8 +52,8 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
   return <>
     <details ref={request} className="mote-details__idea-request"><summary>Find a worthwhile idea</summary>
       <div className="mote-details__cooperation">
-        <label>Your direction<textarea aria-label="Idea direction" rows={3} placeholder="What would be useful to explore next?" value={input.direction}
-          onChange={event => update({ ...input, direction: event.target.value })} /></label>
+        <label>Your direction<ComposerTextarea aria-label="Idea direction" rows={3} placeholder="What would be useful to explore next?" value={input.direction}
+          onValueChange={value => update({ ...input, direction: value })} /></label>
         <label className="mote-details__check"><input type="checkbox" checked={input.includeDiscussion} aria-label="Include exact discussion and linked Goals"
           onChange={event => update({ ...input, includeDiscussion: event.target.checked })} />Include this exact discussion and linked Goals</label>
         <p className="mote-details__hint">Uses the saved profile and selected note. Optionally include this discussion and its Goals.</p>
@@ -74,7 +75,7 @@ export function MoteIdeaControls({ scope, reference, material, onOpenPath }: {
       <div className="mote-details__cooperation">
         <p className="mote-details__hint mote-details__source" title={material.revision}>Feedback on {material.path.split('/').at(-1)} · this saved revision</p>
         <div className="mote-idea-controls__actions" role="group" aria-label="Idea feedback response"><button type="button" className="icon-button" aria-label="Useful" title="Useful" aria-pressed={feedback.vote === 'useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'useful' ? '' : 'useful' })}><ThumbsUp size={16} /></button><button type="button" className="icon-button" aria-label="Less useful" title="Less useful" aria-pressed={feedback.vote === 'less-useful'} onClick={() => updateFeedback({ ...feedback, vote: feedback.vote === 'less-useful' ? '' : 'less-useful' })}><ThumbsDown size={16} /></button></div>
-        <label>Your feedback<textarea aria-label="Idea feedback comment" rows={2} value={feedback.comment} onChange={event => updateFeedback({ ...feedback, comment: event.target.value })} /></label>
+        <label>Your feedback<ComposerTextarea aria-label="Idea feedback comment" rows={2} value={feedback.comment} onValueChange={value => updateFeedback({ ...feedback, comment: value })} /></label>
         <button type="button" className="icon-button" aria-label="Review feedback in SOUL" title="Review feedback in SOUL" onClick={() => {
           if (pending) { setIssue('The current action is still in progress. Your feedback is kept.'); return }
           const { input: capturedInput, material: capturedMaterial } = current.current
